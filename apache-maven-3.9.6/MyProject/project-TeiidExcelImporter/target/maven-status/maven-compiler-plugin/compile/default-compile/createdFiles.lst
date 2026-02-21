@@ -1,0 +1,10 @@
+BuildSQLServlet.class
+GetTablesServlet.class
+BuildViewServlet.class
+GetJoinFieldsColumnsServlet.class
+cloud\tablescope\TeiidExcelImporter.class
+GetColumnsServlet.class
+GetSchemasServlet.class
+GetColumnsServlet$Column.class
+FetchTableDataServlet.class
+cloud\tablescope\TxtFileProcessor.class

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Teiid Excel Upload</title>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+  <script src="my_script.js"></script>
+</head>
+<body>
+  <h1>Upload Excel for Teiid VDB Deployment</h1>
+  <form id="uploadForm">
+    <input type="file" id="excelFile" name="excelFile" accept=".xlsx" />
+    <button type="button" id="submitButton">Upload</button>
+  </form>
+  <div id="message"></div>
+
+  <script>
+    $(document).ready(function() {
+      $("#submitButton").click(function(event) {
+        event.preventDefault(); // Prevent default form submission
+
+        const file = $("#excelFile").prop('files')[0]; // Get the uploaded file
+
+        if (!file) {
+          $("#message").text("Please select an Excel file to upload.");
+          return;
+        }
+
+        if (!file.name.endsWith(".xlsx")) {
+          $("#message").text("Only .xlsx files are supported.");
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("excelFile", file);
+
+        // Send AJAX request to the server-side script with the Excel file data
+        $.ajax({
+          url: "http://64.52.108.62:8080/TeiidExcelDeployer/uploadExcelFile", // Replace with your server-side script URL
+          type: "POST",
+          data: formData,
+          processData: false,
+          contentType: false,
+          success: function(response) {
+            $("#message").text(response);
+          },
+          error: function(xhr, status, error) {
+            $("#message").text("Error uploading Excel file.");
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

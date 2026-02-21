@@ -1,0 +1,100 @@
+# Sensitive Files - NEVER COMMIT THESE
+*.key
+*.pem
+*.p12
+*.jks
+*password*
+*secret*
+*credentials*
+.env
+.env.*
+config/production.py
+config/local.py
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+postgresql.conf
+pg_hba.conf
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Compiled Files
+*.pyc
+__pycache__/
+*.class
+*.jar
+*.war
+*.ear
+target/
+build/
+dist/
+
+# Dependencies
+node_modules/
+venv/
+env/
+.venv/
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Customer Data
+customer_folder/
+uploads/
+data/
+*.xlsx
+*.xls
+*.csv
+*.txt
+
+# Wildfly Specific
+standalone/data/
+standalone/log/
+standalone/tmp/
+domain/data/
+domain/log/
+domain/tmp/
+
+# Backup Files
+*.bak
+*.backup
+*.old
+
+# Temporary Files
+tmp/
+temp/
+*.tmp
+
+# Exclude large files
+wildfly/archive.zip
+wildfly/teiid-wildfly-16.0.0-dist.zip
+wildfly/*.zip
+redash-8.0.0-7/apps/redash/htdocs/client/app/lib/
+
+
+# Exclude Directories
+Archived Apps/
+containerd/
+keycloak-15.0.2/
+letsencrypt/
+redash-8.0.0-7.amt.PRD/
+tablescope/
+wildfly-21.0.2.Final/
+auth.pl
+keycloak-15.0.2.zip
+patterns.dat
+pratap.xlsx
