@@ -1,0 +1,365 @@
+{% extends "layouts/signed_out.html" %}
+
+{% block title %}Enable Two-Factor Authentication{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/antd@4.24.0/dist/antd.min.css">
+<style>
+  .mfa-enrollment-container {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .mfa-step {
+    padding: 20px 0;
+  }
+  .mfa-description {
+    color: #666;
+    margin-bottom: 20px;
+  }
+  .form-group {
+    margin-bottom: 20px;
+  }
+  .form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+  .help-block {
+    display: block;
+    margin-top: 5px;
+    color: #999;
+    font-size: 12px;
+  }
+  .backup-codes-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin: 20px 0;
+    padding: 20px;
+    background: #f5f5f5;
+    border-radius: 4px;
+  }
+  .backup-code {
+    font-family: monospace;
+    font-size: 16px;
+    font-weight: bold;
+    padding: 10px;
+    background: white;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    text-align: center;
+  }
+  .button-group {
+    margin-top: 20px;
+  }
+  .m-b-10 { margin-bottom: 10px; }
+  .m-b-15 { margin-bottom: 15px; }
+  .m-b-20 { margin-bottom: 20px; }
+  .m-t-10 { margin-top: 10px; }
+  .m-b-30 { margin-bottom: 30px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fixed-width-page">
+  <div class="bg-white tiled">
+    <div id="mfa-enrollment-root" class="mfa-enrollment-container">
+      <!-- Step indicator -->
+      <div class="ant-steps ant-steps-horizontal ant-steps-label-horizontal m-b-30" style="margin-bottom: 30px;">
+        <div class="ant-steps-item ant-steps-item-process">
+          <div class="ant-steps-item-container">
+            <div class="ant-steps-item-tail"></div>
+            <div class="ant-steps-item-icon">
+              <span class="ant-steps-icon">1</span>
+            </div>
+            <div class="ant-steps-item-content">
+              <div class="ant-steps-item-title">Phone Number</div>
+              <div class="ant-steps-item-description">Enter your phone</div>
+            </div>
+          </div>
+        </div>
+        <div class="ant-steps-item ant-steps-item-wait">
+          <div class="ant-steps-item-container">
+            <div class="ant-steps-item-tail"></div>
+            <div class="ant-steps-item-icon">
+              <span class="ant-steps-icon">2</span>
+            </div>
+            <div class="ant-steps-item-content">
+              <div class="ant-steps-item-title">Verify</div>
+              <div class="ant-steps-item-description">Enter code</div>
+            </div>
+          </div>
+        </div>
+        <div class="ant-steps-item ant-steps-item-wait">
+          <div class="ant-steps-item-container">
+            <div class="ant-steps-item-icon">
+              <span class="ant-steps-icon">3</span>
+            </div>
+            <div class="ant-steps-item-content">
+              <div class="ant-steps-item-title">Backup Codes</div>
+              <div class="ant-steps-item-description">Save codes</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 1: Phone Number -->
+      <div id="step-phone" class="mfa-step">
+        <h2>Enable Two-Factor Authentication</h2>
+        <p class="mfa-description">
+          As a privileged user, you must enable MFA to access admin features.
+          Enter your mobile phone number to receive verification codes.
+        </p>
+
+        <div id="error-message" class="alert alert-danger" style="display: none;"></div>
+        <div id="success-message" class="alert alert-success" style="display: none;"></div>
+
+        <div class="form-group">
+          <label for="phoneNumber">Phone Number</label>
+          <input
+            type="text"
+            id="phoneNumber"
+            class="form-control input-lg"
+            placeholder="+1234567890"
+            style="font-size: 16px; padding: 10px;"
+          />
+          <small class="help-block">
+            Enter your phone number in international format (e.g., +1234567890)
+          </small>
+        </div>
+
+        <button
+          id="btn-send-code"
+          class="btn btn-primary btn-lg btn-block"
+          onclick="sendVerificationCode()"
+        >
+          Send Verification Code
+        </button>
+      </div>
+
+      <!-- Step 2: Verify (hidden initially) -->
+      <div id="step-verify" class="mfa-step" style="display: none;">
+        <h2>Verify Your Phone Number</h2>
+        <p class="mfa-description">
+          Enter the 6-digit code sent to <strong id="phone-display"></strong>
+        </p>
+
+        <div id="verify-error" class="alert alert-danger" style="display: none;"></div>
+
+        <div class="form-group">
+          <label for="otp">Verification Code</label>
+          <input
+            type="text"
+            id="otp"
+            class="form-control input-lg"
+            placeholder="000000"
+            maxlength="6"
+            style="font-size: 24px; text-align: center; letter-spacing: 8px; padding: 10px;"
+          />
+        </div>
+
+        <button
+          id="btn-verify"
+          class="btn btn-primary btn-lg btn-block"
+          onclick="verifyCode()"
+        >
+          Verify Code
+        </button>
+
+        <button
+          class="btn btn-link btn-block m-t-10"
+          onclick="goToStep(1)"
+        >
+          Change Phone Number
+        </button>
+      </div>
+
+      <!-- Step 3: Backup Codes (hidden initially) -->
+      <div id="step-backup" class="mfa-step" style="display: none;">
+        <h2>Save Your Backup Codes</h2>
+        
+        <div class="alert alert-warning">
+          <strong>Important: Save these codes in a secure location</strong><br>
+          You can use these codes to access your account if you lose your phone. Each code can only be used once.
+        </div>
+
+        <div id="backup-codes-container" class="backup-codes-container"></div>
+
+        <div class="button-group">
+          <button
+            class="btn btn-default btn-lg btn-block m-b-10"
+            onclick="downloadBackupCodes()"
+          >
+            Download Codes
+          </button>
+
+          <button
+            class="btn btn-primary btn-lg btn-block"
+            onclick="completeEnrollment()"
+          >
+            I've Saved My Codes
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  var backupCodes = [];
+  var phoneNumber = '';
+
+  function showError(message, elementId) {
+    elementId = elementId || 'error-message';
+    var el = document.getElementById(elementId);
+    el.textContent = message;
+    el.style.display = 'block';
+    setTimeout(function() {
+      el.style.display = 'none';
+    }, 5000);
+  }
+
+  function showSuccess(message) {
+    var el = document.getElementById('success-message');
+    el.textContent = message;
+    el.style.display = 'block';
+    setTimeout(function() {
+      el.style.display = 'none';
+    }, 3000);
+  }
+
+  function goToStep(step) {
+    document.getElementById('step-phone').style.display = step === 1 ? 'block' : 'none';
+    document.getElementById('step-verify').style.display = step === 2 ? 'block' : 'none';
+    document.getElementById('step-backup').style.display = step === 3 ? 'block' : 'none';
+  }
+
+  function sendVerificationCode() {
+    phoneNumber = document.getElementById('phoneNumber').value.trim();
+    
+    if (!phoneNumber || phoneNumber.length < 10) {
+      showError('Please enter a valid phone number');
+      return;
+    }
+
+    var btn = document.getElementById('btn-send-code');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    // Get org slug from current URL path (e.g., /development/mfa/enroll -> development)
+    var pathParts = window.location.pathname.split('/');
+    var orgSlug = pathParts[1] || '';
+    var apiUrl = orgSlug ? '/' + orgSlug + '/api/auth/mfa/enroll' : '/api/auth/mfa/enroll';
+
+    fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone_number: phoneNumber })
+    })
+    .then(function(response) {
+      return response.json().then(function(data) {
+        if (response.ok) {
+          backupCodes = data.backup_codes || [];
+          showSuccess('Verification code sent to your phone');
+          document.getElementById('phone-display').textContent = phoneNumber;
+          setTimeout(function() {
+            goToStep(2);
+          }, 1000);
+        } else {
+          showError(data.error || 'Failed to enroll in MFA');
+          btn.disabled = false;
+          btn.textContent = 'Send Verification Code';
+        }
+      });
+    })
+    .catch(function(err) {
+      showError('Failed to enroll in MFA. Please try again.');
+      btn.disabled = false;
+      btn.textContent = 'Send Verification Code';
+    });
+  }
+
+  function verifyCode() {
+    var otp = document.getElementById('otp').value.trim();
+    
+    if (otp.length !== 6) {
+      showError('Please enter a 6-digit code', 'verify-error');
+      return;
+    }
+
+    var btn = document.getElementById('btn-verify');
+    btn.disabled = true;
+    btn.textContent = 'Verifying...';
+
+    // Get org slug from current URL path
+    var pathParts = window.location.pathname.split('/');
+    var orgSlug = pathParts[1] || '';
+    var apiUrl = orgSlug ? '/' + orgSlug + '/api/auth/mfa/enroll/verify' : '/api/auth/mfa/enroll/verify';
+
+    fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ otp: otp })
+    })
+    .then(function(response) {
+      return response.json().then(function(data) {
+        if (response.ok) {
+          displayBackupCodes();
+          goToStep(3);
+        } else {
+          showError(data.error || 'Invalid verification code', 'verify-error');
+          btn.disabled = false;
+          btn.textContent = 'Verify Code';
+        }
+      });
+    })
+    .catch(function(err) {
+      showError('Failed to verify code. Please try again.', 'verify-error');
+      btn.disabled = false;
+      btn.textContent = 'Verify Code';
+    });
+  }
+
+  function displayBackupCodes() {
+    var container = document.getElementById('backup-codes-container');
+    container.innerHTML = '';
+    
+    backupCodes.forEach(function(code) {
+      var div = document.createElement('div');
+      div.className = 'backup-code';
+      div.textContent = code;
+      container.appendChild(div);
+    });
+  }
+
+  function downloadBackupCodes() {
+    var content = backupCodes.join('\n');
+    var blob = new Blob([content], { type: 'text/plain' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'tablescope-backup-codes.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function completeEnrollment() {
+    // Get org slug from current URL path
+    var pathParts = window.location.pathname.split('/');
+    var orgSlug = pathParts[1] || '';
+    var redirectUrl = orgSlug ? '/' + orgSlug : '/';
+    window.location.href = redirectUrl;
+  }
+
+  // Allow only digits in OTP field
+  document.addEventListener('DOMContentLoaded', function() {
+    var otpInput = document.getElementById('otp');
+    if (otpInput) {
+      otpInput.addEventListener('input', function(e) {
+        this.value = this.value.replace(/\D/g, '');
+      });
+    }
+  });
+</script>
+{% endblock %}

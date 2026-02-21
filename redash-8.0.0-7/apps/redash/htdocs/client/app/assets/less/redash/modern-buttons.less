@@ -1,0 +1,308 @@
+/* ========================================================
+   MODERN BUTTON STYLES - TableScope
+   Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Button Base
+-------------------------------------------------------- */
+.btn-modern {
+  font-family: @font-family-modern;
+  font-weight: @font-medium;
+  font-size: @text-sm;
+  line-height: @leading-normal;
+  border-radius: @radius-md;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: @space-2;
+  border: none;
+  text-decoration: none;
+  transition: all @transition-fast @ease-out;
+  
+  &:focus {
+    outline: none;
+  }
+  
+  &:focus-visible {
+    box-shadow: 0 0 0 @ring-offset @white, 
+                0 0 0 (@ring-offset + @ring-width) @primary-500;
+  }
+  
+  &:disabled,
+  &.disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  /* Icon styling within buttons */
+  .btn-icon {
+    width: @icon-size-sm;
+    height: @icon-size-sm;
+    flex-shrink: 0;
+  }
+}
+
+/* --------------------------------------------------------
+   Button Sizes
+   Requirements: 5.4
+-------------------------------------------------------- */
+.btn-modern--sm {
+  height: @btn-height-sm;
+  padding: 0 @space-3;
+  font-size: @text-xs;
+  
+  .btn-icon {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+.btn-modern--md {
+  height: @btn-height-md;
+  padding: 0 @space-4;
+}
+
+.btn-modern--lg {
+  height: @btn-height-lg;
+  padding: 0 @space-5;
+  font-size: @text-base;
+  
+  .btn-icon {
+    width: @icon-size-md;
+    height: @icon-size-md;
+  }
+}
+
+/* --------------------------------------------------------
+   Primary Button
+   Requirements: 5.1, 5.5
+-------------------------------------------------------- */
+.btn-modern--primary {
+  background: @primary-600;
+  color: @white;
+  box-shadow: @shadow-sm;
+  
+  &:hover:not(:disabled) {
+    background: @primary-700;
+    box-shadow: @shadow-md;
+  }
+  
+  &:active:not(:disabled) {
+    background: @primary-800;
+    box-shadow: @shadow-sm;
+  }
+  
+  &:focus-visible {
+    box-shadow: 0 0 0 @ring-offset @white, 
+                0 0 0 (@ring-offset + @ring-width) @primary-500,
+                @shadow-sm;
+  }
+}
+
+/* --------------------------------------------------------
+   Secondary Button
+   Requirements: 5.2
+-------------------------------------------------------- */
+.btn-modern--secondary {
+  background: @white;
+  color: @gray-700;
+  border: 1px solid @gray-300;
+  box-shadow: @shadow-xs;
+  
+  &:hover:not(:disabled) {
+    background: @gray-50;
+    border-color: @gray-400;
+  }
+  
+  &:active:not(:disabled) {
+    background: @gray-100;
+  }
+}
+
+
+/* --------------------------------------------------------
+   Ghost Button
+   Requirements: 5.3
+-------------------------------------------------------- */
+.btn-modern--ghost {
+  background: transparent;
+  color: @gray-600;
+  
+  &:hover:not(:disabled) {
+    background: @gray-100;
+    color: @gray-900;
+  }
+  
+  &:active:not(:disabled) {
+    background: @gray-200;
+  }
+}
+
+/* --------------------------------------------------------
+   Danger Button
+-------------------------------------------------------- */
+.btn-modern--danger {
+  background: @error-main;
+  color: @white;
+  box-shadow: @shadow-sm;
+  
+  &:hover:not(:disabled) {
+    background: @error-600;
+    box-shadow: @shadow-md;
+  }
+  
+  &:active:not(:disabled) {
+    background: @error-700;
+  }
+  
+  &:focus-visible {
+    box-shadow: 0 0 0 @ring-offset @white, 
+                0 0 0 (@ring-offset + @ring-width) @error-main;
+  }
+}
+
+/* --------------------------------------------------------
+   Success Button
+-------------------------------------------------------- */
+.btn-modern--success {
+  background: @success-main;
+  color: @white;
+  box-shadow: @shadow-sm;
+  
+  &:hover:not(:disabled) {
+    background: @success-600;
+    box-shadow: @shadow-md;
+  }
+  
+  &:active:not(:disabled) {
+    background: @success-700;
+  }
+  
+  &:focus-visible {
+    box-shadow: 0 0 0 @ring-offset @white, 
+                0 0 0 (@ring-offset + @ring-width) @success-main;
+  }
+}
+
+/* --------------------------------------------------------
+   Outline Variants
+-------------------------------------------------------- */
+.btn-modern--outline-primary {
+  background: transparent;
+  color: @primary-600;
+  border: 1px solid @primary-600;
+  
+  &:hover:not(:disabled) {
+    background: @primary-50;
+    border-color: @primary-700;
+    color: @primary-700;
+  }
+  
+  &:active:not(:disabled) {
+    background: @primary-100;
+  }
+}
+
+.btn-modern--outline-danger {
+  background: transparent;
+  color: @error-main;
+  border: 1px solid @error-main;
+  
+  &:hover:not(:disabled) {
+    background: @error-50;
+    border-color: @error-600;
+    color: @error-600;
+  }
+  
+  &:active:not(:disabled) {
+    background: @error-100;
+  }
+}
+
+/* --------------------------------------------------------
+   Icon-Only Button
+-------------------------------------------------------- */
+.btn-modern--icon {
+  padding: 0;
+  
+  &.btn-modern--sm {
+    width: @btn-height-sm;
+    height: @btn-height-sm;
+  }
+  
+  &.btn-modern--md {
+    width: @btn-height-md;
+    height: @btn-height-md;
+  }
+  
+  &.btn-modern--lg {
+    width: @btn-height-lg;
+    height: @btn-height-lg;
+  }
+}
+
+/* --------------------------------------------------------
+   Full Width Button
+-------------------------------------------------------- */
+.btn-modern--full {
+  width: 100%;
+}
+
+/* --------------------------------------------------------
+   Button Group
+-------------------------------------------------------- */
+.btn-group-modern {
+  display: inline-flex;
+  
+  .btn-modern {
+    border-radius: 0;
+    
+    &:first-child {
+      border-radius: @radius-md 0 0 @radius-md;
+    }
+    
+    &:last-child {
+      border-radius: 0 @radius-md @radius-md 0;
+    }
+    
+    &:not(:first-child) {
+      margin-left: -1px;
+    }
+  }
+}
+
+/* --------------------------------------------------------
+   Loading State
+-------------------------------------------------------- */
+.btn-modern--loading {
+  position: relative;
+  color: transparent !important;
+  pointer-events: none;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: btn-spin 0.6s linear infinite;
+  }
+  
+  &.btn-modern--primary::after,
+  &.btn-modern--danger::after,
+  &.btn-modern--success::after {
+    border-color: @white;
+    border-right-color: transparent;
+  }
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

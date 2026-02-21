@@ -1,0 +1,257 @@
+/* ========================================================
+   PROJECT DETAIL PAGE STYLES - TableScope
+   Modern styling for the ProjectDetailPage component
+   Requirements: 4.1, 4.2, 4.3
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Page Container
+-------------------------------------------------------- */
+.project-detail-page {
+  background: @gray-50;
+  min-height: 100vh;
+  padding: @space-6;
+  font-family: @font-family-modern;
+}
+
+/* --------------------------------------------------------
+   Page Header
+-------------------------------------------------------- */
+.project-detail-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: @space-6;
+}
+
+.project-detail-page__title {
+  font-family: @font-family-modern;
+  font-size: @text-2xl;
+  font-weight: @font-bold;
+  color: @gray-900;
+  margin: 0;
+  letter-spacing: @tracking-tight;
+}
+
+.project-detail-page__actions {
+  display: flex;
+  align-items: center;
+  gap: @space-2;
+}
+
+/* --------------------------------------------------------
+   Section Styling
+-------------------------------------------------------- */
+.project-detail-page__section {
+  margin-top: @space-8;
+}
+
+.project-detail-page__section-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: @space-4;
+  color: @gray-500;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  font-weight: @font-semibold;
+  text-transform: uppercase;
+  letter-spacing: @tracking-wider;
+}
+
+.project-detail-page__section-title {
+  margin-right: auto;
+}
+
+.project-detail-page__add-btn {
+  margin-right: @space-2;
+  color: @gray-400;
+  transition: color @transition-fast @ease-out;
+  
+  &:hover {
+    color: @primary-600;
+  }
+}
+
+/* --------------------------------------------------------
+   Card Grid
+-------------------------------------------------------- */
+.project-detail-page__card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: @space-4;
+}
+
+/* --------------------------------------------------------
+   Project Card (Dashboard, Query, DataSource)
+   Requirements: 4.1, 4.2, 4.3
+-------------------------------------------------------- */
+.project-card {
+  background: @white;
+  border-radius: @radius-lg;
+  box-shadow: @shadow-sm;
+  border: 1px solid @gray-200;
+  padding: @space-4;
+  position: relative;
+  cursor: pointer;
+  transition: all @transition-fast @ease-out;
+  
+  &:hover {
+    box-shadow: @shadow-md;
+    transform: translateY(-2px);
+    border-color: @gray-300;
+  }
+}
+
+.project-card--non-interactive {
+  cursor: default;
+  
+  &:hover {
+    transform: none;
+    box-shadow: @shadow-sm;
+  }
+}
+
+.project-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: @space-3;
+}
+
+.project-card__title {
+  font-family: @font-family-modern;
+  font-size: @text-base;
+  font-weight: @font-semibold;
+  color: @primary-600;
+  margin: 0;
+  line-height: @leading-tight;
+  flex: 1;
+  padding-right: @space-2;
+}
+
+.project-card__menu-btn {
+  color: @gray-400;
+  padding: @space-1;
+  border-radius: @radius-md;
+  transition: all @transition-fast @ease-out;
+  
+  &:hover {
+    background: @gray-100;
+    color: @gray-600;
+  }
+}
+
+.project-card__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: @space-1 @space-2;
+  border-radius: @radius-full;
+  font-size: @text-xs;
+  font-weight: @font-medium;
+  margin-left: @space-2;
+}
+
+.project-card__badge--archived {
+  background: @warning-100;
+  color: @warning-700;
+}
+
+.project-card__badge--external {
+  background: @success-100;
+  color: @success-700;
+}
+
+.project-card__divider {
+  height: 1px;
+  background: @gray-200;
+  margin: @space-3 0;
+}
+
+.project-card__label {
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  font-weight: @font-semibold;
+  color: @gray-500;
+  text-transform: uppercase;
+  letter-spacing: @tracking-wider;
+  margin-bottom: @space-1;
+}
+
+.project-card__value {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-700;
+  margin-bottom: @space-3;
+}
+
+.project-card__meta {
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  color: @gray-400;
+  line-height: @leading-relaxed;
+}
+
+.project-card__meta-item {
+  margin-bottom: @space-0-5;
+}
+
+.project-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: @space-3;
+  padding-top: @space-3;
+  border-top: 1px solid @gray-100;
+}
+
+.project-card__delete-btn {
+  color: @gray-400;
+  padding: @space-1;
+  border-radius: @radius-md;
+  transition: all @transition-fast @ease-out;
+  
+  &:hover {
+    background: @error-50;
+    color: @error-main;
+  }
+}
+
+/* --------------------------------------------------------
+   Empty State
+-------------------------------------------------------- */
+.project-detail-page__empty {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-400;
+  font-style: italic;
+  padding: @space-4;
+}
+
+/* --------------------------------------------------------
+   Loading and Error States
+-------------------------------------------------------- */
+.project-detail-page__loading {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-500;
+  padding: @space-6;
+}
+
+.project-detail-page__error {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @error-main;
+  min-height: 100vh;
+  padding: @space-6;
+}
+
+/* --------------------------------------------------------
+   Click Hint for External Data Sources
+-------------------------------------------------------- */
+.project-card__click-hint {
+  font-size: @text-xs;
+  color: @gray-400;
+  font-weight: @font-normal;
+  margin-left: @space-2;
+}
+

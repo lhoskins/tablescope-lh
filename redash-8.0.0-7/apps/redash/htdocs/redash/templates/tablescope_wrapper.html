@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="redash">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TableScope</title>
+    <!-- Include Tablescope CSS -->
+    <link rel="stylesheet" href="{{ vite_base_path }}assets/index-B-jEYZIn.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Redash app header -->
+      <app-header></app-header>
+
+      <!-- Layout including side menu -->
+      <settings-screen>
+        <div class="content">
+          <div id="root"></div> <!-- Tablescope app root -->
+        </div>
+      </settings-screen>
+    </div>
+
+    <!-- Include Tablescope JS -->
+    <script type="module" src="{{ vite_base_path }}assets/index-CVqHIzJD.js"></script>
+  </body>
+</html>

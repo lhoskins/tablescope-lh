@@ -1,0 +1,352 @@
+/* ========================================================
+   MODERN FORM STYLES - TableScope
+   Requirements: 6.1, 6.2, 6.3, 6.4, 6.5
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Input Base
+   Requirements: 6.1, 6.4, 6.5
+-------------------------------------------------------- */
+.input-modern {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  font-weight: @font-normal;
+  color: @gray-900;
+  background: @white;
+  border: 1px solid @gray-300;
+  border-radius: @radius-md;
+  padding: 0 @space-3;
+  height: @input-height-md;
+  width: 100%;
+  transition: border-color @transition-fast @ease-out, 
+              box-shadow @transition-fast @ease-out;
+  
+  &::placeholder {
+    color: @gray-400;
+    font-weight: @font-normal;
+  }
+  
+  &:hover:not(:disabled):not(:focus) {
+    border-color: @gray-400;
+  }
+  
+  /* Focus state - Requirements: 6.2 */
+  &:focus {
+    outline: none;
+    border-color: @primary-500;
+    box-shadow: 0 0 0 3px fade(@primary-500, 20%);
+  }
+  
+  &:disabled {
+    background-color: @gray-50;
+    color: @gray-500;
+    cursor: not-allowed;
+  }
+}
+
+/* --------------------------------------------------------
+   Input Sizes
+   Requirements: 6.5
+-------------------------------------------------------- */
+.input-modern--sm {
+  height: @input-height-sm;
+  font-size: @text-xs;
+  padding: 0 @space-2;
+}
+
+.input-modern--lg {
+  height: @input-height-lg;
+  font-size: @text-base;
+  padding: 0 @space-4;
+}
+
+/* --------------------------------------------------------
+   Error State
+   Requirements: 6.3
+-------------------------------------------------------- */
+.input-modern--error {
+  border-color: @error-main;
+  
+  &:hover:not(:disabled):not(:focus) {
+    border-color: @error-600;
+  }
+  
+  &:focus {
+    border-color: @error-main;
+    box-shadow: 0 0 0 3px fade(@error-main, 20%);
+  }
+}
+
+/* --------------------------------------------------------
+   Success State
+-------------------------------------------------------- */
+.input-modern--success {
+  border-color: @success-main;
+  
+  &:focus {
+    border-color: @success-main;
+    box-shadow: 0 0 0 3px fade(@success-main, 20%);
+  }
+}
+
+/* --------------------------------------------------------
+   Textarea
+-------------------------------------------------------- */
+.textarea-modern {
+  .input-modern();
+  height: auto;
+  min-height: 100px;
+  padding: @space-3;
+  resize: vertical;
+  line-height: @leading-normal;
+}
+
+/* --------------------------------------------------------
+   Select
+-------------------------------------------------------- */
+.select-modern {
+  .input-modern();
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right @space-3 center;
+  padding-right: @space-10;
+  cursor: pointer;
+  
+  &:disabled {
+    cursor: not-allowed;
+  }
+}
+
+
+/* --------------------------------------------------------
+   Checkbox
+-------------------------------------------------------- */
+.checkbox-modern {
+  display: inline-flex;
+  align-items: center;
+  gap: @space-2;
+  cursor: pointer;
+  
+  &__input {
+    width: 18px;
+    height: 18px;
+    border: 1px solid @gray-300;
+    border-radius: @radius-sm;
+    background: @white;
+    appearance: none;
+    cursor: pointer;
+    transition: all @transition-fast @ease-out;
+    position: relative;
+    
+    &:hover {
+      border-color: @primary-500;
+    }
+    
+    &:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px fade(@primary-500, 20%);
+    }
+    
+    &:checked {
+      background: @primary-600;
+      border-color: @primary-600;
+      
+      &::after {
+        content: '';
+        position: absolute;
+        left: 5px;
+        top: 2px;
+        width: 5px;
+        height: 10px;
+        border: solid @white;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+    }
+    
+    &:disabled {
+      background: @gray-100;
+      cursor: not-allowed;
+    }
+  }
+  
+  &__label {
+    font-family: @font-family-modern;
+    font-size: @text-sm;
+    color: @gray-700;
+  }
+}
+
+/* --------------------------------------------------------
+   Radio
+-------------------------------------------------------- */
+.radio-modern {
+  display: inline-flex;
+  align-items: center;
+  gap: @space-2;
+  cursor: pointer;
+  
+  &__input {
+    width: 18px;
+    height: 18px;
+    border: 1px solid @gray-300;
+    border-radius: @radius-full;
+    background: @white;
+    appearance: none;
+    cursor: pointer;
+    transition: all @transition-fast @ease-out;
+    position: relative;
+    
+    &:hover {
+      border-color: @primary-500;
+    }
+    
+    &:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px fade(@primary-500, 20%);
+    }
+    
+    &:checked {
+      border-color: @primary-600;
+      
+      &::after {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 4px;
+        width: 8px;
+        height: 8px;
+        background: @primary-600;
+        border-radius: @radius-full;
+      }
+    }
+    
+    &:disabled {
+      background: @gray-100;
+      cursor: not-allowed;
+    }
+  }
+  
+  &__label {
+    font-family: @font-family-modern;
+    font-size: @text-sm;
+    color: @gray-700;
+  }
+}
+
+/* --------------------------------------------------------
+   Form Group
+-------------------------------------------------------- */
+.form-group-modern {
+  margin-bottom: @space-4;
+}
+
+.form-label-modern {
+  display: block;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  font-weight: @font-medium;
+  color: @gray-700;
+  margin-bottom: @space-1;
+}
+
+.form-label-modern--required::after {
+  content: ' *';
+  color: @error-main;
+}
+
+.form-hint-modern {
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  color: @gray-500;
+  margin-top: @space-1;
+}
+
+.form-error-modern {
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  color: @error-main;
+  margin-top: @space-1;
+  display: flex;
+  align-items: center;
+  gap: @space-1;
+}
+
+/* --------------------------------------------------------
+   Input with Icon
+-------------------------------------------------------- */
+.input-wrapper-modern {
+  position: relative;
+  
+  &--icon-left {
+    .input-modern {
+      padding-left: @space-10;
+    }
+    
+    .input-icon-modern {
+      left: @space-3;
+    }
+  }
+  
+  &--icon-right {
+    .input-modern {
+      padding-right: @space-10;
+    }
+    
+    .input-icon-modern {
+      right: @space-3;
+    }
+  }
+}
+
+.input-icon-modern {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: @icon-size-md;
+  height: @icon-size-md;
+  color: @gray-400;
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------
+   Input Group (with addon)
+-------------------------------------------------------- */
+.input-group-modern {
+  display: flex;
+  
+  .input-modern {
+    flex: 1;
+    border-radius: 0;
+    
+    &:first-child {
+      border-radius: @radius-md 0 0 @radius-md;
+    }
+    
+    &:last-child {
+      border-radius: 0 @radius-md @radius-md 0;
+    }
+  }
+}
+
+.input-addon-modern {
+  display: flex;
+  align-items: center;
+  padding: 0 @space-3;
+  background: @gray-50;
+  border: 1px solid @gray-300;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-500;
+  
+  &:first-child {
+    border-radius: @radius-md 0 0 @radius-md;
+    border-right: none;
+  }
+  
+  &:last-child {
+    border-radius: 0 @radius-md @radius-md 0;
+    border-left: none;
+  }
+}

@@ -1,0 +1,502 @@
+/* ========================================================
+   NAVIGATION PANE STYLES - TableScope
+   Modern sidebar styling for the NavigationPane component
+   Requirements: 7.1, 7.2, 7.3
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Main Navigation Container
+   Requirements: 7.1 - Clean background with subtle border
+-------------------------------------------------------- */
+.navigation-pane {
+  background: @white;
+  height: 100%;
+  overflow-y: auto;
+  padding: @space-4 @space-1 @space-4 @space-4;
+  font-family: @font-family-modern;
+  border-top: none !important;
+  
+  /* Custom scrollbar styling */
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: @gray-300;
+    border-radius: @radius-full;
+    
+    &:hover {
+      background: @gray-400;
+    }
+  }
+}
+
+/* --------------------------------------------------------
+   Navigation Header
+-------------------------------------------------------- */
+.navigation-pane__header {
+  margin: 0 0 @space-3 0;
+  font-size: @text-sm;
+  font-weight: @font-semibold;
+  color: @gray-900;
+  letter-spacing: @tracking-tight;
+}
+
+/* --------------------------------------------------------
+   View Mode Pills/Tabs - Optimized for sidebar width
+-------------------------------------------------------- */
+.navigation-pane__tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: @space-2;
+  padding-right: 4px;
+}
+
+.navigation-pane__tab {
+  cursor: pointer;
+  border-radius: @radius-full;
+  padding: 4px 10px;
+  border: 1px solid @gray-300;
+  background: transparent;
+  font-family: @font-family-modern;
+  font-weight: @font-medium;
+  font-size: 12px;
+  line-height: 1.4;
+  color: @gray-600;
+  transition: all @transition-fast @ease-out;
+  white-space: nowrap;
+  
+  &:hover {
+    background: @gray-50;
+    border-color: @gray-400;
+    color: @gray-900;
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px @primary-500;
+  }
+}
+
+.navigation-pane__tab--active {
+  background: @primary-50;
+  border-color: @primary-300;
+  color: @primary-700;
+  
+  &:hover {
+    background: @primary-100;
+    border-color: @primary-400;
+    color: @primary-700;
+  }
+}
+
+/* --------------------------------------------------------
+   Action Buttons (New Project, New Query)
+-------------------------------------------------------- */
+.navigation-pane__action-btn {
+  display: flex;
+  align-items: center;
+  gap: @space-2;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: @space-2 @space-3;
+  margin-bottom: @space-3;
+  border-radius: @radius-md;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-600;
+  transition: all @transition-fast @ease-out;
+  
+  &:hover {
+    background: @gray-100;
+    color: @gray-900;
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px @primary-500;
+  }
+  
+  .MuiSvgIcon-root {
+    font-size: @icon-size-lg !important;
+    color: @primary-600;
+  }
+}
+
+/* --------------------------------------------------------
+   Divider Line
+   Requirements: 11.3, 11.4, 11.5
+-------------------------------------------------------- */
+.navigation-pane__divider {
+  height: 1px;
+  background: @gray-200;
+  margin: @space-3 0;
+}
+
+/* --------------------------------------------------------
+   Section Container
+-------------------------------------------------------- */
+.navigation-pane__section {
+  margin: @space-3 0;
+}
+
+/* --------------------------------------------------------
+   Section Headers (Collapsible)
+   Requirements: 7.3 - Hover states
+-------------------------------------------------------- */
+.navigation-pane__section-header {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: @space-2 @space-3;
+  margin-bottom: @space-1;
+  border-radius: @radius-md;
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  font-weight: @font-semibold;
+  color: @gray-500;
+  text-transform: uppercase;
+  letter-spacing: @tracking-wider;
+  transition: all @transition-fast @ease-out;
+  
+  &:hover {
+    background: @gray-50;
+    color: @gray-700;
+  }
+}
+
+.navigation-pane__section-toggle {
+  font-size: @text-xs;
+  transform: scaleX(1.6);
+  color: @gray-400;
+  transition: transform @transition-fast @ease-out;
+}
+
+.navigation-pane__section-header--expanded .navigation-pane__section-toggle {
+  transform: scaleX(1.6) rotate(180deg);
+}
+
+/* --------------------------------------------------------
+   List Container
+-------------------------------------------------------- */
+.navigation-pane__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* --------------------------------------------------------
+   List Items
+   Requirements: 7.2, 7.3 - Active and hover states
+-------------------------------------------------------- */
+.navigation-pane__item {
+  display: flex;
+  align-items: center;
+  padding: @space-2 @space-3;
+  border-radius: @radius-md;
+  margin-bottom: @space-1;
+  cursor: pointer;
+  transition: all @transition-fast @ease-out;
+  position: relative;
+  
+  /* Hover state - Requirements: 7.3 */
+  &:hover {
+    background: @gray-100;
+  }
+}
+
+.navigation-pane__item--active {
+  background: @primary-50;
+  
+  /* Left accent border - Requirements: 7.2 */
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: @space-1;
+    bottom: @space-1;
+    width: 3px;
+    background: @primary-600;
+    border-radius: 0 @radius-sm @radius-sm 0;
+  }
+  
+  &:hover {
+    background: @primary-100;
+  }
+  
+  .navigation-pane__item-text {
+    color: @primary-700;
+    font-weight: @font-medium;
+  }
+}
+
+.navigation-pane__item-text {
+  flex-grow: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-700;
+  transition: color @transition-fast @ease-out;
+}
+
+.navigation-pane__item:hover .navigation-pane__item-text {
+  color: @gray-900;
+}
+
+/* --------------------------------------------------------
+   Item Icons
+   Requirements: 7.4 - Consistent icon sizing
+-------------------------------------------------------- */
+.navigation-pane__item-icon {
+  width: @icon-size-md;
+  height: @icon-size-md;
+  margin-right: @space-3;
+  flex-shrink: 0;
+  color: @gray-400;
+}
+
+.navigation-pane__item:hover .navigation-pane__item-icon {
+  color: @gray-600;
+}
+
+.navigation-pane__item--active .navigation-pane__item-icon {
+  color: @primary-600;
+}
+
+/* --------------------------------------------------------
+   Item Badges/Tags
+-------------------------------------------------------- */
+.navigation-pane__item-badge {
+  font-size: @text-xs;
+  font-weight: @font-medium;
+  padding: @space-0-5 @space-2;
+  border-radius: @radius-full;
+  background: @gray-200;
+  color: @gray-600;
+  margin-left: @space-2;
+}
+
+.navigation-pane__item--active .navigation-pane__item-badge {
+  background: @primary-200;
+  color: @primary-700;
+}
+
+/* --------------------------------------------------------
+   Archived Item Styling
+-------------------------------------------------------- */
+.navigation-pane__item--archived {
+  .navigation-pane__item-text {
+    opacity: 0.6;
+    font-style: italic;
+  }
+}
+
+.navigation-pane__archived-tag {
+  font-size: @text-xs;
+  color: @warning-main;
+  margin-left: @space-2;
+}
+
+/* --------------------------------------------------------
+   Action Menu Button
+-------------------------------------------------------- */
+.navigation-pane__action-menu-btn {
+  visibility: hidden;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 @space-2;
+  font-size: @text-lg;
+  color: @gray-400;
+  border-radius: @radius-sm;
+  transition: all @transition-fast @ease-out;
+  
+  &:hover {
+    background: @gray-200;
+    color: @gray-700;
+  }
+}
+
+.navigation-pane__item:hover .navigation-pane__action-menu-btn {
+  visibility: visible;
+}
+
+/* --------------------------------------------------------
+   Dropdown Menu
+-------------------------------------------------------- */
+.navigation-pane__dropdown {
+  position: absolute;
+  right: @space-2;
+  top: 100%;
+  background: @white;
+  border: 1px solid @gray-200;
+  border-radius: @radius-lg;
+  box-shadow: @shadow-lg;
+  min-width: 160px;
+  z-index: @z-dropdown;
+  padding: @space-1;
+  margin-top: @space-1;
+}
+
+.navigation-pane__dropdown-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.navigation-pane__dropdown-item {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: @space-2 @space-3;
+  text-align: left;
+  cursor: pointer;
+  border-radius: @radius-md;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-700;
+  transition: background @transition-fast @ease-out;
+  
+  &:hover {
+    background: @gray-100;
+  }
+}
+
+.navigation-pane__dropdown-item--danger {
+  color: @error-main;
+  
+  &:hover {
+    background: @error-50;
+  }
+}
+
+.navigation-pane__dropdown-item--success {
+  color: @success-main;
+  
+  &:hover {
+    background: @success-50;
+  }
+}
+
+.navigation-pane__dropdown-item--warning {
+  color: @warning-main;
+  
+  &:hover {
+    background: @warning-50;
+  }
+}
+
+/* --------------------------------------------------------
+   Data Source Expansion Panel
+-------------------------------------------------------- */
+.navigation-pane__expansion-panel {
+  margin-top: @space-1;
+  margin-left: @space-2;
+  border: 1px solid @gray-200;
+  border-radius: @radius-md;
+  background: @white;
+  box-shadow: @shadow-sm;
+  overflow: hidden;
+}
+
+.navigation-pane__search-input {
+  width: 100%;
+  padding: @space-2 @space-3;
+  border: none;
+  border-bottom: 1px solid @gray-100;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-900;
+  background: @gray-50;
+  
+  &::placeholder {
+    color: @gray-400;
+  }
+  
+  &:focus {
+    outline: none;
+    background: @white;
+    border-bottom-color: @primary-300;
+  }
+}
+
+.navigation-pane__table-list {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: @space-1;
+}
+
+.navigation-pane__table-item {
+  padding: @space-2 @space-3;
+  border-radius: @radius-md;
+  cursor: pointer;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-700;
+  transition: background @transition-fast @ease-out;
+  
+  &:hover {
+    background: @primary-50;
+    color: @primary-700;
+  }
+}
+
+.navigation-pane__table-count {
+  padding: @space-1-5 @space-2;
+  border-top: 1px solid @gray-100;
+  font-size: @text-xs;
+  color: @gray-400;
+  text-align: center;
+  background: @gray-50;
+}
+
+/* --------------------------------------------------------
+   Empty State
+-------------------------------------------------------- */
+.navigation-pane__empty {
+  font-family: @font-family-modern;
+  font-style: italic;
+  font-size: @text-sm;
+  color: @gray-400;
+  padding: @space-4;
+  text-align: center;
+}
+
+/* --------------------------------------------------------
+   Loading State
+-------------------------------------------------------- */
+.navigation-pane__loading {
+  padding: @space-4;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-500;
+}
+
+/* --------------------------------------------------------
+   Error State
+-------------------------------------------------------- */
+.navigation-pane__error {
+  padding: @space-4;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @error-main;
+}
+
+/* --------------------------------------------------------
+   Type Icons (File, Database)
+-------------------------------------------------------- */
+.navigation-pane__type-icon {
+  font-size: @text-xs;
+  color: @gray-400;
+  margin-left: @space-1;
+}
+

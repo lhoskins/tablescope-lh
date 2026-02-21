@@ -1,0 +1,49 @@
+/* ------------------------------------------------------------------
+   TSQueryEditor.css   (based on the original QueryEditor.css)
+   ------------------------------------------------------------------ */
+
+/* ────────────────────────────────────────────────────────────────
+  Existing highlight for “query executing” mode
+   ──────────────────────────────────────────────────────────────── */
+.editor__container[data-executing="true"] .ace_marker-layer .ace_selection {
+  background-color: rgb(255, 210, 181);   /* legacy color */
+}
+
+/* ────────────────────────────────────────────────────────────────
+   Ace sizing tweaks – stop first-line crop & shake
+   ──────────────────────────────────────────────────────────────── */
+.editor__container {          /* parent <div> around Ace in both editors */
+  position: relative;
+  width: 100%;
+  height: 100%;               /* lock full height so Ace never “jumps”   */
+  flex: 1 1 auto;             /* keep flex-box behaviour                  */
+  min-height: 0;              /* avoid min-content size quirk             */
+}
+
+/* Force Ace and its scroller to always fill the container */
+.editor__container .ace_editor,
+.editor__container .ace_scroller {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* (Optional) Make sure gutter has same background as editor for nicer feel */
+.editor__container .ace_gutter {
+  background: #fafafa;
+}
+
+.rqb-rule-grid {
+  display: grid !important;
+  /* 1) field, 2) operator, 3) value, 4) AND/OR, 5) ✕ */
+  grid-template-columns: 160px 140px 2fr 80px 32px !important;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.selected-header {
+  background-color: #9AB6C7 !important;
+}
+
+/* ------------------------------------------------------------------
+   End of TSQueryEditor.css
+   ------------------------------------------------------------------ */

@@ -1,0 +1,96 @@
+.mfa-challenge-container {
+  max-width: 500px;
+  margin: 0 auto;
+  padding: 20px;
+
+  h2 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: #333;
+    text-align: center;
+  }
+
+  .mfa-tabs {
+    margin-top: 20px;
+
+    .mfa-tab-content {
+      padding: 20px 0;
+
+      .mfa-description {
+        font-size: 14px;
+        color: #666;
+        margin-bottom: 20px;
+        text-align: center;
+        line-height: 1.6;
+
+        strong {
+          color: #1890ff;
+          font-weight: 600;
+        }
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+    }
+  }
+
+  .m-b-15 {
+    margin-bottom: 15px;
+  }
+
+  .m-t-10 {
+    margin-top: 10px;
+  }
+
+  // Enhanced input styling for better UX
+  .ant-input {
+    &:focus {
+      border-color: #1890ff;
+      box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+    }
+  }
+
+  // Tab styling
+  .ant-tabs-tab {
+    font-size: 15px;
+    font-weight: 500;
+  }
+
+  // Alert styling
+  .ant-alert {
+    border-radius: 4px;
+  }
+
+  // Button styling
+  .ant-btn-primary {
+    height: 44px;
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .ant-btn-link {
+    color: #1890ff;
+    font-size: 14px;
+
+    &:hover {
+      color: #40a9ff;
+    }
+  }
+}
+
+// Responsive design
+@media (max-width: 768px) {
+  .mfa-challenge-container {
+    padding: 10px;
+
+    h2 {
+      font-size: 20px;
+    }
+
+    .ant-input {
+      font-size: 20px !important;
+    }
+  }
+}

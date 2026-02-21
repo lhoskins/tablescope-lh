@@ -1,0 +1,164 @@
+import json
+import requests
+from flask import request, jsonify
+from datetime import datetime
+from sqlalchemy.exc import IntegrityError
+from redash.handlers.base import BaseResource
+from redash.models import Project, ProjectDataSource, DataSource, db
+from redash.utils import json_dumps, json_loads
+from sqlalchemy.orm.exc import NoResultFound  # Import NoResultFound
+import os
+import logging
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
+
+# Load environment variables directly
+REDASH_API_URL = os.environ.get("REDASH_API_URL")
+REDASH_API_KEY = os.environ.get("REDASH_API_KEY")
+
+
+class ProjectDataSourcesResource(BaseResource):
+    def get(self, project_id):
+        logger.debug(u"Fetching data sources for project ID {}".format(project_id))
+        project = Project.query.get_or_404(project_id)
+        data_sources = [ds.data_source.to_dict() for ds in project.data_sources]
+        logger.debug(u"Data sources found: {}".format(data_sources))
+        return jsonify(data_sources)
+
+    def post(self, project_id):
+        logger.debug(u"Entering the POST method for ProjectDataSourcesResource with project ID {}".format(project_id))
+        data = request.get_json()
+        logger.debug(u"Raw request JSON payload: {}".format(data))
+
+        if data is None:
+            logger.error(u"Failed to parse JSON payload in request.")
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        data_source_name = data.get('name')
+        data_source_id = data.get('data_source_id')
+        data_source_type = data.get('type', 'external')
+
+        # Get the current user to set as the owner
+        current_user_id = self.current_user.id  # Assuming `current_user` is set by Redash's authentication
+        logger.debug(u"Current user ID: {}".format(current_user_id))
+
+        if not data_source_name and data_source_id:
+            logger.debug(u"Attempting to fetch name for data_source_id {}".format(data_source_id))
+            try:
+                internal_data_source = DataSource.query.filter_by(id=data_source_id).one_or_none()
+            except NoResultFound:
+                logger.error(u"No internal data source found with ID {}".format(data_source_id))
+                return jsonify({"error": "Data source not found for provided ID"}), 404
+
+            if internal_data_source:
+                data_source_name = internal_data_source.name
+                data_source_type = internal_data_source.type
+                logger.debug(u"Found internal data source with name {} for ID {}".format(data_source_name, data_source_id))
+            else:
+                logger.error(u"Data source not found for ID: {}".format(data_source_id))
+                return jsonify({"error": "Data source not found for provided ID"}), 404
+
+        if not data_source_name:
+            logger.error(u"Data source name is missing in the request payload.")
+            return jsonify({"error": "Data source name is required in the request payload"}), 400
+
+        # Check if the data source already exists in the Redash database
+        try:
+            data_source = DataSource.get_by_name(data_source_name)
+        except NoResultFound:
+            logger.debug(u"No existing data source found with name {}".format(data_source_name))
+            data_source = None
+
+        if not data_source:
+            create_data_source_payload = {
+                "name": data_source_name,
+                "type": data_source_type,
+                "options": data.get('options', {}),
+                "org_id": self.current_org.id,
+            }
+            headers = {
+                "Authorization": "Key {}".format(REDASH_API_KEY),
+                "Content-Type": "application/json",
+            }
+
+            response = requests.post(
+                "{}/data_sources".format(REDASH_API_URL),
+                headers=headers,
+                data=json.dumps(create_data_source_payload),
+            )
+
+            if response.status_code != 200:
+                try:
+                    error_message = response.json().get("message", "Unknown error")
+                except ValueError:
+                    error_message = "Unknown error"
+                logger.error(u"Failed to create data source via API: {}".format(error_message))
+                return jsonify({"error": "Failed to create data source via API: {}".format(error_message)}), response.status_code
+
+            # Convert the response JSON into a DataSource-like object
+            created_data = response.json()
+            data_source = DataSource(
+                id=created_data["id"],
+                name=created_data["name"],
+                type=created_data["type"],
+            )
+
+        try:
+            project_ds = ProjectDataSource(
+                project_id=project_id,
+                data_source_id=data_source.id,  # Use dot notation
+                owner=current_user_id,  # Set the owner as the current user
+            )
+            db.session.add(project_ds)
+            db.session.commit()
+            return jsonify(project_ds.to_dict())
+        except IntegrityError as e:
+            db.session.rollback()
+            logger.error(u"Integrity issue: {}".format(e))
+            return jsonify({"error": "Data source already associated with the project or other integrity issue: {}".format(str(e))}), 400
+
+
+class ProjectListResource(BaseResource):
+    def get(self):
+        projects = Project.query.all()
+        return jsonify([project.to_dict() for project in projects])
+
+    def post(self):
+        data = request.get_json()
+        project = Project(name=data['name'], description=data.get('description', ''))
+        db.session.add(project)
+        db.session.commit()
+        return jsonify(project.to_dict())
+
+
+class ProjectResource(BaseResource):
+    def get(self, project_id):
+        project = Project.query.get_or_404(project_id)
+        return jsonify(project.to_dict())
+
+    def delete(self, project_id):
+        project = Project.query.get_or_404(project_id)
+        db.session.delete(project)
+        db.session.commit()
+        return '', 204
+
+
+class ProjectMembersResource(BaseResource):
+    def get(self, project_id):
+        project = Project.query.get_or_404(project_id)
+        return jsonify([member.user.to_dict() for member in project.members])
+
+    def post(self, project_id):
+        data = request.get_json()
+        member = ProjectMember(project_id=project_id, user_id=data['user_id'])
+        db.session.add(member)
+        db.session.commit()
+        return jsonify(member.to_dict())
+
+    def delete(self, project_id, user_id):
+        member = ProjectMember.query.filter_by(project_id=project_id, user_id=user_id).first_or_404()
+        db.session.delete(member)
+        db.session.commit()
+        return '', 204

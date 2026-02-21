@@ -1,0 +1,246 @@
+/* ========================================================
+   MODERN TYPOGRAPHY STYLES - TableScope
+   Requirements: 2.1, 2.2, 2.3, 2.4, 2.5
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Base Typography
+   Requirements: 2.1
+-------------------------------------------------------- */
+.text-modern {
+  font-family: @font-family-modern;
+}
+
+/* Apply modern font to body when using modern design system */
+body.modern-ui {
+  font-family: @font-family-modern;
+  font-size: @text-base;
+  line-height: @leading-normal;
+  color: @gray-900;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* --------------------------------------------------------
+   Headings
+   Requirements: 2.2, 2.4, 2.5
+-------------------------------------------------------- */
+.h1-modern {
+  font-family: @font-family-modern;
+  font-size: @text-4xl;
+  font-weight: @font-bold;
+  line-height: @leading-tight;
+  letter-spacing: @tracking-tight;
+  color: @gray-900;
+  margin: 0 0 @space-4 0;
+}
+
+.h2-modern {
+  font-family: @font-family-modern;
+  font-size: @text-3xl;
+  font-weight: @font-bold;
+  line-height: @leading-tight;
+  letter-spacing: @tracking-tight;
+  color: @gray-900;
+  margin: 0 0 @space-3 0;
+}
+
+.h3-modern {
+  font-family: @font-family-modern;
+  font-size: @text-2xl;
+  font-weight: @font-semibold;
+  line-height: @leading-tight;
+  letter-spacing: @tracking-tight;
+  color: @gray-900;
+  margin: 0 0 @space-3 0;
+}
+
+.h4-modern {
+  font-family: @font-family-modern;
+  font-size: @text-xl;
+  font-weight: @font-semibold;
+  line-height: @leading-tight;
+  color: @gray-900;
+  margin: 0 0 @space-2 0;
+}
+
+.h5-modern {
+  font-family: @font-family-modern;
+  font-size: @text-lg;
+  font-weight: @font-semibold;
+  line-height: @leading-tight;
+  color: @gray-900;
+  margin: 0 0 @space-2 0;
+}
+
+.h6-modern {
+  font-family: @font-family-modern;
+  font-size: @text-base;
+  font-weight: @font-semibold;
+  line-height: @leading-tight;
+  color: @gray-900;
+  margin: 0 0 @space-2 0;
+}
+
+/* --------------------------------------------------------
+   Body Text
+   Requirements: 2.3, 2.4
+-------------------------------------------------------- */
+.text-body-modern {
+  font-family: @font-family-modern;
+  font-size: @text-base;
+  font-weight: @font-normal;
+  line-height: @leading-normal;
+  color: @gray-700;
+}
+
+.text-body-sm-modern {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  font-weight: @font-normal;
+  line-height: @leading-normal;
+  color: @gray-700;
+}
+
+.text-body-lg-modern {
+  font-family: @font-family-modern;
+  font-size: @text-lg;
+  font-weight: @font-normal;
+  line-height: @leading-relaxed;
+  color: @gray-700;
+}
+
+/* --------------------------------------------------------
+   Text Sizes
+-------------------------------------------------------- */
+.text-xs-modern { font-size: @text-xs; }
+.text-sm-modern { font-size: @text-sm; }
+.text-base-modern { font-size: @text-base; }
+.text-lg-modern { font-size: @text-lg; }
+.text-xl-modern { font-size: @text-xl; }
+.text-2xl-modern { font-size: @text-2xl; }
+.text-3xl-modern { font-size: @text-3xl; }
+.text-4xl-modern { font-size: @text-4xl; }
+
+/* --------------------------------------------------------
+   Text Weights
+-------------------------------------------------------- */
+.font-normal-modern { font-weight: @font-normal; }
+.font-medium-modern { font-weight: @font-medium; }
+.font-semibold-modern { font-weight: @font-semibold; }
+.font-bold-modern { font-weight: @font-bold; }
+
+/* --------------------------------------------------------
+   Text Colors
+-------------------------------------------------------- */
+.text-primary-modern { color: @gray-900; }
+.text-secondary-modern { color: @gray-600; }
+.text-muted-modern { color: @gray-400; }
+.text-inverse-modern { color: @white; }
+.text-brand-modern { color: @primary-600; }
+.text-success-modern { color: @success-main; }
+.text-warning-modern { color: @warning-main; }
+.text-error-modern { color: @error-main; }
+.text-info-modern { color: @info-main; }
+
+/* --------------------------------------------------------
+   Text Alignment
+-------------------------------------------------------- */
+.text-left-modern { text-align: left; }
+.text-center-modern { text-align: center; }
+.text-right-modern { text-align: right; }
+
+/* --------------------------------------------------------
+   Text Utilities
+-------------------------------------------------------- */
+.text-uppercase-modern {
+  text-transform: uppercase;
+  letter-spacing: @tracking-wider;
+}
+
+.text-capitalize-modern {
+  text-transform: capitalize;
+}
+
+.text-truncate-modern {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-nowrap-modern {
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------
+   Links
+-------------------------------------------------------- */
+.link-modern {
+  font-family: @font-family-modern;
+  color: @primary-600;
+  text-decoration: none;
+  transition: color @transition-fast @ease-out;
+  
+  &:hover {
+    color: @primary-700;
+    text-decoration: underline;
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px fade(@primary-500, 50%);
+    border-radius: @radius-sm;
+  }
+}
+
+.link-modern--muted {
+  color: @gray-500;
+  
+  &:hover {
+    color: @gray-700;
+  }
+}
+
+/* --------------------------------------------------------
+   Labels and Captions
+-------------------------------------------------------- */
+.label-modern {
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  font-weight: @font-semibold;
+  text-transform: uppercase;
+  letter-spacing: @tracking-wider;
+  color: @gray-500;
+}
+
+.caption-modern {
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  color: @gray-500;
+  line-height: @leading-normal;
+}
+
+/* --------------------------------------------------------
+   Code and Monospace
+-------------------------------------------------------- */
+.code-modern {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', 
+               'Droid Sans Mono', 'Source Code Pro', monospace;
+  font-size: 0.875em;
+  background: @gray-100;
+  padding: @space-0-5 @space-1;
+  border-radius: @radius-sm;
+  color: @gray-800;
+}
+
+.pre-modern {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', 
+               'Droid Sans Mono', 'Source Code Pro', monospace;
+  font-size: @text-sm;
+  background: @gray-900;
+  color: @gray-100;
+  padding: @space-4;
+  border-radius: @radius-lg;
+  overflow-x: auto;
+  line-height: @leading-relaxed;
+}

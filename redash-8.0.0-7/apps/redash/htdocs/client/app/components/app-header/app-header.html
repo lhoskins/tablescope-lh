@@ -1,0 +1,160 @@
+<nav class="navbar navbar-default app-header" role="navigation">
+  <div class="container">
+    <div class="navbar-header">
+      <!-- Navigation Toggle Button -->
+      <button
+        type="button"
+        class="navbar-nav-toggle"
+        ng-click="$ctrl.toggleNavigation()"
+        title="Toggle Navigation"
+      >
+        <img ng-src="{{ $ctrl.toggleNavIcon }}" alt="Toggle Navigation" />
+      </button>
+      <!-- Vertical Divider -->
+      <span class="navbar-divider"></span>
+      <button
+        type="button"
+        class="navbar-toggle"
+        ng-click="isNavOpen = !isNavOpen"
+      >
+        <span class="sr-only">Toggle navigation</span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <!-- REDASH LOGO -->
+      <a class="navbar-brand" ng-href="{{ $ctrl.basePath }}"
+        ><img ng-src="{{ $ctrl.logoUrl }}"
+      /></a>
+    </div>
+    <div class="collapse navbar-collapse" uib-collapse="!isNavOpen">
+      <!-- Main Left Nav-->
+
+      <!-- Profile -->
+      <ul class="nav navbar-nav navbar-right">
+        <li>
+          <help-trigger
+            type="'HOME'"
+            class-name="'navbar-link-ANGULAR_REMOVE_ME'"
+          ></help-trigger>
+        </li>
+        <li ng-show="$ctrl.currentUser.isAdmin">
+          <a href="data_sources" title="Settings"
+            ><i class="fa fa-sliders" aria-hidden="true"></i
+          ></a>
+        </li>
+        <!--<li ng-show="$ctrl.showSettingsMenu">-->
+        <!--<a href="users" title="Settings"><i class="fa fa-cog"></i></a>-->
+        <!--</li>-->
+        <li class="dropdown" uib-dropdown>
+          <a
+            href="#"
+            class="dropdown-toggle dropdown--profile"
+            uib-dropdown-toggle
+            data-test="ProfileDropdown"
+          >
+            <img
+              ng-src="{{ $ctrl.currentUser.profile_image_url }}"
+              class="profile__image--navbar"
+              width="20"/>
+            <span
+              class="dropdown--profile__username"
+              ng-bind="$ctrl.currentUser.name"
+            ></span>
+            <span ng-if="$ctrl.currentUser.role_type && $ctrl.currentUser.role_type !== 'default'" 
+                  class="badge m-l-5"
+                  ng-class="{
+                    'badge-info': $ctrl.currentUser.role_type === 'designer',
+                    'badge-primary': $ctrl.currentUser.role_type === 'project_owner' || $ctrl.currentUser.role_type === 'project_admin',
+                    'badge-warning': $ctrl.currentUser.role_type === 'organization_admin',
+                    'badge-danger': $ctrl.currentUser.role_type === 'super_admin'
+                  }">
+              {{ $ctrl.getRoleDisplayName($ctrl.currentUser.role_type) }}
+            </span>
+            <span class="caret caret--nav"></span
+          ></a>
+          <ul class="dropdown-menu dropdown-menu--profile">
+            <li>
+              <a ng-href="users/me">Edit Profile</a>
+            </li>
+            <li
+              class="divider"
+              ng-if="$ctrl.currentUser.hasPermission('super_admin')"
+            ></li>
+
+            <li ng-show="$ctrl.currentUser.isAdmin">
+              <a href="data_sources" title="Data Sources">Data Sources</a>
+            </li>
+            <li ng-show="$ctrl.showSettingsMenu">
+                            <a href="groups" title="Settings">Groups</a>
+            </li>
+            <li ng-show="$ctrl.showSettingsMenu">
+              <a href="#" ng-click="$ctrl.showUsersView(); $event.preventDefault();" title="Users">Users</a>
+            </li>
+            <li>
+              <a ng-href="query_snippets">Query Snippets</a>
+            </li>
+            <li ng-show="$ctrl.showSettingsMenu">
+              <a href="destinations" title="Settings">Alert Destinations</a>
+            </li>
+
+            <!-- User Management for Organization Admins and Super Admins -->
+            <li
+              ng-if="$ctrl.currentUser.hasPermission('organization_admin') || $ctrl.currentUser.hasPermission('super_admin')"
+              class="divider"
+            ></li>
+
+            <li ng-if="$ctrl.currentUser.hasPermission('organization_admin') || $ctrl.currentUser.hasPermission('super_admin')">
+              <a href="admin/users">User Management</a>
+            </li>
+
+            <!-- Super Admin Only Section -->
+            <li
+              ng-if="$ctrl.currentUser.hasPermission('super_admin')"
+              class="divider"
+            ></li>
+
+            <li ng-if="$ctrl.currentUser.hasPermission('super_admin')">
+              <a href="admin/status">System Status</a>
+            </li>
+
+            <li ng-if="$ctrl.currentUser.hasPermission('super_admin')">
+              <a href="admin/vdb-management">VDB Management</a>
+            </li>
+
+            <li ng-if="$ctrl.currentUser.hasPermission('super_admin')">
+              <a href="admin/organization-provisioning">Organization Provisioning</a>
+            </li>
+
+            <li class="divider"></li>
+	    
+	    <li>
+              <a href="customer_support">Customer Support</a>
+			  <a href="my_approvals">My Approvals</a>
+            </li>
+            
+	    <li>
+              <a ng-click="$ctrl.logout()">Log out</a>
+            </li>
+
+            <li class="divider"></li>
+            <li class="dropdown-menu__version">
+              Version: {{ $ctrl.backendVersion }}
+              <span ng-if="$ctrl.frontendVersion !== $ctrl.backendVersion">
+                ({{ $ctrl.frontendVersion.substring(0, 8) }})
+              </span>
+              <span
+                class="update-available"
+                ng-if="$ctrl.currentUser.hasPermission('super_admin') && $ctrl.newVersionAvailable"
+              >
+                <a href="https://version.redash.io/" target="_blank">
+                  <i class="fa fa-arrow-circle-down"></i>
+                </a>
+              </span>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>

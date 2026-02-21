@@ -1,0 +1,30 @@
+# Sensitive Files
+*.key
+*.pem
+*password*
+*secret*
+.env
+
+# Logs
+*.log
+logs/
+
+# Compiled
+*.pyc
+__pycache__/
+*.class
+
+# Data directories
+standalone/data/
+standalone/log/
+standalone/tmp/
+domain/data/
+domain/log/
+domain/tmp/
+
+# Customer data
+customer_folder/
+uploads/
+
+# Exclude large files
+*.zip

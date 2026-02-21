@@ -1,0 +1,246 @@
+/* ========================================================
+   MODERN CARD STYLES - TableScope
+   Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Card Base
+   Requirements: 4.1, 4.2, 4.4
+-------------------------------------------------------- */
+.card-modern {
+  background: @white;
+  border-radius: @radius-lg;
+  box-shadow: @shadow-sm;
+  border: 1px solid @gray-200;
+  overflow: hidden;
+  transition: box-shadow @transition-fast @ease-out;
+}
+
+/* --------------------------------------------------------
+   Interactive Card (with hover)
+   Requirements: 4.3, 4.5
+-------------------------------------------------------- */
+.card-modern--interactive {
+  cursor: pointer;
+  
+  &:hover {
+    box-shadow: @shadow-md;
+  }
+  
+  &:active {
+    box-shadow: @shadow-sm;
+  }
+}
+
+/* --------------------------------------------------------
+   Card Header
+-------------------------------------------------------- */
+.card-modern__header {
+  padding: @space-4 @space-5;
+  border-bottom: 1px solid @gray-100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: @space-3;
+}
+
+.card-modern__title {
+  font-family: @font-family-modern;
+  font-size: @text-lg;
+  font-weight: @font-semibold;
+  color: @gray-900;
+  margin: 0;
+  line-height: @leading-tight;
+}
+
+.card-modern__subtitle {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-500;
+  margin: @space-1 0 0 0;
+}
+
+.card-modern__actions {
+  display: flex;
+  align-items: center;
+  gap: @space-2;
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------
+   Card Body
+-------------------------------------------------------- */
+.card-modern__body {
+  padding: @space-5;
+}
+
+.card-modern__body--compact {
+  padding: @space-4;
+}
+
+.card-modern__body--flush {
+  padding: 0;
+}
+
+/* --------------------------------------------------------
+   Card Footer
+-------------------------------------------------------- */
+.card-modern__footer {
+  padding: @space-4 @space-5;
+  background: @gray-50;
+  border-top: 1px solid @gray-100;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: @space-3;
+}
+
+.card-modern__footer--between {
+  justify-content: space-between;
+}
+
+/* --------------------------------------------------------
+   Card Variants
+-------------------------------------------------------- */
+/* Flat card (no shadow) */
+.card-modern--flat {
+  box-shadow: none;
+  
+  &.card-modern--interactive:hover {
+    box-shadow: @shadow-sm;
+  }
+}
+
+/* Elevated card */
+.card-modern--elevated {
+  box-shadow: @shadow-md;
+  
+  &.card-modern--interactive:hover {
+    box-shadow: @shadow-lg;
+  }
+}
+
+/* Borderless card */
+.card-modern--borderless {
+  border: none;
+}
+
+/* --------------------------------------------------------
+   Card with colored accent
+-------------------------------------------------------- */
+.card-modern--accent-primary {
+  border-left: 3px solid @primary-500;
+}
+
+.card-modern--accent-success {
+  border-left: 3px solid @success-main;
+}
+
+.card-modern--accent-warning {
+  border-left: 3px solid @warning-main;
+}
+
+.card-modern--accent-error {
+  border-left: 3px solid @error-main;
+}
+
+/* --------------------------------------------------------
+   Card Grid Layout
+-------------------------------------------------------- */
+.card-grid-modern {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: @space-4;
+}
+
+.card-grid-modern--compact {
+  gap: @space-3;
+}
+
+.card-grid-modern--wide {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+/* --------------------------------------------------------
+   Card List Layout
+-------------------------------------------------------- */
+.card-list-modern {
+  display: flex;
+  flex-direction: column;
+  gap: @space-3;
+}
+
+/* --------------------------------------------------------
+   Stat Card
+-------------------------------------------------------- */
+.card-stat-modern {
+  .card-modern();
+  padding: @space-5;
+  
+  &__label {
+    font-family: @font-family-modern;
+    font-size: @text-sm;
+    font-weight: @font-medium;
+    color: @gray-500;
+    text-transform: uppercase;
+    letter-spacing: @tracking-wider;
+    margin-bottom: @space-2;
+  }
+  
+  &__value {
+    font-family: @font-family-modern;
+    font-size: @text-3xl;
+    font-weight: @font-bold;
+    color: @gray-900;
+    line-height: 1;
+  }
+  
+  &__change {
+    font-family: @font-family-modern;
+    font-size: @text-sm;
+    margin-top: @space-2;
+    display: flex;
+    align-items: center;
+    gap: @space-1;
+    
+    &--positive {
+      color: @success-main;
+    }
+    
+    &--negative {
+      color: @error-main;
+    }
+  }
+}
+
+/* --------------------------------------------------------
+   Empty State Card
+-------------------------------------------------------- */
+.card-empty-modern {
+  .card-modern();
+  padding: @space-10 @space-5;
+  text-align: center;
+  
+  &__icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto @space-4;
+    color: @gray-400;
+  }
+  
+  &__title {
+    font-family: @font-family-modern;
+    font-size: @text-lg;
+    font-weight: @font-semibold;
+    color: @gray-900;
+    margin-bottom: @space-2;
+  }
+  
+  &__description {
+    font-family: @font-family-modern;
+    font-size: @text-sm;
+    color: @gray-500;
+    max-width: 320px;
+    margin: 0 auto @space-5;
+  }
+}

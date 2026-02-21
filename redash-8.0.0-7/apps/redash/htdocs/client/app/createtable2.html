@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create Table</title>
+<style>
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th, td {
+  border: 1px solid black;
+  padding: 8px;
+  text-align: left;
+}
+
+th {
+  background-color: #f2f2f2;
+}
+</style>
+</head>
+<body>
+<h1>Create Table</h1>
+
+<div style="display: flex; justify-content: space-around;">
+  <!-- Left side -->
+  <div style="width: 30%;">
+    <h2>Select Schema:</h2>
+    <select id="schemaSelect" onchange="fetchTables('left', this.value)">
+      <option value="">Select a schema</option>
+      <option value="MyCompany">My Company</option>
+    </select>
+
+    <!-- Step 1: Select Tables -->
+    <h2 id="step2Left" style="display: none;">Step 1: Select Tables:</h2>
+    <div id="leftTableCheckboxes">
+      <!-- Checkboxes will be dynamically generated here -->
+    </div>
+
+    <!-- Step 2: Select Columns -->
+    <h2 id="step3Left" style="display: none;">Step 2: Select Columns:</h2>
+    <div id="leftColumnCheckboxes">
+      <!-- Checkboxes will be dynamically generated here -->
+    </div>
+  </div>
+
+  <!-- Right side -->
+  <div style="width: 60%;">
+    <!-- Hide this dropdown -->
+    <select id="schemaSelect1" onchange="fetchTables('right', this.value)" style="display: none;">
+      <option value="">Select a schema</option>
+      <option value="MyCompany">My Company</option>
+    </select>
+    <br><br><br><br><br>
+
+    <!-- Step 1: Select Tables -->
+    <h2 id="step2Right" style="display: none;">Step 1: Select Tables:</h2>
+    <div id="rightTableCheckboxes">
+      <!-- Checkboxes will be dynamically generated here -->
+    </div>
+
+    <!-- Step 2: Select Columns -->
+    <h2 id="step3Right" style="display: none;">Step 2: Select Columns:</h2>
+    <div id="rightColumnCheckboxes">
+      <!-- Checkboxes will be dynamically generated here -->
+    </div>
+  </div>
+</div>
+
+<!-- Step 3: Combine Data -->
+<div id="combineDataSection" style="margin-top: 20px; display: none;">
+  <h2>Step 3: Combine Data:</h2>
+  <div style="display: flex;">
+    <div style="width: 30%;">
+      <label for="leftField1">File 1:</label>
+      <select id="leftField1"></select>
+    </div>
+
+    <div style="width: 60%;">
+      <label for="rightField1">File 2:</label>
+      <select id="rightField1"></select>
+      <select id="joinCondition">
+        <option value="LEFT">LEFT JOIN</option>
+        <option value="RIGHT">RIGHT JOIN</option>
+        <option value="INNER">INNER JOIN</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<button onclick="buildSQL()">Preview Combined Data</button>
+<br></br>
+<div id="sqlStatement"></div>
+<br></br>
+<div id="queryResults"></div>
+<br></br>
+<!-- Step 4: Combine Data -->
+<div style="margin-top: 20px;">
+  <h2>Step 4: Combine Data:</h2>
+  <label for="viewName">View Name:</label>
+  <input type="text" id="viewName">
+  <br><br>
+  <button onclick="buildView()">Create View</button>
+</div>
+ 
+<!-- Button to deploy VDB
+<button onclick="deployVDB()">Deploy VDB</button>
+
+	Button to deploy WAR
+<button onclick="deployWAR()">Deploy WAR File</button>
+ -->
+ 
+<script>
+// Define global variables for selected tables and field names
+let selectedLeftTable, selectedRightTable, leftTableName, leftFieldName, rightTableName, rightFieldName;
+
+// Function to fetch schemas for the specified side
+function fetchSchemas(side) {
+  fetch('http://64.52.108.62:8095/TeiidExcelImporter/getSchemas')
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Failed to fetch schemas');
+      }
+      return response.json();
+    })
+    .then(data => {
+      const schemaSelect = document.getElementById(`schemaSelect${side === 'left' ? '' : '1'}`);
+      // Clear existing options
+      schemaSelect.innerHTML = '';
+      // Populate dropdown with fetched schemas
+      data.forEach(schema => {
+        const option = document.createElement('option');
+        option.value = schema;
+        option.text = schema;
+        schemaSelect.appendChild(option);
+      });
+    })
+    .catch(error => console.error('Error fetching schemas:', error));
+}
+
+// Function to fetch tables for the selected schema for the specified side
+function fetchTables(side, selectedSchema) {
+  if (!selectedSchema) return; // If no schema selected, do nothing
+
+  // Update options for the right side if left side is changed
+  if (side === 'left') {
+    document.getElementById('schemaSelect1').value = selectedSchema;
+    fetchTables('right', selectedSchema);
+  }
+
+  // Make AJAX request to the GetTablesServlet endpoint
+  fetch(`http://64.52.108.62:8095/TeiidExcelImporter/getTables?schema=${selectedSchema}`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Failed to fetch tables');
+      }
+      return response.json();
+    })
+    .then(data => {
+      const tableCheckboxes = document.getElementById(`${side === 'left' ? 'leftTableCheckboxes' : 'rightTableCheckboxes'}`);
+      // Clear existing checkboxes
+      tableCheckboxes.innerHTML = '';
+      // Populate checkboxes with fetched tables for the specified side
+      data.forEach(table => {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.name = `${side === 'left' ? 'leftTables' : 'rightTables'}`;
+        checkbox.value = table;
+        checkbox.id = `${side}_${table}`; // Ensure unique IDs for checkboxes
+        checkbox.onclick = () => {
+          if (side === 'left') {
+            selectedLeftTable = table;
+          } else {
+            selectedRightTable = table;
+          }
+          fetchColumns(side);
+        }; // Attach fetchColumns function to the click event
+        
+        const label = document.createElement('label');
+        label.htmlFor = `${side}_${table}`;
+        label.appendChild(document.createTextNode(table));
+        
+        tableCheckboxes.appendChild(checkbox);
+        tableCheckboxes.appendChild(label);
+        tableCheckboxes.appendChild(document.createElement('br'));
+      });
+
+      // Show Step 1 and Step 2 headers after fetching tables for the specified side
+      document.getElementById(`step2${side === 'left' ? 'Left' : 'Right'}`).style.display = 'block';
+      document.getElementById(`step3${side === 'left' ? 'Left' : 'Right'}`).style.display = 'block';
+
+      // Check if Step 2 is completed for both sides, then display Step 3
+      if (document.getElementById('step3Left').style.display === 'block' && document.getElementById('step3Right').style.display === 'block') {
+        document.getElementById('combineDataSection').style.display = 'block';
+      }
+    })
+  .catch(error => {
+    console.error('Error fetching tables:', error);
+    return response.text(); // Return the response text for inspection
+  })
+  .then(text => {
+    console.log('Response text:', text); // Log the response text
+  });
+}
+
+function fetchColumns(side) {
+  const selectedTables = Array.from(document.querySelectorAll(`input[name=${side === 'left' ? 'leftTables' : 'rightTables'}]:checked`)).map(checkbox => checkbox.value);
+  if (selectedTables.length === 0) return; // If no tables selected, do nothing
+
+  fetch(`http://64.52.108.62:8095/TeiidExcelImporter/getColumns?tables=${selectedTables.join(',')}`) // Endpoint to fetch columns for the selected tables
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Failed to fetch columns');
+      }
+      return response.json();
+    })
+    .then(data => {
+      console.log('Received columns data:', data); // Log the received data for inspection
+      const columnCheckboxes = document.getElementById(`${side === 'left' ? 'leftColumnCheckboxes' : 'rightColumnCheckboxes'}`);
+      // Clear existing checkboxes
+      columnCheckboxes.innerHTML = '';
+      // Populate checkboxes with fetched columns for the specified side
+      data.forEach(column => {
+        console.log('Column:', column); // Log each column object for inspection
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.name = `${side === 'left' ? 'leftColumns' : 'rightColumns'}`;
+        checkbox.value = `${column.tableName}.${column.name}`; // Combine TableName and Column name
+
+        const label = document.createElement('label');
+        label.htmlFor = column.name;
+        label.appendChild(document.createTextNode(`${column.tableName} - ${column.name}`)); // Separate TableName and Column name
+
+        columnCheckboxes.appendChild(checkbox);
+        columnCheckboxes.appendChild(label);
+        columnCheckboxes.appendChild(document.createElement('br'));
+      });
+
+      // Populate field1 and field2 dropdowns for the specified side
+      populateFieldDropdowns(data, side);
+    })
+    .catch(error => console.error('Error fetching columns:', error));
+}
+
+
+function populateFieldDropdowns(columns, side) {
+  console.log('Received columns for dropdown:', columns); // Log the received columns data for inspection
+  const field1Select = document.getElementById(`${side === 'left' ? 'leftField1' : 'rightField1'}`);
+  // Clear existing options
+  field1Select.innerHTML = '';
+  // Populate dropdowns with fetched columns for the specified side
+  columns.forEach(column => {
+    console.log('Column for dropdown:', column); // Log each column object for inspection
+    const option = document.createElement('option');
+    option.value = `${column.tableName}.${column.name}`;
+    option.text = `${column.tableName} - ${column.name}`;
+    field1Select.appendChild(option);
+  });
+}
+
+
+function buildSQL() {
+  // Get selected fields from Step 2
+  const selectedLeftFields = Array.from(document.querySelectorAll('input[name=leftColumns]:checked')).map(checkbox => checkbox.value);
+  const selectedRightFields = Array.from(document.querySelectorAll('input[name=rightColumns]:checked')).map(checkbox => checkbox.value);
+
+  // Extract table name and field name from the selected options in Step 3
+  const selectedLeftOption = document.getElementById('leftField1').value;
+  const selectedRightOption = document.getElementById('rightField1').value;
+  const [leftTableName, leftFieldName] = selectedLeftOption.split('.');
+  const [rightTableName, rightFieldName] = selectedRightOption.split('.');
+
+   // Construct SQL statement with JOINs and SELECT fields from Step 2
+  const sqlStatement = `SELECT ${selectedLeftFields.join(', ')}, ${selectedRightFields.join(', ')} FROM ${selectedLeftTable} LEFT JOIN ${selectedRightTable} ON ${selectedLeftTable}.${leftFieldName} = ${selectedRightTable}.${rightFieldName}`;
+
+  // Display SQL statement
+  document.getElementById('sqlStatement').textContent = sqlStatement;
+
+  // Send AJAX request to BuildSQLServlet with the SQL statement
+  fetch('http://64.52.108.62:8095/TeiidExcelImporter/buildSQL', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ sqlStatement: sqlStatement }),
+  })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Failed to build SQL statement');
+      }
+      return response.json();
+    })
+    .then(data => {
+      // Process the response from the servlet as needed
+      console.log('Response from server:', data);
+
+      // Display the connection status or query results on the screen
+      const resultContainer = document.getElementById('queryResults');
+      resultContainer.innerHTML = ''; // Clear previous results
+
+      if (data.connectionStatus === "success") {
+        const queryResults = data.queryResults;
+        if (queryResults.length > 0) {
+          const table = document.createElement('table');
+          const headerRow = table.insertRow();
+          Object.keys(queryResults[0]).forEach(key => {
+            const headerCell = document.createElement('th');
+            headerCell.textContent = key;
+            headerRow.appendChild(headerCell);
+          });
+          queryResults.forEach(row => {
+            const tableRow = table.insertRow();
+            Object.values(row).forEach(value => {
+              const cell = tableRow.insertCell();
+              cell.textContent = value;
+            });
+          });
+          resultContainer.appendChild(table);
+        } else {
+          resultContainer.textContent = 'No results found.';
+        }
+      } else if (data.connectionStatus === "failed") {
+        // Display query error
+        const errorStatus = document.createElement('div');
+        errorStatus.textContent = `Error: ${data.error}`;
+        resultContainer.appendChild(errorStatus);
+      } else {
+        // Handle other cases
+        console.error('Unexpected response from server:', data);
+      }
+    })
+    .catch(error => console.error('Error building SQL statement:', error));
+}
+
+function buildView() {
+  // Get selected fields from Step 2
+  const selectedLeftFields = Array.from(document.querySelectorAll('input[name=leftColumns]:checked')).map(checkbox => checkbox.value);
+  const selectedRightFields = Array.from(document.querySelectorAll('input[name=rightColumns]:checked')).map(checkbox => checkbox.value);
+
+  // Extract table name and field name from the selected options in Step 3
+  const selectedLeftOption = document.getElementById('leftField1').value;
+  const selectedRightOption = document.getElementById('rightField1').value;
+  const [leftTableName, leftFieldName] = selectedLeftOption.split('.');
+  const [rightTableName, rightFieldName] = selectedRightOption.split('.');
+
+  // Get the viewName from the input field
+  const viewName = document.getElementById('viewName').value;
+
+  // Construct SQL statement with JOINs and SELECT fields from Step 2
+  const sqlStatement = `SELECT ${selectedLeftFields.join(', ')}, ${selectedRightFields.join(', ')} FROM ${selectedLeftTable} LEFT JOIN ${selectedRightTable} ON ${selectedLeftTable}.${leftFieldName} = ${selectedRightTable}.${rightFieldName}`;
+
+  // Display SQL statement
+  document.getElementById('sqlStatement').textContent = sqlStatement;
+
+  // Create a FormData object to send form data
+  const formData = new FormData();
+  formData.append('viewName', viewName);
+  formData.append('sqlStatement', sqlStatement);
+
+  // Send AJAX request to BuildViewServlet with form data
+  fetch('http://64.52.108.62:8095/TeiidExcelImporter/view', {
+    method: 'POST',
+    body: formData,
+  })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Failed to build view');
+      }
+      return response.text();
+    })
+    .then(message => {
+      alert(message);
+    })
+    .catch(error => console.error('Error building view:', error));
+}
+
+
+
+
+
+// Function to trigger deployment of VDB
+function deployVDB() {
+    fetch('/deploy-vdb', { method: 'GET' })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to deploy VDB');
+        }
+        return response.text();
+    })
+    .then(message => {
+        alert(message);
+    })
+}
+
+// Function to trigger deployment of WAR
+function deployWAR() {
+    fetch('/deploy-WAR', { method: 'GET' })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to deploy WAR');
+        }
+        return response.text();
+    })
+    .then(message => {
+        alert(message);
+    })
+}
+</script>
+</body>
+</html>

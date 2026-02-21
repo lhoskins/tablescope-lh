@@ -1,0 +1,318 @@
+/* ========================================================
+   MODERN TABLE STYLES - TableScope
+   Requirements: 8.1, 8.2, 8.3, 8.4, 8.5
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Table Base
+-------------------------------------------------------- */
+.table-modern {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  background: @white;
+}
+
+/* --------------------------------------------------------
+   Table Header
+   Requirements: 8.1
+-------------------------------------------------------- */
+.table-modern th {
+  background: @gray-50;
+  color: @gray-600;
+  font-weight: @font-semibold;
+  font-size: @text-xs;
+  text-transform: uppercase;
+  letter-spacing: @tracking-wider;
+  padding: @space-3 @space-4;
+  text-align: left;
+  border-bottom: 1px solid @gray-200;
+  white-space: nowrap;
+}
+
+.table-modern th.sortable {
+  cursor: pointer;
+  user-select: none;
+  
+  &:hover {
+    background: @gray-100;
+  }
+}
+
+.table-modern__sort-icon {
+  display: inline-block;
+  margin-left: @space-1;
+  opacity: 0.5;
+}
+
+.table-modern th.sorted .table-modern__sort-icon {
+  opacity: 1;
+}
+
+/* --------------------------------------------------------
+   Table Body
+   Requirements: 8.3, 8.4
+-------------------------------------------------------- */
+.table-modern td {
+  padding: @space-3 @space-4;
+  color: @gray-900;
+  border-bottom: 1px solid @gray-100;
+  vertical-align: middle;
+}
+
+/* Row hover state - Requirements: 8.5 */
+.table-modern tbody tr {
+  transition: background @transition-fast @ease-out;
+  
+  &:hover {
+    background: @gray-50;
+  }
+}
+
+/* Clickable rows */
+.table-modern tbody tr.clickable {
+  cursor: pointer;
+}
+
+/* --------------------------------------------------------
+   Striped Table
+   Requirements: 8.2
+-------------------------------------------------------- */
+.table-modern--striped tbody tr:nth-child(even) {
+  background: @gray-50;
+  
+  &:hover {
+    background: @gray-100;
+  }
+}
+
+/* --------------------------------------------------------
+   Bordered Table
+-------------------------------------------------------- */
+.table-modern--bordered {
+  border: 1px solid @gray-200;
+  border-radius: @radius-lg;
+  overflow: hidden;
+  
+  th, td {
+    border: 1px solid @gray-200;
+  }
+  
+  th {
+    border-top: none;
+    
+    &:first-child {
+      border-left: none;
+    }
+    
+    &:last-child {
+      border-right: none;
+    }
+  }
+  
+  td {
+    &:first-child {
+      border-left: none;
+    }
+    
+    &:last-child {
+      border-right: none;
+    }
+  }
+  
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+}
+
+/* --------------------------------------------------------
+   Compact Table
+-------------------------------------------------------- */
+.table-modern--compact {
+  th, td {
+    padding: @space-2 @space-3;
+  }
+}
+
+/* --------------------------------------------------------
+   Table Cell Variants
+-------------------------------------------------------- */
+.table-modern__cell--numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-modern__cell--truncate {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-modern__cell--nowrap {
+  white-space: nowrap;
+}
+
+.table-modern__cell--actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* --------------------------------------------------------
+   Table Status Indicators
+-------------------------------------------------------- */
+.table-modern__status {
+  display: inline-flex;
+  align-items: center;
+  gap: @space-1;
+  
+  &::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: @radius-full;
+  }
+  
+  &--success::before {
+    background: @success-main;
+  }
+  
+  &--warning::before {
+    background: @warning-main;
+  }
+  
+  &--error::before {
+    background: @error-main;
+  }
+  
+  &--info::before {
+    background: @info-main;
+  }
+  
+  &--neutral::before {
+    background: @gray-400;
+  }
+}
+
+/* --------------------------------------------------------
+   Table Empty State
+-------------------------------------------------------- */
+.table-modern__empty {
+  text-align: center;
+  padding: @space-10 @space-5;
+  color: @gray-500;
+  
+  &-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto @space-3;
+    color: @gray-300;
+  }
+  
+  &-title {
+    font-weight: @font-medium;
+    color: @gray-700;
+    margin-bottom: @space-1;
+  }
+  
+  &-description {
+    font-size: @text-sm;
+  }
+}
+
+/* --------------------------------------------------------
+   Table Loading State
+-------------------------------------------------------- */
+.table-modern__loading {
+  position: relative;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: fade(@white, 80%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* --------------------------------------------------------
+   Responsive Table Wrapper
+-------------------------------------------------------- */
+.table-modern-wrapper {
+  overflow-x: auto;
+  border: 1px solid @gray-200;
+  border-radius: @radius-lg;
+  
+  .table-modern {
+    border-radius: 0;
+  }
+}
+
+/* --------------------------------------------------------
+   Table Pagination
+-------------------------------------------------------- */
+.table-pagination-modern {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: @space-3 @space-4;
+  border-top: 1px solid @gray-200;
+  background: @gray-50;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+}
+
+.table-pagination-modern__info {
+  color: @gray-600;
+}
+
+.table-pagination-modern__controls {
+  display: flex;
+  align-items: center;
+  gap: @space-2;
+}
+
+.table-pagination-modern__btn {
+  padding: @space-1 @space-2;
+  border: 1px solid @gray-300;
+  border-radius: @radius-md;
+  background: @white;
+  color: @gray-700;
+  cursor: pointer;
+  transition: all @transition-fast @ease-out;
+  
+  &:hover:not(:disabled) {
+    background: @gray-50;
+    border-color: @gray-400;
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.table-pagination-modern__page {
+  padding: @space-1 @space-3;
+  border: 1px solid transparent;
+  border-radius: @radius-md;
+  color: @gray-600;
+  cursor: pointer;
+  
+  &:hover {
+    background: @gray-100;
+  }
+  
+  &--active {
+    background: @primary-50;
+    color: @primary-700;
+    border-color: @primary-200;
+  }
+}

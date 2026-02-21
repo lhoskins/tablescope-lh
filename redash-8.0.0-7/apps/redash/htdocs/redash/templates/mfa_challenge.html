@@ -1,0 +1,450 @@
+{% extends "layouts/signed_out.html" %}
+
+{% block title %}Two-Factor Authentication{% endblock %}
+
+{% block head %}
+<style>
+  .mfa-challenge-container {
+    max-width: 400px;
+    margin: 0 auto;
+  }
+  .mfa-description {
+    color: #666;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  .mfa-tabs {
+    margin-bottom: 20px;
+  }
+  .mfa-tab-buttons {
+    display: flex;
+    border-bottom: 2px solid #e8e8e8;
+    margin-bottom: 20px;
+  }
+  .mfa-tab-button {
+    flex: 1;
+    padding: 12px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-size: 14px;
+    color: #666;
+    margin-bottom: -2px;
+  }
+  .mfa-tab-button.active {
+    color: #1890ff;
+    border-bottom-color: #1890ff;
+  }
+  .mfa-tab-content {
+    display: none;
+  }
+  .mfa-tab-content.active {
+    display: block;
+  }
+  .mfa-input {
+    width: 100%;
+    padding: 12px;
+    font-size: 24px;
+    text-align: center;
+    letter-spacing: 8px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    margin-bottom: 15px;
+  }
+  .mfa-input-backup {
+    font-size: 20px;
+    letter-spacing: 4px;
+  }
+  .mfa-button {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-bottom: 10px;
+  }
+  .mfa-button-primary {
+    background-color: #1890ff;
+    color: white;
+  }
+  .mfa-button-primary:hover:not(:disabled) {
+    background-color: #40a9ff;
+  }
+  .mfa-button-primary:disabled {
+    background-color: #d9d9d9;
+    cursor: not-allowed;
+  }
+  .mfa-button-link {
+    background: none;
+    color: #1890ff;
+    text-decoration: underline;
+  }
+  .mfa-alert {
+    padding: 12px;
+    border-radius: 4px;
+    margin-bottom: 15px;
+  }
+  .mfa-alert-info {
+    background-color: #e6f7ff;
+    border: 1px solid #91d5ff;
+    color: #0050b3;
+  }
+  .mfa-alert-success {
+    background-color: #f6ffed;
+    border: 1px solid #b7eb8f;
+    color: #389e0d;
+  }
+  .mfa-alert-error {
+    background-color: #fff2f0;
+    border: 1px solid #ffccc7;
+    color: #cf1322;
+  }
+  .mfa-alert-warning {
+    background-color: #fffbe6;
+    border: 1px solid #ffe58f;
+    color: #d46b08;
+  }
+  .mfa-loading {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fixed-width-page">
+  <div class="bg-white tiled">
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for message in messages %}
+          <div class="alert alert-danger" role="alert">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    
+    <div class="mfa-challenge-container">
+      <div id="alert-container"></div>
+      
+      <div class="mfa-tabs">
+        <div class="mfa-tab-buttons">
+          <button class="mfa-tab-button active" data-tab="otp">SMS Code</button>
+          <button class="mfa-tab-button" data-tab="backup">Backup Code</button>
+        </div>
+        
+        <!-- OTP Tab -->
+        <div class="mfa-tab-content active" data-tab="otp">
+          <p class="mfa-description">
+            Enter the 6-digit code sent to your phone ending in <strong>{{ phone_last4 }}</strong>
+          </p>
+          
+          <div id="sms-sent-alert" class="mfa-alert mfa-alert-info">
+            A verification code has been sent to your phone
+          </div>
+          
+          <form id="otp-form" onsubmit="return false;">
+            <input 
+              type="text" 
+              id="otp-input" 
+              class="mfa-input" 
+              placeholder="000000" 
+              maxlength="6" 
+              autocomplete="off"
+              autofocus
+            />
+            
+            <button type="submit" id="otp-submit" class="mfa-button mfa-button-primary" disabled>
+              Verify
+            </button>
+          </form>
+          
+          <button id="resend-button" class="mfa-button mfa-button-link">
+            Didn't receive a code? Send new code
+          </button>
+        </div>
+        
+        <!-- Backup Code Tab -->
+        <div class="mfa-tab-content" data-tab="backup">
+          <p class="mfa-description">
+            Enter one of your 8-character backup codes
+          </p>
+          
+          <div class="mfa-alert mfa-alert-warning">
+            <strong>Warning:</strong> Each backup code can only be used once. After using a backup code, it will be permanently invalidated.
+          </div>
+          
+          <form id="backup-form" onsubmit="return false;">
+            <input 
+              type="text" 
+              id="backup-input" 
+              class="mfa-input mfa-input-backup" 
+              placeholder="XXXXXXXX" 
+              maxlength="8" 
+              autocomplete="off"
+            />
+            
+            <button type="submit" id="backup-submit" class="mfa-button mfa-button-primary" disabled>
+              Verify
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    var orgSlug = "{{ org_slug or '' }}";
+    var tempToken = "{{ temp_token }}";
+    var phoneLast4 = "{{ phone_last4 }}";
+    
+    // Tab switching
+    var tabButtons = document.querySelectorAll('.mfa-tab-button');
+    var tabContents = document.querySelectorAll('.mfa-tab-content');
+    
+    tabButtons.forEach(function(button) {
+      button.addEventListener('click', function() {
+        var tabName = this.getAttribute('data-tab');
+        
+        // Update buttons
+        tabButtons.forEach(function(btn) {
+          btn.classList.remove('active');
+        });
+        this.classList.add('active');
+        
+        // Update content
+        tabContents.forEach(function(content) {
+          if (content.getAttribute('data-tab') === tabName) {
+            content.classList.add('active');
+            // Focus input
+            var input = content.querySelector('input');
+            if (input) input.focus();
+          } else {
+            content.classList.remove('active');
+          }
+        });
+        
+        // Clear alerts
+        clearAlerts();
+      });
+    });
+    
+    // OTP input handling
+    var otpInput = document.getElementById('otp-input');
+    var otpSubmit = document.getElementById('otp-submit');
+    var otpForm = document.getElementById('otp-form');
+    
+    otpInput.addEventListener('input', function() {
+      // Only allow digits
+      this.value = this.value.replace(/\D/g, '');
+      // Enable submit when 6 digits entered
+      otpSubmit.disabled = this.value.length !== 6;
+    });
+    
+    otpInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter' && this.value.length === 6) {
+        submitOTP();
+      }
+    });
+    
+    otpForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      if (otpInput.value.length === 6) {
+        submitOTP();
+      }
+    });
+    
+    otpSubmit.addEventListener('click', function() {
+      submitOTP();
+    });
+    
+    // Backup code input handling
+    var backupInput = document.getElementById('backup-input');
+    var backupSubmit = document.getElementById('backup-submit');
+    var backupForm = document.getElementById('backup-form');
+    
+    backupInput.addEventListener('input', function() {
+      // Only allow alphanumeric, convert to uppercase
+      this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      // Enable submit when 8 characters entered
+      backupSubmit.disabled = this.value.length !== 8;
+    });
+    
+    backupInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter' && this.value.length === 8) {
+        submitBackupCode();
+      }
+    });
+    
+    backupForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      if (backupInput.value.length === 8) {
+        submitBackupCode();
+      }
+    });
+    
+    backupSubmit.addEventListener('click', function() {
+      submitBackupCode();
+    });
+    
+    // Resend button
+    var resendButton = document.getElementById('resend-button');
+    resendButton.addEventListener('click', function() {
+      resendCode();
+    });
+    
+    // Alert functions
+    function showAlert(message, type) {
+      clearAlerts();
+      var alertDiv = document.createElement('div');
+      alertDiv.className = 'mfa-alert mfa-alert-' + type;
+      alertDiv.textContent = message;
+      document.getElementById('alert-container').appendChild(alertDiv);
+    }
+    
+    function clearAlerts() {
+      document.getElementById('alert-container').innerHTML = '';
+      document.getElementById('sms-sent-alert').style.display = 'block';
+    }
+    
+    function hideSmsSentAlert() {
+      document.getElementById('sms-sent-alert').style.display = 'none';
+    }
+    
+    // Submit OTP
+    var isSubmitting = false;
+    function submitOTP() {
+      var otp = otpInput.value;
+      if (otp.length !== 6 || isSubmitting) return;
+      
+      isSubmitting = true;
+      hideSmsSentAlert();
+      setLoading(true);
+      clearAlerts();
+      
+      fetch('/api/auth/mfa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          temp_token: tempToken,
+          otp: otp
+        })
+      })
+      .then(function(response) {
+        return response.json().then(function(data) {
+          return { ok: response.ok, data: data };
+        });
+      })
+      .then(function(result) {
+        if (result.ok) {
+          showAlert('Verification successful! Redirecting...', 'success');
+          if (result.data.warning) {
+            showAlert(result.data.warning, 'warning');
+          }
+          setTimeout(function() {
+            var redirectUrl = result.data.redirect || (orgSlug ? '/' + orgSlug : '/');
+            window.location.href = redirectUrl;
+          }, 1500);
+        } else {
+          showAlert(result.data.error || 'Verification failed', 'error');
+          setLoading(false);
+        }
+      })
+      .catch(function(err) {
+        showAlert('Verification failed. Please try again.', 'error');
+        setLoading(false);
+      });
+    }
+    
+    // Submit backup code
+    function submitBackupCode() {
+      var backupCode = backupInput.value;
+      if (backupCode.length !== 8) return;
+      
+      setLoading(true);
+      clearAlerts();
+      
+      fetch('/api/auth/mfa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          temp_token: tempToken,
+          backup_code: backupCode
+        })
+      })
+      .then(function(response) {
+        return response.json().then(function(data) {
+          return { ok: response.ok, data: data };
+        });
+      })
+      .then(function(result) {
+        if (result.ok) {
+          showAlert('Verification successful! Redirecting...', 'success');
+          if (result.data.warning) {
+            showAlert(result.data.warning, 'warning');
+          }
+          setTimeout(function() {
+            var redirectUrl = result.data.redirect || (orgSlug ? '/' + orgSlug : '/');
+            window.location.href = redirectUrl;
+          }, 1500);
+        } else {
+          showAlert(result.data.error || 'Verification failed', 'error');
+          setLoading(false);
+        }
+      })
+      .catch(function(err) {
+        showAlert('Verification failed. Please try again.', 'error');
+        setLoading(false);
+      });
+    }
+    
+    // Resend code
+    function resendCode() {
+      setLoading(true);
+      clearAlerts();
+      
+      fetch('/api/auth/mfa/resend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          temp_token: tempToken
+        })
+      })
+      .then(function(response) {
+        return response.json().then(function(data) {
+          return { ok: response.ok, data: data };
+        });
+      })
+      .then(function(result) {
+        if (result.ok) {
+          showAlert('New code sent to your phone', 'success');
+          otpInput.value = '';
+          otpSubmit.disabled = true;
+        } else {
+          showAlert(result.data.error || 'Failed to send new code', 'error');
+        }
+        setLoading(false);
+      })
+      .catch(function(err) {
+        showAlert('Failed to send new code. Please try again.', 'error');
+        setLoading(false);
+      });
+    }
+    
+    // Loading state
+    function setLoading(loading) {
+      var container = document.querySelector('.mfa-challenge-container');
+      if (loading) {
+        container.classList.add('mfa-loading');
+      } else {
+        container.classList.remove('mfa-loading');
+      }
+    }
+  })();
+</script>
+{% endblock %}
+
+{% block scripts %}
+{% endblock %}

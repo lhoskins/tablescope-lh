@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html ng-app="app" ng-strict-di>
+  <head lang="en">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <base href="/">
+    <title>TableScope</title>
+    <!-- Inter Font - Modern Design System -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="/static/unsupportedRedirect.js" async></script>
+    <script src="/static/js/code/highcharts.js"></script>
+	<script src="/static/js/code/modules/exporting.js"></script>
+	<script src="/static/js/code/modules/data.js"></script>
+	<script src="/static/js/code/modules/drilldown.js"></script>
+	<script src="/static/js/jquery-3.1.1.min.js"></script>
+	<script src="/static/js/HOPI.js"></script>
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="/static/images/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/images/favicon-16x16.png">
+  </head>
+
+  <body ng-class="bodyClass">
+    <section>
+      <app-view></app-view>
+      <div class="loading-indicator">
+        <div id="css-logo">
+          <div id="circle">
+            <div></div>
+          </div>
+          <div id="point">
+            <div></div>
+          </div>
+          <div id="bars">
+            <div class="bar"></div>
+            <div class="bar"></div>
+            <div class="bar"></div>
+            <div class="bar"></div>
+          </div>
+        </div>
+        <div id="shadow"></div>
+      </div>
+    </section>
+  </body>
+</html>

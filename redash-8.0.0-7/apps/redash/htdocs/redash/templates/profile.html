@@ -1,0 +1,452 @@
+{% extends "layouts/signed_out.html" %}
+
+{% block title %}MFA Settings{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/antd@4.24.0/dist/antd.min.css">
+<style>
+  .profile-page {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .profile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .profile-header h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 600;
+  }
+  .profile-content {
+    display: block;
+  }
+  .profile-card {
+    background: white;
+    border-radius: 8px;
+    padding: 24px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+  .profile-card h2 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .edit-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+  }
+  .edit-field input {
+    flex: 1;
+  }
+  .edit-icon {
+    cursor: pointer;
+    color: #1890ff;
+    font-size: 16px;
+    padding: 5px;
+  }
+  .edit-icon:hover {
+    color: #40a9ff;
+  }
+  .edit-actions {
+    display: none;
+    gap: 5px;
+  }
+  .edit-actions.active {
+    display: flex;
+  }
+  .form-group {
+    margin-bottom: 20px;
+  }
+  .form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #666;
+  }
+  .form-control {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  .form-control:disabled {
+    background-color: #f5f5f5;
+    cursor: not-allowed;
+  }
+  .groups-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .group-tag {
+    padding: 4px 12px;
+    background-color: #e6f7ff;
+    border: 1px solid #91d5ff;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  .loading-spinner {
+    text-align: center;
+    padding: 60px 20px;
+  }
+  .error-message {
+    padding: 20px;
+    background-color: #fff2f0;
+    border: 1px solid #ffccc7;
+    border-radius: 4px;
+    color: #cf1322;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="profile-page">
+  <div class="profile-header">
+    <button class="btn btn-default btn-sm" onclick="closeModal()">
+      Close
+    </button>
+  </div>
+
+  <div id="loading" class="loading-spinner">
+    <div class="spinner-border" role="status">
+      <span class="sr-only">Loading...</span>
+    </div>
+    <p>Loading MFA settings...</p>
+  </div>
+
+  <div id="error" class="error-message" style="display: none;"></div>
+
+  <div id="profile-content" class="profile-content" style="display: none;">
+    <div class="profile-card" style="margin-bottom: 20px;">
+      <h2>Account Settings</h2>
+      
+      <div class="edit-field">
+        <label style="min-width: 80px; margin: 0;">Email:</label>
+        <input type="email" id="user-email" class="form-control" disabled>
+        <span class="edit-icon" onclick="toggleEmailEdit()" title="Edit email">✏️</span>
+        <div id="email-actions" class="edit-actions">
+          <button class="btn btn-primary btn-sm" onclick="saveEmail()">Save</button>
+          <button class="btn btn-default btn-sm" onclick="cancelEmailEdit()">Cancel</button>
+        </div>
+      </div>
+      
+      <div class="edit-field" id="phone-field" style="display: none;">
+        <label style="min-width: 80px; margin: 0;">Phone:</label>
+        <input type="text" id="user-phone" class="form-control" disabled>
+        <span class="edit-icon" onclick="togglePhoneEdit()" title="Edit phone">✏️</span>
+        <div id="phone-actions" class="edit-actions">
+          <button class="btn btn-primary btn-sm" onclick="savePhone()">Save</button>
+          <button class="btn btn-default btn-sm" onclick="cancelPhoneEdit()">Cancel</button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="profile-card">
+      <div id="mfa-settings-container"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/react@16/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@16/umd/react-dom.production.min.js"></script>
+
+<script>
+  var orgSlug = '{{ org_slug }}';
+  var apiBase = '/' + orgSlug + '/api';
+
+  function showError(message) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error').textContent = message;
+    document.getElementById('error').style.display = 'block';
+  }
+
+  function loadUserProfile() {
+    // First get the current user from session
+    fetch(apiBase + '/session')
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('Failed to load session');
+        }
+        return response.json();
+      })
+      .then(function(session) {
+        var userId = session.user.id;
+        // Now fetch the full user profile
+        return fetch(apiBase + '/users/' + userId);
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('Failed to load profile');
+        }
+        return response.json();
+      })
+      .then(function(user) {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('profile-content').style.display = 'block';
+        
+        // Store user data globally
+        window.currentUser = user;
+        
+        // Display email
+        document.getElementById('user-email').value = user.email || '';
+        
+        loadMFASettings(user.id);
+      })
+      .catch(function(error) {
+        showError('Failed to load user profile: ' + error.message);
+      });
+  }
+
+  function loadMFASettings(userId) {
+    // Load MFA settings component
+    var container = document.getElementById('mfa-settings-container');
+    
+    // For now, just load the settings via API and display them
+    fetch(apiBase + '/auth/mfa/settings')
+      .then(function(response) {
+        return response.json();
+      })
+      .then(function(data) {
+        var html = '';
+        
+        if (data.enrolled) {
+          // Show phone field for editing
+          document.getElementById('phone-field').style.display = 'flex';
+          document.getElementById('user-phone').value = data.phone_masked || 'Not set';
+          window.currentPhone = data.phone_masked;
+          
+          html += '<div style="padding: 16px; background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 4px; margin-bottom: 16px;">';
+          html += '<strong>✓ MFA Enabled</strong><br>';
+          html += '<span style="color: #666;">Backup codes remaining: ' + (data.backup_codes_remaining || 0) + '</span>';
+          html += '</div>';
+          
+          html += '<button class="btn btn-default btn-block" onclick="regenerateCodes()">Regenerate Backup Codes</button>';
+        } else if (data.required) {
+          html += '<div style="padding: 16px; background: #fffbe6; border: 1px solid #ffe58f; border-radius: 4px; margin-bottom: 16px;">';
+          html += '<strong>⚠ MFA Required</strong><br>';
+          html += '<span style="color: #666;">Your account requires multi-factor authentication.</span>';
+          html += '</div>';
+          html += '<button class="btn btn-primary btn-block" onclick="window.location.href=\'/' + orgSlug + '/mfa/enroll\'">Enroll Now</button>';
+        } else {
+          html += '<div style="padding: 16px; background: #e6f7ff; border: 1px solid #91d5ff; border-radius: 4px;">';
+          html += '<strong>ℹ MFA Not Required</strong><br>';
+          html += '<span style="color: #666;">Multi-factor authentication is not required for your account.</span>';
+          html += '</div>';
+        }
+        
+        container.innerHTML = html;
+      })
+      .catch(function(error) {
+        container.innerHTML = '<div style="color: #cf1322;">Failed to load MFA settings</div>';
+      });
+  }
+
+  function verifyPhoneChange(otp) {
+    fetch(apiBase + '/auth/mfa/enroll/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ otp: otp })
+    })
+    .then(function(response) {
+      return response.json().then(function(data) {
+        if (response.ok) {
+          alert('Phone number updated successfully!');
+          window.location.reload();
+        } else {
+          alert('Error: ' + (data.error || 'Invalid verification code'));
+        }
+      });
+    })
+    .catch(function(err) {
+      alert('Failed to verify code. Please try again.');
+    });
+  }
+
+  function regenerateCodes() {
+    if (!confirm('This will invalidate all your existing backup codes. Continue?')) {
+      return;
+    }
+    
+    var password = prompt('Enter your password to confirm:');
+    if (!password) return;
+    
+    fetch(apiBase + '/auth/mfa/backup-codes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: password })
+    })
+    .then(function(response) {
+      return response.json().then(function(data) {
+        if (response.ok) {
+          var codes = data.backup_codes || [];
+          var codesList = codes.join('\n');
+          alert('New backup codes generated:\n\n' + codesList + '\n\nPlease save these codes in a secure location!');
+          
+          // Offer to download
+          if (confirm('Would you like to download these codes?')) {
+            downloadCodes(codes);
+          }
+          
+          window.location.reload();
+        } else {
+          alert('Error: ' + (data.error || 'Failed to regenerate codes'));
+        }
+      });
+    })
+    .catch(function(err) {
+      alert('Failed to regenerate codes. Please try again.');
+    });
+  }
+
+  function downloadCodes(codes) {
+    var content = codes.join('\n');
+    var blob = new Blob([content], { type: 'text/plain' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'tablescope-backup-codes.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Email editing functions
+  function toggleEmailEdit() {
+    var input = document.getElementById('user-email');
+    var actions = document.getElementById('email-actions');
+    input.disabled = false;
+    input.focus();
+    actions.classList.add('active');
+  }
+
+  function cancelEmailEdit() {
+    var input = document.getElementById('user-email');
+    var actions = document.getElementById('email-actions');
+    input.value = window.currentUser.email;
+    input.disabled = true;
+    actions.classList.remove('active');
+  }
+
+  function saveEmail() {
+    var input = document.getElementById('user-email');
+    var newEmail = input.value.trim();
+    var currentEmail = window.currentUser.email;
+    
+    if (!newEmail || newEmail === currentEmail) {
+      cancelEmailEdit();
+      return;
+    }
+    
+    // Validate email format
+    var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newEmail)) {
+      alert('Please enter a valid email address');
+      return;
+    }
+    
+    fetch(apiBase + '/users/' + window.currentUser.id, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: newEmail })
+    })
+    .then(function(response) {
+      return response.json().then(function(data) {
+        if (response.ok) {
+          alert('Email updated successfully!');
+          window.location.reload();
+        } else {
+          alert('Error: ' + (data.message || 'Failed to update email'));
+        }
+      });
+    })
+    .catch(function(err) {
+      alert('Failed to update email. Please try again.');
+      cancelEmailEdit();
+    });
+  }
+
+  // Phone editing functions
+  function togglePhoneEdit() {
+    var input = document.getElementById('user-phone');
+    var actions = document.getElementById('phone-actions');
+    input.disabled = false;
+    input.value = ''; // Clear masked value for new input
+    input.placeholder = '+1234567890';
+    input.focus();
+    actions.classList.add('active');
+  }
+
+  function cancelPhoneEdit() {
+    var input = document.getElementById('user-phone');
+    var actions = document.getElementById('phone-actions');
+    input.value = window.currentPhone || '';
+    input.disabled = true;
+    actions.classList.remove('active');
+  }
+
+  function savePhone() {
+    var input = document.getElementById('user-phone');
+    var newPhone = input.value.trim();
+    
+    if (!newPhone) {
+      cancelPhoneEdit();
+      return;
+    }
+    
+    var password = prompt('Enter your password to confirm phone change:');
+    if (!password) {
+      cancelPhoneEdit();
+      return;
+    }
+    
+    fetch(apiBase + '/auth/mfa/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone_number: newPhone, password: password })
+    })
+    .then(function(response) {
+      return response.json().then(function(data) {
+        if (response.ok) {
+          var otp = prompt('Verification code sent! Enter the 6-digit code:');
+          if (otp) {
+            verifyPhoneChange(otp);
+          } else {
+            cancelPhoneEdit();
+          }
+        } else {
+          alert('Error: ' + (data.error || 'Failed to update phone number'));
+          cancelPhoneEdit();
+        }
+      });
+    })
+    .catch(function(err) {
+      alert('Failed to update phone number. Please try again.');
+      cancelPhoneEdit();
+    });
+  }
+
+  function closeModal() {
+    // If in iframe, send message to parent to close modal
+    if (window.parent !== window) {
+      window.parent.postMessage('closeMFAModal', '*');
+    } else {
+      // If opened directly, just close the window
+      window.close();
+    }
+  }
+
+  // Load profile on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    loadUserProfile();
+  });
+</script>
+{% endblock %}

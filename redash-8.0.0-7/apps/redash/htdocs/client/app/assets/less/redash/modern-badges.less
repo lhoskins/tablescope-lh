@@ -1,0 +1,295 @@
+/* ========================================================
+   MODERN BADGE STYLES - TableScope
+   Requirements: 9.1, 9.2, 9.3, 9.4
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Badge Base
+   Requirements: 9.1, 9.4
+-------------------------------------------------------- */
+.badge-modern {
+  display: inline-flex;
+  align-items: center;
+  padding: @space-1 @space-2;
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  font-weight: @font-medium;
+  border-radius: @radius-full;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------
+   Badge Variants
+   Requirements: 9.2, 9.3
+-------------------------------------------------------- */
+/* Default (Gray) */
+.badge-modern--default {
+  background: @gray-100;
+  color: @gray-700;
+}
+
+/* Primary (Indigo) */
+.badge-modern--primary {
+  background: @primary-100;
+  color: @primary-700;
+}
+
+/* Success (Green) */
+.badge-modern--success {
+  background: @success-100;
+  color: @success-700;
+}
+
+/* Warning (Amber) */
+.badge-modern--warning {
+  background: @warning-100;
+  color: @warning-700;
+}
+
+/* Error (Red) */
+.badge-modern--error {
+  background: @error-100;
+  color: @error-700;
+}
+
+/* Info (Blue) */
+.badge-modern--info {
+  background: @info-100;
+  color: @info-700;
+}
+
+/* --------------------------------------------------------
+   Solid Badge Variants
+-------------------------------------------------------- */
+.badge-modern--solid-primary {
+  background: @primary-600;
+  color: @white;
+}
+
+.badge-modern--solid-success {
+  background: @success-main;
+  color: @white;
+}
+
+.badge-modern--solid-warning {
+  background: @warning-main;
+  color: @white;
+}
+
+.badge-modern--solid-error {
+  background: @error-main;
+  color: @white;
+}
+
+.badge-modern--solid-info {
+  background: @info-main;
+  color: @white;
+}
+
+/* --------------------------------------------------------
+   Outline Badge Variants
+-------------------------------------------------------- */
+.badge-modern--outline-default {
+  background: transparent;
+  color: @gray-600;
+  border: 1px solid @gray-300;
+}
+
+.badge-modern--outline-primary {
+  background: transparent;
+  color: @primary-600;
+  border: 1px solid @primary-300;
+}
+
+.badge-modern--outline-success {
+  background: transparent;
+  color: @success-main;
+  border: 1px solid @success-200;
+}
+
+.badge-modern--outline-error {
+  background: transparent;
+  color: @error-main;
+  border: 1px solid @error-200;
+}
+
+/* --------------------------------------------------------
+   Badge Sizes
+-------------------------------------------------------- */
+.badge-modern--sm {
+  padding: 2px @space-1-5;
+  font-size: 10px;
+}
+
+.badge-modern--lg {
+  padding: @space-1-5 @space-3;
+  font-size: @text-sm;
+}
+
+/* --------------------------------------------------------
+   Badge with Dot
+-------------------------------------------------------- */
+.badge-modern--dot {
+  padding-left: @space-1-5;
+  
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: @radius-full;
+    margin-right: @space-1;
+  }
+  
+  &.badge-modern--default::before {
+    background: @gray-500;
+  }
+  
+  &.badge-modern--primary::before {
+    background: @primary-500;
+  }
+  
+  &.badge-modern--success::before {
+    background: @success-main;
+  }
+  
+  &.badge-modern--warning::before {
+    background: @warning-main;
+  }
+  
+  &.badge-modern--error::before {
+    background: @error-main;
+  }
+  
+  &.badge-modern--info::before {
+    background: @info-main;
+  }
+}
+
+/* --------------------------------------------------------
+   Badge with Icon
+-------------------------------------------------------- */
+.badge-modern__icon {
+  width: 12px;
+  height: 12px;
+  margin-right: @space-1;
+}
+
+.badge-modern--lg .badge-modern__icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* --------------------------------------------------------
+   Removable Badge
+-------------------------------------------------------- */
+.badge-modern--removable {
+  padding-right: @space-1;
+}
+
+.badge-modern__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: @space-1;
+  border-radius: @radius-full;
+  cursor: pointer;
+  transition: background @transition-fast @ease-out;
+  
+  &:hover {
+    background: fade(@black, 10%);
+  }
+  
+  svg {
+    width: 10px;
+    height: 10px;
+  }
+}
+
+/* --------------------------------------------------------
+   Badge Group
+-------------------------------------------------------- */
+.badge-group-modern {
+  display: flex;
+  flex-wrap: wrap;
+  gap: @space-1;
+}
+
+/* --------------------------------------------------------
+   Status Badge (with pulse animation)
+-------------------------------------------------------- */
+.badge-modern--status {
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    left: @space-2;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 6px;
+    border-radius: @radius-full;
+  }
+  
+  padding-left: @space-5;
+}
+
+.badge-modern--status-live {
+  &::before {
+    background: @success-main;
+    animation: badge-pulse 2s infinite;
+  }
+}
+
+@keyframes badge-pulse {
+  0% {
+    box-shadow: 0 0 0 0 fade(@success-main, 70%);
+  }
+  70% {
+    box-shadow: 0 0 0 6px fade(@success-main, 0%);
+  }
+  100% {
+    box-shadow: 0 0 0 0 fade(@success-main, 0%);
+  }
+}
+
+/* --------------------------------------------------------
+   Count Badge (for notifications)
+-------------------------------------------------------- */
+.badge-count-modern {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 @space-1;
+  font-family: @font-family-modern;
+  font-size: 11px;
+  font-weight: @font-semibold;
+  border-radius: @radius-full;
+  background: @error-main;
+  color: @white;
+}
+
+.badge-count-modern--sm {
+  min-width: 14px;
+  height: 14px;
+  font-size: 10px;
+}
+
+.badge-count-modern--lg {
+  min-width: 22px;
+  height: 22px;
+  font-size: @text-xs;
+}
+
+/* Dot only (no number) */
+.badge-count-modern--dot {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+}

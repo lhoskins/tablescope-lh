@@ -1,0 +1,303 @@
+/* ========================================================
+   MODERN STYLE OVERRIDES - TableScope
+   Apply modern design system to existing components
+   Requirements: 4.1, 4.2, 4.3, 5.1, 5.2, 5.6, 7.1, 7.2, 7.3
+   ======================================================== */
+
+/* --------------------------------------------------------
+   ProjectDetailPage Card Overrides
+   Requirements: 4.1, 4.2, 4.3
+-------------------------------------------------------- */
+/* Modern card style for project detail page items */
+.project-card-modern {
+  background: @white !important;
+  color: @gray-600 !important;
+  border: 1px solid @gray-200 !important;
+  border-radius: @radius-lg !important;
+  padding: @space-4 !important;
+  box-shadow: @shadow-sm !important;
+  transition: all @transition-fast @ease-out !important;
+  cursor: pointer;
+  position: relative;
+  
+  &:hover {
+    box-shadow: @shadow-md !important;
+    border-color: @gray-300 !important;
+    transform: translateY(-2px);
+  }
+}
+
+.project-card-modern__title {
+  font-family: @font-family-modern !important;
+  font-weight: @font-semibold !important;
+  color: @primary-600 !important;
+  font-size: @text-base !important;
+  margin-bottom: @space-3 !important;
+}
+
+.project-card-modern__divider {
+  border-top: 1px solid @gray-100 !important;
+  margin: @space-3 -@space-4 !important;
+}
+
+.project-card-modern__label {
+  font-family: @font-family-modern !important;
+  font-weight: @font-semibold !important;
+  font-size: @text-sm !important;
+  color: @gray-700 !important;
+}
+
+.project-card-modern__meta {
+  font-family: @font-family-modern !important;
+  font-size: @text-xs !important;
+  color: @gray-500 !important;
+  line-height: @leading-relaxed !important;
+}
+
+/* --------------------------------------------------------
+   NavigationPane Sidebar Overrides
+   Requirements: 7.1, 7.2, 7.3
+-------------------------------------------------------- */
+/* Apply modern styles to navigation pane */
+.np-section {
+  margin: @space-3 0;
+  
+  h4 {
+    font-family: @font-family-modern;
+    font-size: @text-xs;
+    font-weight: @font-semibold;
+    color: @gray-400;
+    text-transform: uppercase;
+    letter-spacing: @tracking-wider;
+    padding: @space-2 @space-3;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    
+    &:hover {
+      color: @gray-600;
+    }
+  }
+}
+
+/* Navigation list items */
+.list-item {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-600;
+  padding: @space-2 @space-3;
+  border-radius: @radius-md;
+  cursor: pointer;
+  transition: all @transition-fast @ease-out;
+  display: flex;
+  align-items: center;
+  
+  &:hover {
+    background: @gray-100;
+    color: @gray-900;
+  }
+}
+
+.list-item--active {
+  background: @primary-50;
+  color: @primary-700;
+  
+  &:hover {
+    background: @primary-100;
+  }
+}
+
+/* --------------------------------------------------------
+   Button Overrides
+   Requirements: 5.1, 5.2, 5.6
+-------------------------------------------------------- */
+/* Apply modern button styles to ant-design buttons */
+.ant-btn {
+  font-family: @font-family-modern;
+  border-radius: @radius-md;
+  transition: all @transition-fast @ease-out;
+}
+
+.ant-btn-primary {
+  background: @primary-600;
+  border-color: @primary-600;
+  box-shadow: @shadow-sm;
+  
+  &:hover, &:focus {
+    background: @primary-700;
+    border-color: @primary-700;
+    box-shadow: @shadow-md;
+  }
+  
+  &:active {
+    background: @primary-800;
+    border-color: @primary-800;
+  }
+}
+
+.ant-btn-default {
+  border-color: @gray-300;
+  color: @gray-700;
+  
+  &:hover, &:focus {
+    border-color: @gray-400;
+    color: @gray-900;
+    background: @gray-50;
+  }
+}
+
+/* --------------------------------------------------------
+   Form Input Overrides
+-------------------------------------------------------- */
+.ant-input,
+.ant-select-selector {
+  font-family: @font-family-modern !important;
+  border-radius: @radius-md !important;
+  border-color: @gray-300 !important;
+  
+  &:hover {
+    border-color: @gray-400 !important;
+  }
+  
+  &:focus,
+  &.ant-input-focused {
+    border-color: @primary-500 !important;
+    box-shadow: 0 0 0 3px fade(@primary-500, 20%) !important;
+  }
+}
+
+/* --------------------------------------------------------
+   Modal Overrides
+-------------------------------------------------------- */
+.ant-modal-content {
+  border-radius: @radius-lg;
+  overflow: hidden;
+}
+
+.ant-modal-header {
+  border-bottom: 1px solid @gray-100;
+  padding: @space-4 @space-5;
+}
+
+.ant-modal-title {
+  font-family: @font-family-modern;
+  font-weight: @font-semibold;
+  color: @gray-900;
+}
+
+.ant-modal-body {
+  padding: @space-5;
+}
+
+.ant-modal-footer {
+  border-top: 1px solid @gray-100;
+  padding: @space-4 @space-5;
+}
+
+/* --------------------------------------------------------
+   Dropdown Menu Overrides
+-------------------------------------------------------- */
+.ant-dropdown-menu {
+  border-radius: @radius-lg;
+  box-shadow: @shadow-lg;
+  padding: @space-1;
+}
+
+.ant-dropdown-menu-item {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  border-radius: @radius-md;
+  padding: @space-2 @space-3;
+  
+  &:hover {
+    background: @gray-100;
+  }
+}
+
+/* --------------------------------------------------------
+   Table Overrides
+-------------------------------------------------------- */
+.ant-table {
+  font-family: @font-family-modern;
+}
+
+.ant-table-thead > tr > th {
+  background: @gray-50;
+  font-weight: @font-semibold;
+  font-size: @text-xs;
+  text-transform: uppercase;
+  letter-spacing: @tracking-wider;
+  color: @gray-600;
+  border-bottom: 1px solid @gray-200;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid @gray-100;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: @gray-50;
+}
+
+/* --------------------------------------------------------
+   Notification Overrides
+-------------------------------------------------------- */
+.ant-notification-notice {
+  border-radius: @radius-lg;
+  box-shadow: @shadow-lg;
+}
+
+.ant-notification-notice-message {
+  font-family: @font-family-modern;
+  font-weight: @font-semibold;
+  color: @gray-900;
+}
+
+.ant-notification-notice-description {
+  font-family: @font-family-modern;
+  color: @gray-600;
+}
+
+/* --------------------------------------------------------
+   Badge Overrides
+-------------------------------------------------------- */
+.ant-badge-status-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.ant-badge-status-success {
+  background: @success-main;
+}
+
+.ant-badge-status-error {
+  background: @error-main;
+}
+
+.ant-badge-status-warning {
+  background: @warning-main;
+}
+
+/* --------------------------------------------------------
+   Tooltip Overrides
+-------------------------------------------------------- */
+.ant-tooltip-inner {
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  border-radius: @radius-md;
+  background: @gray-900;
+}
+
+/* --------------------------------------------------------
+   Global Typography Improvements
+-------------------------------------------------------- */
+/* Apply Inter font to key elements */
+h1, h2, h3, h4, h5, h6 {
+  font-family: @font-family-modern;
+}
+
+/* Improve link styling */
+a {
+  transition: color @transition-fast @ease-out;
+}

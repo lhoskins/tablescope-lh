@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html ng-app="app" ng-strict-di>
+  <head lang="en">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <base href="{{base_href}}">
+ <title>HOPI</title>
+<script src="/static/js/jquery-3.1.1.min.js"></script>
+<script src="/static/unsupportedRedirect.js" async></script>
+<script src="/static/js/Highcharts-8.1.2/code/highcharts.js"></script>
+<script src="/static/js/Highcharts-8.1.2/code/modules/exporting.js"></script>
+<script src="/static/js/Highcharts-8.1.2/code/modules/data.js"></script>
+<script src="/static/js/Highcharts-8.1.2/code/modules/drilldown.js"></script>
+<script src="/static/js/DataTables/DataTables-1.10.18/js/jquery.dataTables.min.js"></script>
+<script src="/static/js/DataTables/Buttons-1.5.6/js/dataTables.buttons.js"></script>
+<script type="text/javascript" src="/static/js/jquery.min.js"></script>
+<script type="text/javascript" src="/static/js/moment.min.js"></script>
+<script type="text/javascript" src="/static/js/daterangepicker.js"></script>
+<script src="/static/js/Semantic-UI-CSS-master/semantic.min.js"></script>
+<script src="/static/js/keycloak.js"></script>
+<script src="/static/js/calendar.min.js"></script>
+<script src="/static/js/fontawsome5.15.4/all.js"></script>
+<link href="/static/styles/all.css" rel="stylesheet">
+<link rel="stylesheet" href="/static/js/DataTables/DataTables-1.10.18/css/jquery.dataTables.css" />	
+<link rel="stylesheet" href="/static/styles/daterangepicker.css" />
+<link rel="stylesheet" href="/static/js/Semantic-UI-CSS-master/semantic.min.css" />
+<link rel="stylesheet" href="/static/styles/calendar.min.css" />
+
+
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="/static/images/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/images/favicon-16x16.png">
+	
+<script>
+
+</script>	
+  </head>
+ 
+  <body ng-class="bodyClass">
+    <section>
+      <app-view></app-view>
+      <div class="loading-indicator">
+        <div class ="atebits-loader "></div>
+        </div>
+        <div id="shadow"></div>
+    </section>
+  </html>

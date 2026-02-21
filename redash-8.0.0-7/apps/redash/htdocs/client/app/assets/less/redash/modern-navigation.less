@@ -1,0 +1,353 @@
+/* ========================================================
+   MODERN NAVIGATION STYLES - TableScope
+   Requirements: 7.1, 7.2, 7.3, 7.4, 7.5
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Sidebar Container
+   Requirements: 7.1
+-------------------------------------------------------- */
+.sidebar-modern {
+  background: @white;
+  border-right: 0.5px solid @gray-200;
+  width: @sidebar-width;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: @z-fixed;
+  transition: width @transition-normal @ease-in-out;
+}
+
+.sidebar-modern--collapsed {
+  width: @sidebar-collapsed;
+  
+  .sidebar-modern__logo-text,
+  .sidebar-modern__item-text,
+  .sidebar-modern__section-title {
+    display: none;
+  }
+  
+  .sidebar-modern__item {
+    justify-content: center;
+    padding: @space-2;
+  }
+}
+
+/* --------------------------------------------------------
+   Sidebar Header
+   Requirements: 7.5
+-------------------------------------------------------- */
+.sidebar-modern__header {
+  padding: @space-4 @space-5;
+  border-bottom: 0.5px solid @gray-100;
+  display: flex;
+  align-items: center;
+  gap: @space-3;
+  flex-shrink: 0;
+}
+
+.sidebar-modern__logo {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.sidebar-modern__logo-text {
+  font-family: @font-family-modern;
+  font-size: @text-lg;
+  font-weight: @font-bold;
+  color: @gray-900;
+}
+
+/* --------------------------------------------------------
+   Sidebar Navigation
+-------------------------------------------------------- */
+.sidebar-modern__nav {
+  flex: 1;
+  padding: @space-3;
+  overflow-y: auto;
+}
+
+.sidebar-modern__section {
+  margin-bottom: @space-4;
+}
+
+.sidebar-modern__section-title {
+  font-family: @font-family-modern;
+  font-size: @text-xs;
+  font-weight: @font-semibold;
+  color: @gray-400;
+  text-transform: uppercase;
+  letter-spacing: @tracking-wider;
+  padding: @space-2 @space-3;
+  margin-bottom: @space-1;
+}
+
+/* --------------------------------------------------------
+   Navigation Items
+   Requirements: 7.2, 7.3, 7.4
+-------------------------------------------------------- */
+.sidebar-modern__item {
+  display: flex;
+  align-items: center;
+  gap: @space-3;
+  padding: @space-2 @space-3;
+  border-radius: @radius-md;
+  color: @gray-600;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  font-weight: @font-medium;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all @transition-fast @ease-out;
+  margin-bottom: @space-1;
+  
+  /* Hover state - Requirements: 7.3 */
+  &:hover {
+    background: @gray-100;
+    color: @gray-900;
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px @primary-500;
+  }
+}
+
+/* Active state - Requirements: 7.2 */
+.sidebar-modern__item--active {
+  background: @primary-50;
+  color: @primary-700;
+  
+  &:hover {
+    background: @primary-100;
+    color: @primary-700;
+  }
+  
+  /* Left accent border */
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: @space-1;
+    bottom: @space-1;
+    width: 3px;
+    background: @primary-600;
+    border-radius: 0 @radius-sm @radius-sm 0;
+  }
+}
+
+/* Icon styling - Requirements: 7.4 */
+.sidebar-modern__icon {
+  width: @icon-size-md;
+  height: @icon-size-md;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.sidebar-modern__item-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-modern__badge {
+  font-size: @text-xs;
+  font-weight: @font-medium;
+  padding: @space-0-5 @space-2;
+  border-radius: @radius-full;
+  background: @gray-200;
+  color: @gray-600;
+}
+
+.sidebar-modern__item--active .sidebar-modern__badge {
+  background: @primary-200;
+  color: @primary-700;
+}
+
+
+/* --------------------------------------------------------
+   Sidebar Footer
+-------------------------------------------------------- */
+.sidebar-modern__footer {
+  padding: @space-3;
+  border-top: 0.5px solid @gray-100;
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------
+   Header Bar
+   Requirements: 7.5
+-------------------------------------------------------- */
+.header-modern {
+  background: @white;
+  border-bottom: 0.5px solid @gray-200;
+  box-shadow: @shadow-xs;
+  height: @header-height-modern;
+  display: flex;
+  align-items: center;
+  padding: 0 @space-5;
+  position: fixed;
+  top: 0;
+  left: @sidebar-width;
+  right: 0;
+  z-index: @z-sticky;
+}
+
+.header-modern__left {
+  display: flex;
+  align-items: center;
+  gap: @space-4;
+}
+
+.header-modern__center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.header-modern__right {
+  display: flex;
+  align-items: center;
+  gap: @space-3;
+}
+
+.header-modern__title {
+  font-family: @font-family-modern;
+  font-size: @text-lg;
+  font-weight: @font-semibold;
+  color: @gray-900;
+}
+
+/* --------------------------------------------------------
+   Breadcrumb
+-------------------------------------------------------- */
+.breadcrumb-modern {
+  display: flex;
+  align-items: center;
+  gap: @space-2;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+}
+
+.breadcrumb-modern__item {
+  color: @gray-500;
+  text-decoration: none;
+  
+  &:hover {
+    color: @gray-700;
+  }
+}
+
+.breadcrumb-modern__item--active {
+  color: @gray-900;
+  font-weight: @font-medium;
+}
+
+.breadcrumb-modern__separator {
+  color: @gray-300;
+}
+
+/* --------------------------------------------------------
+   Tabs Navigation
+-------------------------------------------------------- */
+.tabs-modern {
+  display: flex;
+  border-bottom: 1px solid @gray-200;
+  gap: @space-1;
+}
+
+.tabs-modern__item {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  font-weight: @font-medium;
+  color: @gray-500;
+  padding: @space-3 @space-4;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all @transition-fast @ease-out;
+  margin-bottom: -1px;
+  
+  &:hover {
+    color: @gray-700;
+    border-bottom-color: @gray-300;
+  }
+}
+
+.tabs-modern__item--active {
+  color: @primary-600;
+  border-bottom-color: @primary-600;
+  
+  &:hover {
+    color: @primary-600;
+    border-bottom-color: @primary-600;
+  }
+}
+
+/* --------------------------------------------------------
+   Dropdown Menu
+-------------------------------------------------------- */
+.dropdown-modern {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-modern__menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 180px;
+  background: @white;
+  border: 1px solid @gray-200;
+  border-radius: @radius-lg;
+  box-shadow: @shadow-lg;
+  padding: @space-1;
+  z-index: @z-dropdown;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: all @transition-fast @ease-out;
+}
+
+.dropdown-modern--open .dropdown-modern__menu {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(4px);
+}
+
+.dropdown-modern__item {
+  display: flex;
+  align-items: center;
+  gap: @space-2;
+  padding: @space-2 @space-3;
+  border-radius: @radius-md;
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-700;
+  cursor: pointer;
+  transition: background @transition-fast @ease-out;
+  
+  &:hover {
+    background: @gray-100;
+  }
+}
+
+.dropdown-modern__item--danger {
+  color: @error-main;
+  
+  &:hover {
+    background: @error-50;
+  }
+}
+
+.dropdown-modern__divider {
+  height: 1px;
+  background: @gray-100;
+  margin: @space-1 0;
+}

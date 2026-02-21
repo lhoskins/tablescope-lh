@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dropdown from PostgreSQL</title>
+</head>
+<body>
+<h2>Select a schema:</h2>
+<select id="schemaSelect" onchange="fetchTables()">
+  <option value="">Select a schema</option>
+</select>
+
+<h2>Select a table:</h2>
+<select id="tableSelect">
+  <option value="">Select a table</option>
+</select>
+
+<script>
+// Function to fetch schema names from Express server
+function fetchSchemas() {
+  fetch('https://ssl.amt.hopi.cloud:3000/getSchemas') // Endpoint to fetch schema names
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Failed to fetch schemas');
+      }
+      return response.json();
+    })
+    .then(data => {
+      const select = document.getElementById('schemaSelect');
+      // Populate dropdown with fetched schema names
+      data.forEach(schema => {
+        const option = document.createElement('option');
+        option.value = schema;
+        option.text = schema;
+        select.appendChild(option);
+      });
+    })
+    .catch(error => console.error('Error fetching schemas:', error));
+}
+
+// Function to fetch tables for the selected schema
+function fetchTables() {
+  const selectedSchema = document.getElementById('schemaSelect').value;
+  if (!selectedSchema) return; // If no schema selected, do nothing
+
+  fetch('https://ssl.amt.hopi.cloud:3000/getTables?schema=${selectedSchema}') // Endpoint to fetch tables for the selected schema
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Failed to fetch tables');
+      }
+      return response.json();
+    })
+    .then(data => {
+      const select = document.getElementById('tableSelect');
+      // Clear existing options
+      select.innerHTML = '<option value="">Select a table</option>';
+      // Populate dropdown with fetched tables
+      data.forEach(table => {
+        const option = document.createElement('option');
+        option.value = table;
+        option.text = table;
+        select.appendChild(option);
+      });
+    })
+    .catch(error => console.error('Error fetching tables:', error));
+}
+
+// Fetch schema names on page load
+document.addEventListener('DOMContentLoaded', function() {
+  fetchSchemas();
+});
+</script>
+</body>
+</html>
+

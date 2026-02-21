@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Edit Query</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <!-- Include any necessary CSS/JS files -->
+  </head>
+  <body>
+    <div class="container">
+      <!-- Pass the query data from Flask to your front-end component -->
+      <query-editor
+        query-id="{{ query.id }}"
+        query-text="{{ query.query_text | e }}"
+        data-sources="{{ query.data_source | tojson }}"
+        can-edit="true"
+        is-dirty="false"
+        is-query-owner="true"
+        query-executing="false"
+        query-tags="{{ query.tags | tojson }}"
+      ></query-editor>
+    </div>
+    <!-- Include AngularJS and your bundled scripts -->
+    <script src="{{ url_for('static', filename='vendor/angular.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='app/app.js') }}"></script>
+  </body>
+</html>

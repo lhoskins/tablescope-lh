@@ -1,0 +1,54 @@
+.menu-search input[type="text"] {
+    height: 30px;
+}
+
+.dropdown-menu__version {
+    padding: 5px 10px 8px 17px;
+}
+
+.update-available .fa {
+    color: #52c41a;
+    vertical-align: bottom;
+    font-size: 16px !important;
+}
+
+/* Navigation Toggle Button */
+.navbar-nav-toggle {
+    background: none;
+    border: none;
+    padding: 15px 12px;
+    cursor: pointer;
+    float: left;
+    margin-right: 0;
+}
+
+.navbar-nav-toggle:hover {
+    background-color: #f5f5f5;
+}
+
+.navbar-nav-toggle:focus {
+    outline: none;
+}
+
+.navbar-nav-toggle img {
+    width: 20px;
+    height: 20px;
+    display: block;
+}
+
+/* Vertical Divider */
+.navbar-divider {
+    display: inline-block;
+    width: 1px;
+    height: 50px;
+    background-color: #E5E7EB;
+    margin: 0 12px;
+    vertical-align: middle;
+    align-self: center;
+    float: left;
+}
+
+/* Navbar Border */
+.app-header {
+    border-bottom: 0.5px solid #E5E7EB !important;
+}

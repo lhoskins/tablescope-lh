@@ -1,0 +1,483 @@
+/* ========================================================
+   MODERN DESIGN SYSTEM - Utility Mixins
+   Reusable mixins for consistent styling
+   Requirements: 4.5, 10.1, 10.2, 10.3
+   ======================================================== */
+
+/* --------------------------------------------------------
+   Focus Ring Mixins
+   Provides consistent focus states for accessibility
+-------------------------------------------------------- */
+.focus-ring() {
+  outline: none;
+  box-shadow: 0 0 0 @ring-offset @white, 
+              0 0 0 (@ring-offset + @ring-width) @primary-500;
+}
+
+.focus-ring-inset() {
+  outline: none;
+  box-shadow: inset 0 0 0 @ring-width @primary-500;
+}
+
+.focus-ring-error() {
+  outline: none;
+  box-shadow: 0 0 0 @ring-offset @white, 
+              0 0 0 (@ring-offset + @ring-width) @error-main;
+}
+
+.focus-ring-offset(@color: @primary-500, @offset: @ring-offset, @width: @ring-width) {
+  outline: none;
+  box-shadow: 0 0 0 @offset @white, 
+              0 0 0 (@offset + @width) @color;
+}
+
+/* Remove focus ring (for custom focus states) */
+.focus-ring-none() {
+  outline: none;
+  box-shadow: none;
+}
+
+/* --------------------------------------------------------
+   Transition Mixins
+   Consistent animation timing
+-------------------------------------------------------- */
+.transition-colors() {
+  transition: color @transition-fast @ease-out, 
+              background-color @transition-fast @ease-out, 
+              border-color @transition-fast @ease-out;
+}
+
+.transition-shadow() {
+  transition: box-shadow @transition-fast @ease-out;
+}
+
+.transition-transform() {
+  transition: transform @transition-fast @ease-out;
+}
+
+.transition-opacity() {
+  transition: opacity @transition-fast @ease-out;
+}
+
+.transition-all() {
+  transition: all @transition-fast @ease-out;
+}
+
+.transition-all-normal() {
+  transition: all @transition-normal @ease-in-out;
+}
+
+/* Custom transition mixin */
+.transition(@property, @duration: @transition-fast, @timing: @ease-out) {
+  transition: @property @duration @timing;
+}
+
+
+/* --------------------------------------------------------
+   Shadow Mixins
+   Elevation system for depth
+-------------------------------------------------------- */
+.shadow-xs() {
+  box-shadow: @shadow-xs;
+}
+
+.shadow-sm() {
+  box-shadow: @shadow-sm;
+}
+
+.shadow-md() {
+  box-shadow: @shadow-md;
+}
+
+.shadow-lg() {
+  box-shadow: @shadow-lg;
+}
+
+.shadow-xl() {
+  box-shadow: @shadow-xl;
+}
+
+.shadow-none() {
+  box-shadow: none;
+}
+
+/* Hover shadow elevation */
+.shadow-hover() {
+  .transition-shadow();
+  
+  &:hover {
+    box-shadow: @shadow-md;
+  }
+}
+
+/* --------------------------------------------------------
+   Responsive Breakpoint Mixins
+   Mobile-first responsive design helpers
+-------------------------------------------------------- */
+.screen-sm(@rules) {
+  @media (min-width: @screen-sm) {
+    @rules();
+  }
+}
+
+.screen-md(@rules) {
+  @media (min-width: @screen-md) {
+    @rules();
+  }
+}
+
+.screen-lg(@rules) {
+  @media (min-width: @screen-lg) {
+    @rules();
+  }
+}
+
+.screen-xl(@rules) {
+  @media (min-width: @screen-xl) {
+    @rules();
+  }
+}
+
+.screen-2xl(@rules) {
+  @media (min-width: @screen-2xl) {
+    @rules();
+  }
+}
+
+/* Max-width breakpoints (for desktop-first) */
+.screen-max-sm(@rules) {
+  @media (max-width: (@screen-sm - 1)) {
+    @rules();
+  }
+}
+
+.screen-max-md(@rules) {
+  @media (max-width: (@screen-md - 1)) {
+    @rules();
+  }
+}
+
+.screen-max-lg(@rules) {
+  @media (max-width: (@screen-lg - 1)) {
+    @rules();
+  }
+}
+
+/* --------------------------------------------------------
+   Accessibility Helpers
+   WCAG compliance utilities
+-------------------------------------------------------- */
+/* Screen reader only - visually hidden but accessible */
+.sr-only() {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Undo sr-only */
+.not-sr-only() {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+/* Focus visible - only show focus ring on keyboard navigation */
+.focus-visible() {
+  &:focus {
+    outline: none;
+  }
+  
+  &:focus-visible {
+    .focus-ring();
+  }
+}
+
+/* Minimum touch target size (44x44px for WCAG) */
+.touch-target() {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Reduced motion preference */
+.motion-safe(@rules) {
+  @media (prefers-reduced-motion: no-preference) {
+    @rules();
+  }
+}
+
+.motion-reduce(@rules) {
+  @media (prefers-reduced-motion: reduce) {
+    @rules();
+  }
+}
+
+
+/* --------------------------------------------------------
+   Typography Mixins
+   Consistent text styling
+-------------------------------------------------------- */
+.text-truncate() {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-clamp(@lines: 2) {
+  display: -webkit-box;
+  -webkit-line-clamp: @lines;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.heading-base() {
+  font-family: @font-family-modern;
+  font-weight: @font-semibold;
+  line-height: @leading-tight;
+  letter-spacing: @tracking-tight;
+  color: @gray-900;
+}
+
+.body-base() {
+  font-family: @font-family-modern;
+  font-weight: @font-normal;
+  line-height: @leading-normal;
+  color: @gray-700;
+}
+
+/* --------------------------------------------------------
+   Layout Mixins
+   Common layout patterns
+-------------------------------------------------------- */
+.flex-center() {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between() {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flex-start() {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.flex-col() {
+  display: flex;
+  flex-direction: column;
+}
+
+.absolute-center() {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.absolute-fill() {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* --------------------------------------------------------
+   Interactive State Mixins
+   Hover, active, disabled states
+-------------------------------------------------------- */
+.interactive-base() {
+  cursor: pointer;
+  .transition-colors();
+  
+  &:disabled,
+  &.disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.hover-bg(@color: @gray-50) {
+  &:hover:not(:disabled):not(.disabled) {
+    background-color: @color;
+  }
+}
+
+.active-bg(@color: @gray-100) {
+  &:active:not(:disabled):not(.disabled) {
+    background-color: @color;
+  }
+}
+
+/* --------------------------------------------------------
+   Border Mixins
+   Consistent border styling
+-------------------------------------------------------- */
+.border-default() {
+  border: 1px solid @border-default;
+}
+
+.border-light() {
+  border: 1px solid @border-light;
+}
+
+.border-bottom-light() {
+  border-bottom: 1px solid @border-light;
+}
+
+.border-top-light() {
+  border-top: 1px solid @border-light;
+}
+
+/* --------------------------------------------------------
+   Card Mixins
+   Reusable card patterns
+-------------------------------------------------------- */
+.card-base() {
+  background: @white;
+  border-radius: @radius-lg;
+  box-shadow: @shadow-sm;
+  border: 1px solid @gray-200;
+}
+
+.card-interactive() {
+  .card-base();
+  .transition-shadow();
+  
+  &:hover {
+    box-shadow: @shadow-md;
+  }
+}
+
+/* --------------------------------------------------------
+   Input Mixins
+   Form input styling
+-------------------------------------------------------- */
+.input-base() {
+  font-family: @font-family-modern;
+  font-size: @text-sm;
+  color: @gray-900;
+  background: @white;
+  border: 1px solid @gray-300;
+  border-radius: @radius-md;
+  .transition-colors();
+  
+  &::placeholder {
+    color: @gray-400;
+  }
+  
+  &:hover:not(:disabled):not(:focus) {
+    border-color: @gray-400;
+  }
+  
+  &:focus {
+    .focus-ring();
+    border-color: @primary-500;
+  }
+  
+  &:disabled {
+    background-color: @gray-50;
+    cursor: not-allowed;
+  }
+}
+
+.input-error() {
+  border-color: @error-main;
+  
+  &:focus {
+    .focus-ring-error();
+    border-color: @error-main;
+  }
+}
+
+/* --------------------------------------------------------
+   Button Mixins
+   Reusable button patterns
+-------------------------------------------------------- */
+.btn-base() {
+  font-family: @font-family-modern;
+  font-weight: @font-medium;
+  font-size: @text-sm;
+  line-height: @leading-normal;
+  border-radius: @radius-md;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: @space-2;
+  .transition-all();
+  
+  &:disabled,
+  &.disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  
+  &:focus-visible {
+    .focus-ring();
+  }
+}
+
+.btn-primary() {
+  .btn-base();
+  background: @primary-600;
+  color: @white;
+  border: none;
+  box-shadow: @shadow-sm;
+  
+  &:hover:not(:disabled) {
+    background: @primary-700;
+    box-shadow: @shadow-md;
+  }
+  
+  &:active:not(:disabled) {
+    background: @primary-800;
+  }
+}
+
+.btn-secondary() {
+  .btn-base();
+  background: @white;
+  color: @gray-700;
+  border: 1px solid @gray-300;
+  
+  &:hover:not(:disabled) {
+    background: @gray-50;
+    border-color: @gray-400;
+  }
+  
+  &:active:not(:disabled) {
+    background: @gray-100;
+  }
+}
+
+.btn-ghost() {
+  .btn-base();
+  background: transparent;
+  color: @gray-600;
+  border: none;
+  
+  &:hover:not(:disabled) {
+    background: @gray-100;
+    color: @gray-900;
+  }
+  
+  &:active:not(:disabled) {
+    background: @gray-200;
+  }
+}
