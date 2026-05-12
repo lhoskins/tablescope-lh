@@ -1,0 +1,155 @@
+# Single-server deployment compose file for Tablescope.
+#
+# Runs: platform-api (FastAPI), web-ui (Next.js), Postgres metadata,
+# Redis, PgBouncer (in front of Teiid), and an optional WildFly/Teiid
+# container. WildFly is OFF by default — provision it on the host or
+# uncomment the `teiid` service below.
+
+services:
+  platform-api:
+    build:
+      context: ./platform-api
+    image: tablescope-platform-api:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+asyncpg://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+      JWT_ISSUER: ${JWT_ISSUER:-tablescope-platform-api}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-tablescope-clients}
+      SERVICE_API_KEYS: ${SERVICE_API_KEYS:-}
+      TEIID_PG_HOST: ${TEIID_PG_HOST:-host.docker.internal}
+      TEIID_PG_PORT: ${TEIID_PG_PORT:-35442}
+      TEIID_SERVLET_URL: ${TEIID_SERVLET_URL:-http://host.docker.internal:8095}
+      TEIID_SERVLET_API_KEY: ${TEIID_API_KEY:-}
+      CUSTOMER_BASE_PATH: /opt/wildfly/teiidfiles/customers
+      DRILLDOWN_CONFIG_PATH: /opt/redash-8.0.0-7/apps/tsTest/src/drilldownConfig.json
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
+      SUPABASE_ISSUER: ${SUPABASE_ISSUER:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      PROMETHEUS_ENABLED: "true"
+    volumes:
+      - /opt/wildfly/teiidfiles:/opt/wildfly/teiidfiles
+      - /opt/redash-8.0.0-7/apps/tsTest/src:/opt/redash-8.0.0-7/apps/tsTest/src
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  platform-api-worker:
+    build:
+      context: ./platform-api
+    image: tablescope-platform-api:latest
+    restart: unless-stopped
+    command: arq app.tasks.workflows.WorkerSettings
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+      TEIID_SERVLET_URL: ${TEIID_SERVLET_URL:-http://host.docker.internal:8095}
+      TEIID_SERVLET_API_KEY: ${TEIID_API_KEY:-}
+      CUSTOMER_BASE_PATH: /opt/wildfly/teiidfiles/customers
+    volumes:
+      - /opt/wildfly/teiidfiles:/opt/wildfly/teiidfiles
+    depends_on:
+      - redis
+      - platform-api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  platform-api-migrate:
+    build:
+      context: ./platform-api
+    image: tablescope-platform-api:latest
+    restart: "no"
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+psycopg2://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web-ui:
+    build:
+      context: ./web-ui
+    image: tablescope-web-ui:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+    depends_on:
+      - platform-api
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tablescope
+      POSTGRES_USER: tablescope
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tablescope}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tablescope"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    environment:
+      DATABASES_HOST: ${TEIID_PG_HOST:-host.docker.internal}
+      DATABASES_PORT: ${TEIID_PG_PORT:-35442}
+      DATABASES_DBNAME: ${TEIID_PG_DEFAULT_VDB:-myvdbtest}
+      DATABASES_USER: ${TEIID_PG_USER:-test}
+      DATABASES_PASSWORD: ${TEIID_PG_PASSWORD:-test}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      AUTH_TYPE: scram-sha-256
+    ports:
+      - "35443:5432"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Uncomment to run WildFly/Teiid inside the compose stack instead of the host.
+  # teiid:
+  #   image: wildfly:26.1.3.Final
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8095:8095"
+  #     - "35442:35442"
+  #     - "10000:10000"
+  #   volumes:
+  #     - /opt/wildfly/teiidfiles:/opt/wildfly/teiidfiles
+  #     - /opt/redash-8.0.0-7/apps/tsTest/src:/opt/redash-8.0.0-7/apps/tsTest/src
+
+volumes:
+  postgres_data:
+  redis_data:

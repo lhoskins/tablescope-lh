@@ -21,8 +21,12 @@ from typing import Any, ClassVar
 
 from arq import create_pool
 from arq.connections import RedisSettings
+from sqlalchemy import select
 
 from app.config import get_settings
+from app.database import SessionLocal
+from app.models.shared_vdb import SharedVDB
+from app.models.user_vdb import UserVDB
 from app.services.vdb_management import VDBManagementService
 
 logger = logging.getLogger(__name__)
@@ -33,7 +37,13 @@ def _redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(settings.redis_url)
 
 
-async def enqueue_process_upload(*, tenant_id: int, user_id: int, path: str) -> str:
+async def enqueue_process_upload(
+    *,
+    tenant_id: int,
+    user_id: int,
+    path: str,
+    is_shared: bool = False,
+) -> str:
     """Enqueue `process_upload` and return the job id."""
     pool = await create_pool(_redis_settings())
     try:
@@ -42,10 +52,26 @@ async def enqueue_process_upload(*, tenant_id: int, user_id: int, path: str) -> 
             tenant_id=tenant_id,
             user_id=user_id,
             path=path,
+            is_shared=is_shared,
         )
         return job.job_id if job else ""
     finally:
         await pool.close()
+
+
+async def _resolve_vdb_id(*, tenant_id: int, user_id: int, is_shared: bool) -> str | None:
+    """Look up the appropriate VDB id for the upload target."""
+    async with SessionLocal() as session:
+        if is_shared:
+            shared_stmt = select(SharedVDB).where(SharedVDB.tenant_id == tenant_id)
+            shared = (await session.execute(shared_stmt)).scalar_one_or_none()
+            return shared.vdb_id if shared else None
+        user_stmt = select(UserVDB).where(
+            UserVDB.tenant_id == tenant_id,
+            UserVDB.user_id == user_id,
+        )
+        user_vdb = (await session.execute(user_stmt)).scalar_one_or_none()
+        return user_vdb.vdb_id if user_vdb else None
 
 
 async def process_upload(
@@ -54,21 +80,64 @@ async def process_upload(
     tenant_id: int,
     user_id: int,
     path: str,
+    is_shared: bool = False,
 ) -> dict[str, Any]:
+    """Parse upload → request VDB redeploy from servlet → schedule indexing.
+
+    The Java Teiid servlet owns DDL generation and VDB XML updates because it
+    has direct access to the WildFly admin API and the filesystem layout used
+    by Teiid's "file" translator. The platform API contribution is:
+
+      * locating the correct VDB for the (tenant, user, is_shared) tuple,
+      * asking the servlet to redeploy that VDB so the new file is picked up,
+      * scheduling a follow-up indexing job for AI/search.
+    """
     logger.info(
-        "process_upload tenant=%s user=%s path=%s",
+        "process_upload tenant=%s user=%s path=%s is_shared=%s",
         tenant_id,
         user_id,
         path,
+        is_shared,
     )
+
+    vdb_id = await _resolve_vdb_id(
+        tenant_id=tenant_id, user_id=user_id, is_shared=is_shared
+    )
+    if vdb_id is None:
+        logger.warning(
+            "process_upload: no VDB found for tenant=%s user=%s is_shared=%s",
+            tenant_id,
+            user_id,
+            is_shared,
+        )
+        return {
+            "status": "skipped",
+            "reason": "no_vdb",
+            "path": path,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        }
+
     teiid = VDBManagementService()
     try:
-        # The actual DDL generation and VDB XML update happen in the Java
-        # servlet; here we just request a redeploy of the user's VDB so that
-        # the new file is picked up.
-        # In a real run, vdb_id is resolved via UserVDB / SharedVDB lookup;
-        # for the scaffold we accept the no-op gracefully.
-        return {"status": "queued", "path": path, "tenant_id": tenant_id, "user_id": user_id}
+        await teiid.redeploy_vdb(vdb_id=vdb_id)
+        pool = await create_pool(_redis_settings())
+        try:
+            await pool.enqueue_job(
+                "index_for_search",
+                tenant_id=tenant_id,
+                vdb_id=vdb_id,
+                path=path,
+            )
+        finally:
+            await pool.close()
+        return {
+            "status": "redeployed",
+            "vdb_id": vdb_id,
+            "path": path,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        }
     finally:
         await teiid.aclose()
 
@@ -77,11 +146,18 @@ async def index_for_search(
     ctx: dict[str, Any],
     *,
     tenant_id: int,
-    table: str,
+    vdb_id: str,
+    path: str,
 ) -> dict[str, Any]:
-    """Stub for downstream embedding generation."""
-    logger.info("index_for_search tenant=%s table=%s", tenant_id, table)
-    return {"status": "ok", "tenant_id": tenant_id, "table": table}
+    """Generate embeddings for the uploaded file (stub).
+
+    Wire this to your embedding provider — the heavy lifting belongs in a
+    dedicated worker pool, not the request path.
+    """
+    logger.info(
+        "index_for_search tenant=%s vdb=%s path=%s", tenant_id, vdb_id, path
+    )
+    return {"status": "ok", "tenant_id": tenant_id, "vdb_id": vdb_id, "path": path}
 
 
 class WorkerSettings:

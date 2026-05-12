@@ -1,0 +1,53 @@
+name: Platform API CI
+
+on:
+  push:
+    branches: ["main", "feature/**"]
+    paths:
+      - "platform-api/**"
+      - ".github/workflows/platform-api.yml"
+  pull_request:
+    paths:
+      - "platform-api/**"
+      - ".github/workflows/platform-api.yml"
+
+defaults:
+  run:
+    working-directory: platform-api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            platform-api/requirements.txt
+            platform-api/requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Lint (ruff)
+        run: ruff check app tests
+      - name: Type check (mypy)
+        run: mypy app
+      - name: Run pytest
+        run: pytest -q
+
+  build-image:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build platform-api image
+        uses: docker/build-push-action@v6
+        with:
+          context: platform-api
+          push: false
+          tags: tablescope-platform-api:${{ github.sha }}

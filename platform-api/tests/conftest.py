@@ -24,10 +24,10 @@ os.environ.setdefault("PROMETHEUS_ENABLED", "false")
 os.environ.setdefault("CUSTOMER_BASE_PATH", "/tmp/tablescope-test-customers")
 os.environ.setdefault("DRILLDOWN_CONFIG_PATH", "/tmp/tablescope-test-drilldown.json")
 
-from app import database as database_module  # noqa: E402  (env vars must be set first)
-from app.config import get_settings  # noqa: E402
-from app.main import create_app  # noqa: E402
-from app.models import Base  # noqa: E402
+from app import database as database_module
+from app.config import get_settings
+from app.main import create_app
+from app.models import Base
 
 
 @pytest_asyncio.fixture(scope="function")
