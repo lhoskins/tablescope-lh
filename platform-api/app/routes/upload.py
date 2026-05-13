@@ -16,7 +16,11 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.user import User
-from app.services.customer_folders import CustomerFolderError, CustomerFolderService
+from app.services.customer_folders import (
+    CustomerFolderError,
+    CustomerFolderService,
+    UnsafeFilenameError,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -49,6 +53,8 @@ async def upload_file(
             filename=file.filename,
             content=content,
         )
+    except UnsafeFilenameError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except CustomerFolderError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

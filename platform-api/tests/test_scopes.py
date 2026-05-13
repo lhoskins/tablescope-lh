@@ -80,6 +80,38 @@ async def test_scope_lifecycle(client, isolated_scope_file) -> None:
     assert response.status_code == 404
 
 
+async def test_concurrent_scope_creation_no_data_loss(
+    isolated_scope_file: Path,
+) -> None:
+    """Two parallel create_scope calls must both end up in the file.
+
+    Regression for the TOCTOU race where each request had its own lock —
+    after the fix, the module-level path-keyed lock serializes RMW cycles
+    on the same file, so neither create is silently dropped.
+    """
+    import asyncio
+
+    from app.services.scope_proxy import ScopeProxyService
+
+    async def _one(service: ScopeProxyService, src_col: str) -> None:
+        await service.create_scope(
+            tenant_id=1,
+            source_table="orders",
+            source_column=src_col,
+            target_table="customers",
+            target_column="id",
+        )
+
+    services = [ScopeProxyService() for _ in range(10)]
+    await asyncio.gather(*(_one(s, f"col_{i}") for i, s in enumerate(services)))
+
+    payload = json.loads(isolated_scope_file.read_text())
+    assert len(payload["drilldowns"]) == 10
+    assert {d["sourceColumn"] for d in payload["drilldowns"]} == {
+        f"col_{i}" for i in range(10)
+    }
+
+
 async def test_scope_isolated_by_tenant(client, isolated_scope_file) -> None:
     tenant_a = _editor_headers(tenant_id=10)
     tenant_b = _editor_headers(tenant_id=20)

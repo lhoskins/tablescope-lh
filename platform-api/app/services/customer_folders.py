@@ -22,7 +22,7 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from app.config import get_settings
 
@@ -31,6 +31,44 @@ logger = logging.getLogger(__name__)
 
 class CustomerFolderError(Exception):
     """Raised when a folder operation fails."""
+
+
+class UnsafeFilenameError(CustomerFolderError):
+    """Raised when a caller-supplied filename would escape its sandbox."""
+
+
+def _safe_filename(filename: str) -> str:
+    """Return ``filename`` stripped of any path components.
+
+    Rejects values that resolve to empty / dot / dotdot, contain path
+    separators, or NUL bytes. Both POSIX and Windows separators are
+    handled defensively because uploads may originate from either kind
+    of client.
+    """
+    if not filename:
+        raise UnsafeFilenameError("Filename is required")
+    if "\x00" in filename:
+        raise UnsafeFilenameError("Filename contains NUL byte")
+    # Strip directory components from both POSIX and Windows-style paths.
+    name = PureWindowsPath(PurePosixPath(filename).name).name
+    if name in ("", ".", ".."):
+        raise UnsafeFilenameError(f"Invalid filename: {filename!r}")
+    if "/" in name or "\\" in name:
+        # Belt-and-suspenders — should be impossible after the .name calls.
+        raise UnsafeFilenameError(f"Filename must not contain separators: {filename!r}")
+    return name
+
+
+def _resolve_within(parent: Path, filename: str) -> Path:
+    """Join ``filename`` onto ``parent`` and guarantee the result stays inside."""
+    safe = _safe_filename(filename)
+    target = (parent / safe).resolve(strict=False)
+    parent_resolved = parent.resolve(strict=False)
+    if not target.is_relative_to(parent_resolved):
+        raise UnsafeFilenameError(
+            f"Filename {filename!r} would escape {parent_resolved}"
+        )
+    return target
 
 
 @dataclass(slots=True)
@@ -98,15 +136,20 @@ class CustomerFolderService:
         Mirrors the project-sharing flow: when a project is shared, its
         data files are physically duplicated into the tenant's shared
         folder so Teiid can serve them from the shared VDB.
+
+        Each entry in ``filenames`` is sanitized to its basename — it must
+        already exist directly inside the user's data folder. Path-traversal
+        attempts (``../etc/passwd``, absolute paths, etc.) raise
+        ``UnsafeFilenameError``.
         """
         layout = self.ensure_tenant_folders(tenant_slug)
         user_data = layout.user_data(user_external_id)
         copied: list[Path] = []
         for filename in filenames:
-            src = user_data / filename
+            src = _resolve_within(user_data, filename)
+            dst = _resolve_within(layout.shared_data, filename)
             if not src.exists():
                 raise CustomerFolderError(f"Missing source file: {src}")
-            dst = layout.shared_data / filename
             try:
                 shutil.copy2(src, dst)
             except OSError as exc:
@@ -138,8 +181,15 @@ class CustomerFolderService:
         filename: str,
         content: bytes,
     ) -> Path:
+        """Write ``content`` into the user's uploads folder.
+
+        ``filename`` is sanitized to its basename and the resolved target
+        is verified to live inside the user's uploads directory. Anything
+        else raises :class:`UnsafeFilenameError`.
+        """
         layout = self.ensure_user_folders(tenant_slug, user_external_id)
-        target = layout.user_uploads(user_external_id) / filename
+        uploads = layout.user_uploads(user_external_id)
+        target = _resolve_within(uploads, filename)
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             with target.open("wb") as fh:
