@@ -1,0 +1,24 @@
+# Copy this file to terraform.tfvars and customize.
+#
+# Most values have sensible defaults — only override what you need.
+
+aws_region        = "us-west-1"
+availability_zone = "us-west-1a"
+instance_type     = "t3.medium"     # 2 vCPU, 4 GB RAM — sufficient for all Docker services
+volume_size       = 30              # GB — root EBS volume
+
+# Use your existing VPC and subnet (recommended):
+# vpc_id    = "vpc-063d8b1b3061cf312"
+# subnet_id = "subnet-00881d6f2a2b5a6bd"
+
+# Use an existing SSH key pair (recommended):
+# key_name = "Office-Branch"
+
+# Or leave key_name empty to auto-generate a new key pair.
+
+# Restrict SSH access to your IP for security:
+# allowed_ssh_cidrs = ["YOUR.IP.ADDRESS/32"]
+
+# Repository settings:
+# repo_url = "https://github.com/lhoskins/tablescope-lh.git"
+# branch   = "feature/multi-tenant-platform-migration"
