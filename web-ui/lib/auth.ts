@@ -33,6 +33,18 @@ export async function exchangeWithClerk(
   });
 }
 
+export async function loginWithPassword(
+  email: string,
+  password: string,
+  tenantSlug?: string,
+): Promise<ExchangeResponse> {
+  return apiClient.post<ExchangeResponse>("/api/auth/login", {
+    email,
+    password,
+    tenant_slug: tenantSlug,
+  });
+}
+
 export function signOut() {
   clearToken();
   if (typeof window !== "undefined") {
