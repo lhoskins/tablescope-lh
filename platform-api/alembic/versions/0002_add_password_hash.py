@@ -10,8 +10,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0002"
-down_revision = "0001"
+revision = "0002_add_password_hash"
+down_revision = "0001_initial"
 branch_labels = None
 depends_on = None
 
