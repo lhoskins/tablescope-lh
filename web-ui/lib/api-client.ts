@@ -75,6 +75,32 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
+async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file);
+  const headers = new Headers();
+  const token = readToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    body: form,
+    headers,
+  });
+  if (!response.ok) {
+    let detail = `Upload failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (payload?.detail) detail = payload.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return (await response.json()) as T;
+}
+
 export const apiClient = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body: unknown) =>
@@ -83,4 +109,5 @@ export const apiClient = {
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   delete: <T = void>(path: string) =>
     request<T>(path, { method: "DELETE" }),
+  upload: <T>(path: string, file: File) => uploadFile<T>(path, file),
 };
