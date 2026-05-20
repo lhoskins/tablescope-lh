@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -129,12 +129,12 @@ async def update_project(
     return ProjectRead.model_validate(project)
 
 
-@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{project_id}")
 async def delete_project(
     project_id: int,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
-) -> None:
+) -> Response:
     """Delete a project (owner or admin only)."""
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
@@ -145,3 +145,4 @@ async def delete_project(
 
     await session.delete(project)
     await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

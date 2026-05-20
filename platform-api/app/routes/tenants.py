@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -182,16 +182,13 @@ async def update_user(
     return UserRead.model_validate(user)
 
 
-@router.delete(
-    "/{tenant_id}/users/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
+@router.delete("/{tenant_id}/users/{user_id}")
 async def deactivate_user(
     tenant_id: int,
     user_id: int,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.ADMIN)),
-) -> None:
+) -> Response:
     """Deactivate a user (soft delete)."""
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot modify users in another tenant")
@@ -205,3 +202,4 @@ async def deactivate_user(
 
     user.is_active = False
     await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
