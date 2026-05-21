@@ -17,7 +17,6 @@ insertion to the Java servlet.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -36,7 +35,7 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 @router.post("")
 async def upload_file(
     file: UploadFile = File(...),
-    vdb_type: Optional[str] = Form(None),
+    vdb_type: str | None = Form(None),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict:
