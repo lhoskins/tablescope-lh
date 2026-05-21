@@ -145,6 +145,15 @@ resource "aws_security_group" "tablescope" {
     cidr_blocks = var.allowed_app_cidrs
   }
 
+  # WildFly management console
+  ingress {
+    description = "WildFly management"
+    from_port   = 9990
+    to_port     = 9990
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_app_cidrs
+  }
+
   # All outbound
   egress {
     from_port   = 0
