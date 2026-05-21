@@ -137,11 +137,11 @@ services:
     image: edoburu/pgbouncer:latest
     restart: unless-stopped
     environment:
-      DATABASES_HOST: teiid
-      DATABASES_PORT: "35432"
-      DATABASES_DBNAME: ${TEIID_PG_DEFAULT_VDB:-myvdbtest}
-      DATABASES_USER: ${TEIID_PG_USER:-test}
-      DATABASES_PASSWORD: ${TEIID_PG_PASSWORD:-test}
+      DB_HOST: teiid
+      DB_PORT: "35432"
+      DB_NAME: ${TEIID_PG_DEFAULT_VDB:-myvdbtest}
+      DB_USER: ${TEIID_PG_USER:-test}
+      DB_PASSWORD: ${TEIID_PG_PASSWORD:-test}
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "200"
       DEFAULT_POOL_SIZE: "20"

@@ -1,9 +1,14 @@
 # Sensitive Files
 *.key
 *.pem
-*password*
-*secret*
 .env
+
+# Allow JAR files with "password" or "secret" in name (WildFly elytron modules)
+# but ignore plaintext password/secret files
+*password*.txt
+*password*.cfg
+*secret*.txt
+*secret*.cfg
 
 # Logs
 *.log
