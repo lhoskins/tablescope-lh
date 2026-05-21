@@ -32,6 +32,8 @@ _ANONYMOUS_PATH_PREFIXES = (
     "/openapi.json",
     "/docs",
     "/redoc",
+    "/api/auth/login",
+    "/api/auth/exchange",
 )
 
 
