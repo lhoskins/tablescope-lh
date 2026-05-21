@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module name="io.swagger.core" xmlns="urn:jboss:module:1.3">
+
+	<properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
+    
+    <resources>
+        <resource-root path="swagger-jaxrs-1.5.22.jar"/>
+        <resource-root path="swagger-core-1.5.22.jar"/>
+        <resource-root path="swagger-annotations-1.5.22.jar"/>
+        <resource-root path="swagger-models-1.5.22.jar"/>
+        <resource-root path="swagger-parser-1.0.44.jar"/>
+        <resource-root path="swagger-compat-spec-parser-1.0.44.jar"/>
+        <resource-root path="swagger-parser-2.0.12.jar"/>
+        <resource-root path="swagger-parser-v3-2.0.12.jar"/>
+        <resource-root path="swagger-parser-v2-converter-2.0.12.jar"/>
+        <resource-root path="swagger-parser-core-2.0.12.jar"/>
+        <resource-root path="swagger-models-2.0.8.jar"/>
+        <resource-root path="swagger-annotations-2.0.8.jar"/>
+        <resource-root path="swagger-core-2.0.8.jar"/>
+    </resources>
+    
+    <dependencies>
+        <module name="org.reflections"/>
+        <module name="javax.ws.rs.api"/>
+        <module name="javax.servlet.api"/>
+        <module name="com.fasterxml.jackson.core.jackson-core"/>
+        <module name="com.fasterxml.jackson.core.jackson-annotations"/>
+        <module name="com.fasterxml.jackson.core.jackson-databind"/>
+        <module name="com.fasterxml.jackson.dataformat"/>
+        <module name="javax.api"/>
+        <module name="javax.validation.api"/>
+        <module name="com.google.guava"/>
+        <module name="org.slf4j"/>
+        <module name="org.apache.commons.commons-lang3"/>
+        <module name="javax.xml.bind.api"/>
+        <module name="org.apache.commons.io"/>
+    </dependencies>
+    
+</module>

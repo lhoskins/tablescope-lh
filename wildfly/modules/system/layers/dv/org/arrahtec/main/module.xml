@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module name="org.arrahtec" xmlns="urn:jboss:module:1.3">
+	<properties>
+		<property name="jboss.api" value="public"/>
+	</properties>
+	<resources>
+		<resource-root path="osdq-core-6.2.6.jar"/>
+		<resource-root path="simmetrics-core-3.0.0.jar"/>
+	</resources>
+
+	<dependencies>
+		<module name="javax.api"/>
+		<module name="javax.activation.api"/>
+		<module name="org.apache.log4j"/>
+		<module name="org.slf4j"/>
+		<module name="org.apache.lucene"/>
+		<module name="com.google.guava"/>
+	</dependencies>
+</module>

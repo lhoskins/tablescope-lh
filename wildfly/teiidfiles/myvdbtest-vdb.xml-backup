@@ -1,0 +1,260 @@
+<vdb name="MyVDBTest" version="1">
+  
+  <!-- Enable Teiid Result Set Caching for Performance -->
+  <property name="result-set-cache-mode" value="true"/>
+  <property name="result-set-cache-max-age" value="1800"/> <!-- 30 minutes -->
+  
+  <!-- Hidden model for the Activate foreign table -->
+  <model name="ExcelSourceModel" type="PHYSICAL" visible="false">
+    <source name="excel-connector" translator-name="excel" connection-jndi-name="java:/excelTestDS"/>
+    <metadata type="DDL">
+      <![CDATA[ -- Place Foreign Table Below
+CREATE FOREIGN TABLE purchaseorderheader(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	PurchaseOrderID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	RevisionNumber string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Status string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	EmployeeID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	VendorID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	ShipMethodID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '6'),
+	OrderDate string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '7'),
+	ShipDate string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '8'),
+	SubTotal string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '9'),
+	TaxAmt string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '10'),
+	Freight string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '11'),
+	TotalDue string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '12'),
+	ModifiedDate string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '13'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'result', "teiid_excel:FILE" 'purchaseorderheader.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE productmodel(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	ProductModelID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	CatalogDescription string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Instructions string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	ModifiedDate string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'result', "teiid_excel:FILE" 'productmodel.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE COGSDate(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Root_Job string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	Job string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Position string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Type string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Assembly_Lvl string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	Customer string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '6'),
+	Part string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '7'),
+	Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '8'),
+	Rev string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '9'),
+	Status string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '10'),
+	Order_Qty string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '11'),
+	Make_Qty string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '12'),
+	Produced_Qty string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '13'),
+	Ship_Qty string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '14'),
+	Trans_Qty string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '15'),
+	Scrap_Qty string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '16'),
+	Pick_Qty string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '17'),
+	Lab string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '18'),
+	WIpLab string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '19'),
+	COGSLab string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '20'),
+	TransLab string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '21'),
+	ScrapLab string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '22'),
+	Burd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '23'),
+	WipBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '24'),
+	COGSBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '25'),
+	TransBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '26'),
+	ScrapBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '27'),
+	Mat string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '28'),
+	WipMat string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '29'),
+	COGSMat string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '30'),
+	TransMat string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '31'),
+	ScrapMat string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '32'),
+	Serv string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '33'),
+	WipServ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '34'),
+	COGSServ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '35'),
+	TransServ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '36'),
+	ScrapServ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '37'),
+	Total string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '38'),
+	WipTotal string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '39'),
+	COGSTotal string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '40'),
+	TransTotal string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '41'),
+	ScrapTotal string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '42'),
+	COGSProfit string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '43'),
+	WipMrkt string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '44'),
+	LowerCostorMrktt string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '45'),
+	LowerCostofMrktAdjt string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '46'),
+	Act_Rev string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '47'),
+	Sales_Rep string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '48'),
+	Sales_Code string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '49'),
+	Order_Date string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '50'),
+	Status_Date string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '51'),
+	Unit_Price string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '52'),
+	Price_UofM string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '53'),
+	Order_Unit string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '54'),
+	Unit_Conv string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '55'),
+	Hrs string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '56'),
+	WipHrs string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '57'),
+	CogsHrs string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '58'),
+	TransHrs string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '59'),
+	ScrapHrs string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '60'),
+	Std_Cost string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '61'),
+	Avg_Cost string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '62'),
+	Last_Cost string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '63'),
+	Sell_Price string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '64'),
+	Cust_PO string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '65'),
+	QPer string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '66'),
+	Relationship_Qty string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '67'),
+	BuildToStock string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '68'),
+	TimeAndMat string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '69'),
+	LBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '70'),
+	LWipBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '71'),
+	LCOGSBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '72'),
+	LTransBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '73'),
+	LScrapBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '74'),
+	MBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '75'),
+	MWipBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '76'),
+	MCOGSBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '77'),
+	MTransBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '78'),
+	MScrapBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '79'),
+	GBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '80'),
+	GWipBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '81'),
+	GCOGSBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '82'),
+	GTransBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '83'),
+	GScrapBurd string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '84'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet1', "teiid_excel:FILE" 'COGSDate.XLS', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+  
+CREATE FOREIGN TABLE SalesJournal2025(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Date_ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	Customer_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Job_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Job_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	Account_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '6'),
+	Account_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '7'),
+	InvoiceCM_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '8'),
+	Line_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '9'),
+	Purchase_Order_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '10'),
+	Amount string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '11'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'SalesJournalYTD', "teiid_excel:FILE" 'SalesJournal2025.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE ActivatedUsers2(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Test string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	Users string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Companies string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet1', "teiid_excel:FILE" 'ActivatedUsers2.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE SalesJournal2020(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Date_ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	Customer_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Job_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Job_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	Account_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '6'),
+	Account_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '7'),
+	InvoiceCM_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '8'),
+	Line_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '9'),
+	Purchase_Order_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '10'),
+	Amount string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '11'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'SalesJournalYTD', "teiid_excel:FILE" 'SalesJournal2020.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+      ]]>
+    </metadata>
+  </model>
+  <model name="CSVSourceModel" type="PHYSICAL" visible="false">
+    <source name="text-connector" translator-name="file" connection-jndi-name="java:/fileTestDS" />
+    <metadata type="DDL">
+      <![CDATA[
+        CREATE FOREIGN PROCEDURE getTextFiles (
+          IN pathAndExt string(4000) NOT NULL
+        ) RETURNS
+          TABLE (
+            file clob,
+            filePath string(4000),
+            lastModified timestamp,
+            created timestamp,
+            size integer
+          ) OPTIONS(UPDATECOUNT '1');
+      ]]>
+    </metadata>
+  </model>
+
+  <!-- Visible model for the MyView -->
+  <model name="MyCompany" type="VIRTUAL" visible="true">
+    <metadata type="DDL">
+      <![CDATA[
+ 
+;
+
+CREATE VIEW ActivatedUsers2_XLSX AS SELECT Test, Users, Companies FROM ExcelSourceModel.ActivatedUsers2;;
+
+CREATE VIEW SalesJournal2025_XLSX AS SELECT Date_, Customer_ID, Name, Job_ID, Job_Description, Account_ID, Account_Description, InvoiceCM_No, Line_Description, Purchase_Order_No, Amount FROM ExcelSourceModel.SalesJournal2025;;
+
+CREATE VIEW COGSDate_XLS AS SELECT Root_Job, Job, Position, Type, Assembly_Lvl, Customer, Part, Description, Rev, Status, Order_Qty, Make_Qty, Produced_Qty, Ship_Qty, Trans_Qty, Scrap_Qty, Pick_Qty, Lab, WIpLab, COGSLab, TransLab, ScrapLab, Burd, WipBurd, COGSBurd, TransBurd, ScrapBurd, Mat, WipMat, COGSMat, TransMat, ScrapMat, Serv, WipServ, COGSServ, TransServ, ScrapServ, Total, WipTotal, COGSTotal, TransTotal, ScrapTotal, COGSProfit, WipMrkt, LowerCostorMrktt, LowerCostofMrktAdjt, Act_Rev, Sales_Rep, Sales_Code, Order_Date, Status_Date, Unit_Price, Price_UofM, Order_Unit, Unit_Conv, Hrs, WipHrs, CogsHrs, TransHrs, ScrapHrs, Std_Cost, Avg_Cost, Last_Cost, Sell_Price, Cust_PO, QPer, Relationship_Qty, BuildToStock, TimeAndMat, LBurd, LWipBurd, LCOGSBurd, LTransBurd, LScrapBurd, MBurd, MWipBurd, MCOGSBurd, MTransBurd, MScrapBurd, GBurd, GWipBurd, GCOGSBurd, GTransBurd, GScrapBurd FROM ExcelSourceModel.COGSDate;;
+
+CREATE VIEW SALES_TXT (
+OrderID string(4000) OPTIONS(NAMEINSOURCE 'OrderID', UPDATABLE 'FALSE'),
+CustomerID string(4000) OPTIONS(NAMEINSOURCE 'CustomerID', UPDATABLE 'FALSE'),
+ProductID string(4000) OPTIONS(NAMEINSOURCE 'ProductID', UPDATABLE 'FALSE'),
+Quantity string(4000) OPTIONS(NAMEINSOURCE 'Quantity', UPDATABLE 'FALSE'),
+Price string(4000) OPTIONS(NAMEINSOURCE 'Price', UPDATABLE 'FALSE'),
+OrderDate string(4000) OPTIONS(NAMEINSOURCE 'OrderDate', UPDATABLE 'FALSE')
+) AS
+SELECT 
+A.OrderID, A.CustomerID, A.ProductID, A.Quantity, A.Price, A.OrderDate
+FROM
+(EXEC CSVSourceModel.getTextFiles('sales.txt')) AS f,
+TEXTTABLE(f.file COLUMNS OrderID string, CustomerID string, ProductID string, Quantity string, Price string, OrderDate string DELIMITER '	' HEADER) AS A;
+
+CREATE VIEW productmodel_XLSX AS SELECT ProductModelID, Name, CatalogDescription, Instructions, ModifiedDate FROM ExcelSourceModel.productmodel;;
+
+CREATE VIEW purchaseorderheader_XLSX AS SELECT PurchaseOrderID, RevisionNumber, Status, EmployeeID, VendorID, ShipMethodID, OrderDate, ShipDate, SubTotal, TaxAmt, Freight, TotalDue, ModifiedDate FROM ExcelSourceModel.purchaseorderheader;;
+
+CREATE VIEW SALESORDERDETAIL_CSV (
+SalesOrderID string(4000) OPTIONS(NAMEINSOURCE 'SalesOrderID', UPDATABLE 'FALSE'),
+SalesOrderDetailID string(4000) OPTIONS(NAMEINSOURCE 'SalesOrderDetailID', UPDATABLE 'FALSE'),
+CarrierTrackingNumber string(4000) OPTIONS(NAMEINSOURCE 'CarrierTrackingNumber', UPDATABLE 'FALSE'),
+OrderQty string(4000) OPTIONS(NAMEINSOURCE 'OrderQty', UPDATABLE 'FALSE'),
+ProductID string(4000) OPTIONS(NAMEINSOURCE 'ProductID', UPDATABLE 'FALSE'),
+SpecialOfferID string(4000) OPTIONS(NAMEINSOURCE 'SpecialOfferID', UPDATABLE 'FALSE'),
+UnitPrice string(4000) OPTIONS(NAMEINSOURCE 'UnitPrice', UPDATABLE 'FALSE'),
+UnitPriceDiscount string(4000) OPTIONS(NAMEINSOURCE 'UnitPriceDiscount', UPDATABLE 'FALSE'),
+LineTotal string(4000) OPTIONS(NAMEINSOURCE 'LineTotal', UPDATABLE 'FALSE'),
+ModifiedDate string(4000) OPTIONS(NAMEINSOURCE 'ModifiedDate', UPDATABLE 'FALSE')
+) AS
+SELECT 
+A.SalesOrderID, A.SalesOrderDetailID, A.CarrierTrackingNumber, A.OrderQty, A.ProductID, A.SpecialOfferID, A.UnitPrice, A.UnitPriceDiscount, A.LineTotal, A.ModifiedDate
+FROM
+(EXEC CSVSourceModel.getTextFiles('salesorderdetail.csv')) AS f,
+TEXTTABLE(f.file COLUMNS SalesOrderID string, SalesOrderDetailID string, CarrierTrackingNumber string, OrderQty string, ProductID string, SpecialOfferID string, UnitPrice string, UnitPriceDiscount string, LineTotal string, ModifiedDate string DELIMITER ',' HEADER) AS A;
+
+CREATE VIEW UPLOAD_USERS_CSV (
+username string(4000) OPTIONS(NAMEINSOURCE 'username', UPDATABLE 'FALSE'),
+password string(4000) OPTIONS(NAMEINSOURCE 'password', UPDATABLE 'FALSE'),
+firstname string(4000) OPTIONS(NAMEINSOURCE 'firstname', UPDATABLE 'FALSE'),
+lastname string(4000) OPTIONS(NAMEINSOURCE 'lastname', UPDATABLE 'FALSE'),
+email string(4000) OPTIONS(NAMEINSOURCE 'email', UPDATABLE 'FALSE'),
+course1 string(4000) OPTIONS(NAMEINSOURCE 'course1', UPDATABLE 'FALSE'),
+group1 string(4000) OPTIONS(NAMEINSOURCE 'group1', UPDATABLE 'FALSE')
+) AS
+SELECT 
+A.username, A.password, A.firstname, A.lastname, A.email, A.course1, A.group1
+FROM
+(EXEC CSVSourceModel.getTextFiles('upload_users.csv')) AS f,
+TEXTTABLE(f.file COLUMNS username string, password string, firstname string, lastname string, email string, course1 string, group1 string DELIMITER ',' HEADER) AS A;
+
+-- Place new View above
+
+      ]]>
+    </metadata>
+  </model>
+</vdb>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Table</title>
+</head>
+<body>
+    <h1>Create Table</h1>
+
+    <div style="display: flex; justify-content: space-around;">
+        <div style="width: 100%;">
+            <div style="width: 30%;">
+                <h2>Select Schema:</h2>
+                <select id="schemaSelect" onchange="fetchTables(this.value)">
+                    <option value="">Select a schema</option>
+                    <option value="MyCompany">My Company</option>
+                </select>
+
+                <h2 id="step2Left" style="display: none;">Available Tables:</h2>
+                <div id="leftTableSelect"></div> 
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedLeftTable;
+
+        fetchSchemas();
+
+        function fetchSchemas() {
+            fetch('http://64.52.108.62:8095/TeiidExcelImporter/getSchemas')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch schemas');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const schemaSelect = document.getElementById('schemaSelect');
+                    schemaSelect.innerHTML = '';
+                    data.forEach(schema => {
+                        const option = document.createElement('option');
+                        option.value = schema;
+                        option.text = schema;
+                        schemaSelect.appendChild(option);
+                    });
+                })
+                .catch(error => console.error('Error fetching schemas:', error));
+        }
+
+        function fetchTables(selectedSchema) {
+            if (!selectedSchema) return;
+
+            fetch(`http://64.52.108.62:8095/TeiidExcelImporter/getTables?schema=${selectedSchema}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch tables');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const tableSelect = document.getElementById('leftTableSelect');
+                    tableSelect.innerHTML = ''; 
+
+                    data.forEach(table => {
+                        const tableButton = document.createElement('button');
+                        tableButton.textContent = table;
+                        tableButton.onclick = () => {
+                            selectedLeftTable = table;
+                            // Call your fetchColumns function here if needed
+                        };
+                        tableSelect.appendChild(tableButton);
+                        tableSelect.appendChild(document.createElement('br')); // Add a line break for better visual separation
+                    });
+
+                    document.getElementById('step2Left').style.display = 'block';
+                })
+                .catch(error => console.error('Error fetching tables:', error));
+        }
+    </script>
+</body>
+</html>

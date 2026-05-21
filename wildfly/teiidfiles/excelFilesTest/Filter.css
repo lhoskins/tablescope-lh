@@ -1,0 +1,131 @@
+TABLE
+{
+    FONT-SIZE: x-small;
+    COLOR: black;
+    FONT-FAMILY: Arial
+}
+.HeaderFont
+{
+    FONT-WEIGHT: bold;
+    FONT-SIZE: 30px;
+    COLOR: white;
+    FONT-FAMILY: Arial;
+    text-align:center;
+    vertical-align:middle;
+}
+
+
+INPUT
+{
+    FONT-SIZE: x-small;
+    COLOR: black;
+    FONT-FAMILY: Arial;
+}
+
+SELECT
+{
+    FONT-SIZE: x-small;
+    FONT-FAMILY: Arial;
+    background-color:white;
+    border:0;
+}
+
+
+input[type=checkbox]
+{
+    BACKGROUND-COLOR: #E6E6E6;
+}
+
+
+.BoldFont
+{
+    FONT-WEIGHT: bold;
+    FONT-SIZE: x-small;
+    COLOR: black;
+    FONT-FAMILY: Arial
+}
+BODY
+{
+    BACKGROUND-COLOR:#FFFFFF
+}
+.HeaderBackgroundColor
+{
+  BACKGROUND-COLOR: #0e4092;
+}
+
+.NonRequiredField
+{
+    BACKGROUND-COLOR: #E6E6E6;
+    HEIGHT: 22px;
+    border: solid #B8B8B8 1px;
+}
+.RequiredField
+{      
+    BACKGROUND-COLOR: #fff;
+    HEIGHT: 22px;
+    border: solid #B8B8B8 1px;
+}
+
+
+.DisabledField
+{   
+  height:22px;
+  BACKGROUND-COLOR: lightgrey;
+  border: solid #B8B8B8 1px;
+
+}
+
+.ListBox
+{
+  border: 1px solid #B8B8B8;
+  background-color: white;
+  font-family: Monospace;
+} 
+
+.SearchButton 
+{
+width:22px; 
+height:22px;
+cursor: hand;  
+border: solid #ffffff 1px;
+text-decoration: none;
+background:white;
+BACKGROUND-IMAGE: url(Images/JBR_Lookup.gif);
+background-repeat: no-repeat;
+background-position:0px 2px;
+value:"Run Report"
+}
+
+.SearchButton:hover
+{
+  background: #E2eeFB;
+  text-decoration: none;
+  BACKGROUND-IMAGE: url(Images/JBR_Lookup.gif);
+   background-repeat: no-repeat; background-position:0px 2px;;
+  border: solid #B6D3F0 1px;
+}
+
+.runbutton {
+  font-family: Arial;
+  color: #000;
+  background-color:#ffffff;
+  font-size: 16px;
+  font-weight: bold;
+  padding: 10px 14px 10px 35px;
+  border: solid #E6E6E6 1px;
+  text-decoration: none;
+  BACKGROUND-IMAGE: url(Images/JBR_printer.png);
+  background-repeat: no-repeat; background-position:5px;
+  
+}
+
+
+.runbutton:hover {
+  background: #E2eeFB;
+  text-decoration: none;
+  border: solid #B6D3F0 1px;
+  BACKGROUND-IMAGE: url(Images/JBR_printer.png);
+  background-repeat: no-repeat; background-position:5px;
+
+}
+

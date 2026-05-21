@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<vdb name="budgettest" version="2">
+    <description/>
+    <connection-type>BY_VERSION</connection-type>
+    <property name="validationDateTime" value="Wed Mar 20 21:03:38 PDT 2024"/>
+    <property name="validationVersion" value="10.1.1"/>
+    <model name="LATBudgetViewModel" type="VIRTUAL">
+        <property name="imports" value="Budget"/>
+        <metadata type="DDL">
+            <![CDATA[
+
+CREATE VIEW BudgetView (
+	ROW_ID integer OPTIONS(SEARCHABLE 'ALL_EXCEPT_LIKE'),
+	Column_1 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Column_2 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	ExpectedShipDate string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	ContractReference string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	GrossMarginPercentage string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	ContractValue string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Mods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	RevisedContractValue string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	DiscretionaryAdjustments string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	ContractValueNetofModifications string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Commission string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	POReceivedStartDate string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	HoursBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	HoursBudgetMods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	ModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	HoursProjectedCostoverbudgettoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	HoursEstimateatcompletion string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	column_18 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	LaborBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	LaborBudgetMods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	LaborModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	LaborProjectedCostoverbudgettoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	LaborEstimateatcompletion string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Column_25 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	MaterialBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	MaterialBudgetMods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	MaterialModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	MaterialProjectedCostoverbudgettoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	MaterialEstimateatcompletion string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Column_31 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	EngineeringBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	EngineeringBudgetMods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	EngineeringModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	EngineeringProjectedCostoverbudgettoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	EngineeringEstimateatcompletion string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	EstimateatCompletionAddlOHCosted string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Column_37 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	TotalDirectCostModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	TotalDirectCostEstToComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Column_40 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	CurrentMonthBasedonModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	CurrentMonthBasedonEsttoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	FrameSizeOEM string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Column_44 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	PMTotalDirCostEstToComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Diff string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Comment string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Column_48 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Column_49 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE')
+) OPTIONS(NAMEINSOURCE 'Budgets & Assumptions', UPDATABLE 'TRUE') 
+AS
+	SELECT
+		ROW_ID, Column_1, Column_2, ExpectedShipDate, ContractReference, GrossMarginPercentage, ContractValue, Mods, RevisedContractValue, DiscretionaryAdjustments, ContractValueNetofModifications, Commission, POReceivedStartDate, HoursBudget, HoursBudgetMods, ModifiedBudget, HoursProjectedCostoverbudgettoComplete, HoursEstimateatcompletion, column_18, LaborBudget, LaborBudgetMods, LaborModifiedBudget, LaborProjectedCostoverbudgettoComplete, LaborEstimateatcompletion, Column_25, MaterialBudget, MaterialBudgetMods, MaterialModifiedBudget, MaterialProjectedCostoverbudgettoComplete, MaterialEstimateatcompletion, Column_31, EngineeringBudget, EngineeringBudgetMods, EngineeringModifiedBudget, EngineeringProjectedCostoverbudgettoComplete, EngineeringEstimateatcompletion, EstimateatCompletionAddlOHCosted, Column_37, TotalDirectCostModifiedBudget, TotalDirectCostEstToComplete, Column_40, CurrentMonthBasedonModifiedBudget, CurrentMonthBasedonEsttoComplete, FrameSizeOEM, Column_44, PMTotalDirCostEstToComplete, Diff, Comment, Column_48, Column_49
+	FROM
+		Budget.BudgetsandAssumptions;
+
+CREATE VIEW MaterialLaborBudget (
+	JobID string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Fringe string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Material string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Engineering string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	DirectLabor string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE')
+) OPTIONS(NAMEINSOURCE 'MgtRptg', UPDATABLE 'TRUE') 
+AS
+	SELECT
+		Budget.MgtRptg.column_1 AS JobID, Budget.MgtRptg.TotalBudgetedCostsLaborFringeBurden AS Fringe, Budget.MgtRptg.TotalBudgetedCostsMaterialCost AS Material, Budget.MgtRptg.TotalBudgetedCostsDirectEngineering AS Engineering, Budget.MgtRptg.TotalBudgetedCostsTotalDirectCosts AS DirectLabor
+	FROM
+		Budget.MgtRptg;
+
+CREATE VIEW BudgetSummaryLevel2 (
+	JobID string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Material double OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	DirectLabor double OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Engineering double OPTIONS(SEARCHABLE 'UNSEARCHABLE'),
+	Fringe double OPTIONS(SEARCHABLE 'UNSEARCHABLE')
+) OPTIONS(NAMEINSOURCE 'MgtRptg', UPDATABLE 'TRUE') 
+AS
+	SELECT
+		LATBudgetViewModel.MaterialLaborBudget.JobID, SUM(parseFloat(LATBudgetViewModel.MaterialLaborBudget.Material, '0.00;-0.00')) AS Material, SUM(parseFloat(LATBudgetViewModel.MaterialLaborBudget.DirectLabor, '0.00;-0.00')) AS DirectLabor, SUM(parseFloat(LATBudgetViewModel.MaterialLaborBudget.Engineering, '0.00;-0.00')) AS Engineering, SUM(parseFloat(LATBudgetViewModel.MaterialLaborBudget.Fringe, '0.00;-0.00')) AS Fringe
+	FROM
+		LATBudgetViewModel.MaterialLaborBudget
+	GROUP BY LATBudgetViewModel.MaterialLaborBudget.JobID;
+
+]]>
+        </metadata>
+    </model>
+    <model name="Budget">
+        <source connection-jndi-name="java:/excel-file" name="Budget" translator-name="excel"/>
+        <metadata type="DDL">
+            <![CDATA[
+SET NAMESPACE 'http://www.teiid.org/translator/excel/2014' AS teiid_excel
+
+
+CREATE FOREIGN TABLE BudgetsandAssumptions (
+	ROW_ID integer OPTIONS(SEARCHABLE 'ALL_EXCEPT_LIKE', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Column_1 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '1'),
+	Column_2 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '2'),
+	ExpectedShipDate string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '3'),
+	ContractReference string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '4'),
+	GrossMarginPercentage string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '5'),
+	ContractValue string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '6'),
+	Mods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '7'),
+	RevisedContractValue string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '8'),
+	DiscretionaryAdjustments string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '9'),
+	ContractValueNetofModifications string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '10'),
+	Commission string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '11'),
+	POReceivedStartDate string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '12'),
+	HoursBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '13'),
+	HoursBudgetMods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '14'),
+	ModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '15'),
+	HoursProjectedCostoverbudgettoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '16'),
+	HoursEstimateatcompletion string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '17'),
+	column_18 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '18'),
+	LaborBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '19'),
+	LaborBudgetMods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '20'),
+	LaborModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '21'),
+	LaborProjectedCostoverbudgettoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '22'),
+	LaborEstimateatcompletion string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '23'),
+	Column_25 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '24'),
+	MaterialBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '25'),
+	MaterialBudgetMods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '26'),
+	MaterialModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '27'),
+	MaterialProjectedCostoverbudgettoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '28'),
+	MaterialEstimateatcompletion string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '29'),
+	Column_31 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '30'),
+	EngineeringBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '31'),
+	EngineeringBudgetMods string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '32'),
+	EngineeringModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '33'),
+	EngineeringProjectedCostoverbudgettoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '34'),
+	EngineeringEstimateatcompletion string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '35'),
+	EstimateatCompletionAddlOHCosted string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '36'),
+	Column_37 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '37'),
+	TotalDirectCostModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '38'),
+	TotalDirectCostEstToComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '39'),
+	Column_40 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '40'),
+	CurrentMonthBasedonModifiedBudget string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '41'),
+	CurrentMonthBasedonEsttoComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '42'),
+	FrameSizeOEM string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '43'),
+	Column_44 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '44'),
+	PMTotalDirCostEstToComplete string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '45'),
+	Diff string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '46'),
+	Comment string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '47'),
+	Column_48 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '48'),
+	Column_49 string(4000) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '49'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS(NAMEINSOURCE 'Budgets & Assumptions', UPDATABLE 'TRUE', "teiid_excel:FILE" 'BudgetsandAssumptions.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '10');
+
+CREATE FOREIGN TABLE MapJobID (
+	ROW_ID integer OPTIONS(SEARCHABLE 'ALL_EXCEPT_LIKE', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	JobIDAlias string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '1'),
+	AcctCode string(25) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '2'),
+	JobID string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '3'),
+	JobDescription string(200) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '4'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS(NAMEINSOURCE 'YTDMaterialCost', UPDATABLE 'TRUE', "teiid_excel:FILE" 'Mapjobid.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE MgtRptg (
+	ROW_ID integer OPTIONS(SEARCHABLE 'ALL_EXCEPT_LIKE', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	column_1 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '1'),
+	column_2 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '2'),
+	column_3 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '3'),
+	ExpectedShipDate string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '4'),
+	column_5 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '5'),
+	ContractValue-NetofMods string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '6'),
+	ITDRevenueCurrentMonth string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '7'),
+	InvoicedITD string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '8'),
+	ITDCostsIncurredMaterialCost string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '9'),
+	ITDCostsIncurredLaborFringeBurden string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '10'),
+	ITDCostsIncurredDirectEngineering string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '11'),
+	ITDCostsIncurredOtherCostsandAdj string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '12'),
+	ITDCostsIncurredTotalDirectCosts string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '13'),
+	ITDCostsIncurredITDGPperFS string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '14'),
+	column_15 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '15'),
+	TotalBudgetedCostsMaterialCost string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '16'),
+	TotalBudgetedCostsLaborFringeBurden string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '17'),
+	TotalBudgetedCostsDirectEngineering string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '18'),
+	TotalBudgetedCostsTotalDirectCosts string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '19'),
+	TotalBudgetedCostsBudgetGP string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '20'),
+	DiffinGP string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '21'),
+	column_22 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '22'),
+	ToGoMaterialCost string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '23'),
+	ToGoLaborFringeBurden string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '24'),
+	ToGoDirectEngineering string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '25'),
+	ToGoOtherCostsandAdj string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '26'),
+	ToGoTotalDirectCosts string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '27'),
+	ToGoPercentofBudgetRemaining string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '28'),
+	column_29 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '29'),
+	BudgetPerformanceVariancesMaterialCost string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '30'),
+	BudgetPerformanceVariancesLaborFringeBurden string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '31'),
+	BudgetPerformanceVariancesDirectEngineering string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '32'),
+	BudgetPerformanceVariancesOtherCostsandAdj string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '33'),
+	BudgetPerformanceVariancesTotal$BudgetVariance string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '34'),
+	BudgetPerformanceVariancesTotalPercentBudgetVariance string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '35'),
+	BudgetFlag string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '36'),
+	ToGoActualLaborHours string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '37'),
+	ToGoBudgetLaborHours string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '38'),
+	ToGoRemainingLabor string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '39'),
+	column_40 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '40'),
+	FinalJobPerformanceActualLaborHours string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '41'),
+	FinalJobPerformanceBudgetLaborHours string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '42'),
+	FinalJobPerformanceLaborBudgetVariance string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '43'),
+	column_44 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '44'),
+	BudgetBreakdownMachShp&AssemblyHours string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '45'),
+	BudgetBreakdownPackagingHours string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '46'),
+	TotalBudget string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '47'),
+	column_48 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '48'),
+	ToGoActualMaterialCosts string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '49'),
+	ToGoOpenPOs string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '50'),
+	ToGoBudgetMaterialCosts string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '51'),
+	ToGoRemainingMaterialSpend string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '52'),
+	column_53 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '53'),
+	FinalJobPerformanceActualMaterialCosts string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '54'),
+	FinalJobPerformanceBudgetMaterialCosts string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '55'),
+	FinalJobPerformanceMaterialBudgetVariance string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '56'),
+	column_57 string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '57'),
+	EngITDCostsIncurred string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '58'),
+	EngBudget string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '59'),
+	ExpectedCostsRemainingToGo string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '60'),
+	PercentRemaining string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '61'),
+	PODate string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '62'),
+	POYear string(50) OPTIONS(SEARCHABLE 'UNSEARCHABLE', "teiid_excel:CELL_NUMBER" '63'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS(NAMEINSOURCE 'MgtRptg', UPDATABLE 'TRUE', "teiid_excel:FILE" 'ManagmentReport.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '9');
+
+]]>
+        </metadata>
+    </model>
+</vdb>
