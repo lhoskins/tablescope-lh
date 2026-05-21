@@ -16,7 +16,9 @@ function resolveApiUrl(): string {
   return "http://localhost:8000";
 }
 
-const API_URL = resolveApiUrl();
+function getApiUrl(): string {
+  return resolveApiUrl();
+}
 
 const TOKEN_KEY = "tablescope.token";
 
@@ -51,7 +53,7 @@ async function request<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(`${getApiUrl()}${path}`, {
     ...init,
     headers,
     cache: "no-store",
@@ -83,7 +85,7 @@ async function uploadFile<T>(path: string, file: File): Promise<T> {
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(`${getApiUrl()}${path}`, {
     method: "POST",
     body: form,
     headers,
