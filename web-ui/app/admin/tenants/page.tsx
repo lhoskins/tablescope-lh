@@ -265,12 +265,12 @@ export default function TenantsPage() {
                   </td>
                   <td className="px-4 py-3 text-sm">
                     <a
-                      href={`/login?tenant=${tenant.slug}`}
+                      href={`/${tenant.slug}/login`}
                       className="text-brand underline hover:text-brand/80"
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      /login?tenant={tenant.slug}
+                      /{tenant.slug}/login
                     </a>
                   </td>
                 </tr>

@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { useRouter, useParams } from "next/navigation";
 import {
   exchangeWithSupabase,
   exchangeWithClerk,
@@ -12,15 +11,14 @@ import {
 
 type AuthMethod = "password" | "supabase" | "clerk";
 
-function LoginForm() {
+export default function TenantLoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const tenantParam = searchParams.get("tenant");
+  const params = useParams<{ slug: string }>();
+  const tenantSlug = params.slug;
 
   const [method, setMethod] = useState<AuthMethod>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [tenantSlug, setTenantSlug] = useState(tenantParam || "");
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -30,13 +28,12 @@ function LoginForm() {
     setError(null);
     setLoading(true);
     try {
-      const slug = tenantSlug.trim() || undefined;
       const result =
         method === "password"
-          ? await loginWithPassword(email, password, slug)
+          ? await loginWithPassword(email, password, tenantSlug)
           : method === "clerk"
-            ? await exchangeWithClerk(token, slug)
-            : await exchangeWithSupabase(token, slug);
+            ? await exchangeWithClerk(token, tenantSlug)
+            : await exchangeWithSupabase(token, tenantSlug);
       storeToken(result.access_token);
       router.replace("/dashboard");
     } catch (err) {
@@ -48,14 +45,12 @@ function LoginForm() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
-      <h1 className="mb-6 text-2xl font-semibold text-slate-900">
+      <h1 className="mb-2 text-2xl font-semibold text-slate-900">
         Sign in to Tablescope
       </h1>
-      {tenantParam && (
-        <p className="mb-4 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">
-          Signing in to tenant: <strong>{tenantParam}</strong>
-        </p>
-      )}
+      <p className="mb-6 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">
+        Tenant: <strong>{tenantSlug}</strong>
+      </p>
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -72,24 +67,6 @@ function LoginForm() {
           </select>
         </div>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">
-            Tenant (optional)
-          </label>
-          <input
-            type="text"
-            value={tenantSlug}
-            onChange={(e) =>
-              setTenantSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))
-            }
-            className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-            placeholder="Leave blank for default tenant"
-          />
-          <p className="mt-1 text-xs text-slate-400">
-            Tenant slug — e.g. &quot;acme-corp&quot;. Leave blank for the default tenant.
-          </p>
-        </div>
-
         {method === "password" ? (
           <>
             <div>
@@ -101,7 +78,7 @@ function LoginForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                placeholder="admin@tablescope.local"
+                placeholder="you@company.com"
                 autoComplete="email"
               />
             </div>
@@ -146,21 +123,6 @@ function LoginForm() {
           {loading ? "Signing in\u2026" : "Sign in"}
         </button>
       </form>
-      <p className="mt-6 text-xs text-slate-500">
-        To sign into a specific tenant, use{" "}
-        <code className="rounded bg-slate-100 px-1 py-0.5">
-          /your-slug/login
-        </code>{" "}
-        or enter the tenant slug above.
-      </p>
     </main>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense>
-      <LoginForm />
-    </Suspense>
   );
 }
