@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { apiClient } from "@/lib/api-client";
 
-type UploadResult = { path: string; size: number };
+type UploadResult = { path: string; size: number; datasource?: string; fileName?: string };
 
 export function FileDropzone({
   onUploaded,

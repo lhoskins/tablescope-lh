@@ -17,9 +17,12 @@ insertion to the Java servlet.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -27,6 +30,7 @@ from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
+from app.models.tenant import Tenant
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -46,7 +50,6 @@ async def upload_file(
     user = await session.get(User, context.user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    from app.models.tenant import Tenant
 
     tenant = await session.get(Tenant, context.tenant_id)
     if tenant is None:
@@ -104,8 +107,44 @@ async def upload_file(
 
     logger.info("Teiid servlet response: %s", teiid_result)
 
+    # Build the datasource name from the filename (matches servlet convention)
+    base_name = file.filename.rsplit(".", 1)[0].replace(" ", "_")
+    extension = file.filename.rsplit(".", 1)[-1].upper() if "." in file.filename else ""
+    datasource_name = f"{base_name}_{extension}" if extension else base_name
+
     return {
         "path": f"/opt/wildfly/teiidfiles/customers/{tenant.id}/{user.id}/uploads/{file.filename}",
         "size": len(content),
+        "datasource": datasource_name,
+        "fileName": file.filename,
         "teiid": teiid_result,
     }
+
+
+@router.get("/datasources")
+async def list_datasources(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> list[dict]:
+    """List uploaded datasources for the current user by scanning their uploads directory."""
+    user = await session.get(User, context.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    settings = get_settings()
+    uploads_dir = Path(settings.customer_base_path) / str(context.tenant_id) / str(user.id) / "uploads"
+
+    datasources: list[dict] = []
+    if uploads_dir.is_dir():
+        for f in sorted(uploads_dir.iterdir()):
+            if f.is_file() and not f.name.startswith("."):
+                base_name = f.stem.replace(" ", "_")
+                extension = f.suffix.lstrip(".").upper()
+                view_name = f"{base_name}_{extension}" if extension else base_name
+                datasources.append({
+                    "fileName": f.name,
+                    "viewName": view_name,
+                    "size": f.stat().st_size,
+                })
+
+    return datasources
