@@ -92,7 +92,7 @@ class VDBManagementService:
             "username": username,
             "password": password,
             "teiid_host": "localhost",
-            "teiid_port": 9999,
+            "teiid_port": 9990,
             "vdb_type": "user",
             "user_id": user_id,
         }
@@ -137,7 +137,7 @@ class VDBManagementService:
             "username": username,
             "password": password,
             "teiid_host": "localhost",
-            "teiid_port": 9999,
+            "teiid_port": 9990,
             "vdb_type": "shared",
         }
 
@@ -173,7 +173,7 @@ class VDBManagementService:
         payload: dict = {
             "vdb_id": vdb_id,
             "teiid_host": "localhost",
-            "teiid_port": 9999,
+            "teiid_port": 9990,
         }
         if vdb_file_path:
             payload["vdb_file_path"] = vdb_file_path
