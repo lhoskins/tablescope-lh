@@ -125,8 +125,10 @@ async def query_datasource(
             password=teiid_password,
         )
         async with pool.acquire() as conn:
-            sql = f'SELECT * FROM "{payload.tableName}" LIMIT $1'
-            records: list[asyncpg.Record] = await conn.fetch(sql, payload.limit)
+            # Teiid does not support parameterised LIMIT via PG wire, so we
+            # inline the value.  payload.limit is Pydantic-validated (1..10000).
+            sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
+            records: list[asyncpg.Record] = await conn.fetch(sql)
     except Exception as exc:
         logger.error("Query against VDB %s failed: %s", user_vdb.vdb_id, exc)
         raise HTTPException(
