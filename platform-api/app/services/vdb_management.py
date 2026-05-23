@@ -83,8 +83,10 @@ class VDBManagementService:
         2. Deploys the VDB to Teiid via the Admin API
         """
         vdb_id = _generate_vdb_id()
-        username = f"vdb_user_{vdb_id}"
-        password = _generate_password()
+        # Use fixed 'test/test' credentials matching WildFly's
+        # application-users.properties — same as original Tablescope/Redash.
+        username = "test"
+        password = "test"
 
         payload = {
             "org_id": org_id,
@@ -128,8 +130,8 @@ class VDBManagementService:
     async def create_shared_vdb(self, *, org_id: int) -> VDBProvisionResult:
         """Create and deploy a shared (tenant-level) VDB via the servlet."""
         vdb_id = _generate_vdb_id()
-        username = f"vdb_shared_{vdb_id}"
-        password = _generate_password()
+        username = "test"
+        password = "test"
 
         payload = {
             "org_id": org_id,

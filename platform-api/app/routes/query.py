@@ -109,13 +109,20 @@ async def query_datasource(
     settings = get_settings()
     database = f"{user_vdb.vdb_id}.1"
 
+    # Use the fixed 'test/test' credentials registered in WildFly's
+    # ApplicationRealm (application-users.properties).  Per-user isolation
+    # is provided by the VDB name used as the database — each user connects
+    # to their own VDB.  This matches the original Tablescope/Redash approach.
+    teiid_username = "test"
+    teiid_password = "test"
+
     try:
         pool = await pool_manager.get_pool(
             host=settings.teiid_pg_host,
             port=settings.teiid_pg_port,
             database=database,
-            username=user_vdb.vdb_username,
-            password=user_vdb.get_decrypted_password(),
+            username=teiid_username,
+            password=teiid_password,
         )
         async with pool.acquire() as conn:
             sql = f'SELECT * FROM "{payload.tableName}" LIMIT $1'
