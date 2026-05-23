@@ -95,7 +95,7 @@
         </access-control>
     </management>
     <profile>
-        <subsystem xmlns="urn:jboss:domain:logging:7.0">
+        <subsystem xmlns="urn:jboss:domain:logging:8.0">
             <console-handler name="CONSOLE">
                 <level name="INFO"/>
                 <formatter>
@@ -445,10 +445,19 @@
         <subsystem xmlns="urn:jboss:domain:remoting:4.0">
             <http-connector name="http-remoting-connector" connector-ref="default" security-realm="ApplicationRealm"/>
         </subsystem>
+        <subsystem xmlns="urn:jboss:domain:request-controller:1.0"/>
         <subsystem xmlns="urn:jboss:domain:resource-adapters:5.0">
             <resource-adapters>
                 <resource-adapter id="file">
                     <module slot="main" id="org.jboss.teiid.resource-adapter.file"/>
+                    <connection-definitions>
+                        <connection-definition class-name="org.teiid.resource.adapter.file.FileManagedConnectionFactory" jndi-name="java:/fileDS" enabled="true" use-java-context="true" pool-name="fileDS">
+                            <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                        </connection-definition>
+                        <connection-definition class-name="org.teiid.resource.adapter.file.FileManagedConnectionFactory" jndi-name="java:/excelDS" enabled="true" use-java-context="true" pool-name="excelDS">
+                            <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                        </connection-definition>
+                    </connection-definitions>
                 </resource-adapter>
                 <resource-adapter id="ftp">
                     <module slot="main" id="org.jboss.teiid.resource-adapter.ftp"/>
@@ -469,10 +478,10 @@
                     <module slot="main" id="org.jboss.teiid.resource-adapter.salesforce"/>
                 </resource-adapter>
                 <resource-adapter id="salesforce-34">
-                    <module id="org.jboss.teiid.resource-adapter.salesforce-34"/>
+                    <module slot="main" id="org.jboss.teiid.resource-adapter.salesforce-34"/>
                 </resource-adapter>
                 <resource-adapter id="salesforce-41">
-                    <module id="org.jboss.teiid.resource-adapter.salesforce-41"/>
+                    <module slot="main" id="org.jboss.teiid.resource-adapter.salesforce-41"/>
                 </resource-adapter>
                 <resource-adapter id="webservice">
                     <module slot="main" id="org.jboss.teiid.resource-adapter.webservice"/>
@@ -500,15 +509,7 @@
                 </resource-adapter>
             </resource-adapters>
         </subsystem>
-        <subsystem xmlns="urn:jboss:domain:request-controller:1.0"/>
         <subsystem xmlns="urn:jboss:domain:sar:1.0"/>
-        <subsystem xmlns="urn:jboss:domain:security-manager:1.0">
-            <deployment-permissions>
-                <maximum-set>
-                    <permission class="java.security.AllPermission"/>
-                </maximum-set>
-            </deployment-permissions>
-        </subsystem>
         <subsystem xmlns="urn:jboss:domain:security:2.0">
             <security-domains>
                 <security-domain name="other" cache-type="default">
@@ -552,18 +553,25 @@
                 </security-domain>
             </security-domains>
         </subsystem>
+        <subsystem xmlns="urn:jboss:domain:security-manager:1.0">
+            <deployment-permissions>
+                <maximum-set>
+                    <permission class="java.security.AllPermission"/>
+                </maximum-set>
+            </deployment-permissions>
+        </subsystem>
         <subsystem xmlns="urn:jboss:domain:teiid:1.2">
             <buffer-manager disk-max-space-mb="51200"/>
-            <resultset-cache infinispan-container="teiid" name="resultset"/>
-            <preparedplan-cache infinispan-container="teiid" name="preparedplan"/>
+            <policy-decider-module>org.jboss.teiid</policy-decider-module>
+            <resultset-cache infinispan-container="teiid"/>
+            <preparedplan-cache infinispan-container="teiid"/>
             <authentication security-domain="teiid-security"/>
             <transport name="local"/>
             <transport name="odata"/>
-            <transport name="jdbc" protocol="teiid" socket-binding="teiid-jdbc"/>
-            <transport name="odbc" protocol="pg" socket-binding="teiid-odbc">
+            <transport name="jdbc" socket-binding="teiid-jdbc" protocol="teiid"/>
+            <transport name="odbc" socket-binding="teiid-odbc" protocol="pg">
                 <ssl mode="disabled"/>
             </transport>
-            <policy-decider-module>org.jboss.teiid</policy-decider-module>
             <translator name="jdbc-simple" module="org.jboss.teiid.translator.jdbc"/>
             <translator name="jdbc-ansi" module="org.jboss.teiid.translator.jdbc"/>
             <translator name="access" module="org.jboss.teiid.translator.jdbc"/>
@@ -678,11 +686,11 @@
         </interface>
     </interfaces>
     <socket-binding-group name="standard-sockets" default-interface="public" port-offset="${jboss.socket.binding.port-offset:0}">
-        <socket-binding name="management-http" interface="management" port="${jboss.management.http.port:9990}"/>
-        <socket-binding name="management-https" interface="management" port="${jboss.management.https.port:9993}"/>
         <socket-binding name="ajp" port="${jboss.ajp.port:8009}"/>
         <socket-binding name="http" port="${jboss.http.port:8080}"/>
         <socket-binding name="https" port="${jboss.https.port:8443}"/>
+        <socket-binding name="management-http" interface="management" port="${jboss.management.http.port:9990}"/>
+        <socket-binding name="management-https" interface="management" port="${jboss.management.https.port:9993}"/>
         <socket-binding name="teiid-jdbc" port="31000"/>
         <socket-binding name="teiid-odbc" port="35432"/>
         <socket-binding name="txn-recovery-environment" port="4712"/>
@@ -691,4 +699,18 @@
             <remote-destination host="localhost" port="25"/>
         </outbound-socket-binding>
     </socket-binding-group>
+    <deployments>
+        <deployment name="5490120-vdb.xml" runtime-name="5490120-vdb.xml">
+            <content sha1="97c6f56412a934fc0715a13c4f0ba6be8fe1d28f"/>
+        </deployment>
+        <deployment name="6426044-vdb.xml" runtime-name="6426044-vdb.xml">
+            <content sha1="178008144cd75c09317e9a9928c6987ffc5bb826"/>
+        </deployment>
+        <deployment name="1395654-vdb.xml" runtime-name="1395654-vdb.xml">
+            <content sha1="bc1ae70eb58df0385ec631a69a9263c9e9b4a338"/>
+        </deployment>
+        <deployment name="933455-vdb.xml" runtime-name="933455-vdb.xml">
+            <content sha1="6b3c79d1ca931fcb68941160165aa4eb6365196b"/>
+        </deployment>
+    </deployments>
 </server>
