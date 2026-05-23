@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import {
   exchangeWithSupabase,
   exchangeWithClerk,
@@ -11,11 +12,15 @@ import {
 
 type AuthMethod = "password" | "supabase" | "clerk";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const tenantParam = searchParams.get("tenant");
+
   const [method, setMethod] = useState<AuthMethod>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [tenantSlug, setTenantSlug] = useState(tenantParam || "");
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,12 +30,13 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
+      const slug = tenantSlug.trim() || undefined;
       const result =
         method === "password"
-          ? await loginWithPassword(email, password)
+          ? await loginWithPassword(email, password, slug)
           : method === "clerk"
-            ? await exchangeWithClerk(token)
-            : await exchangeWithSupabase(token);
+            ? await exchangeWithClerk(token, slug)
+            : await exchangeWithSupabase(token, slug);
       storeToken(result.access_token);
       router.replace("/dashboard");
     } catch (err) {
@@ -45,6 +51,11 @@ export default function LoginPage() {
       <h1 className="mb-6 text-2xl font-semibold text-slate-900">
         Sign in to Tablescope
       </h1>
+      {tenantParam && (
+        <p className="mb-4 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700">
+          Signing in to tenant: <strong>{tenantParam}</strong>
+        </p>
+      )}
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -59,6 +70,24 @@ export default function LoginPage() {
             <option value="supabase">Supabase</option>
             <option value="clerk">Clerk</option>
           </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Tenant (optional)
+          </label>
+          <input
+            type="text"
+            value={tenantSlug}
+            onChange={(e) =>
+              setTenantSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))
+            }
+            className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+            placeholder="Leave blank for default tenant"
+          />
+          <p className="mt-1 text-xs text-slate-400">
+            Tenant slug — e.g. &quot;acme-corp&quot;. Leave blank for the default tenant.
+          </p>
         </div>
 
         {method === "password" ? (
@@ -118,10 +147,20 @@ export default function LoginPage() {
         </button>
       </form>
       <p className="mt-6 text-xs text-slate-500">
-        Select &quot;Email &amp; Password&quot; for direct login without an
-        external auth provider. Supabase and Clerk options exchange a
-        third-party JWT via the /api/auth/exchange endpoint.
+        To sign into a specific tenant, use{" "}
+        <code className="rounded bg-slate-100 px-1 py-0.5">
+          /login?tenant=your-slug
+        </code>{" "}
+        or enter the tenant slug above.
       </p>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -77,13 +77,12 @@ async def list_tenants(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.ADMIN)),
 ) -> list[TenantRead]:
-    """List all tenants. Service accounts see all; admin users see only their own."""
-    if context.is_service:
-        rows = await session.scalars(select(Tenant).order_by(Tenant.id))
-    else:
-        rows = await session.scalars(
-            select(Tenant).where(Tenant.id == context.tenant_id)
-        )
+    """List all tenants visible to the caller.
+
+    Admin users see all tenants so they can manage multi-tenant provisioning.
+    Service accounts also see all tenants.
+    """
+    rows = await session.scalars(select(Tenant).order_by(Tenant.id))
     return [TenantRead.model_validate(t) for t in rows]
 
 

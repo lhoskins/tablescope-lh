@@ -232,6 +232,9 @@ export default function TenantsPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
                   Created
                 </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
+                  Login URL
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -259,6 +262,16 @@ export default function TenantsPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-500">
                     {new Date(tenant.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-4 py-3 text-sm">
+                    <a
+                      href={`/login?tenant=${tenant.slug}`}
+                      className="text-brand underline hover:text-brand/80"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      /login?tenant={tenant.slug}
+                    </a>
                   </td>
                 </tr>
               ))}
