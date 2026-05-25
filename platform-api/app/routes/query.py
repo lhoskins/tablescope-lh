@@ -116,25 +116,36 @@ async def query_datasource(
     teiid_username = "test"
     teiid_password = "test"
 
-    try:
-        pool = await pool_manager.get_pool(
-            host=settings.teiid_pg_host,
-            port=settings.teiid_pg_port,
-            database=database,
-            username=teiid_username,
-            password=teiid_password,
-        )
-        async with pool.acquire() as conn:
-            # Teiid does not support parameterised LIMIT via PG wire, so we
-            # inline the value.  payload.limit is Pydantic-validated (1..10000).
-            sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
-            records: list[asyncpg.Record] = await conn.fetch(sql)
-    except Exception as exc:
-        logger.error("Query against VDB %s failed: %s", user_vdb.vdb_id, exc)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Query failed: {exc}",
-        ) from exc
+    pool_kwargs = dict(
+        host=settings.teiid_pg_host,
+        port=settings.teiid_pg_port,
+        database=database,
+        username=teiid_username,
+        password=teiid_password,
+    )
+    # Teiid does not support parameterised LIMIT via PG wire, so we
+    # inline the value.  payload.limit is Pydantic-validated (1..10000).
+    sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
+
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            pool = await pool_manager.get_pool(**pool_kwargs)
+            async with pool.acquire() as conn:
+                records = list(await conn.fetch(sql))
+            break
+        except Exception as exc:
+            last_exc = exc
+            err_msg = str(exc)
+            # TEIID40041/40042 = stale session after WildFly reload
+            if "TEIID4004" in err_msg and attempt == 0:
+                logger.warning("Stale Teiid session, evicting pool and retrying")
+                await pool_manager.evict_pool(**pool_kwargs)
+                continue
+            logger.error("Query against VDB %s failed: %s", user_vdb.vdb_id, exc)
+            raise HTTPException(status_code=502, detail=f"Query failed: {exc}") from exc
+    else:
+        raise HTTPException(status_code=502, detail=f"Query failed: {last_exc}") from last_exc
 
     columns: list[str] = list(records[0].keys()) if records else []
     rows = [dict(record) for record in records]

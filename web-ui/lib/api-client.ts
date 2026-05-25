@@ -63,7 +63,16 @@ async function request<T>(
     let detail = `Request failed: ${response.status}`;
     try {
       const payload = await response.json();
-      if (payload?.detail) detail = payload.detail;
+      if (payload?.detail) {
+        if (typeof payload.detail === "string") {
+          detail = payload.detail;
+        } else if (Array.isArray(payload.detail)) {
+          // Pydantic 422 returns [{loc, msg, ...}, ...]
+          detail = payload.detail.map((e: { msg?: string }) => e.msg ?? JSON.stringify(e)).join("; ");
+        } else {
+          detail = JSON.stringify(payload.detail);
+        }
+      }
     } catch {
       /* ignore */
     }

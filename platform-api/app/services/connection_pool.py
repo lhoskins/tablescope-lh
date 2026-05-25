@@ -81,6 +81,17 @@ class TeiidConnectionPoolManager:
             self._pools[key] = pool
             return pool
 
+    async def evict_pool(
+        self, *, host: str, port: int, database: str, username: str
+    ) -> None:
+        """Close and remove a specific pool (e.g. after a stale-session error)."""
+        key = PoolKey(host=host, port=port, database=database, username=username)
+        async with self._lock:
+            pool = self._pools.pop(key, None)
+            if pool is not None:
+                logger.info("Evicting stale Teiid pool %s", key)
+                await pool.close()
+
     async def close_all(self) -> None:
         async with self._lock:
             for key, pool in list(self._pools.items()):
