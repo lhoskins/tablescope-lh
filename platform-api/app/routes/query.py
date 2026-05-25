@@ -115,14 +115,8 @@ async def query_datasource(
     teiid_username = "test"
     teiid_password = "test"
 
-    pool_kwargs = dict(
-        host=settings.teiid_pg_host,
-        port=settings.teiid_pg_port,
-        database=database,
-        username=teiid_username,
-        password=teiid_password,
-    )
-    evict_kwargs = {k: v for k, v in pool_kwargs.items() if k != "password"}
+    teiid_host = settings.teiid_pg_host
+    teiid_port = settings.teiid_pg_port
 
     # Teiid does not support parameterised LIMIT via PG wire, so we
     # inline the value.  payload.limit is Pydantic-validated (1..10000).
@@ -131,7 +125,13 @@ async def query_datasource(
     last_exc: Exception | None = None
     for attempt in range(2):
         try:
-            pool = await pool_manager.get_pool(**pool_kwargs)
+            pool = await pool_manager.get_pool(
+                host=teiid_host,
+                port=teiid_port,
+                database=database,
+                username=teiid_username,
+                password=teiid_password,
+            )
             async with pool.acquire() as conn:
                 records = list(await conn.fetch(sql))
             break
@@ -141,7 +141,12 @@ async def query_datasource(
             # TEIID40041/40042 = stale session after VDB redeploy
             if "TEIID4004" in err_msg and attempt == 0:
                 logger.warning("Stale Teiid session, evicting pool and retrying")
-                await pool_manager.evict_pool(**evict_kwargs)
+                await pool_manager.evict_pool(
+                    host=teiid_host,
+                    port=teiid_port,
+                    database=database,
+                    username=teiid_username,
+                )
                 continue
             logger.error("Query against VDB %s failed: %s", user_vdb.vdb_id, exc)
             raise HTTPException(status_code=502, detail=f"Query failed: {exc}") from exc
