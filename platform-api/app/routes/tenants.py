@@ -16,10 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext, get_request_context
 from app.auth.rbac import Role, require_role
 from app.database import get_db
+from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user_vdb import UserVDB
-from app.models.shared_vdb import SharedVDB
 from app.schemas.tenant import (
     TenantCreate,
     TenantRead,

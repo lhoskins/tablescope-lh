@@ -17,20 +17,18 @@ insertion to the Java servlet.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
-from app.models.user import User
 from app.models.tenant import Tenant
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/upload", tags=["upload"])
