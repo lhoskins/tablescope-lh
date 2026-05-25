@@ -107,6 +107,14 @@ async def upload_file(
 
     logger.info("Teiid servlet response: %s", teiid_result)
 
+    # The servlet may return HTTP 200 but include an error in the JSON body
+    if "error" in teiid_result:
+        logger.error("Teiid servlet processing error: %s", teiid_result["error"])
+        raise HTTPException(
+            status_code=422,
+            detail=teiid_result["error"],
+        )
+
     # Build the datasource name from the filename (matches servlet convention)
     base_name = file.filename.rsplit(".", 1)[0].replace(" ", "_")
     extension = file.filename.rsplit(".", 1)[-1].upper() if "." in file.filename else ""
