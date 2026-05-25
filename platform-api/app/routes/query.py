@@ -123,6 +123,8 @@ async def query_datasource(
         username=teiid_username,
         password=teiid_password,
     )
+    evict_kwargs = {k: v for k, v in pool_kwargs.items() if k != "password"}
+
     # Teiid does not support parameterised LIMIT via PG wire, so we
     # inline the value.  payload.limit is Pydantic-validated (1..10000).
     sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
@@ -137,10 +139,10 @@ async def query_datasource(
         except Exception as exc:
             last_exc = exc
             err_msg = str(exc)
-            # TEIID40041/40042 = stale session after WildFly reload
+            # TEIID40041/40042 = stale session after VDB redeploy
             if "TEIID4004" in err_msg and attempt == 0:
                 logger.warning("Stale Teiid session, evicting pool and retrying")
-                await pool_manager.evict_pool(**pool_kwargs)
+                await pool_manager.evict_pool(**evict_kwargs)
                 continue
             logger.error("Query against VDB %s failed: %s", user_vdb.vdb_id, exc)
             raise HTTPException(status_code=502, detail=f"Query failed: {exc}") from exc
