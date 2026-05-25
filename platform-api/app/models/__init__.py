@@ -3,6 +3,7 @@
 from app.models.base import Base
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
+from app.models.saved_query import SavedQuery
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -13,6 +14,7 @@ __all__ = [
     "OrganizationVDB",
     "Project",
     "ProjectMember",
+    "SavedQuery",
     "SharedVDB",
     "Tenant",
     "User",

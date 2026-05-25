@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { getUserMeta } from "@/lib/auth";
 
 type Tenant = {
   id: number;
@@ -14,6 +15,15 @@ type Tenant = {
 };
 
 export default function TenantsPage() {
+  const meta = getUserMeta();
+  const isSuperAdmin = meta?.is_super_admin ?? false;
+
+  return isSuperAdmin ? <SuperAdminView /> : <TenantAdminView />;
+}
+
+// ── Super Admin: Full tenant provisioning ───────────────────────────
+
+function SuperAdminView() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [slug, setSlug] = useState("");
@@ -75,7 +85,7 @@ export default function TenantsPage() {
             Tenant Provisioning
           </h1>
           <p className="text-sm text-slate-500">
-            Create and manage customer/organization tenants
+            Create and manage customer/organization tenants (Super Admin)
           </p>
         </div>
         <button
@@ -217,47 +227,25 @@ export default function TenantsPage() {
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
-                  ID
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
-                  Slug
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
-                  Name
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
-                  Created
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
-                  Login URL
-                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">ID</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Slug</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Name</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Created</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Login URL</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {tenantsQuery.data.map((tenant) => (
                 <tr key={tenant.id}>
-                  <td className="px-4 py-3 text-sm text-slate-500">
-                    {tenant.id}
-                  </td>
-                  <td className="px-4 py-3 text-sm font-mono text-slate-900">
-                    {tenant.slug}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-700">
-                    {tenant.name}
-                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-500">{tenant.id}</td>
+                  <td className="px-4 py-3 text-sm font-mono text-slate-900">{tenant.slug}</td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{tenant.name}</td>
                   <td className="px-4 py-3">
                     {tenant.is_active ? (
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
-                        Active
-                      </span>
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">Active</span>
                     ) : (
-                      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">
-                        Inactive
-                      </span>
+                      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">Inactive</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-500">
@@ -277,6 +265,79 @@ export default function TenantsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── Tenant Admin: Own tenant management only ────────────────────────
+
+function TenantAdminView() {
+  const meta = getUserMeta();
+
+  const myTenantQuery = useQuery<Tenant>({
+    queryKey: ["my-tenant"],
+    queryFn: () => apiClient.get<Tenant>("/api/tenants/me"),
+  });
+
+  return (
+    <section>
+      <header className="mb-6">
+        <h1 className="text-2xl font-semibold text-slate-900">My Tenant</h1>
+        <p className="text-sm text-slate-500">
+          View and manage your organization settings
+        </p>
+      </header>
+
+      {myTenantQuery.isLoading && <p>Loading tenant info...</p>}
+      {myTenantQuery.error && (
+        <p className="text-red-600">{(myTenantQuery.error as Error).message}</p>
+      )}
+
+      {myTenantQuery.data && (
+        <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs font-medium uppercase text-slate-400">Organization Name</p>
+              <p className="text-sm text-slate-900">{myTenantQuery.data.name}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-slate-400">Slug</p>
+              <p className="text-sm font-mono text-slate-900">{myTenantQuery.data.slug}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-slate-400">Status</p>
+              {myTenantQuery.data.is_active ? (
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">Active</span>
+              ) : (
+                <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">Inactive</span>
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase text-slate-400">Created</p>
+              <p className="text-sm text-slate-900">
+                {new Date(myTenantQuery.data.created_at).toLocaleDateString()}
+              </p>
+            </div>
+            <div className="col-span-2">
+              <p className="text-xs font-medium uppercase text-slate-400">Login URL</p>
+              <a
+                href={`/${myTenantQuery.data.slug}/login`}
+                className="text-sm text-brand underline hover:text-brand/80"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                /{myTenantQuery.data.slug}/login
+              </a>
+            </div>
+          </div>
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <p className="text-xs text-slate-400">
+              To manage users within your tenant, go to Admin &gt; Users.
+              Contact a super admin to provision new tenants.
+            </p>
+          </div>
         </div>
       )}
     </section>

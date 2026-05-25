@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
 
 type Project = {
@@ -15,6 +16,7 @@ type Project = {
 };
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
@@ -46,10 +48,56 @@ export default function ProjectsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
   });
 
+  const { privateProjects, sharedProjects } = useMemo(() => {
+    if (!data) return { privateProjects: [], sharedProjects: [] };
+    return {
+      privateProjects: data.filter((p) => !p.is_shared),
+      sharedProjects: data.filter((p) => p.is_shared),
+    };
+  }, [data]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     createMutation.mutate({ name, description, is_shared: isShared });
+  }
+
+  function ProjectCard({ project }: { project: Project }) {
+    return (
+      <li
+        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
+        onClick={() => router.push(`/projects/${project.id}`)}
+      >
+        <div>
+          <p className="font-medium text-slate-900">{project.name}</p>
+          <p className="text-sm text-slate-500">
+            {project.description ?? "No description"}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {project.is_shared ? (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
+              shared
+            </span>
+          ) : (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+              private
+            </span>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm("Delete this project?")) {
+                deleteMutation.mutate(project.id);
+              }
+            }}
+            className="text-xs text-red-500 hover:text-red-700"
+          >
+            Delete
+          </button>
+        </div>
+      </li>
+    );
   }
 
   return (
@@ -112,11 +160,6 @@ export default function ProjectsPage() {
                 {isShared ? "Shared project" : "Private project"}
               </span>
             </div>
-            <p className="text-xs text-slate-500">
-              {isShared
-                ? "Shared projects use the tenant-wide SharedVDB. All tenant members with access can query the data."
-                : "Private projects route queries to your personal UserVDB. Only you can access the data until you share it."}
-            </p>
             {error && (
               <p className="text-sm text-red-600">{error}</p>
             )}
@@ -143,43 +186,33 @@ export default function ProjectsPage() {
           </p>
         </div>
       )}
-      {data && data.length > 0 && (
-        <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
-          {data.map((project) => (
-            <li
-              key={project.id}
-              className="flex items-center justify-between px-4 py-3"
-            >
-              <div>
-                <p className="font-medium text-slate-900">{project.name}</p>
-                <p className="text-sm text-slate-500">
-                  {project.description ?? "No description"}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                {project.is_shared ? (
-                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
-                    shared
-                  </span>
-                ) : (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                    private
-                  </span>
-                )}
-                <button
-                  onClick={() => {
-                    if (confirm("Delete this project?")) {
-                      deleteMutation.mutate(project.id);
-                    }
-                  }}
-                  className="text-xs text-red-500 hover:text-red-700"
-                >
-                  Delete
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+
+      {/* Private Projects */}
+      {privateProjects.length > 0 && (
+        <div className="mb-6">
+          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
+            Private
+          </h2>
+          <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
+            {privateProjects.map((project) => (
+              <ProjectCard key={project.id} project={project} />
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Shared Projects */}
+      {sharedProjects.length > 0 && (
+        <div>
+          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
+            Shared
+          </h2>
+          <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
+            {sharedProjects.map((project) => (
+              <ProjectCard key={project.id} project={project} />
+            ))}
+          </ul>
+        </div>
       )}
     </section>
   );

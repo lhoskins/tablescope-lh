@@ -8,6 +8,7 @@ import {
   exchangeWithClerk,
   loginWithPassword,
   storeToken,
+  storeUserMeta,
 } from "@/lib/auth";
 
 type AuthMethod = "password" | "supabase" | "clerk";
@@ -38,6 +39,12 @@ function LoginForm() {
             ? await exchangeWithClerk(token, slug)
             : await exchangeWithSupabase(token, slug);
       storeToken(result.access_token);
+      storeUserMeta({
+        role: result.role,
+        is_super_admin: result.is_super_admin,
+        tenant_id: result.tenant_id,
+        user_id: result.user_id,
+      });
       router.replace("/dashboard");
     } catch (err) {
       setError((err as Error).message);

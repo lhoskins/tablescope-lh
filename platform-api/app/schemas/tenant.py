@@ -65,5 +65,6 @@ class UserRead(BaseModel):
     role: str
     external_id: str | None
     is_active: bool
+    is_super_admin: bool = False
     created_at: datetime
     updated_at: datetime

@@ -34,6 +34,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 
+async def _require_super_admin(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> RequestContext:
+    """Only super-admins can provision new tenants."""
+    if context.is_service:
+        return context
+    user = await session.get(User, context.user_id)
+    if user is None or not user.is_super_admin:
+        raise HTTPException(status_code=403, detail="Only super-admins can provision tenants")
+    return context
+
+
 @router.post(
     "",
     response_model=TenantRead,
@@ -42,7 +55,7 @@ router = APIRouter(prefix="/tenants", tags=["tenants"])
 async def create_tenant(
     payload: TenantCreate,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.ADMIN)),
+    context: RequestContext = Depends(_require_super_admin),
 ) -> TenantRead:
     tenant = Tenant(slug=payload.slug, name=payload.name, external_id=payload.external_id)
     session.add(tenant)
@@ -125,13 +138,21 @@ async def list_tenants(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.ADMIN)),
 ) -> list[TenantRead]:
-    """List all tenants visible to the caller.
+    """List tenants visible to the caller.
 
-    Admin users see all tenants so they can manage multi-tenant provisioning.
-    Service accounts also see all tenants.
+    Super-admins see all tenants. Regular admins see only their own.
     """
-    rows = await session.scalars(select(Tenant).order_by(Tenant.id))
-    return [TenantRead.model_validate(t) for t in rows]
+    if context.is_service:
+        rows = await session.scalars(select(Tenant).order_by(Tenant.id))
+        return [TenantRead.model_validate(t) for t in rows]
+
+    user = await session.get(User, context.user_id)
+    if user and user.is_super_admin:
+        rows = await session.scalars(select(Tenant).order_by(Tenant.id))
+        return [TenantRead.model_validate(t) for t in rows]
+
+    tenant = await session.get(Tenant, context.tenant_id)
+    return [TenantRead.model_validate(tenant)] if tenant else []
 
 
 @router.get("/me", response_model=TenantRead)

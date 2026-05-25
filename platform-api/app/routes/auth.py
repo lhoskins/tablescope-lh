@@ -68,6 +68,7 @@ async def exchange_token(
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
+        is_super_admin=user.is_super_admin,
     )
 
 
@@ -102,4 +103,5 @@ async def direct_login(
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
+        is_super_admin=user.is_super_admin,
     )

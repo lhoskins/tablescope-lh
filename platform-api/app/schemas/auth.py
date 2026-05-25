@@ -30,3 +30,4 @@ class AuthTokenResponse(BaseModel):
     tenant_id: int
     user_id: int
     role: str
+    is_super_admin: bool = False

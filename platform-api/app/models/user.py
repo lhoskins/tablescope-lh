@@ -27,6 +27,7 @@ class User(TimestampMixin, Base):
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(32), default="viewer", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")  # type: ignore[name-defined]  # noqa: F821
