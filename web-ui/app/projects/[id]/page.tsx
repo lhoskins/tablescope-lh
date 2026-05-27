@@ -99,6 +99,12 @@ export default function ProjectWorkspacePage() {
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
+  // ── Saved query click-to-execute ──────────────────────────────────
+  const [activeSavedQueryId, setActiveSavedQueryId] = useState<number | null>(null);
+  const [savedQueryResult, setSavedQueryResult] = useState<QueryResult | null>(null);
+  const [savedQueryError, setSavedQueryError] = useState<string | null>(null);
+  const [savedQueryLoading, setSavedQueryLoading] = useState(false);
+
   // ── Query execution result ────────────────────────────────────────
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
@@ -247,6 +253,33 @@ export default function ProjectWorkspacePage() {
       return [];
     }
   }, []);
+
+  // ── Click-to-execute saved query ─────────────────────────────────
+
+  const executeSavedQuery = useCallback(async (q: SavedQuery) => {
+    if (activeSavedQueryId === q.id) {
+      setActiveSavedQueryId(null);
+      setSavedQueryResult(null);
+      setSavedQueryError(null);
+      return;
+    }
+    setActiveSavedQueryId(q.id);
+    setSavedQueryLoading(true);
+    setSavedQueryError(null);
+    setSavedQueryResult(null);
+    try {
+      const tableName = q.left_datasource ?? "";
+      const result = await apiClient.post<QueryResult>("/api/query/datasource", {
+        tableName,
+        limit: 100,
+      });
+      setSavedQueryResult(result);
+    } catch (err) {
+      setSavedQueryError((err as Error).message);
+    } finally {
+      setSavedQueryLoading(false);
+    }
+  }, [activeSavedQueryId]);
 
   // ── Click-to-view datasource ──────────────────────────────────────
 
@@ -845,9 +878,18 @@ export default function ProjectWorkspacePage() {
             <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
               {queriesQuery.data.map((q) => (
                 <li key={q.id} className="px-4 py-3">
-                  <div className="flex items-center justify-between">
+                  <div
+                    className={`flex items-center justify-between cursor-pointer rounded-md px-2 py-1 transition-colors ${
+                      activeSavedQueryId === q.id
+                        ? "bg-brand/5"
+                        : "hover:bg-slate-50"
+                    }`}
+                    onClick={() => {
+                      if (renamingId !== q.id) executeSavedQuery(q);
+                    }}
+                  >
                     {renamingId === q.id ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="text"
                           value={renameValue}
@@ -871,12 +913,12 @@ export default function ProjectWorkspacePage() {
                       </div>
                     ) : (
                       <div
-                        onDoubleClick={() => {
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
                           setRenamingId(q.id);
                           setRenameValue(q.name);
                         }}
-                        className="cursor-pointer"
-                        title="Double-click to rename"
+                        title="Click to run query, double-click to rename"
                       >
                         <p className="text-sm font-medium text-slate-900">{q.name}</p>
                         {q.description && <p className="text-xs text-slate-500">{q.description}</p>}
@@ -887,7 +929,7 @@ export default function ProjectWorkspacePage() {
                         )}
                       </div>
                     )}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <span className="text-xs text-slate-400">
                         {q.join_type ?? "N/A"}
                       </span>
@@ -903,6 +945,52 @@ export default function ProjectWorkspacePage() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Saved query results rendered underneath */}
+                  {activeSavedQueryId === q.id && (
+                    <div className="mt-3 ml-2">
+                      {savedQueryLoading && (
+                        <p className="text-sm text-slate-500">Executing query...</p>
+                      )}
+                      {savedQueryError && (
+                        <p className="text-sm text-red-600">{savedQueryError}</p>
+                      )}
+                      {savedQueryResult && savedQueryResult.rows.length > 0 && (
+                        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+                          <table className="min-w-full divide-y divide-slate-200">
+                            <thead className="bg-slate-50">
+                              <tr>
+                                {savedQueryResult.columns.map((col) => (
+                                  <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
+                                    {col}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {savedQueryResult.rows.slice(0, 50).map((row, i) => (
+                                <tr key={i}>
+                                  {savedQueryResult.columns.map((col) => (
+                                    <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
+                                      {String(row[col] ?? "")}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {savedQueryResult.rows.length > 50 && (
+                            <p className="px-3 py-2 text-xs text-slate-400">
+                              Showing first 50 of {savedQueryResult.rows.length} rows
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {savedQueryResult && savedQueryResult.rows.length === 0 && (
+                        <p className="text-sm text-slate-400">Query returned no results.</p>
+                      )}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
