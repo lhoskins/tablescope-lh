@@ -254,6 +254,8 @@ export default function ProjectWorkspacePage() {
   const [rightCol, setRightCol] = useState("");
   const [leftCols, setLeftCols] = useState<string[]>([]);
   const [rightCols, setRightCols] = useState<string[]>([]);
+  const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [filters, setFilters] = useState<{ column: string; operand: string; value: string }[]>([]);
 
   // ── Save dialog ───────────────────────────────────────────────────
   const [showSave, setShowSave] = useState(false);
@@ -542,18 +544,64 @@ export default function ProjectWorkspacePage() {
     e.dataTransfer.dropEffect = "copy";
   }, []);
 
-  // ── Build SQL from join config ────────────────────────────────────
+  // ── Build SQL from query config ───────────────────────────────────
+
+  const allAvailableCols = useMemo(() => {
+    const cols: string[] = [];
+    if (leftDs) {
+      leftCols.forEach((c) => cols.push(leftDs.viewName + "." + c));
+    }
+    if (rightDs) {
+      rightCols.forEach((c) => cols.push(rightDs.viewName + "." + c));
+    }
+    return cols;
+  }, [leftDs, rightDs, leftCols, rightCols]);
 
   const generatedSql = useMemo(() => {
-    if (!leftDs || !rightDs) return "";
+    if (!leftDs) return "";
     const l = `"${leftDs.viewName}"`;
-    const r = `"${rightDs.viewName}"`;
-    if (joinType === "CROSS JOIN") {
-      return `SELECT * FROM ${l} ${joinType} ${r}`;
+    const fieldList = selectedFields.length > 0
+      ? selectedFields.map((f) => {
+          const [tbl, col] = f.split(".");
+          return `"${tbl}"."${col}"`;
+        }).join(", ")
+      : "*";
+
+    let sql: string;
+    if (!rightDs) {
+      sql = `SELECT ${fieldList} FROM ${l}`;
+    } else {
+      const r = `"${rightDs.viewName}"`;
+      if (joinType === "CROSS JOIN") {
+        sql = `SELECT ${fieldList} FROM ${l} ${joinType} ${r}`;
+      } else if (leftCol && rightCol) {
+        sql = `SELECT ${fieldList} FROM ${l} ${joinType} ${r} ON ${l}."${leftCol}" = ${r}."${rightCol}"`;
+      } else {
+        return "";
+      }
     }
-    if (!leftCol || !rightCol) return "";
-    return `SELECT * FROM ${l} ${joinType} ${r} ON ${l}."${leftCol}" = ${r}."${rightCol}"`;
-  }, [leftDs, rightDs, joinType, leftCol, rightCol]);
+
+    if (filters.length > 0) {
+      const whereClauses = filters
+        .filter((f) => f.column && f.operand && f.value)
+        .map((f) => {
+          const [tbl, col] = f.column.split(".");
+          const qualCol = `"${tbl}"."${col}"`;
+          if (f.operand === "IN") {
+            const vals = f.value.split(",").map((v) => `'${v.trim()}'`).join(", ");
+            return `${qualCol} IN (${vals})`;
+          }
+          if (f.operand === "LIKE") {
+            return `${qualCol} LIKE '${f.value}'`;
+          }
+          return `${qualCol} ${f.operand} '${f.value}'`;
+        });
+      if (whereClauses.length > 0) {
+        sql += " WHERE " + whereClauses.join(" AND ");
+      }
+    }
+    return sql;
+  }, [leftDs, rightDs, joinType, leftCol, rightCol, selectedFields, filters]);
 
   // ── Execute query ─────────────────────────────────────────────────
 
@@ -566,6 +614,7 @@ export default function ProjectWorkspacePage() {
         const result = await apiClient.post<QueryResult>("/api/query/datasource", {
           tableName: leftDs?.viewName ?? "",
           limit: 100,
+          project_id: projectId,
         });
         setQueryResult(result);
       } catch (err) {
@@ -574,7 +623,7 @@ export default function ProjectWorkspacePage() {
         setExecuting(false);
       }
     },
-    [leftDs]
+    [leftDs, projectId]
   );
 
   // ── Permission checks ────────────────────────────────────────────
@@ -792,6 +841,8 @@ export default function ProjectWorkspacePage() {
                     setRightDs(null);
                     setShowJoinDialog(false);
                     setShowSave(false);
+                    setSelectedFields([]);
+                    setFilters([]);
                   }}
                   className="text-sm text-slate-500 hover:text-slate-700"
                 >
@@ -844,6 +895,8 @@ export default function ProjectWorkspacePage() {
                         onClick={() => {
                           setLeftDs(null);
                           setLeftCols([]);
+                          setSelectedFields([]);
+                          setFilters([]);
                           setShowJoinDialog(false);
                         }}
                         className="mt-2 text-xs text-red-500 hover:text-red-700"
@@ -852,11 +905,11 @@ export default function ProjectWorkspacePage() {
                       </button>
                     </div>
                   ) : (
-                    <p className="text-sm text-slate-400">Drop left datasource here</p>
+                    <p className="text-sm text-slate-400">Drop datasource here</p>
                   )}
                 </div>
 
-                {/* Right box */}
+                {/* Right box (optional for joins) */}
                 <div
                   onDrop={handleDropRight}
                   onDragOver={allowDrop}
@@ -874,6 +927,7 @@ export default function ProjectWorkspacePage() {
                         onClick={() => {
                           setRightDs(null);
                           setRightCols([]);
+                          setSelectedFields((prev) => prev.filter((f) => !f.startsWith(rightDs.viewName + ".")));
                           setShowJoinDialog(false);
                         }}
                         className="mt-2 text-xs text-red-500 hover:text-red-700"
@@ -882,12 +936,12 @@ export default function ProjectWorkspacePage() {
                       </button>
                     </div>
                   ) : (
-                    <p className="text-sm text-slate-400">Drop right datasource here</p>
+                    <p className="text-sm text-slate-400">Drop second datasource here (optional)</p>
                   )}
                 </div>
               </div>
 
-              {/* Join Parameters Dialog (Tableau-like) */}
+              {/* Join Parameters Dialog (only when both datasources present) */}
               {showJoinDialog && leftDs && rightDs && (
                 <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
                   <h4 className="mb-3 text-sm font-semibold text-blue-900">
@@ -939,14 +993,137 @@ export default function ProjectWorkspacePage() {
                       </select>
                     </div>
                   </div>
+                </div>
+              )}
 
+              {/* Field Selection */}
+              {leftDs && allAvailableCols.length > 0 && (
+                <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-semibold text-slate-900">Select Fields</h4>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setSelectedFields([...allAvailableCols])}
+                        className="text-xs text-blue-600 hover:text-blue-800"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        onClick={() => setSelectedFields([])}
+                        className="text-xs text-slate-500 hover:text-slate-700"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {allAvailableCols.map((col) => (
+                      <label key={col} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs cursor-pointer hover:bg-slate-100">
+                        <input
+                          type="checkbox"
+                          checked={selectedFields.includes(col)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedFields((prev) => [...prev, col]);
+                            } else {
+                              setSelectedFields((prev) => prev.filter((f) => f !== col));
+                            }
+                          }}
+                          className="h-3 w-3 rounded border-slate-300"
+                        />
+                        <span className="text-slate-700">{col.split(".")[1]}</span>
+                        {rightDs && (
+                          <span className="text-slate-400">({col.split(".")[0]})</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {selectedFields.length === 0 ? "All fields selected (SELECT *)" : `${selectedFields.length} field(s) selected`}
+                  </p>
+                </div>
+              )}
+
+              {/* Filters */}
+              {leftDs && allAvailableCols.length > 0 && (
+                <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-semibold text-slate-900">Filters</h4>
+                    <button
+                      onClick={() => setFilters((prev) => [...prev, { column: "", operand: "=", value: "" }])}
+                      className="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      + Add Filter
+                    </button>
+                  </div>
+                  {filters.length === 0 && (
+                    <p className="text-xs text-slate-400">No filters. Click &quot;+ Add Filter&quot; to add a WHERE condition.</p>
+                  )}
+                  {filters.map((f, idx) => (
+                    <div key={idx} className="flex items-center gap-2 mb-2">
+                      <select
+                        value={f.column}
+                        onChange={(e) => {
+                          const updated = [...filters];
+                          updated[idx] = { ...updated[idx], column: e.target.value };
+                          setFilters(updated);
+                        }}
+                        className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="">Column...</option>
+                        {allAvailableCols.map((c) => (
+                          <option key={c} value={c}>{c.split(".")[1]}{rightDs ? ` (${c.split(".")[0]})` : ""}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={f.operand}
+                        onChange={(e) => {
+                          const updated = [...filters];
+                          updated[idx] = { ...updated[idx], operand: e.target.value };
+                          setFilters(updated);
+                        }}
+                        className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="=">=</option>
+                        <option value="!=">!=</option>
+                        <option value=">">&gt;</option>
+                        <option value="<">&lt;</option>
+                        <option value=">=">&gt;=</option>
+                        <option value="<=">&lt;=</option>
+                        <option value="LIKE">LIKE</option>
+                        <option value="IN">IN</option>
+                      </select>
+                      <input
+                        type="text"
+                        value={f.value}
+                        onChange={(e) => {
+                          const updated = [...filters];
+                          updated[idx] = { ...updated[idx], value: e.target.value };
+                          setFilters(updated);
+                        }}
+                        placeholder={f.operand === "IN" ? "val1, val2, ..." : "Value"}
+                        className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                      />
+                      <button
+                        onClick={() => setFilters((prev) => prev.filter((_, i) => i !== idx))}
+                        className="text-xs text-red-500 hover:text-red-700"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* SQL Preview + Actions */}
+              {leftDs && (
+                <div className="mb-4">
                   {generatedSql && (
-                    <div className="mt-3 rounded bg-slate-800 p-3">
+                    <div className="mb-3 rounded bg-slate-800 p-3">
                       <p className="text-xs font-mono text-slate-300 break-all">{generatedSql}</p>
                     </div>
                   )}
-
-                  <div className="mt-3 flex gap-2">
+                  <div className="flex gap-2">
                     <button
                       onClick={() => setShowSave(true)}
                       disabled={!generatedSql}

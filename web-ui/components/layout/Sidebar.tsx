@@ -10,7 +10,6 @@ type NavItem = { href: string; label: string };
 
 const pillItems: NavItem[] = [
   { href: "/projects", label: "Projects" },
-  { href: "/query", label: "Queries" },
   { href: "/upload", label: "Datasources" },
 ];
 
