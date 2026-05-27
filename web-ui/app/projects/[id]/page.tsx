@@ -40,6 +40,7 @@ type Member = {
   project_id: number;
   user_id: number;
   role: string;
+  is_active: boolean;
   email: string;
   display_name: string | null;
 };
@@ -103,6 +104,12 @@ export default function ProjectWorkspacePage() {
   const [queryError, setQueryError] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
 
+  // ── Datasource click-to-view result ───────────────────────────────
+  const [dsResult, setDsResult] = useState<QueryResult | null>(null);
+  const [dsError, setDsError] = useState<string | null>(null);
+  const [dsLoading, setDsLoading] = useState(false);
+  const [activeDsName, setActiveDsName] = useState<string | null>(null);
+
   // ── Member assignment ─────────────────────────────────────────────
   const [addUserId, setAddUserId] = useState<number | null>(null);
   const [addRole, setAddRole] = useState("member");
@@ -115,8 +122,8 @@ export default function ProjectWorkspacePage() {
   });
 
   const datasourcesQuery = useQuery<Datasource[]>({
-    queryKey: ["datasources"],
-    queryFn: () => apiClient.get<Datasource[]>("/api/upload/datasources"),
+    queryKey: ["project-datasources", projectId],
+    queryFn: () => apiClient.get<Datasource[]>(`/api/projects/${projectId}/datasources`),
   });
 
   const queriesQuery = useQuery<SavedQuery[]>({
@@ -147,6 +154,7 @@ export default function ProjectWorkspacePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
     },
   });
 
@@ -156,6 +164,7 @@ export default function ProjectWorkspacePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
     },
   });
 
@@ -211,7 +220,14 @@ export default function ProjectWorkspacePage() {
     },
   });
 
-  const removeMemberMutation = useMutation({
+  const deactivateMemberMutation = useMutation({
+    mutationFn: (userId: number) =>
+      apiClient.put(`/api/projects/${projectId}/members/${userId}/deactivate`, {}),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["project-members", projectId] }),
+  });
+
+  const deleteMemberMutation = useMutation({
     mutationFn: (userId: number) =>
       apiClient.delete(`/api/projects/${projectId}/members/${userId}`),
     onSuccess: () =>
@@ -231,6 +247,32 @@ export default function ProjectWorkspacePage() {
       return [];
     }
   }, []);
+
+  // ── Click-to-view datasource ──────────────────────────────────────
+
+  const viewDatasource = useCallback(async (ds: Datasource) => {
+    if (activeDsName === ds.viewName) {
+      setActiveDsName(null);
+      setDsResult(null);
+      setDsError(null);
+      return;
+    }
+    setActiveDsName(ds.viewName);
+    setDsLoading(true);
+    setDsError(null);
+    setDsResult(null);
+    try {
+      const result = await apiClient.post<QueryResult>("/api/query/datasource", {
+        tableName: ds.viewName,
+        limit: 100,
+      });
+      setDsResult(result);
+    } catch (err) {
+      setDsError((err as Error).message);
+    } finally {
+      setDsLoading(false);
+    }
+  }, [activeDsName]);
 
   // ── Drag-and-drop handlers ────────────────────────────────────────
 
@@ -329,6 +371,20 @@ export default function ProjectWorkspacePage() {
     [tenantUsersQuery.data, existingMemberIds]
   );
 
+  // ── Split members into active / inactive ──────────────────────────
+
+  const { activeMembers, inactiveMembers } = useMemo(() => {
+    const members = membersQuery.data ?? [];
+    return {
+      activeMembers: members.filter((m) => m.is_active),
+      inactiveMembers: members.filter((m) => !m.is_active),
+    };
+  }, [membersQuery.data]);
+
+  // ── Project datasources for query builder ─────────────────────────
+
+  const projectDatasources = datasourcesQuery.data ?? [];
+
   // ── Render ────────────────────────────────────────────────────────
 
   if (projectQuery.isLoading) return <p>Loading project...</p>;
@@ -373,7 +429,7 @@ export default function ProjectWorkspacePage() {
             {isOwner && !project.is_shared && (
               <button
                 onClick={() => {
-                  const files = (datasourcesQuery.data ?? []).map((d) => d.fileName);
+                  const files = projectDatasources.map((d) => d.fileName);
                   shareMutation.mutate(files);
                 }}
                 disabled={shareMutation.isPending}
@@ -416,26 +472,74 @@ export default function ProjectWorkspacePage() {
       {activeTab === "datasources" && (
         <div>
           {datasourcesQuery.isLoading && <p className="text-sm text-slate-500">Loading datasources...</p>}
-          {datasourcesQuery.data && datasourcesQuery.data.length === 0 && (
+          {projectDatasources.length === 0 && !datasourcesQuery.isLoading && (
             <p className="text-sm text-slate-400">No datasources. Upload files first.</p>
           )}
-          {datasourcesQuery.data && datasourcesQuery.data.length > 0 && (
+          {projectDatasources.length > 0 && (
             <div className="grid gap-2">
-              {datasourcesQuery.data.map((ds) => (
+              {projectDatasources.map((ds) => (
                 <div
                   key={ds.viewName}
                   draggable
                   onDragStart={(e) => handleDragStart(e, ds)}
-                  className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-4 py-3 cursor-grab active:cursor-grabbing hover:bg-slate-50"
+                  onClick={() => viewDatasource(ds)}
+                  className={`flex items-center justify-between rounded-md border px-4 py-3 cursor-pointer transition-colors ${
+                    activeDsName === ds.viewName
+                      ? "border-brand bg-brand/5"
+                      : "border-slate-200 bg-white hover:bg-slate-50"
+                  }`}
                 >
                   <div>
                     <p className="text-sm font-medium text-slate-900">{ds.fileName}</p>
                     <p className="text-xs text-slate-400 font-mono">View: {ds.viewName}</p>
                   </div>
-                  <span className="text-xs text-slate-400">{(ds.size / 1024).toFixed(1)} KB</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400">{(ds.size / 1024).toFixed(1)} KB</span>
+                    <span className="text-xs text-slate-400">
+                      {activeDsName === ds.viewName ? "Click to hide" : "Click to view"}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
+          )}
+
+          {/* Datasource data view */}
+          {dsLoading && <p className="mt-4 text-sm text-slate-500">Loading data...</p>}
+          {dsError && <p className="mt-4 text-sm text-red-600">{dsError}</p>}
+          {dsResult && dsResult.rows.length > 0 && (
+            <div className="mt-4 overflow-x-auto rounded-md border border-slate-200 bg-white">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {dsResult.columns.map((col) => (
+                      <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
+                        {col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {dsResult.rows.slice(0, 50).map((row, i) => (
+                    <tr key={i}>
+                      {dsResult.columns.map((col) => (
+                        <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
+                          {String(row[col] ?? "")}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {dsResult.rows.length > 50 && (
+                <p className="px-3 py-2 text-xs text-slate-400">
+                  Showing first 50 of {dsResult.rows.length} rows
+                </p>
+              )}
+            </div>
+          )}
+          {dsResult && dsResult.rows.length === 0 && (
+            <p className="mt-4 text-sm text-slate-400">No data in this datasource.</p>
           )}
         </div>
       )}
@@ -470,9 +574,32 @@ export default function ProjectWorkspacePage() {
                   Cancel
                 </button>
               </div>
-              <p className="mb-4 text-sm text-slate-500">
-                Drag datasources from the Datasources tab into the boxes below.
-              </p>
+
+              {/* Draggable datasource list inside query builder */}
+              <div className="mb-4">
+                <h4 className="mb-2 text-sm font-medium text-slate-700">
+                  Available Datasources
+                  <span className="ml-2 text-xs text-slate-400 font-normal">
+                    Drag into boxes below
+                  </span>
+                </h4>
+                {projectDatasources.length === 0 ? (
+                  <p className="text-xs text-slate-400">No datasources available. Upload files first.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {projectDatasources.map((ds) => (
+                      <div
+                        key={ds.viewName}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, ds)}
+                        className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm cursor-grab active:cursor-grabbing hover:border-brand hover:bg-brand/5"
+                      >
+                        {ds.fileName}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-2 gap-4 mb-4">
                 {/* Left box */}
@@ -834,35 +961,85 @@ export default function ProjectWorkspacePage() {
           )}
 
           {membersQuery.isLoading && <p className="text-sm text-slate-500">Loading members...</p>}
-          {membersQuery.data && membersQuery.data.length === 0 && (
-            <p className="text-sm text-slate-400">No members assigned yet.</p>
+
+          {/* Active Members */}
+          {activeMembers.length > 0 && (
+            <div className="mb-4">
+              <h4 className="mb-2 text-sm font-semibold text-slate-600">Active Members</h4>
+              <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
+                {activeMembers.map((m) => (
+                  <li key={m.user_id} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">{m.email}</p>
+                      {m.display_name && (
+                        <p className="text-xs text-slate-500">{m.display_name}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                        {m.role}
+                      </span>
+                      {canManageMembers && m.role !== "owner" && (
+                        <button
+                          onClick={() => deactivateMemberMutation.mutate(m.user_id)}
+                          className="text-xs text-amber-600 hover:text-amber-800"
+                        >
+                          Deactivate
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
-          {membersQuery.data && membersQuery.data.length > 0 && (
-            <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
-              {membersQuery.data.map((m) => (
-                <li key={m.user_id} className="flex items-center justify-between px-4 py-3">
-                  <div>
-                    <p className="text-sm font-medium text-slate-900">{m.email}</p>
-                    {m.display_name && (
-                      <p className="text-xs text-slate-500">{m.display_name}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                      {m.role}
-                    </span>
-                    {canManageMembers && m.role !== "owner" && (
-                      <button
-                        onClick={() => removeMemberMutation.mutate(m.user_id)}
-                        className="text-xs text-red-500 hover:text-red-700"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
+
+          {/* Inactive Members */}
+          {inactiveMembers.length > 0 && (
+            <div>
+              <h4 className="mb-2 text-sm font-semibold text-slate-400">Inactive Members</h4>
+              <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
+                {inactiveMembers.map((m) => (
+                  <li key={m.user_id} className="flex items-center justify-between px-4 py-3 opacity-60">
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">{m.email}</p>
+                      {m.display_name && (
+                        <p className="text-xs text-slate-500">{m.display_name}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-600">
+                        inactive
+                      </span>
+                      {canManageMembers && (
+                        <>
+                          <button
+                            onClick={() => addMemberMutation.mutate({ user_id: m.user_id, role: m.role })}
+                            className="text-xs text-emerald-600 hover:text-emerald-800"
+                          >
+                            Reactivate
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm("Permanently remove this member? Their datasources will be moved back to their private folder.")) {
+                                deleteMemberMutation.mutate(m.user_id);
+                              }
+                            }}
+                            className="text-xs text-red-500 hover:text-red-700"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {activeMembers.length === 0 && inactiveMembers.length === 0 && !membersQuery.isLoading && (
+            <p className="text-sm text-slate-400">No members assigned yet.</p>
           )}
         </div>
       )}

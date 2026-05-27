@@ -1,20 +1,22 @@
 """Project CRUD routes with tenant scoping.
 
 Every project belongs to a tenant. The owner is the user who created it.
-Private projects (is_shared=False) route queries to the owner's personal VDB.
-Shared projects use the tenant-wide SharedVDB.
+Private projects (is_shared=False) are visible only to the owner and assigned
+members. Shared projects are visible to all active members.
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
+from app.config import get_settings
 from app.database import get_db
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
@@ -40,10 +42,28 @@ async def list_projects(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[ProjectRead]:
-    """List all projects in the caller's tenant."""
+    """List projects visible to the caller.
+
+    A project is visible if:
+    - The user is the owner, OR
+    - The user is an active member of the project.
+    """
+    member_sub = (
+        select(ProjectMember.project_id)
+        .where(
+            ProjectMember.user_id == context.user_id,
+            ProjectMember.is_active.is_(True),
+        )
+    )
     query = (
         select(Project)
-        .where(Project.tenant_id == context.tenant_id)
+        .where(
+            Project.tenant_id == context.tenant_id,
+            or_(
+                Project.owner_id == context.user_id,
+                Project.id.in_(member_sub),
+            ),
+        )
         .order_by(Project.created_at.desc())
     )
     rows = await session.scalars(query)
@@ -75,20 +95,19 @@ async def create_project(
         name=payload.name,
         description=payload.description,
         type=payload.type,
-        is_shared=payload.is_shared,
+        is_shared=False,
     )
     session.add(project)
     await session.flush()
 
-    # Add the creator as a project member with "owner" role
     member = ProjectMember(
         project_id=project.id,
         user_id=context.user_id,
         role="owner",
+        is_active=True,
     )
     session.add(member)
 
-    # Ensure project folders exist on disk
     folders = CustomerFolderService()
     user_ext = user.external_id or str(user.id)
     folders.ensure_user_folders(tenant.slug, user_ext)
@@ -104,10 +123,16 @@ async def get_project(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> ProjectRead:
-    """Get a project by ID (must belong to caller's tenant)."""
+    """Get a project by ID (must be owner or active member)."""
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.owner_id != context.user_id:
+        member = await session.get(ProjectMember, (project_id, context.user_id))
+        if member is None or not member.is_active:
+            raise HTTPException(status_code=403, detail="Not a member of this project")
+
     return ProjectRead.model_validate(project)
 
 
@@ -159,6 +184,53 @@ async def delete_project(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# ── Project Datasources ─────────────────────────────────────────────
+
+
+@router.get("/{project_id}/datasources")
+async def list_project_datasources(
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[dict]:
+    """List datasources for a project.
+
+    For private projects: shows the owner's uploaded files.
+    For shared projects: shows files in the shared folder.
+    """
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    settings = get_settings()
+    base = Path(settings.customer_base_path)
+
+    if project.is_shared:
+        uploads_dir = base / str(tenant.id) / "shared" / "uploads"
+    else:
+        owner_id = project.owner_id or context.user_id
+        uploads_dir = base / str(tenant.id) / str(owner_id) / "uploads"
+
+    datasources: list[dict] = []
+    if uploads_dir.is_dir():
+        for f in sorted(uploads_dir.iterdir()):
+            if f.is_file() and not f.name.startswith("."):
+                base_name = f.stem.replace(" ", "_")
+                extension = f.suffix.lstrip(".").upper()
+                view_name = f"{base_name}_{extension}" if extension else base_name
+                datasources.append({
+                    "fileName": f.name,
+                    "viewName": view_name,
+                    "size": f.stat().st_size,
+                })
+
+    return datasources
+
+
 # ── Project Members ──────────────────────────────────────────────────
 
 
@@ -181,6 +253,7 @@ async def list_members(
             project_id=m.project_id,
             user_id=m.user_id,
             role=m.role,
+            is_active=m.is_active,
             email=user.email if user else "",
             display_name=user.display_name if user else None,
         ))
@@ -222,24 +295,37 @@ async def add_member(
 
     existing = await session.get(ProjectMember, (project_id, user_id))
     if existing:
+        if not existing.is_active:
+            existing.is_active = True
+            existing.role = role
+            await session.commit()
+            return ProjectMemberRead(
+                project_id=project_id, user_id=user_id, role=role,
+                is_active=True,
+                email=user.email, display_name=user.display_name,
+            )
         raise HTTPException(status_code=409, detail="User is already a member")
 
-    member = ProjectMember(project_id=project_id, user_id=user_id, role=role)
+    member = ProjectMember(
+        project_id=project_id, user_id=user_id, role=role, is_active=True,
+    )
     session.add(member)
     await session.commit()
     return ProjectMemberRead(
         project_id=project_id, user_id=user_id, role=role,
+        is_active=True,
         email=user.email, display_name=user.display_name,
     )
 
 
-@router.delete("/{project_id}/members/{user_id}")
-async def remove_member(
+@router.put("/{project_id}/members/{user_id}/deactivate")
+async def deactivate_member(
     project_id: int,
     user_id: int,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
-) -> Response:
+) -> ProjectMemberRead:
+    """Deactivate a project member (set inactive). Does not delete."""
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -251,9 +337,88 @@ async def remove_member(
     if member is None:
         raise HTTPException(status_code=404, detail="Member not found")
 
+    if member.role == "owner":
+        raise HTTPException(status_code=403, detail="Cannot deactivate the project owner")
+
+    member.is_active = False
+    await session.commit()
+
+    target_user = await session.get(User, user_id)
+    return ProjectMemberRead(
+        project_id=project_id,
+        user_id=user_id,
+        role=member.role,
+        is_active=False,
+        email=target_user.email if target_user else "",
+        display_name=target_user.display_name if target_user else None,
+    )
+
+
+@router.delete("/{project_id}/members/{user_id}")
+async def remove_member(
+    project_id: int,
+    user_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> Response:
+    """Permanently delete an inactive member and move their datasources back.
+
+    Only inactive members can be permanently deleted. When deleted, any
+    datasources that were contributed by this user to the shared project
+    are moved back to the user's private folder.
+    """
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.owner_id != context.user_id and context.role != "admin":
+        raise HTTPException(status_code=403, detail="Only project owner or admin can delete members")
+
+    member = await session.get(ProjectMember, (project_id, user_id))
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if member.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail="Member must be deactivated before permanent removal",
+        )
+
+    # Move shared datasources back to the user's private folder
+    if project.is_shared:
+        tenant = await session.get(Tenant, context.tenant_id)
+        target_user = await session.get(User, user_id)
+        if tenant and target_user:
+            _move_shared_files_to_user(
+                tenant_id=tenant.id,
+                user_id=target_user.id,
+            )
+
     await session.delete(member)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _move_shared_files_to_user(*, tenant_id: int, user_id: int) -> None:
+    """Move datasources from shared folder back to user's private uploads."""
+    import shutil
+
+    settings = get_settings()
+    base = Path(settings.customer_base_path)
+    shared_uploads = base / str(tenant_id) / "shared" / "uploads"
+    user_uploads = base / str(tenant_id) / str(user_id) / "uploads"
+
+    if not shared_uploads.is_dir():
+        return
+
+    user_uploads.mkdir(parents=True, exist_ok=True)
+
+    for f in shared_uploads.iterdir():
+        if f.is_file():
+            dest = user_uploads / f.name
+            if not dest.exists():
+                shutil.move(str(f), str(dest))
+                logger.info("Moved %s back to user %s private folder", f.name, user_id)
 
 
 # ── Saved Queries ────────────────────────────────────────────────────

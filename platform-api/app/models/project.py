@@ -57,8 +57,9 @@ class ProjectMember(Base):
         primary_key=True,
     )
     role: Mapped[str] = mapped_column(String(50), default="member", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     project: Mapped[Project] = relationship(back_populates="members")
 
     def __repr__(self) -> str:
-        return f"ProjectMember(project_id={self.project_id}, user_id={self.user_id}, role={self.role!r})"
+        return f"ProjectMember(project_id={self.project_id}, user_id={self.user_id}, role={self.role!r}, active={self.is_active})"

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getUserMeta } from "@/lib/auth";
@@ -60,16 +61,72 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
+function ToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={cn("transition-transform", collapsed && "rotate-180")}
+    >
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+      {collapsed ? (
+        <path d="m14 9 3 3-3 3" />
+      ) : (
+        <path d="m16 15-3-3 3-3" />
+      )}
+    </svg>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const meta = getUserMeta();
   const isSuperAdmin = meta?.is_super_admin ?? false;
   const isAdmin = meta?.role === "admin";
-
   const adminNav = isSuperAdmin ? superAdminItems : isAdmin ? tenantAdminItems : [];
+
+  const [collapsed, setCollapsed] = useState(false);
+  const toggle = useCallback(() => setCollapsed((v) => !v), []);
+
+  if (collapsed) {
+    return (
+      <aside className="w-10 shrink-0">
+        <button
+          onClick={toggle}
+          className="rounded-md p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          aria-label="Open sidebar"
+          title="Open sidebar"
+        >
+          <ToggleIcon collapsed />
+        </button>
+      </aside>
+    );
+  }
 
   return (
     <aside className="w-56 shrink-0">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase text-slate-400">
+          Navigation
+        </span>
+        <button
+          onClick={toggle}
+          className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          aria-label="Collapse sidebar"
+          title="Collapse sidebar"
+        >
+          <ToggleIcon collapsed={false} />
+        </button>
+      </div>
+
       {/* Pill navigation */}
       <div className="flex flex-wrap gap-2 mb-4">
         {pillItems.map((item) => (

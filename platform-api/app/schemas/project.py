@@ -39,6 +39,7 @@ class ProjectMemberRead(BaseModel):
     project_id: int
     user_id: int
     role: str
+    is_active: bool = True
     email: str = ""
     display_name: str | None = None
 
