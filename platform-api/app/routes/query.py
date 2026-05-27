@@ -39,6 +39,7 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*$")
 class DatasourceQueryRequest(BaseModel):
     tableName: str
     limit: int = Field(default=1000, ge=1, le=10_000)
+    project_id: int | None = Field(default=None)
 
 
 @router.post("/fetch", response_model=QueryResponse)
@@ -83,27 +84,37 @@ async def query_datasource(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict[str, Any]:
-    """Query a datasource (view) directly from the user's VDB.
+    """Query a datasource (view) from the appropriate VDB.
 
-    This endpoint does not require a project — it queries the user's personal
-    VDB directly, which is how uploaded file data is accessed.
+    When project_id is provided and the project is shared, the query runs
+    against the project owner's VDB (where the views live). Otherwise it
+    queries the current user's personal VDB.
     """
     if not _IDENTIFIER_RE.match(payload.tableName):
         raise HTTPException(status_code=400, detail=f"Invalid table name: {payload.tableName!r}")
 
+    from app.models.project import Project
+
+    target_user_id = context.user_id
+
+    if payload.project_id is not None:
+        project = await session.get(Project, payload.project_id)
+        if project is not None and project.is_shared and project.owner_id:
+            target_user_id = project.owner_id
+
     user_vdb = await session.scalar(
         select(UserVDB).where(
             UserVDB.tenant_id == context.tenant_id,
-            UserVDB.user_id == context.user_id,
+            UserVDB.user_id == target_user_id,
         )
     )
     if user_vdb is None:
         raise HTTPException(
             status_code=404,
-            detail="No VDB configured for your user. Upload a file first.",
+            detail="No VDB configured. Upload a file first.",
         )
     if not user_vdb.is_active:
-        raise HTTPException(status_code=503, detail="Your VDB is not active.")
+        raise HTTPException(status_code=503, detail="VDB is not active.")
 
     settings = get_settings()
     database = f"{user_vdb.vdb_id}.1"

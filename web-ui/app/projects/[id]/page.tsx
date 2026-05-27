@@ -67,6 +67,117 @@ const JOIN_TYPES = [
   { value: "CROSS JOIN", label: "Cross Join" },
 ];
 
+// ── Edit Query Form ─────────────────────────────────────────────────
+
+function EditQueryForm({
+  query,
+  datasources,
+  onSave,
+  onCancel,
+  isPending,
+}: {
+  query: SavedQuery;
+  datasources: Datasource[];
+  onSave: (updates: Record<string, string>) => void;
+  onCancel: () => void;
+  isPending: boolean;
+}) {
+  const [name, setName] = useState(query.name);
+  const [description, setDescription] = useState(query.description ?? "");
+  const [leftDs, setLeftDs] = useState(query.left_datasource ?? "");
+  const [rightDs, setRightDs] = useState(query.right_datasource ?? "");
+  const [jt, setJt] = useState(query.join_type ?? "INNER JOIN");
+  const [lc, setLc] = useState(query.left_column ?? "");
+  const [rc, setRc] = useState(query.right_column ?? "");
+
+  const sql = useMemo(() => {
+    if (!leftDs || !rightDs) return "";
+    const l = `"${leftDs}"`;
+    const r = `"${rightDs}"`;
+    if (jt === "CROSS JOIN") return `SELECT * FROM ${l} ${jt} ${r}`;
+    if (!lc || !rc) return "";
+    return `SELECT * FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
+  }, [leftDs, rightDs, jt, lc, rc]);
+
+  return (
+    <div className="mt-3 ml-2 rounded-lg border border-blue-200 bg-blue-50 p-4" onClick={(e) => e.stopPropagation()}>
+      <h4 className="mb-3 text-sm font-semibold text-blue-900">Edit Query</h4>
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Name</label>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Description</label>
+          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Left Datasource</label>
+          <select value={leftDs} onChange={(e) => setLeftDs(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+            <option value="">Select...</option>
+            {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Join Type</label>
+          <select value={jt} onChange={(e) => setJt(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+            {JOIN_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Right Datasource</label>
+          <select value={rightDs} onChange={(e) => setRightDs(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+            <option value="">Select...</option>
+            {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Left Column</label>
+          <input type="text" value={lc} onChange={(e) => setLc(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="Column name" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Right Column</label>
+          <input type="text" value={rc} onChange={(e) => setRc(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="Column name" />
+        </div>
+      </div>
+      {sql && (
+        <div className="mb-3 rounded bg-slate-800 p-3">
+          <p className="text-xs font-mono text-slate-300 break-all">{sql}</p>
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button
+          onClick={() => onSave({
+            name, description,
+            left_datasource: leftDs, right_datasource: rightDs,
+            join_type: jt, left_column: lc, right_column: rc,
+            sql_text: sql,
+          })}
+          disabled={!name.trim() || isPending}
+          className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
+        >
+          {isPending ? "Saving..." : "Update Query"}
+        </button>
+        <button onClick={onCancel}
+          className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ──────────────────────────────────────────────────
 
 export default function ProjectWorkspacePage() {
@@ -104,6 +215,9 @@ export default function ProjectWorkspacePage() {
   const [savedQueryResult, setSavedQueryResult] = useState<QueryResult | null>(null);
   const [savedQueryError, setSavedQueryError] = useState<string | null>(null);
   const [savedQueryLoading, setSavedQueryLoading] = useState(false);
+
+  // ── Edit query state ──────────────────────────────────────────────
+  const [editingQuery, setEditingQuery] = useState<SavedQuery | null>(null);
 
   // ── Query execution result ────────────────────────────────────────
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
@@ -208,6 +322,27 @@ export default function ProjectWorkspacePage() {
     },
   });
 
+  const updateQueryMutation = useMutation({
+    mutationFn: (payload: {
+      queryId: number;
+      name?: string;
+      description?: string;
+      left_datasource?: string;
+      right_datasource?: string;
+      join_type?: string;
+      left_column?: string;
+      right_column?: string;
+      sql_text?: string;
+    }) => {
+      const { queryId, ...body } = payload;
+      return apiClient.put(`/api/projects/${projectId}/queries/${queryId}`, body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-queries", projectId] });
+      setEditingQuery(null);
+    },
+  });
+
   const deleteQueryMutation = useMutation({
     mutationFn: (queryId: number) =>
       apiClient.delete(`/api/projects/${projectId}/queries/${queryId}`),
@@ -247,6 +382,7 @@ export default function ProjectWorkspacePage() {
       const result = await apiClient.post<QueryResult>("/api/query/datasource", {
         tableName: viewName,
         limit: 1,
+        project_id: projectId,
       });
       return result.columns;
     } catch {
@@ -272,6 +408,7 @@ export default function ProjectWorkspacePage() {
       const result = await apiClient.post<QueryResult>("/api/query/datasource", {
         tableName,
         limit: 100,
+        project_id: projectId,
       });
       setSavedQueryResult(result);
     } catch (err) {
@@ -298,6 +435,7 @@ export default function ProjectWorkspacePage() {
       const result = await apiClient.post<QueryResult>("/api/query/datasource", {
         tableName: ds.viewName,
         limit: 100,
+        project_id: projectId,
       });
       setDsResult(result);
     } catch (err) {
@@ -450,36 +588,36 @@ export default function ProjectWorkspacePage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {project.is_shared ? (
-              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                Shared
-              </span>
-            ) : (
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                Private
-              </span>
-            )}
-            {isOwner && !project.is_shared && (
+            {isOwner ? (
               <button
                 onClick={() => {
-                  const files = projectDatasources.map((d) => d.fileName);
-                  shareMutation.mutate(files);
+                  if (project.is_shared) {
+                    unshareMutation.mutate();
+                  } else {
+                    const files = projectDatasources.map((d) => d.fileName);
+                    shareMutation.mutate(files);
+                  }
                 }}
-                disabled={shareMutation.isPending}
-                className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                disabled={shareMutation.isPending || unshareMutation.isPending}
+                className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors ${
+                  project.is_shared ? "bg-emerald-500" : "bg-slate-300"
+                } disabled:opacity-50`}
+                title={project.is_shared ? "Click to unshare" : "Click to share"}
               >
-                {shareMutation.isPending ? "Sharing..." : "Share Project"}
+                <span
+                  className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                    project.is_shared ? "translate-x-8" : "translate-x-1"
+                  }`}
+                />
               </button>
-            )}
-            {isOwner && project.is_shared && (
-              <button
-                onClick={() => unshareMutation.mutate()}
-                disabled={unshareMutation.isPending}
-                className="rounded-md bg-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-300 disabled:opacity-50"
-              >
-                {unshareMutation.isPending ? "Unsharing..." : "Unshare"}
-              </button>
-            )}
+            ) : null}
+            <span className={`text-xs font-medium ${
+              project.is_shared ? "text-emerald-700" : "text-slate-500"
+            }`}>
+              {shareMutation.isPending || unshareMutation.isPending
+                ? "Updating..."
+                : project.is_shared ? "Shared" : "Private"}
+            </span>
           </div>
         </div>
       </header>
@@ -934,6 +1072,12 @@ export default function ProjectWorkspacePage() {
                         {q.join_type ?? "N/A"}
                       </span>
                       <button
+                        onClick={() => setEditingQuery(editingQuery?.id === q.id ? null : q)}
+                        className="text-xs text-blue-600 hover:text-blue-800"
+                      >
+                        Edit
+                      </button>
+                      <button
                         onClick={() => {
                           if (confirm("Delete this query?")) {
                             deleteQueryMutation.mutate(q.id);
@@ -945,6 +1089,17 @@ export default function ProjectWorkspacePage() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Inline edit form */}
+                  {editingQuery?.id === q.id && (
+                    <EditQueryForm
+                      query={editingQuery}
+                      datasources={projectDatasources}
+                      onSave={(updates) => updateQueryMutation.mutate({ queryId: q.id, ...updates })}
+                      onCancel={() => setEditingQuery(null)}
+                      isPending={updateQueryMutation.isPending}
+                    />
+                  )}
 
                   {/* Saved query results rendered underneath */}
                   {activeSavedQueryId === q.id && (
