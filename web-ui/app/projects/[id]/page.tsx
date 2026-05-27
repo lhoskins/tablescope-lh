@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, DragEvent } from "react";
+import { useState, useCallback, useMemo, useEffect, DragEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
@@ -72,12 +72,14 @@ const JOIN_TYPES = [
 function EditQueryForm({
   query,
   datasources,
+  projectId,
   onSave,
   onCancel,
   isPending,
 }: {
   query: SavedQuery;
   datasources: Datasource[];
+  projectId: number;
   onSave: (updates: Record<string, string>) => void;
   onCancel: () => void;
   isPending: boolean;
@@ -89,8 +91,32 @@ function EditQueryForm({
   const [jt, setJt] = useState(query.join_type ?? "INNER JOIN");
   const [lc, setLc] = useState(query.left_column ?? "");
   const [rc, setRc] = useState(query.right_column ?? "");
+  const [leftCols, setLeftCols] = useState<string[]>([]);
+  const [rightCols, setRightCols] = useState<string[]>([]);
+  const [sqlEditing, setSqlEditing] = useState(false);
+  const [sqlText, setSqlText] = useState(query.sql_text ?? "");
 
-  const sql = useMemo(() => {
+  useEffect(() => {
+    if (leftDs) {
+      apiClient.post<{ columns: string[] }>("/api/query/datasource", { tableName: leftDs, limit: 1, project_id: projectId })
+        .then((r) => setLeftCols(r.columns))
+        .catch(() => setLeftCols([]));
+    } else {
+      setLeftCols([]);
+    }
+  }, [leftDs, projectId]);
+
+  useEffect(() => {
+    if (rightDs) {
+      apiClient.post<{ columns: string[] }>("/api/query/datasource", { tableName: rightDs, limit: 1, project_id: projectId })
+        .then((r) => setRightCols(r.columns))
+        .catch(() => setRightCols([]));
+    } else {
+      setRightCols([]);
+    }
+  }, [rightDs, projectId]);
+
+  const generatedSql = useMemo(() => {
     if (!leftDs || !rightDs) return "";
     const l = `"${leftDs}"`;
     const r = `"${rightDs}"`;
@@ -98,6 +124,10 @@ function EditQueryForm({
     if (!lc || !rc) return "";
     return `SELECT * FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
   }, [leftDs, rightDs, jt, lc, rc]);
+
+  useEffect(() => {
+    if (!sqlEditing) setSqlText(generatedSql);
+  }, [generatedSql, sqlEditing]);
 
   return (
     <div className="mt-3 ml-2 rounded-lg border border-blue-200 bg-blue-50 p-4" onClick={(e) => e.stopPropagation()}>
@@ -142,27 +172,51 @@ function EditQueryForm({
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Left Column</label>
-          <input type="text" value={lc} onChange={(e) => setLc(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="Column name" />
+          <select value={lc} onChange={(e) => setLc(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+            <option value="">Select column...</option>
+            {leftCols.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Right Column</label>
-          <input type="text" value={rc} onChange={(e) => setRc(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="Column name" />
+          <select value={rc} onChange={(e) => setRc(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+            <option value="">Select column...</option>
+            {rightCols.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
       </div>
-      {sql && (
-        <div className="mb-3 rounded bg-slate-800 p-3">
-          <p className="text-xs font-mono text-slate-300 break-all">{sql}</p>
+      <div className="mb-3">
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-xs font-medium text-slate-600">SQL</label>
+          <button
+            type="button"
+            onClick={() => { setSqlEditing(!sqlEditing); if (sqlEditing) setSqlText(generatedSql); }}
+            className="text-xs text-blue-600 hover:text-blue-800"
+          >
+            {sqlEditing ? "Reset to generated" : "Edit SQL directly"}
+          </button>
         </div>
-      )}
+        <textarea
+          value={sqlText}
+          onChange={(e) => setSqlText(e.target.value)}
+          readOnly={!sqlEditing}
+          rows={3}
+          className={`w-full rounded-md border px-2 py-1.5 text-xs font-mono ${
+            sqlEditing
+              ? "border-blue-400 bg-white text-slate-900"
+              : "border-slate-300 bg-slate-800 text-slate-300 cursor-default"
+          }`}
+        />
+      </div>
       <div className="flex gap-2">
         <button
           onClick={() => onSave({
             name, description,
             left_datasource: leftDs, right_datasource: rightDs,
             join_type: jt, left_column: lc, right_column: rc,
-            sql_text: sql,
+            sql_text: sqlText || generatedSql,
           })}
           disabled={!name.trim() || isPending}
           className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
@@ -605,9 +659,8 @@ export default function ProjectWorkspacePage() {
                 title={project.is_shared ? "Click to unshare" : "Click to share"}
               >
                 <span
-                  className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                    project.is_shared ? "translate-x-8" : "translate-x-1"
-                  }`}
+                  className="inline-block h-5 w-5 rounded-full bg-white shadow transition-transform"
+                  style={{ transform: project.is_shared ? "translateX(30px)" : "translateX(4px)" }}
                 />
               </button>
             ) : null}
@@ -1095,6 +1148,7 @@ export default function ProjectWorkspacePage() {
                     <EditQueryForm
                       query={editingQuery}
                       datasources={projectDatasources}
+                      projectId={projectId}
                       onSave={(updates) => updateQueryMutation.mutate({ queryId: q.id, ...updates })}
                       onCancel={() => setEditingQuery(null)}
                       isPending={updateQueryMutation.isPending}

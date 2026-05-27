@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
+import { getUserMeta } from "@/lib/auth";
 
 type Project = {
   id: number;
@@ -23,6 +24,8 @@ export default function ProjectsPage() {
   const [description, setDescription] = useState("");
   const [isShared, setIsShared] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const meta = getUserMeta();
+  const currentUserId = meta?.user_id ?? null;
 
   const { data, isLoading, error: fetchError } = useQuery<Project[]>({
     queryKey: ["projects"],
@@ -51,10 +54,10 @@ export default function ProjectsPage() {
   const { privateProjects, sharedProjects } = useMemo(() => {
     if (!data) return { privateProjects: [], sharedProjects: [] };
     return {
-      privateProjects: data.filter((p) => !p.is_shared),
-      sharedProjects: data.filter((p) => p.is_shared),
+      privateProjects: data.filter((p) => !p.is_shared && p.owner_id === currentUserId),
+      sharedProjects: data.filter((p) => p.is_shared || (p.owner_id !== currentUserId)),
     };
-  }, [data]);
+  }, [data, currentUserId]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -63,6 +66,7 @@ export default function ProjectsPage() {
   }
 
   function ProjectCard({ project }: { project: Project }) {
+    const isOwner = project.owner_id === currentUserId;
     return (
       <li
         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
@@ -84,17 +88,19 @@ export default function ProjectsPage() {
               private
             </span>
           )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (confirm("Delete this project?")) {
-                deleteMutation.mutate(project.id);
-              }
-            }}
-            className="text-xs text-red-500 hover:text-red-700"
-          >
-            Delete
-          </button>
+          {isOwner && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm("Delete this project?")) {
+                  deleteMutation.mutate(project.id);
+                }
+              }}
+              className="text-xs text-red-500 hover:text-red-700"
+            >
+              Delete
+            </button>
+          )}
         </div>
       </li>
     );
