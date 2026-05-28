@@ -209,11 +209,8 @@ async def list_project_datasources(
     settings = get_settings()
     base = Path(settings.customer_base_path)
 
-    if project.is_shared:
-        uploads_dir = base / str(tenant.id) / "shared" / "uploads"
-    else:
-        owner_id = project.owner_id or context.user_id
-        uploads_dir = base / str(tenant.id) / str(owner_id) / "uploads"
+    owner_id = project.owner_id or context.user_id
+    uploads_dir = base / str(tenant.id) / str(owner_id) / "uploads"
 
     datasources: list[dict] = []
     if uploads_dir.is_dir():

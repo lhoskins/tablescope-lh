@@ -294,3 +294,26 @@ async def deactivate_user(
     session.add(user)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/{tenant_id}/users/{user_id}/permanent",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_user_permanently(
+    tenant_id: int,
+    user_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> Response:
+    """Hard-delete an inactive user. Only works on deactivated users."""
+    if not context.is_service and context.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Cannot delete users in another tenant")
+    user = await session.get(User, user_id)
+    if user is None or user.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.is_active:
+        raise HTTPException(status_code=400, detail="User must be deactivated before permanent deletion")
+    await session.delete(user)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

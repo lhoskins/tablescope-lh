@@ -79,6 +79,20 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["users", tenantId] }),
   });
 
+  const reactivateMutation = useMutation({
+    mutationFn: (userId: number) =>
+      apiClient.put(`/api/tenants/${tenantId}/users/${userId}`, { is_active: true }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["users", tenantId] }),
+  });
+
+  const deletePermanentMutation = useMutation({
+    mutationFn: (userId: number) =>
+      apiClient.delete(`/api/tenants/${tenantId}/users/${userId}/permanent`),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["users", tenantId] }),
+  });
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -254,7 +268,7 @@ export default function UsersPage() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    {user.is_active && (
+                    {user.is_active ? (
                       <button
                         onClick={() => {
                           if (
@@ -269,6 +283,31 @@ export default function UsersPage() {
                       >
                         Deactivate
                       </button>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => reactivateMutation.mutate(user.id)}
+                          disabled={reactivateMutation.isPending}
+                          className="text-xs text-emerald-600 hover:text-emerald-800"
+                        >
+                          Reactivate
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (
+                              confirm(
+                                `Permanently delete ${user.email}? This cannot be undone.`
+                              )
+                            ) {
+                              deletePermanentMutation.mutate(user.id);
+                            }
+                          }}
+                          disabled={deletePermanentMutation.isPending}
+                          className="text-xs text-red-500 hover:text-red-700"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
