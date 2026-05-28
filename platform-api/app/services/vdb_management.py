@@ -119,6 +119,9 @@ class VDBManagementService:
 
         logger.info("User VDB created and deployed: vdb_id=%s", vdb_id)
 
+        # Sync VDB file to S3 if enabled
+        self._sync_vdb_to_s3(org_id, vdb_id, vdb_type="user", user_id=user_id)
+
         return VDBProvisionResult(
             vdb_id=vdb_id,
             vdb_username=username,
@@ -160,6 +163,9 @@ class VDBManagementService:
 
         logger.info("Shared VDB created and deployed: vdb_id=%s", vdb_id)
 
+        # Sync VDB file to S3 if enabled
+        self._sync_vdb_to_s3(org_id, vdb_id, vdb_type="shared")
+
         return VDBProvisionResult(
             vdb_id=vdb_id,
             vdb_username=username,
@@ -167,6 +173,27 @@ class VDBManagementService:
             vdb_host=self._settings.teiid_pg_host,
             vdb_port=self._settings.teiid_pg_port,
         )
+
+    def _sync_vdb_to_s3(self, org_id: int, vdb_id: str, *, vdb_type: str, user_id: int | None = None) -> None:
+        """Sync VDB XML file to S3 after creation/modification."""
+        if not self._settings.s3_enabled:
+            return
+        try:
+            from app.services.s3_storage import S3StorageService
+            s3_svc = S3StorageService()
+            if vdb_type == "shared":
+                local_path = f"{self._settings.customer_base_path}/{org_id}/shared/vdb/{vdb_id}-vdb.xml"
+                s3_key = s3_svc.get_s3_key_for_shared_vdb(org_id, vdb_id)
+            else:
+                local_path = f"{self._settings.customer_base_path}/{org_id}/{user_id}/vdb/{vdb_id}-vdb.xml"
+                s3_key = s3_svc.get_s3_key_for_vdb(org_id, user_id or 0, vdb_id)
+            import os
+            if os.path.exists(local_path):
+                s3_svc.upload_file(local_path, s3_key)
+            else:
+                logger.warning("VDB file not found for S3 sync: %s", local_path)
+        except Exception as e:
+            logger.warning("S3 VDB sync failed (non-fatal): %s", e)
 
     async def redeploy_vdb(
         self, vdb_id: str, *, vdb_file_path: str | None = None

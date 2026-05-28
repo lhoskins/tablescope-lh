@@ -44,6 +44,12 @@ services:
       TEIID_SERVLET_API_KEY: ${TEIID_API_KEY:-}
       CUSTOMER_BASE_PATH: /opt/wildfly/teiidfiles/customers
       DRILLDOWN_CONFIG_PATH: /opt/redash-8.0.0-7/apps/tsTest/src/drilldownConfig.json
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-tablescope-data-988823366090}
+      S3_REGION: ${S3_REGION:-us-west-1}
+      S3_ENABLED: ${S3_ENABLED:-true}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${S3_REGION:-us-west-1}
       CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
       CLERK_ISSUER: ${CLERK_ISSUER:-}
       SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}

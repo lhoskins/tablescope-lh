@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     customer_base_path: str = "/opt/wildfly/teiidfiles/customers"
     drilldown_config_path: str = "/opt/redash-8.0.0-7/apps/tsTest/src/drilldownConfig.json"
 
+    s3_bucket_name: str = "tablescope-data-988823366090"
+    s3_region: str = "us-west-1"
+    s3_enabled: bool = True
+
     clerk_jwks_url: str = ""
     clerk_issuer: str = ""
     supabase_jwks_url: str = ""

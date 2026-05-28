@@ -118,12 +118,26 @@ async def upload_file(
     extension = file.filename.rsplit(".", 1)[-1].upper() if "." in file.filename else ""
     datasource_name = f"{base_name}_{extension}" if extension else base_name
 
+    # Sync uploaded file to S3 if enabled
+    settings_obj = get_settings()
+    s3_location = None
+    if settings_obj.s3_enabled:
+        try:
+            from app.services.s3_storage import S3StorageService
+            s3_svc = S3StorageService()
+            local_file_path = f"{settings_obj.customer_base_path}/{tenant.id}/{user.id}/uploads/{file.filename}"
+            s3_key = s3_svc.get_s3_key_for_upload(tenant.id, user.id, file.filename)
+            s3_location = s3_svc.upload_file(local_file_path, s3_key)
+        except Exception as e:
+            logger.warning("S3 upload sync failed (non-fatal): %s", e)
+
     return {
         "path": f"/opt/wildfly/teiidfiles/customers/{tenant.id}/{user.id}/uploads/{file.filename}",
         "size": len(content),
         "datasource": datasource_name,
         "fileName": file.filename,
         "teiid": teiid_result,
+        "s3_location": s3_location,
     }
 
 
