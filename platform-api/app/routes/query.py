@@ -40,6 +40,7 @@ class DatasourceQueryRequest(BaseModel):
     tableName: str
     limit: int = Field(default=1000, ge=1, le=10_000)
     project_id: int | None = Field(default=None)
+    sql: str | None = Field(default=None)
 
 
 @router.post("/fetch", response_model=QueryResponse)
@@ -82,7 +83,7 @@ async def fetch_table_data(
 async def query_datasource(
     payload: DatasourceQueryRequest,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.EDITOR)),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
     """Query a datasource (view) from the appropriate VDB.
 
@@ -129,9 +130,12 @@ async def query_datasource(
     teiid_host = settings.teiid_pg_host
     teiid_port = settings.teiid_pg_port
 
-    # Teiid does not support parameterised LIMIT via PG wire, so we
-    # inline the value.  payload.limit is Pydantic-validated (1..10000).
-    sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
+    if payload.sql:
+        sql = payload.sql
+        if "LIMIT" not in sql.upper():
+            sql += f" LIMIT {payload.limit}"
+    else:
+        sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
 
     last_exc: Exception | None = None
     for attempt in range(2):

@@ -288,7 +288,7 @@ export default function ProjectWorkspacePage() {
 
   // ── Member assignment ─────────────────────────────────────────────
   const [addUserId, setAddUserId] = useState<number | null>(null);
-  const [addRole, setAddRole] = useState("member");
+  const [addRole, setAddRole] = useState("viewer");
 
   // ── Data fetching ─────────────────────────────────────────────────
 
@@ -321,22 +321,9 @@ export default function ProjectWorkspacePage() {
 
   // ── Sharing mutations ─────────────────────────────────────────────
 
-  const shareMutation = useMutation({
-    mutationFn: (filenames: string[]) =>
-      apiClient.post("/api/sharing/share", {
-        projectId,
-        filenames,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-      queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
-    },
-  });
-
-  const unshareMutation = useMutation({
-    mutationFn: () =>
-      apiClient.put(`/api/projects/${projectId}`, { is_shared: false }),
+  const toggleShareMutation = useMutation({
+    mutationFn: (share: boolean) =>
+      apiClient.put<Project>(`/api/projects/${projectId}`, { is_shared: share }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -465,6 +452,7 @@ export default function ProjectWorkspacePage() {
         tableName,
         limit: 100,
         project_id: projectId,
+        sql: q.sql_text || undefined,
       });
       setSavedQueryResult(result);
     } catch (err) {
@@ -615,6 +603,7 @@ export default function ProjectWorkspacePage() {
           tableName: leftDs?.viewName ?? "",
           limit: 100,
           project_id: projectId,
+          sql,
         });
         setQueryResult(result);
       } catch (err) {
@@ -631,7 +620,11 @@ export default function ProjectWorkspacePage() {
   const project = projectQuery.data;
   const isOwner = project?.owner_id === meta?.user_id;
   const isAdmin = meta?.role === "admin";
-  const canManageMembers = isOwner || isAdmin;
+  const myMembership = (membersQuery.data ?? []).find((m) => m.user_id === meta?.user_id);
+  const myProjectRole = isOwner ? "owner" : (myMembership?.role ?? "viewer");
+  const canManageMembers = isOwner || isAdmin || myProjectRole === "admin";
+  const canEdit = isOwner || isAdmin || myProjectRole === "admin" || myProjectRole === "editor";
+  const canView = true;
 
   // ── Available users for member assignment ─────────────────────────
 
@@ -693,15 +686,8 @@ export default function ProjectWorkspacePage() {
           <div className="flex items-center gap-2">
             {isOwner ? (
               <button
-                onClick={() => {
-                  if (project.is_shared) {
-                    unshareMutation.mutate();
-                  } else {
-                    const files = projectDatasources.map((d) => d.fileName);
-                    shareMutation.mutate(files);
-                  }
-                }}
-                disabled={shareMutation.isPending || unshareMutation.isPending}
+                onClick={() => toggleShareMutation.mutate(!project.is_shared)}
+                disabled={toggleShareMutation.isPending}
                 className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors ${
                   project.is_shared ? "bg-emerald-500" : "bg-slate-300"
                 } disabled:opacity-50`}
@@ -716,7 +702,7 @@ export default function ProjectWorkspacePage() {
             <span className={`text-xs font-medium ${
               project.is_shared ? "text-emerald-700" : "text-slate-500"
             }`}>
-              {shareMutation.isPending || unshareMutation.isPending
+              {toggleShareMutation.isPending
                 ? "Updating..."
                 : project.is_shared ? "Shared" : "Private"}
             </span>
@@ -820,7 +806,7 @@ export default function ProjectWorkspacePage() {
       {/* ── Queries Tab ──────────────────────────────────────────── */}
       {activeTab === "queries" && (
         <div>
-          {!buildingQuery && (
+          {!buildingQuery && canEdit && (
             <button
               onClick={() => setBuildingQuery(true)}
               className="mb-4 rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90"
@@ -1301,22 +1287,26 @@ export default function ProjectWorkspacePage() {
                       <span className="text-xs text-slate-400">
                         {q.join_type ?? "N/A"}
                       </span>
-                      <button
-                        onClick={() => setEditingQuery(editingQuery?.id === q.id ? null : q)}
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm("Delete this query?")) {
-                            deleteQueryMutation.mutate(q.id);
-                          }
-                        }}
-                        className="text-xs text-red-500 hover:text-red-700"
-                      >
-                        Delete
-                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={() => setEditingQuery(editingQuery?.id === q.id ? null : q)}
+                          className="text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {canEdit && (
+                        <button
+                          onClick={() => {
+                            if (confirm("Delete this query?")) {
+                              deleteQueryMutation.mutate(q.id);
+                            }
+                          }}
+                          className="text-xs text-red-500 hover:text-red-700"
+                        >
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1415,7 +1405,8 @@ export default function ProjectWorkspacePage() {
                     onChange={(e) => setAddRole(e.target.value)}
                     className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                   >
-                    <option value="member">Member</option>
+                    <option value="viewer">Viewer</option>
+                    <option value="editor">Editor</option>
                     <option value="admin">Admin</option>
                   </select>
                 </div>
