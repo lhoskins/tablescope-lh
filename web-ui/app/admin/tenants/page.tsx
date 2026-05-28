@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
@@ -25,6 +26,7 @@ export default function TenantsPage() {
 
 function SuperAdminView() {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [showCreate, setShowCreate] = useState(false);
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
@@ -239,7 +241,14 @@ function SuperAdminView() {
               {tenantsQuery.data.map((tenant) => (
                 <tr key={tenant.id}>
                   <td className="px-4 py-3 text-sm text-slate-500">{tenant.id}</td>
-                  <td className="px-4 py-3 text-sm font-mono text-slate-900">{tenant.slug}</td>
+                  <td className="px-4 py-3 text-sm font-mono">
+                    <button
+                      onClick={() => router.push(`/admin/tenants/${tenant.id}`)}
+                      className="text-brand underline hover:text-brand/80"
+                    >
+                      {tenant.slug}
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{tenant.name}</td>
                   <td className="px-4 py-3">
                     {tenant.is_active ? (

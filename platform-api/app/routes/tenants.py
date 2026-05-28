@@ -27,6 +27,7 @@ from app.schemas.tenant import (
     UserRead,
     UserUpdate,
 )
+from app.services.vdb_health import check_vdb_health
 from app.services.customer_folders import CustomerFolderService
 from app.services.vdb_management import VDBManagementService, VDBProvisioningError
 
@@ -153,6 +154,83 @@ async def list_tenants(
 
     tenant = await session.get(Tenant, context.tenant_id)
     return [TenantRead.model_validate(tenant)] if tenant else []
+
+
+@router.get("/{tenant_id}/details")
+async def get_tenant_details(
+    tenant_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(_require_super_admin),
+) -> dict:
+    """Get tenant details including users with VDB info and shared VDBs."""
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # Get all users for this tenant
+    users_result = await session.scalars(
+        select(User).where(User.tenant_id == tenant_id).order_by(User.id)
+    )
+    users = list(users_result)
+
+    # Get all user VDBs for this tenant
+    user_vdbs_result = await session.scalars(
+        select(UserVDB).where(UserVDB.tenant_id == tenant_id)
+    )
+    user_vdbs_by_user: dict[int, UserVDB] = {}
+    for vdb in user_vdbs_result:
+        user_vdbs_by_user[vdb.user_id] = vdb
+
+    # Get shared VDBs for this tenant
+    shared_vdbs_result = await session.scalars(
+        select(SharedVDB).where(SharedVDB.tenant_id == tenant_id)
+    )
+    shared_vdbs = list(shared_vdbs_result)
+
+    # Build user list with VDB info
+    user_list = []
+    for u in users:
+        vdb = user_vdbs_by_user.get(u.id)
+        vdb_info = None
+        if vdb:
+            vdb_location = f"/opt/wildfly/teiidfiles/customers/{tenant_id}/{u.id}/vdb/{vdb.vdb_id}-vdb.xml"
+            vdb_info = {
+                "vdb_id": vdb.vdb_id,
+                "vdb_name": f"{vdb.vdb_id}-vdb.xml",
+                "health_status": vdb.health_status,
+                "location": vdb_location,
+                "is_active": vdb.is_active,
+                "last_health_check": vdb.last_health_check.isoformat() if vdb.last_health_check else None,
+            }
+        user_list.append({
+            "id": u.id,
+            "email": u.email,
+            "display_name": u.display_name,
+            "role": u.role,
+            "is_active": u.is_active,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "vdb": vdb_info,
+        })
+
+    # Build shared VDB list
+    shared_list = []
+    for sv in shared_vdbs:
+        sv_location = f"/opt/wildfly/teiidfiles/customers/{tenant_id}/shared/vdb/{sv.vdb_id}-vdb.xml"
+        shared_list.append({
+            "id": sv.id,
+            "vdb_id": sv.vdb_id,
+            "vdb_name": f"{sv.vdb_id}-vdb.xml",
+            "health_status": sv.health_status,
+            "location": sv_location,
+            "is_active": sv.is_active,
+            "last_health_check": sv.last_health_check.isoformat() if sv.last_health_check else None,
+        })
+
+    return {
+        "tenant": TenantRead.model_validate(tenant).model_dump(mode="json"),
+        "users": user_list,
+        "shared_vdbs": shared_list,
+    }
 
 
 @router.get("/me", response_model=TenantRead)

@@ -13,10 +13,7 @@ const pillItems: NavItem[] = [
   { href: "/upload", label: "Datasources" },
 ];
 
-const otherItems: NavItem[] = [
-  { href: "/dashboard", label: "Overview" },
-  { href: "/scopes", label: "Scopes" },
-];
+const otherItems: NavItem[] = [];
 
 const tenantAdminItems: NavItem[] = [
   { href: "/admin/users", label: "Users" },
@@ -138,15 +135,17 @@ export function Sidebar() {
       </div>
 
       {/* Regular nav links */}
-      <nav className="space-y-1">
-        {otherItems.map((item) => (
-          <NavLink
-            key={item.href}
-            item={item}
-            active={pathname === item.href}
-          />
-        ))}
-      </nav>
+      {otherItems.length > 0 && (
+        <nav className="space-y-1">
+          {otherItems.map((item) => (
+            <NavLink
+              key={item.href}
+              item={item}
+              active={pathname === item.href}
+            />
+          ))}
+        </nav>
+      )}
 
       {/* Admin section */}
       {adminNav.length > 0 && (
