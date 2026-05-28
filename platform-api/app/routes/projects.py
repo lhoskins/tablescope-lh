@@ -315,6 +315,49 @@ async def add_member(
     )
 
 
+@router.put("/{project_id}/members/{user_id}/role")
+async def update_member_role(
+    project_id: int,
+    user_id: int,
+    payload: dict,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> ProjectMemberRead:
+    """Update a project member's role. Only owner or project admin can do this."""
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.owner_id != context.user_id and context.role != "admin":
+        caller_member = await session.get(ProjectMember, (project_id, context.user_id))
+        if caller_member is None or caller_member.role != "admin":
+            raise HTTPException(status_code=403, detail="Only project owner or admin can update roles")
+
+    member = await session.get(ProjectMember, (project_id, user_id))
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if member.role == "owner":
+        raise HTTPException(status_code=403, detail="Cannot change the owner's role")
+
+    new_role = payload.get("role", member.role)
+    if new_role not in ("viewer", "editor", "admin"):
+        raise HTTPException(status_code=400, detail="Invalid role. Must be viewer, editor, or admin")
+
+    member.role = new_role
+    await session.commit()
+
+    target_user = await session.get(User, user_id)
+    return ProjectMemberRead(
+        project_id=project_id,
+        user_id=user_id,
+        role=member.role,
+        is_active=member.is_active,
+        email=target_user.email if target_user else "",
+        display_name=target_user.display_name if target_user else None,
+    )
+
+
 @router.put("/{project_id}/members/{user_id}/deactivate")
 async def deactivate_member(
     project_id: int,

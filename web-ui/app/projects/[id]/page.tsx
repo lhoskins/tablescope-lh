@@ -117,8 +117,9 @@ function EditQueryForm({
   }, [rightDs, projectId]);
 
   const generatedSql = useMemo(() => {
-    if (!leftDs || !rightDs) return "";
+    if (!leftDs) return "";
     const l = `"${leftDs}"`;
+    if (!rightDs) return `SELECT * FROM ${l}`;
     const r = `"${rightDs}"`;
     if (jt === "CROSS JOIN") return `SELECT * FROM ${l} ${jt} ${r}`;
     if (!lc || !rc) return "";
@@ -212,12 +213,19 @@ function EditQueryForm({
       </div>
       <div className="flex gap-2">
         <button
-          onClick={() => onSave({
-            name, description,
-            left_datasource: leftDs, right_datasource: rightDs,
-            join_type: jt, left_column: lc, right_column: rc,
-            sql_text: sqlText || generatedSql,
-          })}
+          onClick={() => {
+            const finalSql = sqlEditing ? sqlText : generatedSql;
+            const saveRightDs = sqlEditing && !sqlText.includes(rightDs) ? "" : rightDs;
+            const saveJt = saveRightDs ? jt : "";
+            const saveLc = saveRightDs ? lc : "";
+            const saveRc = saveRightDs ? rc : "";
+            onSave({
+              name, description,
+              left_datasource: leftDs, right_datasource: saveRightDs,
+              join_type: saveJt, left_column: saveLc, right_column: saveRc,
+              sql_text: finalSql,
+            });
+          }}
           disabled={!name.trim() || isPending}
           className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
         >
@@ -256,6 +264,8 @@ export default function ProjectWorkspacePage() {
   const [rightCols, setRightCols] = useState<string[]>([]);
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [filters, setFilters] = useState<{ column: string; operand: string; value: string }[]>([]);
+  const [mainSqlEditing, setMainSqlEditing] = useState(false);
+  const [customSql, setCustomSql] = useState("");
 
   // ── Save dialog ───────────────────────────────────────────────────
   const [showSave, setShowSave] = useState(false);
@@ -402,6 +412,13 @@ export default function ProjectWorkspacePage() {
       queryClient.invalidateQueries({ queryKey: ["project-members", projectId] });
       setAddUserId(null);
     },
+  });
+
+  const updateMemberRoleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: number; role: string }) =>
+      apiClient.put(`/api/projects/${projectId}/members/${userId}/role`, { role }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["project-members", projectId] }),
   });
 
   const deactivateMemberMutation = useMutation({
@@ -829,6 +846,8 @@ export default function ProjectWorkspacePage() {
                     setShowSave(false);
                     setSelectedFields([]);
                     setFilters([]);
+                    setMainSqlEditing(false);
+                    setCustomSql("");
                   }}
                   className="text-sm text-slate-500 hover:text-slate-700"
                 >
@@ -1104,22 +1123,49 @@ export default function ProjectWorkspacePage() {
               {/* SQL Preview + Actions */}
               {leftDs && (
                 <div className="mb-4">
-                  {generatedSql && (
-                    <div className="mb-3 rounded bg-slate-800 p-3">
-                      <p className="text-xs font-mono text-slate-300 break-all">{generatedSql}</p>
-                    </div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-600">SQL</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (mainSqlEditing) {
+                          setCustomSql("");
+                          setMainSqlEditing(false);
+                        } else {
+                          setCustomSql(generatedSql);
+                          setMainSqlEditing(true);
+                        }
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      {mainSqlEditing ? "Reset to generated" : "Edit SQL directly"}
+                    </button>
+                  </div>
+                  {mainSqlEditing ? (
+                    <textarea
+                      value={customSql}
+                      onChange={(e) => setCustomSql(e.target.value)}
+                      rows={3}
+                      className="w-full rounded-md border border-blue-400 bg-white px-2 py-1.5 text-xs font-mono text-slate-900 mb-3"
+                    />
+                  ) : (
+                    generatedSql && (
+                      <div className="mb-3 rounded bg-slate-800 p-3">
+                        <p className="text-xs font-mono text-slate-300 break-all">{generatedSql}</p>
+                      </div>
+                    )
                   )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => setShowSave(true)}
-                      disabled={!generatedSql}
+                      disabled={!(mainSqlEditing ? customSql : generatedSql)}
                       className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
                     >
                       Save
                     </button>
                     <button
-                      onClick={() => executeQuery(generatedSql)}
-                      disabled={!generatedSql || executing}
+                      onClick={() => executeQuery(mainSqlEditing ? customSql : generatedSql)}
+                      disabled={!(mainSqlEditing ? customSql : generatedSql) || executing}
                       className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                     >
                       {executing ? "Executing..." : "Execute"}
@@ -1168,7 +1214,7 @@ export default function ProjectWorkspacePage() {
                             join_type: joinType,
                             left_column: leftCol,
                             right_column: rightCol,
-                            sql_text: generatedSql,
+                            sql_text: mainSqlEditing ? customSql : generatedSql,
                           });
                         }}
                         disabled={!queryName.trim() || createQueryMutation.isPending}
@@ -1441,9 +1487,21 @@ export default function ProjectWorkspacePage() {
                       )}
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                        {m.role}
-                      </span>
+                      {canManageMembers && m.role !== "owner" ? (
+                        <select
+                          value={m.role}
+                          onChange={(e) => updateMemberRoleMutation.mutate({ userId: m.user_id, role: e.target.value })}
+                          className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-700 cursor-pointer hover:border-slate-400"
+                        >
+                          <option value="viewer">Viewer</option>
+                          <option value="editor">Editor</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      ) : (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                          {m.role}
+                        </span>
+                      )}
                       {canManageMembers && m.role !== "owner" && (
                         <button
                           onClick={() => deactivateMemberMutation.mutate(m.user_id)}
