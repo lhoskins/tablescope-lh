@@ -62,6 +62,7 @@ async def exchange_token(
         user_id=user.id,
         role=user.role,
     )
+    tenant = await session.get(Tenant, user.tenant_id)
     return AuthTokenResponse(
         access_token=access_token,
         expires_in=settings.jwt_access_token_ttl_minutes * 60,
@@ -69,6 +70,7 @@ async def exchange_token(
         user_id=user.id,
         role=user.role,
         is_super_admin=user.is_super_admin,
+        tenant_slug=tenant.slug if tenant else None,
     )
 
 
@@ -97,6 +99,7 @@ async def direct_login(
         user_id=user.id,
         role=user.role,
     )
+    login_tenant = await session.get(Tenant, user.tenant_id)
     return AuthTokenResponse(
         access_token=access_token,
         expires_in=settings.jwt_access_token_ttl_minutes * 60,
@@ -104,4 +107,5 @@ async def direct_login(
         user_id=user.id,
         role=user.role,
         is_super_admin=user.is_super_admin,
+        tenant_slug=login_tenant.slug if login_tenant else None,
     )

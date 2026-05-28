@@ -44,6 +44,7 @@ function LoginForm() {
         is_super_admin: result.is_super_admin,
         tenant_id: result.tenant_id,
         user_id: result.user_id,
+        tenant_slug: result.tenant_slug,
       });
       router.replace("/dashboard");
     } catch (err) {

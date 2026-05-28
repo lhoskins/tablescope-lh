@@ -94,7 +94,8 @@ function EditQueryForm({
   const [leftCols, setLeftCols] = useState<string[]>([]);
   const [rightCols, setRightCols] = useState<string[]>([]);
   const [sqlEditing, setSqlEditing] = useState(false);
-  const [sqlText, setSqlText] = useState(query.sql_text ?? "");
+  const savedSql = query.sql_text ?? "";
+  const [sqlText, setSqlText] = useState(savedSql);
 
   useEffect(() => {
     if (leftDs) {
@@ -193,7 +194,7 @@ function EditQueryForm({
           <label className="block text-xs font-medium text-slate-600">SQL</label>
           <button
             type="button"
-            onClick={() => { setSqlEditing(!sqlEditing); if (sqlEditing) setSqlText(generatedSql); }}
+            onClick={() => { if (sqlEditing) { setSqlText(generatedSql); setSqlEditing(false); } else { setSqlText(savedSql || generatedSql); setSqlEditing(true); } }}
             className="text-xs text-blue-600 hover:text-blue-800"
           >
             {sqlEditing ? "Reset to generated" : "Edit SQL directly"}
@@ -636,12 +637,11 @@ export default function ProjectWorkspacePage() {
 
   const project = projectQuery.data;
   const isOwner = project?.owner_id === meta?.user_id;
-  const isAdmin = meta?.role === "admin";
+  const isTenantAdmin = meta?.role === "admin";
   const myMembership = (membersQuery.data ?? []).find((m) => m.user_id === meta?.user_id);
   const myProjectRole = isOwner ? "owner" : (myMembership?.role ?? "viewer");
-  const canManageMembers = isOwner || isAdmin || myProjectRole === "admin";
-  const canEdit = isOwner || isAdmin || myProjectRole === "admin" || myProjectRole === "editor";
-  const canView = true;
+  const canManageMembers = isOwner || myProjectRole === "admin";
+  const canEdit = isOwner || myProjectRole === "admin" || myProjectRole === "editor";
 
   // ── Available users for member assignment ─────────────────────────
 
@@ -1550,7 +1550,7 @@ export default function ProjectWorkspacePage() {
                             }}
                             className="text-xs text-red-500 hover:text-red-700"
                           >
-                            Delete
+                            Remove
                           </button>
                         </>
                       )}

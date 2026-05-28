@@ -31,3 +31,4 @@ class AuthTokenResponse(BaseModel):
     user_id: int
     role: str
     is_super_admin: bool = False
+    tenant_slug: str | None = None
