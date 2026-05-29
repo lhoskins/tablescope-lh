@@ -15,6 +15,14 @@ class AuthExchangeRequest(BaseModel):
     tenant_slug: str | None = None
 
 
+class DirectLoginRequest(BaseModel):
+    """Email/password login without an external auth provider."""
+
+    email: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    tenant_slug: str | None = None
+
+
 class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "Bearer"
@@ -22,3 +30,5 @@ class AuthTokenResponse(BaseModel):
     tenant_id: int
     user_id: int
     role: str
+    is_super_admin: bool = False
+    tenant_slug: str | None = None

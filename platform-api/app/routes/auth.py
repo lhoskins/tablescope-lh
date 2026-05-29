@@ -20,7 +20,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.schemas.auth import AuthExchangeRequest, AuthTokenResponse
+from app.schemas.auth import AuthExchangeRequest, AuthTokenResponse, DirectLoginRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -62,10 +62,50 @@ async def exchange_token(
         user_id=user.id,
         role=user.role,
     )
+    tenant = await session.get(Tenant, user.tenant_id)
     return AuthTokenResponse(
         access_token=access_token,
         expires_in=settings.jwt_access_token_ttl_minutes * 60,
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
+        is_super_admin=user.is_super_admin,
+        tenant_slug=tenant.slug if tenant else None,
+    )
+
+
+@router.post("/login", response_model=AuthTokenResponse)
+async def direct_login(
+    payload: DirectLoginRequest,
+    session: AsyncSession = Depends(get_db),
+) -> AuthTokenResponse:
+    """Authenticate with email and password (no external provider required)."""
+    settings = get_settings()
+
+    query = select(User).where(User.email == payload.email, User.is_active.is_(True))
+    if payload.tenant_slug:
+        tenant = await session.scalar(select(Tenant).where(Tenant.slug == payload.tenant_slug))
+        if tenant is None:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        query = query.where(User.tenant_id == tenant.id)
+
+    user = await session.scalar(query)
+    if user is None or not user.verify_password(payload.password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    access_token = create_access_token(
+        sub=user.external_id or str(user.id),
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        role=user.role,
+    )
+    login_tenant = await session.get(Tenant, user.tenant_id)
+    return AuthTokenResponse(
+        access_token=access_token,
+        expires_in=settings.jwt_access_token_ttl_minutes * 60,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        role=user.role,
+        is_super_admin=user.is_super_admin,
+        tenant_slug=login_tenant.slug if login_tenant else None,
     )

@@ -3,8 +3,9 @@
 asyncpg pools are keyed by `(host, port, vdb_name, username)` so each tenant's
 VDB gets its own pool. Pools are created lazily and cached.
 
-PgBouncer is configured in docker-compose for additional connection multiplexing
-between platform-api workers and Teiid.
+Teiid's PG wire protocol is compatible with asyncpg but does NOT support
+certain PostgreSQL internal functions (e.g. pg_advisory_unlock_all) that
+asyncpg calls during pool reset.  We provide a no-op reset callback.
 """
 
 from __future__ import annotations
@@ -18,6 +19,15 @@ import asyncpg
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+async def _teiid_reset(conn: asyncpg.Connection) -> None:
+    """No-op pool reset for Teiid connections.
+
+    The default asyncpg pool reset calls ``pg_advisory_unlock_all()`` which
+    Teiid does not implement (TEIID30068).  Skipping it is safe because
+    advisory locks are not used.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,10 +74,23 @@ class TeiidConnectionPoolManager:
                 min_size=self._min_size,
                 max_size=self._max_size,
                 command_timeout=60,
+                statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},
+                reset=_teiid_reset,
             )
             self._pools[key] = pool
             return pool
+
+    async def evict_pool(
+        self, *, host: str, port: int, database: str, username: str
+    ) -> None:
+        """Close and remove a specific pool (e.g. after a stale-session error)."""
+        key = PoolKey(host=host, port=port, database=database, username=username)
+        async with self._lock:
+            pool = self._pools.pop(key, None)
+            if pool is not None:
+                logger.info("Evicting stale Teiid pool %s", key)
+                await pool.close()
 
     async def close_all(self) -> None:
         async with self._lock:

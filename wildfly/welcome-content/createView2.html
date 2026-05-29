@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Upload Excel File</title>
+</head>
+<body>
+  <h1>Upload Excel File</h1>
+  <form id="uploadForm" enctype="multipart/form-data" method="post"> <!-- Specify method="post" -->
+    <input type="file" name="file" id="fileInput" accept=".xlsx"><br><br>
+    <button type="button" onclick="uploadFile()">Upload</button>
+  </form>
+
+  <div id="response"></div>
+
+  <script>
+    function uploadFile() {
+      var fileInput = document.getElementById('fileInput');
+      var file = fileInput.files[0];
+
+      if (!file) {
+        document.getElementById('response').innerHTML = 'Please select a file to upload.';
+        return;
+      }
+
+      var formData = new FormData();
+      formData.append('file', file);
+
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', 'http://64.52.108.62:8095/TeiidExcelImporter/upload', true); // Corrected endpoint URL
+      xhr.onload = function () {
+        if (xhr.status === 200) {
+          document.getElementById('response').innerHTML = xhr.responseText;
+        } else {
+          document.getElementById('response').innerHTML = 'Error: ' + xhr.statusText + ' (' + xhr.status + ')';
+        }
+      };
+      xhr.onerror = function () {
+        document.getElementById('response').innerHTML = 'Error: Network Failure';
+      };
+      xhr.send(formData);
+    }
+  </script>
+</body>
+</html>

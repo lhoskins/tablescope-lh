@@ -1,11 +1,27 @@
 # Single-server deployment compose file for Tablescope.
 #
 # Runs: platform-api (FastAPI), web-ui (Next.js), Postgres metadata,
-# Redis, PgBouncer (in front of Teiid), and an optional WildFly/Teiid
-# container. WildFly is OFF by default — provision it on the host or
-# uncomment the `teiid` service below.
+# Redis, PgBouncer (in front of Teiid), WildFly/Teiid (data engine).
 
 services:
+  teiid:
+    build:
+      context: ./wildfly
+    image: tablescope-teiid:latest
+    restart: unless-stopped
+    ports:
+      - "8095:8080"
+      - "35442:35432"
+      - "9990:9990"
+    volumes:
+      - teiid_data:/opt/wildfly/teiidfiles/customers
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9990/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
   platform-api:
     build:
       context: ./platform-api
@@ -22,12 +38,18 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-tablescope-platform-api}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-tablescope-clients}
       SERVICE_API_KEYS: ${SERVICE_API_KEYS:-}
-      TEIID_PG_HOST: ${TEIID_PG_HOST:-host.docker.internal}
-      TEIID_PG_PORT: ${TEIID_PG_PORT:-35442}
-      TEIID_SERVLET_URL: ${TEIID_SERVLET_URL:-http://host.docker.internal:8095}
+      TEIID_PG_HOST: teiid
+      TEIID_PG_PORT: "35432"
+      TEIID_SERVLET_URL: http://teiid:8080
       TEIID_SERVLET_API_KEY: ${TEIID_API_KEY:-}
       CUSTOMER_BASE_PATH: /opt/wildfly/teiidfiles/customers
       DRILLDOWN_CONFIG_PATH: /opt/redash-8.0.0-7/apps/tsTest/src/drilldownConfig.json
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-tablescope-data-988823366090}
+      S3_REGION: ${S3_REGION:-us-west-1}
+      S3_ENABLED: ${S3_ENABLED:-true}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${S3_REGION:-us-west-1}
       CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
       CLERK_ISSUER: ${CLERK_ISSUER:-}
       SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
@@ -35,20 +57,19 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       PROMETHEUS_ENABLED: "true"
     volumes:
-      - /opt/wildfly/teiidfiles:/opt/wildfly/teiidfiles
-      - /opt/redash-8.0.0-7/apps/tsTest/src:/opt/redash-8.0.0-7/apps/tsTest/src
+      - teiid_data:/opt/wildfly/teiidfiles/customers
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_started
+      teiid:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
   platform-api-worker:
     build:
@@ -60,16 +81,14 @@ services:
       DATABASE_URL: postgresql+asyncpg://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
-      TEIID_SERVLET_URL: ${TEIID_SERVLET_URL:-http://host.docker.internal:8095}
+      TEIID_SERVLET_URL: http://teiid:8080
       TEIID_SERVLET_API_KEY: ${TEIID_API_KEY:-}
       CUSTOMER_BASE_PATH: /opt/wildfly/teiidfiles/customers
     volumes:
-      - /opt/wildfly/teiidfiles:/opt/wildfly/teiidfiles
+      - teiid_data:/opt/wildfly/teiidfiles/customers
     depends_on:
       - redis
       - platform-api
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
   platform-api-migrate:
     build:
@@ -124,32 +143,21 @@ services:
     image: edoburu/pgbouncer:latest
     restart: unless-stopped
     environment:
-      DATABASES_HOST: ${TEIID_PG_HOST:-host.docker.internal}
-      DATABASES_PORT: ${TEIID_PG_PORT:-35442}
-      DATABASES_DBNAME: ${TEIID_PG_DEFAULT_VDB:-myvdbtest}
-      DATABASES_USER: ${TEIID_PG_USER:-test}
-      DATABASES_PASSWORD: ${TEIID_PG_PASSWORD:-test}
+      DB_HOST: teiid
+      DB_PORT: "35432"
+      DB_NAME: ${TEIID_PG_DEFAULT_VDB:-myvdbtest}
+      DB_USER: ${TEIID_PG_USER:-test}
+      DB_PASSWORD: ${TEIID_PG_PASSWORD:-test}
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "200"
       DEFAULT_POOL_SIZE: "20"
       AUTH_TYPE: scram-sha-256
     ports:
       - "35443:5432"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  # Uncomment to run WildFly/Teiid inside the compose stack instead of the host.
-  # teiid:
-  #   image: wildfly:26.1.3.Final
-  #   restart: unless-stopped
-  #   ports:
-  #     - "8095:8095"
-  #     - "35442:35442"
-  #     - "10000:10000"
-  #   volumes:
-  #     - /opt/wildfly/teiidfiles:/opt/wildfly/teiidfiles
-  #     - /opt/redash-8.0.0-7/apps/tsTest/src:/opt/redash-8.0.0-7/apps/tsTest/src
+    depends_on:
+      - teiid
 
 volumes:
   postgres_data:
   redis_data:
+  teiid_data:

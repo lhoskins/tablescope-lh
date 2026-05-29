@@ -28,7 +28,13 @@ def test_round_trip_token_carries_claims() -> None:
 
 def test_decoding_rejects_tampered_token() -> None:
     token = create_access_token(sub="u", tenant_id=1, user_id=1)
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    # Replace multiple characters in the signature to guarantee invalidity
+    parts = token.rsplit(".", 1)
+    sig = parts[1]
+    flipped = "".join(
+        ("A" if c != "A" else "B") for c in sig[:8]
+    ) + sig[8:]
+    tampered = parts[0] + "." + flipped
     with pytest.raises(AuthError):
         decode_access_token(tampered)
 

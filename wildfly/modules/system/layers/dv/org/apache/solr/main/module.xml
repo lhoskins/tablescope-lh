@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module name="org.apache.solr" xmlns="urn:jboss:module:1.3">
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
+       
+    <resources>
+        <resource-root path="solr-solrj-6.4.1.jar"/>
+        <resource-root path="noggit-0.6.jar"/>
+    </resources>
+
+    <dependencies>
+        <module name="javax.api"/>
+        <module name="org.slf4j"/>
+        <module name="org.apache.log4j"/>
+        <module name="org.apache.commons.configuration"/>
+        <module name="org.apache.commons.logging"/>
+        <module name="org.apache.commons.io"/>
+        <module name="org.apache.zookeeper"/>
+        <module name="org.apache.httpcomponents"/>
+        <module name="org.codehaus.woodstox"/>
+    </dependencies>
+</module>

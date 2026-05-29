@@ -1,0 +1,17 @@
+<vdb name="MyVDB" version="1">
+    <model name="ExcelSource1" type="PHYSICAL" visible="true">
+        <source name="ExcelSource1" translator-name="excel" connection-jndi-name="java:/excelDS1">
+            <translator name="excel">
+                <property name="Source" value="/opt/wildfly/teiidfiles/excelFiles/ExcelFile1.xlsx"/>
+            </translator>
+        </source>
+    </model>
+    <model name="ExcelSource2" type="PHYSICAL" visible="true">
+        <source name="ExcelSource2" translator-name="excel" connection-jndi-name="java:/excelDS2">
+            <translator name="excel">
+                <property name="Source" value="/opt/wildfly/teiidfiles/excelFiles/ExcelFile2.xlsx"/>
+            </translator>
+        </source>
+    </model>
+    <!-- Add more models for additional Excel files as needed -->
+</vdb>

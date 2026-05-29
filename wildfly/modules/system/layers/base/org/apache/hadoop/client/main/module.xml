@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module name="org.apache.hadoop.client" xmlns="urn:jboss:module:1.8">
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
+       
+    <resources>
+        <resource-root path="hadoop-client-api-3.1.3.jar"/>
+        <resource-root path="hadoop-client-runtime-3.1.3.jar"/>
+        <resource-root path="htrace-core4-4.1.0-incubating.jar"/>
+    </resources>
+
+    <dependencies>
+        <module name="sun.jdk"/>
+        <module name="javax.api"/>
+        <module name="org.slf4j"/>
+        <module name="org.apache.log4j"/>
+        <module name="org.apache.commons.logging"/>
+        <!-- findbugs -->
+    </dependencies>
+</module>

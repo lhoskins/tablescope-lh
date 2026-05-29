@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module name="org.jboss.teiid.client" xmlns="urn:jboss:module:1.3">
+    <properties>
+        <property name="jboss.api" value="public"/>
+    </properties>
+    
+    <resources>
+		<resource-root path="teiid-client-16.0.0.jar"/>
+		<resource-root path="teiid-hibernate-dialect-16.0.0.jar"/>
+		<resource-root path="teiid-wildfly-client-16.0.0.jar"/>
+    </resources>
+
+    <dependencies>
+        <module name="org.jboss.teiid.common-core"/>
+        <module name="javax.transaction.api"/>
+        <module name="javax.api"/>
+        <module name="sun.jdk"/>
+        <module name="org.jboss.modules"/>
+        <module name="org.hibernate"/>
+        <module name="io.opentracing.opentracing-api"/>
+        <module name="io.opentracing.opentracing-noop"/>
+        <module name="io.opentracing.opentracing-util"/>
+    </dependencies>
+</module>

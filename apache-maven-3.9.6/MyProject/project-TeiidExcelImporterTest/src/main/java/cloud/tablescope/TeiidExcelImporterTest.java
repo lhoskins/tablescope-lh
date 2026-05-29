@@ -900,7 +900,7 @@ private void processExcelFile(Part filePart, String fileName, String vdbFilePath
 
     private void deployVDB(String vdbFilePath, String vdbDeploymentName) {
         try {
-            Admin admin = AdminFactory.getInstance().createAdmin("64.52.108.62", 10000, "admin", "admin".toCharArray());
+            Admin admin = AdminFactory.getInstance().createAdmin("localhost", 9990, "admin", "admin".toCharArray());
             try (InputStream inputStream = new FileInputStream(vdbFilePath)) {
                 admin.deploy(vdbDeploymentName, inputStream);
             }
@@ -1010,7 +1010,7 @@ private void processExcelFile(Part filePart, String fileName, String vdbFilePath
     private void invalidateTeiidCache(String tableName) {
         try {
             Admin admin = AdminFactory.getInstance().createAdmin(
-                "localhost", 10000, "admin", "admin".toCharArray()
+                "localhost", 9990, "admin", "admin".toCharArray()
             );
             
             // Clear all result set cache (Teiid API doesn't support granular table-level clearing)

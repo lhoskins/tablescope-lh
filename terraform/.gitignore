@@ -1,0 +1,11 @@
+# Terraform state and working files
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Generated SSH keys — never commit
+*.pem
+
+# User-specific variable overrides
+terraform.tfvars

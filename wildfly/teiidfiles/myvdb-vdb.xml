@@ -1,0 +1,51 @@
+<vdb name="MyVDBTest" version="1">
+  <!-- Hidden model for the Activate foreign table -->
+  <model name="ExcelSourceModel" type="PHYSICAL" visible="false">
+    <source name="excel-connector" translator-name="excel" connection-jndi-name="java:/excelTestDS"/>
+    <metadata type="DDL">
+      <![CDATA[ -- Place Foreign Table Below
+CREATE FOREIGN TABLE V3iTProspectsList(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	FirstName string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	LastName string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Email string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Company string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Title string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet1', "teiid_excel:FILE" 'V3iTProspectsList.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+
+      ]]>
+    </metadata>
+  </model>
+  <model name="CSVSourceModel" type="PHYSICAL" visible="false">
+    <source name="text-connector" translator-name="file" connection-jndi-name="java:/fileTestDS" />
+    <metadata type="DDL">
+      <![CDATA[
+        CREATE FOREIGN PROCEDURE getTextFiles (
+          IN pathAndExt string(4000) NOT NULL
+        ) RETURNS
+          TABLE (
+            file clob,
+            filePath string(4000),
+            lastModified timestamp,
+            created timestamp,
+            size integer
+          ) OPTIONS(UPDATECOUNT '1');
+      ]]>
+    </metadata>
+  </model>
+
+  <!-- Visible model for the MyView -->
+  <model name="MyCompany" type="VIRTUAL" visible="true">
+    <metadata type="DDL">
+      <![CDATA[
+
+
+CREATE VIEW V3iTProspectsList_XLSX AS SELECT * FROM ExcelSourceModel.V3iTProspectsList;;
+
+-- Place new View above
+		]]> 
+        </metadata>
+    </model>
+</vdb>

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from enum import Enum
+from enum import StrEnum
 
 from fastapi import Depends, HTTPException, status
 
 from app.auth.context import RequestContext, get_request_context
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     ADMIN = "admin"
     EDITOR = "editor"
     VIEWER = "viewer"

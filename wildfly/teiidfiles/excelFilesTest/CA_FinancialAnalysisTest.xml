@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CrystalReport xmlns="urn:crystal-reports:schemas:report-detail"  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:crystal-reports:schemas:report-detail http://www.businessobjects.com/products/xml/CR2008Schema.xsd">
+<ReportHeader>
+<Section SectionNumber="0">
+</Section>
+</ReportHeader>
+<Group Level="1">
+<Group Level="2">
+<GroupHeader>
+</GroupHeader>
+<Details Level="3">
+</Details>
+</Group>
+<Group Level="2">
+<GroupHeader>
+</GroupHeader>
+<Details Level="3">
+</Details>
+</Group>
+<GroupFooter>
+<Section SectionNumber="0">
+<Field Name="RootJob1" FieldName="{CA_FinancialAnalysis.Root_Job}"><FormattedValue>19-583</FormattedValue><Value>19-583</Value></Field>
+<Field Name="sCustomer2" FieldName="{CA_FinancialAnalysis.sCustomer}"><FormattedValue>NORTH</FormattedValue><Value>NORTH</Value></Field>
+<Text Name="DNT_OrderUnit2"><TextValue> / ea</TextValue>
+</Text>
+<Field Name="RootTypeDisp1" FieldName="{@RootTypeDisp}"><FormattedValue>A</FormattedValue><Value>A</Value></Field>
+<Field Name="MaxofQtyPickLvl01" FieldName="Maximum ({@Qty_Pick_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>0</FormattedValue><Value>0.00</Value></Field>
+<Field Name="MaxofQtyProducedLvl01" FieldName="Maximum ({@Qty_Produced_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>0</FormattedValue><Value>0.00</Value></Field>
+<Field Name="MaxofQtyScrapLvl01" FieldName="Maximum ({@Qty_Scrap_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>0</FormattedValue><Value>0.00</Value></Field>
+<Field Name="MaxofQtyShipLvl01" FieldName="Maximum ({@Qty_Ship_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>0</FormattedValue><Value>0.00</Value></Field>
+<Field Name="MaxofQtyTransferLvl01" FieldName="Maximum ({@Qty_Transfer_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>0</FormattedValue><Value>0.00</Value></Field>
+<Field Name="SumofQtyMakeLvl01" FieldName="Sum ({@Qty_Make_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>97</FormattedValue><Value>97.00</Value></Field>
+<Field Name="MaxofQtyOrderLvl01" FieldName="Maximum ({@Qty_Order_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>92</FormattedValue><Value>92.00</Value></Field>
+<Field Name="MaxofsPartNumberLvl01" FieldName="Maximum ({@sPart_Number_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>5627910</FormattedValue><Value>5627910</Value></Field>
+<Field Name="MaxofsDescriptionLvl01" FieldName="Maximum ({@sDescription_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>DESTRUCT BRACKET</FormattedValue><Value>DESTRUCT BRACKET</Value></Field>
+<Field Name="MaxofRootJob1" FieldName="Maximum ({@Status_Dispaly_Lvl0}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>X</FormattedValue><Value>X</Value></Field>
+</Section>
+<Section SectionNumber="4">
+<Field Name="SumofCOGSLabor1" FieldName="Sum ({@COGSLabor}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>(68)</FormattedValue><Value>-68.09</Value></Field>
+<Field Name="SumofCOGSBurden1" FieldName="Sum ({@COGSBurden}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>(167)</FormattedValue><Value>-166.71</Value></Field>
+<Field Name="SumofCOGSMaterial1" FieldName="Sum ({@COGSMaterial}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>(66)</FormattedValue><Value>-66.14</Value></Field>
+<Field Name="SumofCOGSService1" FieldName="Sum ({@COGSService}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>(138)</FormattedValue><Value>-138.11</Value></Field>
+<Field Name="SumofCOGSTotal1" FieldName="Sum ({@COGSTotal}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>($439.05)</FormattedValue><Value>-439.05</Value></Field>
+<Field Name="COGSProfitGF11" FieldName="{@COGSProfitGF1}"><FormattedValue>$439.05</FormattedValue><Value>439.05</Value></Field>
+<Field Name="SumofTotalRev9" FieldName="Sum ({@TotalRev}, {CA_FinancialAnalysis.Root_Job})"><FormattedValue>$0.00</FormattedValue><Value>0.00</Value></Field>
+</Section>
+<Section SectionNumber="6">
+</Section>
+</GroupFooter>
+</Group>
+</CrystalReport>

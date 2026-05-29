@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TenantCreate(BaseModel):
     slug: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9-]+$")
     name: str = Field(min_length=1, max_length=255)
     external_id: str | None = None
+    root_user_email: str | None = None
+    root_user_name: str | None = None
+    root_user_password: str | None = None
 
 
 class TenantRead(BaseModel):
@@ -25,11 +29,29 @@ class TenantRead(BaseModel):
     updated_at: datetime
 
 
+_LOOSE_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: str
     display_name: str | None = None
     role: str = "viewer"
     external_id: str | None = None
+    password: str | None = None
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, v: str) -> str:
+        if not _LOOSE_EMAIL_RE.match(v):
+            raise ValueError("Not a valid email address")
+        return v.strip().lower()
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
+    password: str | None = None
 
 
 class UserRead(BaseModel):
@@ -42,5 +64,6 @@ class UserRead(BaseModel):
     role: str
     external_id: str | None
     is_active: bool
+    is_super_admin: bool = False
     created_at: datetime
     updated_at: datetime

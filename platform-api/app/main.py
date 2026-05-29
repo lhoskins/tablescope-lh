@@ -18,10 +18,12 @@ from app.logging_config import configure_logging
 from app.observability import mount_metrics, setup_sentry
 from app.routes import auth as auth_routes
 from app.routes import health as health_routes
+from app.routes import projects as projects_routes
 from app.routes import query as query_routes
 from app.routes import scopes as scopes_routes
 from app.routes import sharing as sharing_routes
 from app.routes import tenants as tenants_routes
+from app.routes import storage as storage_routes
 from app.routes import upload as upload_routes
 from app.services.connection_pool import pool_manager
 
@@ -81,9 +83,11 @@ def create_app() -> FastAPI:
     api_prefix = settings.api_prefix
     app.include_router(auth_routes.router, prefix=api_prefix)
     app.include_router(tenants_routes.router, prefix=api_prefix)
+    app.include_router(projects_routes.router, prefix=api_prefix)
     app.include_router(scopes_routes.router, prefix=api_prefix)
     app.include_router(query_routes.router, prefix=api_prefix)
     app.include_router(sharing_routes.router, prefix=api_prefix)
+    app.include_router(storage_routes.router, prefix=api_prefix)
     app.include_router(upload_routes.router, prefix=api_prefix)
 
     return app
