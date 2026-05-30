@@ -277,7 +277,10 @@ def map_to_teiid_type(sa_type: str) -> str:
     if base in bool_types:
         return "boolean"
     if base in decimal_types:
-        return "bigdecimal"
+        # Map exact numerics to double rather than bigdecimal: Teiid's PG-wire
+        # binary encoding for NUMERIC/bigdecimal is not decodable by asyncpg
+        # ("insufficient data in buffer"), whereas float8/double works.
+        return "double"
     if base in float_types:
         return "float"
     if base in double_types:

@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
 
 import asyncpg
 
@@ -29,29 +28,6 @@ async def _teiid_reset(conn: asyncpg.Connection) -> None:
     Teiid does not implement (TEIID30068).  Skipping it is safe because
     advisory locks are not used.
     """
-
-
-def _decode_numeric(value: str) -> Decimal | None:
-    if value is None or value == "":
-        return None
-    return Decimal(value)
-
-
-async def _teiid_init(conn: asyncpg.Connection) -> None:
-    """Per-connection setup for Teiid (PG-wire) connections.
-
-    Teiid's PG-wire binary encoding for ``NUMERIC`` is incompatible with
-    asyncpg's binary decoder and fails with "insufficient data in buffer".
-    Registering a text-format codec forces asyncpg to request the value as
-    text, which Teiid encodes correctly.
-    """
-    await conn.set_type_codec(
-        "numeric",
-        schema="pg_catalog",
-        encoder=str,
-        decoder=_decode_numeric,
-        format="text",
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +77,6 @@ class TeiidConnectionPoolManager:
                 statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},
                 reset=_teiid_reset,
-                init=_teiid_init,
             )
             self._pools[key] = pool
             return pool
