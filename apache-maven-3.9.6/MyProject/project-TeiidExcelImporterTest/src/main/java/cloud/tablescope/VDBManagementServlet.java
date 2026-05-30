@@ -1417,7 +1417,7 @@ public class VDBManagementServlet extends HttpServlet {
             Admin admin = AdminFactory.getInstance().createAdmin(
                     teiidHost, teiidPort, teiidAdminUser, teiidAdminPassword.toCharArray());
             try {
-                ensureDataSource(admin, dsName, dbType, jdbcUrl, username, password);
+                ensureDataSource(dsName, dbType, jdbcUrl, username, password);
 
                 // 3. Edit the VDB XML: add the physical model + the view.
                 String vdbXml = readFile(vdbFilePath);
@@ -1482,28 +1482,71 @@ public class VDBManagementServlet extends HttpServlet {
     }
 
     /** Create the WildFly JDBC datasource if it does not already exist. */
-    private void ensureDataSource(Admin admin, String dsName, String dbType,
+    private void ensureDataSource(String dsName, String dbType,
                                   String jdbcUrl, String username, String password) throws Exception {
-        try {
-            Collection<?> existing = admin.getDataSourceNames();
-            if (existing != null && existing.contains(dsName)) {
-                log("Datasource already exists: " + dsName);
-                return;
-            }
-        } catch (Exception e) {
-            log("Warning: could not list datasources: " + e.getMessage());
+        if (dataSourceExists(dsName)) {
+            log("Datasource already exists: " + dsName);
+            return;
         }
 
         String driver = driverNameFor(dbType);
-        Properties props = new Properties();
-        props.setProperty("connection-url", jdbcUrl);
-        props.setProperty("user-name", username);
-        props.setProperty("password", password);
-        props.setProperty("driver-name", driver);
+        String escUser = username == null ? "" : username.replace("\\", "\\\\").replace("\"", "\\\"");
+        String escPass = password == null ? "" : password.replace("\\", "\\\\").replace("\"", "\\\"");
 
-        log("Creating datasource " + dsName + " with driver " + driver);
-        admin.createDataSource(dsName, driver, props);
+        // Use the server's own CLI (correct version + local auth) to avoid the
+        // bundled Teiid admin client building a composite incompatible with the
+        // running WildFly management model.
+        String command = "/subsystem=datasources/data-source=" + dsName + ":add("
+                + "jndi-name=java:/" + dsName
+                + ", driver-name=" + driver
+                + ", connection-url=" + jdbcUrl
+                + ", user-name=\"" + escUser + "\""
+                + ", password=\"" + escPass + "\""
+                + ", enabled=true)";
+
+        log("Creating datasource " + dsName + " with driver " + driver + " via CLI");
+        String result = runCli(command);
+        if (result == null || result.indexOf("\"outcome\" => \"success\"") < 0) {
+            throw new Exception("CLI datasource creation failed: " + result);
+        }
         log("Datasource created: " + dsName);
+    }
+
+    /** Return true if a WildFly data-source with this name already exists. */
+    private boolean dataSourceExists(String dsName) {
+        try {
+            String out = runCli("/subsystem=datasources:read-children-names(child-type=data-source)");
+            return out != null && out.contains("\"" + dsName + "\"");
+        } catch (Exception e) {
+            log("Warning: could not list datasources: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /** Run a jboss-cli command against the local management interface (local auth). */
+    private String runCli(String command) throws Exception {
+        String jbossHome = System.getProperty("jboss.home.dir", "/opt/wildfly");
+        ProcessBuilder pb = new ProcessBuilder(
+                jbossHome + "/bin/jboss-cli.sh",
+                "--connect",
+                "--controller=localhost:9990",
+                "--command=" + command);
+        pb.redirectErrorStream(true);
+        Process p = pb.start();
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(p.getInputStream(), "UTF-8"))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+        }
+        boolean finished = p.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
+        if (!finished) {
+            p.destroyForcibly();
+            throw new Exception("jboss-cli timed out");
+        }
+        return sb.toString();
     }
 
     /** Build a PHYSICAL model block with an explicit CREATE FOREIGN TABLE. */
