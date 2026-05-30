@@ -19,7 +19,7 @@ RUN mkdir -p /opt/wildfly/standalone/data \
              /opt/wildfly/domain/tmp \
              /opt/wildfly/teiidfiles/customers && \
     chown -R wildfly:wildfly /opt/wildfly && \
-    chmod +x /opt/wildfly/bin/*.sh
+    chmod +x /opt/wildfly/bin/*.sh /opt/wildfly/docker-entrypoint.sh
 
 # WildFly HTTP (servlets)
 EXPOSE 8080
@@ -33,7 +33,4 @@ EXPOSE 35432
 USER wildfly
 WORKDIR /opt/wildfly
 
-CMD ["/opt/wildfly/bin/standalone.sh", \
-     "-c", "standalone-teiid.xml", \
-     "-b", "0.0.0.0", \
-     "-bmanagement", "0.0.0.0"]
+CMD ["/opt/wildfly/docker-entrypoint.sh"]
