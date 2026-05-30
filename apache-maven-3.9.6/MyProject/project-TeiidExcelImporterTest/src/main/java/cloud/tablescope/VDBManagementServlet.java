@@ -1559,7 +1559,15 @@ public class VDBManagementServlet extends HttpServlet {
                 JSONObject c = columns.getJSONObject(i);
                 String name = c.getString("name");
                 String type = c.optString("teiid_type", "string");
-                cols.append("	\"").append(name).append("\" ").append(type);
+                // Quoted source identifier; double internal quotes per SQL identifier rules.
+                String quotedId = "\"" + name.replace("\"", "\"\"") + "\"";
+                // Escape single quotes for the DDL NAMEINSOURCE string literal.
+                String nameInSourceLiteral = quotedId.replace("'", "''");
+                // Emit an explicit column NAMEINSOURCE so Teiid quotes names that it
+                // would otherwise leave unquoted (e.g. leading/trailing spaces,
+                // reserved words, mixed case), which Postgres then cannot resolve.
+                cols.append("	").append(quotedId).append(" ").append(type)
+                    .append(" OPTIONS (NAMEINSOURCE '").append(nameInSourceLiteral).append("')");
                 if (i < columns.length() - 1) cols.append(",");
                 cols.append("\n");
             }
