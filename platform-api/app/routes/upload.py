@@ -21,12 +21,14 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.database_data_source import DatabaseDataSource
 from app.models.tenant import Tenant
 from app.models.user import User
 
@@ -165,6 +167,29 @@ async def list_datasources(
                     "fileName": f.name,
                     "viewName": view_name,
                     "size": f.stat().st_size,
+                    "sourceType": extension.lower() or "file",
+                    "dbType": None,
                 })
+
+    # Append the user's database-backed data sources (not tied to a project).
+    db_sources = (
+        await session.scalars(
+            select(DatabaseDataSource).where(
+                DatabaseDataSource.tenant_id == context.tenant_id,
+                DatabaseDataSource.created_by == user.id,
+                DatabaseDataSource.project_id.is_(None),
+                DatabaseDataSource.status == "active",
+            )
+        )
+    ).all()
+    for ds in db_sources:
+        datasources.append({
+            "fileName": ds.display_name,
+            "viewName": ds.teiid_view_name,
+            "size": None,
+            "sourceType": "database_table",
+            "dbType": ds.db_type,
+            "id": ds.id,
+        })
 
     return datasources

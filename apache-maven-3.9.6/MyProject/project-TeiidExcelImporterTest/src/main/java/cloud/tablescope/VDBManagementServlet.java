@@ -9,6 +9,7 @@ import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.*;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import org.teiid.adminapi.Admin;
 import org.teiid.adminapi.jboss.AdminFactory;
 
@@ -112,6 +113,8 @@ public class VDBManagementServlet extends HttpServlet {
                 checkVDBStatus(request, response, out);
             } else if (pathInfo.equals("/redeployVDB")) {
                 redeployVDB(request, response, out);
+            } else if (pathInfo.equals("/createDatabaseSource")) {
+                createDatabaseSource(request, response, out);
             } else {
                 out.println(createErrorResponse("Unknown action: " + pathInfo));
                 response.setStatus(HttpServletResponse.SC_NOT_FOUND);
@@ -1324,6 +1327,241 @@ public class VDBManagementServlet extends HttpServlet {
      * @param vdbId The VDB identifier
      * @return Full path to VDB file, or null if not found
      */
+    /**
+     * Register an external database table as a queryable data source inside an
+     * existing user VDB.
+     *
+     * Steps:
+     *  1. Ensure a WildFly JDBC datasource exists (Teiid Admin API), so the
+     *     physical model has a live JNDI connection.
+     *  2. Insert a PHYSICAL model (CREATE FOREIGN TABLE) for the table.
+     *  3. Insert a VIEW over that model into the MyCompany virtual model so it
+     *     joins transparently with file-backed views.
+     *  4. Undeploy + redeploy the VDB.
+     *
+     * The password is used only to create the datasource and is never logged.
+     */
+    private void createDatabaseSource(HttpServletRequest request, HttpServletResponse response, PrintWriter out)
+            throws IOException {
+
+        JSONObject body = parseRequestBody(request);
+
+        String[] required = {"vdb_id", "org_id", "db_type", "translator", "jdbc_url",
+                "username", "password", "model_name", "teiid_table_name",
+                "jndi_name", "ds_name", "view_name", "table_name"};
+        for (String key : required) {
+            if (!body.has(key)) {
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                out.println(createErrorResponse("Missing required field: " + key));
+                return;
+            }
+        }
+
+        String vdbId = body.getString("vdb_id");
+        int orgId = body.getInt("org_id");
+        Integer userId = body.has("user_id") && !body.isNull("user_id") ? body.getInt("user_id") : null;
+        String dbType = body.getString("db_type");
+        String translator = body.getString("translator");
+        String jdbcUrl = body.getString("jdbc_url");
+        String username = body.getString("username");
+        String password = body.getString("password");
+        String modelName = body.getString("model_name");
+        String teiidTableName = body.getString("teiid_table_name");
+        String jndiName = body.getString("jndi_name");
+        String dsName = body.getString("ds_name");
+        String viewName = body.getString("view_name");
+        String tableName = body.getString("table_name");
+        String schemaName = body.optString("schema_name", "");
+        JSONArray columns = body.optJSONArray("columns");
+
+        // Teiid admin endpoint (local to this WildFly node).
+        String teiidHost = body.optString("teiid_host", "localhost");
+        int teiidPort = body.has("teiid_port") ? body.getInt("teiid_port") : 9990;
+
+        log("createDatabaseSource: vdb_id=" + vdbId + ", org_id=" + orgId
+                + ", user_id=" + userId + ", db_type=" + dbType
+                + ", model=" + modelName + ", view=" + viewName + ", table=" + tableName);
+
+        // 1. Locate the VDB XML file. User VDBs live under {org}/{user}/vdb/.
+        String vdbFilePath = null;
+        if (userId != null) {
+            String candidate = vdbBasePath + "/customers/" + orgId + "/" + userId
+                    + "/vdb/" + vdbId + "-vdb.xml";
+            if (new File(candidate).exists()) {
+                vdbFilePath = candidate;
+            }
+        }
+        if (vdbFilePath == null) {
+            String shared = vdbBasePath + "/customers/" + orgId + "/shared/vdb/" + vdbId + "-vdb.xml";
+            if (new File(shared).exists()) {
+                vdbFilePath = shared;
+            }
+        }
+        if (vdbFilePath == null) {
+            vdbFilePath = findVDBFile(vdbId);
+        }
+        if (vdbFilePath == null || !new File(vdbFilePath).exists()) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            out.println(createErrorResponse("VDB file not found for vdb_id: " + vdbId));
+            return;
+        }
+
+        if (!VDBLockManager.acquireLock(vdbFilePath)) {
+            response.setStatus(HttpServletResponse.SC_CONFLICT);
+            out.println(createErrorResponse("VDB is currently being modified. Please try again."));
+            return;
+        }
+
+        try {
+            // 2. Ensure the WildFly JDBC datasource exists.
+            Admin admin = AdminFactory.getInstance().createAdmin(
+                    teiidHost, teiidPort, teiidAdminUser, teiidAdminPassword.toCharArray());
+            try {
+                ensureDataSource(admin, dsName, dbType, jdbcUrl, username, password);
+
+                // 3. Edit the VDB XML: add the physical model + the view.
+                String vdbXml = readFile(vdbFilePath);
+
+                if (vdbXml.contains("<model name=\"" + modelName + "\"")) {
+                    log("Model " + modelName + " already present in VDB; skipping model insert.");
+                } else {
+                    String modelBlock = buildPhysicalModelBlock(
+                            modelName, dsName, translator, jndiName,
+                            teiidTableName, schemaName, tableName, columns);
+                    vdbXml = insertBefore(vdbXml, "</vdb>", modelBlock);
+                }
+
+                String viewStmt = "CREATE VIEW " + viewName + " AS SELECT * FROM "
+                        + modelName + "." + teiidTableName + ";";
+                if (vdbXml.contains("CREATE VIEW " + viewName + " ")) {
+                    log("View " + viewName + " already present in VDB; skipping view insert.");
+                } else {
+                    vdbXml = insertBefore(vdbXml, "-- Place new View above", viewStmt + NEWLINE());
+                }
+
+                writeFile(vdbFilePath, vdbXml);
+
+                // 4. Redeploy the VDB.
+                try {
+                    admin.undeploy(vdbId + "-vdb.xml");
+                    log("VDB undeployed: " + vdbId);
+                } catch (Exception e) {
+                    log("Warning: undeploy failed (may not be deployed): " + e.getMessage());
+                }
+                try (InputStream inputStream = new FileInputStream(vdbFilePath)) {
+                    admin.deploy(vdbId + "-vdb.xml", inputStream);
+                }
+                log("VDB redeployed with database source: " + vdbId);
+            } finally {
+                admin.close();
+            }
+
+            response.setStatus(HttpServletResponse.SC_OK);
+            JSONObject ok = new JSONObject();
+            ok.put("success", true);
+            ok.put("vdb_id", vdbId);
+            ok.put("model_name", modelName);
+            ok.put("view_name", viewName);
+            ok.put("message", "Database source registered successfully");
+            out.println(ok.toString());
+        } catch (Exception e) {
+            log("Failed to register database source: " + e.getMessage(), e);
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            out.println(createErrorResponse("Failed to register database source: " + e.getMessage()));
+        } finally {
+            VDBLockManager.releaseLock(vdbFilePath);
+        }
+    }
+
+    /** Map a db_type to the WildFly JDBC driver (template) name. */
+    private String driverNameFor(String dbType) {
+        if ("postgresql".equalsIgnoreCase(dbType)) return "postgresql";
+        if ("mysql".equalsIgnoreCase(dbType)) return "mysql";
+        if ("sqlserver".equalsIgnoreCase(dbType)) return "sqlserver";
+        return dbType;
+    }
+
+    /** Create the WildFly JDBC datasource if it does not already exist. */
+    private void ensureDataSource(Admin admin, String dsName, String dbType,
+                                  String jdbcUrl, String username, String password) throws Exception {
+        try {
+            Collection<?> existing = admin.getDataSourceNames();
+            if (existing != null && existing.contains(dsName)) {
+                log("Datasource already exists: " + dsName);
+                return;
+            }
+        } catch (Exception e) {
+            log("Warning: could not list datasources: " + e.getMessage());
+        }
+
+        String driver = driverNameFor(dbType);
+        Properties props = new Properties();
+        props.setProperty("connection-url", jdbcUrl);
+        props.setProperty("user-name", username);
+        props.setProperty("password", password);
+        props.setProperty("driver-name", driver);
+
+        log("Creating datasource " + dsName + " with driver " + driver);
+        admin.createDataSource(dsName, driver, props);
+        log("Datasource created: " + dsName);
+    }
+
+    /** Build a PHYSICAL model block with an explicit CREATE FOREIGN TABLE. */
+    private String buildPhysicalModelBlock(String modelName, String dsName, String translator,
+                                           String jndiName, String teiidTableName, String schemaName,
+                                           String tableName, JSONArray columns) {
+        StringBuilder cols = new StringBuilder();
+        if (columns != null && columns.length() > 0) {
+            for (int i = 0; i < columns.length(); i++) {
+                JSONObject c = columns.getJSONObject(i);
+                String name = c.getString("name");
+                String type = c.optString("teiid_type", "string");
+                cols.append("	\"").append(name).append("\" ").append(type);
+                if (i < columns.length() - 1) cols.append(",");
+                cols.append("\n");
+            }
+        } else {
+            // Fallback: a single passthrough column keeps the model valid.
+            cols.append("	\"__row__\" string\n");
+        }
+
+        String nameInSource;
+        if (schemaName != null && !schemaName.isEmpty()) {
+            nameInSource = "\"" + schemaName + "\".\"" + tableName + "\"";
+        } else {
+            nameInSource = "\"" + tableName + "\"";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n");
+        sb.append("  <model name=\"").append(modelName).append("\" type=\"PHYSICAL\" visible=\"false\">\n");
+        sb.append("    <source name=\"").append(dsName).append("\" translator-name=\"").append(translator)
+          .append("\" connection-jndi-name=\"").append(jndiName).append("\"/>\n");
+        sb.append("    <metadata type=\"DDL\">\n");
+        sb.append("      <![CDATA[\n");
+        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
+        sb.append(cols);
+        sb.append(") OPTIONS (NAMEINSOURCE '").append(nameInSource).append("');\n");
+        sb.append("]]>\n");
+        sb.append("    </metadata>\n");
+        sb.append("  </model>\n");
+        return sb.toString();
+    }
+
+    /** Insert {@code insertion} immediately before the first occurrence of {@code anchor}. */
+    private String insertBefore(String content, String anchor, String insertion) {
+        int idx = content.indexOf(anchor);
+        if (idx < 0) {
+            log("Warning: anchor not found for insertBefore: " + anchor);
+            return content;
+        }
+        return content.substring(0, idx) + insertion + content.substring(idx);
+    }
+
+    private String NEWLINE() {
+        return "\n";
+    }
+
     private String findVDBFile(String vdbId) {
         String fileName = vdbId + "-vdb.xml";
         

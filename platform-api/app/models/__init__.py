@@ -1,6 +1,7 @@
 """SQLAlchemy ORM models for the platform API."""
 
 from app.models.base import Base
+from app.models.database_data_source import DataSourceColumn, DatabaseDataSource
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
@@ -11,6 +12,8 @@ from app.models.user_vdb import UserVDB
 
 __all__ = [
     "Base",
+    "DataSourceColumn",
+    "DatabaseDataSource",
     "OrganizationVDB",
     "Project",
     "ProjectMember",

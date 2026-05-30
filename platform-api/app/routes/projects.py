@@ -18,6 +18,7 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.database_data_source import DatabaseDataSource
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.models.tenant import Tenant
@@ -223,7 +224,29 @@ async def list_project_datasources(
                     "fileName": f.name,
                     "viewName": view_name,
                     "size": f.stat().st_size,
+                    "sourceType": extension.lower() or "file",
+                    "dbType": None,
                 })
+
+    # Append database-backed data sources registered against this project.
+    db_sources = (
+        await session.scalars(
+            select(DatabaseDataSource).where(
+                DatabaseDataSource.tenant_id == context.tenant_id,
+                DatabaseDataSource.project_id == project_id,
+                DatabaseDataSource.status == "active",
+            )
+        )
+    ).all()
+    for ds in db_sources:
+        datasources.append({
+            "fileName": ds.display_name,
+            "viewName": ds.teiid_view_name,
+            "size": None,
+            "sourceType": "database_table",
+            "dbType": ds.db_type,
+            "id": ds.id,
+        })
 
     return datasources
 

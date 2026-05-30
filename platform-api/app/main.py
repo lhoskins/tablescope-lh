@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.logging_config import configure_logging
 from app.observability import mount_metrics, setup_sentry
 from app.routes import auth as auth_routes
+from app.routes import database_sources as database_sources_routes
 from app.routes import health as health_routes
 from app.routes import projects as projects_routes
 from app.routes import query as query_routes
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     app.include_router(query_routes.router, prefix=api_prefix)
     app.include_router(sharing_routes.router, prefix=api_prefix)
     app.include_router(storage_routes.router, prefix=api_prefix)
+    app.include_router(database_sources_routes.router, prefix=api_prefix)
     app.include_router(upload_routes.router, prefix=api_prefix)
 
     return app

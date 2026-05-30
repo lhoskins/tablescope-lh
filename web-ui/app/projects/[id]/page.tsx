@@ -5,6 +5,31 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
+import { DatabaseTableWizard } from "@/components/datasource/DatabaseTableWizard";
+
+// Small badge describing where a datasource comes from (file type or DB engine).
+function SourceBadge({ ds }: { ds: Datasource }) {
+  let label: string;
+  let cls: string;
+  if (ds.sourceType === "database_table") {
+    const db = (ds.dbType ?? "database").toLowerCase();
+    label =
+      db === "postgresql"
+        ? "PostgreSQL"
+        : db === "mysql"
+        ? "MySQL"
+        : db === "sqlserver"
+        ? "SQL Server"
+        : "Database";
+    cls = "bg-indigo-100 text-indigo-700";
+  } else {
+    label = (ds.sourceType ?? "file").toUpperCase();
+    cls = "bg-emerald-100 text-emerald-700";
+  }
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${cls}`}>{label}</span>
+  );
+}
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -19,7 +44,9 @@ type Project = {
 type Datasource = {
   fileName: string;
   viewName: string;
-  size: number;
+  size: number | null;
+  sourceType?: string | null;
+  dbType?: string | null;
 };
 
 type SavedQuery = {
@@ -252,6 +279,7 @@ export default function ProjectWorkspacePage() {
 
   // ── Tab state ─────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "members">("datasources");
+  const [showDbWizard, setShowDbWizard] = useState(false);
 
   // ── Query builder state ───────────────────────────────────────────
   const [buildingQuery, setBuildingQuery] = useState(false);
@@ -747,9 +775,19 @@ export default function ProjectWorkspacePage() {
       {/* ── Datasources Tab ──────────────────────────────────────── */}
       {activeTab === "datasources" && (
         <div>
+          {canEdit && (
+            <div className="mb-4">
+              <button
+                onClick={() => setShowDbWizard(true)}
+                className="rounded-md border border-brand bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10"
+              >
+                + Connect Database Table
+              </button>
+            </div>
+          )}
           {datasourcesQuery.isLoading && <p className="text-sm text-slate-500">Loading datasources...</p>}
           {projectDatasources.length === 0 && !datasourcesQuery.isLoading && (
-            <p className="text-sm text-slate-400">No datasources. Upload files first.</p>
+            <p className="text-sm text-slate-400">No datasources. Upload files or connect a database table.</p>
           )}
           {projectDatasources.length > 0 && (
             <div className="grid gap-2">
@@ -766,11 +804,16 @@ export default function ProjectWorkspacePage() {
                   }`}
                 >
                   <div>
-                    <p className="text-sm font-medium text-slate-900">{ds.fileName}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-slate-900">{ds.fileName}</p>
+                      <SourceBadge ds={ds} />
+                    </div>
                     <p className="text-xs text-slate-400 font-mono">View: {ds.viewName}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">{(ds.size / 1024).toFixed(1)} KB</span>
+                    {typeof ds.size === "number" && (
+                      <span className="text-xs text-slate-400">{(ds.size / 1024).toFixed(1)} KB</span>
+                    )}
                     <span className="text-xs text-slate-400">
                       {activeDsName === ds.viewName ? "Click to hide" : "Click to view"}
                     </span>
@@ -872,9 +915,10 @@ export default function ProjectWorkspacePage() {
                         key={ds.viewName}
                         draggable
                         onDragStart={(e) => handleDragStart(e, ds)}
-                        className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm cursor-grab active:cursor-grabbing hover:border-brand hover:bg-brand/5"
+                        className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm cursor-grab active:cursor-grabbing hover:border-brand hover:bg-brand/5"
                       >
-                        {ds.fileName}
+                        <span>{ds.fileName}</span>
+                        <SourceBadge ds={ds} />
                       </div>
                     ))}
                   </div>
@@ -1565,6 +1609,16 @@ export default function ProjectWorkspacePage() {
             <p className="text-sm text-slate-400">No members assigned yet.</p>
           )}
         </div>
+      )}
+
+      {showDbWizard && (
+        <DatabaseTableWizard
+          projectId={projectId}
+          onClose={() => setShowDbWizard(false)}
+          onCreated={() =>
+            queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
+          }
+        />
       )}
     </section>
   );

@@ -3,13 +3,39 @@
 import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileDropzone } from "@/components/upload/FileDropzone";
+import { DatabaseTableWizard } from "@/components/datasource/DatabaseTableWizard";
 import { apiClient } from "@/lib/api-client";
 
 type Datasource = {
   fileName: string;
   viewName: string;
-  size: number;
+  size: number | null;
+  sourceType?: string | null;
+  dbType?: string | null;
 };
+
+function SourceBadge({ ds }: { ds: Datasource }) {
+  let label: string;
+  let cls: string;
+  if (ds.sourceType === "database_table") {
+    const db = (ds.dbType ?? "database").toLowerCase();
+    label =
+      db === "postgresql"
+        ? "PostgreSQL"
+        : db === "mysql"
+        ? "MySQL"
+        : db === "sqlserver"
+        ? "SQL Server"
+        : "Database";
+    cls = "bg-indigo-100 text-indigo-700";
+  } else {
+    label = (ds.sourceType ?? "file").toUpperCase();
+    cls = "bg-emerald-100 text-emerald-700";
+  }
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${cls}`}>{label}</span>
+  );
+}
 
 type QueryResult = {
   columns: string[];
@@ -23,6 +49,7 @@ export default function UploadPage() {
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
   const [querying, setQuerying] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [showDbWizard, setShowDbWizard] = useState(false);
 
   const datasourcesQuery = useQuery<Datasource[]>({
     queryKey: ["datasources"],
@@ -64,6 +91,15 @@ export default function UploadPage() {
 
       <FileDropzone onUploaded={handleUploaded} />
 
+      <div className="mt-4">
+        <button
+          onClick={() => setShowDbWizard(true)}
+          className="rounded-md border border-brand bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10"
+        >
+          + Connect Database Table
+        </button>
+      </div>
+
       {/* Datasources list */}
       <div className="mt-8">
         <h2 className="mb-3 text-lg font-semibold text-slate-900">
@@ -95,16 +131,21 @@ export default function UploadPage() {
                 }`}
               >
                 <div>
-                  <p className="text-sm font-medium text-slate-900">
-                    {ds.fileName}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-slate-900">
+                      {ds.fileName}
+                    </p>
+                    <SourceBadge ds={ds} />
+                  </div>
                   <p className="text-xs text-slate-400 font-mono">
                     View: {ds.viewName}
                   </p>
                 </div>
-                <span className="text-xs text-slate-400">
-                  {(ds.size / 1024).toFixed(1)} KB
-                </span>
+                {typeof ds.size === "number" && (
+                  <span className="text-xs text-slate-400">
+                    {(ds.size / 1024).toFixed(1)} KB
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -164,6 +205,15 @@ export default function UploadPage() {
             </div>
           )}
         </div>
+      )}
+
+      {showDbWizard && (
+        <DatabaseTableWizard
+          onClose={() => setShowDbWizard(false)}
+          onCreated={() =>
+            queryClient.invalidateQueries({ queryKey: ["datasources"] })
+          }
+        />
       )}
     </section>
   );
