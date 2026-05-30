@@ -72,7 +72,7 @@ class DatabaseDataSource(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
-    columns: Mapped[list["DataSourceColumn"]] = relationship(
+    columns: Mapped[list[DataSourceColumn]] = relationship(
         back_populates="data_source",
         cascade="all, delete-orphan",
         order_by="DataSourceColumn.ordinal_position",

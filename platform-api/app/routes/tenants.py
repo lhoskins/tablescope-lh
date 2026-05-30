@@ -27,7 +27,6 @@ from app.schemas.tenant import (
     UserRead,
     UserUpdate,
 )
-from app.services.vdb_health import check_vdb_health
 from app.services.customer_folders import CustomerFolderService
 from app.services.vdb_management import VDBManagementService, VDBProvisioningError
 
@@ -190,9 +189,10 @@ async def get_tenant_details(
     # Build user list with VDB info
     user_list = []
     for u in users:
-        vdb = user_vdbs_by_user.get(u.id)
+        user_vdb = user_vdbs_by_user.get(u.id)
         vdb_info = None
-        if vdb:
+        if user_vdb:
+            vdb = user_vdb
             vdb_location = f"/opt/wildfly/teiidfiles/customers/{tenant_id}/{u.id}/vdb/{vdb.vdb_id}-vdb.xml"
             vdb_info = {
                 "vdb_id": vdb.vdb_id,

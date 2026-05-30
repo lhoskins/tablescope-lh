@@ -14,7 +14,7 @@ Passwords are encrypted at rest and are never returned to the UI.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -24,7 +24,7 @@ from starlette.concurrency import run_in_threadpool
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
-from app.models.database_data_source import DataSourceColumn, DatabaseDataSource
+from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.project import Project
 from app.models.user_vdb import UserVDB
 from app.schemas.database_source import (
@@ -203,7 +203,7 @@ async def create_database_source(
         status="draft",
         last_test_status="success",
         last_test_message="Connection successful",
-        last_tested_at=datetime.now(timezone.utc),
+        last_tested_at=datetime.now(UTC),
     )
     session.add(ds)
     await session.flush()  # assign ds.id
@@ -232,7 +232,7 @@ async def create_database_source(
                 data_type=c.get("type"),
                 nullable=c.get("nullable"),
                 primary_key=c.get("primary_key", False),
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
 
