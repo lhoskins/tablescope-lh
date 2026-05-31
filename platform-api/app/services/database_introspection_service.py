@@ -15,8 +15,8 @@ avoid blocking the event loop.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, inspect, text

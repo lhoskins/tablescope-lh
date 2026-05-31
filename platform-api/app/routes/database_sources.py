@@ -252,7 +252,8 @@ async def create_database_source(
             port=params.resolved_port,
             database_name=body.database_name,
             schema_name=intro.source_identifier(body.db_type, body.schema_name),
-            table_name=intro.source_identifier(body.db_type, body.table_name),
+            table_name=intro.source_identifier(body.db_type, body.table_name)
+            or body.table_name,
             username=body.username,
             password=body.password,
             ssl_mode=body.ssl_mode,
