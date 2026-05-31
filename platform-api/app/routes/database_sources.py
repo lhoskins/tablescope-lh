@@ -48,6 +48,7 @@ from app.services.teiid_registration_service import (
     TeiidRegistrationService,
     generate_teiid_names,
     generate_view_name,
+    reconcile_database_sources,
 )
 
 logger = logging.getLogger(__name__)
@@ -312,3 +313,17 @@ async def delete_database_source(
     await session.delete(ds)
     await session.commit()
     return {"status": "deleted", "id": source_id}
+
+
+@router.post("/reconcile")
+async def reconcile_sources(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> dict:
+    """Re-register all active DB-table sources' datasources/models in Teiid.
+
+    Runtime JDBC datasources do not survive a Teiid restart, so this restores
+    every DB-table source after a Teiid container restart/recreate.  Admin-only;
+    also invoked automatically on platform-api startup.
+    """
+    return await reconcile_database_sources(session)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -31,15 +32,42 @@ from app.services.connection_pool import pool_manager
 logger = logging.getLogger(__name__)
 
 
+async def _reconcile_db_sources_on_startup() -> None:
+    """Re-register DB-table sources in Teiid after a (re)start.
+
+    Runtime JDBC datasources do not survive a Teiid container restart, so the
+    persisted VDBs would otherwise reference missing datasources.  This runs in
+    the background (with retries) so it never blocks or fails app startup if
+    Teiid is not yet reachable.
+    """
+    from app.database import SessionLocal
+    from app.services.teiid_registration_service import reconcile_database_sources
+
+    for attempt in range(1, 7):
+        await asyncio.sleep(min(10 * attempt, 30))
+        try:
+            async with SessionLocal() as session:
+                result = await reconcile_database_sources(session)
+            logger.info("Startup DB-source reconcile: %s", result)
+            if result.get("failed", 0) == 0:
+                return
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.warning(
+                "Startup DB-source reconcile attempt %s failed: %s", attempt, exc
+            )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
     setup_sentry()
     logger.info("Platform API starting (env=%s, version=%s)", settings.environment, __version__)
+    reconcile_task = asyncio.create_task(_reconcile_db_sources_on_startup())
     try:
         yield
     finally:
+        reconcile_task.cancel()
         await pool_manager.close_all()
         logger.info("Platform API shutdown complete")
 
