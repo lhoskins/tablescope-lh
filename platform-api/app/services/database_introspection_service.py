@@ -42,8 +42,10 @@ class DbTypeConfig:
     system_schemas: frozenset[str] = field(default_factory=frozenset)
 
 
-# Only PostgreSQL is enabled for the MVP.  Others are defined for forward
-# compatibility but are not selectable until their drivers are installed.
+# Enabled engines.  Each needs (a) a Python DBAPI driver for introspection from
+# platform-api and (b) a matching WildFly JDBC driver module so Teiid can build
+# the runtime datasource.  Adding an engine is now just a row here plus the
+# bundled driver module.
 DB_TYPES: dict[str, DbTypeConfig] = {
     "postgresql": DbTypeConfig(
         db_type="postgresql",
@@ -53,17 +55,15 @@ DB_TYPES: dict[str, DbTypeConfig] = {
         jdbc_template="jdbc:postgresql://{host}:{port}/{database}",
         system_schemas=frozenset({"information_schema", "pg_catalog", "pg_toast"}),
     ),
-}
-
-# Defined but not yet enabled (no driver bundled).  Surfaced so the API can
-# return a clear "unsupported yet" error rather than a generic failure.
-FUTURE_DB_TYPES: dict[str, DbTypeConfig] = {
     "mysql": DbTypeConfig(
         db_type="mysql",
         default_port=3306,
         sa_dialect="mysql+pymysql",
         teiid_translator="mysql5",
         jdbc_template="jdbc:mysql://{host}:{port}/{database}",
+        system_schemas=frozenset(
+            {"information_schema", "performance_schema", "mysql", "sys"}
+        ),
     ),
     "sqlserver": DbTypeConfig(
         db_type="sqlserver",
@@ -71,8 +71,35 @@ FUTURE_DB_TYPES: dict[str, DbTypeConfig] = {
         sa_dialect="mssql+pymssql",
         teiid_translator="sqlserver",
         jdbc_template="jdbc:sqlserver://{host}:{port};databaseName={database}",
+        system_schemas=frozenset(
+            {
+                "sys", "INFORMATION_SCHEMA", "guest", "db_owner",
+                "db_accessadmin", "db_securityadmin", "db_ddladmin",
+                "db_backupoperator", "db_datareader", "db_datawriter",
+                "db_denydatareader", "db_denydatawriter",
+            }
+        ),
+    ),
+    "oracle": DbTypeConfig(
+        db_type="oracle",
+        default_port=1521,
+        sa_dialect="oracle+oracledb",
+        teiid_translator="oracle",
+        # Oracle thin URL using a service name (the modern connect form).
+        jdbc_template="jdbc:oracle:thin:@//{host}:{port}/{database}",
+        system_schemas=frozenset(
+            {
+                "SYS", "SYSTEM", "OUTLN", "XDB", "CTXSYS", "MDSYS", "DBSNMP",
+                "APPQOSSYS", "ORDSYS", "ORDDATA", "OLAPSYS", "WMSYS", "LBACSYS",
+                "DVSYS", "AUDSYS", "GSMADMIN_INTERNAL", "DBSFWUSER", "GGSYS",
+                "ANONYMOUS", "REMOTE_SCHEDULER_AGENT", "SYS$UMF", "PUBLIC",
+            }
+        ),
     ),
 }
+
+# No deferred engines remain; kept for the "unsupported yet" branch below.
+FUTURE_DB_TYPES: dict[str, DbTypeConfig] = {}
 
 
 def get_db_type_config(db_type: str) -> DbTypeConfig:
@@ -115,13 +142,30 @@ def _build_engine(params: ConnectionParams) -> Engine:
     cfg = get_db_type_config(params.db_type)
     user = quote_plus(params.username)
     pwd = quote_plus(params.password)
-    url = (
-        f"{cfg.sa_dialect}://{user}:{pwd}@{params.host}:{params.resolved_port}"
-        f"/{quote_plus(params.database_name)}"
-    )
-    connect_args: dict = {"connect_timeout": 10}
-    if params.ssl_mode and params.db_type == "postgresql":
-        connect_args["sslmode"] = params.ssl_mode
+    host = params.host
+    port = params.resolved_port
+    db = quote_plus(params.database_name)
+
+    if params.db_type == "oracle":
+        # Connect by service name (matches the JDBC thin service-name form).
+        url = f"{cfg.sa_dialect}://{user}:{pwd}@{host}:{port}/?service_name={db}"
+    else:
+        url = f"{cfg.sa_dialect}://{user}:{pwd}@{host}:{port}/{db}"
+
+    # Connection-timeout argument names differ across DBAPI drivers.
+    connect_args: dict = {}
+    if params.db_type == "postgresql":
+        connect_args["connect_timeout"] = 10
+        if params.ssl_mode:
+            connect_args["sslmode"] = params.ssl_mode
+    elif params.db_type == "mysql":
+        connect_args["connect_timeout"] = 10
+    elif params.db_type == "sqlserver":
+        connect_args["login_timeout"] = 10
+        connect_args["timeout"] = 30
+    elif params.db_type == "oracle":
+        connect_args["tcp_connect_timeout"] = 10
+
     return create_engine(
         url,
         connect_args=connect_args,
@@ -255,17 +299,37 @@ def map_to_teiid_type(sa_type: str) -> str:
     # Strip any length/precision qualifier, e.g. "VARCHAR(255)" -> "VARCHAR".
     base = t.split("(", 1)[0].strip()
 
-    integer_types = {"INTEGER", "INT", "INT4", "SERIAL"}
+    # Covers PostgreSQL, MySQL, SQL Server and Oracle rendered type names.
+    integer_types = {"INTEGER", "INT", "INT4", "SERIAL", "MEDIUMINT"}
     long_types = {"BIGINT", "INT8", "BIGSERIAL"}
-    short_types = {"SMALLINT", "INT2", "SMALLSERIAL"}
-    bool_types = {"BOOLEAN", "BOOL"}
-    decimal_types = {"NUMERIC", "DECIMAL", "MONEY"}
-    float_types = {"REAL", "FLOAT4"}
-    double_types = {"DOUBLE PRECISION", "FLOAT8", "FLOAT", "DOUBLE"}
+    short_types = {
+        "SMALLINT", "INT2", "SMALLSERIAL", "TINYINT", "YEAR",
+    }
+    bool_types = {"BOOLEAN", "BOOL", "BIT"}
+    decimal_types = {
+        "NUMERIC", "DECIMAL", "MONEY", "SMALLMONEY", "DEC", "NUMBER",
+    }
+    float_types = {"REAL", "FLOAT4", "BINARY_FLOAT"}
+    double_types = {
+        "DOUBLE PRECISION", "FLOAT8", "FLOAT", "DOUBLE", "BINARY_DOUBLE",
+    }
     string_types = {
+        # PostgreSQL
         "VARCHAR", "CHARACTER VARYING", "CHAR", "CHARACTER", "TEXT", "NAME",
         "CITEXT", "UUID", "JSON", "JSONB", "XML", "ENUM",
-        "INET", "CIDR", "MACADDR", "INTERVAL",
+        "INET", "CIDR", "MACADDR", "INTERVAL", "SET",
+        # MySQL
+        "TINYTEXT", "MEDIUMTEXT", "LONGTEXT",
+        # SQL Server
+        "NVARCHAR", "NCHAR", "NTEXT", "UNIQUEIDENTIFIER", "SYSNAME",
+        # Oracle
+        "VARCHAR2", "NVARCHAR2", "CLOB", "NCLOB", "ROWID", "UROWID", "LONG",
+    }
+    binary_types = {
+        "BYTEA",
+        # MySQL / SQL Server / Oracle
+        "BLOB", "TINYBLOB", "MEDIUMBLOB", "LONGBLOB", "BINARY", "VARBINARY",
+        "IMAGE", "RAW", "LONG RAW", "BFILE",
     }
 
     if base in integer_types:
@@ -287,12 +351,14 @@ def map_to_teiid_type(sa_type: str) -> str:
         return "double"
     if base in string_types:
         return "string"
-    if base in {"DATE"}:
+    if base == "DATE":
         return "date"
+    if base.startswith("DATETIME") or base.startswith("SMALLDATETIME"):
+        return "timestamp"
     if base.startswith("TIMESTAMP"):
         return "timestamp"
     if base.startswith("TIME"):
         return "time"
-    if base in {"BYTEA"}:
+    if base in binary_types:
         return "varbinary"
     return "string"

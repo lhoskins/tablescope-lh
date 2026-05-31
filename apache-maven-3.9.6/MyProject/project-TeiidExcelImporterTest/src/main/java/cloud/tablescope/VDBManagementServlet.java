@@ -1478,6 +1478,7 @@ public class VDBManagementServlet extends HttpServlet {
         if ("postgresql".equalsIgnoreCase(dbType)) return "postgresql";
         if ("mysql".equalsIgnoreCase(dbType)) return "mysql";
         if ("sqlserver".equalsIgnoreCase(dbType)) return "sqlserver";
+        if ("oracle".equalsIgnoreCase(dbType)) return "oracle";
         return dbType;
     }
 

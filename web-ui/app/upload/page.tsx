@@ -26,6 +26,8 @@ function SourceBadge({ ds }: { ds: Datasource }) {
         ? "MySQL"
         : db === "sqlserver"
         ? "SQL Server"
+        : db === "oracle"
+        ? "Oracle"
         : "Database";
     cls = "bg-indigo-100 text-indigo-700";
   } else {

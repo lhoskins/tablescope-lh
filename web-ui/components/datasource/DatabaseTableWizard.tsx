@@ -6,14 +6,16 @@ import { apiClient } from "@/lib/api-client";
 // Connect an external database table as an independent Tablescope data source.
 // Mirrors the file-upload flow but walks the user through:
 //   connection -> test -> schema -> table -> column preview -> save.
-// PostgreSQL is the only enabled type for the MVP.
+// PostgreSQL, MySQL, SQL Server and Oracle are supported via bundled JDBC
+// driver modules + Python DBAPI drivers for introspection.
 
 type DbType = { value: string; label: string; defaultPort: number; enabled: boolean };
 
 const DB_TYPES: DbType[] = [
   { value: "postgresql", label: "PostgreSQL", defaultPort: 5432, enabled: true },
-  { value: "mysql", label: "MySQL (coming soon)", defaultPort: 3306, enabled: false },
-  { value: "sqlserver", label: "SQL Server (coming soon)", defaultPort: 1433, enabled: false },
+  { value: "mysql", label: "MySQL", defaultPort: 3306, enabled: true },
+  { value: "sqlserver", label: "SQL Server", defaultPort: 1433, enabled: true },
+  { value: "oracle", label: "Oracle", defaultPort: 1521, enabled: true },
 ];
 
 type TableInfo = { schema_name: string | null; table_name: string; type: string };
