@@ -70,7 +70,12 @@ DB_TYPES: dict[str, DbTypeConfig] = {
         default_port=1433,
         sa_dialect="mssql+pymssql",
         teiid_translator="sqlserver",
-        jdbc_template="jdbc:sqlserver://{host}:{port};databaseName={database}",
+        # mssql-jdbc 12.x encrypts by default and validates the server cert;
+        # trust it so federation works against self-signed SQL Server instances.
+        jdbc_template=(
+            "jdbc:sqlserver://{host}:{port};databaseName={database}"
+            ";encrypt=true;trustServerCertificate=true"
+        ),
         system_schemas=frozenset(
             {
                 "sys", "INFORMATION_SCHEMA", "guest", "db_owner",
