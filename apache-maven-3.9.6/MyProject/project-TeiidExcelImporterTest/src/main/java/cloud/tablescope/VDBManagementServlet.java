@@ -1493,6 +1493,10 @@ public class VDBManagementServlet extends HttpServlet {
         String driver = driverNameFor(dbType);
         String escUser = username == null ? "" : username.replace("\\", "\\\\").replace("\"", "\\\"");
         String escPass = password == null ? "" : password.replace("\\", "\\\\").replace("\"", "\\\"");
+        // Quote the connection-url: some JDBC URLs contain ';' and '=' (e.g. SQL
+        // Server's "...;databaseName=db"), which the CLI would otherwise parse as
+        // command separators / object syntax.
+        String escUrl = jdbcUrl == null ? "" : jdbcUrl.replace("\\", "\\\\").replace("\"", "\\\"");
 
         // Use the server's own CLI (correct version + local auth) to avoid the
         // bundled Teiid admin client building a composite incompatible with the
@@ -1500,7 +1504,7 @@ public class VDBManagementServlet extends HttpServlet {
         String command = "/subsystem=datasources/data-source=" + dsName + ":add("
                 + "jndi-name=java:/" + dsName
                 + ", driver-name=" + driver
-                + ", connection-url=" + jdbcUrl
+                + ", connection-url=\"" + escUrl + "\""
                 + ", user-name=\"" + escUser + "\""
                 + ", password=\"" + escPass + "\""
                 + ", enabled=true)";
@@ -1554,20 +1558,30 @@ public class VDBManagementServlet extends HttpServlet {
     private String buildPhysicalModelBlock(String modelName, String dsName, String translator,
                                            String jndiName, String teiidTableName, String schemaName,
                                            String tableName, JSONArray columns) {
+        // NAMEINSOURCE is passed through to the source database verbatim, so the
+        // identifier quote character must match the source dialect: MySQL uses
+        // backticks by default, everything else (PostgreSQL, SQL Server with
+        // QUOTED_IDENTIFIER on, Oracle) uses double quotes.
+        boolean backtick = translator != null && translator.toLowerCase().startsWith("mysql");
+        char q = backtick ? '`' : '"';
+
         StringBuilder cols = new StringBuilder();
         if (columns != null && columns.length() > 0) {
             for (int i = 0; i < columns.length(); i++) {
                 JSONObject c = columns.getJSONObject(i);
                 String name = c.getString("name");
                 String type = c.optString("teiid_type", "string");
-                // Quoted source identifier; double internal quotes per SQL identifier rules.
-                String quotedId = "\"" + name.replace("\"", "\"\"") + "\"";
+                // Teiid view identifier is always double-quoted (Teiid DDL syntax).
+                String viewId = "\"" + name.replace("\"", "\"\"") + "\"";
+                // Source identifier uses the dialect quote char, with internal
+                // quote chars doubled per SQL identifier rules.
+                String srcId = q + name.replace(String.valueOf(q), "" + q + q) + q;
                 // Escape single quotes for the DDL NAMEINSOURCE string literal.
-                String nameInSourceLiteral = quotedId.replace("'", "''");
+                String nameInSourceLiteral = srcId.replace("'", "''");
                 // Emit an explicit column NAMEINSOURCE so Teiid quotes names that it
                 // would otherwise leave unquoted (e.g. leading/trailing spaces,
-                // reserved words, mixed case), which Postgres then cannot resolve.
-                cols.append("	").append(quotedId).append(" ").append(type)
+                // reserved words, mixed case), which the source DB cannot resolve.
+                cols.append("	").append(viewId).append(" ").append(type)
                     .append(" OPTIONS (NAMEINSOURCE '").append(nameInSourceLiteral).append("')");
                 if (i < columns.length() - 1) cols.append(",");
                 cols.append("\n");
@@ -1579,9 +1593,9 @@ public class VDBManagementServlet extends HttpServlet {
 
         String nameInSource;
         if (schemaName != null && !schemaName.isEmpty()) {
-            nameInSource = "\"" + schemaName + "\".\"" + tableName + "\"";
+            nameInSource = q + schemaName + q + "." + q + tableName + q;
         } else {
-            nameInSource = "\"" + tableName + "\"";
+            nameInSource = q + tableName + q;
         }
 
         StringBuilder sb = new StringBuilder();
