@@ -1571,11 +1571,16 @@ public class VDBManagementServlet extends HttpServlet {
                 JSONObject c = columns.getJSONObject(i);
                 String name = c.getString("name");
                 String type = c.optString("teiid_type", "string");
+                // The source identifier may differ in case from the Teiid-facing
+                // name (e.g. Oracle stores unquoted identifiers upper-case while
+                // introspection reports them lower-case), so honor an explicit
+                // name_in_source when provided.
+                String srcName = c.optString("name_in_source", name);
                 // Teiid view identifier is always double-quoted (Teiid DDL syntax).
                 String viewId = "\"" + name.replace("\"", "\"\"") + "\"";
                 // Source identifier uses the dialect quote char, with internal
                 // quote chars doubled per SQL identifier rules.
-                String srcId = q + name.replace(String.valueOf(q), "" + q + q) + q;
+                String srcId = q + srcName.replace(String.valueOf(q), "" + q + q) + q;
                 // Escape single quotes for the DDL NAMEINSOURCE string literal.
                 String nameInSourceLiteral = srcId.replace("'", "''");
                 // Emit an explicit column NAMEINSOURCE so Teiid quotes names that it

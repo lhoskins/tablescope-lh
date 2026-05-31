@@ -16,12 +16,34 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+import re
 from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
+
+# A "simple" SQL identifier needs no quoting: starts with a letter, then only
+# letters / digits / underscores, all lower-case.
+_SIMPLE_LOWER_IDENT = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def source_identifier(db_type: str, name: str | None) -> str | None:
+    """Return the identifier *as stored in the source database*.
+
+    Oracle folds unquoted identifiers to UPPER CASE, but SQLAlchemy reflection
+    reports them lower-case.  When Teiid sends a quoted identifier verbatim via
+    NAMEINSOURCE, the case must match exactly or Oracle raises ORA-00904 /
+    ORA-00942.  So for Oracle we upper-case simple lower-case identifiers and
+    leave anything that genuinely needs quoting (spaces, mixed case, reserved
+    words) untouched.  Other engines preserve the introspected name as-is.
+    """
+    if name is None:
+        return None
+    if db_type == "oracle" and _SIMPLE_LOWER_IDENT.match(name):
+        return name.upper()
+    return name
 
 
 class DatabaseIntrospectionError(Exception):
@@ -279,6 +301,9 @@ def list_columns(
             result.append(
                 {
                     "name": col["name"],
+                    "name_in_source": source_identifier(
+                        params.db_type, col["name"]
+                    ),
                     "type": str(col.get("type")),
                     "nullable": bool(col.get("nullable", True)),
                     "primary_key": col["name"] in pk,

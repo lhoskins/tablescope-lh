@@ -220,7 +220,11 @@ async def create_database_source(
     ds.teiid_view_name = view_name
 
     teiid_columns = [
-        {"name": c["name"], "teiid_type": intro.map_to_teiid_type(c.get("type", ""))}
+        {
+            "name": c["name"],
+            "name_in_source": c.get("name_in_source", c["name"]),
+            "teiid_type": intro.map_to_teiid_type(c.get("type", "")),
+        }
         for c in columns
     ]
     for c in columns:
@@ -247,8 +251,8 @@ async def create_database_source(
             host=body.host,
             port=params.resolved_port,
             database_name=body.database_name,
-            schema_name=body.schema_name,
-            table_name=body.table_name,
+            schema_name=intro.source_identifier(body.db_type, body.schema_name),
+            table_name=intro.source_identifier(body.db_type, body.table_name),
             username=body.username,
             password=body.password,
             ssl_mode=body.ssl_mode,
