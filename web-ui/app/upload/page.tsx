@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileDropzone } from "@/components/upload/FileDropzone";
 import { DatabaseTableWizard } from "@/components/datasource/DatabaseTableWizard";
+import { SaasSourceWizard } from "@/components/datasource/SaasSourceWizard";
 import { apiClient } from "@/lib/api-client";
 
 type Datasource = {
@@ -12,12 +13,17 @@ type Datasource = {
   size: number | null;
   sourceType?: string | null;
   dbType?: string | null;
+  connectorType?: string | null;
 };
 
 function SourceBadge({ ds }: { ds: Datasource }) {
   let label: string;
   let cls: string;
-  if (ds.sourceType === "database_table") {
+  if (ds.sourceType === "saas_object") {
+    const c = (ds.connectorType ?? "saas").toLowerCase();
+    label = c === "hubspot" ? "HubSpot" : c === "salesforce" ? "Salesforce" : "SaaS";
+    cls = c === "hubspot" ? "bg-orange-100 text-orange-700" : "bg-sky-100 text-sky-700";
+  } else if (ds.sourceType === "database_table") {
     const db = (ds.dbType ?? "database").toLowerCase();
     label =
       db === "postgresql"
@@ -52,6 +58,7 @@ export default function UploadPage() {
   const [querying, setQuerying] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [showDbWizard, setShowDbWizard] = useState(false);
+  const [showSaasWizard, setShowSaasWizard] = useState(false);
 
   const datasourcesQuery = useQuery<Datasource[]>({
     queryKey: ["datasources"],
@@ -99,6 +106,12 @@ export default function UploadPage() {
           className="rounded-md border border-brand bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10"
         >
           + Connect Database Table
+        </button>
+        <button
+          onClick={() => setShowSaasWizard(true)}
+          className="ml-2 rounded-md border border-brand bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10"
+        >
+          + Connect SaaS App
         </button>
       </div>
 
@@ -212,6 +225,15 @@ export default function UploadPage() {
       {showDbWizard && (
         <DatabaseTableWizard
           onClose={() => setShowDbWizard(false)}
+          onCreated={() =>
+            queryClient.invalidateQueries({ queryKey: ["datasources"] })
+          }
+        />
+      )}
+
+      {showSaasWizard && (
+        <SaasSourceWizard
+          onClose={() => setShowSaasWizard(false)}
           onCreated={() =>
             queryClient.invalidateQueries({ queryKey: ["datasources"] })
           }

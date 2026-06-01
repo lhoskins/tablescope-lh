@@ -22,6 +22,7 @@ from app.routes import database_sources as database_sources_routes
 from app.routes import health as health_routes
 from app.routes import projects as projects_routes
 from app.routes import query as query_routes
+from app.routes import saas_sources as saas_sources_routes
 from app.routes import scopes as scopes_routes
 from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
@@ -118,6 +119,7 @@ def create_app() -> FastAPI:
     app.include_router(sharing_routes.router, prefix=api_prefix)
     app.include_router(storage_routes.router, prefix=api_prefix)
     app.include_router(database_sources_routes.router, prefix=api_prefix)
+    app.include_router(saas_sources_routes.router, prefix=api_prefix)
     app.include_router(upload_routes.router, prefix=api_prefix)
 
     return app

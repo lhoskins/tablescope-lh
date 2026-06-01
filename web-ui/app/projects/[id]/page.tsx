@@ -6,12 +6,17 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
 import { DatabaseTableWizard } from "@/components/datasource/DatabaseTableWizard";
+import { SaasSourceWizard } from "@/components/datasource/SaasSourceWizard";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
 function SourceBadge({ ds }: { ds: Datasource }) {
   let label: string;
   let cls: string;
-  if (ds.sourceType === "database_table") {
+  if (ds.sourceType === "saas_object") {
+    const c = (ds.connectorType ?? "saas").toLowerCase();
+    label = c === "hubspot" ? "HubSpot" : c === "salesforce" ? "Salesforce" : "SaaS";
+    cls = c === "hubspot" ? "bg-orange-100 text-orange-700" : "bg-sky-100 text-sky-700";
+  } else if (ds.sourceType === "database_table") {
     const db = (ds.dbType ?? "database").toLowerCase();
     label =
       db === "postgresql"
@@ -47,6 +52,7 @@ type Datasource = {
   size: number | null;
   sourceType?: string | null;
   dbType?: string | null;
+  connectorType?: string | null;
 };
 
 type SavedQuery = {
@@ -280,6 +286,7 @@ export default function ProjectWorkspacePage() {
   // ── Tab state ─────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "members">("datasources");
   const [showDbWizard, setShowDbWizard] = useState(false);
+  const [showSaasWizard, setShowSaasWizard] = useState(false);
 
   // ── Query builder state ───────────────────────────────────────────
   const [buildingQuery, setBuildingQuery] = useState(false);
@@ -782,6 +789,12 @@ export default function ProjectWorkspacePage() {
                 className="rounded-md border border-brand bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10"
               >
                 + Connect Database Table
+              </button>
+              <button
+                onClick={() => setShowSaasWizard(true)}
+                className="ml-2 rounded-md border border-brand bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10"
+              >
+                + Connect SaaS App
               </button>
             </div>
           )}
@@ -1615,6 +1628,16 @@ export default function ProjectWorkspacePage() {
         <DatabaseTableWizard
           projectId={projectId}
           onClose={() => setShowDbWizard(false)}
+          onCreated={() =>
+            queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
+          }
+        />
+      )}
+
+      {showSaasWizard && (
+        <SaasSourceWizard
+          projectId={projectId}
+          onClose={() => setShowSaasWizard(false)}
           onCreated={() =>
             queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
           }

@@ -239,12 +239,14 @@ async def list_project_datasources(
         )
     ).all()
     for ds in db_sources:
+        is_saas = ds.source_type == "saas_object"
         datasources.append({
             "fileName": ds.display_name,
             "viewName": ds.teiid_view_name,
             "size": None,
-            "sourceType": "database_table",
+            "sourceType": "saas_object" if is_saas else "database_table",
             "dbType": ds.db_type,
+            "connectorType": ds.connector_type,
             "id": ds.id,
         })
 

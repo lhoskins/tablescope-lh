@@ -142,6 +142,42 @@ async def process_upload(
         await teiid.aclose()
 
 
+async def enqueue_sync_saas_object(
+    *, saas_source_id: int, limit: int | None = None
+) -> str:
+    """Enqueue a SaaS object sync and return the job id."""
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "sync_saas_object", saas_source_id=saas_source_id, limit=limit
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def sync_saas_object(
+    ctx: dict[str, Any],
+    *,
+    saas_source_id: int,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Sync a SaaS object (HubSpot/Salesforce) into its Postgres staging table."""
+    from app.services.saas_source_service import run_sync
+
+    async with SessionLocal() as session:
+        try:
+            result = await run_sync(
+                session, saas_source_id=saas_source_id, limit=limit
+            )
+        except Exception as exc:
+            logger.warning(
+                "sync_saas_object failed for source %s: %s", saas_source_id, exc
+            )
+            return {"status": "error", "saas_source_id": saas_source_id}
+    return {"status": "ok", "saas_source_id": saas_source_id, **result}
+
+
 async def index_for_search(
     ctx: dict[str, Any],
     *,
@@ -164,5 +200,5 @@ class WorkerSettings:
     """arq worker entrypoint."""
 
     redis_settings: ClassVar[RedisSettings] = _redis_settings()
-    functions: ClassVar[list] = [process_upload, index_for_search]
+    functions: ClassVar[list] = [process_upload, index_for_search, sync_saas_object]
     job_timeout: ClassVar[int] = 600

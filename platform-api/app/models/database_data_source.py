@@ -46,6 +46,11 @@ class DatabaseDataSource(TimestampMixin, Base):
     source_type: Mapped[str] = mapped_column(
         String(50), nullable=False, default="database_table"
     )
+    # For SaaS-backed sources (source_type="saas_object") this records the
+    # connector that produced the staging table (e.g. "hubspot",
+    # "salesforce").  NULL for plain database tables.  The badge/UI use it to
+    # show the source's origin even though the staging table is just Postgres.
+    connector_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     db_type: Mapped[str] = mapped_column(String(50), nullable=False)
     host: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -86,6 +91,7 @@ class DatabaseDataSource(TimestampMixin, Base):
             "created_by": self.created_by,
             "display_name": self.display_name,
             "source_type": self.source_type,
+            "connector_type": self.connector_type,
             "db_type": self.db_type,
             "host": self.host,
             "port": self.port,
