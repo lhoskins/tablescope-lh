@@ -5,8 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
-import { DatabaseTableWizard } from "@/components/datasource/DatabaseTableWizard";
-import { SaasSourceWizard } from "@/components/datasource/SaasSourceWizard";
+import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -14,8 +13,20 @@ function SourceBadge({ ds }: { ds: Datasource }) {
   let cls: string;
   if (ds.sourceType === "saas_object") {
     const c = (ds.connectorType ?? "saas").toLowerCase();
-    label = c === "hubspot" ? "HubSpot" : c === "salesforce" ? "Salesforce" : "SaaS";
-    cls = c === "hubspot" ? "bg-orange-100 text-orange-700" : "bg-sky-100 text-sky-700";
+    label =
+      c === "hubspot"
+        ? "HubSpot"
+        : c === "salesforce"
+        ? "Salesforce"
+        : c === "quickbooks"
+        ? "QuickBooks"
+        : "SaaS";
+    cls =
+      c === "hubspot"
+        ? "bg-orange-100 text-orange-700"
+        : c === "quickbooks"
+        ? "bg-green-100 text-green-700"
+        : "bg-sky-100 text-sky-700";
   } else if (ds.sourceType === "database_table") {
     const db = (ds.dbType ?? "database").toLowerCase();
     label =
@@ -25,6 +36,8 @@ function SourceBadge({ ds }: { ds: Datasource }) {
         ? "MySQL"
         : db === "sqlserver"
         ? "SQL Server"
+        : db === "oracle"
+        ? "Oracle"
         : "Database";
     cls = "bg-indigo-100 text-indigo-700";
   } else {
@@ -129,6 +142,14 @@ function EditQueryForm({
   const [sqlEditing, setSqlEditing] = useState(false);
   const savedSql = query.sql_text ?? "";
   const [sqlText, setSqlText] = useState(savedSql);
+  // Show join config only when a join is in play (right datasource present).
+  const [showJoin, setShowJoin] = useState(!!query.right_datasource);
+  // Collapsible "view fields" panel for the selected table(s).
+  const [fieldsOpen, setFieldsOpen] = useState(false);
+  // Once the user touches the visual params we regenerate SQL from them;
+  // until then we keep showing the explicit saved SQL (with field selection).
+  const [visualDirty, setVisualDirty] = useState(false);
+  const markDirty = () => setVisualDirty(true);
 
   useEffect(() => {
     if (leftDs) {
@@ -153,16 +174,21 @@ function EditQueryForm({
   const generatedSql = useMemo(() => {
     if (!leftDs) return "";
     const l = `"${leftDs}"`;
-    if (!rightDs) return `SELECT * FROM ${l}`;
+    if (!showJoin || !rightDs) return `SELECT * FROM ${l}`;
     const r = `"${rightDs}"`;
     if (jt === "CROSS JOIN") return `SELECT * FROM ${l} ${jt} ${r}`;
     if (!lc || !rc) return "";
     return `SELECT * FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
-  }, [leftDs, rightDs, jt, lc, rc]);
+  }, [leftDs, rightDs, jt, lc, rc, showJoin]);
+
+  // Before the user edits visual params, prefer the explicit saved SQL so the
+  // editor shows the real query (with selected fields), not a regenerated
+  // SELECT *.  Once they change a param, reflect the generated SQL.
+  const effectiveSql = visualDirty ? generatedSql : savedSql || generatedSql;
 
   useEffect(() => {
-    if (!sqlEditing) setSqlText(generatedSql);
-  }, [generatedSql, sqlEditing]);
+    if (!sqlEditing) setSqlText(effectiveSql);
+  }, [effectiveSql, sqlEditing]);
 
   return (
     <div className="mt-3 ml-2 rounded-lg border border-blue-200 bg-blue-50 p-4" onClick={(e) => e.stopPropagation()}>
@@ -179,55 +205,121 @@ function EditQueryForm({
             className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3 mb-3">
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Left Datasource</label>
-          <select value={leftDs} onChange={(e) => setLeftDs(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            <option value="">Select...</option>
-            {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Join Type</label>
-          <select value={jt} onChange={(e) => setJt(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            {JOIN_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Right Datasource</label>
-          <select value={rightDs} onChange={(e) => setRightDs(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            <option value="">Select...</option>
-            {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
-          </select>
+      <div className="mb-3">
+        <div className="flex items-end gap-3">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1">Datasource</label>
+            <select value={leftDs} onChange={(e) => { markDirty(); setLeftDs(e.target.value); }}
+              className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+              <option value="">Select...</option>
+              {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
+            </select>
+          </div>
+          {leftDs && !showJoin && (
+            <button
+              type="button"
+              onClick={() => { markDirty(); setShowJoin(true); }}
+              className="rounded-md border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+            >
+              + Add Join
+            </button>
+          )}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Left Column</label>
-          <select value={lc} onChange={(e) => setLc(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            <option value="">Select column...</option>
-            {leftCols.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+
+      {/* Join config — only shown when a join is active */}
+      {showJoin && (
+        <div className="mb-3 rounded-md border border-blue-200 bg-white p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-blue-900">Join Configuration</span>
+            <button
+              type="button"
+              onClick={() => { markDirty(); setShowJoin(false); setRightDs(""); setLc(""); setRc(""); }}
+              className="text-xs text-red-500 hover:text-red-700"
+            >
+              Remove Join
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Join Type</label>
+              <select value={jt} onChange={(e) => { markDirty(); setJt(e.target.value); }}
+                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                {JOIN_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Right Datasource</label>
+              <select value={rightDs} onChange={(e) => { markDirty(); setRightDs(e.target.value); }}
+                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                <option value="">Select...</option>
+                {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
+              </select>
+            </div>
+          </div>
+          {jt !== "CROSS JOIN" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Left Column</label>
+                <select value={lc} onChange={(e) => { markDirty(); setLc(e.target.value); }}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                  <option value="">Select column...</option>
+                  {leftCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Right Column</label>
+                <select value={rc} onChange={(e) => { markDirty(); setRc(e.target.value); }}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                  <option value="">Select column...</option>
+                  {rightCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
         </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Right Column</label>
-          <select value={rc} onChange={(e) => setRc(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            <option value="">Select column...</option>
-            {rightCols.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+      )}
+
+      {/* Collapsible fields panel for the selected table(s) */}
+      {leftDs && (
+        <div className="mb-3 rounded-md border border-slate-200 bg-white">
+          <button
+            type="button"
+            onClick={() => setFieldsOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <span>Fields ({leftCols.length + (showJoin && rightDs ? rightCols.length : 0)})</span>
+            <span className="text-slate-400">{fieldsOpen ? "▲ Collapse" : "▼ Expand"}</span>
+          </button>
+          {fieldsOpen && (
+            <div className="border-t border-slate-100 px-3 py-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{leftDs}</p>
+              <div className="mb-2 flex flex-wrap gap-1">
+                {leftCols.length === 0 && <span className="text-xs text-slate-400">No fields loaded.</span>}
+                {leftCols.map((c) => (
+                  <span key={c} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{c}</span>
+                ))}
+              </div>
+              {showJoin && rightDs && (
+                <>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{rightDs}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {rightCols.map((c) => (
+                      <span key={c} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{c}</span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
-      </div>
+      )}
       <div className="mb-3">
         <div className="flex items-center justify-between mb-1">
           <label className="block text-xs font-medium text-slate-600">SQL</label>
           <button
             type="button"
-            onClick={() => { if (sqlEditing) { setSqlText(generatedSql); setSqlEditing(false); } else { setSqlText(savedSql || generatedSql); setSqlEditing(true); } }}
+            onClick={() => { if (sqlEditing) { setSqlText(effectiveSql); setSqlEditing(false); } else { setSqlText(effectiveSql); setSqlEditing(true); } }}
             className="text-xs text-blue-600 hover:text-blue-800"
           >
             {sqlEditing ? "Reset to generated" : "Edit SQL directly"}
@@ -248,8 +340,12 @@ function EditQueryForm({
       <div className="flex gap-2">
         <button
           onClick={() => {
-            const finalSql = sqlEditing ? sqlText : generatedSql;
-            const saveRightDs = sqlEditing && !sqlText.includes(rightDs) ? "" : rightDs;
+            const finalSql = sqlEditing ? sqlText : effectiveSql;
+            const joinActive = showJoin && !!rightDs;
+            const saveRightDs =
+              (sqlEditing && rightDs && !sqlText.includes(rightDs)) || !joinActive
+                ? ""
+                : rightDs;
             const saveJt = saveRightDs ? jt : "";
             const saveLc = saveRightDs ? lc : "";
             const saveRc = saveRightDs ? rc : "";
@@ -285,14 +381,16 @@ export default function ProjectWorkspacePage() {
 
   // ── Tab state ─────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "members">("datasources");
-  const [showDbWizard, setShowDbWizard] = useState(false);
-  const [showSaasWizard, setShowSaasWizard] = useState(false);
 
   // ── Query builder state ───────────────────────────────────────────
   const [buildingQuery, setBuildingQuery] = useState(false);
   const [leftDs, setLeftDs] = useState<Datasource | null>(null);
   const [rightDs, setRightDs] = useState<Datasource | null>(null);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
+  // Whether the user has opted into a join (reveals the second datasource box).
+  const [joinMode, setJoinMode] = useState(false);
+  // Collapsible "view fields" panel for the selected table(s) in the builder.
+  const [builderFieldsOpen, setBuilderFieldsOpen] = useState(false);
   const [joinType, setJoinType] = useState("INNER JOIN");
   const [leftCol, setLeftCol] = useState("");
   const [rightCol, setRightCol] = useState("");
@@ -784,18 +882,12 @@ export default function ProjectWorkspacePage() {
         <div>
           {canEdit && (
             <div className="mb-4">
-              <button
-                onClick={() => setShowDbWizard(true)}
-                className="rounded-md border border-brand bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10"
-              >
-                + Connect Database Table
-              </button>
-              <button
-                onClick={() => setShowSaasWizard(true)}
-                className="ml-2 rounded-md border border-brand bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10"
-              >
-                + Connect SaaS App
-              </button>
+              <ConnectorsMenu
+                projectId={projectId}
+                onCreated={() =>
+                  queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
+                }
+              />
             </div>
           )}
           {datasourcesQuery.isLoading && <p className="text-sm text-slate-500">Loading datasources...</p>}
@@ -899,6 +991,7 @@ export default function ProjectWorkspacePage() {
                     setLeftDs(null);
                     setRightDs(null);
                     setShowJoinDialog(false);
+                    setJoinMode(false);
                     setShowSave(false);
                     setSelectedFields([]);
                     setFilters([]);
@@ -938,7 +1031,7 @@ export default function ProjectWorkspacePage() {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className={`grid gap-4 mb-4 ${joinMode ? "grid-cols-2" : "grid-cols-1"}`}>
                 {/* Left box */}
                 <div
                   onDrop={handleDropLeft}
@@ -960,6 +1053,9 @@ export default function ProjectWorkspacePage() {
                           setSelectedFields([]);
                           setFilters([]);
                           setShowJoinDialog(false);
+                          setJoinMode(false);
+                          setRightDs(null);
+                          setRightCols([]);
                         }}
                         className="mt-2 text-xs text-red-500 hover:text-red-700"
                       >
@@ -971,37 +1067,70 @@ export default function ProjectWorkspacePage() {
                   )}
                 </div>
 
-                {/* Right box (optional for joins) */}
-                <div
-                  onDrop={handleDropRight}
-                  onDragOver={allowDrop}
-                  className={`flex min-h-[120px] items-center justify-center rounded-lg border-2 border-dashed p-4 transition-colors ${
-                    rightDs
-                      ? "border-brand bg-brand/5"
-                      : "border-slate-300 hover:border-slate-400"
-                  }`}
-                >
-                  {rightDs ? (
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-slate-900">{rightDs.fileName}</p>
-                      <p className="text-xs text-slate-400 font-mono">{rightDs.viewName}</p>
-                      <button
-                        onClick={() => {
-                          setRightDs(null);
-                          setRightCols([]);
-                          setSelectedFields((prev) => prev.filter((f) => !f.startsWith(rightDs.viewName + ".")));
-                          setShowJoinDialog(false);
-                        }}
-                        className="mt-2 text-xs text-red-500 hover:text-red-700"
-                      >
-                        Remove
-                      </button>
-                    </div>
+                {/* Right box — only when the user has added a join */}
+                {joinMode && (
+                  <div
+                    onDrop={handleDropRight}
+                    onDragOver={allowDrop}
+                    className={`flex min-h-[120px] items-center justify-center rounded-lg border-2 border-dashed p-4 transition-colors ${
+                      rightDs
+                        ? "border-brand bg-brand/5"
+                        : "border-slate-300 hover:border-slate-400"
+                    }`}
+                  >
+                    {rightDs ? (
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-slate-900">{rightDs.fileName}</p>
+                        <p className="text-xs text-slate-400 font-mono">{rightDs.viewName}</p>
+                        <button
+                          onClick={() => {
+                            setRightDs(null);
+                            setRightCols([]);
+                            setSelectedFields((prev) => prev.filter((f) => !f.startsWith(rightDs.viewName + ".")));
+                            setShowJoinDialog(false);
+                          }}
+                          className="mt-2 text-xs text-red-500 hover:text-red-700"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-400">Drop second datasource here</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Add / remove join control — join info is hidden until added */}
+              {leftDs && (
+                <div className="mb-4">
+                  {!joinMode ? (
+                    <button
+                      onClick={() => setJoinMode(true)}
+                      className="rounded-md border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                    >
+                      + Add Join
+                    </button>
                   ) : (
-                    <p className="text-sm text-slate-400">Drop second datasource here (optional)</p>
+                    <button
+                      onClick={() => {
+                        setJoinMode(false);
+                        if (rightDs) {
+                          setSelectedFields((prev) => prev.filter((f) => !f.startsWith(rightDs.viewName + ".")));
+                        }
+                        setRightDs(null);
+                        setRightCols([]);
+                        setShowJoinDialog(false);
+                        setLeftCol("");
+                        setRightCol("");
+                      }}
+                      className="text-xs text-red-500 hover:text-red-700"
+                    >
+                      Remove Join
+                    </button>
                   )}
                 </div>
-              </div>
+              )}
 
               {/* Join Parameters Dialog (only when both datasources present) */}
               {showJoinDialog && leftDs && rightDs && (
@@ -1058,51 +1187,67 @@ export default function ProjectWorkspacePage() {
                 </div>
               )}
 
-              {/* Field Selection */}
+              {/* Field Selection — collapsible */}
               {leftDs && allAvailableCols.length > 0 && (
-                <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-sm font-semibold text-slate-900">Select Fields</h4>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setSelectedFields([...allAvailableCols])}
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        Select All
-                      </button>
-                      <button
-                        onClick={() => setSelectedFields([])}
-                        className="text-xs text-slate-500 hover:text-slate-700"
-                      >
-                        Clear
-                      </button>
+                <div className="mb-4 rounded-lg border border-slate-200 bg-white">
+                  <div className="flex items-center justify-between px-4 py-2">
+                    <button
+                      type="button"
+                      onClick={() => setBuilderFieldsOpen((o) => !o)}
+                      className="flex items-center gap-2 text-sm font-semibold text-slate-900"
+                    >
+                      <span className="text-slate-400">{builderFieldsOpen ? "▲" : "▼"}</span>
+                      Select Fields
+                      <span className="text-xs font-normal text-slate-400">
+                        ({selectedFields.length === 0 ? "all" : selectedFields.length} selected)
+                      </span>
+                    </button>
+                    {builderFieldsOpen && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setSelectedFields([...allAvailableCols])}
+                          className="text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          onClick={() => setSelectedFields([])}
+                          className="text-xs text-slate-500 hover:text-slate-700"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {builderFieldsOpen && (
+                    <div className="border-t border-slate-100 p-4">
+                      <div className="flex flex-wrap gap-2">
+                        {allAvailableCols.map((col) => (
+                          <label key={col} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs cursor-pointer hover:bg-slate-100">
+                            <input
+                              type="checkbox"
+                              checked={selectedFields.includes(col)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedFields((prev) => [...prev, col]);
+                                } else {
+                                  setSelectedFields((prev) => prev.filter((f) => f !== col));
+                                }
+                              }}
+                              className="h-3 w-3 rounded border-slate-300"
+                            />
+                            <span className="text-slate-700">{col.split(".")[1]}</span>
+                            {rightDs && (
+                              <span className="text-slate-400">({col.split(".")[0]})</span>
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {selectedFields.length === 0 ? "All fields selected (SELECT *)" : `${selectedFields.length} field(s) selected`}
+                      </p>
                     </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {allAvailableCols.map((col) => (
-                      <label key={col} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs cursor-pointer hover:bg-slate-100">
-                        <input
-                          type="checkbox"
-                          checked={selectedFields.includes(col)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedFields((prev) => [...prev, col]);
-                            } else {
-                              setSelectedFields((prev) => prev.filter((f) => f !== col));
-                            }
-                          }}
-                          className="h-3 w-3 rounded border-slate-300"
-                        />
-                        <span className="text-slate-700">{col.split(".")[1]}</span>
-                        {rightDs && (
-                          <span className="text-slate-400">({col.split(".")[0]})</span>
-                        )}
-                      </label>
-                    ))}
-                  </div>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {selectedFields.length === 0 ? "All fields selected (SELECT *)" : `${selectedFields.length} field(s) selected`}
-                  </p>
+                  )}
                 </div>
               )}
 
@@ -1622,26 +1767,6 @@ export default function ProjectWorkspacePage() {
             <p className="text-sm text-slate-400">No members assigned yet.</p>
           )}
         </div>
-      )}
-
-      {showDbWizard && (
-        <DatabaseTableWizard
-          projectId={projectId}
-          onClose={() => setShowDbWizard(false)}
-          onCreated={() =>
-            queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
-          }
-        />
-      )}
-
-      {showSaasWizard && (
-        <SaasSourceWizard
-          projectId={projectId}
-          onClose={() => setShowSaasWizard(false)}
-          onCreated={() =>
-            queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
-          }
-        />
       )}
     </section>
   );

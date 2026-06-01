@@ -10,11 +10,12 @@ import { apiClient } from "@/lib/api-client";
 // registered in Teiid exactly like a database table, so it lists, queries and
 // joins like any other data source.
 
-type ConnectorType = "hubspot" | "salesforce";
+type ConnectorType = "hubspot" | "salesforce" | "quickbooks";
 
 const CONNECTORS: { value: ConnectorType; label: string }[] = [
   { value: "hubspot", label: "HubSpot" },
   { value: "salesforce", label: "Salesforce" },
+  { value: "quickbooks", label: "QuickBooks" },
 ];
 
 type ObjectInfo = { name: string; label: string };
@@ -30,15 +31,19 @@ type Step = "connect" | "object" | "fields" | "preview";
 
 export function SaasSourceWizard({
   projectId,
+  initialConnector,
   onClose,
   onCreated,
 }: {
   projectId?: number;
+  initialConnector?: ConnectorType;
   onClose: () => void;
   onCreated: () => void;
 }) {
   const [step, setStep] = useState<Step>("connect");
-  const [connector, setConnector] = useState<ConnectorType>("hubspot");
+  const [connector, setConnector] = useState<ConnectorType>(
+    initialConnector ?? "hubspot"
+  );
 
   // HubSpot
   const [hsToken, setHsToken] = useState("");
@@ -50,6 +55,12 @@ export function SaasSourceWizard({
     username: "",
     password: "",
     security_token: "",
+  });
+  // QuickBooks
+  const [qb, setQb] = useState({
+    access_token: "",
+    realm_id: "",
+    environment: "production",
   });
 
   const [credName, setCredName] = useState("");
@@ -67,13 +78,15 @@ export function SaasSourceWizard({
   const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
 
   function config(): Record<string, unknown> {
-    return connector === "hubspot"
-      ? { access_token: hsToken }
-      : { ...sf };
+    if (connector === "hubspot") return { access_token: hsToken };
+    if (connector === "quickbooks") return { ...qb };
+    return { ...sf };
   }
 
   function credValid(): boolean {
     if (connector === "hubspot") return !!hsToken.trim();
+    if (connector === "quickbooks")
+      return !!qb.access_token.trim() && !!qb.realm_id.trim();
     return (
       !!sf.instance_url &&
       !!sf.client_id &&
@@ -360,6 +373,49 @@ export function SaasSourceWizard({
                     onChange={(e) => setSf((s) => ({ ...s, security_token: e.target.value }))}
                     autoComplete="new-password"
                   />
+                </div>
+              </div>
+            )}
+
+            {connector === "quickbooks" && (
+              <div className="space-y-3">
+                <div>
+                  <label className={label}>Access Token (OAuth2)</label>
+                  <input
+                    className={input}
+                    type="password"
+                    value={qb.access_token}
+                    onChange={(e) => setQb((s) => ({ ...s, access_token: e.target.value }))}
+                    placeholder="eyJ..."
+                    autoComplete="new-password"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    Generate from the Intuit Developer portal (OAuth2 Playground) with the
+                    Accounting scope. Tokens expire ~1h.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={label}>Company (Realm) ID</label>
+                    <input
+                      className={input}
+                      value={qb.realm_id}
+                      onChange={(e) => setQb((s) => ({ ...s, realm_id: e.target.value }))}
+                      placeholder="1234567890"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <label className={label}>Environment</label>
+                    <select
+                      className={input}
+                      value={qb.environment}
+                      onChange={(e) => setQb((s) => ({ ...s, environment: e.target.value }))}
+                    >
+                      <option value="production">Production</option>
+                      <option value="sandbox">Sandbox</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             )}

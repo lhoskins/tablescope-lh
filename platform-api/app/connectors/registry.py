@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from app.connectors.base import SaasConnector, SaasConnectorError
 from app.connectors.saas.hubspot import HubSpotConnector
+from app.connectors.saas.quickbooks import QuickBooksConnector
 from app.connectors.saas.salesforce import SalesforceConnector
 
 _REGISTRY: dict[str, SaasConnector] = {
     HubSpotConnector.connector_type: HubSpotConnector(),
     SalesforceConnector.connector_type: SalesforceConnector(),
+    QuickBooksConnector.connector_type: QuickBooksConnector(),
 }
 
 
