@@ -13,10 +13,13 @@ type SaasConnector = "hubspot" | "salesforce" | "quickbooks";
 
 type ActiveWizard = null | { kind: "database" } | { kind: "saas"; connector: SaasConnector };
 
-const SAAS_APPS: { connector: SaasConnector; label: string }[] = [
-  { connector: "hubspot", label: "HubSpot" },
-  { connector: "salesforce", label: "Salesforce" },
-  { connector: "quickbooks", label: "QuickBooks" },
+// Flat list of every connector (no group headers). Order is database first,
+// then the SaaS apps; each entry opens its own configuration wizard.
+const CONNECTORS: { key: string; label: string; wizard: ActiveWizard }[] = [
+  { key: "database", label: "Database Table", wizard: { kind: "database" } },
+  { key: "hubspot", label: "HubSpot", wizard: { kind: "saas", connector: "hubspot" } },
+  { key: "salesforce", label: "Salesforce", wizard: { kind: "saas", connector: "salesforce" } },
+  { key: "quickbooks", label: "QuickBooks", wizard: { kind: "saas", connector: "quickbooks" } },
 ];
 
 export function ConnectorsMenu({
@@ -56,23 +59,9 @@ export function ConnectorsMenu({
             aria-hidden
           />
           <div className="absolute left-0 z-20 mt-1 w-56 rounded-md border border-slate-200 bg-white py-1 shadow-lg">
-            <p className="px-4 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              Database
-            </p>
-            <button className={item} onClick={() => choose({ kind: "database" })}>
-              Database Table
-            </button>
-            <div className="my-1 border-t border-slate-100" />
-            <p className="px-4 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              SaaS Apps
-            </p>
-            {SAAS_APPS.map((a) => (
-              <button
-                key={a.connector}
-                className={item}
-                onClick={() => choose({ kind: "saas", connector: a.connector })}
-              >
-                {a.label}
+            {CONNECTORS.map((c) => (
+              <button key={c.key} className={item} onClick={() => choose(c.wizard)}>
+                {c.label}
               </button>
             ))}
           </div>

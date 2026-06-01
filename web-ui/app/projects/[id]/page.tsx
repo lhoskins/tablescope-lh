@@ -181,6 +181,10 @@ function EditQueryForm({
   const [selectedFields, setSelectedFields] = useState<string[]>(() =>
     parseSelectedFields(savedSql),
   );
+  // Execute-in-editor state (parity with the Create Query flow).
+  const [execResult, setExecResult] = useState<QueryResult | null>(null);
+  const [execError, setExecError] = useState<string | null>(null);
+  const [executing, setExecuting] = useState(false);
 
   const allFields = useMemo(() => {
     const l = leftCols.map((c) => `${leftDs}.${c}`);
@@ -241,6 +245,27 @@ function EditQueryForm({
   useEffect(() => {
     if (!sqlEditing) setSqlText(effectiveSql);
   }, [effectiveSql, sqlEditing]);
+
+  const runQuery = useCallback(async () => {
+    const sql = sqlEditing ? sqlText : effectiveSql;
+    if (!sql || !leftDs) return;
+    setExecuting(true);
+    setExecError(null);
+    setExecResult(null);
+    try {
+      const result = await apiClient.post<QueryResult>("/api/query/datasource", {
+        tableName: leftDs,
+        limit: 100,
+        project_id: projectId,
+        sql,
+      });
+      setExecResult(result);
+    } catch (err) {
+      setExecError((err as Error).message);
+    } finally {
+      setExecuting(false);
+    }
+  }, [sqlEditing, sqlText, effectiveSql, leftDs, projectId]);
 
   return (
     <div className="mt-3 ml-2 rounded-lg border border-blue-200 bg-blue-50 p-4" onClick={(e) => e.stopPropagation()}>
@@ -342,54 +367,32 @@ function EditQueryForm({
       {/* Collapsible fields panel for the selected table(s) */}
       {leftDs && (
         <div className="mb-3 rounded-md border border-slate-200 bg-white">
-          <div className="flex items-center justify-between px-3 py-2">
-            <button
-              type="button"
-              onClick={() => setFieldsOpen((o) => !o)}
-              className="flex items-center gap-2 text-xs font-medium text-slate-700"
-            >
+          <div
+            onClick={() => setFieldsOpen((o) => !o)}
+            className="flex cursor-pointer items-center justify-between px-3 py-2 hover:bg-slate-50"
+          >
+            <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
               <span className="text-slate-400">{fieldsOpen ? "▲" : "▼"}</span>
               <span>Fields ({isAllFields ? "all" : selectedFields.length} selected)</span>
-            </button>
+            </div>
             {fieldsOpen && (
               <div className="flex gap-2">
-                <button type="button" onClick={() => { markDirty(); setSelectedFields([]); }}
+                <button type="button" onClick={(e) => { e.stopPropagation(); markDirty(); setSelectedFields([]); }}
                   className="text-xs text-blue-600 hover:text-blue-800">Select All</button>
-                <button type="button" onClick={() => { markDirty(); setSelectedFields(allFields.length ? allFields.slice(0, 1) : []); }}
+                <button type="button" onClick={(e) => { e.stopPropagation(); markDirty(); setSelectedFields(allFields.length ? allFields.slice(0, 1) : []); }}
                   className="text-xs text-slate-500 hover:text-slate-700">Reset</button>
               </div>
             )}
           </div>
           {fieldsOpen && (
             <div className="border-t border-slate-100 px-3 py-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{leftDs}</p>
-              <div className="mb-2 flex flex-wrap gap-1">
-                {leftCols.length === 0 && <span className="text-xs text-slate-400">No fields loaded.</span>}
-                {leftCols.map((c) => {
-                  const f = `${leftDs}.${c}`;
-                  const on = isFieldOn(f);
-                  return (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => toggleField(f)}
-                      className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${
-                        on
-                          ? "border-blue-500 bg-blue-500 text-white"
-                          : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
-                      }`}
-                    >
-                      {c}
-                    </button>
-                  );
-                })}
-              </div>
-              {showJoin && rightDs && (
-                <>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{rightDs}</p>
+              <div className={showJoin && rightDs ? "grid grid-cols-2 gap-4" : ""}>
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{leftDs}</p>
                   <div className="flex flex-wrap gap-1">
-                    {rightCols.map((c) => {
-                      const f = `${rightDs}.${c}`;
+                    {leftCols.length === 0 && <span className="text-xs text-slate-400">No fields loaded.</span>}
+                    {leftCols.map((c) => {
+                      const f = `${leftDs}.${c}`;
                       const on = isFieldOn(f);
                       return (
                         <button
@@ -407,8 +410,34 @@ function EditQueryForm({
                       );
                     })}
                   </div>
-                </>
-              )}
+                </div>
+                {showJoin && rightDs && (
+                  <div className="border-l border-slate-100 pl-4">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{rightDs}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {rightCols.length === 0 && <span className="text-xs text-slate-400">No fields loaded.</span>}
+                      {rightCols.map((c) => {
+                        const f = `${rightDs}.${c}`;
+                        const on = isFieldOn(f);
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => toggleField(f)}
+                            className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${
+                              on
+                                ? "border-blue-500 bg-blue-500 text-white"
+                                : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                            }`}
+                          >
+                            {c}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
               <p className="mt-2 text-[10px] text-slate-400">
                 Highlighted fields are included in the query. Click to add or remove; the SQL updates and saves with the query.
               </p>
@@ -463,11 +492,55 @@ function EditQueryForm({
         >
           {isPending ? "Saving..." : "Update Query"}
         </button>
+        <button
+          onClick={runQuery}
+          disabled={executing || !(sqlEditing ? sqlText : effectiveSql)}
+          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {executing ? "Executing..." : "Execute"}
+        </button>
         <button onClick={onCancel}
           className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200">
           Cancel
         </button>
       </div>
+
+      {/* Execution results (parity with Create Query flow) */}
+      {execError && <p className="mt-3 text-sm text-red-600">{execError}</p>}
+      {execResult && execResult.rows.length > 0 && (
+        <div className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-white">
+          <table className="min-w-full divide-y divide-slate-200">
+            <thead className="bg-slate-50">
+              <tr>
+                {execResult.columns.map((col) => (
+                  <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {execResult.rows.slice(0, 50).map((row, i) => (
+                <tr key={i}>
+                  {execResult.columns.map((col) => (
+                    <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
+                      {String(row[col] ?? "")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {execResult.rows.length > 50 && (
+            <p className="px-3 py-2 text-xs text-slate-400">
+              Showing first 50 of {execResult.rows.length} rows
+            </p>
+          )}
+        </div>
+      )}
+      {execResult && execResult.rows.length === 0 && (
+        <p className="mt-3 text-sm text-slate-400">Query returned no results.</p>
+      )}
     </div>
   );
 }

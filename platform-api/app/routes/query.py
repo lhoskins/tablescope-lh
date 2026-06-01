@@ -168,7 +168,27 @@ async def query_datasource(
     else:
         raise HTTPException(status_code=502, detail=f"Query failed: {last_exc}") from last_exc
 
-    columns: list[str] = list(records[0].keys()) if records else []
-    rows = [dict(record) for record in records]
+    # Build columns positionally and disambiguate duplicate names so that a
+    # JOIN selecting columns with the same name from both datasources (e.g.
+    # both tables have an "id"/"name"/"date" column) keeps every selected
+    # field instead of silently collapsing them via dict(record).
+    if records:
+        raw_cols = list(records[0].keys())
+        seen: dict[str, int] = {}
+        columns: list[str] = []
+        for name in raw_cols:
+            if name in seen:
+                seen[name] += 1
+                columns.append(f"{name}_{seen[name]}")
+            else:
+                seen[name] = 0
+                columns.append(name)
+        rows = [
+            {columns[i]: value for i, value in enumerate(record.values())}
+            for record in records
+        ]
+    else:
+        columns = []
+        rows = []
 
     return {"columns": columns, "rows": rows}
