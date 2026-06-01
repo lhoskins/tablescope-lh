@@ -113,6 +113,33 @@ const JOIN_TYPES = [
   { value: "CROSS JOIN", label: "Cross Join" },
 ];
 
+// Parse the explicit `"ds"."col"` field list out of a SELECT statement.
+// Returns [] for `SELECT *` (meaning "all fields").
+function parseSelectedFields(sql: string): string[] {
+  if (!sql) return [];
+  const m = /select\s+([\s\S]*?)\s+from\s/i.exec(sql);
+  if (!m) return [];
+  const list = m[1].trim();
+  if (list === "*" || list === "") return [];
+  return list
+    .split(",")
+    .map((tok) => {
+      const parts = tok
+        .trim()
+        .split(".")
+        .map((p) => p.trim().replace(/^"|"$/g, ""));
+      if (parts.length >= 2) return `${parts[0]}.${parts[1]}`;
+      return parts[0] ? parts[0] : "";
+    })
+    .filter(Boolean);
+}
+
+function quoteField(qualified: string): string {
+  const idx = qualified.indexOf(".");
+  if (idx === -1) return `"${qualified}"`;
+  return `"${qualified.slice(0, idx)}"."${qualified.slice(idx + 1)}"`;
+}
+
 // ── Edit Query Form ─────────────────────────────────────────────────
 
 function EditQueryForm({
@@ -150,6 +177,30 @@ function EditQueryForm({
   // until then we keep showing the explicit saved SQL (with field selection).
   const [visualDirty, setVisualDirty] = useState(false);
   const markDirty = () => setVisualDirty(true);
+  // Fields currently in the SELECT (fully-qualified "ds.col").  Empty = all.
+  const [selectedFields, setSelectedFields] = useState<string[]>(() =>
+    parseSelectedFields(savedSql),
+  );
+
+  const allFields = useMemo(() => {
+    const l = leftCols.map((c) => `${leftDs}.${c}`);
+    const r = showJoin && rightDs ? rightCols.map((c) => `${rightDs}.${c}`) : [];
+    return [...l, ...r];
+  }, [leftCols, rightCols, leftDs, rightDs, showJoin]);
+
+  const isAllFields = selectedFields.length === 0;
+  const isFieldOn = (f: string) => isAllFields || selectedFields.includes(f);
+
+  const toggleField = (f: string) => {
+    markDirty();
+    setSelectedFields((prev) => {
+      const base = prev.length === 0 ? [...allFields] : prev;
+      const next = base.includes(f) ? base.filter((x) => x !== f) : [...base, f];
+      // Normalize "everything selected" back to [] (SELECT *).
+      if (allFields.length > 0 && next.length === allFields.length) return [];
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (leftDs) {
@@ -174,12 +225,13 @@ function EditQueryForm({
   const generatedSql = useMemo(() => {
     if (!leftDs) return "";
     const l = `"${leftDs}"`;
-    if (!showJoin || !rightDs) return `SELECT * FROM ${l}`;
+    const cols = selectedFields.length === 0 ? "*" : selectedFields.map(quoteField).join(", ");
+    if (!showJoin || !rightDs) return `SELECT ${cols} FROM ${l}`;
     const r = `"${rightDs}"`;
-    if (jt === "CROSS JOIN") return `SELECT * FROM ${l} ${jt} ${r}`;
+    if (jt === "CROSS JOIN") return `SELECT ${cols} FROM ${l} ${jt} ${r}`;
     if (!lc || !rc) return "";
-    return `SELECT * FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
-  }, [leftDs, rightDs, jt, lc, rc, showJoin]);
+    return `SELECT ${cols} FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
+  }, [leftDs, rightDs, jt, lc, rc, showJoin, selectedFields]);
 
   // Before the user edits visual params, prefer the explicit saved SQL so the
   // editor shows the real query (with selected fields), not a regenerated
@@ -234,7 +286,14 @@ function EditQueryForm({
             <span className="text-xs font-semibold text-blue-900">Join Configuration</span>
             <button
               type="button"
-              onClick={() => { markDirty(); setShowJoin(false); setRightDs(""); setLc(""); setRc(""); }}
+              onClick={() => {
+                markDirty();
+                setSelectedFields((prev) => prev.filter((f) => !rightDs || !f.startsWith(rightDs + ".")));
+                setShowJoin(false);
+                setRightDs("");
+                setLc("");
+                setRc("");
+              }}
               className="text-xs text-red-500 hover:text-red-700"
             >
               Remove Join
@@ -283,33 +342,76 @@ function EditQueryForm({
       {/* Collapsible fields panel for the selected table(s) */}
       {leftDs && (
         <div className="mb-3 rounded-md border border-slate-200 bg-white">
-          <button
-            type="button"
-            onClick={() => setFieldsOpen((o) => !o)}
-            className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <span>Fields ({leftCols.length + (showJoin && rightDs ? rightCols.length : 0)})</span>
-            <span className="text-slate-400">{fieldsOpen ? "▲ Collapse" : "▼ Expand"}</span>
-          </button>
+          <div className="flex items-center justify-between px-3 py-2">
+            <button
+              type="button"
+              onClick={() => setFieldsOpen((o) => !o)}
+              className="flex items-center gap-2 text-xs font-medium text-slate-700"
+            >
+              <span className="text-slate-400">{fieldsOpen ? "▲" : "▼"}</span>
+              <span>Fields ({isAllFields ? "all" : selectedFields.length} selected)</span>
+            </button>
+            {fieldsOpen && (
+              <div className="flex gap-2">
+                <button type="button" onClick={() => { markDirty(); setSelectedFields([]); }}
+                  className="text-xs text-blue-600 hover:text-blue-800">Select All</button>
+                <button type="button" onClick={() => { markDirty(); setSelectedFields(allFields.length ? allFields.slice(0, 1) : []); }}
+                  className="text-xs text-slate-500 hover:text-slate-700">Reset</button>
+              </div>
+            )}
+          </div>
           {fieldsOpen && (
             <div className="border-t border-slate-100 px-3 py-2">
               <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{leftDs}</p>
               <div className="mb-2 flex flex-wrap gap-1">
                 {leftCols.length === 0 && <span className="text-xs text-slate-400">No fields loaded.</span>}
-                {leftCols.map((c) => (
-                  <span key={c} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{c}</span>
-                ))}
+                {leftCols.map((c) => {
+                  const f = `${leftDs}.${c}`;
+                  const on = isFieldOn(f);
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => toggleField(f)}
+                      className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${
+                        on
+                          ? "border-blue-500 bg-blue-500 text-white"
+                          : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  );
+                })}
               </div>
               {showJoin && rightDs && (
                 <>
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{rightDs}</p>
                   <div className="flex flex-wrap gap-1">
-                    {rightCols.map((c) => (
-                      <span key={c} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{c}</span>
-                    ))}
+                    {rightCols.map((c) => {
+                      const f = `${rightDs}.${c}`;
+                      const on = isFieldOn(f);
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => toggleField(f)}
+                          className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${
+                            on
+                              ? "border-blue-500 bg-blue-500 text-white"
+                              : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      );
+                    })}
                   </div>
                 </>
               )}
+              <p className="mt-2 text-[10px] text-slate-400">
+                Highlighted fields are included in the query. Click to add or remove; the SQL updates and saves with the query.
+              </p>
             </div>
           )}
         </div>
@@ -1222,26 +1324,35 @@ export default function ProjectWorkspacePage() {
                   {builderFieldsOpen && (
                     <div className="border-t border-slate-100 p-4">
                       <div className="flex flex-wrap gap-2">
-                        {allAvailableCols.map((col) => (
-                          <label key={col} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs cursor-pointer hover:bg-slate-100">
-                            <input
-                              type="checkbox"
-                              checked={selectedFields.includes(col)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedFields((prev) => [...prev, col]);
-                                } else {
-                                  setSelectedFields((prev) => prev.filter((f) => f !== col));
-                                }
+                        {allAvailableCols.map((col) => {
+                          const on = selectedFields.length === 0 || selectedFields.includes(col);
+                          return (
+                            <button
+                              key={col}
+                              type="button"
+                              onClick={() => {
+                                setSelectedFields((prev) => {
+                                  const base = prev.length === 0 ? [...allAvailableCols] : prev;
+                                  const next = base.includes(col)
+                                    ? base.filter((f) => f !== col)
+                                    : [...base, col];
+                                  if (next.length === allAvailableCols.length) return [];
+                                  return next;
+                                });
                               }}
-                              className="h-3 w-3 rounded border-slate-300"
-                            />
-                            <span className="text-slate-700">{col.split(".")[1]}</span>
-                            {rightDs && (
-                              <span className="text-slate-400">({col.split(".")[0]})</span>
-                            )}
-                          </label>
-                        ))}
+                              className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
+                                on
+                                  ? "border-blue-500 bg-blue-500 text-white"
+                                  : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                              }`}
+                            >
+                              <span>{col.split(".")[1]}</span>
+                              {rightDs && (
+                                <span className={on ? "text-blue-100" : "text-slate-400"}>({col.split(".")[0]})</span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                       <p className="mt-1 text-xs text-slate-400">
                         {selectedFields.length === 0 ? "All fields selected (SELECT *)" : `${selectedFields.length} field(s) selected`}
