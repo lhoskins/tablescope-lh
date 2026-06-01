@@ -6,6 +6,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
 import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
+import { DataGrid } from "@/components/data-grid/DataGrid";
+import { TablescopeDataGrid } from "@/components/data-grid/TablescopeDataGrid";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -508,34 +510,8 @@ function EditQueryForm({
       {/* Execution results (parity with Create Query flow) */}
       {execError && <p className="mt-3 text-sm text-red-600">{execError}</p>}
       {execResult && execResult.rows.length > 0 && (
-        <div className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-white">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
-              <tr>
-                {execResult.columns.map((col) => (
-                  <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {execResult.rows.slice(0, 50).map((row, i) => (
-                <tr key={i}>
-                  {execResult.columns.map((col) => (
-                    <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
-                      {String(row[col] ?? "")}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {execResult.rows.length > 50 && (
-            <p className="px-3 py-2 text-xs text-slate-400">
-              Showing first 50 of {execResult.rows.length} rows
-            </p>
-          )}
+        <div className="mt-3">
+          <DataGrid columns={execResult.columns} rows={execResult.rows} />
         </div>
       )}
       {execResult && execResult.rows.length === 0 && (
@@ -1107,34 +1083,8 @@ export default function ProjectWorkspacePage() {
           {dsLoading && <p className="mt-4 text-sm text-slate-500">Loading data...</p>}
           {dsError && <p className="mt-4 text-sm text-red-600">{dsError}</p>}
           {dsResult && dsResult.rows.length > 0 && (
-            <div className="mt-4 overflow-x-auto rounded-md border border-slate-200 bg-white">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50">
-                  <tr>
-                    {dsResult.columns.map((col) => (
-                      <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {dsResult.rows.slice(0, 50).map((row, i) => (
-                    <tr key={i}>
-                      {dsResult.columns.map((col) => (
-                        <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
-                          {String(row[col] ?? "")}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {dsResult.rows.length > 50 && (
-                <p className="px-3 py-2 text-xs text-slate-400">
-                  Showing first 50 of {dsResult.rows.length} rows
-                </p>
-              )}
+            <div className="mt-4">
+              <DataGrid columns={dsResult.columns} rows={dsResult.rows} />
             </div>
           )}
           {dsResult && dsResult.rows.length === 0 && (
@@ -1622,35 +1572,7 @@ export default function ProjectWorkspacePage() {
               {/* Execution results */}
               {queryError && <p className="text-sm text-red-600 mb-4">{queryError}</p>}
               {queryResult && queryResult.rows.length > 0 && (
-                <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
-                  <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        {queryResult.columns.map((col) => (
-                          <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {queryResult.rows.slice(0, 50).map((row, i) => (
-                        <tr key={i}>
-                          {queryResult.columns.map((col) => (
-                            <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
-                              {String(row[col] ?? "")}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {queryResult.rows.length > 50 && (
-                    <p className="px-3 py-2 text-xs text-slate-400">
-                      Showing first 50 of {queryResult.rows.length} rows
-                    </p>
-                  )}
-                </div>
+                <DataGrid columns={queryResult.columns} rows={queryResult.rows} />
               )}
             </div>
           )}
@@ -1764,35 +1686,14 @@ export default function ProjectWorkspacePage() {
                         <p className="text-sm text-red-600">{savedQueryError}</p>
                       )}
                       {savedQueryResult && savedQueryResult.rows.length > 0 && (
-                        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
-                          <table className="min-w-full divide-y divide-slate-200">
-                            <thead className="bg-slate-50">
-                              <tr>
-                                {savedQueryResult.columns.map((col) => (
-                                  <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
-                                    {col}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {savedQueryResult.rows.slice(0, 50).map((row, i) => (
-                                <tr key={i}>
-                                  {savedQueryResult.columns.map((col) => (
-                                    <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
-                                      {String(row[col] ?? "")}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          {savedQueryResult.rows.length > 50 && (
-                            <p className="px-3 py-2 text-xs text-slate-400">
-                              Showing first 50 of {savedQueryResult.rows.length} rows
-                            </p>
-                          )}
-                        </div>
+                        <TablescopeDataGrid
+                          columns={savedQueryResult.columns}
+                          rows={savedQueryResult.rows}
+                          queryId={q.id}
+                          queryName={q.name}
+                          availableQueries={(queriesQuery.data ?? []).map((sq) => ({ id: sq.id, name: sq.name }))}
+                          canEditScopes={canEdit}
+                        />
                       )}
                       {savedQueryResult && savedQueryResult.rows.length === 0 && (
                         <p className="text-sm text-slate-400">Query returned no results.</p>

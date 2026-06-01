@@ -5,6 +5,7 @@ from app.models.connector_credential import ConnectorCredential
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
+from app.models.query_scope import QueryScope
 from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.saved_query import SavedQuery
 from app.models.shared_vdb import SharedVDB
@@ -20,6 +21,7 @@ __all__ = [
     "OrganizationVDB",
     "Project",
     "ProjectMember",
+    "QueryScope",
     "SaasObjectDataSource",
     "SavedQuery",
     "SharedVDB",
