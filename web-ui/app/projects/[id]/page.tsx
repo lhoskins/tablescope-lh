@@ -231,13 +231,19 @@ function EditQueryForm({
   const generatedSql = useMemo(() => {
     if (!leftDs) return "";
     const l = `"${leftDs}"`;
-    const cols = selectedFields.length === 0 ? "*" : selectedFields.map(quoteField).join(", ");
+    // Drop any selected fields that no longer belong to an active datasource
+    // (e.g. right-side fields left over after a join is removed).
+    const liveFields =
+      allFields.length > 0
+        ? selectedFields.filter((f) => allFields.includes(f))
+        : selectedFields;
+    const cols = liveFields.length === 0 ? "*" : liveFields.map(quoteField).join(", ");
     if (!showJoin || !rightDs) return `SELECT ${cols} FROM ${l}`;
     const r = `"${rightDs}"`;
     if (jt === "CROSS JOIN") return `SELECT ${cols} FROM ${l} ${jt} ${r}`;
     if (!lc || !rc) return "";
     return `SELECT ${cols} FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
-  }, [leftDs, rightDs, jt, lc, rc, showJoin, selectedFields]);
+  }, [leftDs, rightDs, jt, lc, rc, showJoin, selectedFields, allFields]);
 
   // Before the user edits visual params, prefer the explicit saved SQL so the
   // editor shows the real query (with selected fields), not a regenerated
@@ -315,6 +321,7 @@ function EditQueryForm({
               type="button"
               onClick={() => {
                 markDirty();
+                setSqlEditing(false);
                 setSelectedFields((prev) => prev.filter((f) => !rightDs || !f.startsWith(rightDs + ".")));
                 setShowJoin(false);
                 setRightDs("");
@@ -673,11 +680,28 @@ export default function ProjectWorkspacePage() {
       sql_text?: string;
     }) => {
       const { queryId, ...body } = payload;
-      return apiClient.put(`/api/projects/${projectId}/queries/${queryId}`, body);
+      return apiClient.put<SavedQuery>(`/api/projects/${projectId}/queries/${queryId}`, body);
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["project-queries", projectId] });
       setEditingQuery(null);
+      // If this query's results are currently displayed, re-run it with the
+      // updated SQL so changes (e.g. a removed join) are reflected immediately.
+      if (data && activeSavedQueryId === variables.queryId) {
+        setSavedQueryLoading(true);
+        setSavedQueryError(null);
+        setSavedQueryResult(null);
+        apiClient
+          .post<QueryResult>("/api/query/datasource", {
+            tableName: data.left_datasource ?? "",
+            limit: 100,
+            project_id: projectId,
+            sql: data.sql_text || undefined,
+          })
+          .then((result) => setSavedQueryResult(result))
+          .catch((err) => setSavedQueryError((err as Error).message))
+          .finally(() => setSavedQueryLoading(false));
+      }
     },
   });
 
@@ -1691,7 +1715,13 @@ export default function ProjectWorkspacePage() {
                           rows={savedQueryResult.rows}
                           queryId={q.id}
                           queryName={q.name}
-                          availableQueries={(queriesQuery.data ?? []).map((sq) => ({ id: sq.id, name: sq.name }))}
+                          projectId={projectId}
+                          availableQueries={(queriesQuery.data ?? []).map((sq) => ({
+                            id: sq.id,
+                            name: sq.name,
+                            sql: sq.sql_text,
+                            leftDatasource: sq.left_datasource,
+                          }))}
                           canEditScopes={canEdit}
                         />
                       )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DatabaseTableWizard } from "@/components/datasource/DatabaseTableWizard";
+import { DatabaseTableWizard, DB_TYPES } from "@/components/datasource/DatabaseTableWizard";
 import { SaasSourceWizard } from "@/components/datasource/SaasSourceWizard";
 
 // Single "Connectors" dropdown that replaces the separate "Connect Database
@@ -11,12 +11,20 @@ import { SaasSourceWizard } from "@/components/datasource/SaasSourceWizard";
 
 type SaasConnector = "hubspot" | "salesforce" | "quickbooks";
 
-type ActiveWizard = null | { kind: "database" } | { kind: "saas"; connector: SaasConnector };
+type ActiveWizard =
+  | null
+  | { kind: "database"; dbType: string }
+  | { kind: "saas"; connector: SaasConnector };
 
-// Flat list of every connector (no group headers). Order is database first,
-// then the SaaS apps; each entry opens its own configuration wizard.
+// Flat list of every connector (no group headers). Each database engine is
+// listed individually above the SaaS apps; every entry opens its own
+// configuration wizard (the DB wizard pre-selected to the chosen engine).
 const CONNECTORS: { key: string; label: string; wizard: ActiveWizard }[] = [
-  { key: "database", label: "Database Table", wizard: { kind: "database" } },
+  ...DB_TYPES.map((d) => ({
+    key: d.value,
+    label: d.label,
+    wizard: { kind: "database" as const, dbType: d.value },
+  })),
   { key: "hubspot", label: "HubSpot", wizard: { kind: "saas", connector: "hubspot" } },
   { key: "salesforce", label: "Salesforce", wizard: { kind: "saas", connector: "salesforce" } },
   { key: "quickbooks", label: "QuickBooks", wizard: { kind: "saas", connector: "quickbooks" } },
@@ -71,6 +79,7 @@ export function ConnectorsMenu({
       {active?.kind === "database" && (
         <DatabaseTableWizard
           projectId={projectId}
+          initialDbType={active.dbType}
           onClose={() => setActive(null)}
           onCreated={onCreated}
         />

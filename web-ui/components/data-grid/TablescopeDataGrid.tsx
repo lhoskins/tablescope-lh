@@ -12,7 +12,12 @@ import MenuItem from "@mui/material/MenuItem";
 import { apiClient } from "@/lib/api-client";
 import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
 
-type QueryRef = { id: number; name: string };
+type QueryRef = {
+  id: number;
+  name: string;
+  sql?: string | null;
+  leftDatasource?: string | null;
+};
 
 type Level = {
   queryId: number | null;
@@ -34,6 +39,8 @@ type TablescopeDataGridProps = {
   availableQueries?: QueryRef[];
   /** Whether the current user may create/edit/delete scopes. */
   canEditScopes?: boolean;
+  /** Project id, used to fetch target-query columns for the scope dialog. */
+  projectId?: number;
 };
 
 const ROW_ID = "__tsid";
@@ -47,6 +54,7 @@ export function TablescopeDataGrid({
   queryName = "Results",
   availableQueries = [],
   canEditScopes = false,
+  projectId,
 }: TablescopeDataGridProps) {
   // ── Drill-down breadcrumb (stack of levels) ──────────────────────
   const [levels, setLevels] = useState<Level[]>([
@@ -126,6 +134,44 @@ export function TablescopeDataGrid({
   const [targetQueryId, setTargetQueryId] = useState<number | "">("");
   const [targetField, setTargetField] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Columns of the selected target query, used to populate the target-field
+  // dropdown in the scope dialog.
+  const [targetFields, setTargetFields] = useState<string[]>([]);
+  const [targetFieldsLoading, setTargetFieldsLoading] = useState(false);
+
+  useEffect(() => {
+    if (targetQueryId === "") {
+      setTargetFields([]);
+      return;
+    }
+    const tq = availableQueries.find((q) => q.id === targetQueryId);
+    if (!tq) {
+      setTargetFields([]);
+      return;
+    }
+    let cancelled = false;
+    setTargetFieldsLoading(true);
+    apiClient
+      .post<{ columns: string[] }>("/api/query/datasource", {
+        tableName: tq.leftDatasource ?? "",
+        limit: 1,
+        project_id: projectId,
+        sql: tq.sql ?? undefined,
+      })
+      .then((r) => {
+        if (!cancelled) setTargetFields(r.columns ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setTargetFields([]);
+      })
+      .finally(() => {
+        if (!cancelled) setTargetFieldsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [targetQueryId, availableQueries, projectId]);
 
   const openScopeDialog = useCallback(
     (field: string) => {
@@ -283,7 +329,9 @@ export function TablescopeDataGrid({
     [scopeEnabled, scopesByField, openScopeDialog],
   );
 
-  const targetQueryChoices = availableQueries.filter((q) => q.id !== currentQueryId);
+  // All saved queries are valid drill-down targets (including the current one,
+  // e.g. to filter the same query by a clicked value).
+  const targetQueryChoices = availableQueries;
 
   return (
     <div>
@@ -407,12 +455,31 @@ export function TablescopeDataGrid({
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600">Target field</label>
-                <input
-                  value={targetField}
-                  onChange={(e) => setTargetField(e.target.value)}
-                  placeholder="column in the target query result"
-                  className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                />
+                {targetQueryId === "" ? (
+                  <p className="mt-1 text-xs text-slate-400">Select a target query first.</p>
+                ) : targetFieldsLoading ? (
+                  <p className="mt-1 text-xs text-slate-400">Loading fields…</p>
+                ) : targetFields.length > 0 ? (
+                  <select
+                    value={targetField}
+                    onChange={(e) => setTargetField(e.target.value)}
+                    className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                  >
+                    <option value="">Select…</option>
+                    {targetFields.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={targetField}
+                    onChange={(e) => setTargetField(e.target.value)}
+                    placeholder="column in the target query result"
+                    className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                )}
                 <p className="mt-1 text-[10px] text-slate-400">
                   The clicked value filters this field in the target query.
                 </p>

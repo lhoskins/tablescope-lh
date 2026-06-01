@@ -11,7 +11,7 @@ import { apiClient } from "@/lib/api-client";
 
 type DbType = { value: string; label: string; defaultPort: number; enabled: boolean };
 
-const DB_TYPES: DbType[] = [
+export const DB_TYPES: DbType[] = [
   { value: "postgresql", label: "PostgreSQL", defaultPort: 5432, enabled: true },
   { value: "mysql", label: "MySQL", defaultPort: 3306, enabled: true },
   { value: "sqlserver", label: "SQL Server", defaultPort: 1433, enabled: true },
@@ -42,16 +42,18 @@ export function DatabaseTableWizard({
   projectId,
   onClose,
   onCreated,
+  initialDbType = "postgresql",
 }: {
   projectId?: number;
   onClose: () => void;
   onCreated: () => void;
+  initialDbType?: string;
 }) {
   const [step, setStep] = useState<Step>("connection");
   const [conn, setConn] = useState<Connection>({
-    db_type: "postgresql",
+    db_type: initialDbType,
     host: "",
-    port: 5432,
+    port: DB_TYPES.find((d) => d.value === initialDbType)?.defaultPort ?? 5432,
     database_name: "",
     username: "",
     password: "",
