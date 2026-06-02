@@ -86,9 +86,20 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-async function uploadFile<T>(path: string, file: File): Promise<T> {
+async function uploadFile<T>(
+  path: string,
+  file: File,
+  fields?: Record<string, string | number | undefined | null>,
+): Promise<T> {
   const form = new FormData();
   form.append("file", file);
+  if (fields) {
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined && value !== null) {
+        form.append(key, String(value));
+      }
+    }
+  }
   const headers = new Headers();
   const token = readToken();
   if (token) {
@@ -122,5 +133,9 @@ export const apiClient = {
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T = void>(path: string) =>
     request<T>(path, { method: "DELETE" }),
-  upload: <T>(path: string, file: File) => uploadFile<T>(path, file),
+  upload: <T>(
+    path: string,
+    file: File,
+    fields?: Record<string, string | number | undefined | null>,
+  ) => uploadFile<T>(path, file, fields),
 };

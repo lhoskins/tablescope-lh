@@ -50,9 +50,34 @@ type TablescopeDataGridProps = {
   canEditScopes?: boolean;
   /** Project id, used to fetch target-query columns for the scope dialog. */
   projectId?: number;
+  /** Per-column formatting hints (currency/date/number) for item 6. */
+  columnTypes?: { field: string; name?: string; type: string }[];
 };
 
 const ROW_ID = "__tsid";
+
+const _currencyFmt = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+});
+
+function formatTypedValue(value: unknown, type: string | undefined): string {
+  if (value == null || value === "") return "";
+  const text = String(value);
+  if (type === "currency") {
+    const n = Number(text.replace(/[^0-9.\-]/g, ""));
+    return Number.isFinite(n) ? _currencyFmt.format(n) : text;
+  }
+  if (type === "number") {
+    const n = Number(text.replace(/,/g, ""));
+    return Number.isFinite(n) ? n.toLocaleString() : text;
+  }
+  if (type === "date") {
+    const d = new Date(text);
+    return Number.isNaN(d.getTime()) ? text : d.toLocaleDateString();
+  }
+  return text;
+}
 
 export function TablescopeDataGrid({
   columns,
@@ -64,6 +89,7 @@ export function TablescopeDataGrid({
   availableQueries = [],
   canEditScopes = false,
   projectId,
+  columnTypes = [],
 }: TablescopeDataGridProps) {
   // ── Drill-down breadcrumb (stack of levels) ──────────────────────
   const [levels, setLevels] = useState<Level[]>([
@@ -346,6 +372,17 @@ export function TablescopeDataGrid({
     return [...ordered, ...remaining];
   }, [current.columns, columnOrder]);
 
+  // Map column field -> formatting type (currency/date/number) for item 6.
+  // The view normalizes spaces to underscores, so match either spelling.
+  const typeByField = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of columnTypes) {
+      if (c.field) map[c.field] = c.type;
+      if (c.name) map[c.name] = c.type;
+    }
+    return map;
+  }, [columnTypes]);
+
   const gridColumns = useMemo<GridColDef[]>(
     () =>
       orderedFields.map((field) => ({
@@ -370,8 +407,19 @@ export function TablescopeDataGrid({
         },
         renderCell: (params) => {
           const scoped = !!scopesByField[field];
-          const text = params.value == null ? "" : String(params.value);
-          if (!scoped) return <span>{text}</span>;
+          const fieldType = typeByField[field];
+          const text =
+            params.value == null
+              ? ""
+              : formatTypedValue(params.value, fieldType);
+          const numeric = fieldType === "currency" || fieldType === "number";
+          if (!scoped) {
+            return (
+              <span className={numeric ? "block w-full text-right tabular-nums" : undefined}>
+                {text}
+              </span>
+            );
+          }
           return (
             <span
               className="cursor-pointer text-blue-700 underline decoration-dotted underline-offset-2"
@@ -382,7 +430,7 @@ export function TablescopeDataGrid({
           );
         },
       })),
-    [orderedFields, scopesByField],
+    [orderedFields, scopesByField, typeByField],
   );
 
   // ── Custom column menu (Create / Edit Scope) ─────────────────────

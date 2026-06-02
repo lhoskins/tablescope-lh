@@ -3,6 +3,7 @@
 from app.models.base import Base
 from app.models.connector_credential import ConnectorCredential
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
+from app.models.file_source_meta import FileSourceMeta
 from app.models.grid_preference import GridPreference
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
@@ -19,6 +20,7 @@ __all__ = [
     "ConnectorCredential",
     "DataSourceColumn",
     "DatabaseDataSource",
+    "FileSourceMeta",
     "GridPreference",
     "OrganizationVDB",
     "Project",

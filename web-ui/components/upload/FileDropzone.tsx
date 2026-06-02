@@ -7,8 +7,11 @@ type UploadResult = { path: string; size: number; datasource?: string; fileName?
 
 export function FileDropzone({
   onUploaded,
+  projectId,
 }: {
   onUploaded?: (result: UploadResult) => void;
+  /** When set, uploaded files are auto-associated with this project. */
+  projectId?: number;
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -23,7 +26,8 @@ export function FileDropzone({
         try {
           const result = await apiClient.upload<UploadResult>(
             "/api/upload",
-            file
+            file,
+            projectId != null ? { project_id: projectId } : undefined,
           );
           setUploaded((prev) => [...prev, result]);
           onUploaded?.(result);
@@ -33,7 +37,7 @@ export function FileDropzone({
       }
       setUploading(false);
     },
-    [onUploaded]
+    [onUploaded, projectId]
   );
 
   function onDragOver(e: React.DragEvent) {

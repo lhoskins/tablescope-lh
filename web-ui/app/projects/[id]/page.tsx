@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
 import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
+import { FileDropzone } from "@/components/upload/FileDropzone";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 import { TablescopeDataGrid } from "@/components/data-grid/TablescopeDataGrid";
 
@@ -61,6 +62,8 @@ type Project = {
   owner_id: number | null;
 };
 
+type ColumnType = { name: string; field: string; type: string };
+
 type Datasource = {
   fileName: string;
   viewName: string;
@@ -70,6 +73,9 @@ type Datasource = {
   connectorType?: string | null;
   id?: number | null;
   ownerId?: number | null;
+  fileMetaId?: number | null;
+  projectId?: number | null;
+  columnTypes?: ColumnType[];
 };
 
 type SavedQuery = {
@@ -853,6 +859,70 @@ export default function ProjectWorkspacePage() {
     [queryClient, projectId],
   );
 
+  // ── File data source actions (item 1 archive, item 3 project link) ──
+  const isFileSource = useCallback(
+    (ds: Datasource) => ds.id == null && !!ds.viewName,
+    [],
+  );
+
+  const removeFileFromProject = useCallback(
+    async (ds: Datasource) => {
+      setDsActionError(null);
+      try {
+        await apiClient.patch(
+          `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/project`,
+          {},
+        );
+        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+      } catch (err) {
+        setDsActionError((err as Error).message);
+      }
+    },
+    [queryClient, projectId],
+  );
+
+  const archiveFileSource = useCallback(
+    async (ds: Datasource) => {
+      setDsActionError(null);
+      try {
+        await apiClient.patch(
+          `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/archive?archived=true`,
+          {},
+        );
+        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+      } catch (err) {
+        setDsActionError((err as Error).message);
+      }
+    },
+    [queryClient, projectId],
+  );
+
+  // Item 5: drag a file onto a file datasource row to replace its data.
+  const [dragOverView, setDragOverView] = useState<string | null>(null);
+  const [replaceMsg, setReplaceMsg] = useState<string | null>(null);
+  const replaceFileFromDrop = useCallback(
+    async (ds: Datasource, files: FileList | null) => {
+      setDragOverView(null);
+      if (!files || files.length === 0) return;
+      setDsActionError(null);
+      setReplaceMsg(null);
+      try {
+        const res = await apiClient.upload<{ addedColumns?: string[] }>(
+          `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/replace`,
+          files[0],
+        );
+        const added = res.addedColumns ?? [];
+        setReplaceMsg(
+          `Replaced "${ds.fileName}"${added.length ? ` (added: ${added.join(", ")})` : ""}.`,
+        );
+        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+      } catch (err) {
+        setDsActionError((err as Error).message);
+      }
+    },
+    [queryClient, projectId],
+  );
+
   // ── Drag-and-drop handlers ────────────────────────────────────────
 
   const handleDragStart = useCallback(
@@ -1094,15 +1164,22 @@ export default function ProjectWorkspacePage() {
       {activeTab === "datasources" && (
         <div>
           {canEdit && (
-            <div className="mb-4">
+            <div className="mb-4 space-y-3">
               <ConnectorsMenu
                 projectId={projectId}
                 onCreated={() =>
                   queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
                 }
               />
+              <FileDropzone
+                projectId={projectId}
+                onUploaded={() =>
+                  queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
+                }
+              />
             </div>
           )}
+          {replaceMsg && <p className="mb-2 text-sm text-green-600">{replaceMsg}</p>}
           {datasourcesQuery.isLoading && <p className="text-sm text-slate-500">Loading datasources...</p>}
           {projectDatasources.length === 0 && !datasourcesQuery.isLoading && (
             <p className="text-sm text-slate-400">No datasources. Upload files or connect a database table.</p>
@@ -1114,9 +1191,34 @@ export default function ProjectWorkspacePage() {
                   key={ds.viewName}
                   draggable
                   onDragStart={(e) => handleDragStart(e, ds)}
+                  onDragOver={
+                    isFileSource(ds)
+                      ? (e) => {
+                          if (e.dataTransfer.types.includes("Files")) {
+                            e.preventDefault();
+                            setDragOverView(ds.viewName);
+                          }
+                        }
+                      : undefined
+                  }
+                  onDragLeave={
+                    isFileSource(ds) ? () => setDragOverView(null) : undefined
+                  }
+                  onDrop={
+                    isFileSource(ds)
+                      ? (e) => {
+                          if (e.dataTransfer.files.length > 0) {
+                            e.preventDefault();
+                            replaceFileFromDrop(ds, e.dataTransfer.files);
+                          }
+                        }
+                      : undefined
+                  }
                   onClick={() => viewDatasource(ds)}
                   className={`flex items-center justify-between rounded-md border px-4 py-3 cursor-pointer transition-colors ${
-                    activeDsName === ds.viewName
+                    dragOverView === ds.viewName
+                      ? "border-brand border-dashed bg-brand/10 ring-2 ring-brand/30"
+                      : activeDsName === ds.viewName
                       ? "border-brand bg-brand/5"
                       : "border-slate-200 bg-white hover:bg-slate-50"
                   }`}
@@ -1155,6 +1257,26 @@ export default function ProjectWorkspacePage() {
                         </button>
                       </>
                     )}
+                    {canEdit && isFileSource(ds) && ds.projectId != null && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); removeFileFromProject(ds); }}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                        title="Remove this file from the project (keeps the file in your personal datasources)"
+                      >
+                        Remove
+                      </button>
+                    )}
+                    {canEdit && isFileSource(ds) && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); archiveFileSource(ds); }}
+                        className="text-xs font-medium text-red-500 hover:text-red-700"
+                        title="Archive this file source"
+                      >
+                        Archive
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1169,7 +1291,13 @@ export default function ProjectWorkspacePage() {
           {dsError && <p className="mt-4 text-sm text-red-600">{dsError}</p>}
           {dsResult && dsResult.rows.length > 0 && (
             <div className="mt-4">
-              <DataGrid columns={dsResult.columns} rows={dsResult.rows} />
+              <DataGrid
+                columns={dsResult.columns}
+                rows={dsResult.rows}
+                columnTypes={
+                  projectDatasources.find((d) => d.viewName === activeDsName)?.columnTypes
+                }
+              />
             </div>
           )}
           {dsResult && dsResult.rows.length === 0 && (

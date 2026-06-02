@@ -19,6 +19,7 @@ from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
 from app.models.database_data_source import DatabaseDataSource
+from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.models.tenant import Tenant
@@ -213,6 +214,21 @@ async def list_project_datasources(
     owner_id = project.owner_id or context.user_id
     uploads_dir = base / str(tenant.id) / str(owner_id) / "uploads"
 
+    # File-source metadata governs project association + archive state.
+    #   - no meta row        -> legacy file, shown in all the owner's projects
+    #   - project_id == this -> scoped to this project (shown here)
+    #   - project_id is None -> personal only (hidden from every project)
+    #   - project_id == other-> scoped elsewhere (hidden here)
+    meta_rows = (
+        await session.scalars(
+            select(FileSourceMeta).where(
+                FileSourceMeta.tenant_id == context.tenant_id,
+                FileSourceMeta.owner_id == owner_id,
+            )
+        )
+    ).all()
+    meta_by_view = {m.view_name: m for m in meta_rows}
+
     datasources: list[dict] = []
     if uploads_dir.is_dir():
         for f in sorted(uploads_dir.iterdir()):
@@ -220,12 +236,22 @@ async def list_project_datasources(
                 base_name = f.stem.replace(" ", "_")
                 extension = f.suffix.lstrip(".").upper()
                 view_name = f"{base_name}_{extension}" if extension else base_name
+                meta = meta_by_view.get(view_name)
+                if meta is not None:
+                    if meta.archived:
+                        continue
+                    if meta.project_id != project_id:
+                        continue
                 datasources.append({
                     "fileName": f.name,
                     "viewName": view_name,
                     "size": f.stat().st_size,
                     "sourceType": extension.lower() or "file",
                     "dbType": None,
+                    "fileMetaId": meta.id if meta else None,
+                    "projectId": meta.project_id if meta else None,
+                    "ownerId": owner_id,
+                    "columnTypes": (meta.column_types or []) if meta else [],
                 })
 
     # Append database-backed data sources registered against this project.

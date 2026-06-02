@@ -4,7 +4,10 @@ import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileDropzone } from "@/components/upload/FileDropzone";
 import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
+import { DataGrid } from "@/components/data-grid/DataGrid";
 import { apiClient } from "@/lib/api-client";
+
+type ColumnType = { name: string; field: string; type: string };
 
 type Datasource = {
   fileName: string;
@@ -14,6 +17,9 @@ type Datasource = {
   dbType?: string | null;
   connectorType?: string | null;
   id?: number | null;
+  fileMetaId?: number | null;
+  archived?: boolean;
+  columnTypes?: ColumnType[];
 };
 
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -91,7 +97,68 @@ export default function UploadPage() {
   });
   const archived = (archivedQuery.data ?? []).filter((d) => d.archived);
 
+  // Archived file sources (separate from DB/SaaS archived sources above).
+  const archivedFilesQuery = useQuery<Datasource[]>({
+    queryKey: ["datasources", "archived-files"],
+    queryFn: () =>
+      apiClient.get<Datasource[]>("/api/upload/datasources?include_archived=true"),
+  });
+  const archivedFiles = (archivedFilesQuery.data ?? []).filter(
+    (d) => d.id == null && d.archived,
+  );
+
   const [actionError, setActionError] = useState<string | null>(null);
+
+  async function setFileArchived(viewName: string, archivedFlag: boolean) {
+    setActionError(null);
+    try {
+      await apiClient.patch(
+        `/api/upload/datasources/${encodeURIComponent(viewName)}/archive?archived=${archivedFlag}`,
+        {},
+      );
+      queryClient.invalidateQueries({ queryKey: ["datasources"] });
+    } catch (err) {
+      setActionError((err as Error).message);
+    }
+  }
+
+  async function deleteFile(viewName: string, label: string) {
+    if (!window.confirm(`Permanently delete "${label}"? This cannot be undone.`)) {
+      return;
+    }
+    setActionError(null);
+    try {
+      await apiClient.delete(`/api/upload/datasources/${encodeURIComponent(viewName)}`);
+      queryClient.invalidateQueries({ queryKey: ["datasources"] });
+    } catch (err) {
+      setActionError((err as Error).message);
+    }
+  }
+
+  // ── Item 5: drag a file onto a datasource row to replace it ──────────
+  const [dragOverView, setDragOverView] = useState<string | null>(null);
+  const [replaceMsg, setReplaceMsg] = useState<string | null>(null);
+
+  async function replaceFromDrop(ds: Datasource, files: FileList | null) {
+    setDragOverView(null);
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    setActionError(null);
+    setReplaceMsg(null);
+    try {
+      const res = await apiClient.upload<{ addedColumns?: string[] }>(
+        `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/replace`,
+        file,
+      );
+      const added = res.addedColumns ?? [];
+      setReplaceMsg(
+        `Replaced "${ds.fileName}"${added.length ? ` (added column(s): ${added.join(", ")})` : ""}.`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["datasources"] });
+    } catch (err) {
+      setActionError((err as Error).message);
+    }
+  }
 
   const handleUploaded = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["datasources"] });
@@ -184,9 +251,16 @@ export default function UploadPage() {
 
       {/* Datasources list */}
       <div className="mt-8">
-        <h2 className="mb-3 text-lg font-semibold text-slate-900">
+        <h2 className="mb-1 text-lg font-semibold text-slate-900">
           Your Datasources
         </h2>
+        <p className="mb-3 text-xs text-slate-400">
+          Tip: drag a file (same name, same columns) onto a file datasource to
+          replace its data. New columns are added automatically.
+        </p>
+        {replaceMsg && (
+          <p className="mb-2 text-sm text-green-600">{replaceMsg}</p>
+        )}
         {datasourcesQuery.isLoading && (
           <p className="text-sm text-slate-500">Loading datasources...</p>
         )}
@@ -208,8 +282,34 @@ export default function UploadPage() {
             {datasourcesQuery.data.map((ds) => (
               <div
                 key={ds.viewName}
+                onDragOver={
+                  ds.id == null
+                    ? (e) => {
+                        e.preventDefault();
+                        setDragOverView(ds.viewName);
+                      }
+                    : undefined
+                }
+                onDragLeave={
+                  ds.id == null ? () => setDragOverView(null) : undefined
+                }
+                onDrop={
+                  ds.id == null
+                    ? (e) => {
+                        e.preventDefault();
+                        replaceFromDrop(ds, e.dataTransfer.files);
+                      }
+                    : undefined
+                }
+                title={
+                  ds.id == null
+                    ? "Drop a file with the same name here to replace this datasource"
+                    : undefined
+                }
                 className={`flex items-center justify-between rounded-md border px-4 py-3 transition-colors ${
-                  selectedDatasource?.viewName === ds.viewName
+                  dragOverView === ds.viewName
+                    ? "border-brand border-dashed bg-brand/10 ring-2 ring-brand/30"
+                    : selectedDatasource?.viewName === ds.viewName
                     ? "border-brand bg-brand/5"
                     : "border-slate-200 bg-white hover:bg-slate-50"
                 }`}
@@ -254,6 +354,16 @@ export default function UploadPage() {
                       </button>
                     </>
                   )}
+                  {ds.id == null && (
+                    <button
+                      type="button"
+                      onClick={() => setFileArchived(ds.viewName, true)}
+                      className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                      title="Archive (hide from list; can be deleted later)"
+                    >
+                      Archive
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -293,6 +403,40 @@ export default function UploadPage() {
             </div>
           </details>
         )}
+
+        {archivedFiles.length > 0 && (
+          <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-slate-600">
+              Archived files ({archivedFiles.length})
+            </summary>
+            <div className="mt-2 grid gap-2">
+              {archivedFiles.map((d) => (
+                <div
+                  key={d.viewName}
+                  className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2"
+                >
+                  <span className="text-sm text-slate-600">{d.fileName}</span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFileArchived(d.viewName, false)}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                    >
+                      Restore
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteFile(d.viewName, d.fileName)}
+                      className="text-xs font-medium text-red-500 hover:text-red-700"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
       </div>
 
       {/* Data preview */}
@@ -311,41 +455,11 @@ export default function UploadPage() {
             <p className="text-sm text-slate-400">No data in this datasource.</p>
           )}
           {queryResult && queryResult.rows.length > 0 && (
-            <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50">
-                  <tr>
-                    {queryResult.columns.map((col) => (
-                      <th
-                        key={col}
-                        className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500"
-                      >
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {queryResult.rows.slice(0, 100).map((row, i) => (
-                    <tr key={i}>
-                      {queryResult.columns.map((col) => (
-                        <td
-                          key={col}
-                          className="whitespace-nowrap px-3 py-2 text-sm text-slate-700"
-                        >
-                          {String(row[col] ?? "")}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {queryResult.rows.length > 100 && (
-                <p className="px-3 py-2 text-xs text-slate-400">
-                  Showing first 100 of {queryResult.rows.length} rows
-                </p>
-              )}
-            </div>
+            <DataGrid
+              columns={queryResult.columns}
+              rows={queryResult.rows}
+              columnTypes={selectedDatasource.columnTypes}
+            />
           )}
         </div>
       )}
