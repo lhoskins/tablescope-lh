@@ -71,6 +71,12 @@ class DatabaseDataSource(TimestampMixin, Base):
     teiid_jndi_name: Mapped[str] = mapped_column(String(255), nullable=False)
 
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="draft")
+    # Soft-archive: archived sources are hidden from the active datasource list
+    # but kept so they can be deleted once no active query depends on them.
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_test_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
     last_test_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_tested_at: Mapped[datetime | None] = mapped_column(
@@ -105,6 +111,8 @@ class DatabaseDataSource(TimestampMixin, Base):
             "teiid_model_name": self.teiid_model_name,
             "teiid_table_name": self.teiid_table_name,
             "status": self.status,
+            "archived": self.archived,
+            "archived_at": self.archived_at.isoformat() if self.archived_at else None,
             "last_test_status": self.last_test_status,
             "last_test_message": self.last_test_message,
             "last_tested_at": self.last_tested_at.isoformat()

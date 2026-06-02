@@ -269,6 +269,7 @@ async def create_source(
 @router.get("")
 async def list_saas_sources(
     project_id: int | None = None,
+    include_archived: bool = False,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[dict]:
@@ -281,8 +282,12 @@ async def list_saas_sources(
         d = r.to_dict()
         ds = await session.get(DatabaseDataSource, r.database_data_source_id)
         if ds is not None:
+            if not include_archived and ds.archived:
+                continue
             if project_id is not None and ds.project_id != project_id:
                 continue
+            d["id"] = ds.id
+            d["archived"] = ds.archived
             d["display_name"] = ds.display_name
             d["teiid_view_name"] = ds.teiid_view_name
             d["status"] = ds.status

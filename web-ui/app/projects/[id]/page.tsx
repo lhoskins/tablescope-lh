@@ -68,6 +68,8 @@ type Datasource = {
   sourceType?: string | null;
   dbType?: string | null;
   connectorType?: string | null;
+  id?: number | null;
+  ownerId?: number | null;
 };
 
 type SavedQuery = {
@@ -815,6 +817,42 @@ export default function ProjectWorkspacePage() {
     }
   }, [activeDsName]);
 
+  const [dsActionError, setDsActionError] = useState<string | null>(null);
+
+  const archiveDatasource = useCallback(
+    async (ds: Datasource, archived: boolean) => {
+      if (ds.id == null) return;
+      setDsActionError(null);
+      try {
+        await apiClient.patch(
+          `/api/database-sources/${ds.id}/archive?archived=${archived}`,
+          {},
+        );
+        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+      } catch (err) {
+        setDsActionError((err as Error).message);
+      }
+    },
+    [queryClient, projectId],
+  );
+
+  const deleteDatasource = useCallback(
+    async (ds: Datasource) => {
+      if (ds.id == null) return;
+      if (!window.confirm(`Permanently delete "${ds.fileName}"? This cannot be undone.`)) {
+        return;
+      }
+      setDsActionError(null);
+      try {
+        await apiClient.delete(`/api/database-sources/${ds.id}`);
+        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+      } catch (err) {
+        setDsActionError((err as Error).message);
+      }
+    },
+    [queryClient, projectId],
+  );
+
   // ── Drag-and-drop handlers ────────────────────────────────────────
 
   const handleDragStart = useCallback(
@@ -1090,17 +1128,40 @@ export default function ProjectWorkspacePage() {
                     </div>
                     <p className="text-xs text-slate-400 font-mono">View: {ds.viewName}</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     {typeof ds.size === "number" && (
                       <span className="text-xs text-slate-400">{(ds.size / 1024).toFixed(1)} KB</span>
                     )}
                     <span className="text-xs text-slate-400">
                       {activeDsName === ds.viewName ? "Click to hide" : "Click to view"}
                     </span>
+                    {canEdit && ds.id != null && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); archiveDatasource(ds, true); }}
+                          className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                          title="Archive (hide from project; can be deleted later)"
+                        >
+                          Archive
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); deleteDatasource(ds); }}
+                          className="text-xs font-medium text-red-500 hover:text-red-700"
+                          title="Delete (archive first; blocked if a query depends on it)"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
+          )}
+          {dsActionError && (
+            <p className="mt-2 text-sm text-red-600">{dsActionError}</p>
           )}
 
           {/* Datasource data view */}

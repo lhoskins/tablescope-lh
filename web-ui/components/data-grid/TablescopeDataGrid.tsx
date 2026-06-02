@@ -2,15 +2,24 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  DataGrid,
+  DataGridPremium,
   GridColumnMenu,
+  useGridApiRef,
   type GridColDef,
   type GridColumnMenuProps,
   type GridColumnVisibilityModel,
-} from "@mui/x-data-grid";
+} from "@mui/x-data-grid-premium";
+import { LicenseInfo } from "@mui/x-license";
 import MenuItem from "@mui/material/MenuItem";
 import { apiClient } from "@/lib/api-client";
 import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
+
+// MUI X Premium license key (optional). Without it the grid runs with a
+// watermark + console warning but is otherwise fully functional.
+const MUI_LICENSE_KEY = process.env.NEXT_PUBLIC_MUI_LICENSE_KEY;
+if (MUI_LICENSE_KEY) {
+  LicenseInfo.setLicenseKey(MUI_LICENSE_KEY);
+}
 
 type QueryRef = {
   id: number;
@@ -230,25 +239,93 @@ export function TablescopeDataGrid({
     }
   };
 
-  // ── Column visibility persistence (localStorage per query) ───────
-  const storageKey = `tablescope-grid-cols-${currentQueryId ?? "default"}`;
-  const [colVisibility, setColVisibility] = useState<GridColumnVisibilityModel>({});
+  const deleteEditingScope = async () => {
+    if (!editing) return;
+    setSaving(true);
+    await removeScope(editing);
+    setSaving(false);
+    closeDialog();
+  };
 
+  // ── Column visibility + order persistence ────────────────────────
+  // When the grid is bound to a saved query we persist per-user layout to the
+  // database (so it follows the user across devices); otherwise we fall back to
+  // localStorage keyed by the query name.
+  const apiRef = useGridApiRef();
+  const storageKey = `tablescope-grid-cols-${currentQueryId ?? queryName ?? "default"}`;
+  const [colVisibility, setColVisibility] = useState<GridColumnVisibilityModel>({});
+  const [columnOrder, setColumnOrder] = useState<string[]>([]);
+
+  const persistPrefs = useCallback(
+    (order: string[], hidden: string[]) => {
+      if (currentQueryId != null) {
+        apiClient
+          .put(`/api/grid-preferences/${currentQueryId}`, {
+            column_order: order,
+            hidden_columns: hidden,
+          })
+          .catch(() => {});
+      } else if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          storageKey,
+          JSON.stringify({ order, hidden }),
+        );
+      }
+    },
+    [currentQueryId, storageKey],
+  );
+
+  // Load saved preferences whenever the bound query changes.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      setColVisibility(raw ? (JSON.parse(raw) as GridColumnVisibilityModel) : {});
-    } catch {
-      setColVisibility({});
+    let cancelled = false;
+    const apply = (order: string[], hidden: string[]) => {
+      if (cancelled) return;
+      setColumnOrder(order ?? []);
+      const model: GridColumnVisibilityModel = {};
+      for (const f of hidden ?? []) model[f] = false;
+      setColVisibility(model);
+    };
+    if (currentQueryId != null) {
+      apiClient
+        .get<{ column_order: string[]; hidden_columns: string[] }>(
+          `/api/grid-preferences/${currentQueryId}`,
+        )
+        .then((p) => apply(p.column_order, p.hidden_columns))
+        .catch(() => apply([], []));
+    } else if (typeof window !== "undefined") {
+      try {
+        const raw = window.localStorage.getItem(storageKey);
+        const parsed = raw ? JSON.parse(raw) : null;
+        apply(parsed?.order ?? [], parsed?.hidden ?? []);
+      } catch {
+        apply([], []);
+      }
+    } else {
+      apply([], []);
     }
-  }, [storageKey]);
+    return () => {
+      cancelled = true;
+    };
+  }, [currentQueryId, storageKey]);
+
+  const hiddenFromModel = (model: GridColumnVisibilityModel): string[] =>
+    Object.entries(model)
+      .filter(([, visible]) => visible === false)
+      .map(([field]) => field);
 
   const onColVisibilityChange = (model: GridColumnVisibilityModel) => {
     setColVisibility(model);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(storageKey, JSON.stringify(model));
-    }
+    persistPrefs(columnOrder, hiddenFromModel(model));
+  };
+
+  const onColumnOrderChange = () => {
+    if (!apiRef.current) return;
+    const order = apiRef.current
+      .getAllColumns()
+      .map((c) => c.field)
+      .filter((f) => f !== ROW_ID);
+    setColumnOrder(order);
+    persistPrefs(order, hiddenFromModel(colVisibility));
   };
 
   // ── Grid rows + columns ──────────────────────────────────────────
@@ -259,9 +336,19 @@ export function TablescopeDataGrid({
 
   const scopeEnabled = canEditScopes && currentQueryId != null;
 
+  // Apply the saved column order: ordered fields first (that still exist),
+  // then any remaining columns in their natural order.
+  const orderedFields = useMemo(() => {
+    if (columnOrder.length === 0) return current.columns;
+    const present = new Set(current.columns);
+    const ordered = columnOrder.filter((f) => present.has(f));
+    const remaining = current.columns.filter((f) => !ordered.includes(f));
+    return [...ordered, ...remaining];
+  }, [current.columns, columnOrder]);
+
   const gridColumns = useMemo<GridColDef[]>(
     () =>
-      current.columns.map((field) => ({
+      orderedFields.map((field) => ({
         field,
         headerName: field,
         flex: 1,
@@ -295,7 +382,7 @@ export function TablescopeDataGrid({
           );
         },
       })),
-    [current.columns, scopesByField],
+    [orderedFields, scopesByField],
   );
 
   // ── Custom column menu (Create / Edit Scope) ─────────────────────
@@ -359,8 +446,37 @@ export function TablescopeDataGrid({
 
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
+      {/* Scope trace — shown above the column headers */}
+      {scopeEnabled && scopes.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs text-slate-700">
+          <span className="font-semibold uppercase tracking-wide text-blue-700">
+            Scopes:
+          </span>
+          {scopes.map((s) => {
+            const tq = availableQueries.find((q) => q.id === s.target_query_id);
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => openScopeDialog(s.source_field)}
+                title="Edit scope"
+                className="flex items-center gap-1 rounded-full border border-blue-200 bg-white px-2 py-0.5 hover:border-blue-400 hover:bg-blue-100"
+              >
+                <span className="text-blue-600">&#128279;</span>
+                <span className="font-medium">{s.source_field}</span>
+                <span className="text-slate-400">&rarr;</span>
+                <span>
+                  {tq ? tq.name : `query #${s.target_query_id}`}.{s.target_field}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div style={{ height, width: "100%" }}>
-        <DataGrid
+        <DataGridPremium
+          apiRef={apiRef}
           rows={gridRows}
           columns={gridColumns}
           getRowId={(row) => row[ROW_ID] as number}
@@ -368,6 +484,7 @@ export function TablescopeDataGrid({
           density="compact"
           columnVisibilityModel={colVisibility}
           onColumnVisibilityModelChange={onColVisibilityChange}
+          onColumnOrderChange={onColumnOrderChange}
           onCellClick={(params) => drilldown(params.field, params.value)}
           slots={{ columnMenu: ColumnMenu }}
           initialState={{ pagination: { paginationModel: { pageSize: 50, page: 0 } } }}
@@ -375,44 +492,6 @@ export function TablescopeDataGrid({
           disableRowSelectionOnClick
         />
       </div>
-
-      {/* Scope Details panel */}
-      {scopeEnabled && scopes.length > 0 && (
-        <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Drill-down scopes
-          </p>
-          <ul className="space-y-1">
-            {scopes.map((s) => {
-              const tq = availableQueries.find((q) => q.id === s.target_query_id);
-              return (
-                <li key={s.id} className="flex items-center justify-between text-xs text-slate-700">
-                  <span>
-                    <span className="font-medium">{s.source_field}</span> →{" "}
-                    {tq ? tq.name : `query #${s.target_query_id}`}.{s.target_field}
-                  </span>
-                  <span className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openScopeDialog(s.source_field)}
-                      className="text-blue-600 hover:text-blue-800"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeScope(s)}
-                      className="text-red-500 hover:text-red-700"
-                    >
-                      Remove
-                    </button>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
 
       {/* Create / Edit Scope dialog */}
       {dialogField && (
@@ -485,7 +564,22 @@ export function TablescopeDataGrid({
                 </p>
               </div>
             </div>
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-4 flex items-center gap-2">
+              {editing && (
+                <button
+                  type="button"
+                  onClick={deleteEditingScope}
+                  disabled={saving}
+                  title="Delete scope"
+                  aria-label="Delete scope"
+                  className="rounded-md p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                    <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              )}
+              <div className="flex-1" />
               <button
                 onClick={closeDialog}
                 className="rounded-md bg-slate-100 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-200"

@@ -13,6 +13,7 @@ type Datasource = {
   sourceType?: string | null;
   dbType?: string | null;
   connectorType?: string | null;
+  id?: number | null;
 };
 
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -74,9 +75,73 @@ export default function UploadPage() {
     queryFn: () => apiClient.get<Datasource[]>("/api/upload/datasources"),
   });
 
+  type DbSource = {
+    id: number;
+    display_name: string;
+    teiid_view_name: string;
+    source_type: string;
+    db_type: string;
+    connector_type?: string | null;
+    archived: boolean;
+  };
+  const archivedQuery = useQuery<DbSource[]>({
+    queryKey: ["datasources", "archived"],
+    queryFn: () =>
+      apiClient.get<DbSource[]>("/api/database-sources?include_archived=true"),
+  });
+  const archived = (archivedQuery.data ?? []).filter((d) => d.archived);
+
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const handleUploaded = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["datasources"] });
   }, [queryClient]);
+
+  async function archiveDatasource(ds: Datasource, archived: boolean) {
+    if (ds.id == null) return;
+    setActionError(null);
+    try {
+      await apiClient.patch(
+        `/api/database-sources/${ds.id}/archive?archived=${archived}`,
+        {},
+      );
+      queryClient.invalidateQueries({ queryKey: ["datasources"] });
+    } catch (err) {
+      setActionError((err as Error).message);
+    }
+  }
+
+  async function deleteDatasource(ds: Datasource) {
+    if (ds.id == null) return;
+    await deleteById(ds.id, ds.fileName);
+    if (selectedDatasource?.viewName === ds.viewName) setSelectedDatasource(null);
+  }
+
+  async function setArchivedById(id: number, archived: boolean) {
+    setActionError(null);
+    try {
+      await apiClient.patch(
+        `/api/database-sources/${id}/archive?archived=${archived}`,
+        {},
+      );
+      queryClient.invalidateQueries({ queryKey: ["datasources"] });
+    } catch (err) {
+      setActionError((err as Error).message);
+    }
+  }
+
+  async function deleteById(id: number, label: string) {
+    if (!window.confirm(`Permanently delete "${label}"? This cannot be undone.`)) {
+      return;
+    }
+    setActionError(null);
+    try {
+      await apiClient.delete(`/api/database-sources/${id}`);
+      queryClient.invalidateQueries({ queryKey: ["datasources"] });
+    } catch (err) {
+      setActionError((err as Error).message);
+    }
+  }
 
   async function handleDatasourceClick(ds: Datasource) {
     setSelectedDatasource(ds);
@@ -135,19 +200,24 @@ export default function UploadPage() {
             No datasources yet. Upload a file above.
           </p>
         )}
+        {actionError && (
+          <p className="mb-2 text-sm text-red-600">{actionError}</p>
+        )}
         {datasourcesQuery.data && datasourcesQuery.data.length > 0 && (
           <div className="grid gap-2">
             {datasourcesQuery.data.map((ds) => (
-              <button
+              <div
                 key={ds.viewName}
-                onClick={() => handleDatasourceClick(ds)}
-                className={`flex items-center justify-between rounded-md border px-4 py-3 text-left transition-colors hover:bg-slate-50 ${
+                className={`flex items-center justify-between rounded-md border px-4 py-3 transition-colors ${
                   selectedDatasource?.viewName === ds.viewName
                     ? "border-brand bg-brand/5"
-                    : "border-slate-200 bg-white"
+                    : "border-slate-200 bg-white hover:bg-slate-50"
                 }`}
               >
-                <div>
+                <button
+                  onClick={() => handleDatasourceClick(ds)}
+                  className="flex-1 text-left"
+                >
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium text-slate-900">
                       {ds.fileName}
@@ -157,15 +227,71 @@ export default function UploadPage() {
                   <p className="text-xs text-slate-400 font-mono">
                     View: {ds.viewName}
                   </p>
+                </button>
+                <div className="ml-3 flex items-center gap-3">
+                  {typeof ds.size === "number" && (
+                    <span className="text-xs text-slate-400">
+                      {(ds.size / 1024).toFixed(1)} KB
+                    </span>
+                  )}
+                  {ds.id != null && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => archiveDatasource(ds, true)}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                        title="Archive (hide from list; can be deleted later)"
+                      >
+                        Archive
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteDatasource(ds)}
+                        className="text-xs font-medium text-red-500 hover:text-red-700"
+                        title="Delete (archive first; blocked if a query depends on it)"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </div>
-                {typeof ds.size === "number" && (
-                  <span className="text-xs text-slate-400">
-                    {(ds.size / 1024).toFixed(1)} KB
-                  </span>
-                )}
-              </button>
+              </div>
             ))}
           </div>
+        )}
+
+        {archived.length > 0 && (
+          <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-slate-600">
+              Archived ({archived.length})
+            </summary>
+            <div className="mt-2 grid gap-2">
+              {archived.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2"
+                >
+                  <span className="text-sm text-slate-600">{d.display_name}</span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setArchivedById(d.id, false)}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                    >
+                      Restore
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteById(d.id, d.display_name)}
+                      className="text-xs font-medium text-red-500 hover:text-red-700"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
         )}
       </div>
 

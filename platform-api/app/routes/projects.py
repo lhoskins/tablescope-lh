@@ -235,6 +235,7 @@ async def list_project_datasources(
                 DatabaseDataSource.tenant_id == context.tenant_id,
                 DatabaseDataSource.project_id == project_id,
                 DatabaseDataSource.status == "active",
+                DatabaseDataSource.archived.is_(False),
             )
         )
     ).all()

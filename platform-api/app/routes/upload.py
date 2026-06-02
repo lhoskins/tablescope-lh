@@ -179,6 +179,7 @@ async def list_datasources(
                 DatabaseDataSource.created_by == user.id,
                 DatabaseDataSource.project_id.is_(None),
                 DatabaseDataSource.status == "active",
+                DatabaseDataSource.archived.is_(False),
             )
         )
     ).all()

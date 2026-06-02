@@ -3,6 +3,7 @@
 from app.models.base import Base
 from app.models.connector_credential import ConnectorCredential
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
+from app.models.grid_preference import GridPreference
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
@@ -18,6 +19,7 @@ __all__ = [
     "ConnectorCredential",
     "DataSourceColumn",
     "DatabaseDataSource",
+    "GridPreference",
     "OrganizationVDB",
     "Project",
     "ProjectMember",

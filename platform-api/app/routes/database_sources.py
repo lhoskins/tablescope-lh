@@ -285,6 +285,7 @@ async def create_database_source(
 @router.get("")
 async def list_database_sources(
     project_id: int | None = None,
+    include_archived: bool = False,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[dict]:
@@ -295,8 +296,60 @@ async def list_database_sources(
         stmt = stmt.where(DatabaseDataSource.project_id == project_id)
     else:
         stmt = stmt.where(DatabaseDataSource.created_by == context.user_id)
+    if not include_archived:
+        stmt = stmt.where(DatabaseDataSource.archived.is_(False))
     rows = (await session.scalars(stmt)).all()
     return [r.to_dict() for r in rows]
+
+
+async def find_query_dependencies(
+    session: AsyncSession, *, tenant_id: int, view_name: str
+) -> list[dict]:
+    """Return active saved queries that reference ``view_name`` as a datasource.
+
+    A query depends on the source if it joins/selects it directly
+    (``left_datasource``/``right_datasource``) or names it in its SQL text.
+    """
+    from app.models.project import Project as _Project
+    from app.models.saved_query import SavedQuery as _SavedQuery
+
+    rows = (
+        await session.scalars(
+            select(_SavedQuery)
+            .join(_Project, _SavedQuery.project_id == _Project.id)
+            .where(_Project.tenant_id == tenant_id)
+        )
+    ).all()
+    deps: list[dict] = []
+    for q in rows:
+        sql = q.sql_text or ""
+        if (
+            q.left_datasource == view_name
+            or q.right_datasource == view_name
+            or f'"{view_name}"' in sql
+        ):
+            deps.append({"id": q.id, "name": q.name})
+    return deps
+
+
+@router.patch("/{source_id}/archive")
+async def archive_database_source(
+    source_id: int,
+    archived: bool = True,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Archive (hide) or unarchive a data source without deleting it."""
+    ds = await session.get(DatabaseDataSource, source_id)
+    if ds is None or ds.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Data source not found")
+    if ds.created_by != context.user_id and context.role != "admin":
+        raise HTTPException(status_code=403, detail="Not allowed to modify this source")
+    ds.archived = archived
+    ds.archived_at = datetime.now(UTC) if archived else None
+    await session.commit()
+    await session.refresh(ds)
+    return ds.to_dict()
 
 
 @router.delete("/{source_id}")
@@ -310,6 +363,21 @@ async def delete_database_source(
         raise HTTPException(status_code=404, detail="Data source not found")
     if ds.created_by != context.user_id and context.role != "admin":
         raise HTTPException(status_code=403, detail="Not allowed to delete this source")
+    if not ds.archived:
+        raise HTTPException(
+            status_code=409,
+            detail="Archive the data source before deleting it.",
+        )
+    deps = await find_query_dependencies(
+        session, tenant_id=context.tenant_id, view_name=ds.teiid_view_name
+    )
+    if deps:
+        names = ", ".join(d["name"] for d in deps)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete: {len(deps)} active quer"
+            f"{'y' if len(deps) == 1 else 'ies'} depend on this source ({names}).",
+        )
     await session.delete(ds)
     await session.commit()
     return {"status": "deleted", "id": source_id}
