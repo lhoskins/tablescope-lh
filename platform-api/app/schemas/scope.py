@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-_IDENT_PATTERN = r"^[A-Za-z_][A-Za-z0-9_$.]*$"
+# Leading digit allowed: digit-leading file views are valid scope targets.
+_IDENT_PATTERN = r"^[A-Za-z0-9_][A-Za-z0-9_$.]*$"
 
 
 class ScopeCreate(BaseModel):

@@ -29,7 +29,8 @@ from app.schemas.query_scope import (
 
 router = APIRouter(prefix="/query-scopes", tags=["query-scopes"])
 
-_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$. ]*$")
+# Allow a leading digit so scopes can target digit-leading file views/fields.
+_FIELD_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$. ]*$")
 
 
 async def _get_project_for_query(

@@ -33,7 +33,10 @@ from app.services.vdb_routing import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/query", tags=["query"])
 
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*$")
+# View names can start with a digit (e.g. a file named "0_revenue.csv" maps to
+# the view "0_revenueTest_CSV"); the name is always emitted inside double quotes
+# in generated SQL, so a leading digit is safe.
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$.]*$")
 
 
 class DatasourceQueryRequest(BaseModel):
