@@ -5,8 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
-import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
 import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 import { TablescopeDataGrid } from "@/components/data-grid/TablescopeDataGrid";
 
@@ -867,15 +867,6 @@ export default function ProjectWorkspacePage() {
     queryFn: () => apiClient.get<Datasource[]>(`/api/projects/${projectId}/datasources`),
   });
 
-  // Archived sources (files + DB + SaaS) for the unified "Archived" section.
-  const archivedDsQuery = useQuery<Datasource[]>({
-    queryKey: ["project-datasources", projectId, "archived"],
-    queryFn: () =>
-      apiClient.get<Datasource[]>(
-        `/api/projects/${projectId}/datasources?include_archived=true`,
-      ),
-  });
-
   const queriesQuery = useQuery<SavedQuery[]>({
     queryKey: ["project-queries", projectId],
     queryFn: () => apiClient.get<SavedQuery[]>(`/api/projects/${projectId}/queries`),
@@ -1096,85 +1087,25 @@ export default function ProjectWorkspacePage() {
     [],
   );
 
-  const removeFileFromProject = useCallback(
+  // Unified "remove from project" for files, databases and SaaS sources
+  // (item 3). Only clears the project association; gated server-side to a
+  // project admin or the datasource owner.
+  const removeDatasourceFromProject = useCallback(
     async (ds: Datasource) => {
-      setDsActionError(null);
-      try {
-        await apiClient.patch(
-          `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/project`,
-          {},
-        );
-        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
-      } catch (err) {
-        setDsActionError((err as Error).message);
-      }
-    },
-    [queryClient, projectId],
-  );
-
-  // ── Unified archive / restore / delete (item 3) ──────────────────
-  // Files, databases and SaaS sources all archive into one place with the
-  // same rule: Delete only becomes available once a source is archived.
-  const archiveSource = useCallback(
-    async (ds: Datasource) => {
-      setDsActionError(null);
-      try {
-        if (ds.id != null) {
-          await apiClient.patch(
-            `/api/database-sources/${ds.id}/archive?archived=true`,
-            {},
-          );
-        } else {
-          await apiClient.patch(
-            `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/archive?archived=true`,
-            {},
-          );
-        }
-        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
-      } catch (err) {
-        setDsActionError((err as Error).message);
-      }
-    },
-    [queryClient, projectId],
-  );
-
-  const restoreSource = useCallback(
-    async (ds: Datasource) => {
-      setDsActionError(null);
-      try {
-        if (ds.id != null) {
-          await apiClient.patch(
-            `/api/database-sources/${ds.id}/archive?archived=false`,
-            {},
-          );
-        } else {
-          await apiClient.patch(
-            `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/archive?archived=false`,
-            {},
-          );
-        }
-        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
-      } catch (err) {
-        setDsActionError((err as Error).message);
-      }
-    },
-    [queryClient, projectId],
-  );
-
-  const deleteSource = useCallback(
-    async (ds: Datasource) => {
-      if (!window.confirm(`Permanently delete "${ds.fileName}"? This cannot be undone.`)) {
+      if (
+        !window.confirm(
+          `Remove "${ds.fileName}" from this project? It stays in the owner's datasources.`,
+        )
+      ) {
         return;
       }
       setDsActionError(null);
       try {
-        if (ds.id != null) {
-          await apiClient.delete(`/api/database-sources/${ds.id}`);
-        } else {
-          await apiClient.delete(
-            `/api/upload/datasources/${encodeURIComponent(ds.viewName)}`,
-          );
-        }
+        await apiClient.post(`/api/projects/${projectId}/datasources/remove`, {
+          kind: ds.id != null ? "db" : "file",
+          id: ds.id ?? undefined,
+          viewName: ds.viewName,
+        });
         queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
       } catch (err) {
         setDsActionError((err as Error).message);
@@ -1186,28 +1117,40 @@ export default function ProjectWorkspacePage() {
   // Item 5: drag a file onto a file datasource row to replace its data.
   const [dragOverView, setDragOverView] = useState<string | null>(null);
   const [replaceMsg, setReplaceMsg] = useState<string | null>(null);
+  // Item 6: confirm before overwriting an existing datasource.
+  const [pendingReplace, setPendingReplace] = useState<
+    { ds: Datasource; file: File } | null
+  >(null);
   const replaceFileFromDrop = useCallback(
-    async (ds: Datasource, files: FileList | null) => {
+    (ds: Datasource, files: FileList | null) => {
       setDragOverView(null);
       if (!files || files.length === 0) return;
       setDsActionError(null);
       setReplaceMsg(null);
-      try {
-        const res = await apiClient.upload<{ addedColumns?: string[] }>(
-          `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/replace`,
-          files[0],
-        );
-        const added = res.addedColumns ?? [];
-        setReplaceMsg(
-          `Replaced "${ds.fileName}"${added.length ? ` (added: ${added.join(", ")})` : ""}.`,
-        );
-        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
-      } catch (err) {
-        setDsActionError((err as Error).message);
-      }
+      setPendingReplace({ ds, file: files[0] });
     },
-    [queryClient, projectId],
+    [],
   );
+  const confirmReplace = useCallback(async () => {
+    if (!pendingReplace) return;
+    const { ds, file } = pendingReplace;
+    setPendingReplace(null);
+    setDsActionError(null);
+    setReplaceMsg(null);
+    try {
+      const res = await apiClient.upload<{ addedColumns?: string[] }>(
+        `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/replace`,
+        file,
+      );
+      const added = res.addedColumns ?? [];
+      setReplaceMsg(
+        `Replaced "${ds.fileName}"${added.length ? ` (added: ${added.join(", ")})` : ""}.`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+    } catch (err) {
+      setDsActionError((err as Error).message);
+    }
+  }, [pendingReplace, queryClient, projectId]);
 
   // ── Drag-and-drop handlers ────────────────────────────────────────
 
@@ -1344,6 +1287,9 @@ export default function ProjectWorkspacePage() {
   const myProjectRole = isOwner ? "owner" : (myMembership?.role ?? "viewer");
   const canManageMembers = isOwner || myProjectRole === "admin";
   const canEdit = isOwner || myProjectRole === "admin" || myProjectRole === "editor";
+  // Item 3: only a project admin/owner (or tenant admin) — or the datasource's
+  // own owner — may remove a datasource from the project.
+  const isProjectAdmin = isOwner || myProjectRole === "admin" || isTenantAdmin;
 
   // ── Available users for member assignment ─────────────────────────
 
@@ -1458,12 +1404,6 @@ export default function ProjectWorkspacePage() {
               >
                 + Add Datasource
               </button>
-              <ConnectorsMenu
-                projectId={projectId}
-                onCreated={() =>
-                  queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
-                }
-              />
             </div>
           )}
           {showAddDs && (
@@ -1533,24 +1473,14 @@ export default function ProjectWorkspacePage() {
                     <span className="text-xs text-slate-400">
                       {activeDsName === ds.viewName ? "Click to hide" : "Click to view"}
                     </span>
-                    {canEdit && isFileSource(ds) && (
+                    {(isProjectAdmin || ds.ownerId === meta?.user_id) && (
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); removeFileFromProject(ds); }}
+                        onClick={(e) => { e.stopPropagation(); removeDatasourceFromProject(ds); }}
                         className="text-xs font-medium text-slate-500 hover:text-slate-800"
-                        title="Remove this datasource from the project (keeps it in your personal datasources)"
+                        title="Remove this datasource from the project (keeps it in the owner's datasources)"
                       >
                         Remove
-                      </button>
-                    )}
-                    {canEdit && (
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); archiveSource(ds); }}
-                        className="text-xs font-medium text-slate-500 hover:text-slate-800"
-                        title="Archive (hide from project; delete becomes available once archived)"
-                      >
-                        Archive
                       </button>
                     )}
                   </div>
@@ -1561,57 +1491,6 @@ export default function ProjectWorkspacePage() {
           {dsActionError && (
             <p className="mt-2 text-sm text-red-600">{dsActionError}</p>
           )}
-
-          {/* Unified Archived section (files + databases + SaaS) — item 3 */}
-          {(() => {
-            const archivedSources = (archivedDsQuery.data ?? []).filter(
-              (d) => d.archived,
-            );
-            if (archivedSources.length === 0) return null;
-            return (
-              <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-                <summary className="cursor-pointer text-sm font-medium text-slate-600">
-                  Archived ({archivedSources.length})
-                </summary>
-                <p className="mt-1 mb-2 text-xs text-slate-400">
-                  Files, databases and SaaS sources archive here. Delete is only
-                  available after archiving and is blocked while a saved query
-                  depends on the source.
-                </p>
-                <div className="mt-2 grid gap-2">
-                  {archivedSources.map((ds) => (
-                    <div
-                      key={ds.viewName}
-                      className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-slate-600">{ds.fileName}</span>
-                        <SourceBadge ds={ds} />
-                      </div>
-                      {canEdit && (
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => restoreSource(ds)}
-                            className="text-xs font-medium text-blue-600 hover:text-blue-800"
-                          >
-                            Restore
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteSource(ds)}
-                            className="text-xs font-medium text-red-500 hover:text-red-700"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </details>
-            );
-          })()}
 
           {/* Datasource data view */}
           {dsLoading && <p className="mt-4 text-sm text-slate-500">Loading data...</p>}
@@ -2399,6 +2278,32 @@ export default function ProjectWorkspacePage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingReplace !== null}
+        title="Overwrite datasource?"
+        message={
+          pendingReplace ? (
+            <>
+              Are you sure you want to overwrite{" "}
+              <span className="font-medium text-slate-900">
+                &quot;{pendingReplace.ds.fileName}&quot;
+              </span>{" "}
+              with{" "}
+              <span className="font-medium text-slate-900">
+                &quot;{pendingReplace.file.name}&quot;
+              </span>
+              ? This replaces the existing data.
+            </>
+          ) : (
+            ""
+          )
+        }
+        confirmLabel="Yes"
+        cancelLabel="Cancel"
+        onConfirm={confirmReplace}
+        onCancel={() => setPendingReplace(null)}
+      />
     </section>
   );
 }

@@ -443,6 +443,86 @@ async def add_datasources_to_project(
     return {"status": "ok", "added": added}
 
 
+async def _is_project_admin(
+    session: AsyncSession, project: Project, context: RequestContext
+) -> bool:
+    """True if the caller is the project owner, a project-admin member, or a
+    tenant admin — i.e. allowed to manage any datasource on the project."""
+    if context.role == "admin":
+        return True
+    if project.owner_id == context.user_id:
+        return True
+    member = await session.get(ProjectMember, (project.id, context.user_id))
+    return member is not None and member.role == "admin"
+
+
+@router.post("/{project_id}/datasources/remove")
+async def remove_datasource_from_project(
+    project_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Remove a datasource from a project (item 3).
+
+    Works identically for file, database and SaaS sources: it only clears the
+    project association (the source stays in the owner's personal datasources).
+    Allowed only for a project admin/owner or the datasource's owner.
+
+    Body: ``{"kind": "file"|"db", "viewName": "...", "id": 123}``.
+    """
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    is_admin = await _is_project_admin(session, project, context)
+    kind = body.get("kind")
+
+    if kind == "file":
+        view_name = body.get("viewName")
+        if not view_name:
+            raise HTTPException(status_code=400, detail="viewName is required")
+        owner_id = project.owner_id or context.user_id
+        meta = await session.scalar(
+            select(FileSourceMeta).where(
+                FileSourceMeta.tenant_id == context.tenant_id,
+                FileSourceMeta.owner_id == owner_id,
+                FileSourceMeta.view_name == view_name,
+            )
+        )
+        # A file source's owner is the project owner whose folder it lives in.
+        if not is_admin and owner_id != context.user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Only a project admin or the datasource owner can remove it.",
+            )
+        if meta is None:
+            meta = FileSourceMeta(
+                tenant_id=context.tenant_id,
+                owner_id=owner_id,
+                view_name=view_name,
+                file_name=view_name,
+            )
+            session.add(meta)
+        meta.project_id = None
+    else:
+        ds_id = body.get("id")
+        if ds_id is None:
+            raise HTTPException(status_code=400, detail="id is required")
+        ds = await session.get(DatabaseDataSource, int(ds_id))
+        if ds is None or ds.tenant_id != context.tenant_id:
+            raise HTTPException(status_code=404, detail="Datasource not found")
+        if not is_admin and ds.created_by != context.user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Only a project admin or the datasource owner can remove it.",
+            )
+        ds.project_id = None
+
+    await session.commit()
+    return {"status": "ok"}
+
+
 # ── Project Members ──────────────────────────────────────────────────
 
 

@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileDropzone } from "@/components/upload/FileDropzone";
 import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
 import { DataGrid } from "@/components/data-grid/DataGrid";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { apiClient } from "@/lib/api-client";
 
 type ColumnType = { name: string; field: string; type: string };
@@ -178,11 +179,23 @@ export default function UploadPage() {
   // ── Item 5: drag a file onto a datasource row to replace it ──────────
   const [dragOverView, setDragOverView] = useState<string | null>(null);
   const [replaceMsg, setReplaceMsg] = useState<string | null>(null);
+  // Item 6: confirm before overwriting an existing datasource.
+  const [pendingReplace, setPendingReplace] = useState<
+    { ds: Datasource; file: File } | null
+  >(null);
 
-  async function replaceFromDrop(ds: Datasource, files: FileList | null) {
+  function replaceFromDrop(ds: Datasource, files: FileList | null) {
     setDragOverView(null);
     if (!files || files.length === 0) return;
-    const file = files[0];
+    setActionError(null);
+    setReplaceMsg(null);
+    setPendingReplace({ ds, file: files[0] });
+  }
+
+  async function confirmReplace() {
+    if (!pendingReplace) return;
+    const { ds, file } = pendingReplace;
+    setPendingReplace(null);
     setActionError(null);
     setReplaceMsg(null);
     try {
@@ -451,6 +464,31 @@ export default function UploadPage() {
         </div>
       )}
 
+      <ConfirmDialog
+        open={pendingReplace !== null}
+        title="Overwrite datasource?"
+        message={
+          pendingReplace ? (
+            <>
+              Are you sure you want to overwrite{" "}
+              <span className="font-medium text-slate-900">
+                &quot;{pendingReplace.ds.fileName}&quot;
+              </span>{" "}
+              with{" "}
+              <span className="font-medium text-slate-900">
+                &quot;{pendingReplace.file.name}&quot;
+              </span>
+              ? This replaces the existing data.
+            </>
+          ) : (
+            ""
+          )
+        }
+        confirmLabel="Yes"
+        cancelLabel="Cancel"
+        onConfirm={confirmReplace}
+        onCancel={() => setPendingReplace(null)}
+      />
     </section>
   );
 }

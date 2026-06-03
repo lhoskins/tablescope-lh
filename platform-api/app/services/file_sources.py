@@ -143,6 +143,137 @@ def _read_xlsx_sample(content: bytes, max_rows: int = 200) -> tuple[list[str], l
     return header, data
 
 
+def _flatten_value(value: Any) -> str:
+    """Render a JSON/XML cell value as a flat string.
+
+    Scalars become their string form; nested objects/arrays are serialized to
+    compact JSON so the column still carries the data without breaking the
+    tabular shape.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str | int | float):
+        return str(value)
+    import json as _json
+
+    return _json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _rows_to_csv(rows: list[dict[str, Any]]) -> bytes:
+    """Serialize a list of record dicts to CSV bytes (union of keys as header)."""
+    columns: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for key in row.keys():
+            if key not in seen:
+                seen.add(key)
+                columns.append(key)
+    if not columns:
+        columns = ["value"]
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow([_flatten_value(row.get(col, "")) for col in columns])
+    return buf.getvalue().encode("utf-8")
+
+
+def _json_to_rows(content: bytes) -> list[dict[str, Any]]:
+    import json as _json
+
+    data = _json.loads(content.decode("utf-8-sig"))
+    if isinstance(data, list):
+        records = data
+    elif isinstance(data, dict):
+        # Common API wrappers: use the first list-of-objects value if present,
+        # otherwise treat the object itself as a single row.
+        nested = next(
+            (v for v in data.values() if isinstance(v, list) and v and all(
+                isinstance(i, dict) for i in v
+            )),
+            None,
+        )
+        records = nested if nested is not None else [data]
+    else:
+        records = [{"value": data}]
+    rows: list[dict[str, Any]] = []
+    for rec in records:
+        if isinstance(rec, dict):
+            rows.append(rec)
+        else:
+            rows.append({"value": rec})
+    return rows
+
+
+def _xml_to_rows(content: bytes) -> list[dict[str, Any]]:
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(content)
+
+    def _local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+    def _element_to_row(el: ET.Element) -> dict[str, Any]:
+        row: dict[str, Any] = {}
+        for attr, val in el.attrib.items():
+            row[_local(attr)] = val
+        for child in el:
+            key = _local(child.tag)
+            if len(child) == 0:
+                row[key] = (child.text or "").strip()
+            else:
+                row[key] = {
+                    _local(gc.tag): (gc.text or "").strip() for gc in child
+                }
+        text = (el.text or "").strip()
+        if text and not row:
+            row["value"] = text
+        return row
+
+    children = list(root)
+    # Find the dominant repeating child tag -> those become the rows.
+    if children:
+        from collections import Counter
+
+        counts = Counter(_local(c.tag) for c in children)
+        top_tag, top_n = counts.most_common(1)[0]
+        if top_n > 1:
+            return [_element_to_row(c) for c in children if _local(c.tag) == top_tag]
+        # Single record: the root's children describe one row.
+        return [_element_to_row(root)]
+    return [_element_to_row(root)]
+
+
+def convert_to_csv_if_needed(filename: str, content: bytes) -> tuple[str, bytes]:
+    """Convert JSON/XML uploads to CSV so they ride the existing file pipeline.
+
+    Returns ``(filename, content)`` unchanged for non-JSON/XML inputs. For
+    ``.json``/``.xml`` the content is flattened to CSV and the filename's
+    extension is rewritten to ``.csv`` so the Teiid import servlet (which only
+    parses CSV/TXT/Excel) treats it as a normal tabular data source. Raises
+    ``ValueError`` with a friendly message if the file can't be parsed.
+    """
+    lower = filename.lower()
+    if lower.endswith(".json"):
+        try:
+            rows = _json_to_rows(content)
+        except Exception as exc:
+            raise ValueError(f"Could not parse JSON file: {exc}") from exc
+    elif lower.endswith(".xml"):
+        try:
+            rows = _xml_to_rows(content)
+        except Exception as exc:
+            raise ValueError(f"Could not parse XML file: {exc}") from exc
+    else:
+        return filename, content
+
+    csv_bytes = _rows_to_csv(rows)
+    base = filename.rsplit(".", 1)[0]
+    return f"{base}.csv", csv_bytes
+
+
 def detect_column_types(content: bytes, filename: str) -> list[dict[str, Any]]:
     """Detect a formatting type for each column of an uploaded file.
 

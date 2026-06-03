@@ -98,7 +98,7 @@ export function FileDropzone({
             : "Drag & drop files here, or click to browse"}
         </p>
         <p className="mt-1 text-xs text-slate-400">
-          Supports CSV, Excel (.xlsx), and other data files
+          Supports CSV, Excel (.xlsx), XML, and JSON files
         </p>
         <label className="mt-3 cursor-pointer rounded-md bg-white px-3 py-1.5 text-sm font-medium text-brand shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50">
           Browse files
@@ -106,6 +106,7 @@ export function FileDropzone({
             type="file"
             className="hidden"
             multiple
+            accept=".csv,.txt,.xlsx,.xls,.xml,.json"
             disabled={uploading}
             onChange={onFileSelect}
           />

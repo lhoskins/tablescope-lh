@@ -33,7 +33,11 @@ from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.services.file_sources import compute_view_name, detect_column_types
+from app.services.file_sources import (
+    compute_view_name,
+    convert_to_csv_if_needed,
+    detect_column_types,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -65,6 +69,14 @@ async def upload_file(
         raise HTTPException(status_code=404, detail="Tenant not found")
 
     content = await file.read()
+
+    # JSON/XML uploads are flattened to CSV so they import through the same
+    # Teiid file pipeline as CSV/Excel and behave like every other data source.
+    try:
+        filename, content = convert_to_csv_if_needed(file.filename, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     settings = get_settings()
     servlet_url = (
         f"{settings.teiid_servlet_url}/TeiidExcelImporterTest/upload"
@@ -74,7 +86,7 @@ async def upload_file(
 
     logger.info(
         "Forwarding upload to Teiid servlet: file=%s org_id=%s user_id=%s vdb_type=%s",
-        file.filename,
+        filename,
         tenant.id,
         user.id,
         resolved_vdb_type,
@@ -91,7 +103,7 @@ async def upload_file(
                     "user_id": str(user.id),
                     "vdb_type": resolved_vdb_type,
                 },
-                files={"file": (file.filename, content, file.content_type or "application/octet-stream")},
+                files={"file": (filename, content, file.content_type or "application/octet-stream")},
             )
     except httpx.RequestError as exc:
         logger.error("Failed to reach Teiid servlet: %s", exc)
@@ -125,8 +137,8 @@ async def upload_file(
         )
 
     # Build the datasource name from the filename (matches servlet convention)
-    base_name = file.filename.rsplit(".", 1)[0].replace(" ", "_")
-    extension = file.filename.rsplit(".", 1)[-1].upper() if "." in file.filename else ""
+    base_name = filename.rsplit(".", 1)[0].replace(" ", "_")
+    extension = filename.rsplit(".", 1)[-1].upper() if "." in filename else ""
     datasource_name = f"{base_name}_{extension}" if extension else base_name
 
     # Sync uploaded file to S3 if enabled
@@ -136,14 +148,14 @@ async def upload_file(
         try:
             from app.services.s3_storage import S3StorageService
             s3_svc = S3StorageService()
-            local_file_path = f"{settings_obj.customer_base_path}/{tenant.id}/{user.id}/uploads/{file.filename}"
-            s3_key = s3_svc.get_s3_key_for_upload(tenant.id, user.id, file.filename)
+            local_file_path = f"{settings_obj.customer_base_path}/{tenant.id}/{user.id}/uploads/{filename}"
+            s3_key = s3_svc.get_s3_key_for_upload(tenant.id, user.id, filename)
             s3_location = s3_svc.upload_file(local_file_path, s3_key)
         except Exception as e:
             logger.warning("S3 upload sync failed (non-fatal): %s", e)
 
     # Detect per-column formatting types (currency/date/number) for item 6.
-    column_types = detect_column_types(content, file.filename)
+    column_types = detect_column_types(content, filename)
 
     # Validate the requested project (if any) belongs to this tenant.
     resolved_project_id: int | None = None
@@ -155,7 +167,7 @@ async def upload_file(
 
     # Upsert the file-source metadata row (project association, archive flag,
     # column types). Keyed by (tenant, owner, view_name).
-    view_name = compute_view_name(file.filename)
+    view_name = compute_view_name(filename)
     existing = await session.scalar(
         select(FileSourceMeta).where(
             FileSourceMeta.tenant_id == context.tenant_id,
@@ -170,13 +182,13 @@ async def upload_file(
                 owner_id=user.id,
                 project_id=resolved_project_id,
                 view_name=view_name,
-                file_name=file.filename,
+                file_name=filename,
                 vdb_type=resolved_vdb_type,
                 column_types=column_types or None,
             )
         )
     else:
-        existing.file_name = file.filename
+        existing.file_name = filename
         existing.vdb_type = resolved_vdb_type
         if column_types:
             existing.column_types = column_types
@@ -189,10 +201,10 @@ async def upload_file(
     await session.commit()
 
     return {
-        "path": f"/opt/wildfly/teiidfiles/customers/{tenant.id}/{user.id}/uploads/{file.filename}",
+        "path": f"/opt/wildfly/teiidfiles/customers/{tenant.id}/{user.id}/uploads/{filename}",
         "size": len(content),
         "datasource": datasource_name,
-        "fileName": file.filename,
+        "fileName": filename,
         "viewName": view_name,
         "columnTypes": column_types,
         "projectId": resolved_project_id,

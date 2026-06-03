@@ -961,9 +961,15 @@ private void processExcelFile(Part filePart, String fileName, String vdbFilePath
     private String removeForeignTableAndView(String vdbContent, String normalizedName) {
         String modifiedContent = vdbContent;
         
-        // Pattern to match the foreign table block
+        // Pattern to match the foreign table block.
+        // A CREATE FOREIGN TABLE statement has nested parentheses (each column has its
+        // own OPTIONS (...) and the table has a trailing OPTIONS (...)), so a paren-based
+        // matcher fails for multi-column tables. The statement is reliably terminated by
+        // the first ';' (column/option values never contain ';'), so consume up to it.
+        // The optional surrounding quotes let this match both quoted and unquoted forms,
+        // and replaceAll removes any duplicate definitions of the same table.
         String foreignTablePattern = "CREATE FOREIGN TABLE \"?" + Pattern.quote(normalizedName) + "\"?" +
-                                    "\\s*\\([^)]*\\)\\s*OPTIONS\\s*\\([^)]*\\);";
+                                    "\\s*\\([^;]*;";
         Pattern ftPattern = Pattern.compile(foreignTablePattern, Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
         Matcher ftMatcher = ftPattern.matcher(modifiedContent);
         
