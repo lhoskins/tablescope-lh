@@ -27,7 +27,9 @@ from app.services.vdb_routing import VDBConnectionInfo, VDBRoutingService
 logger = logging.getLogger(__name__)
 
 
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*$")
+# Allow a leading digit: file views like "0_revenueTest_CSV" are valid view
+# names and are always quoted when interpolated into SQL.
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$.]*$")
 
 
 class QueryValidationError(Exception):

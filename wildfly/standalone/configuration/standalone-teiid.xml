@@ -171,6 +171,22 @@
                         <driver-class>org.teiid.jdbc.TeiidDriver</driver-class>
                         <xa-datasource-class>org.teiid.jdbc.TeiidDataSource</xa-datasource-class>
                     </driver>
+                    <driver name="postgresql" module="org.postgresql">
+                        <driver-class>org.postgresql.Driver</driver-class>
+                        <xa-datasource-class>org.postgresql.xa.PGXADataSource</xa-datasource-class>
+                    </driver>
+                    <driver name="mysql" module="com.mysql">
+                        <driver-class>com.mysql.cj.jdbc.Driver</driver-class>
+                        <xa-datasource-class>com.mysql.cj.jdbc.MysqlXADataSource</xa-datasource-class>
+                    </driver>
+                    <driver name="sqlserver" module="com.microsoft.sqlserver">
+                        <driver-class>com.microsoft.sqlserver.jdbc.SQLServerDriver</driver-class>
+                        <xa-datasource-class>com.microsoft.sqlserver.jdbc.SQLServerXADataSource</xa-datasource-class>
+                    </driver>
+                    <driver name="oracle" module="com.oracle">
+                        <driver-class>oracle.jdbc.OracleDriver</driver-class>
+                        <xa-datasource-class>oracle.jdbc.xa.client.OracleXADataSource</xa-datasource-class>
+                    </driver>
                 </drivers>
             </datasources>
         </subsystem>
@@ -699,18 +715,4 @@
             <remote-destination host="localhost" port="25"/>
         </outbound-socket-binding>
     </socket-binding-group>
-    <deployments>
-        <deployment name="5490120-vdb.xml" runtime-name="5490120-vdb.xml">
-            <content sha1="97c6f56412a934fc0715a13c4f0ba6be8fe1d28f"/>
-        </deployment>
-        <deployment name="6426044-vdb.xml" runtime-name="6426044-vdb.xml">
-            <content sha1="178008144cd75c09317e9a9928c6987ffc5bb826"/>
-        </deployment>
-        <deployment name="1395654-vdb.xml" runtime-name="1395654-vdb.xml">
-            <content sha1="bc1ae70eb58df0385ec631a69a9263c9e9b4a338"/>
-        </deployment>
-        <deployment name="933455-vdb.xml" runtime-name="933455-vdb.xml">
-            <content sha1="6b3c79d1ca931fcb68941160165aa4eb6365196b"/>
-        </deployment>
-    </deployments>
 </server>

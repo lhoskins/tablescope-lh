@@ -5,6 +5,52 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
+import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DataGrid } from "@/components/data-grid/DataGrid";
+import { TablescopeDataGrid } from "@/components/data-grid/TablescopeDataGrid";
+
+// Small badge describing where a datasource comes from (file type or DB engine).
+function SourceBadge({ ds }: { ds: Datasource }) {
+  let label: string;
+  let cls: string;
+  if (ds.sourceType === "saas_object") {
+    const c = (ds.connectorType ?? "saas").toLowerCase();
+    label =
+      c === "hubspot"
+        ? "HubSpot"
+        : c === "salesforce"
+        ? "Salesforce"
+        : c === "quickbooks"
+        ? "QuickBooks"
+        : "SaaS";
+    cls =
+      c === "hubspot"
+        ? "bg-orange-100 text-orange-700"
+        : c === "quickbooks"
+        ? "bg-green-100 text-green-700"
+        : "bg-sky-100 text-sky-700";
+  } else if (ds.sourceType === "database_table") {
+    const db = (ds.dbType ?? "database").toLowerCase();
+    label =
+      db === "postgresql"
+        ? "PostgreSQL"
+        : db === "mysql"
+        ? "MySQL"
+        : db === "sqlserver"
+        ? "SQL Server"
+        : db === "oracle"
+        ? "Oracle"
+        : "Database";
+    cls = "bg-indigo-100 text-indigo-700";
+  } else {
+    label = (ds.sourceType ?? "file").toUpperCase();
+    cls = "bg-emerald-100 text-emerald-700";
+  }
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${cls}`}>{label}</span>
+  );
+}
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -16,10 +62,21 @@ type Project = {
   owner_id: number | null;
 };
 
+type ColumnType = { name: string; field: string; type: string };
+
 type Datasource = {
   fileName: string;
   viewName: string;
-  size: number;
+  size: number | null;
+  sourceType?: string | null;
+  dbType?: string | null;
+  connectorType?: string | null;
+  id?: number | null;
+  ownerId?: number | null;
+  fileMetaId?: number | null;
+  projectId?: number | null;
+  archived?: boolean;
+  columnTypes?: ColumnType[];
 };
 
 type SavedQuery = {
@@ -67,6 +124,128 @@ const JOIN_TYPES = [
   { value: "CROSS JOIN", label: "Cross Join" },
 ];
 
+// Parse the explicit `"ds"."col"` field list out of a SELECT statement.
+// Returns [] for `SELECT *` (meaning "all fields").
+function parseSelectedFields(sql: string): string[] {
+  if (!sql) return [];
+  const m = /select\s+([\s\S]*?)\s+from\s/i.exec(sql);
+  if (!m) return [];
+  const list = m[1].trim();
+  if (list === "*" || list === "") return [];
+  return list
+    .split(",")
+    .map((tok) => {
+      const parts = tok
+        .trim()
+        .split(".")
+        .map((p) => p.trim().replace(/^"|"$/g, ""));
+      if (parts.length >= 2) return `${parts[0]}.${parts[1]}`;
+      return parts[0] ? parts[0] : "";
+    })
+    .filter(Boolean);
+}
+
+function quoteField(qualified: string): string {
+  const idx = qualified.indexOf(".");
+  if (idx === -1) return `"${qualified}"`;
+  return `"${qualified.slice(0, idx)}"."${qualified.slice(idx + 1)}"`;
+}
+
+// Normalize a `"ds"."col"` (or bare) token into the unquoted `ds.col` form.
+function unquoteField(tok: string): string {
+  return tok
+    .trim()
+    .split(".")
+    .map((p) => p.trim().replace(/^"|"$/g, ""))
+    .join(".");
+}
+
+type Filter = { column: string; operand: string; value: string };
+type OrderByItem = { column: string; dir: string };
+
+// Best-effort parsers so the visual controls pre-populate from saved SQL.
+function parseWhere(sql: string): Filter[] {
+  const m = /\swhere\s+([\s\S]*?)(?:\s+group\s+by\s|\s+order\s+by\s|\s*$)/i.exec(sql);
+  if (!m) return [];
+  return m[1]
+    .split(/\s+and\s+/i)
+    .map((clause) => {
+      const inM = /^\s*("?[\w.]+"?(?:\."?[\w]+"?)?)\s+in\s*\((.*)\)\s*$/i.exec(clause);
+      if (inM) {
+        const vals = inM[2]
+          .split(",")
+          .map((v) => v.trim().replace(/^'|'$/g, ""))
+          .join(", ");
+        return { column: unquoteField(inM[1]), operand: "IN", value: vals };
+      }
+      const opM = /^\s*("?[\w.]+"?(?:\."?[\w]+"?)?)\s*(>=|<=|!=|=|>|<|like)\s*(.+?)\s*$/i.exec(
+        clause,
+      );
+      if (!opM) return null;
+      return {
+        column: unquoteField(opM[1]),
+        operand: opM[2].toUpperCase(),
+        value: opM[3].trim().replace(/^'|'$/g, ""),
+      };
+    })
+    .filter((f): f is Filter => f !== null && !!f.column);
+}
+
+function parseGroupBy(sql: string): string[] {
+  const m = /\sgroup\s+by\s+([\s\S]*?)(?:\s+order\s+by\s|\s+having\s|\s*$)/i.exec(sql);
+  if (!m) return [];
+  return m[1]
+    .split(",")
+    .map((t) => unquoteField(t))
+    .filter(Boolean);
+}
+
+function parseOrderBy(sql: string): OrderByItem[] {
+  const m = /\sorder\s+by\s+([\s\S]*?)\s*$/i.exec(sql);
+  if (!m) return [];
+  return m[1]
+    .split(",")
+    .map((t) => {
+      const parts = t.trim().split(/\s+/);
+      const dir = /^(asc|desc)$/i.test(parts[parts.length - 1] ?? "")
+        ? parts.pop()!.toUpperCase()
+        : "ASC";
+      return { column: unquoteField(parts.join(" ")), dir };
+    })
+    .filter((o) => !!o.column);
+}
+
+// Build the trailing WHERE / GROUP BY / ORDER BY clauses from visual controls.
+function buildClauses(
+  filters: Filter[],
+  groupBy: string[],
+  orderBy: OrderByItem[],
+): string {
+  let out = "";
+  const where = filters
+    .filter((f) => f.column && f.operand && f.value)
+    .map((f) => {
+      const col = quoteField(f.column);
+      if (f.operand === "IN") {
+        const vals = f.value
+          .split(",")
+          .map((v) => `'${v.trim()}'`)
+          .join(", ");
+        return `${col} IN (${vals})`;
+      }
+      if (f.operand === "LIKE") return `${col} LIKE '${f.value}'`;
+      return `${col} ${f.operand} '${f.value}'`;
+    });
+  if (where.length > 0) out += " WHERE " + where.join(" AND ");
+  const groups = groupBy.filter(Boolean).map(quoteField);
+  if (groups.length > 0) out += " GROUP BY " + groups.join(", ");
+  const orders = orderBy
+    .filter((o) => o.column)
+    .map((o) => `${quoteField(o.column)} ${o.dir}`);
+  if (orders.length > 0) out += " ORDER BY " + orders.join(", ");
+  return out;
+}
+
 // ── Edit Query Form ─────────────────────────────────────────────────
 
 function EditQueryForm({
@@ -96,6 +275,46 @@ function EditQueryForm({
   const [sqlEditing, setSqlEditing] = useState(false);
   const savedSql = query.sql_text ?? "";
   const [sqlText, setSqlText] = useState(savedSql);
+  // Show join config only when a join is in play (right datasource present).
+  const [showJoin, setShowJoin] = useState(!!query.right_datasource);
+  // Collapsible "view fields" panel for the selected table(s).
+  const [fieldsOpen, setFieldsOpen] = useState(false);
+  // Once the user touches the visual params we regenerate SQL from them;
+  // until then we keep showing the explicit saved SQL (with field selection).
+  const [visualDirty, setVisualDirty] = useState(false);
+  const markDirty = () => setVisualDirty(true);
+  // Fields currently in the SELECT (fully-qualified "ds.col").  Empty = all.
+  const [selectedFields, setSelectedFields] = useState<string[]>(() =>
+    parseSelectedFields(savedSql),
+  );
+  // WHERE / GROUP BY / ORDER BY builder controls (item 4).
+  const [filters, setFilters] = useState<Filter[]>(() => parseWhere(savedSql));
+  const [groupBy, setGroupBy] = useState<string[]>(() => parseGroupBy(savedSql));
+  const [orderBy, setOrderBy] = useState<OrderByItem[]>(() => parseOrderBy(savedSql));
+  // Execute-in-editor state (parity with the Create Query flow).
+  const [execResult, setExecResult] = useState<QueryResult | null>(null);
+  const [execError, setExecError] = useState<string | null>(null);
+  const [executing, setExecuting] = useState(false);
+
+  const allFields = useMemo(() => {
+    const l = leftCols.map((c) => `${leftDs}.${c}`);
+    const r = showJoin && rightDs ? rightCols.map((c) => `${rightDs}.${c}`) : [];
+    return [...l, ...r];
+  }, [leftCols, rightCols, leftDs, rightDs, showJoin]);
+
+  const isAllFields = selectedFields.length === 0;
+  const isFieldOn = (f: string) => isAllFields || selectedFields.includes(f);
+
+  const toggleField = (f: string) => {
+    markDirty();
+    setSelectedFields((prev) => {
+      const base = prev.length === 0 ? [...allFields] : prev;
+      const next = base.includes(f) ? base.filter((x) => x !== f) : [...base, f];
+      // Normalize "everything selected" back to [] (SELECT *).
+      if (allFields.length > 0 && next.length === allFields.length) return [];
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (leftDs) {
@@ -120,16 +339,59 @@ function EditQueryForm({
   const generatedSql = useMemo(() => {
     if (!leftDs) return "";
     const l = `"${leftDs}"`;
-    if (!rightDs) return `SELECT * FROM ${l}`;
-    const r = `"${rightDs}"`;
-    if (jt === "CROSS JOIN") return `SELECT * FROM ${l} ${jt} ${r}`;
-    if (!lc || !rc) return "";
-    return `SELECT * FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
-  }, [leftDs, rightDs, jt, lc, rc]);
+    // Drop any selected fields that no longer belong to an active datasource
+    // (e.g. right-side fields left over after a join is removed).
+    const liveFields =
+      allFields.length > 0
+        ? selectedFields.filter((f) => allFields.includes(f))
+        : selectedFields;
+    const cols = liveFields.length === 0 ? "*" : liveFields.map(quoteField).join(", ");
+    const tail = buildClauses(filters, groupBy, orderBy);
+    let base: string;
+    if (!showJoin || !rightDs) {
+      base = `SELECT ${cols} FROM ${l}`;
+    } else {
+      const r = `"${rightDs}"`;
+      if (jt === "CROSS JOIN") {
+        base = `SELECT ${cols} FROM ${l} ${jt} ${r}`;
+      } else if (lc && rc) {
+        base = `SELECT ${cols} FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
+      } else {
+        return "";
+      }
+    }
+    return base + tail;
+  }, [leftDs, rightDs, jt, lc, rc, showJoin, selectedFields, allFields, filters, groupBy, orderBy]);
+
+  // Before the user edits visual params, prefer the explicit saved SQL so the
+  // editor shows the real query (with selected fields), not a regenerated
+  // SELECT *.  Once they change a param, reflect the generated SQL.
+  const effectiveSql = visualDirty ? generatedSql : savedSql || generatedSql;
 
   useEffect(() => {
-    if (!sqlEditing) setSqlText(generatedSql);
-  }, [generatedSql, sqlEditing]);
+    if (!sqlEditing) setSqlText(effectiveSql);
+  }, [effectiveSql, sqlEditing]);
+
+  const runQuery = useCallback(async () => {
+    const sql = sqlEditing ? sqlText : effectiveSql;
+    if (!sql || !leftDs) return;
+    setExecuting(true);
+    setExecError(null);
+    setExecResult(null);
+    try {
+      const result = await apiClient.post<QueryResult>("/api/query/datasource", {
+        tableName: leftDs,
+        limit: 100,
+        project_id: projectId,
+        sql,
+      });
+      setExecResult(result);
+    } catch (err) {
+      setExecError((err as Error).message);
+    } finally {
+      setExecuting(false);
+    }
+  }, [sqlEditing, sqlText, effectiveSql, leftDs, projectId]);
 
   return (
     <div className="mt-3 ml-2 rounded-lg border border-blue-200 bg-blue-50 p-4" onClick={(e) => e.stopPropagation()}>
@@ -146,55 +408,321 @@ function EditQueryForm({
             className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3 mb-3">
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Left Datasource</label>
-          <select value={leftDs} onChange={(e) => setLeftDs(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            <option value="">Select...</option>
-            {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Join Type</label>
-          <select value={jt} onChange={(e) => setJt(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            {JOIN_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Right Datasource</label>
-          <select value={rightDs} onChange={(e) => setRightDs(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            <option value="">Select...</option>
-            {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
-          </select>
+      <div className="mb-3">
+        <div className="flex items-end gap-3">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-slate-600 mb-1">Datasource</label>
+            <select value={leftDs} onChange={(e) => { markDirty(); setLeftDs(e.target.value); }}
+              className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+              <option value="">Select...</option>
+              {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
+            </select>
+          </div>
+          {leftDs && !showJoin && (
+            <button
+              type="button"
+              onClick={() => { markDirty(); setShowJoin(true); }}
+              className="rounded-md border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+            >
+              + Add Join
+            </button>
+          )}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Left Column</label>
-          <select value={lc} onChange={(e) => setLc(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            <option value="">Select column...</option>
-            {leftCols.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+
+      {/* Join config — only shown when a join is active */}
+      {showJoin && (
+        <div className="mb-3 rounded-md border border-blue-200 bg-white p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-blue-900">Join Configuration</span>
+            <button
+              type="button"
+              onClick={() => {
+                markDirty();
+                setSqlEditing(false);
+                setSelectedFields((prev) => prev.filter((f) => !rightDs || !f.startsWith(rightDs + ".")));
+                setShowJoin(false);
+                setRightDs("");
+                setLc("");
+                setRc("");
+              }}
+              className="text-xs text-red-500 hover:text-red-700"
+            >
+              Remove Join
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Join Type</label>
+              <select value={jt} onChange={(e) => { markDirty(); setJt(e.target.value); }}
+                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                {JOIN_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Right Datasource</label>
+              <select value={rightDs} onChange={(e) => { markDirty(); setRightDs(e.target.value); }}
+                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                <option value="">Select...</option>
+                {datasources.map((d) => <option key={d.viewName} value={d.viewName}>{d.fileName}</option>)}
+              </select>
+            </div>
+          </div>
+          {jt !== "CROSS JOIN" && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Left Column</label>
+                <select value={lc} onChange={(e) => { markDirty(); setLc(e.target.value); }}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                  <option value="">Select column...</option>
+                  {leftCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Right Column</label>
+                <select value={rc} onChange={(e) => { markDirty(); setRc(e.target.value); }}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                  <option value="">Select column...</option>
+                  {rightCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
         </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Right Column</label>
-          <select value={rc} onChange={(e) => setRc(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            <option value="">Select column...</option>
-            {rightCols.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+      )}
+
+      {/* Collapsible fields panel for the selected table(s) */}
+      {leftDs && (
+        <div className="mb-3 rounded-md border border-slate-200 bg-white">
+          <div
+            onClick={() => setFieldsOpen((o) => !o)}
+            className="flex cursor-pointer items-center justify-between px-3 py-2 hover:bg-slate-50"
+          >
+            <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
+              <span className="text-slate-400">{fieldsOpen ? "▲" : "▼"}</span>
+              <span>Fields ({isAllFields ? "all" : selectedFields.length} selected)</span>
+            </div>
+            {fieldsOpen && (
+              <div className="flex gap-2">
+                <button type="button" onClick={(e) => { e.stopPropagation(); markDirty(); setSelectedFields([]); }}
+                  className="text-xs text-blue-600 hover:text-blue-800">Select All</button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); markDirty(); setSelectedFields(allFields.length ? allFields.slice(0, 1) : []); }}
+                  className="text-xs text-slate-500 hover:text-slate-700">Reset</button>
+              </div>
+            )}
+          </div>
+          {fieldsOpen && (
+            <div className="border-t border-slate-100 px-3 py-2">
+              <div className={showJoin && rightDs ? "grid grid-cols-2 gap-4" : ""}>
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{leftDs}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {leftCols.length === 0 && <span className="text-xs text-slate-400">No fields loaded.</span>}
+                    {leftCols.map((c) => {
+                      const f = `${leftDs}.${c}`;
+                      const on = isFieldOn(f);
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => toggleField(f)}
+                          className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${
+                            on
+                              ? "border-blue-500 bg-blue-500 text-white"
+                              : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {showJoin && rightDs && (
+                  <div className="border-l border-slate-100 pl-4">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{rightDs}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {rightCols.length === 0 && <span className="text-xs text-slate-400">No fields loaded.</span>}
+                      {rightCols.map((c) => {
+                        const f = `${rightDs}.${c}`;
+                        const on = isFieldOn(f);
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => toggleField(f)}
+                            className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${
+                              on
+                                ? "border-blue-500 bg-blue-500 text-white"
+                                : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                            }`}
+                          >
+                            {c}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <p className="mt-2 text-[10px] text-slate-400">
+                Highlighted fields are included in the query. Click to add or remove; the SQL updates and saves with the query.
+              </p>
+            </div>
+          )}
         </div>
-      </div>
+      )}
+
+      {/* Filters (WHERE) */}
+      {leftDs && (
+        <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700">Filters</span>
+            <button
+              type="button"
+              onClick={() => { markDirty(); setFilters((p) => [...p, { column: "", operand: "=", value: "" }]); }}
+              className="text-xs text-blue-600 hover:text-blue-800"
+            >
+              + Add Filter
+            </button>
+          </div>
+          {filters.length === 0 && (
+            <p className="text-xs text-slate-400">No filters. Add a WHERE condition.</p>
+          )}
+          {filters.map((f, idx) => (
+            <div key={idx} className="mb-2 flex items-center gap-2">
+              <select
+                value={f.column}
+                onChange={(e) => { markDirty(); setFilters((p) => p.map((x, i) => i === idx ? { ...x, column: e.target.value } : x)); }}
+                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">Column...</option>
+                {allFields.map((c) => (
+                  <option key={c} value={c}>{c.split(".")[1]}{showJoin && rightDs ? ` (${c.split(".")[0]})` : ""}</option>
+                ))}
+              </select>
+              <select
+                value={f.operand}
+                onChange={(e) => { markDirty(); setFilters((p) => p.map((x, i) => i === idx ? { ...x, operand: e.target.value } : x)); }}
+                className="w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                {["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN"].map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={f.value}
+                onChange={(e) => { markDirty(); setFilters((p) => p.map((x, i) => i === idx ? { ...x, value: e.target.value } : x)); }}
+                placeholder={f.operand === "IN" ? "val1, val2, ..." : "Value"}
+                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => { markDirty(); setFilters((p) => p.filter((_, i) => i !== idx)); }}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Group By */}
+      {leftDs && (
+        <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700">Group By</span>
+            <button
+              type="button"
+              onClick={() => { markDirty(); setGroupBy((p) => [...p, ""]); }}
+              className="text-xs text-blue-600 hover:text-blue-800"
+            >
+              + Group By
+            </button>
+          </div>
+          {groupBy.length === 0 && (
+            <p className="text-xs text-slate-400">No grouping.</p>
+          )}
+          {groupBy.map((g, idx) => (
+            <div key={idx} className="mb-2 flex items-center gap-2">
+              <select
+                value={g}
+                onChange={(e) => { markDirty(); setGroupBy((p) => p.map((x, i) => i === idx ? e.target.value : x)); }}
+                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">Column...</option>
+                {allFields.map((c) => (
+                  <option key={c} value={c}>{c.split(".")[1]}{showJoin && rightDs ? ` (${c.split(".")[0]})` : ""}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => { markDirty(); setGroupBy((p) => p.filter((_, i) => i !== idx)); }}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Order By */}
+      {leftDs && (
+        <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700">Order By</span>
+            <button
+              type="button"
+              onClick={() => { markDirty(); setOrderBy((p) => [...p, { column: "", dir: "ASC" }]); }}
+              className="text-xs text-blue-600 hover:text-blue-800"
+            >
+              + Order By
+            </button>
+          </div>
+          {orderBy.length === 0 && (
+            <p className="text-xs text-slate-400">No ordering.</p>
+          )}
+          {orderBy.map((o, idx) => (
+            <div key={idx} className="mb-2 flex items-center gap-2">
+              <select
+                value={o.column}
+                onChange={(e) => { markDirty(); setOrderBy((p) => p.map((x, i) => i === idx ? { ...x, column: e.target.value } : x)); }}
+                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">Column...</option>
+                {allFields.map((c) => (
+                  <option key={c} value={c}>{c.split(".")[1]}{showJoin && rightDs ? ` (${c.split(".")[0]})` : ""}</option>
+                ))}
+              </select>
+              <select
+                value={o.dir}
+                onChange={(e) => { markDirty(); setOrderBy((p) => p.map((x, i) => i === idx ? { ...x, dir: e.target.value } : x)); }}
+                className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="ASC">Ascending</option>
+                <option value="DESC">Descending</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => { markDirty(); setOrderBy((p) => p.filter((_, i) => i !== idx)); }}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="mb-3">
         <div className="flex items-center justify-between mb-1">
           <label className="block text-xs font-medium text-slate-600">SQL</label>
           <button
             type="button"
-            onClick={() => { if (sqlEditing) { setSqlText(generatedSql); setSqlEditing(false); } else { setSqlText(savedSql || generatedSql); setSqlEditing(true); } }}
+            onClick={() => { if (sqlEditing) { setSqlText(effectiveSql); setSqlEditing(false); } else { setSqlText(effectiveSql); setSqlEditing(true); } }}
             className="text-xs text-blue-600 hover:text-blue-800"
           >
             {sqlEditing ? "Reset to generated" : "Edit SQL directly"}
@@ -215,8 +743,12 @@ function EditQueryForm({
       <div className="flex gap-2">
         <button
           onClick={() => {
-            const finalSql = sqlEditing ? sqlText : generatedSql;
-            const saveRightDs = sqlEditing && !sqlText.includes(rightDs) ? "" : rightDs;
+            const finalSql = sqlEditing ? sqlText : effectiveSql;
+            const joinActive = showJoin && !!rightDs;
+            const saveRightDs =
+              (sqlEditing && rightDs && !sqlText.includes(rightDs)) || !joinActive
+                ? ""
+                : rightDs;
             const saveJt = saveRightDs ? jt : "";
             const saveLc = saveRightDs ? lc : "";
             const saveRc = saveRightDs ? rc : "";
@@ -232,11 +764,29 @@ function EditQueryForm({
         >
           {isPending ? "Saving..." : "Update Query"}
         </button>
+        <button
+          onClick={runQuery}
+          disabled={executing || !(sqlEditing ? sqlText : effectiveSql)}
+          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {executing ? "Executing..." : "Execute"}
+        </button>
         <button onClick={onCancel}
           className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200">
           Cancel
         </button>
       </div>
+
+      {/* Execution results (parity with Create Query flow) */}
+      {execError && <p className="mt-3 text-sm text-red-600">{execError}</p>}
+      {execResult && execResult.rows.length > 0 && (
+        <div className="mt-3">
+          <DataGrid columns={execResult.columns} rows={execResult.rows} />
+        </div>
+      )}
+      {execResult && execResult.rows.length === 0 && (
+        <p className="mt-3 text-sm text-slate-400">Query returned no results.</p>
+      )}
     </div>
   );
 }
@@ -258,6 +808,10 @@ export default function ProjectWorkspacePage() {
   const [leftDs, setLeftDs] = useState<Datasource | null>(null);
   const [rightDs, setRightDs] = useState<Datasource | null>(null);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
+  // Whether the user has opted into a join (reveals the second datasource box).
+  const [joinMode, setJoinMode] = useState(false);
+  // Collapsible "view fields" panel for the selected table(s) in the builder.
+  const [builderFieldsOpen, setBuilderFieldsOpen] = useState(false);
   const [joinType, setJoinType] = useState("INNER JOIN");
   const [leftCol, setLeftCol] = useState("");
   const [rightCol, setRightCol] = useState("");
@@ -389,11 +943,28 @@ export default function ProjectWorkspacePage() {
       sql_text?: string;
     }) => {
       const { queryId, ...body } = payload;
-      return apiClient.put(`/api/projects/${projectId}/queries/${queryId}`, body);
+      return apiClient.put<SavedQuery>(`/api/projects/${projectId}/queries/${queryId}`, body);
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["project-queries", projectId] });
       setEditingQuery(null);
+      // If this query's results are currently displayed, re-run it with the
+      // updated SQL so changes (e.g. a removed join) are reflected immediately.
+      if (data && activeSavedQueryId === variables.queryId) {
+        setSavedQueryLoading(true);
+        setSavedQueryError(null);
+        setSavedQueryResult(null);
+        apiClient
+          .post<QueryResult>("/api/query/datasource", {
+            tableName: data.left_datasource ?? "",
+            limit: 100,
+            project_id: projectId,
+            sql: data.sql_text || undefined,
+          })
+          .then((result) => setSavedQueryResult(result))
+          .catch((err) => setSavedQueryError((err as Error).message))
+          .finally(() => setSavedQueryLoading(false));
+      }
     },
   });
 
@@ -506,6 +1077,80 @@ export default function ProjectWorkspacePage() {
       setDsLoading(false);
     }
   }, [activeDsName]);
+
+  const [dsActionError, setDsActionError] = useState<string | null>(null);
+  const [showAddDs, setShowAddDs] = useState(false);
+
+  // ── File data source actions (item 1 archive, item 3 project link) ──
+  const isFileSource = useCallback(
+    (ds: Datasource) => ds.id == null && !!ds.viewName,
+    [],
+  );
+
+  // Unified "remove from project" for files, databases and SaaS sources
+  // (item 3). Only clears the project association; gated server-side to a
+  // project admin or the datasource owner.
+  const removeDatasourceFromProject = useCallback(
+    async (ds: Datasource) => {
+      if (
+        !window.confirm(
+          `Remove "${ds.fileName}" from this project? It stays in the owner's datasources.`,
+        )
+      ) {
+        return;
+      }
+      setDsActionError(null);
+      try {
+        await apiClient.post(`/api/projects/${projectId}/datasources/remove`, {
+          kind: ds.id != null ? "db" : "file",
+          id: ds.id ?? undefined,
+          viewName: ds.viewName,
+        });
+        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+      } catch (err) {
+        setDsActionError((err as Error).message);
+      }
+    },
+    [queryClient, projectId],
+  );
+
+  // Item 5: drag a file onto a file datasource row to replace its data.
+  const [dragOverView, setDragOverView] = useState<string | null>(null);
+  const [replaceMsg, setReplaceMsg] = useState<string | null>(null);
+  // Item 6: confirm before overwriting an existing datasource.
+  const [pendingReplace, setPendingReplace] = useState<
+    { ds: Datasource; file: File } | null
+  >(null);
+  const replaceFileFromDrop = useCallback(
+    (ds: Datasource, files: FileList | null) => {
+      setDragOverView(null);
+      if (!files || files.length === 0) return;
+      setDsActionError(null);
+      setReplaceMsg(null);
+      setPendingReplace({ ds, file: files[0] });
+    },
+    [],
+  );
+  const confirmReplace = useCallback(async () => {
+    if (!pendingReplace) return;
+    const { ds, file } = pendingReplace;
+    setPendingReplace(null);
+    setDsActionError(null);
+    setReplaceMsg(null);
+    try {
+      const res = await apiClient.upload<{ addedColumns?: string[] }>(
+        `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/replace`,
+        file,
+      );
+      const added = res.addedColumns ?? [];
+      setReplaceMsg(
+        `Replaced "${ds.fileName}"${added.length ? ` (added: ${added.join(", ")})` : ""}.`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+    } catch (err) {
+      setDsActionError((err as Error).message);
+    }
+  }, [pendingReplace, queryClient, projectId]);
 
   // ── Drag-and-drop handlers ────────────────────────────────────────
 
@@ -642,6 +1287,9 @@ export default function ProjectWorkspacePage() {
   const myProjectRole = isOwner ? "owner" : (myMembership?.role ?? "viewer");
   const canManageMembers = isOwner || myProjectRole === "admin";
   const canEdit = isOwner || myProjectRole === "admin" || myProjectRole === "editor";
+  // Item 3: only a project admin/owner (or tenant admin) — or the datasource's
+  // own owner — may remove a datasource from the project.
+  const isProjectAdmin = isOwner || myProjectRole === "admin" || isTenantAdmin;
 
   // ── Available users for member assignment ─────────────────────────
 
@@ -747,9 +1395,30 @@ export default function ProjectWorkspacePage() {
       {/* ── Datasources Tab ──────────────────────────────────────── */}
       {activeTab === "datasources" && (
         <div>
+          {canEdit && (
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowAddDs(true)}
+                className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90"
+              >
+                + Add Datasource
+              </button>
+            </div>
+          )}
+          {showAddDs && (
+            <AddDatasourceModal
+              projectId={projectId}
+              onClose={() => setShowAddDs(false)}
+              onAdded={() =>
+                queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
+              }
+            />
+          )}
+          {replaceMsg && <p className="mb-2 text-sm text-green-600">{replaceMsg}</p>}
           {datasourcesQuery.isLoading && <p className="text-sm text-slate-500">Loading datasources...</p>}
           {projectDatasources.length === 0 && !datasourcesQuery.isLoading && (
-            <p className="text-sm text-slate-400">No datasources. Upload files first.</p>
+            <p className="text-sm text-slate-400">No datasources. Upload files or connect a database table.</p>
           )}
           {projectDatasources.length > 0 && (
             <div className="grid gap-2">
@@ -758,60 +1427,83 @@ export default function ProjectWorkspacePage() {
                   key={ds.viewName}
                   draggable
                   onDragStart={(e) => handleDragStart(e, ds)}
+                  onDragOver={
+                    isFileSource(ds)
+                      ? (e) => {
+                          if (e.dataTransfer.types.includes("Files")) {
+                            e.preventDefault();
+                            setDragOverView(ds.viewName);
+                          }
+                        }
+                      : undefined
+                  }
+                  onDragLeave={
+                    isFileSource(ds) ? () => setDragOverView(null) : undefined
+                  }
+                  onDrop={
+                    isFileSource(ds)
+                      ? (e) => {
+                          if (e.dataTransfer.files.length > 0) {
+                            e.preventDefault();
+                            replaceFileFromDrop(ds, e.dataTransfer.files);
+                          }
+                        }
+                      : undefined
+                  }
                   onClick={() => viewDatasource(ds)}
                   className={`flex items-center justify-between rounded-md border px-4 py-3 cursor-pointer transition-colors ${
-                    activeDsName === ds.viewName
+                    dragOverView === ds.viewName
+                      ? "border-brand border-dashed bg-brand/10 ring-2 ring-brand/30"
+                      : activeDsName === ds.viewName
                       ? "border-brand bg-brand/5"
                       : "border-slate-200 bg-white hover:bg-slate-50"
                   }`}
                 >
                   <div>
-                    <p className="text-sm font-medium text-slate-900">{ds.fileName}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-slate-900">{ds.fileName}</p>
+                      <SourceBadge ds={ds} />
+                    </div>
                     <p className="text-xs text-slate-400 font-mono">View: {ds.viewName}</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">{(ds.size / 1024).toFixed(1)} KB</span>
+                  <div className="flex items-center gap-3">
+                    {typeof ds.size === "number" && (
+                      <span className="text-xs text-slate-400">{(ds.size / 1024).toFixed(1)} KB</span>
+                    )}
                     <span className="text-xs text-slate-400">
                       {activeDsName === ds.viewName ? "Click to hide" : "Click to view"}
                     </span>
+                    {(isProjectAdmin || ds.ownerId === meta?.user_id) && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); removeDatasourceFromProject(ds); }}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                        title="Remove this datasource from the project (keeps it in the owner's datasources)"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
+          )}
+          {dsActionError && (
+            <p className="mt-2 text-sm text-red-600">{dsActionError}</p>
           )}
 
           {/* Datasource data view */}
           {dsLoading && <p className="mt-4 text-sm text-slate-500">Loading data...</p>}
           {dsError && <p className="mt-4 text-sm text-red-600">{dsError}</p>}
           {dsResult && dsResult.rows.length > 0 && (
-            <div className="mt-4 overflow-x-auto rounded-md border border-slate-200 bg-white">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50">
-                  <tr>
-                    {dsResult.columns.map((col) => (
-                      <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {dsResult.rows.slice(0, 50).map((row, i) => (
-                    <tr key={i}>
-                      {dsResult.columns.map((col) => (
-                        <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
-                          {String(row[col] ?? "")}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {dsResult.rows.length > 50 && (
-                <p className="px-3 py-2 text-xs text-slate-400">
-                  Showing first 50 of {dsResult.rows.length} rows
-                </p>
-              )}
+            <div className="mt-4">
+              <DataGrid
+                columns={dsResult.columns}
+                rows={dsResult.rows}
+                columnTypes={
+                  projectDatasources.find((d) => d.viewName === activeDsName)?.columnTypes
+                }
+              />
             </div>
           )}
           {dsResult && dsResult.rows.length === 0 && (
@@ -843,6 +1535,7 @@ export default function ProjectWorkspacePage() {
                     setLeftDs(null);
                     setRightDs(null);
                     setShowJoinDialog(false);
+                    setJoinMode(false);
                     setShowSave(false);
                     setSelectedFields([]);
                     setFilters([]);
@@ -872,16 +1565,17 @@ export default function ProjectWorkspacePage() {
                         key={ds.viewName}
                         draggable
                         onDragStart={(e) => handleDragStart(e, ds)}
-                        className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm cursor-grab active:cursor-grabbing hover:border-brand hover:bg-brand/5"
+                        className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm cursor-grab active:cursor-grabbing hover:border-brand hover:bg-brand/5"
                       >
-                        {ds.fileName}
+                        <span>{ds.fileName}</span>
+                        <SourceBadge ds={ds} />
                       </div>
                     ))}
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className={`grid gap-4 mb-4 ${joinMode ? "grid-cols-2" : "grid-cols-1"}`}>
                 {/* Left box */}
                 <div
                   onDrop={handleDropLeft}
@@ -903,6 +1597,9 @@ export default function ProjectWorkspacePage() {
                           setSelectedFields([]);
                           setFilters([]);
                           setShowJoinDialog(false);
+                          setJoinMode(false);
+                          setRightDs(null);
+                          setRightCols([]);
                         }}
                         className="mt-2 text-xs text-red-500 hover:text-red-700"
                       >
@@ -914,37 +1611,70 @@ export default function ProjectWorkspacePage() {
                   )}
                 </div>
 
-                {/* Right box (optional for joins) */}
-                <div
-                  onDrop={handleDropRight}
-                  onDragOver={allowDrop}
-                  className={`flex min-h-[120px] items-center justify-center rounded-lg border-2 border-dashed p-4 transition-colors ${
-                    rightDs
-                      ? "border-brand bg-brand/5"
-                      : "border-slate-300 hover:border-slate-400"
-                  }`}
-                >
-                  {rightDs ? (
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-slate-900">{rightDs.fileName}</p>
-                      <p className="text-xs text-slate-400 font-mono">{rightDs.viewName}</p>
-                      <button
-                        onClick={() => {
-                          setRightDs(null);
-                          setRightCols([]);
-                          setSelectedFields((prev) => prev.filter((f) => !f.startsWith(rightDs.viewName + ".")));
-                          setShowJoinDialog(false);
-                        }}
-                        className="mt-2 text-xs text-red-500 hover:text-red-700"
-                      >
-                        Remove
-                      </button>
-                    </div>
+                {/* Right box — only when the user has added a join */}
+                {joinMode && (
+                  <div
+                    onDrop={handleDropRight}
+                    onDragOver={allowDrop}
+                    className={`flex min-h-[120px] items-center justify-center rounded-lg border-2 border-dashed p-4 transition-colors ${
+                      rightDs
+                        ? "border-brand bg-brand/5"
+                        : "border-slate-300 hover:border-slate-400"
+                    }`}
+                  >
+                    {rightDs ? (
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-slate-900">{rightDs.fileName}</p>
+                        <p className="text-xs text-slate-400 font-mono">{rightDs.viewName}</p>
+                        <button
+                          onClick={() => {
+                            setRightDs(null);
+                            setRightCols([]);
+                            setSelectedFields((prev) => prev.filter((f) => !f.startsWith(rightDs.viewName + ".")));
+                            setShowJoinDialog(false);
+                          }}
+                          className="mt-2 text-xs text-red-500 hover:text-red-700"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-400">Drop second datasource here</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Add / remove join control — join info is hidden until added */}
+              {leftDs && (
+                <div className="mb-4">
+                  {!joinMode ? (
+                    <button
+                      onClick={() => setJoinMode(true)}
+                      className="rounded-md border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                    >
+                      + Add Join
+                    </button>
                   ) : (
-                    <p className="text-sm text-slate-400">Drop second datasource here (optional)</p>
+                    <button
+                      onClick={() => {
+                        setJoinMode(false);
+                        if (rightDs) {
+                          setSelectedFields((prev) => prev.filter((f) => !f.startsWith(rightDs.viewName + ".")));
+                        }
+                        setRightDs(null);
+                        setRightCols([]);
+                        setShowJoinDialog(false);
+                        setLeftCol("");
+                        setRightCol("");
+                      }}
+                      className="text-xs text-red-500 hover:text-red-700"
+                    >
+                      Remove Join
+                    </button>
                   )}
                 </div>
-              </div>
+              )}
 
               {/* Join Parameters Dialog (only when both datasources present) */}
               {showJoinDialog && leftDs && rightDs && (
@@ -1001,51 +1731,76 @@ export default function ProjectWorkspacePage() {
                 </div>
               )}
 
-              {/* Field Selection */}
+              {/* Field Selection — collapsible */}
               {leftDs && allAvailableCols.length > 0 && (
-                <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-sm font-semibold text-slate-900">Select Fields</h4>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setSelectedFields([...allAvailableCols])}
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        Select All
-                      </button>
-                      <button
-                        onClick={() => setSelectedFields([])}
-                        className="text-xs text-slate-500 hover:text-slate-700"
-                      >
-                        Clear
-                      </button>
+                <div className="mb-4 rounded-lg border border-slate-200 bg-white">
+                  <div className="flex items-center justify-between px-4 py-2">
+                    <button
+                      type="button"
+                      onClick={() => setBuilderFieldsOpen((o) => !o)}
+                      className="flex items-center gap-2 text-sm font-semibold text-slate-900"
+                    >
+                      <span className="text-slate-400">{builderFieldsOpen ? "▲" : "▼"}</span>
+                      Select Fields
+                      <span className="text-xs font-normal text-slate-400">
+                        ({selectedFields.length === 0 ? "all" : selectedFields.length} selected)
+                      </span>
+                    </button>
+                    {builderFieldsOpen && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setSelectedFields([...allAvailableCols])}
+                          className="text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          onClick={() => setSelectedFields([])}
+                          className="text-xs text-slate-500 hover:text-slate-700"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {builderFieldsOpen && (
+                    <div className="border-t border-slate-100 p-4">
+                      <div className="flex flex-wrap gap-2">
+                        {allAvailableCols.map((col) => {
+                          const on = selectedFields.length === 0 || selectedFields.includes(col);
+                          return (
+                            <button
+                              key={col}
+                              type="button"
+                              onClick={() => {
+                                setSelectedFields((prev) => {
+                                  const base = prev.length === 0 ? [...allAvailableCols] : prev;
+                                  const next = base.includes(col)
+                                    ? base.filter((f) => f !== col)
+                                    : [...base, col];
+                                  if (next.length === allAvailableCols.length) return [];
+                                  return next;
+                                });
+                              }}
+                              className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
+                                on
+                                  ? "border-blue-500 bg-blue-500 text-white"
+                                  : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                              }`}
+                            >
+                              <span>{col.split(".")[1]}</span>
+                              {rightDs && (
+                                <span className={on ? "text-blue-100" : "text-slate-400"}>({col.split(".")[0]})</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {selectedFields.length === 0 ? "All fields selected (SELECT *)" : `${selectedFields.length} field(s) selected`}
+                      </p>
                     </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {allAvailableCols.map((col) => (
-                      <label key={col} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs cursor-pointer hover:bg-slate-100">
-                        <input
-                          type="checkbox"
-                          checked={selectedFields.includes(col)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedFields((prev) => [...prev, col]);
-                            } else {
-                              setSelectedFields((prev) => prev.filter((f) => f !== col));
-                            }
-                          }}
-                          className="h-3 w-3 rounded border-slate-300"
-                        />
-                        <span className="text-slate-700">{col.split(".")[1]}</span>
-                        {rightDs && (
-                          <span className="text-slate-400">({col.split(".")[0]})</span>
-                        )}
-                      </label>
-                    ))}
-                  </div>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {selectedFields.length === 0 ? "All fields selected (SELECT *)" : `${selectedFields.length} field(s) selected`}
-                  </p>
+                  )}
                 </div>
               )}
 
@@ -1236,35 +1991,7 @@ export default function ProjectWorkspacePage() {
               {/* Execution results */}
               {queryError && <p className="text-sm text-red-600 mb-4">{queryError}</p>}
               {queryResult && queryResult.rows.length > 0 && (
-                <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
-                  <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        {queryResult.columns.map((col) => (
-                          <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {queryResult.rows.slice(0, 50).map((row, i) => (
-                        <tr key={i}>
-                          {queryResult.columns.map((col) => (
-                            <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
-                              {String(row[col] ?? "")}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {queryResult.rows.length > 50 && (
-                    <p className="px-3 py-2 text-xs text-slate-400">
-                      Showing first 50 of {queryResult.rows.length} rows
-                    </p>
-                  )}
-                </div>
+                <DataGrid columns={queryResult.columns} rows={queryResult.rows} />
               )}
             </div>
           )}
@@ -1378,35 +2105,20 @@ export default function ProjectWorkspacePage() {
                         <p className="text-sm text-red-600">{savedQueryError}</p>
                       )}
                       {savedQueryResult && savedQueryResult.rows.length > 0 && (
-                        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
-                          <table className="min-w-full divide-y divide-slate-200">
-                            <thead className="bg-slate-50">
-                              <tr>
-                                {savedQueryResult.columns.map((col) => (
-                                  <th key={col} className="px-3 py-2 text-left text-xs font-medium uppercase text-slate-500">
-                                    {col}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {savedQueryResult.rows.slice(0, 50).map((row, i) => (
-                                <tr key={i}>
-                                  {savedQueryResult.columns.map((col) => (
-                                    <td key={col} className="whitespace-nowrap px-3 py-2 text-sm text-slate-700">
-                                      {String(row[col] ?? "")}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          {savedQueryResult.rows.length > 50 && (
-                            <p className="px-3 py-2 text-xs text-slate-400">
-                              Showing first 50 of {savedQueryResult.rows.length} rows
-                            </p>
-                          )}
-                        </div>
+                        <TablescopeDataGrid
+                          columns={savedQueryResult.columns}
+                          rows={savedQueryResult.rows}
+                          queryId={q.id}
+                          queryName={q.name}
+                          projectId={projectId}
+                          availableQueries={(queriesQuery.data ?? []).map((sq) => ({
+                            id: sq.id,
+                            name: sq.name,
+                            sql: sq.sql_text,
+                            leftDatasource: sq.left_datasource,
+                          }))}
+                          canEditScopes={canEdit}
+                        />
                       )}
                       {savedQueryResult && savedQueryResult.rows.length === 0 && (
                         <p className="text-sm text-slate-400">Query returned no results.</p>
@@ -1566,6 +2278,32 @@ export default function ProjectWorkspacePage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingReplace !== null}
+        title="Overwrite datasource?"
+        message={
+          pendingReplace ? (
+            <>
+              Are you sure you want to overwrite{" "}
+              <span className="font-medium text-slate-900">
+                &quot;{pendingReplace.ds.fileName}&quot;
+              </span>{" "}
+              with{" "}
+              <span className="font-medium text-slate-900">
+                &quot;{pendingReplace.file.name}&quot;
+              </span>
+              ? This replaces the existing data.
+            </>
+          ) : (
+            ""
+          )
+        }
+        confirmLabel="Yes"
+        cancelLabel="Cancel"
+        onConfirm={confirmReplace}
+        onCancel={() => setPendingReplace(null)}
+      />
     </section>
   );
 }

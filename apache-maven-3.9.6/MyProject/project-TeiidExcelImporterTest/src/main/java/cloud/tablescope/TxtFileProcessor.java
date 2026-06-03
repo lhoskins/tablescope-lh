@@ -146,7 +146,7 @@ public class TxtFileProcessor {
         String fileNameWithoutExtension = fileName.substring(0, fileName.lastIndexOf('.'));
         String viewName = fileNameWithoutExtension.replaceAll("\\s+", "_") + "_" + extension.toUpperCase();
         StringBuilder viewDefinition = new StringBuilder();
-        viewDefinition.append("CREATE VIEW ").append(viewName).append(" (\n");
+        viewDefinition.append("CREATE VIEW ").append("\"").append(viewName).append("\"").append(" (\n");
         for (String columnName : columnNames) {
             // Use the original column name for NAMEINSOURCE
             String sourceColumnName = columnNameMapping.getOrDefault(columnName, columnName);

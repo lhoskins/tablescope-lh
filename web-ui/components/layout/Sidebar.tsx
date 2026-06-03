@@ -9,8 +9,8 @@ import { cn } from "@/lib/cn";
 type NavItem = { href: string; label: string };
 
 const pillItems: NavItem[] = [
-  { href: "/projects", label: "Projects" },
   { href: "/upload", label: "Datasources" },
+  { href: "/projects", label: "Projects" },
 ];
 
 const otherItems: NavItem[] = [];

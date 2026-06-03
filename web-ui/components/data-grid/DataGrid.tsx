@@ -1,36 +1,27 @@
 "use client";
 
-import { useMemo } from "react";
-import { AgGridReact } from "ag-grid-react";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
+import { TablescopeDataGrid } from "@/components/data-grid/TablescopeDataGrid";
 
 type DataGridProps = {
   columns: string[];
   rows: Record<string, unknown>[];
+  loading?: boolean;
+  height?: number;
+  columnTypes?: { field: string; name?: string; type: string }[];
 };
 
-export function DataGrid({ columns, rows }: DataGridProps) {
-  const columnDefs = useMemo(
-    () =>
-      columns.map((field) => ({
-        field,
-        sortable: true,
-        filter: true,
-        resizable: true,
-      })),
-    [columns]
-  );
-
+/**
+ * Thin wrapper around {@link TablescopeDataGrid} (MUI X Data Grid, community)
+ * for plain result rendering without scope/drill-down features.
+ */
+export function DataGrid({ columns, rows, loading, height = 480, columnTypes }: DataGridProps) {
   return (
-    <div className="ag-theme-quartz" style={{ height: 480 }}>
-      <AgGridReact
-        rowData={rows}
-        columnDefs={columnDefs}
-        defaultColDef={{ minWidth: 120 }}
-        pagination
-        paginationPageSize={50}
-      />
-    </div>
+    <TablescopeDataGrid
+      columns={columns}
+      rows={rows}
+      loading={loading}
+      height={height}
+      columnTypes={columnTypes}
+    />
   );
 }
