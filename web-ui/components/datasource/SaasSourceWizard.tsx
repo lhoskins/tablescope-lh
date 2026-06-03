@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api-client";
 
 // Connect a SaaS app (HubSpot, Salesforce) object as an independent Tablescope
@@ -29,14 +29,22 @@ type PreviewResult = { columns: string[]; rows: Record<string, unknown>[] };
 
 type Step = "connect" | "object" | "fields" | "preview";
 
+type SavedCredential = {
+  id: number;
+  connector_type: string;
+  display_name: string;
+};
+
 export function SaasSourceWizard({
   projectId,
   initialConnector,
+  initialCredentialId,
   onClose,
   onCreated,
 }: {
   projectId?: number;
   initialConnector?: ConnectorType;
+  initialCredentialId?: number;
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -44,6 +52,7 @@ export function SaasSourceWizard({
   const [connector, setConnector] = useState<ConnectorType>(
     initialConnector ?? "hubspot"
   );
+  const [savedCreds, setSavedCreds] = useState<SavedCredential[]>([]);
 
   // HubSpot
   const [hsToken, setHsToken] = useState("");
@@ -103,7 +112,9 @@ export function SaasSourceWizard({
     try {
       const res = await apiClient.post<{ success: boolean; message: string }>(
         "/api/saas-sources/test",
-        { connector_type: connector, config: config() }
+        credentialId != null
+          ? { credential_id: credentialId }
+          : { connector_type: connector, config: config() }
       );
       if (!res.success) {
         setError(res.message);
@@ -112,6 +123,52 @@ export function SaasSourceWizard({
       setTestMessage(res.message);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Connection test failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Load saved SaaS credentials; if launched from a saved one (the "Connected"
+  // category), select it and jump straight to object selection (item 5).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await apiClient.get<SavedCredential[]>(
+          "/api/saas-sources/credentials",
+        );
+        if (cancelled) return;
+        setSavedCreds(rows);
+        if (initialCredentialId != null) {
+          const match = rows.find((r) => r.id === initialCredentialId);
+          if (match) {
+            setCredentialId(match.id);
+            setConnector(match.connector_type as ConnectorType);
+            void loadObjectsFor(match.id);
+          }
+        }
+      } catch {
+        // Non-fatal: user can still enter credentials manually.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadObjectsFor(credId: number) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiClient.post<{ objects: ObjectInfo[] }>(
+        "/api/saas-sources/objects",
+        { credential_id: credId },
+      );
+      setObjects(res.objects);
+      setStep("object");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load objects");
     } finally {
       setBusy(false);
     }
@@ -265,6 +322,32 @@ export function SaasSourceWizard({
         {/* Step 1: Connector + credentials */}
         {step === "connect" && (
           <div className="space-y-3">
+            {savedCreds.filter((c) => c.connector_type === connector).length > 0 && (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <label className={label}>Use a saved connection (Connected)</label>
+                <select
+                  className={input}
+                  value={credentialId ?? ""}
+                  onChange={(e) =>
+                    setCredentialId(e.target.value ? Number(e.target.value) : null)
+                  }
+                >
+                  <option value="">— Enter new credentials —</option>
+                  {savedCreds
+                    .filter((c) => c.connector_type === connector)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.display_name}
+                      </option>
+                    ))}
+                </select>
+                {credentialId != null && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Using saved credentials — no need to re-enter them.
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <label className={label}>App</label>
               <select
@@ -425,14 +508,14 @@ export function SaasSourceWizard({
             <div className="flex justify-between pt-2">
               <button
                 onClick={handleTest}
-                disabled={busy || !credValid()}
+                disabled={busy || (credentialId == null && !credValid())}
                 className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 {busy ? "Testing..." : "Test Connection"}
               </button>
               <button
                 onClick={handleConnectNext}
-                disabled={busy || !credValid()}
+                disabled={busy || (credentialId == null && !credValid())}
                 className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
               >
                 Next: Choose Object

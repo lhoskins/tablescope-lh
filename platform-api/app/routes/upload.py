@@ -506,6 +506,10 @@ async def replace_file_source(
                     "org_id": str(tenant.id),
                     "user_id": str(user.id),
                     "vdb_type": resolved_vdb_type,
+                    # This is a replace: tell the servlet to overwrite the
+                    # existing view/foreign table instead of returning a 409
+                    # "already exists / requiresConfirmation" conflict.
+                    "replace": "true",
                 },
                 files={
                     "file": (

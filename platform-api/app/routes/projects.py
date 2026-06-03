@@ -192,6 +192,7 @@ async def delete_project(
 @router.get("/{project_id}/datasources")
 async def list_project_datasources(
     project_id: int,
+    include_archived: bool = False,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[dict]:
@@ -199,6 +200,10 @@ async def list_project_datasources(
 
     For private projects: shows the owner's uploaded files.
     For shared projects: shows files in the shared folder.
+
+    When ``include_archived`` is true, archived sources are also returned (each
+    carrying an ``archived`` flag) so the UI can render a single unified
+    "Archived" section for files, databases and SaaS sources alike.
     """
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
@@ -237,11 +242,12 @@ async def list_project_datasources(
                 extension = f.suffix.lstrip(".").upper()
                 view_name = f"{base_name}_{extension}" if extension else base_name
                 meta = meta_by_view.get(view_name)
-                if meta is not None:
-                    if meta.archived:
-                        continue
-                    if meta.project_id != project_id:
-                        continue
+                is_archived = bool(meta and meta.archived)
+                if meta is not None and meta.project_id != project_id:
+                    # Scoped to another project (or personal-only); never here.
+                    continue
+                if is_archived and not include_archived:
+                    continue
                 datasources.append({
                     "fileName": f.name,
                     "viewName": view_name,
@@ -252,19 +258,18 @@ async def list_project_datasources(
                     "projectId": meta.project_id if meta else None,
                     "ownerId": owner_id,
                     "columnTypes": (meta.column_types or []) if meta else [],
+                    "archived": is_archived,
                 })
 
     # Append database-backed data sources registered against this project.
-    db_sources = (
-        await session.scalars(
-            select(DatabaseDataSource).where(
-                DatabaseDataSource.tenant_id == context.tenant_id,
-                DatabaseDataSource.project_id == project_id,
-                DatabaseDataSource.status == "active",
-                DatabaseDataSource.archived.is_(False),
-            )
-        )
-    ).all()
+    db_stmt = select(DatabaseDataSource).where(
+        DatabaseDataSource.tenant_id == context.tenant_id,
+        DatabaseDataSource.project_id == project_id,
+        DatabaseDataSource.status == "active",
+    )
+    if not include_archived:
+        db_stmt = db_stmt.where(DatabaseDataSource.archived.is_(False))
+    db_sources = (await session.scalars(db_stmt)).all()
     for ds in db_sources:
         is_saas = ds.source_type == "saas_object"
         datasources.append({
@@ -275,9 +280,167 @@ async def list_project_datasources(
             "dbType": ds.db_type,
             "connectorType": ds.connector_type,
             "id": ds.id,
+            "ownerId": ds.created_by,
+            "archived": ds.archived,
         })
 
     return datasources
+
+
+def _file_view_name(file_name: str) -> str:
+    """Replicate the Teiid view-name convention for an uploaded file name."""
+    stem = file_name.rsplit(".", 1)[0].replace(" ", "_")
+    ext = file_name.rsplit(".", 1)[-1].upper() if "." in file_name else ""
+    return f"{stem}_{ext}" if ext else stem
+
+
+@router.get("/{project_id}/available-datasources")
+async def list_available_datasources(
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> list[dict]:
+    """List the caller's datasources that are NOT yet in this project.
+
+    Powers the "Add Datasource" modal: the user picks from their existing
+    files / database tables / SaaS objects to associate them with the project
+    (item 2).  Only the caller's own, non-archived sources are offered.
+    """
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    settings = get_settings()
+    uploads_dir = (
+        Path(settings.customer_base_path)
+        / str(tenant.id)
+        / str(context.user_id)
+        / "uploads"
+    )
+
+    meta_rows = (
+        await session.scalars(
+            select(FileSourceMeta).where(
+                FileSourceMeta.tenant_id == context.tenant_id,
+                FileSourceMeta.owner_id == context.user_id,
+            )
+        )
+    ).all()
+    meta_by_view = {m.view_name: m for m in meta_rows}
+
+    available: list[dict] = []
+    if uploads_dir.is_dir():
+        for f in sorted(uploads_dir.iterdir()):
+            if not f.is_file() or f.name.startswith("."):
+                continue
+            view_name = _file_view_name(f.name)
+            meta = meta_by_view.get(view_name)
+            # Only files explicitly scoped elsewhere or personal-only can be
+            # added here.  Files already in this project (or legacy files with
+            # no meta, which already show in every project) are excluded.
+            if meta is None or meta.archived or meta.project_id == project_id:
+                continue
+            extension = f.suffix.lstrip(".").upper()
+            available.append({
+                "kind": "file",
+                "fileName": f.name,
+                "viewName": view_name,
+                "sourceType": extension.lower() or "file",
+                "dbType": None,
+                "connectorType": None,
+            })
+
+    db_sources = (
+        await session.scalars(
+            select(DatabaseDataSource).where(
+                DatabaseDataSource.tenant_id == context.tenant_id,
+                DatabaseDataSource.created_by == context.user_id,
+                DatabaseDataSource.status == "active",
+                DatabaseDataSource.archived.is_(False),
+                or_(
+                    DatabaseDataSource.project_id.is_(None),
+                    DatabaseDataSource.project_id != project_id,
+                ),
+            )
+        )
+    ).all()
+    for ds in db_sources:
+        is_saas = ds.source_type == "saas_object"
+        available.append({
+            "kind": "db",
+            "id": ds.id,
+            "fileName": ds.display_name,
+            "viewName": ds.teiid_view_name,
+            "sourceType": "saas_object" if is_saas else "database_table",
+            "dbType": ds.db_type,
+            "connectorType": ds.connector_type,
+        })
+
+    return available
+
+
+@router.post("/{project_id}/datasources/add")
+async def add_datasources_to_project(
+    project_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Associate existing datasources with a project (item 2).
+
+    Body: ``{"items": [{"kind": "file", "viewName": "..."},
+                        {"kind": "db", "id": 123}]}``.
+    """
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    items = body.get("items") or []
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items must be a list")
+
+    added = 0
+    for item in items:
+        kind = item.get("kind")
+        if kind == "file":
+            view_name = item.get("viewName")
+            if not view_name:
+                continue
+            meta = await session.scalar(
+                select(FileSourceMeta).where(
+                    FileSourceMeta.tenant_id == context.tenant_id,
+                    FileSourceMeta.owner_id == context.user_id,
+                    FileSourceMeta.view_name == view_name,
+                )
+            )
+            if meta is None:
+                meta = FileSourceMeta(
+                    tenant_id=context.tenant_id,
+                    owner_id=context.user_id,
+                    view_name=view_name,
+                    file_name=view_name,
+                )
+                session.add(meta)
+            meta.project_id = project_id
+            added += 1
+        elif kind == "db":
+            ds_id = item.get("id")
+            if ds_id is None:
+                continue
+            ds = await session.get(DatabaseDataSource, int(ds_id))
+            if ds is None or ds.tenant_id != context.tenant_id:
+                continue
+            if ds.created_by != context.user_id and context.role != "admin":
+                continue
+            ds.project_id = project_id
+            added += 1
+
+    await session.commit()
+    return {"status": "ok", "added": added}
 
 
 # ── Project Members ──────────────────────────────────────────────────

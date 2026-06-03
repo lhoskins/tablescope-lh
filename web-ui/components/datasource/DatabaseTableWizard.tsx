@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api-client";
 
 // Connect an external database table as an independent Tablescope data source.
@@ -38,16 +38,30 @@ type Connection = {
 
 type Step = "connection" | "schema" | "table" | "columns";
 
+type SavedConnection = {
+  id: number;
+  name: string;
+  db_type: string;
+  host: string;
+  port: number;
+  database_name: string;
+  username: string;
+  has_password: boolean;
+  ssl_mode: string | null;
+};
+
 export function DatabaseTableWizard({
   projectId,
   onClose,
   onCreated,
   initialDbType = "postgresql",
+  initialConnectionId,
 }: {
   projectId?: number;
   onClose: () => void;
   onCreated: () => void;
   initialDbType?: string;
+  initialConnectionId?: number;
 }) {
   const [step, setStep] = useState<Step>("connection");
   const [conn, setConn] = useState<Connection>({
@@ -71,8 +85,58 @@ export function DatabaseTableWizard({
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [displayName, setDisplayName] = useState("");
 
+  // Item 5: saved connection profiles (reuse credentials without re-entering).
+  const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
+  const [connectionId, setConnectionId] = useState<number | null>(
+    initialConnectionId ?? null,
+  );
+  const [saveConnection, setSaveConnection] = useState(false);
+  const [connectionName, setConnectionName] = useState("");
+
+  function applySavedConnection(c: SavedConnection) {
+    setConnectionId(c.id);
+    setConn({
+      db_type: c.db_type,
+      host: c.host,
+      port: c.port,
+      database_name: c.database_name,
+      username: c.username,
+      password: "",
+      ssl_mode: c.ssl_mode ?? "",
+    });
+  }
+
+  // Load the caller's saved connections; if launched from a saved connection,
+  // pre-fill it and jump straight to schema browsing.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await apiClient.get<SavedConnection[]>(
+          "/api/database-sources/connections",
+        );
+        if (cancelled) return;
+        setSavedConnections(rows);
+        if (initialConnectionId != null) {
+          const match = rows.find((r) => r.id === initialConnectionId);
+          if (match) {
+            applySavedConnection(match);
+            // Browse schemas immediately using the stored credentials.
+            void loadSchemasFor(match);
+          }
+        }
+      } catch {
+        // Non-fatal: the user can still enter credentials manually.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function body(extra: Record<string, unknown> = {}) {
-    return {
+    const b: Record<string, unknown> = {
       db_type: conn.db_type,
       host: conn.host,
       port: conn.port,
@@ -82,6 +146,26 @@ export function DatabaseTableWizard({
       ssl_mode: conn.ssl_mode || null,
       ...extra,
     };
+    if (connectionId != null) b.connection_id = connectionId;
+    return b;
+  }
+
+  async function loadSchemasFor(c: SavedConnection) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiClient.post<{ schemas: string[] }>(
+        "/api/database-sources/schemas",
+        { connection_id: c.id },
+      );
+      setSchemas(res.schemas);
+      setSelectedSchema(res.schemas[0] ?? "");
+      setStep("schema");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load schemas");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleTest() {
@@ -171,6 +255,12 @@ export function DatabaseTableWizard({
           display_name: displayName.trim(),
         }),
         project_id: projectId ?? null,
+        // Persist a reusable connection profile when requested (item 5).
+        save_connection: connectionId == null && saveConnection,
+        connection_name:
+          connectionId == null && saveConnection
+            ? connectionName.trim() || displayName.trim()
+            : null,
       });
       onCreated();
       onClose();
@@ -222,6 +312,37 @@ export function DatabaseTableWizard({
         {/* Step 1: Connection */}
         {step === "connection" && (
           <div className="space-y-3">
+            {savedConnections.length > 0 && (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <label className={label}>Use a saved connection (Connected)</label>
+                <select
+                  className={input}
+                  value={connectionId ?? ""}
+                  onChange={(e) => {
+                    if (!e.target.value) {
+                      setConnectionId(null);
+                      return;
+                    }
+                    const c = savedConnections.find(
+                      (s) => s.id === Number(e.target.value),
+                    );
+                    if (c) applySavedConnection(c);
+                  }}
+                >
+                  <option value="">— Enter new credentials —</option>
+                  {savedConnections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.db_type} · {c.host}/{c.database_name})
+                    </option>
+                  ))}
+                </select>
+                {connectionId != null && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Using saved credentials — no need to re-enter the password.
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <label className={label}>Database Type</label>
               <select
@@ -426,6 +547,27 @@ export function DatabaseTableWizard({
                 </table>
               </div>
             </div>
+            {connectionId == null && (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={saveConnection}
+                    onChange={(e) => setSaveConnection(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-brand"
+                  />
+                  Save this connection for reuse (skip re-entering credentials)
+                </label>
+                {saveConnection && (
+                  <input
+                    className={`${input} mt-2`}
+                    value={connectionName}
+                    onChange={(e) => setConnectionName(e.target.value)}
+                    placeholder="Connection name (e.g. Sales Postgres DB)"
+                  />
+                )}
+              </div>
+            )}
             <div className="flex justify-between pt-2">
               <button
                 onClick={() => setStep("table")}

@@ -24,6 +24,7 @@ from starlette.concurrency import run_in_threadpool
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
+from app.models.database_connection import DatabaseConnection
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.project import Project
 from app.models.user_vdb import UserVDB
@@ -31,6 +32,8 @@ from app.schemas.database_source import (
     ColumnRequest,
     ColumnsResponse,
     CreateDatabaseSourceRequest,
+    SaveConnectionRequest,
+    SavedConnectionRead,
     SchemaRequest,
     SchemasResponse,
     TableRequest,
@@ -38,7 +41,7 @@ from app.schemas.database_source import (
     TestConnectionResponse,
 )
 from app.services import database_introspection_service as intro
-from app.services.crypto import encrypt_secret
+from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.database_introspection_service import (
     ConnectionParams,
     DatabaseIntrospectionError,
@@ -57,23 +60,58 @@ router = APIRouter(prefix="/database-sources", tags=["database-sources"])
 
 def _params(body) -> ConnectionParams:
     return ConnectionParams(
-        db_type=body.db_type,
-        host=body.host,
+        db_type=body.db_type or "",
+        host=body.host or "",
         port=body.port,
-        database_name=body.database_name,
-        username=body.username,
-        password=body.password,
+        database_name=body.database_name or "",
+        username=body.username or "",
+        password=body.password or "",
         ssl_mode=getattr(body, "ssl_mode", None),
+    )
+
+
+async def _resolve_params(
+    body, session: AsyncSession, context: RequestContext
+) -> ConnectionParams:
+    """Build :class:`ConnectionParams` from the request.
+
+    If ``connection_id`` is set, load the saved connection profile (scoped to
+    the caller's tenant) and use its stored, decrypted credentials.  Inline
+    fields on the body override the saved values when provided (e.g. a new
+    password), which keeps the wizard flexible.
+    """
+    conn_id = getattr(body, "connection_id", None)
+    if conn_id is None:
+        return _params(body)
+
+    conn = await session.get(DatabaseConnection, conn_id)
+    if conn is None or conn.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Saved connection not found")
+
+    password = body.password
+    if not password and conn.password_encrypted:
+        password = decrypt_secret(conn.password_encrypted)
+
+    return ConnectionParams(
+        db_type=body.db_type or conn.db_type,
+        host=body.host or conn.host,
+        port=body.port or conn.port,
+        database_name=body.database_name or conn.database_name,
+        username=body.username or conn.username,
+        password=password or "",
+        ssl_mode=body.ssl_mode or conn.ssl_mode,
     )
 
 
 @router.post("/test", response_model=TestConnectionResponse)
 async def test_connection(
     body: SchemaRequest,
+    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> TestConnectionResponse:
+    params = await _resolve_params(body, session, context)
     try:
-        await run_in_threadpool(intro.test_connection, _params(body))
+        await run_in_threadpool(intro.test_connection, params)
     except DatabaseIntrospectionError as exc:
         return TestConnectionResponse(success=False, message=str(exc))
     return TestConnectionResponse(success=True, message="Connection successful")
@@ -82,10 +120,12 @@ async def test_connection(
 @router.post("/schemas", response_model=SchemasResponse)
 async def list_schemas(
     body: SchemaRequest,
+    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> SchemasResponse:
+    params = await _resolve_params(body, session, context)
     try:
-        schemas = await run_in_threadpool(intro.list_schemas, _params(body))
+        schemas = await run_in_threadpool(intro.list_schemas, params)
     except DatabaseIntrospectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return SchemasResponse(schemas=schemas)
@@ -94,11 +134,13 @@ async def list_schemas(
 @router.post("/tables", response_model=TablesResponse)
 async def list_tables(
     body: TableRequest,
+    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> TablesResponse:
+    params = await _resolve_params(body, session, context)
     try:
         tables = await run_in_threadpool(
-            intro.list_tables, _params(body), body.schema_name
+            intro.list_tables, params, body.schema_name
         )
     except DatabaseIntrospectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -108,15 +150,83 @@ async def list_tables(
 @router.post("/columns", response_model=ColumnsResponse)
 async def list_columns(
     body: ColumnRequest,
+    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> ColumnsResponse:
+    params = await _resolve_params(body, session, context)
     try:
         columns = await run_in_threadpool(
-            intro.list_columns, _params(body), body.schema_name, body.table_name
+            intro.list_columns, params, body.schema_name, body.table_name
         )
     except DatabaseIntrospectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ColumnsResponse(columns=columns)
+
+
+# ── Saved connection profiles (item 5) ──────────────────────────────
+
+
+@router.get("/connections", response_model=list[SavedConnectionRead])
+async def list_saved_connections(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> list[SavedConnectionRead]:
+    rows = (
+        await session.scalars(
+            select(DatabaseConnection).where(
+                DatabaseConnection.tenant_id == context.tenant_id,
+                DatabaseConnection.created_by == context.user_id,
+            )
+        )
+    ).all()
+    return [SavedConnectionRead(**r.to_dict()) for r in rows]
+
+
+@router.post("/connections", response_model=SavedConnectionRead)
+async def create_saved_connection(
+    body: SaveConnectionRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> SavedConnectionRead:
+    params = await _resolve_params(body, session, context)
+    try:
+        intro.get_db_type_config(params.db_type)
+        await run_in_threadpool(intro.test_connection, params)
+    except DatabaseIntrospectionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    conn = DatabaseConnection(
+        tenant_id=context.tenant_id,
+        created_by=context.user_id,
+        name=body.name,
+        db_type=params.db_type,
+        host=params.host,
+        port=params.resolved_port,
+        database_name=params.database_name,
+        username=params.username,
+        password_encrypted=encrypt_secret(params.password) if params.password else None,
+        ssl_mode=params.ssl_mode,
+    )
+    session.add(conn)
+    await session.commit()
+    await session.refresh(conn)
+    return SavedConnectionRead(**conn.to_dict())
+
+
+@router.delete("/connections/{connection_id}")
+async def delete_saved_connection(
+    connection_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    conn = await session.get(DatabaseConnection, connection_id)
+    if conn is None or conn.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Saved connection not found")
+    if conn.created_by != context.user_id and context.role != "admin":
+        raise HTTPException(status_code=403, detail="Not allowed to delete this connection")
+    await session.delete(conn)
+    await session.commit()
+    return {"status": "deleted", "id": connection_id}
 
 
 @router.post("")
@@ -126,13 +236,14 @@ async def create_database_source(
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict:
     """Validate, introspect, encrypt, persist, register in Teiid."""
+    # Resolve credentials (inline or from a saved connection profile).
+    params = await _resolve_params(body, session, context)
+
     # 1. Validate db type early (clear error for unsupported types).
     try:
-        intro.get_db_type_config(body.db_type)
+        intro.get_db_type_config(params.db_type)
     except DatabaseIntrospectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    params = _params(body)
 
     # 2. Test connection.
     try:
@@ -181,22 +292,52 @@ async def create_database_source(
             detail=f"A data source named '{body.display_name}' already exists.",
         )
 
-    # 4. Encrypt password + persist row (draft).
+    # 4. Optionally persist a reusable connection profile (item 5).
+    if body.save_connection:
+        existing_conn = await session.scalar(
+            select(DatabaseConnection).where(
+                DatabaseConnection.tenant_id == context.tenant_id,
+                DatabaseConnection.created_by == context.user_id,
+                DatabaseConnection.host == params.host,
+                DatabaseConnection.port == params.resolved_port,
+                DatabaseConnection.database_name == params.database_name,
+                DatabaseConnection.username == params.username,
+            )
+        )
+        if existing_conn is None:
+            session.add(
+                DatabaseConnection(
+                    tenant_id=context.tenant_id,
+                    created_by=context.user_id,
+                    name=body.connection_name or body.display_name,
+                    db_type=params.db_type,
+                    host=params.host,
+                    port=params.resolved_port,
+                    database_name=params.database_name,
+                    username=params.username,
+                    password_encrypted=encrypt_secret(params.password)
+                    if params.password
+                    else None,
+                    ssl_mode=params.ssl_mode,
+                )
+            )
+
+    # 5. Encrypt password + persist row (draft).
     ds = DatabaseDataSource(
         tenant_id=context.tenant_id,
         project_id=body.project_id,
         created_by=context.user_id,
         display_name=body.display_name,
         source_type="database_table",
-        db_type=body.db_type,
-        host=body.host,
+        db_type=params.db_type,
+        host=params.host,
         port=params.resolved_port,
-        database_name=body.database_name,
+        database_name=params.database_name,
         schema_name=body.schema_name,
         table_name=body.table_name,
-        username=body.username,
-        password_encrypted=encrypt_secret(body.password),
-        ssl_mode=body.ssl_mode,
+        username=params.username,
+        password_encrypted=encrypt_secret(params.password) if params.password else None,
+        ssl_mode=params.ssl_mode,
         teiid_model_name="",
         teiid_table_name="",
         teiid_view_name="",
@@ -210,10 +351,10 @@ async def create_database_source(
     await session.flush()  # assign ds.id
 
     names = generate_teiid_names(
-        data_source_id=ds.id, db_type=body.db_type, table_name=body.table_name
+        data_source_id=ds.id, db_type=params.db_type, table_name=body.table_name
     )
     view_name = generate_view_name(
-        display_name=body.display_name, db_type=body.db_type
+        display_name=body.display_name, db_type=params.db_type
     )
     ds.teiid_model_name = names["model_name"]
     ds.teiid_table_name = names["teiid_table_name"]
@@ -248,16 +389,16 @@ async def create_database_source(
             vdb_id=user_vdb.vdb_id,
             org_id=context.tenant_id,
             user_id=context.user_id,
-            db_type=body.db_type,
-            host=body.host,
+            db_type=params.db_type,
+            host=params.host,
             port=params.resolved_port,
-            database_name=body.database_name,
-            schema_name=intro.source_identifier(body.db_type, body.schema_name),
-            table_name=intro.source_identifier(body.db_type, body.table_name)
+            database_name=params.database_name,
+            schema_name=intro.source_identifier(params.db_type, body.schema_name),
+            table_name=intro.source_identifier(params.db_type, body.table_name)
             or body.table_name,
-            username=body.username,
-            password=body.password,
-            ssl_mode=body.ssl_mode,
+            username=params.username,
+            password=params.password,
+            ssl_mode=params.ssl_mode,
             model_name=names["model_name"],
             teiid_table_name=names["teiid_table_name"],
             jndi_name=names["jndi_name"],

@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
 import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
-import { FileDropzone } from "@/components/upload/FileDropzone";
+import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 import { TablescopeDataGrid } from "@/components/data-grid/TablescopeDataGrid";
 
@@ -75,6 +75,7 @@ type Datasource = {
   ownerId?: number | null;
   fileMetaId?: number | null;
   projectId?: number | null;
+  archived?: boolean;
   columnTypes?: ColumnType[];
 };
 
@@ -150,6 +151,101 @@ function quoteField(qualified: string): string {
   return `"${qualified.slice(0, idx)}"."${qualified.slice(idx + 1)}"`;
 }
 
+// Normalize a `"ds"."col"` (or bare) token into the unquoted `ds.col` form.
+function unquoteField(tok: string): string {
+  return tok
+    .trim()
+    .split(".")
+    .map((p) => p.trim().replace(/^"|"$/g, ""))
+    .join(".");
+}
+
+type Filter = { column: string; operand: string; value: string };
+type OrderByItem = { column: string; dir: string };
+
+// Best-effort parsers so the visual controls pre-populate from saved SQL.
+function parseWhere(sql: string): Filter[] {
+  const m = /\swhere\s+([\s\S]*?)(?:\s+group\s+by\s|\s+order\s+by\s|\s*$)/i.exec(sql);
+  if (!m) return [];
+  return m[1]
+    .split(/\s+and\s+/i)
+    .map((clause) => {
+      const inM = /^\s*("?[\w.]+"?(?:\."?[\w]+"?)?)\s+in\s*\((.*)\)\s*$/i.exec(clause);
+      if (inM) {
+        const vals = inM[2]
+          .split(",")
+          .map((v) => v.trim().replace(/^'|'$/g, ""))
+          .join(", ");
+        return { column: unquoteField(inM[1]), operand: "IN", value: vals };
+      }
+      const opM = /^\s*("?[\w.]+"?(?:\."?[\w]+"?)?)\s*(>=|<=|!=|=|>|<|like)\s*(.+?)\s*$/i.exec(
+        clause,
+      );
+      if (!opM) return null;
+      return {
+        column: unquoteField(opM[1]),
+        operand: opM[2].toUpperCase(),
+        value: opM[3].trim().replace(/^'|'$/g, ""),
+      };
+    })
+    .filter((f): f is Filter => f !== null && !!f.column);
+}
+
+function parseGroupBy(sql: string): string[] {
+  const m = /\sgroup\s+by\s+([\s\S]*?)(?:\s+order\s+by\s|\s+having\s|\s*$)/i.exec(sql);
+  if (!m) return [];
+  return m[1]
+    .split(",")
+    .map((t) => unquoteField(t))
+    .filter(Boolean);
+}
+
+function parseOrderBy(sql: string): OrderByItem[] {
+  const m = /\sorder\s+by\s+([\s\S]*?)\s*$/i.exec(sql);
+  if (!m) return [];
+  return m[1]
+    .split(",")
+    .map((t) => {
+      const parts = t.trim().split(/\s+/);
+      const dir = /^(asc|desc)$/i.test(parts[parts.length - 1] ?? "")
+        ? parts.pop()!.toUpperCase()
+        : "ASC";
+      return { column: unquoteField(parts.join(" ")), dir };
+    })
+    .filter((o) => !!o.column);
+}
+
+// Build the trailing WHERE / GROUP BY / ORDER BY clauses from visual controls.
+function buildClauses(
+  filters: Filter[],
+  groupBy: string[],
+  orderBy: OrderByItem[],
+): string {
+  let out = "";
+  const where = filters
+    .filter((f) => f.column && f.operand && f.value)
+    .map((f) => {
+      const col = quoteField(f.column);
+      if (f.operand === "IN") {
+        const vals = f.value
+          .split(",")
+          .map((v) => `'${v.trim()}'`)
+          .join(", ");
+        return `${col} IN (${vals})`;
+      }
+      if (f.operand === "LIKE") return `${col} LIKE '${f.value}'`;
+      return `${col} ${f.operand} '${f.value}'`;
+    });
+  if (where.length > 0) out += " WHERE " + where.join(" AND ");
+  const groups = groupBy.filter(Boolean).map(quoteField);
+  if (groups.length > 0) out += " GROUP BY " + groups.join(", ");
+  const orders = orderBy
+    .filter((o) => o.column)
+    .map((o) => `${quoteField(o.column)} ${o.dir}`);
+  if (orders.length > 0) out += " ORDER BY " + orders.join(", ");
+  return out;
+}
+
 // ── Edit Query Form ─────────────────────────────────────────────────
 
 function EditQueryForm({
@@ -191,6 +287,10 @@ function EditQueryForm({
   const [selectedFields, setSelectedFields] = useState<string[]>(() =>
     parseSelectedFields(savedSql),
   );
+  // WHERE / GROUP BY / ORDER BY builder controls (item 4).
+  const [filters, setFilters] = useState<Filter[]>(() => parseWhere(savedSql));
+  const [groupBy, setGroupBy] = useState<string[]>(() => parseGroupBy(savedSql));
+  const [orderBy, setOrderBy] = useState<OrderByItem[]>(() => parseOrderBy(savedSql));
   // Execute-in-editor state (parity with the Create Query flow).
   const [execResult, setExecResult] = useState<QueryResult | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
@@ -246,12 +346,22 @@ function EditQueryForm({
         ? selectedFields.filter((f) => allFields.includes(f))
         : selectedFields;
     const cols = liveFields.length === 0 ? "*" : liveFields.map(quoteField).join(", ");
-    if (!showJoin || !rightDs) return `SELECT ${cols} FROM ${l}`;
-    const r = `"${rightDs}"`;
-    if (jt === "CROSS JOIN") return `SELECT ${cols} FROM ${l} ${jt} ${r}`;
-    if (!lc || !rc) return "";
-    return `SELECT ${cols} FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
-  }, [leftDs, rightDs, jt, lc, rc, showJoin, selectedFields, allFields]);
+    const tail = buildClauses(filters, groupBy, orderBy);
+    let base: string;
+    if (!showJoin || !rightDs) {
+      base = `SELECT ${cols} FROM ${l}`;
+    } else {
+      const r = `"${rightDs}"`;
+      if (jt === "CROSS JOIN") {
+        base = `SELECT ${cols} FROM ${l} ${jt} ${r}`;
+      } else if (lc && rc) {
+        base = `SELECT ${cols} FROM ${l} ${jt} ${r} ON ${l}."${lc}" = ${r}."${rc}"`;
+      } else {
+        return "";
+      }
+    }
+    return base + tail;
+  }, [leftDs, rightDs, jt, lc, rc, showJoin, selectedFields, allFields, filters, groupBy, orderBy]);
 
   // Before the user edits visual params, prefer the explicit saved SQL so the
   // editor shows the real query (with selected fields), not a regenerated
@@ -462,6 +572,151 @@ function EditQueryForm({
           )}
         </div>
       )}
+
+      {/* Filters (WHERE) */}
+      {leftDs && (
+        <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700">Filters</span>
+            <button
+              type="button"
+              onClick={() => { markDirty(); setFilters((p) => [...p, { column: "", operand: "=", value: "" }]); }}
+              className="text-xs text-blue-600 hover:text-blue-800"
+            >
+              + Add Filter
+            </button>
+          </div>
+          {filters.length === 0 && (
+            <p className="text-xs text-slate-400">No filters. Add a WHERE condition.</p>
+          )}
+          {filters.map((f, idx) => (
+            <div key={idx} className="mb-2 flex items-center gap-2">
+              <select
+                value={f.column}
+                onChange={(e) => { markDirty(); setFilters((p) => p.map((x, i) => i === idx ? { ...x, column: e.target.value } : x)); }}
+                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">Column...</option>
+                {allFields.map((c) => (
+                  <option key={c} value={c}>{c.split(".")[1]}{showJoin && rightDs ? ` (${c.split(".")[0]})` : ""}</option>
+                ))}
+              </select>
+              <select
+                value={f.operand}
+                onChange={(e) => { markDirty(); setFilters((p) => p.map((x, i) => i === idx ? { ...x, operand: e.target.value } : x)); }}
+                className="w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                {["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN"].map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={f.value}
+                onChange={(e) => { markDirty(); setFilters((p) => p.map((x, i) => i === idx ? { ...x, value: e.target.value } : x)); }}
+                placeholder={f.operand === "IN" ? "val1, val2, ..." : "Value"}
+                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => { markDirty(); setFilters((p) => p.filter((_, i) => i !== idx)); }}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Group By */}
+      {leftDs && (
+        <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700">Group By</span>
+            <button
+              type="button"
+              onClick={() => { markDirty(); setGroupBy((p) => [...p, ""]); }}
+              className="text-xs text-blue-600 hover:text-blue-800"
+            >
+              + Group By
+            </button>
+          </div>
+          {groupBy.length === 0 && (
+            <p className="text-xs text-slate-400">No grouping.</p>
+          )}
+          {groupBy.map((g, idx) => (
+            <div key={idx} className="mb-2 flex items-center gap-2">
+              <select
+                value={g}
+                onChange={(e) => { markDirty(); setGroupBy((p) => p.map((x, i) => i === idx ? e.target.value : x)); }}
+                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">Column...</option>
+                {allFields.map((c) => (
+                  <option key={c} value={c}>{c.split(".")[1]}{showJoin && rightDs ? ` (${c.split(".")[0]})` : ""}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => { markDirty(); setGroupBy((p) => p.filter((_, i) => i !== idx)); }}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Order By */}
+      {leftDs && (
+        <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700">Order By</span>
+            <button
+              type="button"
+              onClick={() => { markDirty(); setOrderBy((p) => [...p, { column: "", dir: "ASC" }]); }}
+              className="text-xs text-blue-600 hover:text-blue-800"
+            >
+              + Order By
+            </button>
+          </div>
+          {orderBy.length === 0 && (
+            <p className="text-xs text-slate-400">No ordering.</p>
+          )}
+          {orderBy.map((o, idx) => (
+            <div key={idx} className="mb-2 flex items-center gap-2">
+              <select
+                value={o.column}
+                onChange={(e) => { markDirty(); setOrderBy((p) => p.map((x, i) => i === idx ? { ...x, column: e.target.value } : x)); }}
+                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">Column...</option>
+                {allFields.map((c) => (
+                  <option key={c} value={c}>{c.split(".")[1]}{showJoin && rightDs ? ` (${c.split(".")[0]})` : ""}</option>
+                ))}
+              </select>
+              <select
+                value={o.dir}
+                onChange={(e) => { markDirty(); setOrderBy((p) => p.map((x, i) => i === idx ? { ...x, dir: e.target.value } : x)); }}
+                className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="ASC">Ascending</option>
+                <option value="DESC">Descending</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => { markDirty(); setOrderBy((p) => p.filter((_, i) => i !== idx)); }}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="mb-3">
         <div className="flex items-center justify-between mb-1">
           <label className="block text-xs font-medium text-slate-600">SQL</label>
@@ -610,6 +865,15 @@ export default function ProjectWorkspacePage() {
   const datasourcesQuery = useQuery<Datasource[]>({
     queryKey: ["project-datasources", projectId],
     queryFn: () => apiClient.get<Datasource[]>(`/api/projects/${projectId}/datasources`),
+  });
+
+  // Archived sources (files + DB + SaaS) for the unified "Archived" section.
+  const archivedDsQuery = useQuery<Datasource[]>({
+    queryKey: ["project-datasources", projectId, "archived"],
+    queryFn: () =>
+      apiClient.get<Datasource[]>(
+        `/api/projects/${projectId}/datasources?include_archived=true`,
+      ),
   });
 
   const queriesQuery = useQuery<SavedQuery[]>({
@@ -824,40 +1088,7 @@ export default function ProjectWorkspacePage() {
   }, [activeDsName]);
 
   const [dsActionError, setDsActionError] = useState<string | null>(null);
-
-  const archiveDatasource = useCallback(
-    async (ds: Datasource, archived: boolean) => {
-      if (ds.id == null) return;
-      setDsActionError(null);
-      try {
-        await apiClient.patch(
-          `/api/database-sources/${ds.id}/archive?archived=${archived}`,
-          {},
-        );
-        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
-      } catch (err) {
-        setDsActionError((err as Error).message);
-      }
-    },
-    [queryClient, projectId],
-  );
-
-  const deleteDatasource = useCallback(
-    async (ds: Datasource) => {
-      if (ds.id == null) return;
-      if (!window.confirm(`Permanently delete "${ds.fileName}"? This cannot be undone.`)) {
-        return;
-      }
-      setDsActionError(null);
-      try {
-        await apiClient.delete(`/api/database-sources/${ds.id}`);
-        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
-      } catch (err) {
-        setDsActionError((err as Error).message);
-      }
-    },
-    [queryClient, projectId],
-  );
+  const [showAddDs, setShowAddDs] = useState(false);
 
   // ── File data source actions (item 1 archive, item 3 project link) ──
   const isFileSource = useCallback(
@@ -881,14 +1112,69 @@ export default function ProjectWorkspacePage() {
     [queryClient, projectId],
   );
 
-  const archiveFileSource = useCallback(
+  // ── Unified archive / restore / delete (item 3) ──────────────────
+  // Files, databases and SaaS sources all archive into one place with the
+  // same rule: Delete only becomes available once a source is archived.
+  const archiveSource = useCallback(
     async (ds: Datasource) => {
       setDsActionError(null);
       try {
-        await apiClient.patch(
-          `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/archive?archived=true`,
-          {},
-        );
+        if (ds.id != null) {
+          await apiClient.patch(
+            `/api/database-sources/${ds.id}/archive?archived=true`,
+            {},
+          );
+        } else {
+          await apiClient.patch(
+            `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/archive?archived=true`,
+            {},
+          );
+        }
+        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+      } catch (err) {
+        setDsActionError((err as Error).message);
+      }
+    },
+    [queryClient, projectId],
+  );
+
+  const restoreSource = useCallback(
+    async (ds: Datasource) => {
+      setDsActionError(null);
+      try {
+        if (ds.id != null) {
+          await apiClient.patch(
+            `/api/database-sources/${ds.id}/archive?archived=false`,
+            {},
+          );
+        } else {
+          await apiClient.patch(
+            `/api/upload/datasources/${encodeURIComponent(ds.viewName)}/archive?archived=false`,
+            {},
+          );
+        }
+        queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+      } catch (err) {
+        setDsActionError((err as Error).message);
+      }
+    },
+    [queryClient, projectId],
+  );
+
+  const deleteSource = useCallback(
+    async (ds: Datasource) => {
+      if (!window.confirm(`Permanently delete "${ds.fileName}"? This cannot be undone.`)) {
+        return;
+      }
+      setDsActionError(null);
+      try {
+        if (ds.id != null) {
+          await apiClient.delete(`/api/database-sources/${ds.id}`);
+        } else {
+          await apiClient.delete(
+            `/api/upload/datasources/${encodeURIComponent(ds.viewName)}`,
+          );
+        }
         queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
       } catch (err) {
         setDsActionError((err as Error).message);
@@ -1164,20 +1450,30 @@ export default function ProjectWorkspacePage() {
       {activeTab === "datasources" && (
         <div>
           {canEdit && (
-            <div className="mb-4 space-y-3">
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowAddDs(true)}
+                className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90"
+              >
+                + Add Datasource
+              </button>
               <ConnectorsMenu
                 projectId={projectId}
                 onCreated={() =>
                   queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
                 }
               />
-              <FileDropzone
-                projectId={projectId}
-                onUploaded={() =>
-                  queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
-                }
-              />
             </div>
+          )}
+          {showAddDs && (
+            <AddDatasourceModal
+              projectId={projectId}
+              onClose={() => setShowAddDs(false)}
+              onAdded={() =>
+                queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] })
+              }
+            />
           )}
           {replaceMsg && <p className="mb-2 text-sm text-green-600">{replaceMsg}</p>}
           {datasourcesQuery.isLoading && <p className="text-sm text-slate-500">Loading datasources...</p>}
@@ -1237,42 +1533,22 @@ export default function ProjectWorkspacePage() {
                     <span className="text-xs text-slate-400">
                       {activeDsName === ds.viewName ? "Click to hide" : "Click to view"}
                     </span>
-                    {canEdit && ds.id != null && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); archiveDatasource(ds, true); }}
-                          className="text-xs font-medium text-slate-500 hover:text-slate-800"
-                          title="Archive (hide from project; can be deleted later)"
-                        >
-                          Archive
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); deleteDatasource(ds); }}
-                          className="text-xs font-medium text-red-500 hover:text-red-700"
-                          title="Delete (archive first; blocked if a query depends on it)"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
-                    {canEdit && isFileSource(ds) && ds.projectId != null && (
+                    {canEdit && isFileSource(ds) && (
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); removeFileFromProject(ds); }}
                         className="text-xs font-medium text-slate-500 hover:text-slate-800"
-                        title="Remove this file from the project (keeps the file in your personal datasources)"
+                        title="Remove this datasource from the project (keeps it in your personal datasources)"
                       >
                         Remove
                       </button>
                     )}
-                    {canEdit && isFileSource(ds) && (
+                    {canEdit && (
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); archiveFileSource(ds); }}
-                        className="text-xs font-medium text-red-500 hover:text-red-700"
-                        title="Archive this file source"
+                        onClick={(e) => { e.stopPropagation(); archiveSource(ds); }}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                        title="Archive (hide from project; delete becomes available once archived)"
                       >
                         Archive
                       </button>
@@ -1285,6 +1561,57 @@ export default function ProjectWorkspacePage() {
           {dsActionError && (
             <p className="mt-2 text-sm text-red-600">{dsActionError}</p>
           )}
+
+          {/* Unified Archived section (files + databases + SaaS) — item 3 */}
+          {(() => {
+            const archivedSources = (archivedDsQuery.data ?? []).filter(
+              (d) => d.archived,
+            );
+            if (archivedSources.length === 0) return null;
+            return (
+              <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-slate-600">
+                  Archived ({archivedSources.length})
+                </summary>
+                <p className="mt-1 mb-2 text-xs text-slate-400">
+                  Files, databases and SaaS sources archive here. Delete is only
+                  available after archiving and is blocked while a saved query
+                  depends on the source.
+                </p>
+                <div className="mt-2 grid gap-2">
+                  {archivedSources.map((ds) => (
+                    <div
+                      key={ds.viewName}
+                      className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-600">{ds.fileName}</span>
+                        <SourceBadge ds={ds} />
+                      </div>
+                      {canEdit && (
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => restoreSource(ds)}
+                            className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                          >
+                            Restore
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteSource(ds)}
+                            className="text-xs font-medium text-red-500 hover:text-red-700"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            );
+          })()}
 
           {/* Datasource data view */}
           {dsLoading && <p className="mt-4 text-sm text-slate-500">Loading data...</p>}

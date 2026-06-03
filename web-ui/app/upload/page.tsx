@@ -107,6 +107,46 @@ export default function UploadPage() {
     (d) => d.id == null && d.archived,
   );
 
+  // Unified archived list (files + databases + SaaS) so they live under one
+  // category with the same Restore / Delete actions (item 3).
+  type ArchivedItem = {
+    key: string;
+    label: string;
+    kind: "file" | "db";
+    viewName?: string;
+    id?: number;
+  };
+  const archivedAll: ArchivedItem[] = [
+    ...archivedFiles.map((f) => ({
+      key: `file:${f.viewName}`,
+      label: f.fileName,
+      kind: "file" as const,
+      viewName: f.viewName,
+    })),
+    ...archived.map((d) => ({
+      key: `db:${d.id}`,
+      label: d.display_name,
+      kind: "db" as const,
+      id: d.id,
+    })),
+  ];
+
+  async function restoreArchived(item: ArchivedItem) {
+    if (item.kind === "file" && item.viewName) {
+      await setFileArchived(item.viewName, false);
+    } else if (item.kind === "db" && item.id != null) {
+      await setArchivedById(item.id, false);
+    }
+  }
+
+  async function deleteArchived(item: ArchivedItem) {
+    if (item.kind === "file" && item.viewName) {
+      await deleteFile(item.viewName, item.label);
+    } else if (item.kind === "db" && item.id != null) {
+      await deleteById(item.id, item.label);
+    }
+  }
+
   const [actionError, setActionError] = useState<string | null>(null);
 
   async function setFileArchived(viewName: string, archivedFlag: boolean) {
@@ -176,12 +216,6 @@ export default function UploadPage() {
     } catch (err) {
       setActionError((err as Error).message);
     }
-  }
-
-  async function deleteDatasource(ds: Datasource) {
-    if (ds.id == null) return;
-    await deleteById(ds.id, ds.fileName);
-    if (selectedDatasource?.viewName === ds.viewName) setSelectedDatasource(null);
   }
 
   async function setArchivedById(id: number, archived: boolean) {
@@ -334,99 +368,52 @@ export default function UploadPage() {
                       {(ds.size / 1024).toFixed(1)} KB
                     </span>
                   )}
-                  {ds.id != null && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => archiveDatasource(ds, true)}
-                        className="text-xs font-medium text-slate-500 hover:text-slate-800"
-                        title="Archive (hide from list; can be deleted later)"
-                      >
-                        Archive
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteDatasource(ds)}
-                        className="text-xs font-medium text-red-500 hover:text-red-700"
-                        title="Delete (archive first; blocked if a query depends on it)"
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                  {ds.id == null && (
-                    <button
-                      type="button"
-                      onClick={() => setFileArchived(ds.viewName, true)}
-                      className="text-xs font-medium text-slate-500 hover:text-slate-800"
-                      title="Archive (hide from list; can be deleted later)"
-                    >
-                      Archive
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      ds.id != null
+                        ? archiveDatasource(ds, true)
+                        : setFileArchived(ds.viewName, true)
+                    }
+                    className="text-xs font-medium text-slate-500 hover:text-slate-800"
+                    title="Archive (hide from list; delete becomes available once archived)"
+                  >
+                    Archive
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {archived.length > 0 && (
+        {archivedAll.length > 0 && (
           <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
             <summary className="cursor-pointer text-sm font-medium text-slate-600">
-              Archived ({archived.length})
+              Archived ({archivedAll.length})
             </summary>
+            <p className="mt-1 mb-2 text-xs text-slate-400">
+              Files, databases and SaaS sources archive here. Delete is only
+              available after archiving and is blocked while a saved query
+              depends on the source.
+            </p>
             <div className="mt-2 grid gap-2">
-              {archived.map((d) => (
+              {archivedAll.map((item) => (
                 <div
-                  key={d.id}
+                  key={item.key}
                   className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2"
                 >
-                  <span className="text-sm text-slate-600">{d.display_name}</span>
+                  <span className="text-sm text-slate-600">{item.label}</span>
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => setArchivedById(d.id, false)}
+                      onClick={() => restoreArchived(item)}
                       className="text-xs font-medium text-blue-600 hover:text-blue-800"
                     >
                       Restore
                     </button>
                     <button
                       type="button"
-                      onClick={() => deleteById(d.id, d.display_name)}
-                      className="text-xs font-medium text-red-500 hover:text-red-700"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-
-        {archivedFiles.length > 0 && (
-          <details className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-            <summary className="cursor-pointer text-sm font-medium text-slate-600">
-              Archived files ({archivedFiles.length})
-            </summary>
-            <div className="mt-2 grid gap-2">
-              {archivedFiles.map((d) => (
-                <div
-                  key={d.viewName}
-                  className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2"
-                >
-                  <span className="text-sm text-slate-600">{d.fileName}</span>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setFileArchived(d.viewName, false)}
-                      className="text-xs font-medium text-blue-600 hover:text-blue-800"
-                    >
-                      Restore
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteFile(d.viewName, d.fileName)}
+                      onClick={() => deleteArchived(item)}
                       className="text-xs font-medium text-red-500 hover:text-red-700"
                     >
                       Delete
