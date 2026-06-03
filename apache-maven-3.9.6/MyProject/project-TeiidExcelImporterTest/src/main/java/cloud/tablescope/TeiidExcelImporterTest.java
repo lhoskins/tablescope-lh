@@ -307,7 +307,8 @@ public class TeiidExcelImporterTest extends HttpServlet {
         String fileExtension = fileName.substring(fileName.lastIndexOf('.') + 1);
         String fileNameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.'));
         String viewName = fileNameWithoutExt.replaceAll("\\s+", "_") + "_" + fileExtension.toUpperCase();
-        boolean viewExists = vdbContent.contains("CREATE VIEW " + viewName);
+        boolean viewExists = vdbContent.contains("CREATE VIEW " + viewName)
+                || vdbContent.contains("CREATE VIEW \"" + viewName + "\"");
         
         if (viewExists && !shouldReplace) {
             // Return conflict status with HTTP 409
@@ -458,7 +459,7 @@ private void processExcelFileFromDiskInternal(String filePath, String fileName, 
             System.out.println("[TeiidExcelImporterTest] File validated successfully at: " + fullFilePath);
             
             StringBuilder foreignTableBlock = new StringBuilder();
-            foreignTableBlock.append("CREATE FOREIGN TABLE ").append(fileNameWithoutExtension.replaceAll("\\s+", "_")).append("(\n");
+            foreignTableBlock.append("CREATE FOREIGN TABLE \"").append(fileNameWithoutExtension.replaceAll("\\s+", "_")).append("\"(\n");
             foreignTableBlock.append("\tROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', \"teiid_excel:CELL_NUMBER\" 'ROW_ID'),\n");
             for (int i = 0; i < columnNames.size(); i++) {
                 String columnName = columnNames.get(i);
@@ -476,7 +477,8 @@ private void processExcelFileFromDiskInternal(String filePath, String fileName, 
 
             // Check if foreign table already exists
             String normalizedTableName = fileNameWithoutExtension.replaceAll("\\s+", "_");
-            boolean foreignTableExists = vdbContent.contains("CREATE FOREIGN TABLE " + normalizedTableName);
+            boolean foreignTableExists = vdbContent.contains("CREATE FOREIGN TABLE " + normalizedTableName)
+                    || vdbContent.contains("CREATE FOREIGN TABLE \"" + normalizedTableName + "\"");
             
             if (foreignTableExists && !shouldReplace) {
                 response.setStatus(HttpServletResponse.SC_CONFLICT);
@@ -495,8 +497,8 @@ private void processExcelFileFromDiskInternal(String filePath, String fileName, 
             // Create view
             String viewName = fileNameWithoutExtension.replaceAll("\\s+", "_") + "_" + fileExtension.toUpperCase();
             String columnsList = String.join(", ", columnNames);
-            String viewDefinition = "SELECT " + columnsList + " FROM ExcelSourceModel." + fileNameWithoutExtension.replaceAll("\\s+", "_");
-            String createViewStatement = "CREATE VIEW " + viewName + " AS " + viewDefinition + ";";
+            String viewDefinition = "SELECT " + columnsList + " FROM ExcelSourceModel.\"" + fileNameWithoutExtension.replaceAll("\\s+", "_") + "\"";
+            String createViewStatement = "CREATE VIEW \"" + viewName + "\" AS " + viewDefinition + ";";
 
             // Update VDB
             String modifiedContent = updateVDB(vdbFilePath, vdbContent, foreignTableBlock.toString(), createViewStatement);
@@ -593,7 +595,7 @@ private void processExcelFile(Part filePart, String fileName, String vdbFilePath
     System.out.println("[TeiidExcelImporterTest] File validated successfully at: " + fullFilePath);
     
     StringBuilder foreignTableBlock = new StringBuilder();
-    foreignTableBlock.append("CREATE FOREIGN TABLE ").append(fileNameWithoutExtension.replaceAll("\\s+", "_")).append("(\n");
+    foreignTableBlock.append("CREATE FOREIGN TABLE \"").append(fileNameWithoutExtension.replaceAll("\\s+", "_")).append("\"(\n");
     foreignTableBlock.append("\tROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', \"teiid_excel:CELL_NUMBER\" 'ROW_ID'),\n");
     for (int i = 0; i < columnNames.size(); i++) {
         String columnName = columnNames.get(i);
@@ -611,7 +613,8 @@ private void processExcelFile(Part filePart, String fileName, String vdbFilePath
 
     // Check if the foreign table already exists
     String normalizedTableName = fileNameWithoutExtension.replaceAll("\\s+", "_");
-    boolean foreignTableExists = vdbContent.contains("CREATE FOREIGN TABLE " + normalizedTableName);
+    boolean foreignTableExists = vdbContent.contains("CREATE FOREIGN TABLE " + normalizedTableName)
+            || vdbContent.contains("CREATE FOREIGN TABLE \"" + normalizedTableName + "\"");
     
     if (foreignTableExists && !shouldReplace) {
         // Return conflict status with HTTP 409
@@ -636,8 +639,8 @@ private void processExcelFile(Part filePart, String fileName, String vdbFilePath
     String columnsList = String.join(", ", columnNames);
 
     // Construct the view definition with explicit column names
-    String viewDefinition = "SELECT " + columnsList + " FROM ExcelSourceModel." + fileNameWithoutExtension.replaceAll("\\s+", "_");
-    String createViewStatement = "CREATE VIEW " + viewName + " AS " + viewDefinition + ";";
+    String viewDefinition = "SELECT " + columnsList + " FROM ExcelSourceModel.\"" + fileNameWithoutExtension.replaceAll("\\s+", "_") + "\"";
+    String createViewStatement = "CREATE VIEW \"" + viewName + "\" AS " + viewDefinition + ";";
 
     // Ensure the insertion point string is preserved and duplicates are removed
     String modifiedContent = updateVDB(vdbFilePath, vdbContent, foreignTableBlock.toString(), createViewStatement);
@@ -959,7 +962,7 @@ private void processExcelFile(Part filePart, String fileName, String vdbFilePath
         String modifiedContent = vdbContent;
         
         // Pattern to match the foreign table block
-        String foreignTablePattern = "CREATE FOREIGN TABLE " + Pattern.quote(normalizedName) + 
+        String foreignTablePattern = "CREATE FOREIGN TABLE \"?" + Pattern.quote(normalizedName) + "\"?" +
                                     "\\s*\\([^)]*\\)\\s*OPTIONS\\s*\\([^)]*\\);";
         Pattern ftPattern = Pattern.compile(foreignTablePattern, Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
         Matcher ftMatcher = ftPattern.matcher(modifiedContent);
@@ -969,7 +972,7 @@ private void processExcelFile(Part filePart, String fileName, String vdbFilePath
         }
         
         // Pattern to match the view with extension suffix (e.g., tablename_XLSX)
-        String viewPattern = "CREATE VIEW " + Pattern.quote(normalizedName) + "_[A-Z]+\\s+AS\\s+SELECT[^;]+;+";
+        String viewPattern = "CREATE VIEW \"?" + Pattern.quote(normalizedName) + "_[A-Z]+\"?\\s+AS\\s+SELECT[^;]+;+";
         Pattern viewPatternCompiled = Pattern.compile(viewPattern, Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
         Matcher viewMatcher = viewPatternCompiled.matcher(modifiedContent);
         
@@ -989,7 +992,7 @@ private void processExcelFile(Part filePart, String fileName, String vdbFilePath
         
         // Pattern to match TXT/CSV views
         String upperName = viewName.replaceAll("([\\\\\\[\\](){}.*+?^$|])", "\\\\$1");
-        String txtViewPattern = "CREATE VIEW " + upperName + "\\s+.*?AS\\s+SELECT.*?;+";
+        String txtViewPattern = "CREATE VIEW \"?" + upperName + "\"?\\s*.*?AS\\s+SELECT.*?;+";
         Pattern txtViewPatternCompiled = Pattern.compile(txtViewPattern, Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
         Matcher txtViewMatcher = txtViewPatternCompiled.matcher(modifiedContent);
         
