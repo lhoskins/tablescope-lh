@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field
 class TenantDataPlaneCreate(BaseModel):
     tenant_id: str = Field(..., description="Stable lowercase slug, e.g. 'acme'.")
     tenant_name: str
+    vpn_mode: str = Field(
+        default="none",
+        description="'none' (container-only, no VPN) or 'customer_vpn' "
+        "(dedicated VPC + Site-to-Site VPN to the customer's on-prem network).",
+    )
     allowed_onprem_cidrs: list[str] = Field(default_factory=list)
     org_tenant_id: int | None = None
     routing_type: str = "static"
@@ -39,6 +44,7 @@ class TenantDataPlaneRead(BaseModel):
     tenant_name: str
     org_tenant_id: int | None
     isolation_mode: str
+    vpn_mode: str
     docker_network_name: str
     docker_subnet_cidr: str
     teiid_container_name: str

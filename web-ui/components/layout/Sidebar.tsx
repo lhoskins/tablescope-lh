@@ -23,6 +23,7 @@ const tenantAdminItems: NavItem[] = [
 const superAdminItems: NavItem[] = [
   { href: "/admin/users", label: "Users" },
   { href: "/admin/tenants", label: "Tenant Provisioning" },
+  { href: "/admin/data-planes", label: "Data Planes (VPN)" },
 ];
 
 function PillLink({ item, active }: { item: NavItem; active: boolean }) {

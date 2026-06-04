@@ -32,6 +32,13 @@ from app.models.base import Base, TimestampMixin
 DEFAULT_ISOLATION_MODE = "shared_ec2_tenant_vpc_container"
 DEFAULT_VDB_CONTAINER_PATH = "/opt/wildfly/teiidfiles/customers"
 
+# Whether this tenant reaches a customer's on-prem network over a dedicated AWS
+# Site-to-Site VPN, or runs container-only with no VPN (cloud/SaaS-only data).
+VPN_MODE_NONE = "none"
+VPN_MODE_CUSTOMER = "customer_vpn"
+VPN_MODES = (VPN_MODE_NONE, VPN_MODE_CUSTOMER)
+DEFAULT_VPN_MODE = VPN_MODE_NONE
+
 # JSONB on Postgres, plain JSON on other dialects (e.g. SQLite used in tests).
 _JSON = JSONB().with_variant(JSON(), "sqlite")
 
@@ -50,6 +57,10 @@ class TenantDataPlane(TimestampMixin, Base):
     )
 
     isolation_mode: Mapped[str] = mapped_column(String(100), nullable=False, default=DEFAULT_ISOLATION_MODE)
+
+    # Tenant tier: 'none' (container-only, no VPN) or 'customer_vpn' (dedicated
+    # VPC + Site-to-Site VPN to the customer's on-prem network).
+    vpn_mode: Mapped[str] = mapped_column(String(30), nullable=False, default=DEFAULT_VPN_MODE)
 
     # AWS / network metadata (visible, auditable; no secrets).
     shared_ec2_instance_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -100,6 +111,7 @@ class TenantDataPlane(TimestampMixin, Base):
             "tenant_name": self.tenant_name,
             "org_tenant_id": self.org_tenant_id,
             "isolation_mode": self.isolation_mode,
+            "vpn_mode": self.vpn_mode,
             "docker_network_name": self.docker_network_name,
             "docker_subnet_cidr": self.docker_subnet_cidr,
             "teiid_container_name": self.teiid_container_name,

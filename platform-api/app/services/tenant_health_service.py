@@ -78,6 +78,10 @@ class TenantHealthService:
         return report
 
     async def _check_vpn(self, plane: TenantDataPlane, report: TenantHealthReport) -> None:
+        if plane.vpn_mode == "none":
+            # Container-only tier; no customer VPN is expected.
+            report.vpn_status = "not_applicable"
+            return
         if not plane.vpn_connection_id:
             report.vpn_status = "not_configured"
             return

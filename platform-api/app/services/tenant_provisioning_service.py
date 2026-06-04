@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tenant_data_plane import (
     DEFAULT_ISOLATION_MODE,
+    DEFAULT_VPN_MODE,
+    VPN_MODES,
     TenantDataPlane,
     TenantSecretRef,
 )
@@ -35,6 +37,10 @@ class TenantAlreadyExists(Exception):
 
 
 class TenantNotFound(Exception):
+    pass
+
+
+class InvalidVpnMode(Exception):
     pass
 
 
@@ -92,11 +98,14 @@ class TenantProvisioningService:
         allowed_onprem_cidrs: list[str],
         org_tenant_id: int | None = None,
         routing_type: str = "static",
+        vpn_mode: str = DEFAULT_VPN_MODE,
         shared_ec2_instance_id: str | None = None,
         shared_services_vpc_id: str | None = None,
         teiid_api_key_secret_ref: str | None = None,
     ) -> tuple[TenantDataPlane, TenantLayout]:
         tid = validate_tenant_id(tenant_id)
+        if vpn_mode not in VPN_MODES:
+            raise InvalidVpnMode(f"vpn_mode must be one of {VPN_MODES}, got {vpn_mode!r}")
         existing = await self._session.scalar(select(TenantDataPlane).where(TenantDataPlane.tenant_id == tid))
         if existing is not None:
             raise TenantAlreadyExists(tid)
@@ -109,6 +118,7 @@ class TenantProvisioningService:
             tenant_name=tenant_name,
             org_tenant_id=org_tenant_id,
             isolation_mode=DEFAULT_ISOLATION_MODE,
+            vpn_mode=vpn_mode,
             shared_ec2_instance_id=shared_ec2_instance_id,
             shared_services_vpc_id=shared_services_vpc_id,
             routing_type=routing_type,

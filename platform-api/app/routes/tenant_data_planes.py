@@ -38,6 +38,7 @@ from app.services.tenant_firewall_service import (
 from app.services.tenant_health_service import TenantHealthService
 from app.services.tenant_layout import InvalidTenantId
 from app.services.tenant_provisioning_service import (
+    InvalidVpnMode,
     TenantAlreadyExists,
     TenantNotFound,
     TenantProvisioningService,
@@ -78,11 +79,12 @@ async def create_data_plane(
             allowed_onprem_cidrs=payload.allowed_onprem_cidrs,
             org_tenant_id=payload.org_tenant_id,
             routing_type=payload.routing_type,
+            vpn_mode=payload.vpn_mode,
             shared_ec2_instance_id=payload.shared_ec2_instance_id,
             shared_services_vpc_id=payload.shared_services_vpc_id,
             teiid_api_key_secret_ref=payload.teiid_api_key_secret_ref,
         )
-    except InvalidTenantId as exc:
+    except (InvalidTenantId, InvalidVpnMode) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except TenantAlreadyExists as exc:
         raise HTTPException(status_code=409, detail=f"Tenant '{exc}' already exists") from exc

@@ -124,6 +124,8 @@ async def test_create_list_get_and_artifacts(client, service_headers) -> None:
     assert plane["docker_subnet_cidr"] == "172.30.10.0/24"
     assert plane["teiid_pg_port"] == 15442
     assert plane["status"] == "provisioning"
+    # Defaults to the no-VPN (container-only) tier.
+    assert plane["vpn_mode"] == "none"
 
     # Second tenant gets the next deterministic index/subnet.
     resp = await client.post(
@@ -171,6 +173,42 @@ async def test_create_list_get_and_artifacts(client, service_headers) -> None:
     assert "TABLESCOPE-TENANT-ACME -d 172.30.20.0/24 -j DROP" in script
 
 
+async def test_vpn_mode_selection(client, service_headers) -> None:
+    # Customer-VPN tier is accepted and persisted.
+    resp = await client.post(
+        "/api/tenant-data-planes",
+        json={
+            "tenant_id": "acme",
+            "tenant_name": "Acme",
+            "vpn_mode": "customer_vpn",
+            "allowed_onprem_cidrs": ["10.10.0.0/16"],
+        },
+        headers=service_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["vpn_mode"] == "customer_vpn"
+
+    # Invalid mode rejected.
+    bad = await client.post(
+        "/api/tenant-data-planes",
+        json={"tenant_id": "globex", "tenant_name": "G", "vpn_mode": "wat", "allowed_onprem_cidrs": []},
+        headers=service_headers,
+    )
+    assert bad.status_code == 422
+
+    # No-VPN tenant reports vpn_status not_applicable in health.
+    await client.post(
+        "/api/tenant-data-planes",
+        json={"tenant_id": "novpn", "tenant_name": "No VPN", "vpn_mode": "none", "allowed_onprem_cidrs": []},
+        headers=service_headers,
+    )
+    health = await client.post(
+        "/api/tenant-data-planes/novpn/health", json={}, headers=service_headers
+    )
+    assert health.status_code == 200
+    assert health.json()["vpn_status"] == "not_applicable"
+
+
 async def test_vpn_metadata_and_onboarding(client, service_headers) -> None:
     await client.post(
         "/api/tenant-data-planes",
@@ -203,7 +241,12 @@ async def test_vpn_metadata_and_onboarding(client, service_headers) -> None:
 async def test_health_endpoint_reports_dimensions(client, service_headers) -> None:
     await client.post(
         "/api/tenant-data-planes",
-        json={"tenant_id": "acme", "tenant_name": "Acme", "allowed_onprem_cidrs": []},
+        json={
+            "tenant_id": "acme",
+            "tenant_name": "Acme",
+            "vpn_mode": "customer_vpn",
+            "allowed_onprem_cidrs": [],
+        },
         headers=service_headers,
     )
     resp = await client.post("/api/tenant-data-planes/acme/health", json={}, headers=service_headers)
@@ -211,7 +254,7 @@ async def test_health_endpoint_reports_dimensions(client, service_headers) -> No
     report = resp.json()
     for key in ("vpn_status", "teiid_status", "firewall_status", "vdb_path_status"):
         assert key in report
-    # No VPN configured yet.
+    # Customer-VPN tier but no VPN metadata attached yet.
     assert report["vpn_status"] == "not_configured"
 
 
