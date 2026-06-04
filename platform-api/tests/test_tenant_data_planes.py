@@ -98,6 +98,8 @@ def test_firewall_blocks_cross_tenant_and_allows_own_onprem() -> None:
     assert "iptables -A TABLESCOPE-TENANT-ACME -d 169.254.169.254/32 -j DROP" in script
     # Default deny at end of chain.
     assert "iptables -A TABLESCOPE-TENANT-ACME -j DROP" in script
+    # Applied-marker so the containerized control plane can confirm application.
+    assert "/etc/tablescope/tenant-firewall.d/acme.applied" in script
     # systemd unit references the apply script.
     unit = svc.render_systemd_unit()
     assert "tablescope-apply-tenant-firewall.sh" in unit

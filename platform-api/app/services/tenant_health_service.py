@@ -21,6 +21,7 @@ import httpx
 
 from app.config import get_settings
 from app.models.tenant_data_plane import TenantDataPlane
+from app.services.tenant_firewall_service import FIREWALL_CONFIG_DIR
 from app.services.tenant_layout import TEIID_MGMT_CONTAINER_PORT, compute_layout
 
 
@@ -137,10 +138,26 @@ class TenantHealthService:
                 timeout=self._timeout,
             )
             report.firewall_status = "applied" if result.returncode == 0 else "not_applied"
+            return
         except FileNotFoundError:
-            report.firewall_status = "unknown"
-            report.messages["firewall"] = "iptables not available in this context"
+            # iptables isn't available inside the control-plane container; fall
+            # back to the applied-marker the host firewall script writes.
+            pass
         except Exception as exc:
+            report.firewall_status = "unknown"
+            report.messages["firewall"] = str(exc)
+            return
+
+        marker = f"{FIREWALL_CONFIG_DIR}/{plane.tenant_id}.applied"
+        try:
+            if os.path.isfile(marker):
+                report.firewall_status = "applied"
+                with open(marker, encoding="utf-8") as fh:
+                    report.messages["firewall"] = f"applied at {fh.read().strip()} (host marker)"
+            else:
+                report.firewall_status = "not_applied"
+                report.messages["firewall"] = f"no applied-marker at {marker}"
+        except OSError as exc:
             report.firewall_status = "unknown"
             report.messages["firewall"] = str(exc)
 

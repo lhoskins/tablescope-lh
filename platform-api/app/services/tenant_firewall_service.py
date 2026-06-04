@@ -83,6 +83,9 @@ class TenantFirewallService:
         # Default deny for everything else this tenant tries to reach, logged.
         lines.append(f"iptables -A {chain} -m limit --limit 5/min " f'-j LOG --log-prefix "TS-DROP {spec.tenant_id}: "')
         lines.append(f"iptables -A {chain} -j DROP")
+        # Drop an applied-marker the (containerized) control plane can read to
+        # confirm the firewall ran, since it cannot inspect host iptables.
+        lines.append(f"date -u +%Y-%m-%dT%H:%M:%SZ > {FIREWALL_CONFIG_DIR}/{spec.tenant_id}.applied")
         return lines
 
     def render_script(self, specs: list[TenantFirewallSpec]) -> str:
@@ -98,6 +101,7 @@ class TenantFirewallService:
             "",
             "# Ensure Docker's user hook chain exists before we jump from it.",
             "iptables -N DOCKER-USER 2>/dev/null || true",
+            f"mkdir -p {FIREWALL_CONFIG_DIR}",
             "",
         ]
         for spec in specs:
