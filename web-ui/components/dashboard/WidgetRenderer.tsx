@@ -20,7 +20,7 @@ import {
 } from "recharts";
 import type { WidgetConfig } from "./types";
 
-const COLORS = ["#2563eb", "#60a5fa", "#93c5fd", "#bfdbfe", "#7c3aed", "#a78bfa", "#16a34a", "#ea580c"];
+const COLORS = ["#2563eb", "#60a5fa", "#7c3aed", "#16a34a", "#ea580c", "#0891b2", "#dc2626", "#ca8a04"];
 
 type Props = {
   widget: WidgetConfig;
@@ -29,19 +29,75 @@ type Props = {
   onDelete?: () => void;
 };
 
+function getXKey(widget: WidgetConfig, data: Props["data"]): string {
+  if (data.length === 0) return widget.xColumn ?? widget.xKey ?? "";
+  const keys = Object.keys(data[0]);
+  // Aggregation query returns date_month, date_year, etc.
+  const dateKeys = keys.filter((k) => k.startsWith("date_"));
+  if (dateKeys.length > 0) return dateKeys[0];
+  // Try xColumn match
+  if (widget.xColumn && keys.includes(widget.xColumn)) return widget.xColumn;
+  // Legacy xKey
+  if (widget.xKey && keys.includes(widget.xKey)) return widget.xKey;
+  return keys[0] ?? "";
+}
+
+function getYKey(widget: WidgetConfig, data: Props["data"]): string {
+  if (data.length === 0) return widget.yColumn ?? widget.yKey ?? "";
+  const keys = Object.keys(data[0]);
+  // Aggregation query returns sum_amount, avg_quantity, etc.
+  const aggPrefixes = ["sum_", "avg_", "count_", "min_", "max_"];
+  const aggKey = keys.find((k) => aggPrefixes.some((p) => k.startsWith(p)));
+  if (aggKey) return aggKey;
+  // Try yColumn match
+  if (widget.yColumn && keys.includes(widget.yColumn)) return widget.yColumn;
+  // Legacy yKey
+  if (widget.yKey && keys.includes(widget.yKey)) return widget.yKey;
+  return keys[keys.length - 1] ?? "";
+}
+
+function pivotData(
+  data: Props["data"],
+  xKey: string,
+  yKey: string,
+  groupCol: string
+): { chartData: Props["data"]; seriesNames: string[] } {
+  const xValues = new Map<string, Record<string, unknown>>();
+  const seriesSet = new Set<string>();
+  for (const row of data) {
+    const x = String(row[xKey] ?? "");
+    const group = String(row[groupCol] ?? "Other");
+    const y = row[yKey];
+    seriesSet.add(group);
+    if (!xValues.has(x)) xValues.set(x, { [xKey]: x });
+    const entry = xValues.get(x)!;
+    entry[group] = y;
+  }
+  return { chartData: Array.from(xValues.values()), seriesNames: Array.from(seriesSet) };
+}
+
 function KpiWidget({ widget, data }: { widget: WidgetConfig; data: Props["data"] }) {
-  const value = data.length > 0 ? data[0][widget.yKey] : "—";
+  const yKey = getYKey(widget, data);
+  const value = data.length > 0 ? data[0][yKey] : "\u2014";
+  const formatted = typeof value === "number"
+    ? value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+    : String(value ?? "\u2014");
   return (
     <div className="flex flex-col items-center justify-center py-4">
-      <div className="text-3xl font-extrabold text-blue-600">{String(value)}</div>
+      <div className="text-3xl font-extrabold text-blue-600">{formatted}</div>
       <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
         {widget.title}
       </div>
+      {widget.aggregation && (
+        <div className="mt-0.5 text-[10px] text-slate-400">
+          {widget.aggregation.toUpperCase()}({widget.yColumn})
+        </div>
+      )}
     </div>
   );
 }
 
-function TableWidget({ widget, data }: { widget: WidgetConfig; data: Props["data"] }) {
+function TableWidget({ data }: { data: Props["data"] }) {
   const columns = useMemo(() => {
     if (data.length === 0) return [];
     return Object.keys(data[0]);
@@ -63,7 +119,7 @@ function TableWidget({ widget, data }: { widget: WidgetConfig; data: Props["data
           </tr>
         </thead>
         <tbody>
-          {data.slice(0, 20).map((row, i) => (
+          {data.slice(0, 50).map((row, i) => (
             <tr key={i} className="hover:bg-slate-50">
               {columns.map((col) => (
                 <td key={col} className="border-b border-slate-100 px-3 py-2 text-slate-700">
@@ -80,46 +136,77 @@ function TableWidget({ widget, data }: { widget: WidgetConfig; data: Props["data
 
 export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
   const chartHeight = 220;
+  const xKey = getXKey(widget, data);
+  const yKey = getYKey(widget, data);
+  const hasGroupBy = !!widget.groupByColumn && data.length > 0 && Object.keys(data[0] ?? {}).includes(widget.groupByColumn);
+
+  const { chartData, seriesNames } = useMemo(() => {
+    if (hasGroupBy && widget.groupByColumn) {
+      return pivotData(data, xKey, yKey, widget.groupByColumn);
+    }
+    return { chartData: data, seriesNames: [] as string[] };
+  }, [data, xKey, yKey, hasGroupBy, widget.groupByColumn]);
 
   const renderChart = () => {
     switch (widget.type) {
       case "kpi":
         return <KpiWidget widget={widget} data={data} />;
       case "table":
-        return <TableWidget widget={widget} data={data} />;
+        return <TableWidget data={data} />;
       case "line":
         return (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <LineChart data={data}>
+            <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey={widget.xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
+              <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
               <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
               <Tooltip />
-              <Line type="monotone" dataKey={widget.yKey} stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+              {seriesNames.length > 0 ? (
+                seriesNames.map((name, i) => (
+                  <Line key={name} type="monotone" dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />
+                ))
+              ) : (
+                <Line type="monotone" dataKey={yKey} stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+              )}
+              {seriesNames.length > 0 && <Legend />}
             </LineChart>
           </ResponsiveContainer>
         );
       case "bar":
         return (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <BarChart data={data}>
+            <BarChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey={widget.xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
+              <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
               <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
               <Tooltip />
-              <Bar dataKey={widget.yKey} fill="#2563eb" radius={[4, 4, 0, 0]} />
+              {seriesNames.length > 0 ? (
+                seriesNames.map((name, i) => (
+                  <Bar key={name} dataKey={name} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} stackId="stack" />
+                ))
+              ) : (
+                <Bar dataKey={yKey} fill="#2563eb" radius={[4, 4, 0, 0]} />
+              )}
+              {seriesNames.length > 0 && <Legend />}
             </BarChart>
           </ResponsiveContainer>
         );
       case "area":
         return (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <AreaChart data={data}>
+            <AreaChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey={widget.xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
+              <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
               <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
               <Tooltip />
-              <Area type="monotone" dataKey={widget.yKey} stroke="#2563eb" fill="rgba(37,99,235,0.1)" strokeWidth={2} />
+              {seriesNames.length > 0 ? (
+                seriesNames.map((name, i) => (
+                  <Area key={name} type="monotone" dataKey={name} stroke={COLORS[i % COLORS.length]} fill={`${COLORS[i % COLORS.length]}20`} strokeWidth={2} stackId="stack" />
+                ))
+              ) : (
+                <Area type="monotone" dataKey={yKey} stroke="#2563eb" fill="rgba(37,99,235,0.1)" strokeWidth={2} />
+              )}
+              {seriesNames.length > 0 && <Legend />}
             </AreaChart>
           </ResponsiveContainer>
         );
@@ -128,16 +215,16 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
           <ResponsiveContainer width="100%" height={chartHeight}>
             <PieChart>
               <Pie
-                data={data}
-                dataKey={widget.yKey}
-                nameKey={widget.xKey}
+                data={chartData}
+                dataKey={seriesNames.length > 0 ? seriesNames[0] : yKey}
+                nameKey={xKey}
                 cx="50%"
                 cy="50%"
                 innerRadius={50}
                 outerRadius={80}
                 label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
               >
-                {data.map((_, i) => (
+                {chartData.map((_, i) => (
                   <Cell key={i} fill={COLORS[i % COLORS.length]} />
                 ))}
               </Pie>
@@ -154,7 +241,29 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-slate-700">{widget.title}</h4>
+        <div>
+          <h4 className="text-sm font-semibold text-slate-700">{widget.title}</h4>
+          {widget.aggregation && widget.yColumn && (
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <span className="inline-block rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">
+                {widget.aggregation.toUpperCase()}({widget.yColumn})
+              </span>
+              {widget.dateGranularity && (
+                <span className="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                  {widget.dateGranularity}
+                </span>
+              )}
+              {widget.groupByColumn && (
+                <>
+                  <span className="text-[9px] text-slate-400">by</span>
+                  <span className="inline-block rounded bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">
+                    {widget.groupByColumn}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
         <div className="flex gap-1">
           {onEdit && (
             <button onClick={onEdit} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Edit">
@@ -170,7 +279,7 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
       </div>
       {data.length === 0 ? (
         <div className="flex h-[200px] items-center justify-center text-sm text-slate-400">
-          No data available. Run the linked query to populate this widget.
+          No data available
         </div>
       ) : (
         renderChart()

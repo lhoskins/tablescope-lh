@@ -1,16 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import type { WidgetConfig, WidgetType, DashboardConfig } from "./types";
-
-const WIDGET_TYPES: { type: WidgetType; label: string; icon: string }[] = [
-  { type: "bar", label: "Bar Chart", icon: "📊" },
-  { type: "line", label: "Line Chart", icon: "📈" },
-  { type: "pie", label: "Pie / Donut", icon: "🍩" },
-  { type: "area", label: "Area Chart", icon: "📉" },
-  { type: "kpi", label: "KPI / Number", icon: "🔢" },
-  { type: "table", label: "Data Table", icon: "📋" },
-];
+import { useState } from "react";
+import type { WidgetConfig, DashboardConfig } from "./types";
+import { WidgetConfigPanel } from "./WidgetConfigPanel";
 
 type SavedQuery = {
   id: number;
@@ -32,6 +24,7 @@ type Props = {
 };
 
 export function CreateDashboardWizard({
+  projectId,
   savedQueries,
   datasources,
   onCancel,
@@ -42,303 +35,206 @@ export function CreateDashboardWizard({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
+  const [showAddWidget, setShowAddWidget] = useState(false);
 
-  // Widget form state
-  const [wTitle, setWTitle] = useState("");
-  const [wType, setWType] = useState<WidgetType>("bar");
-  const [wSourceKind, setWSourceKind] = useState<"query" | "datasource">("query");
-  const [wSourceId, setWSourceId] = useState("");
-  const [wXKey, setWXKey] = useState("");
-  const [wYKey, setWYKey] = useState("");
-  const [wColSpan, setWColSpan] = useState(6);
+  const handleAddWidget = (widget: WidgetConfig) => {
+    setWidgets([...widgets, { ...widget, position: widgets.length }]);
+    setShowAddWidget(false);
+  };
 
-  const addWidget = useCallback(() => {
-    if (!wTitle.trim()) return;
-    const w: WidgetConfig = {
-      id: `w-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      type: wType,
-      title: wTitle,
-      dataSource:
-        wSourceKind === "query"
-          ? { kind: "query", queryId: Number(wSourceId) || 0 }
-          : { kind: "datasource", viewName: wSourceId },
-      xKey: wXKey || "category",
-      yKey: wYKey || "value",
-      colSpan: wColSpan,
-      position: widgets.length,
-    };
-    setWidgets((prev) => [...prev, w]);
-    setWTitle("");
-    setWXKey("");
-    setWYKey("");
-  }, [wTitle, wType, wSourceKind, wSourceId, wXKey, wYKey, wColSpan, widgets.length]);
-
-  const removeWidget = useCallback((id: string) => {
-    setWidgets((prev) => prev.filter((w) => w.id !== id));
-  }, []);
+  const handleRemoveWidget = (idx: number) => {
+    setWidgets(widgets.filter((_, i) => i !== idx));
+  };
 
   const handleSubmit = () => {
-    onSubmit({ name, description, config: { widgets } });
+    onSubmit({
+      name,
+      description,
+      config: { widgets, globalFilters: [] },
+    });
   };
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
-      {/* Wizard steps header */}
-      <div className="flex border-b border-slate-200">
-        {[
-          { num: 1, label: "Name & Info" },
-          { num: 2, label: "Add Widgets" },
-          { num: 3, label: "Review & Create" },
-        ].map((s) => (
-          <div
-            key={s.num}
-            className={`flex-1 border-b-2 px-4 py-3 text-center text-xs font-semibold transition-colors ${
-              step === s.num
-                ? "border-blue-600 text-blue-600"
-                : step > s.num
-                ? "border-green-500 text-green-600"
-                : "border-transparent text-slate-400"
-            }`}
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      {/* Header */}
+      <div className="border-b border-slate-100 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-slate-800">Create Dashboard</h2>
+            <p className="text-xs text-slate-500">Step {step} of 3</p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700"
           >
-            <span
-              className={`mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
-                step > s.num
-                  ? "bg-green-500 text-white"
-                  : step === s.num
-                  ? "bg-blue-600 text-white"
-                  : "bg-slate-200 text-slate-400"
-              }`}
+            Cancel
+          </button>
+        </div>
+        {/* Step indicators */}
+        <div className="mt-3 flex gap-2">
+          {[1, 2, 3].map((s) => (
+            <div
+              key={s}
+              className={`h-1.5 flex-1 rounded-full ${s <= step ? "bg-blue-600" : "bg-slate-200"}`}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Step 1: Name & Description */}
+      {step === 1 && (
+        <div className="p-6">
+          <div className="mb-4">
+            <label className="mb-1 block text-xs font-semibold text-slate-700">Dashboard Name</label>
+            <input
+              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Q1 Sales Performance"
+            />
+          </div>
+          <div className="mb-4">
+            <label className="mb-1 block text-xs font-semibold text-slate-700">Description (optional)</label>
+            <textarea
+              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What does this dashboard show?"
+              rows={2}
+            />
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setStep(2)}
+              disabled={!name.trim()}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white disabled:opacity-50"
             >
-              {step > s.num ? "✓" : s.num}
-            </span>
-            {s.label}
+              Next: Add Widgets
+            </button>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
-      <div className="p-6">
-        {/* Step 1: Name & Info */}
-        {step === 1 && (
-          <div className="space-y-4">
-            <div>
-              <label className="mb-1 block text-sm font-semibold text-slate-700">Dashboard Name</label>
-              <input
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Q1 Revenue Overview"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-semibold text-slate-700">Description</label>
-              <textarea
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
-                rows={3}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Optional description..."
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <button onClick={onCancel} className="rounded-lg px-4 py-2 text-sm text-slate-500 hover:text-slate-700">
-                Cancel
-              </button>
-              <button
-                onClick={() => setStep(2)}
-                disabled={!name.trim()}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Add Widgets */}
-        {step === 2 && (
-          <div className="grid grid-cols-2 gap-6">
-            {/* Left: widget form */}
-            <div className="space-y-4">
-              <h3 className="text-base font-bold text-slate-800">Add a Widget</h3>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Widget Title</label>
-                <input
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
-                  value={wTitle}
-                  onChange={(e) => setWTitle(e.target.value)}
-                  placeholder="e.g. Monthly Revenue Trend"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Chart Type</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {WIDGET_TYPES.map((wt) => (
-                    <button
-                      key={wt.type}
-                      onClick={() => setWType(wt.type)}
-                      className={`rounded-lg border-2 px-3 py-3 text-center text-xs font-semibold transition-colors ${
-                        wType === wt.type
-                          ? "border-blue-600 bg-blue-50 text-blue-700"
-                          : "border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50"
-                      }`}
-                    >
-                      <div className="mb-1 text-xl">{wt.icon}</div>
-                      {wt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Data Source</label>
-                <select
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none"
-                  value={`${wSourceKind}:${wSourceId}`}
-                  onChange={(e) => {
-                    const [kind, id] = e.target.value.split(":") as ["query" | "datasource", string];
-                    setWSourceKind(kind);
-                    setWSourceId(id);
-                  }}
+      {/* Step 2: Add Widgets (using enhanced WidgetConfigPanel) */}
+      {step === 2 && (
+        <div className="p-6">
+          {/* Widget list */}
+          {widgets.length > 0 && (
+            <div className="mb-4 space-y-2">
+              {widgets.map((w, idx) => (
+                <div
+                  key={w.id}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-2"
                 >
-                  <option value="query:">Select a data source...</option>
-                  {savedQueries.map((q) => (
-                    <option key={`q-${q.id}`} value={`query:${q.id}`}>
-                      Saved Query: {q.name}
-                    </option>
-                  ))}
-                  {datasources.map((ds) => (
-                    <option key={`ds-${ds.viewName}`} value={`datasource:${ds.viewName}`}>
-                      Datasource: {ds.fileName}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-1 text-[10px] text-slate-400">Choose a saved query or project datasource.</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">X Axis / Category</label>
-                  <input
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none"
-                    value={wXKey}
-                    onChange={(e) => setWXKey(e.target.value)}
-                    placeholder="e.g. month"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Y Axis / Value</label>
-                  <input
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none"
-                    value={wYKey}
-                    onChange={(e) => setWYKey(e.target.value)}
-                    placeholder="e.g. revenue"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Widget Size</label>
-                <div className="flex gap-2">
-                  {([
-                    { v: 3, l: "Small (1/4)" },
-                    { v: 6, l: "Medium (1/2)" },
-                    { v: 12, l: "Large (Full)" },
-                  ] as const).map((s) => (
-                    <button
-                      key={s.v}
-                      onClick={() => setWColSpan(s.v)}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                        wColSpan === s.v
-                          ? "bg-blue-600 text-white"
-                          : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      {s.l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <button
-                onClick={addWidget}
-                disabled={!wTitle.trim()}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                Add Widget
-              </button>
-            </div>
-
-            {/* Right: preview list */}
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4">
-              <h3 className="mb-3 text-sm font-semibold text-slate-500">
-                Dashboard Preview ({widgets.length} widget{widgets.length !== 1 ? "s" : ""} added)
-              </h3>
-              {widgets.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400">
-                  No widgets yet. Use the form on the left to add widgets.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {widgets.map((w) => (
-                    <div key={w.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
-                      <div>
-                        <div className="text-xs font-semibold text-slate-700">{w.title}</div>
-                        <div className="text-[10px] text-slate-400">
-                          {WIDGET_TYPES.find((t) => t.type === w.type)?.label ?? w.type} · {w.colSpan === 12 ? "Full" : w.colSpan === 6 ? "Half" : "Quarter"}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => removeWidget(w.id)}
-                        className="rounded p-1 text-slate-400 hover:text-red-500"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="mt-4 flex justify-end gap-2">
-                <button onClick={() => setStep(1)} className="rounded-lg px-3 py-2 text-xs text-slate-500 hover:text-slate-700">
-                  Back
-                </button>
-                <button
-                  onClick={() => setStep(3)}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-700"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Review & Create */}
-        {step === 3 && (
-          <div className="space-y-4">
-            <h3 className="text-base font-bold text-slate-800">Review Dashboard</h3>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <div className="mb-1 text-sm font-semibold text-slate-800">{name}</div>
-              <div className="mb-3 text-xs text-slate-500">{description || "No description"}</div>
-              <div className="text-xs text-slate-500">{widgets.length} widget{widgets.length !== 1 ? "s" : ""}</div>
-              <div className="mt-2 space-y-1">
-                {widgets.map((w) => (
-                  <div key={w.id} className="text-xs text-slate-600">
-                    • {w.title} ({WIDGET_TYPES.find((t) => t.type === w.type)?.label ?? w.type})
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-slate-700">
+                      {idx + 1}. {w.title}
+                    </span>
+                    <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                      {w.type}
+                    </span>
+                    {w.aggregation && (
+                      <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">
+                        {w.aggregation.toUpperCase()}({w.yColumn})
+                      </span>
+                    )}
+                    {w.dateGranularity && (
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                        {w.dateGranularity}
+                      </span>
+                    )}
                   </div>
-                ))}
-              </div>
+                  <button
+                    onClick={() => handleRemoveWidget(idx)}
+                    className="text-xs text-red-500 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
             </div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setStep(2)} className="rounded-lg px-4 py-2 text-sm text-slate-500 hover:text-slate-700">
-                Back
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={isSubmitting || !name.trim()}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {isSubmitting ? "Creating..." : "Create Dashboard"}
-              </button>
+          )}
+
+          {/* Add Widget panel */}
+          {showAddWidget ? (
+            <WidgetConfigPanel
+              projectId={projectId}
+              savedQueries={savedQueries}
+              datasources={datasources}
+              onSave={handleAddWidget}
+              onCancel={() => setShowAddWidget(false)}
+            />
+          ) : (
+            <button
+              onClick={() => setShowAddWidget(true)}
+              className="mb-4 w-full rounded-lg border-2 border-dashed border-slate-200 py-6 text-xs font-medium text-slate-500 hover:border-blue-400 hover:text-blue-600"
+            >
+              + Add Widget
+            </button>
+          )}
+
+          <div className="flex justify-between">
+            <button
+              onClick={() => setStep(1)}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-medium hover:bg-slate-50"
+            >
+              Back
+            </button>
+            <button
+              onClick={() => setStep(3)}
+              disabled={widgets.length === 0}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white disabled:opacity-50"
+            >
+              Next: Review
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3: Review & Create */}
+      {step === 3 && (
+        <div className="p-6">
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <h3 className="text-sm font-bold text-slate-800">{name}</h3>
+            {description && <p className="mt-1 text-xs text-slate-500">{description}</p>}
+            <div className="mt-3 space-y-1">
+              {widgets.map((w, idx) => (
+                <div key={w.id} className="flex items-center gap-2 text-xs text-slate-600">
+                  <span className="font-medium">{idx + 1}.</span>
+                  <span>{w.title}</span>
+                  <span className="rounded bg-blue-100 px-1 py-0.5 text-[9px] font-bold text-blue-700">
+                    {w.type}
+                  </span>
+                  <span className="rounded bg-sky-100 px-1 py-0.5 text-[9px] font-bold text-sky-700">
+                    {w.aggregation.toUpperCase()}({w.yColumn})
+                  </span>
+                  {w.dateGranularity && (
+                    <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">
+                      by {w.dateGranularity}
+                    </span>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
-        )}
-      </div>
+
+          <div className="flex justify-between">
+            <button
+              onClick={() => setStep(2)}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-medium hover:bg-slate-50"
+            >
+              Back
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {isSubmitting ? "Creating..." : "Create Dashboard"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
