@@ -222,8 +222,10 @@ async def create_data_plane(
             admin_password=payload.app_tenant_admin_password,
         )
         # Bind the data plane to this app tenant, then provision its VDBs in
-        # the dedicated container.
+        # the dedicated container. Flush so the resolver (which looks the plane
+        # up by org_tenant_id) sees the binding when routing the VDB creation.
         plane.org_tenant_id = tenant.id
+        await session.flush()
         await _provision_vdbs_for_tenant(
             session, org_tenant_id=tenant.id, user_id=root_user.id
         )
@@ -340,7 +342,10 @@ async def bind_app_tenant(
             )
         org_id = existing_tenant.id
 
+    # Flush so the resolver sees the new binding when routing VDB creation to
+    # the dedicated container.
     plane.org_tenant_id = org_id
+    await session.flush()
     await _provision_vdbs_for_tenant(session, org_tenant_id=org_id, user_id=root_user_id)
 
     await session.commit()
