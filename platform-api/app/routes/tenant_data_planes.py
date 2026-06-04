@@ -190,7 +190,11 @@ async def provision_container(
         note=(
             "Compose + directory layout rendered. Apply on the EC2 host: create the "
             "directories, write the compose file, set the tenant Teiid API key env var, "
-            "then `docker compose -f <file> up -d`. Run the firewall script afterwards."
+            "then `docker compose -f <file> up -d`. Run the firewall script afterwards. "
+            "Finally connect the control plane to this tenant's network so the "
+            "(containerized) platform API can reach the tenant Teiid over the tenant "
+            f"network: `docker network connect {layout.docker_network_name} "
+            "tablescope-platform-api-1` (and the -worker-1 container)."
         ),
     )
 

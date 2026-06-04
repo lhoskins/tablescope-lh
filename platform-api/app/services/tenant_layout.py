@@ -76,12 +76,23 @@ class TenantLayout:
 
     @property
     def teiid_servlet_url(self) -> str:
-        """Servlet URL the platform API uses to reach this tenant's Teiid."""
+        """Host-facing servlet URL (when the platform API runs on the host)."""
         return f"http://127.0.0.1:{self.host_servlet_port}"
 
     @property
     def teiid_pg_host(self) -> str:
         return "127.0.0.1"
+
+    @property
+    def teiid_incluster_servlet_url(self) -> str:
+        """Servlet URL reachable from a control-plane *container* over the
+        tenant Docker network (container IP + container-internal port)."""
+        return f"http://{self.teiid_container_ip}:{TEIID_SERVLET_CONTAINER_PORT}"
+
+    @property
+    def teiid_incluster_mgmt_url(self) -> str:
+        """WildFly management/health URL reachable in-cluster."""
+        return f"http://{self.teiid_container_ip}:{TEIID_MGMT_CONTAINER_PORT}"
 
     @property
     def firewall_chain(self) -> str:

@@ -213,6 +213,42 @@ async def test_health_endpoint_reports_dimensions(client, service_headers) -> No
     assert report["vpn_status"] == "not_configured"
 
 
+async def test_resolver_uses_incluster_address(db_session) -> None:
+    from app.models.tenant_data_plane import TenantDataPlane
+    from app.services.tenant_teiid_resolver import TenantTeiidResolver
+
+    db_session.add(
+        TenantDataPlane(
+            tenant_id="acme",
+            tenant_name="Acme",
+            docker_network_name="tenant_acme_net",
+            docker_subnet_cidr="172.30.10.0/24",
+            teiid_container_name="tenant-acme-teiid",
+            teiid_container_ip="172.30.10.10",
+            teiid_servlet_url="http://127.0.0.1:18095",
+            teiid_pg_host="127.0.0.1",
+            teiid_pg_port=15442,
+            teiid_mgmt_port=19990,
+            vdb_host_path="/opt/tablescope/tenants/acme/vdb",
+            allowed_onprem_cidrs=[],
+            blocked_cidrs=[],
+        )
+    )
+    await db_session.commit()
+
+    ep = await TenantTeiidResolver(db_session).resolve("acme")
+    # In-cluster default: reach the tenant container over the tenant network,
+    # not the host's 127.0.0.1-bound ports.
+    assert ep.is_dedicated is True
+    assert ep.servlet_url == "http://172.30.10.10:8080"
+    assert ep.pg_host == "172.30.10.10"
+    assert ep.pg_port == 35432
+
+    # Unknown tenant falls back to the global (dev/single-tenant) endpoint.
+    fallback = await TenantTeiidResolver(db_session).resolve("nope")
+    assert fallback.is_dedicated is False
+
+
 async def test_requires_auth(client) -> None:
     resp = await client.get("/api/tenant-data-planes")
     assert resp.status_code == 401

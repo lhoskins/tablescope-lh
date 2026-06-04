@@ -58,6 +58,9 @@ services:
       PROMETHEUS_ENABLED: "true"
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
+      # Read-only view of the per-tenant root so the control plane can verify
+      # tenant VDB directories during health checks (never writes here).
+      - /opt/tablescope:/opt/tablescope:ro
     depends_on:
       db:
         condition: service_healthy
@@ -86,6 +89,7 @@ services:
       CUSTOMER_BASE_PATH: /opt/wildfly/teiidfiles/customers
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
+      - /opt/tablescope:/opt/tablescope:ro
     depends_on:
       - redis
       - platform-api

@@ -19,8 +19,9 @@ from dataclasses import asdict, dataclass, field
 
 import httpx
 
+from app.config import get_settings
 from app.models.tenant_data_plane import TenantDataPlane
-from app.services.tenant_layout import compute_layout
+from app.services.tenant_layout import TEIID_MGMT_CONTAINER_PORT, compute_layout
 
 
 @dataclass(slots=True)
@@ -104,8 +105,13 @@ class TenantHealthService:
         return conns[0].get("State", "unknown")
 
     async def _check_teiid(self, plane: TenantDataPlane, report: TenantHealthReport) -> None:
-        # WildFly management/health endpoint.
-        url = f"http://{plane.teiid_pg_host}:{plane.teiid_mgmt_port}/health"
+        # WildFly management/health endpoint. When containerized, reach the
+        # tenant Teiid over the tenant Docker network (container IP + container
+        # port) rather than the host's 127.0.0.1-bound port.
+        if get_settings().tenant_teiid_in_cluster and plane.teiid_container_ip:
+            url = f"http://{plane.teiid_container_ip}:{TEIID_MGMT_CONTAINER_PORT}/health"
+        else:
+            url = f"http://{plane.teiid_pg_host}:{plane.teiid_mgmt_port}/health"
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.get(url)

@@ -20,6 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
+from app.services.tenant_layout import (
+    TEIID_PG_CONTAINER_PORT,
+    TEIID_SERVLET_CONTAINER_PORT,
+)
 
 
 @dataclass(slots=True)
@@ -74,10 +78,22 @@ class TenantTeiidResolver:
             )
         )
 
+        # When containerized, reach the tenant Teiid over the tenant Docker
+        # network (container IP + container port); the host's 127.0.0.1 ports
+        # are not reachable from inside another container.
+        if get_settings().tenant_teiid_in_cluster and plane.teiid_container_ip:
+            servlet_url = f"http://{plane.teiid_container_ip}:{TEIID_SERVLET_CONTAINER_PORT}"
+            pg_host = plane.teiid_container_ip
+            pg_port = TEIID_PG_CONTAINER_PORT
+        else:
+            servlet_url = plane.teiid_servlet_url
+            pg_host = plane.teiid_pg_host
+            pg_port = plane.teiid_pg_port
+
         return TeiidEndpoint(
-            servlet_url=plane.teiid_servlet_url,
-            pg_host=plane.teiid_pg_host,
-            pg_port=plane.teiid_pg_port,
+            servlet_url=servlet_url,
+            pg_host=pg_host,
+            pg_port=pg_port,
             api_key_secret_ref=api_key_ref,
             vdb_host_path=plane.vdb_host_path,
             tenant_id=plane.tenant_id,

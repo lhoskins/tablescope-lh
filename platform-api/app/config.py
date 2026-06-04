@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     teiid_servlet_url: str = "http://teiid:8095"
     teiid_servlet_api_key: str = ""
 
+    # When the platform API runs as a container (the normal deployment), it
+    # cannot reach a tenant Teiid via the host's 127.0.0.1-bound ports. Instead
+    # it reaches the tenant container directly over the tenant Docker network
+    # using the container's fixed IP + container-internal ports. Set to False
+    # only when the platform API runs as a host process.
+    tenant_teiid_in_cluster: bool = True
+
     customer_base_path: str = "/opt/wildfly/teiidfiles/customers"
     drilldown_config_path: str = "/opt/redash-8.0.0-7/apps/tsTest/src/drilldownConfig.json"
 

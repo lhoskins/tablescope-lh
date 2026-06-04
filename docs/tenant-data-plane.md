@@ -22,15 +22,24 @@ than one EC2 per tenant.
   routing through a VPN attachment; a TGW does. One shared TGW serves all tenants.
 - **Static VPN routes, not BGP.** Simpler and no extra cost; BGP is available per
   tenant via `customer_bgp_asn` / `vpn_routing_type = "dynamic"` if needed later.
-- **Per-tenant Teiid bound to `127.0.0.1` only.** Never published publicly; the
-  platform API reaches each tenant's Teiid over localhost on deterministic ports.
+- **Per-tenant Teiid bound to `127.0.0.1` only.** The tenant ports are published
+  on the host loopback only (never publicly). Because the platform API runs as a
+  container, it cannot use those host-loopback ports; instead it reaches each
+  tenant's Teiid directly over the tenant Docker network using the container's
+  fixed IP + container-internal ports (`tenant_teiid_in_cluster=true`, the
+  default). The control plane is attached to each tenant network at provision
+  time (`docker network connect tenant_<id>_net tablescope-platform-api-1`). The
+  127.0.0.1 host ports remain for host-level debugging.
 - **Secrets as references, never plaintext.** `tenant_secret_refs` stores a
   reference; the Teiid API key is injected into the tenant container via an env
   var (`TENANT_<ID>_TEIID_API_KEY`). No plaintext in compose, DB, or logs.
 - **Host firewall enforces egress.** Docker isolation alone is insufficient, so a
   per-tenant `iptables` chain (`TABLESCOPE-TENANT-<ID>`) allows only that tenant's
   on-prem CIDRs, denies other tenants' subnets/CIDRs and the metadata endpoint,
-  and defaults to deny. Persisted via a systemd unit so it survives reboots.
+  and defaults to deny. The jump is hooked into Docker's `DOCKER-USER` chain
+  (evaluated *before* Docker's own per-network ACCEPT rules) — appending to
+  `FORWARD` would be silently preempted by Docker. Persisted via a systemd unit
+  so it survives reboots.
 
 ## Deterministic layout
 
@@ -72,7 +81,10 @@ Paths: `/opt/tablescope/tenants/<tenant_id>/{vdb,logs,secrets,mounts,compose}`.
 4. **Render + apply the container** on the EC2 host:
    `POST /api/tenant-data-planes/acme/provision-container` returns the compose
    file + directory list; create the dirs, write the compose, set the API key
-   env var, `docker compose -f <file> up -d`.
+   env var, `docker compose -f <file> up -d`. Then connect the control plane to
+   the tenant network so the containerized API can reach the tenant Teiid:
+   `docker network connect tenant_<id>_net tablescope-platform-api-1`
+   (and `...-worker-1`).
 5. **Apply host firewall** — `GET /api/tenant-data-planes/firewall-script` returns
    the idempotent script + systemd unit; install and enable on the host.
 6. **Hand the customer their config** — `GET /api/tenant-data-planes/acme/onboarding-package`.
