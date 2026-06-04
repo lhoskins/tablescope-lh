@@ -374,8 +374,12 @@ def _build_widget_sql(body: WidgetQueryRequest) -> str:
         select_parts.append(f"{gb_col} AS \"{body.group_by_column}\"")
         group_parts.append(gb_col)
 
-    # Aggregation on Y
-    agg_expr = f"{agg}({y_col})"
+    # Aggregation on Y — CAST to double for numeric aggregations since CSV
+    # columns are often imported as string type by Teiid
+    if agg == "COUNT":
+        agg_expr = f"COUNT({y_col})"
+    else:
+        agg_expr = f"{agg}(CAST({y_col} AS double))"
     agg_alias = f"{agg.lower()}_{body.y_column}"
     select_parts.append(f"{agg_expr} AS \"{agg_alias}\"")
 
