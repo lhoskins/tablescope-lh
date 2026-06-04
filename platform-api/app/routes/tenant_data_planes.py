@@ -216,6 +216,16 @@ async def health_check(
     report = await TenantHealthService().check(plane, connectivity_targets=targets)
     plane.last_health_status = report.teiid_status
     plane.vpn_status = report.vpn_status
+    # Promote a pending tenant to active once its data plane is verified healthy
+    # (container reachable, firewall applied, VDB dir present). VPN tunnels may
+    # legitimately be down until the customer peer is configured.
+    if (
+        plane.status in ("provisioning", "container_pending")
+        and report.teiid_status == "healthy"
+        and report.firewall_status == "applied"
+        and report.vdb_path_status == "ok"
+    ):
+        plane.status = "active"
     await session.commit()
     return report.to_dict()
 
