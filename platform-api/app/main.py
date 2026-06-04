@@ -28,6 +28,7 @@ from app.routes import saas_sources as saas_sources_routes
 from app.routes import scopes as scopes_routes
 from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
+from app.routes import tenant_data_planes as tenant_data_planes_routes
 from app.routes import tenants as tenants_routes
 from app.routes import upload as upload_routes
 from app.services.connection_pool import pool_manager
@@ -115,6 +116,7 @@ def create_app() -> FastAPI:
     api_prefix = settings.api_prefix
     app.include_router(auth_routes.router, prefix=api_prefix)
     app.include_router(tenants_routes.router, prefix=api_prefix)
+    app.include_router(tenant_data_planes_routes.router, prefix=api_prefix)
     app.include_router(projects_routes.router, prefix=api_prefix)
     app.include_router(scopes_routes.router, prefix=api_prefix)
     app.include_router(query_routes.router, prefix=api_prefix)

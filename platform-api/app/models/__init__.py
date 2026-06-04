@@ -13,6 +13,7 @@ from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.saved_query import SavedQuery
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant
+from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
 from app.models.user import User
 from app.models.user_vdb import UserVDB
 
@@ -32,6 +33,8 @@ __all__ = [
     "SavedQuery",
     "SharedVDB",
     "Tenant",
+    "TenantDataPlane",
+    "TenantSecretRef",
     "User",
     "UserVDB",
 ]
