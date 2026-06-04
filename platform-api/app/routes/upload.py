@@ -37,6 +37,7 @@ from app.services.file_sources import (
     compute_view_name,
     convert_to_csv_if_needed,
     detect_column_types,
+    display_source,
 )
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
@@ -70,6 +71,12 @@ async def upload_file(
         raise HTTPException(status_code=404, detail="Tenant not found")
 
     content = await file.read()
+
+    # Remember the original uploaded extension so the UI can show the real type
+    # (e.g. "json"/"xml") even though JSON/XML are flattened to CSV below.
+    original_format = (
+        file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else None
+    )
 
     # JSON/XML uploads are flattened to CSV so they import through the same
     # Teiid file pipeline as CSV/Excel and behave like every other data source.
@@ -186,12 +193,14 @@ async def upload_file(
                 view_name=view_name,
                 file_name=filename,
                 vdb_type=resolved_vdb_type,
+                source_format=original_format,
                 column_types=column_types or None,
             )
         )
     else:
         existing.file_name = filename
         existing.vdb_type = resolved_vdb_type
+        existing.source_format = original_format
         if column_types:
             existing.column_types = column_types
         # Re-associating via a project upload (re)links to that project; a plain
@@ -256,11 +265,14 @@ async def list_datasources(
                 is_archived = bool(meta and meta.archived)
                 if is_archived and not include_archived:
                     continue
+                display_name, source_type = display_source(
+                    f.name, meta.source_format if meta else None
+                )
                 datasources.append({
-                    "fileName": f.name,
+                    "fileName": display_name,
                     "viewName": view_name,
                     "size": f.stat().st_size,
-                    "sourceType": extension.lower() or "file",
+                    "sourceType": source_type,
                     "dbType": None,
                     "fileMetaId": meta.id if meta else None,
                     "projectId": meta.project_id if meta else None,

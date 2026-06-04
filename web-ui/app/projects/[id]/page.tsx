@@ -629,8 +629,32 @@ function EditQueryForm({
         </div>
       )}
 
-      {/* Group By */}
-      {leftDs && (
+      {/* Group By / Order By — collapsed to buttons until a column is added */}
+      {leftDs && (groupBy.length === 0 || orderBy.length === 0) && (
+        <div className="mb-3 flex gap-2">
+          {groupBy.length === 0 && (
+            <button
+              type="button"
+              onClick={() => { markDirty(); setGroupBy((p) => [...p, ""]); }}
+              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              + Group By
+            </button>
+          )}
+          {orderBy.length === 0 && (
+            <button
+              type="button"
+              onClick={() => { markDirty(); setOrderBy((p) => [...p, { column: "", dir: "ASC" }]); }}
+              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              + Order By
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Group By (expanded once a column is added) */}
+      {leftDs && groupBy.length > 0 && (
         <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-slate-700">Group By</span>
@@ -642,9 +666,6 @@ function EditQueryForm({
               + Group By
             </button>
           </div>
-          {groupBy.length === 0 && (
-            <p className="text-xs text-slate-400">No grouping.</p>
-          )}
           {groupBy.map((g, idx) => (
             <div key={idx} className="mb-2 flex items-center gap-2">
               <select
@@ -669,8 +690,8 @@ function EditQueryForm({
         </div>
       )}
 
-      {/* Order By */}
-      {leftDs && (
+      {/* Order By (expanded once a column is added) */}
+      {leftDs && orderBy.length > 0 && (
         <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-slate-700">Order By</span>
@@ -682,9 +703,6 @@ function EditQueryForm({
               + Order By
             </button>
           </div>
-          {orderBy.length === 0 && (
-            <p className="text-xs text-slate-400">No ordering.</p>
-          )}
           {orderBy.map((o, idx) => (
             <div key={idx} className="mb-2 flex items-center gap-2">
               <select

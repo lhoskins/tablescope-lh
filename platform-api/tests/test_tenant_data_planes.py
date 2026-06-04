@@ -418,6 +418,82 @@ async def test_bind_new_app_tenant_requires_credentials(client, service_headers)
     assert "admin" in bad.json()["detail"].lower()
 
 
+async def test_delete_data_plane_cascades_app_tenant(client, service_headers) -> None:
+    # Provision a plane and bind a freshly created app tenant + admin user.
+    resp = await client.post(
+        "/api/tenant-data-planes",
+        json={"tenant_id": "acme", "tenant_name": "Acme Co", "allowed_onprem_cidrs": ["10.10.0.0/16"]},
+        headers=service_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    bound = await client.post(
+        "/api/tenant-data-planes/acme/bind-app-tenant",
+        json={
+            "new_tenant_slug": "acme",
+            "new_tenant_name": "Acme Co",
+            "admin_email": "admin@acme.com",
+            "admin_password": "s3cret-pw",
+        },
+        headers=service_headers,
+    )
+    assert bound.status_code == 200, bound.text
+    org_id = bound.json()["org_tenant_id"]
+
+    # Delete the data plane (default cascades the bound app tenant).
+    deleted = await client.delete(
+        "/api/tenant-data-planes/acme", headers=service_headers
+    )
+    assert deleted.status_code == 200, deleted.text
+    body = deleted.json()
+    assert body["org_tenant_id"] == org_id
+    assert body["app_tenant_deleted"] is True
+    assert body["deleted_rows"]["users"] >= 1
+    assert body["deleted_rows"]["tenants"] == 1
+    # Teardown script targets this tenant's isolated container + network + dir.
+    assert "tenant-acme-teiid" in body["teardown_script"]
+    assert "tenant_acme_net" in body["teardown_script"]
+    assert "/opt/tablescope/tenants/acme" in body["teardown_script"]
+
+    # Plane is gone, and so is the app tenant (login impossible).
+    gone = await client.get("/api/tenant-data-planes/acme", headers=service_headers)
+    assert gone.status_code == 404
+
+
+async def test_delete_data_plane_can_keep_app_tenant(client, service_headers) -> None:
+    resp = await client.post(
+        "/api/tenant-data-planes",
+        json={"tenant_id": "acme", "tenant_name": "Acme Co", "allowed_onprem_cidrs": []},
+        headers=service_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    bound = await client.post(
+        "/api/tenant-data-planes/acme/bind-app-tenant",
+        json={
+            "new_tenant_slug": "acme",
+            "admin_email": "admin@acme.com",
+            "admin_password": "s3cret-pw",
+        },
+        headers=service_headers,
+    )
+    assert bound.status_code == 200, bound.text
+
+    deleted = await client.delete(
+        "/api/tenant-data-planes/acme?delete_app_tenant=false",
+        headers=service_headers,
+    )
+    assert deleted.status_code == 200, deleted.text
+    body = deleted.json()
+    assert body["app_tenant_deleted"] is False
+    assert body["deleted_rows"] == {}
+
+
+async def test_delete_missing_data_plane_404(client, service_headers) -> None:
+    resp = await client.delete(
+        "/api/tenant-data-planes/nope", headers=service_headers
+    )
+    assert resp.status_code == 404
+
+
 async def test_requires_auth(client) -> None:
     resp = await client.get("/api/tenant-data-planes")
     assert resp.status_code == 401

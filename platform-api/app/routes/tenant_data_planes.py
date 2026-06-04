@@ -27,6 +27,7 @@ from app.models.user_vdb import UserVDB
 from app.schemas.tenant_data_plane import (
     BindAppTenantIn,
     ComposePreview,
+    DeleteDataPlaneResponse,
     FirewallScriptPreview,
     HealthCheckRequest,
     OnboardingPackage,
@@ -35,7 +36,12 @@ from app.schemas.tenant_data_plane import (
     TenantDataPlaneRead,
     VpnMetadataIn,
 )
-from app.services.customer_folders import CustomerFolderService
+from app.services.customer_folders import CustomerFolderError, CustomerFolderService
+from app.services.tenant_deletion_service import (
+    delete_tenant_folders,
+    purge_app_tenant,
+    render_teardown_script,
+)
 from app.services.tenant_firewall_service import (
     FIREWALL_CONFIG_DIR,
     SYSTEMD_UNIT_PATH,
@@ -483,4 +489,74 @@ async def onboarding_package(
         routing_type=plane.routing_type or "static",
         allowed_onprem_cidrs=list(plane.allowed_onprem_cidrs or []),
         instructions=instructions,
+    )
+
+
+@router.delete("/{tenant_id}", response_model=DeleteDataPlaneResponse)
+async def delete_data_plane(
+    tenant_id: str,
+    delete_app_tenant: bool = True,
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(_require_super_admin),
+) -> DeleteDataPlaneResponse:
+    """Decommission a tenant data plane.
+
+    Cascades: deletes the bound application tenant's users, projects, data
+    sources and VDB records, removes the tenant's customer folders, deletes the
+    secret references and the data-plane registry row, and returns a host
+    teardown script that removes the isolated Docker container, network and
+    on-host VDB directory (root/Docker ops the least-privilege API cannot run).
+    """
+    svc = TenantProvisioningService(session)
+    try:
+        plane = await svc.get(tenant_id)
+    except TenantNotFound as exc:
+        raise HTTPException(status_code=404, detail="Tenant data plane not found") from exc
+
+    layout = svc.layout_for(plane)
+    org_tenant_id = plane.org_tenant_id
+    deleted_rows: dict[str, int] = {}
+    folders_removed = False
+    app_tenant_deleted = False
+
+    if org_tenant_id is not None and delete_app_tenant:
+        org_tenant = await session.get(Tenant, org_tenant_id)
+        if org_tenant is not None:
+            slug = org_tenant.slug
+            deleted_rows = await purge_app_tenant(session, org_tenant_id)
+            app_tenant_deleted = deleted_rows.get("tenants", 0) > 0
+            try:
+                folders_removed = delete_tenant_folders(slug)
+            except (CustomerFolderError, OSError) as exc:
+                logger.warning("Failed to remove folders for tenant %s: %s", slug, exc)
+
+    # Drop the secret references then the data-plane row (explicit, so it works
+    # the same on SQLite tests as on Postgres FK cascade).
+    from sqlalchemy import delete as sa_delete
+
+    from app.models.tenant_data_plane import TenantSecretRef
+
+    await session.execute(
+        sa_delete(TenantSecretRef).where(TenantSecretRef.data_plane_id == plane.id)
+    )
+    await session.delete(plane)
+    await session.commit()
+
+    teardown_script = render_teardown_script(layout)
+    note = (
+        f"Data plane '{tenant_id}' removed from the registry. "
+        "Run the teardown script on the EC2 host to remove the isolated "
+        f"container ({layout.teiid_container_name}), the tenant network "
+        f"({layout.docker_network_name}) and the on-host VDB directory "
+        f"({layout.tenant_root})."
+    )
+    return DeleteDataPlaneResponse(
+        tenant_id=tenant_id,
+        org_tenant_id=org_tenant_id,
+        app_tenant_deleted=app_tenant_deleted,
+        deleted_rows=deleted_rows,
+        folders_removed=folders_removed,
+        teardown_script=teardown_script,
+        teardown_script_path=None,
+        note=note,
     )

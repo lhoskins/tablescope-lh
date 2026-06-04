@@ -149,3 +149,14 @@ class OnboardingPackage(BaseModel):
     routing_type: str
     allowed_onprem_cidrs: list[str]
     instructions: str
+
+
+class DeleteDataPlaneResponse(BaseModel):
+    tenant_id: str
+    org_tenant_id: int | None = None
+    app_tenant_deleted: bool
+    deleted_rows: dict[str, int]
+    folders_removed: bool
+    teardown_script: str
+    teardown_script_path: str | None = None
+    note: str

@@ -50,6 +50,13 @@ class FileSourceMeta(TimestampMixin, Base):
     file_name: Mapped[str] = mapped_column(String(512), nullable=False)
     vdb_type: Mapped[str] = mapped_column(String(50), nullable=False, default="user")
 
+    # Original uploaded extension (e.g. "json", "xml"). JSON/XML files are
+    # flattened to CSV for the Teiid import pipeline, but we keep the source
+    # format here so the UI can display the original type rather than "csv".
+    source_format: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )
+
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -66,6 +73,7 @@ class FileSourceMeta(TimestampMixin, Base):
             "id": self.id,
             "view_name": self.view_name,
             "file_name": self.file_name,
+            "source_format": self.source_format,
             "project_id": self.project_id,
             "owner_id": self.owner_id,
             "archived": self.archived,

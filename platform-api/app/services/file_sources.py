@@ -246,6 +246,27 @@ def _xml_to_rows(content: bytes) -> list[dict[str, Any]]:
     return [_element_to_row(root)]
 
 
+def display_source(
+    physical_name: str, source_format: str | None
+) -> tuple[str, str]:
+    """Return ``(display_file_name, source_type)`` honoring the original upload.
+
+    JSON/XML uploads are flattened to CSV, so the physical file on disk is
+    ``foo.csv``. When ``source_format`` is recorded (e.g. ``"json"``) we present
+    the original extension instead (``foo.json`` + type ``json``); otherwise we
+    fall back to the on-disk extension.
+    """
+    ext = physical_name.rsplit(".", 1)[-1].lower() if "." in physical_name else ""
+    if source_format:
+        stem = (
+            physical_name.rsplit(".", 1)[0]
+            if "." in physical_name
+            else physical_name
+        )
+        return f"{stem}.{source_format}", source_format
+    return physical_name, (ext or "file")
+
+
 def convert_to_csv_if_needed(filename: str, content: bytes) -> tuple[str, bytes]:
     """Convert JSON/XML uploads to CSV so they ride the existing file pipeline.
 

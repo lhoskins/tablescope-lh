@@ -34,6 +34,16 @@ type HealthReport = {
   messages?: Record<string, string>;
 };
 
+type DeleteResult = {
+  tenant_id: string;
+  org_tenant_id: number | null;
+  app_tenant_deleted: boolean;
+  deleted_rows: Record<string, number>;
+  folders_removed: boolean;
+  teardown_script: string;
+  note: string;
+};
+
 const STATUS_STYLES: Record<string, string> = {
   active: "bg-green-100 text-green-700",
   provisioning: "bg-amber-100 text-amber-700",
@@ -103,6 +113,12 @@ function SuperAdminView() {
   const [bindPassword, setBindPassword] = useState("");
   const [bindOrgId, setBindOrgId] = useState<number | null>(null);
   const [bindError, setBindError] = useState<string | null>(null);
+
+  // Delete-tenant confirmation + teardown-script modal state.
+  const [deleteFor, setDeleteFor] = useState<DataPlane | null>(null);
+  const [deleteAppTenant, setDeleteAppTenant] = useState(true);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [teardown, setTeardown] = useState<DeleteResult | null>(null);
 
   const planesQuery = useQuery<DataPlane[]>({
     queryKey: ["data-planes"],
@@ -200,6 +216,21 @@ function SuperAdminView() {
       setNote(resp.note);
       queryClient.invalidateQueries({ queryKey: ["data-planes"] });
     },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: ({ id, withApp }: { id: string; withApp: boolean }) =>
+      apiClient.delete<DeleteResult>(
+        `/api/tenant-data-planes/${id}?delete_app_tenant=${withApp}`
+      ),
+    onSuccess: (resp) => {
+      setDeleteFor(null);
+      setDeleteError(null);
+      setTeardown(resp);
+      queryClient.invalidateQueries({ queryKey: ["data-planes"] });
+      queryClient.invalidateQueries({ queryKey: ["app-tenants"] });
+    },
+    onError: (err: Error) => setDeleteError(err.message),
   });
 
   function handleSubmit(e: React.FormEvent) {
@@ -618,6 +649,16 @@ function SuperAdminView() {
                             Bind app tenant
                           </button>
                         )}
+                        <button
+                          onClick={() => {
+                            setDeleteFor(p);
+                            setDeleteAppTenant(p.org_tenant_id != null);
+                            setDeleteError(null);
+                          }}
+                          className="rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -779,6 +820,130 @@ function SuperAdminView() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {deleteFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-medium text-slate-900">
+              Delete tenant{" "}
+              <span className="font-mono">{deleteFor.tenant_id}</span>?
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              This permanently decommissions the tenant data plane. This action
+              cannot be undone.
+            </p>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+              <li>Undeploys all of the tenant&apos;s VDBs and removes their records.</li>
+              <li>Deletes the tenant folder structure and uploaded data.</li>
+              <li>
+                Removes the isolated Teiid container (
+                <span className="font-mono">tenant-{deleteFor.tenant_id}-teiid</span>
+                ) and its Docker network.
+              </li>
+            </ul>
+
+            {deleteFor.org_tenant_id != null && (
+              <label className="mt-4 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                <input
+                  type="checkbox"
+                  checked={deleteAppTenant}
+                  onChange={(e) => setDeleteAppTenant(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Also delete the bound application tenant (org #
+                  {deleteFor.org_tenant_id}) and <strong>all its users</strong>.
+                  Uncheck to keep the app tenant and only tear down the data
+                  plane.
+                </span>
+              </label>
+            )}
+
+            {deleteError && (
+              <p className="mt-3 text-sm text-red-600">{deleteError}</p>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteFor(null)}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={() =>
+                  deleteMutation.mutate({
+                    id: deleteFor.tenant_id,
+                    withApp:
+                      deleteFor.org_tenant_id != null ? deleteAppTenant : false,
+                  })
+                }
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? "Deleting…" : "Yes, delete tenant"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {teardown && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-medium text-slate-900">
+              Tenant <span className="font-mono">{teardown.tenant_id}</span>{" "}
+              removed
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">{teardown.note}</p>
+            {Object.keys(teardown.deleted_rows).length > 0 && (
+              <p className="mt-2 text-xs text-slate-500">
+                Deleted:{" "}
+                {Object.entries(teardown.deleted_rows)
+                  .filter(([, n]) => n > 0)
+                  .map(([t, n]) => `${n} ${t}`)
+                  .join(", ") || "no application rows"}
+                .
+              </p>
+            )}
+            <div className="mt-4">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-700">
+                  Host teardown script
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigator.clipboard?.writeText(teardown.teardown_script)
+                  }
+                  className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+                >
+                  Copy
+                </button>
+              </div>
+              <pre className="max-h-72 overflow-auto rounded-md bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">
+                {teardown.teardown_script}
+              </pre>
+              <p className="mt-2 text-xs text-slate-500">
+                Run this on the EC2 host to remove the isolated container,
+                network and on-host VDB directory (root/Docker operations the
+                control plane does not perform itself).
+              </p>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setTeardown(null)}
+                className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90"
+              >
+                Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
