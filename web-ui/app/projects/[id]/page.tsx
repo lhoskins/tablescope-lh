@@ -9,6 +9,7 @@ import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 import { TablescopeDataGrid } from "@/components/data-grid/TablescopeDataGrid";
+import { DashboardTab } from "@/components/dashboard/DashboardTab";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -819,7 +820,7 @@ export default function ProjectWorkspacePage() {
   const meta = getUserMeta();
 
   // ── Tab state ─────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "members">("datasources");
+  const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "dashboards" | "members">("datasources");
 
   // ── Query builder state ───────────────────────────────────────────
   const [buildingQuery, setBuildingQuery] = useState(false);
@@ -1395,7 +1396,7 @@ export default function ProjectWorkspacePage() {
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 rounded-lg bg-slate-100 p-1">
-        {(["datasources", "queries", "members"] as const).map((tab) => (
+        {(["datasources", "queries", "dashboards", "members"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -2148,6 +2149,23 @@ export default function ProjectWorkspacePage() {
             </ul>
           )}
         </div>
+      )}
+
+      {/* ── Dashboards Tab ────────────────────────────────────────── */}
+      {activeTab === "dashboards" && (
+        <DashboardTab
+          projectId={projectId}
+          savedQueries={(queriesQuery.data ?? []).map((q) => ({
+            id: q.id,
+            name: q.name,
+            sql_text: q.sql_text,
+          }))}
+          datasources={projectDatasources.map((ds) => ({
+            viewName: ds.viewName,
+            fileName: ds.fileName,
+          }))}
+          canEdit={canEdit}
+        />
       )}
 
       {/* ── Members Tab ──────────────────────────────────────────── */}

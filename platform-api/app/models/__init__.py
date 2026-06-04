@@ -2,6 +2,7 @@
 
 from app.models.base import Base
 from app.models.connector_credential import ConnectorCredential
+from app.models.dashboard import Dashboard
 from app.models.database_connection import DatabaseConnection
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.file_source_meta import FileSourceMeta
@@ -20,6 +21,7 @@ from app.models.user_vdb import UserVDB
 __all__ = [
     "Base",
     "ConnectorCredential",
+    "Dashboard",
     "DatabaseConnection",
     "DataSourceColumn",
     "DatabaseDataSource",

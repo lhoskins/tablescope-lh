@@ -22,6 +22,7 @@ from sqlalchemy import Delete, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.connector_credential import ConnectorCredential
+from app.models.dashboard import Dashboard
 from app.models.database_connection import DatabaseConnection
 from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
@@ -107,6 +108,10 @@ async def purge_app_tenant(session: AsyncSession, tenant_id: int) -> dict[str, i
 
     # Project-scoped tables that have no direct tenant_id column.
     if project_ids:
+        await _run(
+            "dashboards",
+            delete(Dashboard).where(Dashboard.project_id.in_(project_ids)),
+        )
         await _run(
             "saved_queries",
             delete(SavedQuery).where(SavedQuery.project_id.in_(project_ids)),
