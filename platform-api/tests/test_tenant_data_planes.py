@@ -85,6 +85,10 @@ def test_firewall_blocks_cross_tenant_and_allows_own_onprem() -> None:
     svc = TenantFirewallService()
     script = svc.render_script([acme, globex])
 
+    # Jump is hooked into DOCKER-USER (before Docker's own ACCEPT rules), not
+    # appended to FORWARD where it would be preempted.
+    assert "iptables -I DOCKER-USER -s 172.30.10.0/24 -j TABLESCOPE-TENANT-ACME" in script
+    assert "-A FORWARD -s 172.30.10.0/24 -j TABLESCOPE-TENANT-ACME" not in script
     # Acme can reach its own on-prem.
     assert "iptables -A TABLESCOPE-TENANT-ACME -d 10.10.0.0/16 -j ACCEPT" in script
     # Acme blocked from Globex's Docker subnet and on-prem.
