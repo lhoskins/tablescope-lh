@@ -25,6 +25,7 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user_vdb import UserVDB
 from app.schemas.tenant_data_plane import (
+    BindAppTenantIn,
     ComposePreview,
     FirewallScriptPreview,
     HealthCheckRequest,
@@ -72,6 +73,100 @@ def _read(plane) -> TenantDataPlaneRead:
     return TenantDataPlaneRead(**plane.to_dict(include_network=True))
 
 
+async def _provision_vdbs_for_tenant(
+    session: AsyncSession,
+    *,
+    org_tenant_id: int,
+    user_id: int | None,
+) -> None:
+    """Create the shared (and optional user) VDBs inside the tenant's container.
+
+    Routing comes from ``TenantTeiidResolver.resolve_for_org`` so the VDBs land
+    in the dedicated container when the org tenant is bound to a data plane.
+    Failures are non-fatal (logged) so a not-yet-running container doesn't block
+    the tenant record.
+    """
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(org_tenant_id)
+    vdb_svc = VDBManagementService(
+        servlet_url=endpoint.servlet_url,
+        pg_host=endpoint.pg_host,
+        pg_port=endpoint.pg_port,
+    )
+    try:
+        shared_result = await vdb_svc.create_shared_vdb(org_id=org_tenant_id)
+        session.add(SharedVDB(
+            tenant_id=org_tenant_id,
+            vdb_id=shared_result.vdb_id,
+            vdb_username=shared_result.vdb_username,
+            encrypted_password=shared_result.vdb_password,
+            vdb_host=shared_result.vdb_host,
+            vdb_port=shared_result.vdb_port,
+            is_active=True,
+            health_status="deployed",
+        ))
+        logger.info("Shared VDB created for org tenant %s: %s", org_tenant_id, shared_result.vdb_id)
+    except VDBProvisioningError as exc:
+        logger.warning("Shared VDB not created for org %s (container may not be up): %s", org_tenant_id, exc)
+    finally:
+        await vdb_svc.aclose()
+
+    if user_id is None:
+        return
+
+    vdb_svc = VDBManagementService(
+        servlet_url=endpoint.servlet_url,
+        pg_host=endpoint.pg_host,
+        pg_port=endpoint.pg_port,
+    )
+    try:
+        user_result = await vdb_svc.create_user_vdb(org_id=org_tenant_id, user_id=user_id)
+        session.add(UserVDB(
+            tenant_id=org_tenant_id,
+            user_id=user_id,
+            vdb_id=user_result.vdb_id,
+            vdb_username=user_result.vdb_username,
+            encrypted_password=user_result.vdb_password,
+            vdb_host=user_result.vdb_host,
+            vdb_port=user_result.vdb_port,
+            is_active=True,
+            health_status="deployed",
+        ))
+        logger.info("User VDB created for user %s: %s", user_id, user_result.vdb_id)
+    except VDBProvisioningError as exc:
+        logger.warning("User VDB not created for user %s (container may not be up): %s", user_id, exc)
+    finally:
+        await vdb_svc.aclose()
+
+
+async def _create_app_tenant(
+    session: AsyncSession,
+    *,
+    slug: str,
+    name: str,
+    admin_email: str,
+    admin_password: str,
+) -> tuple[Tenant, User]:
+    """Create an application tenant + root admin user and their folders."""
+    tenant = Tenant(slug=slug, name=name)
+    session.add(tenant)
+    await session.flush()
+    CustomerFolderService().ensure_tenant_folders(tenant.slug)
+
+    root_user = User(
+        tenant_id=tenant.id,
+        email=admin_email,
+        display_name="Admin",
+        role="admin",
+    )
+    root_user.set_password(admin_password)
+    session.add(root_user)
+    await session.flush()
+    CustomerFolderService().ensure_user_folders(
+        tenant.slug, root_user.external_id or str(root_user.id)
+    )
+    return tenant, root_user
+
+
 @router.post("", response_model=TenantDataPlaneRead, status_code=status.HTTP_201_CREATED)
 async def create_data_plane(
     payload: TenantDataPlaneCreate,
@@ -117,83 +212,21 @@ async def create_data_plane(
 
     # --- Unified provisioning: create the app tenant + root admin + VDBs ---
     if payload.create_app_tenant:
-        tenant = Tenant(slug=payload.tenant_id, name=payload.tenant_name)
-        session.add(tenant)
-        await session.flush()
-        CustomerFolderService().ensure_tenant_folders(tenant.slug)
-
-        # Bind the data plane to this app tenant.
-        plane.org_tenant_id = tenant.id
-
-        # Resolve the tenant Teiid endpoint (the data plane's own container)
-        # so VDBs are created *in the tenant container*.
-        endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant.id)
-
-        # Shared VDB for the tenant.
-        vdb_svc = VDBManagementService(
-            servlet_url=endpoint.servlet_url,
-            pg_host=endpoint.pg_host,
-            pg_port=endpoint.pg_port,
-        )
-        try:
-            shared_result = await vdb_svc.create_shared_vdb(org_id=tenant.id)
-            session.add(SharedVDB(
-                tenant_id=tenant.id,
-                vdb_id=shared_result.vdb_id,
-                vdb_username=shared_result.vdb_username,
-                encrypted_password=shared_result.vdb_password,
-                vdb_host=shared_result.vdb_host,
-                vdb_port=shared_result.vdb_port,
-                is_active=True,
-                health_status="deployed",
-            ))
-            logger.info("Shared VDB created for tenant %s: %s", tenant.slug, shared_result.vdb_id)
-        except VDBProvisioningError as exc:
-            logger.warning("Failed to create shared VDB for %s (tenant container may not be running yet): %s", tenant.slug, exc)
-        finally:
-            await vdb_svc.aclose()
-
-        # Root admin user.
-        root_user = User(
-            tenant_id=tenant.id,
-            email=payload.app_tenant_admin_email,
-            display_name="Admin",
-            role="admin",
-        )
+        assert payload.app_tenant_admin_email is not None  # validated above
         assert payload.app_tenant_admin_password is not None  # validated above
-        root_user.set_password(payload.app_tenant_admin_password)
-        session.add(root_user)
-        await session.flush()
-        CustomerFolderService().ensure_user_folders(
-            tenant.slug, root_user.external_id or str(root_user.id)
+        tenant, root_user = await _create_app_tenant(
+            session,
+            slug=payload.tenant_id,
+            name=payload.tenant_name,
+            admin_email=payload.app_tenant_admin_email,
+            admin_password=payload.app_tenant_admin_password,
         )
-
-        # User VDB for the root admin.
-        vdb_svc = VDBManagementService(
-            servlet_url=endpoint.servlet_url,
-            pg_host=endpoint.pg_host,
-            pg_port=endpoint.pg_port,
+        # Bind the data plane to this app tenant, then provision its VDBs in
+        # the dedicated container.
+        plane.org_tenant_id = tenant.id
+        await _provision_vdbs_for_tenant(
+            session, org_tenant_id=tenant.id, user_id=root_user.id
         )
-        try:
-            user_result = await vdb_svc.create_user_vdb(
-                org_id=tenant.id, user_id=root_user.id,
-            )
-            session.add(UserVDB(
-                tenant_id=tenant.id,
-                user_id=root_user.id,
-                vdb_id=user_result.vdb_id,
-                vdb_username=user_result.vdb_username,
-                encrypted_password=user_result.vdb_password,
-                vdb_host=user_result.vdb_host,
-                vdb_port=user_result.vdb_port,
-                is_active=True,
-                health_status="deployed",
-            ))
-            logger.info("User VDB created for root admin %s: %s", root_user.email, user_result.vdb_id)
-        except VDBProvisioningError as exc:
-            logger.warning("Failed to create user VDB for root admin %s (container may not be running yet): %s", root_user.email, exc)
-        finally:
-            await vdb_svc.aclose()
 
     await session.commit()
     await session.refresh(plane)
@@ -245,6 +278,73 @@ async def get_data_plane(
         plane = await svc.get(tenant_id)
     except TenantNotFound as exc:
         raise HTTPException(status_code=404, detail="Tenant data plane not found") from exc
+    return _read(plane)
+
+
+@router.post("/{tenant_id}/bind-app-tenant", response_model=TenantDataPlaneRead)
+async def bind_app_tenant(
+    tenant_id: str,
+    payload: BindAppTenantIn,
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(_require_super_admin),
+) -> TenantDataPlaneRead:
+    """Bind an *existing* data plane to an application tenant.
+
+    Use this for data planes that were provisioned before an app tenant existed
+    (e.g. the live ``acme`` plane). Either link an existing org tenant by id, or
+    create a new app tenant (slug + root admin). Once bound, that tenant's
+    serving path routes to this data plane's dedicated Teiid container.
+    """
+    svc = TenantProvisioningService(session)
+    try:
+        plane = await svc.get(tenant_id)
+    except TenantNotFound as exc:
+        raise HTTPException(status_code=404, detail="Tenant data plane not found") from exc
+
+    if payload.org_tenant_id is None and not payload.new_tenant_slug:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide either org_tenant_id (link existing) or new_tenant_slug (create new).",
+        )
+
+    root_user_id: int | None = None
+    if payload.new_tenant_slug:
+        if not payload.admin_email or not payload.admin_password:
+            raise HTTPException(
+                status_code=422,
+                detail="admin_email and admin_password are required when creating a new app tenant.",
+            )
+        existing = await session.scalar(
+            select(Tenant).where(Tenant.slug == payload.new_tenant_slug)
+        )
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Application tenant with slug '{payload.new_tenant_slug}' already exists.",
+            )
+        tenant, root_user = await _create_app_tenant(
+            session,
+            slug=payload.new_tenant_slug,
+            name=payload.new_tenant_name or payload.new_tenant_slug,
+            admin_email=payload.admin_email,
+            admin_password=payload.admin_password,
+        )
+        org_id = tenant.id
+        root_user_id = root_user.id
+    else:
+        assert payload.org_tenant_id is not None
+        existing_tenant = await session.get(Tenant, payload.org_tenant_id)
+        if existing_tenant is None:
+            raise HTTPException(
+                status_code=404, detail=f"Application tenant id {payload.org_tenant_id} not found."
+            )
+        org_id = existing_tenant.id
+
+    plane.org_tenant_id = org_id
+    await _provision_vdbs_for_tenant(session, org_tenant_id=org_id, user_id=root_user_id)
+
+    await session.commit()
+    await session.refresh(plane)
     return _read(plane)
 
 

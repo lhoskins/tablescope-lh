@@ -39,6 +39,28 @@ class TenantDataPlaneCreate(BaseModel):
     )
 
 
+class BindAppTenantIn(BaseModel):
+    """Bind an existing data plane to an application tenant.
+
+    Either link an existing org tenant by id, or create a new app tenant
+    (slug + root admin). VDBs are (re)provisioned in the data plane's container.
+    """
+
+    org_tenant_id: int | None = Field(
+        default=None, description="Link to this existing application tenant id."
+    )
+    new_tenant_slug: str | None = Field(
+        default=None, description="Slug for a new application tenant to create and bind."
+    )
+    new_tenant_name: str | None = None
+    admin_email: str | None = Field(
+        default=None, description="Root admin email (required with new_tenant_slug)."
+    )
+    admin_password: str | None = Field(
+        default=None, description="Root admin password (required with new_tenant_slug)."
+    )
+
+
 class VpnMetadataIn(BaseModel):
     tenant_vpc_id: str | None = None
     tenant_subnet_id: str | None = None

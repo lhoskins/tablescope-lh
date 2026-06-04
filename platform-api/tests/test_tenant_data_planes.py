@@ -351,6 +351,73 @@ async def test_create_app_tenant_requires_admin_credentials(client, service_head
     assert "admin" in resp.json()["detail"].lower()
 
 
+async def test_bind_app_tenant_to_existing_data_plane(client, service_headers) -> None:
+    # Provision a data plane with no app tenant bound.
+    resp = await client.post(
+        "/api/tenant-data-planes",
+        json={"tenant_id": "acme", "tenant_name": "Acme Co", "allowed_onprem_cidrs": []},
+        headers=service_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["org_tenant_id"] is None
+
+    # Validation: must supply either an existing id or a new slug.
+    bad = await client.post(
+        "/api/tenant-data-planes/acme/bind-app-tenant",
+        json={},
+        headers=service_headers,
+    )
+    assert bad.status_code == 422
+
+    # Bind by creating a new app tenant + root admin.
+    bound = await client.post(
+        "/api/tenant-data-planes/acme/bind-app-tenant",
+        json={
+            "new_tenant_slug": "acme",
+            "new_tenant_name": "Acme Co",
+            "admin_email": "admin@acme.com",
+            "admin_password": "s3cret-pw",
+        },
+        headers=service_headers,
+    )
+    assert bound.status_code == 200, bound.text
+    org_id = bound.json()["org_tenant_id"]
+    assert org_id is not None
+
+    # The data plane now reports the binding (resolver routing of a bound
+    # org tenant to its dedicated container is covered separately).
+    got = await client.get("/api/tenant-data-planes/acme", headers=service_headers)
+    assert got.json()["org_tenant_id"] == org_id
+
+    # Re-binding via a duplicate slug is rejected.
+    dup = await client.post(
+        "/api/tenant-data-planes/acme/bind-app-tenant",
+        json={
+            "new_tenant_slug": "acme",
+            "admin_email": "x@acme.com",
+            "admin_password": "pw123456",
+        },
+        headers=service_headers,
+    )
+    assert dup.status_code == 409
+
+
+async def test_bind_new_app_tenant_requires_credentials(client, service_headers) -> None:
+    resp = await client.post(
+        "/api/tenant-data-planes",
+        json={"tenant_id": "acme", "tenant_name": "Acme", "allowed_onprem_cidrs": []},
+        headers=service_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    bad = await client.post(
+        "/api/tenant-data-planes/acme/bind-app-tenant",
+        json={"new_tenant_slug": "acme"},
+        headers=service_headers,
+    )
+    assert bad.status_code == 422
+    assert "admin" in bad.json()["detail"].lower()
+
+
 async def test_requires_auth(client) -> None:
     resp = await client.get("/api/tenant-data-planes")
     assert resp.status_code == 401
