@@ -29,6 +29,14 @@ class TenantRead(BaseModel):
     updated_at: datetime
 
 
+class TenantDeleteResponse(BaseModel):
+    tenant_id: int
+    slug: str
+    deleted_rows: dict[str, int]
+    vdbs_undeployed: int
+    folders_removed: bool
+
+
 _LOOSE_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 

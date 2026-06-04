@@ -37,6 +37,51 @@ from app.models.user import User
 from app.models.user_vdb import UserVDB
 from app.services.customer_folders import CustomerFolderService
 from app.services.tenant_layout import TenantLayout
+from app.services.vdb_management import VDBManagementService, VDBProvisioningError
+
+
+async def undeploy_tenant_vdbs(
+    session: AsyncSession,
+    tenant_id: int,
+    vdb_svc: VDBManagementService,
+) -> int:
+    """Undeploy a tenant's shared + user VDBs from Teiid (best-effort).
+
+    Returns the number of VDBs successfully undeployed. Failures are logged and
+    skipped so a missing/already-undeployed VDB never blocks tenant deletion.
+    The caller passes a ``VDBManagementService`` already pointed at the tenant's
+    resolved Teiid (shared global, or the dedicated container when bound).
+    """
+    undeployed = 0
+    shared = (
+        await session.scalars(
+            select(SharedVDB).where(SharedVDB.tenant_id == tenant_id)
+        )
+    ).all()
+    for vdb in shared:
+        try:
+            await vdb_svc.delete_vdb(vdb.vdb_id, org_id=tenant_id, vdb_type="shared")
+            undeployed += 1
+        except VDBProvisioningError:
+            pass
+
+    user_vdbs = (
+        await session.scalars(
+            select(UserVDB).where(UserVDB.tenant_id == tenant_id)
+        )
+    ).all()
+    for uvdb in user_vdbs:
+        try:
+            await vdb_svc.delete_vdb(
+                uvdb.vdb_id,
+                org_id=tenant_id,
+                vdb_type="user",
+                user_id=uvdb.user_id,
+            )
+            undeployed += 1
+        except VDBProvisioningError:
+            pass
+    return undeployed
 
 
 async def purge_app_tenant(session: AsyncSession, tenant_id: int) -> dict[str, int]:

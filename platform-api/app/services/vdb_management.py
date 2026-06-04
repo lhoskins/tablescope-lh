@@ -233,6 +233,44 @@ class VDBManagementService:
             )
         logger.info("VDB redeployed: vdb_id=%s", vdb_id)
 
+    async def delete_vdb(
+        self,
+        vdb_id: str,
+        *,
+        org_id: int,
+        vdb_type: str = "shared",
+        user_id: int | None = None,
+    ) -> None:
+        """Undeploy a VDB from Teiid and archive its file via the servlet.
+
+        Best-effort: a missing/already-undeployed VDB is not treated as fatal so
+        tenant deletion can proceed even if Teiid no longer has the VDB.
+        """
+        payload: dict = {
+            "org_id": org_id,
+            "vdb_id": vdb_id,
+            "teiid_host": "localhost",
+            "teiid_port": 9990,
+            "vdb_type": vdb_type,
+        }
+        if vdb_type == "user" and user_id is not None:
+            payload["user_id"] = user_id
+
+        try:
+            response = await self._client.post(
+                "/TeiidExcelImporterTest/vdb-management/deleteVDB",
+                json=payload,
+            )
+        except httpx.RequestError as exc:
+            raise VDBProvisioningError(
+                f"Failed to contact Teiid servlet to delete VDB {vdb_id}: {exc}"
+            ) from exc
+        if response.status_code >= 400:
+            raise VDBProvisioningError(
+                f"Teiid delete failed for {vdb_id}: {response.status_code} {response.text}"
+            )
+        logger.info("VDB deleted/undeployed: vdb_id=%s", vdb_id)
+
     async def provision_user_vdb(
         self, *, tenant_external_id: str, user_external_id: str
     ) -> VDBProvisionResult:
