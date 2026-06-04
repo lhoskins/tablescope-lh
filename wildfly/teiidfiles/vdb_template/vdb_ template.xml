@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<vdb name="vdb_production" version="1">
+  
+  <!-- Enable Teiid Result Set Caching for Performance -->
+  <property name="result-set-cache-mode" value="true"/>
+  <property name="result-set-cache-max-age" value="1800"/> <!-- 30 minutes -->
+  
+  <!-- Hidden model for Excel files -->
+  <model name="ExcelSourceModel" type="PHYSICAL" visible="false">
+    <!-- Uses resource adapter from standalone.xml (ParentDirectory=/opt/wildfly/teiidfiles/customers) -->
+    <source name="excel-connector" translator-name="excel" connection-jndi-name="java:/excelDS"/>
+    
+    <metadata type="DDL">
+      <![CDATA[
+-- Placeholder table to ensure model is valid (Teiid requires at least one object per model)
+-- This table is never queried - actual Excel tables are added dynamically when files are uploaded
+CREATE FOREIGN TABLE _placeholder_excel_(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet1', "teiid_excel:FILE" '_placeholder_.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+-- Place Foreign Table Below
+
+]]>
+    </metadata>
+  </model>
+  
+  <!-- Hidden model for CSV/Text files -->
+  <model name="CSVSourceModel" type="PHYSICAL" visible="false">
+    <!-- Uses resource adapter from standalone.xml (ParentDirectory=/opt/wildfly/teiidfiles/customers) -->
+    <source name="text-connector" translator-name="file" connection-jndi-name="java:/fileDS"/>
+    
+    <metadata type="DDL">
+      <![CDATA[
+CREATE FOREIGN PROCEDURE getTextFiles (
+  IN pathAndExt string(4000) NOT NULL
+) RETURNS
+  TABLE (
+    file clob,
+    filePath string(4000),
+    lastModified timestamp,
+    created timestamp,
+    size integer
+  ) OPTIONS(UPDATECOUNT '1');
+]]>
+    </metadata>
+  </model>
+
+  <!-- Visible model for Views -->
+  <model name="MyCompany" type="VIRTUAL" visible="true">
+    <metadata type="DDL">
+      <![CDATA[
+-- Placeholder view to ensure model is valid (Teiid requires at least one object per model)
+-- This view returns system info and is always available
+CREATE VIEW _system_info_ AS SELECT 'TableScope VDB' AS name, '1.0' AS version;
+
+-- Place new View above
+]]>
+    </metadata>
+  </model>
+</vdb>

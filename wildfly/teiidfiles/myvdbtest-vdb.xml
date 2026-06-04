@@ -1,0 +1,53 @@
+<vdb name="MyVDBTest" version="1">
+  
+  <!-- Enable Teiid Result Set Caching for Performance -->
+  <property name="result-set-cache-mode" value="true"/>
+  <property name="result-set-cache-max-age" value="1800"/> <!-- 30 minutes -->
+  
+  <!-- Hidden model for the Activate foreign table -->
+  <model name="ExcelSourceModel" type="PHYSICAL" visible="false">
+    <source name="excel-connector" translator-name="excel" connection-jndi-name="java:/excelTestDS"/>
+    <metadata type="DDL">
+      <![CDATA[
+-- Dummy table to satisfy Teiid's requirement for at least one table in a PHYSICAL model
+-- This table will never be used and can be deleted when you upload your first Excel file
+CREATE FOREIGN TABLE _dummy(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	dummy_column string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet1', "teiid_excel:FILE" '_dummy.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+	  -- Place Foreign Table Below
+]]>
+    </metadata>
+  </model>
+  <model name="CSVSourceModel" type="PHYSICAL" visible="false">
+    <source name="text-connector" translator-name="file" connection-jndi-name="java:/fileTestDS" />
+    <metadata type="DDL">
+      <![CDATA[
+        CREATE FOREIGN PROCEDURE getTextFiles (
+          IN pathAndExt string(4000) NOT NULL
+        ) RETURNS
+          TABLE (
+            file clob,
+            filePath string(4000),
+            lastModified timestamp,
+            created timestamp,
+            size integer
+          ) OPTIONS(UPDATECOUNT '1');
+      ]]>
+    </metadata>
+  </model>
+
+  <!-- Visible model for the MyView -->
+  <model name="MyCompany" type="VIRTUAL" visible="true">
+    <metadata type="DDL">
+      <![CDATA[
+
+-- Place new View above
+
+      ]]>
+    </metadata>
+  </model>
+</vdb>
+

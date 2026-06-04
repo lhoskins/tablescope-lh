@@ -1,0 +1,12 @@
+[Unit]
+Description=Attach Tablescope control plane to per-tenant Docker networks
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/tablescope-attach-control-plane.sh
+
+[Install]
+WantedBy=multi-user.target

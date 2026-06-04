@@ -1,0 +1,178 @@
+<vdb name="MyVDB" version="1">
+    <!-- Hidden model for the Activate foreign table -->
+    <model name="HiddenModel" type="PHYSICAL" visible="false">
+        <property name="importer.headerRowNumber" value="1"/>
+        <property name="importer.ExcelFileName" value="BudgetsandAssumptions.xlsx"/>
+        <source name="excel-connector" translator-name="excel" connection-jndi-name="java:/excelDS"/>
+		 <!--source name="text-connector" translator-name="file" connection-jndi-name="java:/fileDS"/-->
+        <metadata type="DDL">
+            <![CDATA[ -- Place Foreign Table Below
+-- CSV Foreign Table
+CREATE FOREIGN TABLE  upload_users(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_csv:ROW_NUMBER" 'ROW_ID'),
+	username string,
+	password string,
+	firstname string,
+	lastname string,
+	email string,
+	course1 string,
+	group1 string 
+  )
+  OPTIONS(
+	"teiid_csv:FILE" 'upload_users.csv',
+	"teiid_csv:SKIP_HEADER_COUNT" '1'  
+  );        
+
+
+CREATE FOREIGN TABLE ActivatedUsers2(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Test string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	Users string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Companies string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet1', "teiid_excel:FILE" 'ActivatedUsers2.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE V3iTProspectsList(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	FirstName string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '1'),
+	LastName string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Email string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Company string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Title string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet1', "teiid_excel:FILE" 'V3iTProspectsList.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE Verified_SAP_Attendees (
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Email string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	FirstName string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	LastName string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Title string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	Category string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '6'),
+	Date_ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '7'),
+	Status string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '8'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet4', "teiid_excel:FILE" 'Verified_SAP_Attendees.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE SalesJournalYTD3 (
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Date_ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Customer_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Job_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	Job_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '6'),
+	Account_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '7'),
+	Account_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '8'),
+	InvoiceCM_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '9'),
+	Line_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '10'),
+	Purchase_Order_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '11'),
+	Amount string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '12'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'SalesJournalYTD', "teiid_excel:FILE" 'SalesJournalYTD3.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE SalesJournalYTD2 (
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Date_ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Customer_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Job_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	Job_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '6'),
+	Account_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '7'),
+	Account_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '8'),
+	InvoiceCM_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '9'),
+	Line_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '10'),
+	Purchase_Order_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '11'),
+	Amount string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '12'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'SalesJournalYTD', "teiid_excel:FILE" 'SalesJournalYTD2.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE SalesJournalYTD (
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Date_ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	Customer_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Job_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	Job_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '6'),
+	Account_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '7'),
+	Account_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '8'),
+	InvoiceCM_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '9'),
+	Line_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '10'),
+	Purchase_Order_No string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '11'),
+	Amount string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '12'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'SalesJournalYTD', "teiid_excel:FILE" 'SalesJournalYTD.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+CREATE FOREIGN TABLE GLDump2019YTD (
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	Account_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '2'),
+	GL string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '3'),
+	Dept string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '4'),
+	Account_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '5'),
+	Date_ string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '6'),
+	Period string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '7'),
+	Transaction_Type string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '8'),
+	Reference string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '9'),
+	Amount string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '10'),
+	Line_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '11'),
+	ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '12'),
+	Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '13'),
+	Job_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '14'),
+	Job_Description string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '15'),
+	Job_Type string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '16'),
+	Vendor_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '17'),
+	Vendor_Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '18'),
+	Customer_ID string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '19'),
+	Customer_Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '20'),
+	FS_Index string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '21'),
+	FS_Index_Name string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '22'),
+	Dir_vs_Indir string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '23'),
+	Prod string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '24'),
+	Org string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '25'),
+	Fixed_v_Var string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '26'),
+	Cost_Pools string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '27'),
+	OH_Calc string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '28'),
+	FS_Seq_1 string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '29'),
+	FS_Seq_2 string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '30'),
+	FS_Level_1 string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '31'),
+	FS_Level_2_RevCOGS string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '32'),
+	FS_Level_3_COGS string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '33'),
+	FS_Level_4_COGS string OPTIONS (SEARCHABLE 'Unsearchable', "teiid_excel:CELL_NUMBER" '34'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet1', "teiid_excel:FILE" 'GLDump2019YTD.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+
+            ]]>
+        </metadata>
+    </model>
+
+    <!-- Visible model for the MyView -->
+    <model name="MyCompany" type="VIRTUAL" visible="true">
+        <metadata type="DDL">
+            <![CDATA[ 
+CREATE VIEW GLDump2019YTD_XLSX AS SELECT * FROM HiddenModel.GLDump2019YTD;;
+CREATE VIEW SalesJournalYTD_XLSX AS SELECT * FROM HiddenModel.SalesJournalYTD;;
+
+CREATE VIEW SalesRoller AS SELECT SalesJournalYTD_XLSX.Date_, SalesJournalYTD_XLSX.Customer_ID, SalesJournalYTD_XLSX.Name, SalesJournalYTD_XLSX.Job_ID, GLDump2019YTD_XLSX.GL, GLDump2019YTD_XLSX.Dept FROM SalesJournalYTD_XLSX LEFT JOIN GLDump2019YTD_XLSX ON SalesJournalYTD_XLSX.Job_ID = GLDump2019YTD_XLSX.Job_ID;
+CREATE VIEW SalesJournalYTD2_XLSX AS SELECT * FROM HiddenModel.SalesJournalYTD2;;
+CREATE VIEW EPHRAIM AS 
+SELECT 
+    SalesRoller.Date_,
+    SalesRoller.Customer_ID,
+    SalesRoller.Job_ID,
+    SalesRoller.GL,
+    SalesRoller.Dept,
+	InvoiceCM_No
+   
+FROM 
+    SalesRoller LEFT JOIN SalesJournalYTD_XLSX ON SalesRoller.Job_ID = SalesJournalYTD_XLSX.Job_ID;
+CREATE VIEW SalesJournalYTD3_XLSX AS SELECT * FROM HiddenModel.SalesJournalYTD3;;
+CREATE VIEW V3iTProspectsList_XLSX AS SELECT * FROM HiddenModel.V3iTProspectsList;;
+CREATE VIEW ActivatedUsers2_XLSX AS SELECT * FROM HiddenModel.ActivatedUsers2;;
+CREATE VIEW upload_users_CSV AS SELECT * FROM HiddenModel.upload_users;;
+-- Place new View above
+
+
+
+			]]> 
+        </metadata>
+    </model>
+</vdb>

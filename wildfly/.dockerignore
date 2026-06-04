@@ -1,0 +1,12 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile
+*.log
+standalone/data/
+standalone/log/
+standalone/tmp/
+domain/data/
+domain/log/
+domain/tmp/
+teiidfiles/customers/

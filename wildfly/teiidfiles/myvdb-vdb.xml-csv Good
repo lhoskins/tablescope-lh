@@ -1,0 +1,44 @@
+<vdb name="MyVDB" version="1">
+  <!-- Hidden model for the Activate foreign table -->
+  <model name="SourceModel" type="PHYSICAL" visible="false">
+    <source name="text-connector" translator-name="file" connection-jndi-name="java:/fileDS" />
+    <metadata type="DDL">
+      <![CDATA[
+        CREATE FOREIGN PROCEDURE getTextFiles (
+          IN pathAndExt string(4000) NOT NULL
+        ) RETURNS
+          TABLE (
+            file clob,
+            filePath string(4000),
+            lastModified timestamp,
+            created timestamp,
+            size integer
+          ) OPTIONS(UPDATECOUNT '1');
+          
+      ]]>
+    </metadata>
+  </model>
+
+  <!-- Visible model for the MyView -->
+  <model name="MyCompany" type="VIRTUAL" visible="true">
+    <metadata type="DDL">
+      <![CDATA[
+        CREATE VIEW MyCSV (
+          username string(4000) OPTIONS(NAMEINSOURCE 'username', UPDATABLE 'FALSE'),
+          password string(4000) OPTIONS(NAMEINSOURCE 'password', UPDATABLE 'FALSE'),
+          firstname string(4000) OPTIONS(NAMEINSOURCE 'firstname', UPDATABLE 'FALSE'),
+          lastname string(4000) OPTIONS(NAMEINSOURCE 'lastname', UPDATABLE 'FALSE'),
+          email string(4000) OPTIONS(NAMEINSOURCE 'email', UPDATABLE 'FALSE'),
+          course1 string(4000) OPTIONS(NAMEINSOURCE 'course1', UPDATABLE 'FALSE'),
+          group1 string(4000) OPTIONS(NAMEINSOURCE 'group1', UPDATABLE 'FALSE')
+        ) 
+        AS
+          SELECT 
+            A.username, A.password, A.firstname, A.lastname, A.email, A.course1, A.group1
+          FROM
+            (EXEC SourceModel.getTextFiles('upload_users.csv')) AS f,
+            TEXTTABLE(f.file COLUMNS username string, password string, firstname string, lastname string, email string, course1 string, group1 string HEADER) AS A;
+      ]]>
+    </metadata>
+  </model>
+</vdb>

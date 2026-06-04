@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module name="org.reflections" xmlns="urn:jboss:module:1.3">
+    <properties>
+        <property name="jboss.api" value="private"/>
+    </properties>
+    <resources>
+        <resource-root path="reflections-0.9.11.jar"/>
+    </resources>
+    
+    <dependencies>
+        <module name="org.javassist"/> 
+        <module name="com.google.guava"/>
+        <module name="com.google.code.findbugs"/> 
+    </dependencies>
+    
+</module>

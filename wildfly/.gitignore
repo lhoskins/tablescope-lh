@@ -1,0 +1,37 @@
+# Sensitive Files
+*.key
+*.pem
+.env
+
+# Allow JAR files with "password" or "secret" in name (WildFly elytron modules)
+# but ignore plaintext password/secret files
+*password*.txt
+*password*.cfg
+*secret*.txt
+*secret*.cfg
+
+# Logs
+*.log
+logs/
+
+# Compiled
+*.pyc
+__pycache__/
+*.class
+
+# Data directories
+standalone/data/
+standalone/log/
+standalone/tmp/
+domain/data/
+domain/log/
+domain/tmp/
+
+# Customer data
+customer_folder/
+uploads/
+
+# Exclude large files
+wildfly/archive.zip
+wildfly/teiid-wildfly-16.0.0-dist.zip
+wildfly/*.zip
