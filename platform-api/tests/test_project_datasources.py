@@ -9,8 +9,6 @@ endpoint and read from that dedicated path, otherwise the files are invisible.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from app.auth.context import RequestContext
 from app.auth.jwt import TokenClaims
 from app.models.file_source_meta import FileSourceMeta
