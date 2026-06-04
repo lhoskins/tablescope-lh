@@ -199,6 +199,30 @@ async def _run_sql(
     return {"columns": columns, "rows": rows}
 
 
+# Regex to add CAST(... AS double) inside SUM/AVG/MIN/MAX so aggregations work
+# on CSV columns that Teiid imports as string type. COUNT is excluded (works on
+# any type). Matches e.g. SUM("revenue") or AVG(col) but NOT already-cast
+# expressions like SUM(CAST(...)).
+_AGG_CAST_RE = re.compile(
+    r'\b(SUM|AVG|MIN|MAX)\(\s*(?!CAST\b)(\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_$.]*)\s*\)',
+    re.IGNORECASE,
+)
+
+
+def _auto_cast_aggregates(sql: str) -> str:
+    """Wrap SUM/AVG/MIN/MAX column arguments with CAST(col AS double).
+
+    Teiid imports CSV columns as string, causing numeric aggregations to fail.
+    This transparently casts the argument for the user.
+    """
+    def _replacer(m: re.Match[str]) -> str:
+        func = m.group(1).upper()
+        col = m.group(2)
+        return f"{func}(CAST({col} AS double))"
+
+    return _AGG_CAST_RE.sub(_replacer, sql)
+
+
 @router.post("/datasource")
 async def query_datasource(
     payload: DatasourceQueryRequest,
@@ -221,7 +245,7 @@ async def query_datasource(
     endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
 
     if payload.sql:
-        sql = payload.sql
+        sql = _auto_cast_aggregates(payload.sql)
         if "LIMIT" not in sql.upper():
             sql += f" LIMIT {payload.limit}"
     else:
