@@ -294,6 +294,63 @@ async def test_resolver_uses_incluster_address(db_session) -> None:
     assert fallback.is_dedicated is False
 
 
+async def test_resolve_for_org_binds_app_tenant_to_data_plane(db_session) -> None:
+    from app.models.tenant import Tenant
+    from app.models.tenant_data_plane import TenantDataPlane
+    from app.services.tenant_teiid_resolver import TenantTeiidResolver
+
+    tenant = Tenant(slug="acme", name="Acme")
+    db_session.add(tenant)
+    await db_session.flush()
+
+    db_session.add(
+        TenantDataPlane(
+            tenant_id="acme",
+            tenant_name="Acme",
+            org_tenant_id=tenant.id,
+            docker_network_name="tenant_acme_net",
+            docker_subnet_cidr="172.30.10.0/24",
+            teiid_container_name="tenant-acme-teiid",
+            teiid_container_ip="172.30.10.10",
+            teiid_servlet_url="http://127.0.0.1:18095",
+            teiid_pg_host="127.0.0.1",
+            teiid_pg_port=15442,
+            teiid_mgmt_port=19990,
+            vdb_host_path="/opt/tablescope/tenants/acme/vdb",
+            allowed_onprem_cidrs=[],
+            blocked_cidrs=[],
+        )
+    )
+    await db_session.commit()
+
+    resolver = TenantTeiidResolver(db_session)
+    # Bound app tenant -> dedicated container endpoint.
+    ep = await resolver.resolve_for_org(tenant.id)
+    assert ep.is_dedicated is True
+    assert ep.servlet_url == "http://172.30.10.10:8080"
+
+    # Unbound / unknown org tenant -> shared global fallback.
+    fallback = await resolver.resolve_for_org(999999)
+    assert fallback.is_dedicated is False
+    none_ep = await resolver.resolve_for_org(None)
+    assert none_ep.is_dedicated is False
+
+
+async def test_create_app_tenant_requires_admin_credentials(client, service_headers) -> None:
+    resp = await client.post(
+        "/api/tenant-data-planes",
+        headers=service_headers,
+        json={
+            "tenant_id": "needsadmin",
+            "tenant_name": "Needs Admin",
+            "vpn_mode": "none",
+            "create_app_tenant": True,
+        },
+    )
+    assert resp.status_code == 422
+    assert "admin" in resp.json()["detail"].lower()
+
+
 async def test_requires_auth(client) -> None:
     resp = await client.get("/api/tenant-data-planes")
     assert resp.status_code == 401

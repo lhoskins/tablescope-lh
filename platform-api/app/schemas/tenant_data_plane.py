@@ -24,6 +24,20 @@ class TenantDataPlaneCreate(BaseModel):
         "AWS Secrets Manager ARN). Never the secret value itself.",
     )
 
+    # --- Optional unified provisioning fields ---
+    # When provided, the data-plane create endpoint also creates an application
+    # tenant (slug + root admin user) and binds them via org_tenant_id, so one
+    # API call delivers a fully usable, login-ready tenant.
+    create_app_tenant: bool = Field(
+        default=False, description="If true, also create the application tenant and root admin user."
+    )
+    app_tenant_admin_email: str | None = Field(
+        default=None, description="Root admin email for the new app tenant (required when create_app_tenant=true)."
+    )
+    app_tenant_admin_password: str | None = Field(
+        default=None, description="Root admin password (required when create_app_tenant=true)."
+    )
+
 
 class VpnMetadataIn(BaseModel):
     tenant_vpc_id: str | None = None

@@ -51,12 +51,25 @@ def _generate_password(length: int = 24) -> str:
 class VDBManagementService:
     """Thin async client around the WildFly Teiid management servlet."""
 
-    def __init__(self, *, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: httpx.AsyncClient | None = None,
+        servlet_url: str | None = None,
+        pg_host: str | None = None,
+        pg_port: int | None = None,
+    ) -> None:
         settings = get_settings()
         self._settings = settings
+        # When a tenant is bound to a dedicated data plane the caller passes the
+        # tenant container's servlet/PG endpoint; otherwise we use the shared
+        # global Teiid so single-tenant behaviour is preserved.
+        self._servlet_url = servlet_url or settings.teiid_servlet_url
+        self._pg_host = pg_host or settings.teiid_pg_host
+        self._pg_port = pg_port or settings.teiid_pg_port
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
-            base_url=settings.teiid_servlet_url,
+            base_url=self._servlet_url,
             timeout=httpx.Timeout(60.0, connect=10.0),
             headers={"X-API-Key": settings.teiid_servlet_api_key} if settings.teiid_servlet_api_key else {},
         )
@@ -126,8 +139,8 @@ class VDBManagementService:
             vdb_id=vdb_id,
             vdb_username=username,
             vdb_password=password,
-            vdb_host=self._settings.teiid_pg_host,
-            vdb_port=self._settings.teiid_pg_port,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
         )
 
     async def create_shared_vdb(self, *, org_id: int) -> VDBProvisionResult:
@@ -170,8 +183,8 @@ class VDBManagementService:
             vdb_id=vdb_id,
             vdb_username=username,
             vdb_password=password,
-            vdb_host=self._settings.teiid_pg_host,
-            vdb_port=self._settings.teiid_pg_port,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
         )
 
     def _sync_vdb_to_s3(self, org_id: int, vdb_id: str, *, vdb_type: str, user_id: int | None = None) -> None:

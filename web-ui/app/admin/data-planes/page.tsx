@@ -84,6 +84,11 @@ function SuperAdminView() {
   const [tenantName, setTenantName] = useState("");
   const [vpnMode, setVpnMode] = useState<VpnMode>("none");
   const [cidrs, setCidrs] = useState("");
+  const [createAppTenant, setCreateAppTenant] = useState(true);
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [linkOrgTenantId, setLinkOrgTenantId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<Record<string, HealthReport>>({});
   const [note, setNote] = useState<string | null>(null);
@@ -93,13 +98,17 @@ function SuperAdminView() {
     queryFn: () => apiClient.get<DataPlane[]>("/api/tenant-data-planes"),
   });
 
+  type AppTenant = { id: number; slug: string; name: string };
+  const appTenantsQuery = useQuery<AppTenant[]>({
+    queryKey: ["app-tenants"],
+    queryFn: () =>
+      apiClient.get<AppTenant[]>("/api/tenant-data-planes/app-tenants"),
+    enabled: showCreate && !createAppTenant,
+  });
+
   const createMutation = useMutation({
-    mutationFn: (payload: {
-      tenant_id: string;
-      tenant_name: string;
-      vpn_mode: VpnMode;
-      allowed_onprem_cidrs: string[];
-    }) => apiClient.post<DataPlane>("/api/tenant-data-planes", payload),
+    mutationFn: (payload: Record<string, unknown>) =>
+      apiClient.post<DataPlane>("/api/tenant-data-planes", payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["data-planes"] });
       setShowCreate(false);
@@ -107,6 +116,11 @@ function SuperAdminView() {
       setTenantName("");
       setVpnMode("none");
       setCidrs("");
+      setCreateAppTenant(true);
+      setAdminEmail("");
+      setAdminPassword("");
+      setConfirmPassword("");
+      setLinkOrgTenantId(null);
       setError(null);
     },
     onError: (err: Error) => setError(err.message),
@@ -144,12 +158,30 @@ function SuperAdminView() {
       setError("Customer-VPN tenants require at least one on-prem CIDR.");
       return;
     }
-    createMutation.mutate({
+    if (createAppTenant) {
+      if (!adminEmail || !adminPassword) {
+        setError("Admin email and password are required to create the app tenant.");
+        return;
+      }
+      if (adminPassword !== confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+      }
+    }
+    const payload: Record<string, unknown> = {
       tenant_id: tenantId,
       tenant_name: tenantName,
       vpn_mode: vpnMode,
       allowed_onprem_cidrs: list,
-    });
+      create_app_tenant: createAppTenant,
+    };
+    if (createAppTenant) {
+      payload.app_tenant_admin_email = adminEmail;
+      payload.app_tenant_admin_password = adminPassword;
+    } else if (linkOrgTenantId) {
+      payload.org_tenant_id = linkOrgTenantId;
+    }
+    createMutation.mutate(payload);
   }
 
   return (
@@ -285,6 +317,86 @@ function SuperAdminView() {
                 "Optional for No-VPN tenants (typically left blank)."}
             </p>
           </div>
+
+          {/* Application tenant creation */}
+          <div className="mt-5">
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={createAppTenant}
+                onChange={(e) => setCreateAppTenant(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand"
+              />
+              Also create application tenant (login-ready with admin account)
+            </label>
+          </div>
+
+          {createAppTenant && (
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Admin Email <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  required={createAppTenant}
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  placeholder="admin@acme.com"
+                />
+              </div>
+              <div />
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Admin Password <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  required={createAppTenant}
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Confirm Password <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required={createAppTenant}
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                />
+              </div>
+            </div>
+          )}
+
+          {!createAppTenant && (
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-slate-700">
+                Link to existing application tenant (optional)
+              </label>
+              <select
+                value={linkOrgTenantId ?? ""}
+                onChange={(e) =>
+                  setLinkOrgTenantId(
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              >
+                <option value="">-- none (infra only) --</option>
+                {appTenantsQuery.data?.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.slug} — {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
           <button

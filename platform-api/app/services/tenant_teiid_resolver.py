@@ -46,6 +46,11 @@ class TenantTeiidResolver:
     async def _data_plane(self, tenant_id: str) -> TenantDataPlane | None:
         return await self._session.scalar(select(TenantDataPlane).where(TenantDataPlane.tenant_id == tenant_id))
 
+    async def _data_plane_by_org(self, org_tenant_id: int) -> TenantDataPlane | None:
+        return await self._session.scalar(
+            select(TenantDataPlane).where(TenantDataPlane.org_tenant_id == org_tenant_id)
+        )
+
     def _global_endpoint(self) -> TeiidEndpoint:
         settings = get_settings()
         return TeiidEndpoint(
@@ -58,22 +63,10 @@ class TenantTeiidResolver:
             is_dedicated=False,
         )
 
-    async def resolve(self, tenant_id: str | None) -> TeiidEndpoint:
-        """Return the Teiid endpoint for ``tenant_id``.
-
-        Falls back to the global single-tenant endpoint when the tenant has no
-        dedicated data plane (dev mode / criteria 11-12).
-        """
-        if not tenant_id:
-            return self._global_endpoint()
-
-        plane = await self._data_plane(tenant_id)
-        if plane is None:
-            return self._global_endpoint()
-
+    async def _endpoint_for_plane(self, plane: TenantDataPlane) -> TeiidEndpoint:
         api_key_ref = await self._session.scalar(
             select(TenantSecretRef.secret_ref).where(
-                TenantSecretRef.tenant_id == tenant_id,
+                TenantSecretRef.tenant_id == plane.tenant_id,
                 TenantSecretRef.secret_name == "teiid_api_key",
             )
         )
@@ -99,3 +92,32 @@ class TenantTeiidResolver:
             tenant_id=plane.tenant_id,
             is_dedicated=True,
         )
+
+    async def resolve(self, tenant_id: str | None) -> TeiidEndpoint:
+        """Return the Teiid endpoint for the data-plane ``tenant_id`` (slug).
+
+        Falls back to the global single-tenant endpoint when the tenant has no
+        dedicated data plane (dev mode / criteria 11-12).
+        """
+        if not tenant_id:
+            return self._global_endpoint()
+        plane = await self._data_plane(tenant_id)
+        if plane is None:
+            return self._global_endpoint()
+        return await self._endpoint_for_plane(plane)
+
+    async def resolve_for_org(self, org_tenant_id: int | None) -> TeiidEndpoint:
+        """Return the Teiid endpoint for an *application* (org) tenant id.
+
+        This is the entry point used by the serving path: a logged-in user's
+        JWT carries the numeric org tenant id. If that org tenant is bound to a
+        dedicated data plane (``tenant_data_planes.org_tenant_id``) all Teiid
+        traffic is routed to that tenant's container; otherwise it falls back to
+        the shared global Teiid so existing single-tenant tenants are unaffected.
+        """
+        if not org_tenant_id:
+            return self._global_endpoint()
+        plane = await self._data_plane_by_org(org_tenant_id)
+        if plane is None:
+            return self._global_endpoint()
+        return await self._endpoint_for_plane(plane)

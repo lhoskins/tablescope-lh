@@ -28,6 +28,7 @@ from app.schemas.tenant import (
     UserUpdate,
 )
 from app.services.customer_folders import CustomerFolderService
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.services.vdb_management import VDBManagementService, VDBProvisioningError
 
 logger = logging.getLogger(__name__)
@@ -67,8 +68,13 @@ async def create_tenant(
 
     CustomerFolderService().ensure_tenant_folders(tenant.slug)
 
-    # Create shared VDB for the tenant
-    vdb_svc = VDBManagementService()
+    # Create shared VDB for the tenant, targeting the dedicated container if bound.
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant.id)
+    vdb_svc = VDBManagementService(
+        servlet_url=endpoint.servlet_url,
+        pg_host=endpoint.pg_host,
+        pg_port=endpoint.pg_port,
+    )
     try:
         shared_result = await vdb_svc.create_shared_vdb(org_id=tenant.id)
         shared_vdb = SharedVDB(
@@ -104,8 +110,12 @@ async def create_tenant(
             tenant.slug, root_user.external_id or str(root_user.id)
         )
 
-        # Create and deploy user VDB for the root user
-        vdb_svc = VDBManagementService()
+        # Create and deploy user VDB for the root user in the tenant container.
+        vdb_svc = VDBManagementService(
+            servlet_url=endpoint.servlet_url,
+            pg_host=endpoint.pg_host,
+            pg_port=endpoint.pg_port,
+        )
         try:
             user_result = await vdb_svc.create_user_vdb(
                 org_id=tenant.id, user_id=root_user.id,
@@ -282,8 +292,13 @@ async def create_user(
         tenant.slug, payload.external_id or str(user.id)
     )
 
-    # Create and deploy user VDB
-    vdb_svc = VDBManagementService()
+    # Create and deploy user VDB — target the dedicated container if bound.
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant_id)
+    vdb_svc = VDBManagementService(
+        servlet_url=endpoint.servlet_url,
+        pg_host=endpoint.pg_host,
+        pg_port=endpoint.pg_port,
+    )
     try:
         vdb_result = await vdb_svc.create_user_vdb(
             org_id=tenant_id, user_id=user.id,

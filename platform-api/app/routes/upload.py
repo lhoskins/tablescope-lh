@@ -38,6 +38,7 @@ from app.services.file_sources import (
     convert_to_csv_if_needed,
     detect_column_types,
 )
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -77,19 +78,20 @@ async def upload_file(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    settings = get_settings()
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
     servlet_url = (
-        f"{settings.teiid_servlet_url}/TeiidExcelImporterTest/upload"
+        f"{endpoint.servlet_url}/TeiidExcelImporterTest/upload"
     )
 
     resolved_vdb_type = vdb_type or "user"
 
     logger.info(
-        "Forwarding upload to Teiid servlet: file=%s org_id=%s user_id=%s vdb_type=%s",
+        "Forwarding upload to Teiid servlet: file=%s org_id=%s user_id=%s vdb_type=%s endpoint=%s",
         filename,
         tenant.id,
         user.id,
         resolved_vdb_type,
+        "dedicated" if endpoint.is_dedicated else "shared",
     )
 
     try:
@@ -225,7 +227,12 @@ async def list_datasources(
         raise HTTPException(status_code=404, detail="User not found")
 
     settings = get_settings()
-    uploads_dir = Path(settings.customer_base_path) / str(context.tenant_id) / str(user.id) / "uploads"
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    if endpoint.is_dedicated and endpoint.vdb_host_path:
+        base_path = endpoint.vdb_host_path
+    else:
+        base_path = settings.customer_base_path
+    uploads_dir = Path(base_path) / str(context.tenant_id) / str(user.id) / "uploads"
 
     # Metadata (archive flag, project association, column types) keyed by view.
     meta_rows = (
@@ -445,8 +452,13 @@ async def replace_file_source(
         raise HTTPException(status_code=404, detail="Tenant not found")
 
     settings = get_settings()
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    if endpoint.is_dedicated and endpoint.vdb_host_path:
+        base_path = endpoint.vdb_host_path
+    else:
+        base_path = settings.customer_base_path
     uploads_dir = (
-        Path(settings.customer_base_path)
+        Path(base_path)
         / str(context.tenant_id)
         / str(user.id)
         / "uploads"
@@ -507,7 +519,7 @@ async def replace_file_source(
         )
     )
     resolved_vdb_type = meta.vdb_type if meta else "user"
-    servlet_url = f"{settings.teiid_servlet_url}/TeiidExcelImporterTest/upload"
+    servlet_url = f"{endpoint.servlet_url}/TeiidExcelImporterTest/upload"
     try:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(120.0, connect=10.0)
