@@ -1,4 +1,21 @@
-export type WidgetType = "kpi" | "line" | "bar" | "area" | "pie" | "table";
+export type WidgetType = "kpi" | "line" | "bar" | "area" | "pie" | "table" | "combo";
+
+export type ChartSubtype =
+  // Bar variants
+  | "column"           // vertical bars (default bar)
+  | "stacked_bar"      // stacked vertical bars
+  | "grouped_bar"      // side-by-side bars (grouped)
+  | "horizontal_bar"   // horizontal bars
+  | "stacked_horizontal"
+  // Line variants
+  | "smooth_line"      // curved/spline
+  | "step_line"        // step function
+  // Area variants
+  | "stacked_area"
+  // Pie variants
+  | "donut"
+  // Combo
+  | "bar_line";        // bars + overlay line
 
 export type WidgetDataSource = {
   kind: "query" | "datasource" | "custom_sql";
@@ -17,6 +34,7 @@ export type WidgetFilter = {
 export type WidgetConfig = {
   id: string;
   type: WidgetType;
+  chartSubtype?: ChartSubtype;
   title: string;
   dataSource: WidgetDataSource;
   // Axis & Aggregation
@@ -25,6 +43,9 @@ export type WidgetConfig = {
   dateGranularity?: "day" | "week" | "month" | "quarter" | "year";
   yColumn: string;
   aggregation: "sum" | "avg" | "count" | "min" | "max";
+  // Secondary Y (for combo charts)
+  y2Column?: string;
+  y2Aggregation?: "sum" | "avg" | "count" | "min" | "max";
   // Grouping
   groupByColumn?: string;
   // Sort & Limit
@@ -32,9 +53,15 @@ export type WidgetConfig = {
   limit?: number;
   // Filters
   filters: WidgetFilter[];
-  // Layout
+  // Layout (grid-based)
   colSpan: number;
+  rowSpan?: number;
   position: number;
+  // Grid layout (react-grid-layout)
+  gridX?: number;
+  gridY?: number;
+  gridW?: number;
+  gridH?: number;
   // Legacy compat (deprecated — use xColumn/yColumn)
   xKey?: string;
   yKey?: string;

@@ -1,12 +1,17 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ResponsiveGridLayout, type Layout, type LayoutItem } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
 import { apiClient } from "@/lib/api-client";
 import type { Dashboard, WidgetConfig, DashboardConfig, DashboardFilter, ColumnInfo, WidgetFilter } from "./types";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { WidgetConfigPanel } from "./WidgetConfigPanel";
 import { FilterBar } from "./FilterBar";
+
+// react-grid-layout v2 does not export WidthProvider; Responsive handles width
+// automatically via a container ref.
 
 type SavedQuery = { id: number; name: string; sql_text: string | null };
 type Datasource = { viewName: string; fileName: string };
@@ -28,7 +33,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
 
-  // Collect all view names to fetch schema for filter bar
   const viewNames = useMemo(() => {
     const names = new Set<string>();
     widgets.forEach((w) => {
@@ -39,7 +43,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     return Array.from(names);
   }, [widgets]);
 
-  // Fetch schema for first datasource (for filter bar columns)
   const { data: schemaData } = useQuery({
     queryKey: ["datasource-schema", projectId, viewNames[0]],
     queryFn: async () => {
@@ -60,7 +63,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     },
   });
 
-  // Convert global filters to WidgetFilter[] for the API
   const globalFiltersForApi = useCallback((): WidgetFilter[] => {
     const result: WidgetFilter[] = [];
     for (const f of globalFilters) {
@@ -83,10 +85,9 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     return result;
   }, [globalFilters]);
 
-  // Fetch data for all widgets using the widget-query endpoint
   const fetchWidgetData = useCallback(async (w: WidgetConfig) => {
     try {
-      // Use the new widget-query endpoint if widget has xColumn/yColumn
+      // Widget-query endpoint for datasource with aggregation config
       if (w.xColumn && w.yColumn && w.dataSource.kind === "datasource" && w.dataSource.viewName) {
         const resp = await apiClient.post<{ columns: string[]; rows: Record<string, unknown>[]; sql: string }>(
           `/api/projects/${projectId}/dashboards/widget-query`,
@@ -113,19 +114,21 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         );
         return resp.rows ?? [];
       }
-      // Query-based
+      // Query-based widget: execute the saved query's SQL via the datasource endpoint
       if (w.dataSource.kind === "query" && w.dataSource.queryId) {
         const query = savedQueries.find((q) => q.id === w.dataSource.queryId);
         if (query?.sql_text) {
+          const tableMatch = query.sql_text.match(/FROM\s+"?([A-Za-z0-9_]+)"?/i);
+          const tableName = tableMatch ? tableMatch[1] : "dual";
           const resp = await apiClient.post<{ columns: string[]; rows: Record<string, unknown>[] }>(
-            "/api/query/execute",
-            { sql: query.sql_text, project_id: projectId }
+            "/api/query/datasource",
+            { tableName, sql: query.sql_text, limit: 500, project_id: projectId }
           );
           return resp.rows ?? [];
         }
       }
     } catch {
-      // query may not be runnable yet
+      // swallow — widget shows "No data available"
     }
     return [];
   }, [savedQueries, projectId, globalFiltersForApi]);
@@ -146,7 +149,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const handleSaveWidget = (widget: WidgetConfig) => {
     let updatedWidgets: WidgetConfig[];
     if (editingWidget) {
-      updatedWidgets = widgets.map((w) => (w.id === editingWidget.id ? { ...widget, position: w.position } : w));
+      updatedWidgets = widgets.map((w) => (w.id === editingWidget.id ? { ...widget, position: w.position, gridX: w.gridX, gridY: w.gridY, gridW: widget.gridW ?? w.gridW, gridH: widget.gridH ?? w.gridH } : w));
     } else {
       updatedWidgets = [...widgets, { ...widget, position: widgets.length }];
     }
@@ -169,38 +172,59 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     updateMutation.mutate({ config: { widgets, globalFilters: newFilters } });
   };
 
-  const colSpanClass = (span: number) => {
-    const map: Record<number, string> = {
-      3: "col-span-3",
-      4: "col-span-4",
-      6: "col-span-6",
-      8: "col-span-8",
-      12: "col-span-12",
-    };
-    return map[span] || "col-span-6";
-  };
+  // ── react-grid-layout ────────────────────────────────────────────
+  const colSpanToGridW = (span: number) => Math.min(12, Math.max(2, span));
+
+  const layoutRef = useRef<LayoutItem[]>([]);
+  const layouts = useMemo(() => {
+    const lg: LayoutItem[] = widgets.map((w, idx) => ({
+      i: w.id,
+      x: w.gridX ?? ((idx * (w.colSpan || 6)) % 12),
+      y: w.gridY ?? Math.floor((idx * (w.colSpan || 6)) / 12) * 4,
+      w: w.gridW ?? colSpanToGridW(w.colSpan || 6),
+      h: w.gridH ?? (w.type === "kpi" ? 2 : 4),
+      minW: 2,
+      minH: 2,
+    }));
+    layoutRef.current = lg;
+    return { lg };
+  }, [widgets]);
+
+  const handleLayoutChange = useCallback((layout: Layout, _layouts: Record<string, Layout>) => {
+    const prev = layoutRef.current;
+    const changed = layout.some((l) => {
+      const p = prev.find((pl) => pl.i === l.i);
+      return p && (p.x !== l.x || p.y !== l.y || p.w !== l.w || p.h !== l.h);
+    });
+    if (!changed) return;
+    layoutRef.current = [...layout];
+    const updatedWidgets = widgets.map((w) => {
+      const l = layout.find((li) => li.i === w.id);
+      if (!l) return w;
+      return { ...w, gridX: l.x, gridY: l.y, gridW: l.w, gridH: l.h };
+    });
+    updateMutation.mutate({ config: { widgets: updatedWidgets, globalFilters } });
+  }, [widgets, globalFilters, updateMutation]);
 
   return (
     <div>
       {/* Header */}
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <button
-            onClick={onBack}
-            className="mb-1 text-xs font-medium text-blue-600 hover:underline"
-          >
+          <button onClick={onBack} className="mb-1 text-xs font-medium text-blue-600 hover:underline">
             &larr; Back to Dashboards
           </button>
           <h2 className="text-lg font-bold text-slate-900">{dashboard.name}</h2>
           <p className="text-[11px] text-slate-500">
             {widgets.length} widget{widgets.length !== 1 ? "s" : ""} &middot; Status:{" "}
             <span className="font-medium">{dashboard.status}</span>
+            &nbsp;&middot;&nbsp;
+            <span className="text-slate-400">Drag to move &middot; Resize from corners</span>
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => {
-              // Re-fetch all data
               const loadAll = async () => {
                 const results: Record<string, Array<Record<string, unknown>>> = {};
                 for (const w of widgets) {
@@ -234,7 +258,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         <div className="mb-4">
           <WidgetConfigPanel
             projectId={projectId}
-            savedQueries={savedQueries.map((q) => ({ id: q.id, name: q.name }))}
+            savedQueries={savedQueries}
             datasources={datasources}
             editingWidget={editingWidget}
             onSave={handleSaveWidget}
@@ -254,10 +278,21 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             Click &quot;+ Add Widget&quot; to configure your first chart
           </p>
         </div>
-      ) : (
-        <div className="grid grid-cols-12 gap-4">
+      ) : widgets.length > 0 ? (
+        <ResponsiveGridLayout
+          className="layout"
+          layouts={layouts}
+          breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+          cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
+          rowHeight={80}
+          onLayoutChange={handleLayoutChange}
+          dragConfig={{ enabled: true, handle: ".widget-drag-handle", bounded: false, threshold: 3 }}
+          resizeConfig={{ enabled: true }}
+          width={1200}
+        >
           {widgets.map((w) => (
-            <div key={w.id} className={colSpanClass(w.colSpan)}>
+            <div key={w.id} className="relative">
+              <div className="widget-drag-handle absolute left-0 right-0 top-0 z-10 h-7 cursor-grab" />
               <WidgetRenderer
                 widget={w}
                 data={widgetData[w.id] ?? []}
@@ -266,8 +301,8 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
               />
             </div>
           ))}
-        </div>
-      )}
+        </ResponsiveGridLayout>
+      ) : null}
     </div>
   );
 }

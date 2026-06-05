@@ -38,6 +38,9 @@ from app.services.file_sources import (
     convert_to_csv_if_needed,
     detect_column_types,
     display_source,
+    sanitize_csv_content,
+    sanitize_filename,
+    sanitize_xlsx_content,
 )
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
@@ -72,6 +75,20 @@ async def upload_file(
 
     content = await file.read()
 
+    # ── Comprehensive upload cleaning (no user interaction) ──────────
+    # 1. Sanitize the filename: remove $, commas, whitespace, reserved chars
+    clean_name = sanitize_filename(file.filename)
+    logger.info("Filename sanitized: %r → %r", file.filename, clean_name)
+
+    # 2. Clean column headers + cell values in CSV / XLSX
+    lower_name = clean_name.lower()
+    if lower_name.endswith((".csv", ".tsv", ".txt")):
+        content = sanitize_csv_content(content)
+    elif lower_name.endswith((".xlsx", ".xlsm", ".xls")):
+        content = sanitize_xlsx_content(content)
+        # sanitize_xlsx_content returns CSV bytes
+        clean_name = clean_name.rsplit(".", 1)[0] + ".csv"
+
     # Remember the original uploaded extension so the UI can show the real type
     # (e.g. "json"/"xml") even though JSON/XML are flattened to CSV below.
     original_format = (
@@ -81,7 +98,7 @@ async def upload_file(
     # JSON/XML uploads are flattened to CSV so they import through the same
     # Teiid file pipeline as CSV/Excel and behave like every other data source.
     try:
-        filename, content = convert_to_csv_if_needed(file.filename, content)
+        filename, content = convert_to_csv_if_needed(clean_name, content)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -420,10 +437,16 @@ async def delete_file_source(
             detail=f"Cannot delete: {len(deps)} active query(ies) depend on this source ({names}).",
         )
 
-    # Remove the physical file (best-effort) and the metadata row.
+    # Remove the physical file (best-effort) and the metadata row. Bound
+    # tenants store uploads under their dedicated data plane's VDB path.
     settings = get_settings()
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    if endpoint.is_dedicated and endpoint.vdb_host_path:
+        base_path = endpoint.vdb_host_path
+    else:
+        base_path = settings.customer_base_path
     uploads_dir = (
-        Path(settings.customer_base_path)
+        Path(base_path)
         / str(context.tenant_id)
         / str(context.user_id)
         / "uploads"

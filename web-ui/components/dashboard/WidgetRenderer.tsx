@@ -17,6 +17,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ComposedChart,
 } from "recharts";
 import type { WidgetConfig } from "./types";
 
@@ -32,12 +33,9 @@ type Props = {
 function getXKey(widget: WidgetConfig, data: Props["data"]): string {
   if (data.length === 0) return widget.xColumn ?? widget.xKey ?? "";
   const keys = Object.keys(data[0]);
-  // Aggregation query returns date_month, date_year, etc.
   const dateKeys = keys.filter((k) => k.startsWith("date_"));
   if (dateKeys.length > 0) return dateKeys[0];
-  // Try xColumn match
   if (widget.xColumn && keys.includes(widget.xColumn)) return widget.xColumn;
-  // Legacy xKey
   if (widget.xKey && keys.includes(widget.xKey)) return widget.xKey;
   return keys[0] ?? "";
 }
@@ -45,15 +43,22 @@ function getXKey(widget: WidgetConfig, data: Props["data"]): string {
 function getYKey(widget: WidgetConfig, data: Props["data"]): string {
   if (data.length === 0) return widget.yColumn ?? widget.yKey ?? "";
   const keys = Object.keys(data[0]);
-  // Aggregation query returns sum_amount, avg_quantity, etc.
   const aggPrefixes = ["sum_", "avg_", "count_", "min_", "max_"];
   const aggKey = keys.find((k) => aggPrefixes.some((p) => k.startsWith(p)));
   if (aggKey) return aggKey;
-  // Try yColumn match
   if (widget.yColumn && keys.includes(widget.yColumn)) return widget.yColumn;
-  // Legacy yKey
   if (widget.yKey && keys.includes(widget.yKey)) return widget.yKey;
   return keys[keys.length - 1] ?? "";
+}
+
+function getY2Key(widget: WidgetConfig, data: Props["data"]): string {
+  if (!widget.y2Column || data.length === 0) return "";
+  const keys = Object.keys(data[0]);
+  const y2AggPrefix = widget.y2Aggregation ? `${widget.y2Aggregation}_` : "";
+  const y2AggKey = keys.find((k) => y2AggPrefix && k.startsWith(y2AggPrefix) && k !== getYKey(widget, data));
+  if (y2AggKey) return y2AggKey;
+  if (keys.includes(widget.y2Column)) return widget.y2Column;
+  return "";
 }
 
 function pivotData(
@@ -109,10 +114,7 @@ function TableWidget({ data }: { data: Props["data"] }) {
         <thead>
           <tr>
             {columns.map((col) => (
-              <th
-                key={col}
-                className="border-b-2 border-slate-200 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500"
-              >
+              <th key={col} className="border-b-2 border-slate-200 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                 {col}
               </th>
             ))}
@@ -138,7 +140,10 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
   const chartHeight = 220;
   const xKey = getXKey(widget, data);
   const yKey = getYKey(widget, data);
+  const y2Key = getY2Key(widget, data);
   const hasGroupBy = !!widget.groupByColumn && data.length > 0 && Object.keys(data[0] ?? {}).includes(widget.groupByColumn);
+  const sub = widget.chartSubtype ?? "";
+  const isHorizontal = sub === "horizontal_bar" || sub === "stacked_horizontal";
 
   const { chartData, seriesNames } = useMemo(() => {
     if (hasGroupBy && widget.groupByColumn) {
@@ -147,12 +152,17 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
     return { chartData: data, seriesNames: [] as string[] };
   }, [data, xKey, yKey, hasGroupBy, widget.groupByColumn]);
 
+  const stackId = (sub === "stacked_bar" || sub === "stacked_horizontal") ? "stack" : undefined;
+  const lineType = sub === "smooth_line" ? "monotone" : sub === "step_line" ? "stepAfter" : "linear";
+
   const renderChart = () => {
     switch (widget.type) {
       case "kpi":
         return <KpiWidget widget={widget} data={data} />;
       case "table":
         return <TableWidget data={data} />;
+
+      // ── LINE ─────────────────────────────────────────────────
       case "line":
         return (
           <ResponsiveContainer width="100%" height={chartHeight}>
@@ -163,34 +173,53 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
               <Tooltip />
               {seriesNames.length > 0 ? (
                 seriesNames.map((name, i) => (
-                  <Line key={name} type="monotone" dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />
+                  <Line key={name} type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />
                 ))
               ) : (
-                <Line type="monotone" dataKey={yKey} stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={yKey} stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
               )}
               {seriesNames.length > 0 && <Legend />}
             </LineChart>
           </ResponsiveContainer>
         );
+
+      // ── BAR (column, stacked, grouped, horizontal, stacked-horizontal) ──
       case "bar":
         return (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <BarChart data={chartData}>
+            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
+              {isHorizontal ? (
+                <>
+                  <YAxis type="category" dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} width={90} />
+                  <XAxis type="number" stroke="#64748b" tick={{ fontSize: 11 }} />
+                </>
+              ) : (
+                <>
+                  <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
+                </>
+              )}
               <Tooltip />
               {seriesNames.length > 0 ? (
                 seriesNames.map((name, i) => (
-                  <Bar key={name} dataKey={name} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} stackId="stack" />
+                  <Bar
+                    key={name}
+                    dataKey={name}
+                    fill={COLORS[i % COLORS.length]}
+                    radius={isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+                    stackId={stackId ?? (sub === "grouped_bar" ? undefined : "stack")}
+                  />
                 ))
               ) : (
-                <Bar dataKey={yKey} fill="#2563eb" radius={[4, 4, 0, 0]} />
+                <Bar dataKey={yKey} fill="#2563eb" radius={isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]} />
               )}
               {seriesNames.length > 0 && <Legend />}
             </BarChart>
           </ResponsiveContainer>
         );
+
+      // ── AREA (regular, stacked) ──────────────────────────────
       case "area":
         return (
           <ResponsiveContainer width="100%" height={chartHeight}>
@@ -201,7 +230,15 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
               <Tooltip />
               {seriesNames.length > 0 ? (
                 seriesNames.map((name, i) => (
-                  <Area key={name} type="monotone" dataKey={name} stroke={COLORS[i % COLORS.length]} fill={`${COLORS[i % COLORS.length]}20`} strokeWidth={2} stackId="stack" />
+                  <Area
+                    key={name}
+                    type="monotone"
+                    dataKey={name}
+                    stroke={COLORS[i % COLORS.length]}
+                    fill={`${COLORS[i % COLORS.length]}20`}
+                    strokeWidth={2}
+                    stackId={sub === "stacked_area" ? "stack" : undefined}
+                  />
                 ))
               ) : (
                 <Area type="monotone" dataKey={yKey} stroke="#2563eb" fill="rgba(37,99,235,0.1)" strokeWidth={2} />
@@ -210,7 +247,10 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
             </AreaChart>
           </ResponsiveContainer>
         );
-      case "pie":
+
+      // ── PIE / DONUT ──────────────────────────────────────────
+      case "pie": {
+        const isDonut = sub === "donut";
         return (
           <ResponsiveContainer width="100%" height={chartHeight}>
             <PieChart>
@@ -220,9 +260,9 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
                 nameKey={xKey}
                 cx="50%"
                 cy="50%"
-                innerRadius={50}
+                innerRadius={isDonut ? 50 : 0}
                 outerRadius={80}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                label={({ name, percent }: { name: string; percent: number }) => `${name} ${(percent * 100).toFixed(0)}%`}
               >
                 {chartData.map((_, i) => (
                   <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -233,13 +273,37 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
             </PieChart>
           </ResponsiveContainer>
         );
+      }
+
+      // ── COMBO (bar + line) ───────────────────────────────────
+      case "combo":
+        return (
+          <ResponsiveContainer width="100%" height={chartHeight}>
+            <ComposedChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
+              <YAxis yAxisId="left" stroke="#64748b" tick={{ fontSize: 11 }} />
+              {y2Key && <YAxis yAxisId="right" orientation="right" stroke="#7c3aed" tick={{ fontSize: 11 }} />}
+              <Tooltip />
+              <Legend />
+              <Bar yAxisId="left" dataKey={yKey} fill="#2563eb" radius={[4, 4, 0, 0]} />
+              {y2Key && (
+                <Line yAxisId="right" type="monotone" dataKey={y2Key} stroke="#7c3aed" strokeWidth={2} dot={{ r: 3 }} />
+              )}
+              {!y2Key && (
+                <Line yAxisId="left" type="monotone" dataKey={yKey} stroke="#7c3aed" strokeWidth={2} dot={{ r: 3 }} />
+              )}
+            </ComposedChart>
+          </ResponsiveContainer>
+        );
+
       default:
         return <div className="py-8 text-center text-sm text-slate-400">Unknown widget type</div>;
     }
   };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="h-full rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h4 className="text-sm font-semibold text-slate-700">{widget.title}</h4>
@@ -248,6 +312,11 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
               <span className="inline-block rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">
                 {widget.aggregation.toUpperCase()}({widget.yColumn})
               </span>
+              {widget.chartSubtype && (
+                <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">
+                  {widget.chartSubtype.replace(/_/g, " ")}
+                </span>
+              )}
               {widget.dateGranularity && (
                 <span className="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
                   {widget.dateGranularity}
