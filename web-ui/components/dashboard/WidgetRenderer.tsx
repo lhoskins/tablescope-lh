@@ -136,8 +136,8 @@ function TableWidget({ data }: { data: Props["data"] }) {
   );
 }
 
-export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
-  const chartHeight = 220;
+export function WidgetRenderer({ widget, data }: Props) {
+  const chartHeight = "100%";
   const xKey = getXKey(widget, data);
   const yKey = getYKey(widget, data);
   const y2Key = getY2Key(widget, data);
@@ -303,51 +303,9 @@ export function WidgetRenderer({ widget, data, onEdit, onDelete }: Props) {
   };
 
   return (
-    <div className="h-full rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <h4 className="text-sm font-semibold text-slate-700">{widget.title}</h4>
-          {widget.aggregation && widget.yColumn && (
-            <div className="mt-0.5 flex items-center gap-1.5">
-              <span className="inline-block rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">
-                {widget.aggregation.toUpperCase()}({widget.yColumn})
-              </span>
-              {widget.chartSubtype && (
-                <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">
-                  {widget.chartSubtype.replace(/_/g, " ")}
-                </span>
-              )}
-              {widget.dateGranularity && (
-                <span className="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
-                  {widget.dateGranularity}
-                </span>
-              )}
-              {widget.groupByColumn && (
-                <>
-                  <span className="text-[9px] text-slate-400">by</span>
-                  <span className="inline-block rounded bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">
-                    {widget.groupByColumn}
-                  </span>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="flex gap-1">
-          {onEdit && (
-            <button onClick={onEdit} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Edit">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-            </button>
-          )}
-          {onDelete && (
-            <button onClick={onDelete} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500" title="Delete">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="h-full w-full">
       {data.length === 0 ? (
-        <div className="flex h-[200px] items-center justify-center text-sm text-slate-400">
+        <div className="flex h-full items-center justify-center text-xs text-slate-400">
           No data available
         </div>
       ) : (

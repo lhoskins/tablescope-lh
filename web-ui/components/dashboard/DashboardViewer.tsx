@@ -10,9 +10,6 @@ import { WidgetRenderer } from "./WidgetRenderer";
 import { WidgetConfigPanel } from "./WidgetConfigPanel";
 import { FilterBar } from "./FilterBar";
 
-// react-grid-layout v2 does not export WidthProvider; Responsive handles width
-// automatically via a container ref.
-
 type SavedQuery = { id: number; name: string; sql_text: string | null };
 type Datasource = { viewName: string; fileName: string };
 
@@ -87,7 +84,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
 
   const fetchWidgetData = useCallback(async (w: WidgetConfig) => {
     try {
-      // Widget-query endpoint for datasource with aggregation config
       if (w.xColumn && w.yColumn && w.dataSource.kind === "datasource" && w.dataSource.viewName) {
         const resp = await apiClient.post<{ columns: string[]; rows: Record<string, unknown>[]; sql: string }>(
           `/api/projects/${projectId}/dashboards/widget-query`,
@@ -106,7 +102,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         );
         return resp.rows ?? [];
       }
-      // Legacy fallback: raw datasource query
       if (w.dataSource.kind === "datasource" && w.dataSource.viewName) {
         const resp = await apiClient.post<{ columns: string[]; rows: Record<string, unknown>[] }>(
           "/api/query/datasource",
@@ -114,7 +109,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         );
         return resp.rows ?? [];
       }
-      // Query-based widget: execute the saved query's SQL via the datasource endpoint
       if (w.dataSource.kind === "query" && w.dataSource.queryId) {
         const query = savedQueries.find((q) => q.id === w.dataSource.queryId);
         if (query?.sql_text) {
@@ -128,7 +122,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         }
       }
     } catch {
-      // swallow — widget shows "No data available"
+      /* widget shows "No data" */
     }
     return [];
   }, [savedQueries, projectId, globalFiltersForApi]);
@@ -141,9 +135,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       }
       setWidgetData(results);
     };
-    if (widgets.length > 0) {
-      loadAll();
-    }
+    if (widgets.length > 0) loadAll();
   }, [widgets, fetchWidgetData]);
 
   const handleSaveWidget = (widget: WidgetConfig) => {
@@ -207,102 +199,125 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   }, [widgets, globalFilters, updateMutation]);
 
   return (
-    <div>
-      {/* Header */}
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <button onClick={onBack} className="mb-1 text-xs font-medium text-blue-600 hover:underline">
-            &larr; Back to Dashboards
-          </button>
-          <h2 className="text-lg font-bold text-slate-900">{dashboard.name}</h2>
-          <p className="text-[11px] text-slate-500">
-            {widgets.length} widget{widgets.length !== 1 ? "s" : ""} &middot; Status:{" "}
-            <span className="font-medium">{dashboard.status}</span>
-            &nbsp;&middot;&nbsp;
-            <span className="text-slate-400">Drag to move &middot; Resize from corners</span>
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => {
-              const loadAll = async () => {
-                const results: Record<string, Array<Record<string, unknown>>> = {};
-                for (const w of widgets) {
-                  results[w.id] = await fetchWidgetData(w);
-                }
-                setWidgetData(results);
-              };
-              loadAll();
-            }}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
-          >
-            Refresh
-          </button>
-          <button
-            onClick={() => {
-              setEditingWidget(null);
-              setShowConfigPanel(true);
-            }}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
-          >
-            + Add Widget
-          </button>
+    <div className="min-h-screen bg-gray-50">
+      {/* ── Looker-style dark toolbar ────────────────────────────── */}
+      <div className="rounded-t-xl bg-slate-800 px-5 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={onBack} className="flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-white transition-colors">
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              Dashboards
+            </button>
+            <div className="h-4 w-px bg-slate-600" />
+            <h2 className="text-sm font-bold text-white">{dashboard.name}</h2>
+            <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+              dashboard.status === "published" ? "bg-emerald-900/50 text-emerald-300" : "bg-amber-900/50 text-amber-300"
+            }`}>
+              {dashboard.status}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-500">
+              {widgets.length} widget{widgets.length !== 1 ? "s" : ""}
+            </span>
+            <div className="h-4 w-px bg-slate-600" />
+            <button
+              onClick={() => {
+                const loadAll = async () => {
+                  const results: Record<string, Array<Record<string, unknown>>> = {};
+                  for (const w of widgets) results[w.id] = await fetchWidgetData(w);
+                  setWidgetData(results);
+                };
+                loadAll();
+              }}
+              className="flex items-center gap-1 rounded-md border border-slate-600 px-2.5 py-1 text-[10px] font-medium text-slate-300 hover:bg-slate-700 transition-colors"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              Refresh
+            </button>
+            <button
+              onClick={() => { setEditingWidget(null); setShowConfigPanel(true); }}
+              className="flex items-center gap-1 rounded-md bg-blue-500 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-blue-600 transition-colors"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              Add Widget
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Global Filter Bar */}
-      <FilterBar filters={globalFilters} columns={allColumns} onChange={handleFiltersChange} />
+      {/* ── Filter Bar ───────────────────────────────────────────── */}
+      <div className="border-b border-slate-200 bg-white px-5 py-2">
+        <FilterBar filters={globalFilters} columns={allColumns} onChange={handleFiltersChange} />
+      </div>
 
-      {/* Widget Config Panel */}
+      {/* ── Widget Config Panel (slide-down) ──────────────────────── */}
       {showConfigPanel && (
-        <div className="mb-4">
+        <div className="mx-4 mt-4">
           <WidgetConfigPanel
             projectId={projectId}
             savedQueries={savedQueries}
             datasources={datasources}
             editingWidget={editingWidget}
             onSave={handleSaveWidget}
-            onCancel={() => {
-              setShowConfigPanel(false);
-              setEditingWidget(null);
-            }}
+            onCancel={() => { setShowConfigPanel(false); setEditingWidget(null); }}
           />
         </div>
       )}
 
-      {/* Widget Grid */}
-      {widgets.length === 0 && !showConfigPanel ? (
-        <div className="rounded-xl border-2 border-dashed border-slate-200 p-12 text-center">
-          <p className="text-sm font-semibold text-slate-600">No widgets yet</p>
-          <p className="mt-1 text-xs text-slate-400">
-            Click &quot;+ Add Widget&quot; to configure your first chart
-          </p>
-        </div>
-      ) : widgets.length > 0 ? (
-        <ResponsiveGridLayout
-          className="layout"
-          layouts={layouts}
-          breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-          cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
-          rowHeight={80}
-          onLayoutChange={handleLayoutChange}
-          dragConfig={{ enabled: true, handle: ".widget-drag-handle", bounded: false, threshold: 3 }}
-          resizeConfig={{ enabled: true }}
-          width={1200}
-        >
-          {widgets.map((w) => (
-            <div key={w.id} className="relative">
-              <div className="widget-drag-handle absolute left-0 right-0 top-0 z-10 h-7 cursor-grab" />
-              <WidgetRenderer
-                widget={w}
-                data={widgetData[w.id] ?? []}
-                onEdit={() => handleEditWidget(w)}
-                onDelete={() => handleDeleteWidget(w.id)}
-              />
-            </div>
-          ))}
-        </ResponsiveGridLayout>
-      ) : null}
+      {/* ── Widget Grid ──────────────────────────────────────────── */}
+      <div className="px-4 py-4">
+        {widgets.length === 0 && !showConfigPanel ? (
+          <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white py-20">
+            <svg className="mb-3 h-12 w-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+            <p className="text-sm font-semibold text-slate-600">No widgets yet</p>
+            <p className="mt-1 text-xs text-slate-400">Click &quot;+ Add Widget&quot; to start building your dashboard</p>
+          </div>
+        ) : widgets.length > 0 ? (
+          <ResponsiveGridLayout
+            className="layout"
+            layouts={layouts}
+            breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+            cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
+            rowHeight={80}
+            onLayoutChange={handleLayoutChange}
+            dragConfig={{ enabled: true, handle: ".widget-drag-handle", bounded: false, threshold: 3 }}
+            resizeConfig={{ enabled: true }}
+            width={1200}
+          >
+            {widgets.map((w) => (
+              <div key={w.id}>
+                <div className="h-full rounded-lg border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+                  {/* Widget header — drag handle */}
+                  <div className="widget-drag-handle flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-3 py-1.5 cursor-grab active:cursor-grabbing">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <svg className="h-3 w-3 flex-shrink-0 text-slate-300" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                      <h4 className="truncate text-xs font-semibold text-slate-700">{w.title || "Untitled"}</h4>
+                      {w.aggregation && w.yColumn && (
+                        <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[8px] font-bold uppercase text-blue-600">
+                          {w.aggregation}({w.yColumn})
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-0.5">
+                      <button onClick={() => handleEditWidget(w)} title="Edit" className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      </button>
+                      <button onClick={() => handleDeleteWidget(w.id)} title="Delete" className="rounded p-1 text-slate-400 hover:bg-red-100 hover:text-red-500 transition-colors">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                  {/* Chart */}
+                  <div className="p-2 overflow-hidden" style={{ height: "calc(100% - 36px)" }}>
+                    <WidgetRenderer widget={w} data={widgetData[w.id] ?? []} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </ResponsiveGridLayout>
+        ) : null}
+      </div>
     </div>
   );
 }
