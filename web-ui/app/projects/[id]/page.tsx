@@ -8,10 +8,7 @@ import { getUserMeta } from "@/lib/auth";
 import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataGrid } from "@/components/data-grid/DataGrid";
-import { TablescopeDataGrid } from "@/components/data-grid/TablescopeDataGrid";
 import { TanStackDataGrid } from "@/components/data-grid/TanStackDataGrid";
-
-const USE_TANSTACK_GRID = process.env.NEXT_PUBLIC_USE_TANSTACK_GRID === "true";
 import { DashboardTab } from "@/components/dashboard/DashboardTab";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
@@ -2152,37 +2149,20 @@ export default function ProjectWorkspacePage() {
                         <p className="text-sm text-red-600">{savedQueryError}</p>
                       )}
                       {savedQueryResult && savedQueryResult.rows.length > 0 && (
-                        USE_TANSTACK_GRID ? (
-                          <TanStackDataGrid
-                            columns={savedQueryResult.columns}
-                            rows={savedQueryResult.rows}
-                            queryId={q.id}
-                            queryName={q.name}
-                            projectId={projectId}
-                            availableQueries={(queriesQuery.data ?? []).map((sq) => ({
-                              id: sq.id,
-                              name: sq.name,
-                              sql: sq.sql_text,
-                              leftDatasource: sq.left_datasource,
-                            }))}
-                            canEditScopes={canEdit}
-                          />
-                        ) : (
-                          <TablescopeDataGrid
-                            columns={savedQueryResult.columns}
-                            rows={savedQueryResult.rows}
-                            queryId={q.id}
-                            queryName={q.name}
-                            projectId={projectId}
-                            availableQueries={(queriesQuery.data ?? []).map((sq) => ({
-                              id: sq.id,
-                              name: sq.name,
-                              sql: sq.sql_text,
-                              leftDatasource: sq.left_datasource,
-                            }))}
-                            canEditScopes={canEdit}
-                          />
-                        )
+                        <TanStackDataGrid
+                          columns={savedQueryResult.columns}
+                          rows={savedQueryResult.rows}
+                          queryId={q.id}
+                          queryName={q.name}
+                          projectId={projectId}
+                          availableQueries={(queriesQuery.data ?? []).map((sq) => ({
+                            id: sq.id,
+                            name: sq.name,
+                            sql: sq.sql_text,
+                            leftDatasource: sq.left_datasource,
+                          }))}
+                          canEditScopes={canEdit}
+                        />
                       )}
                       {savedQueryResult && savedQueryResult.rows.length === 0 && (
                         <p className="text-sm text-slate-400">Query returned no results.</p>
