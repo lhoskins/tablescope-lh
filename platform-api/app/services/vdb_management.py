@@ -51,12 +51,25 @@ def _generate_password(length: int = 24) -> str:
 class VDBManagementService:
     """Thin async client around the WildFly Teiid management servlet."""
 
-    def __init__(self, *, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: httpx.AsyncClient | None = None,
+        servlet_url: str | None = None,
+        pg_host: str | None = None,
+        pg_port: int | None = None,
+    ) -> None:
         settings = get_settings()
         self._settings = settings
+        # When a tenant is bound to a dedicated data plane the caller passes the
+        # tenant container's servlet/PG endpoint; otherwise we use the shared
+        # global Teiid so single-tenant behaviour is preserved.
+        self._servlet_url = servlet_url or settings.teiid_servlet_url
+        self._pg_host = pg_host or settings.teiid_pg_host
+        self._pg_port = pg_port or settings.teiid_pg_port
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
-            base_url=settings.teiid_servlet_url,
+            base_url=self._servlet_url,
             timeout=httpx.Timeout(60.0, connect=10.0),
             headers={"X-API-Key": settings.teiid_servlet_api_key} if settings.teiid_servlet_api_key else {},
         )
@@ -126,8 +139,8 @@ class VDBManagementService:
             vdb_id=vdb_id,
             vdb_username=username,
             vdb_password=password,
-            vdb_host=self._settings.teiid_pg_host,
-            vdb_port=self._settings.teiid_pg_port,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
         )
 
     async def create_shared_vdb(self, *, org_id: int) -> VDBProvisionResult:
@@ -170,8 +183,8 @@ class VDBManagementService:
             vdb_id=vdb_id,
             vdb_username=username,
             vdb_password=password,
-            vdb_host=self._settings.teiid_pg_host,
-            vdb_port=self._settings.teiid_pg_port,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
         )
 
     def _sync_vdb_to_s3(self, org_id: int, vdb_id: str, *, vdb_type: str, user_id: int | None = None) -> None:
@@ -219,6 +232,44 @@ class VDBManagementService:
                 f"Teiid redeploy failed for {vdb_id}: {response.status_code} {response.text}"
             )
         logger.info("VDB redeployed: vdb_id=%s", vdb_id)
+
+    async def delete_vdb(
+        self,
+        vdb_id: str,
+        *,
+        org_id: int,
+        vdb_type: str = "shared",
+        user_id: int | None = None,
+    ) -> None:
+        """Undeploy a VDB from Teiid and archive its file via the servlet.
+
+        Best-effort: a missing/already-undeployed VDB is not treated as fatal so
+        tenant deletion can proceed even if Teiid no longer has the VDB.
+        """
+        payload: dict = {
+            "org_id": org_id,
+            "vdb_id": vdb_id,
+            "teiid_host": "localhost",
+            "teiid_port": 9990,
+            "vdb_type": vdb_type,
+        }
+        if vdb_type == "user" and user_id is not None:
+            payload["user_id"] = user_id
+
+        try:
+            response = await self._client.post(
+                "/TeiidExcelImporterTest/vdb-management/deleteVDB",
+                json=payload,
+            )
+        except httpx.RequestError as exc:
+            raise VDBProvisioningError(
+                f"Failed to contact Teiid servlet to delete VDB {vdb_id}: {exc}"
+            ) from exc
+        if response.status_code >= 400:
+            raise VDBProvisioningError(
+                f"Teiid delete failed for {vdb_id}: {response.status_code} {response.text}"
+            )
+        logger.info("VDB deleted/undeployed: vdb_id=%s", vdb_id)
 
     async def provision_user_vdb(
         self, *, tenant_external_id: str, user_external_id: str

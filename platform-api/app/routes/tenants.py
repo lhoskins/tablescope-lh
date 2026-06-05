@@ -18,16 +18,24 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant
+from app.models.tenant_data_plane import TenantDataPlane
 from app.models.user import User
 from app.models.user_vdb import UserVDB
 from app.schemas.tenant import (
     TenantCreate,
+    TenantDeleteResponse,
     TenantRead,
     UserCreate,
     UserRead,
     UserUpdate,
 )
-from app.services.customer_folders import CustomerFolderService
+from app.services.customer_folders import CustomerFolderError, CustomerFolderService
+from app.services.tenant_deletion_service import (
+    delete_tenant_folders,
+    purge_app_tenant,
+    undeploy_tenant_vdbs,
+)
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.services.vdb_management import VDBManagementService, VDBProvisioningError
 
 logger = logging.getLogger(__name__)
@@ -67,8 +75,13 @@ async def create_tenant(
 
     CustomerFolderService().ensure_tenant_folders(tenant.slug)
 
-    # Create shared VDB for the tenant
-    vdb_svc = VDBManagementService()
+    # Create shared VDB for the tenant, targeting the dedicated container if bound.
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant.id)
+    vdb_svc = VDBManagementService(
+        servlet_url=endpoint.servlet_url,
+        pg_host=endpoint.pg_host,
+        pg_port=endpoint.pg_port,
+    )
     try:
         shared_result = await vdb_svc.create_shared_vdb(org_id=tenant.id)
         shared_vdb = SharedVDB(
@@ -104,8 +117,12 @@ async def create_tenant(
             tenant.slug, root_user.external_id or str(root_user.id)
         )
 
-        # Create and deploy user VDB for the root user
-        vdb_svc = VDBManagementService()
+        # Create and deploy user VDB for the root user in the tenant container.
+        vdb_svc = VDBManagementService(
+            servlet_url=endpoint.servlet_url,
+            pg_host=endpoint.pg_host,
+            pg_port=endpoint.pg_port,
+        )
         try:
             user_result = await vdb_svc.create_user_vdb(
                 org_id=tenant.id, user_id=root_user.id,
@@ -131,6 +148,84 @@ async def create_tenant(
     await session.commit()
     await session.refresh(tenant)
     return TenantRead.model_validate(tenant)
+
+
+@router.delete("/{tenant_id}", response_model=TenantDeleteResponse)
+async def delete_tenant(
+    tenant_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(_require_super_admin),
+) -> TenantDeleteResponse:
+    """Delete an application (org) tenant and all of its data.
+
+    Cascades: undeploys the tenant's shared + user VDBs from its Teiid, deletes
+    all users, projects, saved queries, data sources and VDB records, and
+    removes the tenant's customer folder tree.
+
+    A tenant bound to an isolated data plane must be deleted from
+    ``/admin/data-planes`` instead, so the dedicated container/network are also
+    torn down (a host/root operation). Such a request is rejected here.
+    """
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    super_admin = await session.scalar(
+        select(User.id).where(
+            User.tenant_id == tenant_id, User.is_super_admin.is_(True)
+        )
+    )
+    if super_admin is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a tenant that contains a super-admin user.",
+        )
+
+    bound_plane = await session.scalar(
+        select(TenantDataPlane).where(TenantDataPlane.org_tenant_id == tenant_id)
+    )
+    if bound_plane is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Tenant is bound to data plane '{bound_plane.tenant_id}'. "
+                "Delete it from Data Planes (VPN) to also tear down the "
+                "isolated container and network."
+            ),
+        )
+
+    slug = tenant.slug
+
+    # Undeploy VDBs from the tenant's resolved Teiid before purging the rows
+    # (best-effort; a missing VDB does not block deletion).
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant_id)
+    vdb_svc = VDBManagementService(
+        servlet_url=endpoint.servlet_url,
+        pg_host=endpoint.pg_host,
+        pg_port=endpoint.pg_port,
+    )
+    try:
+        vdbs_undeployed = await undeploy_tenant_vdbs(session, tenant_id, vdb_svc)
+    finally:
+        await vdb_svc.aclose()
+
+    deleted_rows = await purge_app_tenant(session, tenant_id)
+
+    folders_removed = False
+    try:
+        folders_removed = delete_tenant_folders(slug)
+    except (CustomerFolderError, OSError) as exc:
+        logger.warning("Failed to remove folders for tenant %s: %s", slug, exc)
+
+    await session.commit()
+
+    return TenantDeleteResponse(
+        tenant_id=tenant_id,
+        slug=slug,
+        deleted_rows=deleted_rows,
+        vdbs_undeployed=vdbs_undeployed,
+        folders_removed=folders_removed,
+    )
 
 
 @router.get("", response_model=list[TenantRead])
@@ -282,8 +377,13 @@ async def create_user(
         tenant.slug, payload.external_id or str(user.id)
     )
 
-    # Create and deploy user VDB
-    vdb_svc = VDBManagementService()
+    # Create and deploy user VDB — target the dedicated container if bound.
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant_id)
+    vdb_svc = VDBManagementService(
+        servlet_url=endpoint.servlet_url,
+        pg_host=endpoint.pg_host,
+        pg_port=endpoint.pg_port,
+    )
     try:
         vdb_result = await vdb_svc.create_user_vdb(
             org_id=tenant_id, user_id=user.id,

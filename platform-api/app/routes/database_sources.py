@@ -53,6 +53,7 @@ from app.services.teiid_registration_service import (
     generate_view_name,
     reconcile_database_sources,
 )
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/database-sources", tags=["database-sources"])
@@ -383,7 +384,8 @@ async def create_database_source(
         )
 
     # 5. Register in Teiid (model + view + redeploy).
-    reg = TeiidRegistrationService()
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    reg = TeiidRegistrationService(servlet_url=endpoint.servlet_url)
     try:
         await reg.register_database_source(
             vdb_id=user_vdb.vdb_id,

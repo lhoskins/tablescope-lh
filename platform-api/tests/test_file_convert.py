@@ -5,7 +5,19 @@ from __future__ import annotations
 import csv
 import io
 
-from app.services.file_sources import convert_to_csv_if_needed
+from app.services.file_sources import convert_to_csv_if_needed, display_source
+
+
+def test_display_source_preserves_original_format() -> None:
+    # JSON/XML are stored on disk as .csv but should display their real type.
+    assert display_source("people.csv", "json") == ("people.json", "json")
+    assert display_source("orders.csv", "xml") == ("orders.xml", "xml")
+
+
+def test_display_source_falls_back_to_disk_extension() -> None:
+    assert display_source("sales.csv", None) == ("sales.csv", "csv")
+    assert display_source("report.xlsx", None) == ("report.xlsx", "xlsx")
+    assert display_source("noext", None) == ("noext", "file")
 
 
 def _parse(content: bytes) -> tuple[list[str], list[list[str]]]:

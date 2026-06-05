@@ -22,6 +22,7 @@ type DataPlane = {
   vpn_connection_id: string | null;
   tenant_vpc_id: string | null;
   last_health_status: string | null;
+  org_tenant_id: number | null;
 };
 
 type HealthReport = {
@@ -31,6 +32,16 @@ type HealthReport = {
   firewall_status: string;
   vdb_path_status: string;
   messages?: Record<string, string>;
+};
+
+type DeleteResult = {
+  tenant_id: string;
+  org_tenant_id: number | null;
+  app_tenant_deleted: boolean;
+  deleted_rows: Record<string, number>;
+  folders_removed: boolean;
+  teardown_script: string;
+  note: string;
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -84,22 +95,91 @@ function SuperAdminView() {
   const [tenantName, setTenantName] = useState("");
   const [vpnMode, setVpnMode] = useState<VpnMode>("none");
   const [cidrs, setCidrs] = useState("");
+  const [createAppTenant, setCreateAppTenant] = useState(true);
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [linkOrgTenantId, setLinkOrgTenantId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<Record<string, HealthReport>>({});
   const [note, setNote] = useState<string | null>(null);
+
+  // Bind-existing-data-plane-to-app-tenant modal state.
+  const [bindFor, setBindFor] = useState<string | null>(null);
+  const [bindCreateNew, setBindCreateNew] = useState(true);
+  const [bindSlug, setBindSlug] = useState("");
+  const [bindName, setBindName] = useState("");
+  const [bindEmail, setBindEmail] = useState("");
+  const [bindPassword, setBindPassword] = useState("");
+  const [bindOrgId, setBindOrgId] = useState<number | null>(null);
+  const [bindError, setBindError] = useState<string | null>(null);
+
+  // Delete-tenant confirmation + teardown-script modal state.
+  const [deleteFor, setDeleteFor] = useState<DataPlane | null>(null);
+  const [deleteAppTenant, setDeleteAppTenant] = useState(true);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [teardown, setTeardown] = useState<DeleteResult | null>(null);
 
   const planesQuery = useQuery<DataPlane[]>({
     queryKey: ["data-planes"],
     queryFn: () => apiClient.get<DataPlane[]>("/api/tenant-data-planes"),
   });
 
+  type AppTenant = { id: number; slug: string; name: string };
+  const appTenantsQuery = useQuery<AppTenant[]>({
+    queryKey: ["app-tenants"],
+    queryFn: () =>
+      apiClient.get<AppTenant[]>("/api/tenant-data-planes/app-tenants"),
+    enabled: (showCreate && !createAppTenant) || (bindFor !== null && !bindCreateNew),
+  });
+
+  const bindMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) =>
+      apiClient.post<DataPlane>(
+        `/api/tenant-data-planes/${id}/bind-app-tenant`,
+        payload
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["data-planes"] });
+      queryClient.invalidateQueries({ queryKey: ["app-tenants"] });
+      setBindFor(null);
+      setBindSlug("");
+      setBindName("");
+      setBindEmail("");
+      setBindPassword("");
+      setBindOrgId(null);
+      setBindError(null);
+    },
+    onError: (err: Error) => setBindError(err.message),
+  });
+
+  function submitBind(e: React.FormEvent) {
+    e.preventDefault();
+    setBindError(null);
+    if (!bindFor) return;
+    const payload: Record<string, unknown> = {};
+    if (bindCreateNew) {
+      if (!bindSlug || !bindEmail || !bindPassword) {
+        setBindError("Slug, admin email and password are required.");
+        return;
+      }
+      payload.new_tenant_slug = bindSlug;
+      payload.new_tenant_name = bindName || bindSlug;
+      payload.admin_email = bindEmail;
+      payload.admin_password = bindPassword;
+    } else {
+      if (!bindOrgId) {
+        setBindError("Select an existing app tenant to link.");
+        return;
+      }
+      payload.org_tenant_id = bindOrgId;
+    }
+    bindMutation.mutate({ id: bindFor, payload });
+  }
+
   const createMutation = useMutation({
-    mutationFn: (payload: {
-      tenant_id: string;
-      tenant_name: string;
-      vpn_mode: VpnMode;
-      allowed_onprem_cidrs: string[];
-    }) => apiClient.post<DataPlane>("/api/tenant-data-planes", payload),
+    mutationFn: (payload: Record<string, unknown>) =>
+      apiClient.post<DataPlane>("/api/tenant-data-planes", payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["data-planes"] });
       setShowCreate(false);
@@ -107,6 +187,11 @@ function SuperAdminView() {
       setTenantName("");
       setVpnMode("none");
       setCidrs("");
+      setCreateAppTenant(true);
+      setAdminEmail("");
+      setAdminPassword("");
+      setConfirmPassword("");
+      setLinkOrgTenantId(null);
       setError(null);
     },
     onError: (err: Error) => setError(err.message),
@@ -133,6 +218,21 @@ function SuperAdminView() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: ({ id, withApp }: { id: string; withApp: boolean }) =>
+      apiClient.delete<DeleteResult>(
+        `/api/tenant-data-planes/${id}?delete_app_tenant=${withApp}`
+      ),
+    onSuccess: (resp) => {
+      setDeleteFor(null);
+      setDeleteError(null);
+      setTeardown(resp);
+      queryClient.invalidateQueries({ queryKey: ["data-planes"] });
+      queryClient.invalidateQueries({ queryKey: ["app-tenants"] });
+    },
+    onError: (err: Error) => setDeleteError(err.message),
+  });
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -144,12 +244,30 @@ function SuperAdminView() {
       setError("Customer-VPN tenants require at least one on-prem CIDR.");
       return;
     }
-    createMutation.mutate({
+    if (createAppTenant) {
+      if (!adminEmail || !adminPassword) {
+        setError("Admin email and password are required to create the app tenant.");
+        return;
+      }
+      if (adminPassword !== confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+      }
+    }
+    const payload: Record<string, unknown> = {
       tenant_id: tenantId,
       tenant_name: tenantName,
       vpn_mode: vpnMode,
       allowed_onprem_cidrs: list,
-    });
+      create_app_tenant: createAppTenant,
+    };
+    if (createAppTenant) {
+      payload.app_tenant_admin_email = adminEmail;
+      payload.app_tenant_admin_password = adminPassword;
+    } else if (linkOrgTenantId) {
+      payload.org_tenant_id = linkOrgTenantId;
+    }
+    createMutation.mutate(payload);
   }
 
   return (
@@ -285,6 +403,86 @@ function SuperAdminView() {
                 "Optional for No-VPN tenants (typically left blank)."}
             </p>
           </div>
+
+          {/* Application tenant creation */}
+          <div className="mt-5">
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={createAppTenant}
+                onChange={(e) => setCreateAppTenant(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand"
+              />
+              Also create application tenant (login-ready with admin account)
+            </label>
+          </div>
+
+          {createAppTenant && (
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Admin Email <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  required={createAppTenant}
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  placeholder="admin@acme.com"
+                />
+              </div>
+              <div />
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Admin Password <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  required={createAppTenant}
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Confirm Password <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required={createAppTenant}
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                />
+              </div>
+            </div>
+          )}
+
+          {!createAppTenant && (
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-slate-700">
+                Link to existing application tenant (optional)
+              </label>
+              <select
+                value={linkOrgTenantId ?? ""}
+                onChange={(e) =>
+                  setLinkOrgTenantId(
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              >
+                <option value="">-- none (infra only) --</option>
+                {appTenantsQuery.data?.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.slug} — {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
           <button
@@ -433,6 +631,34 @@ function SuperAdminView() {
                         >
                           Provision container
                         </button>
+                        {p.org_tenant_id ? (
+                          <span className="inline-flex items-center justify-center rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700">
+                            Bound · org #{p.org_tenant_id}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setBindFor(p.tenant_id);
+                              setBindCreateNew(true);
+                              setBindSlug(p.tenant_id);
+                              setBindName(p.tenant_name);
+                              setBindError(null);
+                            }}
+                            className="rounded border border-brand px-2 py-1 text-xs font-medium text-brand hover:bg-brand/5"
+                          >
+                            Bind app tenant
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            setDeleteFor(p);
+                            setDeleteAppTenant(p.org_tenant_id != null);
+                            setDeleteError(null);
+                          }}
+                          className="rounded border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -440,6 +666,284 @@ function SuperAdminView() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {bindFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <form
+            onSubmit={submitBind}
+            className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl"
+          >
+            <h2 className="text-lg font-medium text-slate-900">
+              Bind app tenant to{" "}
+              <span className="font-mono">{bindFor}</span>
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Link this data plane to an application tenant so logins for that
+              tenant route to its dedicated Teiid container.
+            </p>
+
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setBindCreateNew(true)}
+                className={`flex-1 rounded-lg border p-3 text-left text-sm ${
+                  bindCreateNew
+                    ? "border-brand bg-brand/5 ring-1 ring-brand"
+                    : "border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                <span className="block font-semibold text-slate-900">
+                  Create new app tenant
+                </span>
+                <span className="text-xs text-slate-500">
+                  Slug + root admin login
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBindCreateNew(false)}
+                className={`flex-1 rounded-lg border p-3 text-left text-sm ${
+                  !bindCreateNew
+                    ? "border-brand bg-brand/5 ring-1 ring-brand"
+                    : "border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                <span className="block font-semibold text-slate-900">
+                  Link existing tenant
+                </span>
+                <span className="text-xs text-slate-500">
+                  Pick an existing org tenant
+                </span>
+              </button>
+            </div>
+
+            {bindCreateNew ? (
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Slug <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={bindSlug}
+                    onChange={(e) =>
+                      setBindSlug(
+                        e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "")
+                      )
+                    }
+                    className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    placeholder="acme"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    Login URL: /{bindSlug || "slug"}/login
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Display name
+                  </label>
+                  <input
+                    type="text"
+                    value={bindName}
+                    onChange={(e) => setBindName(e.target.value)}
+                    className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    placeholder="Acme Corporation"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Admin email <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={bindEmail}
+                    onChange={(e) => setBindEmail(e.target.value)}
+                    className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    placeholder="admin@acme.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Admin password <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    value={bindPassword}
+                    onChange={(e) => setBindPassword(e.target.value)}
+                    className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    placeholder="••••••••"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-slate-700">
+                  Existing app tenant
+                </label>
+                <select
+                  value={bindOrgId ?? ""}
+                  onChange={(e) =>
+                    setBindOrgId(e.target.value ? Number(e.target.value) : null)
+                  }
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                >
+                  <option value="">Select a tenant…</option>
+                  {appTenantsQuery.data?.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.slug} — {t.name} (#{t.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {bindError && (
+              <p className="mt-3 text-sm text-red-600">{bindError}</p>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBindFor(null)}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={bindMutation.isPending}
+                className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
+              >
+                {bindMutation.isPending ? "Binding…" : "Bind"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {deleteFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-medium text-slate-900">
+              Delete tenant{" "}
+              <span className="font-mono">{deleteFor.tenant_id}</span>?
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              This permanently decommissions the tenant data plane. This action
+              cannot be undone.
+            </p>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+              <li>Undeploys all of the tenant&apos;s VDBs and removes their records.</li>
+              <li>Deletes the tenant folder structure and uploaded data.</li>
+              <li>
+                Removes the isolated Teiid container (
+                <span className="font-mono">tenant-{deleteFor.tenant_id}-teiid</span>
+                ) and its Docker network.
+              </li>
+            </ul>
+
+            {deleteFor.org_tenant_id != null && (
+              <label className="mt-4 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                <input
+                  type="checkbox"
+                  checked={deleteAppTenant}
+                  onChange={(e) => setDeleteAppTenant(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Also delete the bound application tenant (org #
+                  {deleteFor.org_tenant_id}) and <strong>all its users</strong>.
+                  Uncheck to keep the app tenant and only tear down the data
+                  plane.
+                </span>
+              </label>
+            )}
+
+            {deleteError && (
+              <p className="mt-3 text-sm text-red-600">{deleteError}</p>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteFor(null)}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={() =>
+                  deleteMutation.mutate({
+                    id: deleteFor.tenant_id,
+                    withApp:
+                      deleteFor.org_tenant_id != null ? deleteAppTenant : false,
+                  })
+                }
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? "Deleting…" : "Yes, delete tenant"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {teardown && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-medium text-slate-900">
+              Tenant <span className="font-mono">{teardown.tenant_id}</span>{" "}
+              removed
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">{teardown.note}</p>
+            {Object.keys(teardown.deleted_rows).length > 0 && (
+              <p className="mt-2 text-xs text-slate-500">
+                Deleted:{" "}
+                {Object.entries(teardown.deleted_rows)
+                  .filter(([, n]) => n > 0)
+                  .map(([t, n]) => `${n} ${t}`)
+                  .join(", ") || "no application rows"}
+                .
+              </p>
+            )}
+            <div className="mt-4">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-700">
+                  Host teardown script
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigator.clipboard?.writeText(teardown.teardown_script)
+                  }
+                  className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+                >
+                  Copy
+                </button>
+              </div>
+              <pre className="max-h-72 overflow-auto rounded-md bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">
+                {teardown.teardown_script}
+              </pre>
+              <p className="mt-2 text-xs text-slate-500">
+                Run this on the EC2 host to remove the isolated container,
+                network and on-host VDB directory (root/Docker operations the
+                control plane does not perform itself).
+              </p>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setTeardown(null)}
+                className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90"
+              >
+                Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>

@@ -34,10 +34,24 @@ function SuperAdminView() {
   const [rootName, setRootName] = useState("");
   const [rootPassword, setRootPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Tenant | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const tenantsQuery = useQuery<Tenant[]>({
     queryKey: ["tenants"],
     queryFn: () => apiClient.get<Tenant[]>("/api/tenants"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiClient.delete(`/api/tenants/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tenants"] });
+      setDeleteTarget(null);
+      setDeleteConfirm("");
+      setDeleteError(null);
+    },
+    onError: (err: Error) => setDeleteError(err.message),
   });
 
   const createMutation = useMutation({
@@ -235,6 +249,7 @@ function SuperAdminView() {
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Created</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Login URL</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -270,10 +285,78 @@ function SuperAdminView() {
                       /{tenant.slug}/login
                     </a>
                   </td>
+                  <td className="px-4 py-3 text-sm">
+                    <button
+                      onClick={() => {
+                        setDeleteTarget(tenant);
+                        setDeleteConfirm("");
+                        setDeleteError(null);
+                      }}
+                      className="rounded border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Delete tenant &quot;{deleteTarget.slug}&quot;?
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              This permanently deletes the application tenant and cascades:
+            </p>
+            <ul className="mt-2 list-disc pl-5 text-sm text-slate-600">
+              <li>All users in the tenant</li>
+              <li>All projects, saved queries and project members</li>
+              <li>All data sources (files, databases, SaaS) and VDB records</li>
+              <li>Undeploys the tenant&apos;s shared + user VDBs from Teiid</li>
+              <li>Deletes the tenant&apos;s folder structure on disk</li>
+            </ul>
+            <p className="mt-3 text-sm text-slate-700">
+              Type{" "}
+              <span className="font-mono font-semibold">{deleteTarget.slug}</span>{" "}
+              to confirm.
+            </p>
+            <input
+              type="text"
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+              placeholder={deleteTarget.slug}
+            />
+            {deleteError && (
+              <p className="mt-2 text-sm text-red-600">{deleteError}</p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setDeleteConfirm("");
+                  setDeleteError(null);
+                }}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={
+                  deleteConfirm !== deleteTarget.slug || deleteMutation.isPending
+                }
+                onClick={() => deleteMutation.mutate(deleteTarget.id)}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? "Deleting..." : "Delete tenant"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>

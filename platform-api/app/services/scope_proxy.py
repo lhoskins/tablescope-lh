@@ -155,6 +155,7 @@ class ScopeProxyService:
         store: ScopeFileStore | None = None,
         servlet_client: httpx.AsyncClient | None = None,
         use_servlet: bool = False,
+        servlet_url: str | None = None,
     ) -> None:
         settings = get_settings()
         self._store = store or ScopeFileStore(Path(settings.drilldown_config_path))
@@ -163,8 +164,10 @@ class ScopeProxyService:
             headers = {}
             if settings.teiid_servlet_api_key:
                 headers["X-API-Key"] = settings.teiid_servlet_api_key
+            # When a tenant is bound to a dedicated data plane the caller passes
+            # the tenant container's servlet URL; otherwise use the shared one.
             self._client: httpx.AsyncClient | None = servlet_client or httpx.AsyncClient(
-                base_url=settings.teiid_servlet_url,
+                base_url=servlet_url or settings.teiid_servlet_url,
                 timeout=httpx.Timeout(10.0, connect=5.0),
                 headers=headers,
             )

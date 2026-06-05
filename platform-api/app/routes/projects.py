@@ -34,6 +34,8 @@ from app.schemas.project import (
     SavedQueryUpdate,
 )
 from app.services.customer_folders import CustomerFolderService
+from app.services.file_sources import display_source
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -213,8 +215,11 @@ async def list_project_datasources(
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    settings = get_settings()
-    base = Path(settings.customer_base_path)
+    # Resolve the tenant's Teiid endpoint so dedicated-data-plane tenants read
+    # their files from the dedicated VDB host path; unbound tenants fall back to
+    # the shared customer_base_path (vdb_host_path == customer_base_path).
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    base = Path(endpoint.vdb_host_path)
 
     owner_id = project.owner_id or context.user_id
     uploads_dir = base / str(tenant.id) / str(owner_id) / "uploads"
@@ -248,11 +253,14 @@ async def list_project_datasources(
                     continue
                 if is_archived and not include_archived:
                     continue
+                display_name, source_type = display_source(
+                    f.name, meta.source_format if meta else None
+                )
                 datasources.append({
-                    "fileName": f.name,
+                    "fileName": display_name,
                     "viewName": view_name,
                     "size": f.stat().st_size,
-                    "sourceType": extension.lower() or "file",
+                    "sourceType": source_type,
                     "dbType": None,
                     "fileMetaId": meta.id if meta else None,
                     "projectId": meta.project_id if meta else None,
@@ -314,9 +322,11 @@ async def list_available_datasources(
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    settings = get_settings()
+    # Read from the tenant's dedicated VDB host path when bound to a data plane;
+    # falls back to the shared customer_base_path for unbound tenants.
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
     uploads_dir = (
-        Path(settings.customer_base_path)
+        Path(endpoint.vdb_host_path)
         / str(tenant.id)
         / str(context.user_id)
         / "uploads"
@@ -344,12 +354,12 @@ async def list_available_datasources(
             # no meta, which already show in every project) are excluded.
             if meta is None or meta.archived or meta.project_id == project_id:
                 continue
-            extension = f.suffix.lstrip(".").upper()
+            display_name, source_type = display_source(f.name, meta.source_format)
             available.append({
                 "kind": "file",
-                "fileName": f.name,
+                "fileName": display_name,
                 "viewName": view_name,
-                "sourceType": extension.lower() or "file",
+                "sourceType": source_type,
                 "dbType": None,
                 "connectorType": None,
             })

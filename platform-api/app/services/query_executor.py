@@ -72,6 +72,8 @@ class TeiidQueryExecutor:
         column_name: str | None = None,
         value: str | None = None,
         limit: int = 1000,
+        teiid_host: str | None = None,
+        teiid_port: int | None = None,
     ) -> QueryResult:
         _validate_identifier(table_name, kind="table")
         if column_name is not None:
@@ -98,9 +100,11 @@ class TeiidQueryExecutor:
             sql = f'SELECT * FROM "{table_name}" LIMIT $1'
             params = (limit,)
 
+        # A tenant bound to a dedicated data plane is routed to its own Teiid
+        # container; otherwise we use the VDB row's host/port (shared global).
         pool = await pool_manager.get_pool(
-            host=connection_info.host,
-            port=connection_info.port,
+            host=teiid_host or connection_info.host,
+            port=teiid_port or connection_info.port,
             database=connection_info.database,
             username=connection_info.username,
             password=connection_info.password,

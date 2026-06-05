@@ -74,12 +74,17 @@ def generate_view_name(*, display_name: str, db_type: str) -> str:
 class TeiidRegistrationService:
     """Async client around the servlet's ``createDatabaseSource`` endpoint."""
 
-    def __init__(self, *, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: httpx.AsyncClient | None = None,
+        servlet_url: str | None = None,
+    ) -> None:
         settings = get_settings()
         self._settings = settings
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
-            base_url=settings.teiid_servlet_url,
+            base_url=servlet_url or settings.teiid_servlet_url,
             timeout=httpx.Timeout(120.0, connect=10.0),
             headers=(
                 {"X-API-Key": settings.teiid_servlet_api_key}

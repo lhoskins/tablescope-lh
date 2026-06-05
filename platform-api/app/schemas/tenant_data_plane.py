@@ -24,6 +24,42 @@ class TenantDataPlaneCreate(BaseModel):
         "AWS Secrets Manager ARN). Never the secret value itself.",
     )
 
+    # --- Optional unified provisioning fields ---
+    # When provided, the data-plane create endpoint also creates an application
+    # tenant (slug + root admin user) and binds them via org_tenant_id, so one
+    # API call delivers a fully usable, login-ready tenant.
+    create_app_tenant: bool = Field(
+        default=False, description="If true, also create the application tenant and root admin user."
+    )
+    app_tenant_admin_email: str | None = Field(
+        default=None, description="Root admin email for the new app tenant (required when create_app_tenant=true)."
+    )
+    app_tenant_admin_password: str | None = Field(
+        default=None, description="Root admin password (required when create_app_tenant=true)."
+    )
+
+
+class BindAppTenantIn(BaseModel):
+    """Bind an existing data plane to an application tenant.
+
+    Either link an existing org tenant by id, or create a new app tenant
+    (slug + root admin). VDBs are (re)provisioned in the data plane's container.
+    """
+
+    org_tenant_id: int | None = Field(
+        default=None, description="Link to this existing application tenant id."
+    )
+    new_tenant_slug: str | None = Field(
+        default=None, description="Slug for a new application tenant to create and bind."
+    )
+    new_tenant_name: str | None = None
+    admin_email: str | None = Field(
+        default=None, description="Root admin email (required with new_tenant_slug)."
+    )
+    admin_password: str | None = Field(
+        default=None, description="Root admin password (required with new_tenant_slug)."
+    )
+
 
 class VpnMetadataIn(BaseModel):
     tenant_vpc_id: str | None = None
@@ -113,3 +149,14 @@ class OnboardingPackage(BaseModel):
     routing_type: str
     allowed_onprem_cidrs: list[str]
     instructions: str
+
+
+class DeleteDataPlaneResponse(BaseModel):
+    tenant_id: str
+    org_tenant_id: int | None = None
+    app_tenant_deleted: bool
+    deleted_rows: dict[str, int]
+    folders_removed: bool
+    teardown_script: str
+    teardown_script_path: str | None = None
+    note: str
