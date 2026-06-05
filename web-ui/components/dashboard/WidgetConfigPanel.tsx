@@ -146,8 +146,13 @@ export function WidgetConfigPanel({
           const row = resp.rows?.[0];
           const val = row?.[name];
           let type: ColumnInfo["type"] = "string";
-          if (typeof val === "number") type = "number";
-          else if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) type = "date";
+          if (typeof val === "number") {
+            type = "number";
+          } else if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) {
+            type = "date";
+          } else if (typeof val === "string" && val !== "" && !isNaN(Number(val.replace(/[,$%]/g, "")))) {
+            type = "number";
+          }
           return { name, type };
         });
         return { columns: cols };

@@ -58,9 +58,9 @@ services:
       PROMETHEUS_ENABLED: "true"
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
-      # Read-only view of the per-tenant root so the control plane can verify
-      # tenant VDB directories during health checks (never writes here).
-      - /opt/tablescope:/opt/tablescope:ro
+      # Read-write access to per-tenant root so the platform API can manage
+      # tenant files (upload, delete) and verify VDB directories.
+      - /opt/tablescope:/opt/tablescope
       # Read-only view of the firewall applied-markers for health reporting.
       - /etc/tablescope:/etc/tablescope:ro
     depends_on:
@@ -91,7 +91,7 @@ services:
       CUSTOMER_BASE_PATH: /opt/wildfly/teiidfiles/customers
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
-      - /opt/tablescope:/opt/tablescope:ro
+      - /opt/tablescope:/opt/tablescope
       - /etc/tablescope:/etc/tablescope:ro
     depends_on:
       - redis

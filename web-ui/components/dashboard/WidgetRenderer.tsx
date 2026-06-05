@@ -207,12 +207,37 @@ export function WidgetRenderer({ widget, data }: Props) {
   const sub = widget.chartSubtype ?? "";
   const isHorizontal = sub === "horizontal_bar" || sub === "stacked_horizontal";
 
+  // Coerce numeric-string values to actual numbers so Recharts can render them
+  const coercedData = useMemo(() => {
+    if (data.length === 0) return data;
+    const numericKeys = new Set<string>();
+    const firstRow = data[0];
+    for (const [k, v] of Object.entries(firstRow)) {
+      if (typeof v === "number") { numericKeys.add(k); continue; }
+      if (typeof v === "string" && v !== "" && !isNaN(Number(v.replace(/[,$%]/g, "")))) {
+        numericKeys.add(k);
+      }
+    }
+    if (numericKeys.size === 0) return data;
+    return data.map((row) => {
+      const out = { ...row };
+      for (const k of numericKeys) {
+        const v = out[k];
+        if (typeof v === "string") {
+          const n = Number(v.replace(/[,$%]/g, ""));
+          if (!isNaN(n)) out[k] = n;
+        }
+      }
+      return out;
+    });
+  }, [data]);
+
   const { chartData, seriesNames } = useMemo(() => {
     if (hasGroupBy && widget.groupByColumn) {
-      return pivotData(data, xKey, yKey, widget.groupByColumn);
+      return pivotData(coercedData, xKey, yKey, widget.groupByColumn);
     }
-    return { chartData: data, seriesNames: [] as string[] };
-  }, [data, xKey, yKey, hasGroupBy, widget.groupByColumn]);
+    return { chartData: coercedData, seriesNames: [] as string[] };
+  }, [coercedData, xKey, yKey, hasGroupBy, widget.groupByColumn]);
 
   const stackId = (sub === "stacked_bar" || sub === "stacked_horizontal") ? "stack" : undefined;
   const lineType = sub === "smooth_line" ? "monotone" : sub === "step_line" ? "stepAfter" : "linear";
@@ -222,6 +247,19 @@ export function WidgetRenderer({ widget, data }: Props) {
     tick: { fontSize: 10, fill: "#64748b" },
     axisLine: { stroke: "#e2e8f0" },
     tickLine: false,
+  };
+
+  const xAxisProps = {
+    ...commonAxisProps,
+    interval: "preserveStartEnd" as const,
+    angle: -30,
+    textAnchor: "end" as const,
+    height: 50,
+  };
+
+  const yAxisProps = {
+    ...commonAxisProps,
+    width: 55,
   };
 
   const renderChart = () => {
@@ -235,10 +273,10 @@ export function WidgetRenderer({ widget, data }: Props) {
       case "line":
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 5 }}>
+            <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 25, left: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis dataKey={xKey} {...commonAxisProps} />
-              <YAxis {...commonAxisProps} tickFormatter={fmtAxis} />
+              <XAxis dataKey={xKey} {...xAxisProps} />
+              <YAxis {...yAxisProps} tickFormatter={fmtAxis} />
               <Tooltip
                 contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
                 formatter={(value: number) => [fmtNumber(value), ""]}
@@ -259,7 +297,7 @@ export function WidgetRenderer({ widget, data }: Props) {
       case "bar":
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} margin={{ top: 10, right: 20, bottom: 5, left: 5 }}>
+            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} margin={{ top: 10, right: 20, bottom: 25, left: isHorizontal ? 5 : 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!isHorizontal} horizontal={isHorizontal} />
               {isHorizontal ? (
                 <>
@@ -268,8 +306,8 @@ export function WidgetRenderer({ widget, data }: Props) {
                 </>
               ) : (
                 <>
-                  <XAxis dataKey={xKey} {...commonAxisProps} />
-                  <YAxis {...commonAxisProps} tickFormatter={fmtAxis} />
+                  <XAxis dataKey={xKey} {...xAxisProps} />
+                  <YAxis {...yAxisProps} tickFormatter={fmtAxis} />
                 </>
               )}
               <Tooltip
@@ -299,7 +337,7 @@ export function WidgetRenderer({ widget, data }: Props) {
       case "area":
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 5 }}>
+            <AreaChart data={chartData} margin={{ top: 10, right: 20, bottom: 25, left: 10 }}>
               <defs>
                 {seriesNames.length > 0 ? (
                   seriesNames.map((name, i) => (
@@ -316,8 +354,8 @@ export function WidgetRenderer({ widget, data }: Props) {
                 )}
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis dataKey={xKey} {...commonAxisProps} />
-              <YAxis {...commonAxisProps} tickFormatter={fmtAxis} />
+              <XAxis dataKey={xKey} {...xAxisProps} />
+              <YAxis {...yAxisProps} tickFormatter={fmtAxis} />
               <Tooltip
                 contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
                 formatter={(value: number) => [fmtNumber(value), ""]}
@@ -392,11 +430,11 @@ export function WidgetRenderer({ widget, data }: Props) {
       case "combo":
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 5 }}>
+            <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 25, left: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis dataKey={xKey} {...commonAxisProps} />
-              <YAxis yAxisId="left" {...commonAxisProps} tickFormatter={fmtAxis} />
-              {y2Key && <YAxis yAxisId="right" orientation="right" {...commonAxisProps} tickFormatter={fmtAxis} />}
+              <XAxis dataKey={xKey} {...xAxisProps} />
+              <YAxis yAxisId="left" {...yAxisProps} tickFormatter={fmtAxis} />
+              {y2Key && <YAxis yAxisId="right" orientation="right" {...yAxisProps} tickFormatter={fmtAxis} />}
               <Tooltip
                 contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
                 formatter={(value: number) => [fmtNumber(value), ""]}
