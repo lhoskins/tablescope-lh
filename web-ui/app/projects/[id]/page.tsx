@@ -9,6 +9,9 @@ import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 import { TablescopeDataGrid } from "@/components/data-grid/TablescopeDataGrid";
+import { TanStackDataGrid } from "@/components/data-grid/TanStackDataGrid";
+
+const USE_TANSTACK_GRID = process.env.NEXT_PUBLIC_USE_TANSTACK_GRID === "true";
 import { DashboardTab } from "@/components/dashboard/DashboardTab";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
@@ -235,6 +238,8 @@ function buildClauses(
         return `${col} IN (${vals})`;
       }
       if (f.operand === "LIKE") return `${col} LIKE '${f.value}'`;
+      if (f.operand === "BEGINS WITH") return `${col} LIKE '${f.value}%'`;
+      if (f.operand === "ENDS WITH") return `${col} LIKE '%${f.value}'`;
       return `${col} ${f.operand} '${f.value}'`;
     });
   if (where.length > 0) out += " WHERE " + where.join(" AND ");
@@ -507,8 +512,8 @@ function EditQueryForm({
               <div className="flex gap-2">
                 <button type="button" onClick={(e) => { e.stopPropagation(); markDirty(); setSelectedFields([]); }}
                   className="text-xs text-blue-600 hover:text-blue-800">Select All</button>
-                <button type="button" onClick={(e) => { e.stopPropagation(); markDirty(); setSelectedFields(allFields.length ? allFields.slice(0, 1) : []); }}
-                  className="text-xs text-slate-500 hover:text-slate-700">Reset</button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); markDirty(); setSelectedFields(allFields.length ? [allFields[0]] : []); }}
+                  className="text-xs text-red-500 hover:text-red-700">Clear All</button>
               </div>
             )}
           </div>
@@ -574,8 +579,41 @@ function EditQueryForm({
         </div>
       )}
 
-      {/* Filters (WHERE) */}
+      {/* + Add Filter / + Group By / + Order By — always visible as a button row */}
       {leftDs && (
+        <div className="mb-3 flex gap-2">
+          {filters.length === 0 && (
+            <button
+              type="button"
+              onClick={() => { markDirty(); setFilters((p) => [...p, { column: "", operand: "=", value: "" }]); }}
+              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              + Add Filter
+            </button>
+          )}
+          {groupBy.length === 0 && (
+            <button
+              type="button"
+              onClick={() => { markDirty(); setGroupBy((p) => [...p, ""]); }}
+              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              + Group By
+            </button>
+          )}
+          {orderBy.length === 0 && (
+            <button
+              type="button"
+              onClick={() => { markDirty(); setOrderBy((p) => [...p, { column: "", dir: "ASC" }]); }}
+              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              + Order By
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Filters (WHERE) — expanded once a filter is added */}
+      {leftDs && filters.length > 0 && (
         <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-slate-700">Filters</span>
@@ -587,9 +625,6 @@ function EditQueryForm({
               + Add Filter
             </button>
           </div>
-          {filters.length === 0 && (
-            <p className="text-xs text-slate-400">No filters. Add a WHERE condition.</p>
-          )}
           {filters.map((f, idx) => (
             <div key={idx} className="mb-2 flex items-center gap-2">
               <select
@@ -605,9 +640,9 @@ function EditQueryForm({
               <select
                 value={f.operand}
                 onChange={(e) => { markDirty(); setFilters((p) => p.map((x, i) => i === idx ? { ...x, operand: e.target.value } : x)); }}
-                className="w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
               >
-                {["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN"].map((o) => (
+                {["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN", "BEGINS WITH", "ENDS WITH"].map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
@@ -627,30 +662,6 @@ function EditQueryForm({
               </button>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Group By / Order By — collapsed to buttons until a column is added */}
-      {leftDs && (groupBy.length === 0 || orderBy.length === 0) && (
-        <div className="mb-3 flex gap-2">
-          {groupBy.length === 0 && (
-            <button
-              type="button"
-              onClick={() => { markDirty(); setGroupBy((p) => [...p, ""]); }}
-              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-            >
-              + Group By
-            </button>
-          )}
-          {orderBy.length === 0 && (
-            <button
-              type="button"
-              onClick={() => { markDirty(); setOrderBy((p) => [...p, { column: "", dir: "ASC" }]); }}
-              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-            >
-              + Order By
-            </button>
-          )}
         </div>
       )}
 
@@ -1264,6 +1275,12 @@ export default function ProjectWorkspacePage() {
           if (f.operand === "LIKE") {
             return `${qualCol} LIKE '${f.value}'`;
           }
+          if (f.operand === "BEGINS WITH") {
+            return `${qualCol} LIKE '${f.value}%'`;
+          }
+          if (f.operand === "ENDS WITH") {
+            return `${qualCol} LIKE '%${f.value}'`;
+          }
           return `${qualCol} ${f.operand} '${f.value}'`;
         });
       if (whereClauses.length > 0) {
@@ -1823,8 +1840,20 @@ export default function ProjectWorkspacePage() {
                 </div>
               )}
 
-              {/* Filters */}
-              {leftDs && allAvailableCols.length > 0 && (
+              {/* + Add Filter button (collapsed, same row style as Group By / Order By) */}
+              {leftDs && allAvailableCols.length > 0 && filters.length === 0 && (
+                <div className="mb-4">
+                  <button
+                    onClick={() => setFilters((prev) => [...prev, { column: "", operand: "=", value: "" }])}
+                    className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                  >
+                    + Add Filter
+                  </button>
+                </div>
+              )}
+
+              {/* Filters — expanded once a filter is added */}
+              {leftDs && allAvailableCols.length > 0 && filters.length > 0 && (
                 <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="text-sm font-semibold text-slate-900">Filters</h4>
@@ -1835,9 +1864,6 @@ export default function ProjectWorkspacePage() {
                       + Add Filter
                     </button>
                   </div>
-                  {filters.length === 0 && (
-                    <p className="text-xs text-slate-400">No filters. Click &quot;+ Add Filter&quot; to add a WHERE condition.</p>
-                  )}
                   {filters.map((f, idx) => (
                     <div key={idx} className="flex items-center gap-2 mb-2">
                       <select
@@ -1861,7 +1887,7 @@ export default function ProjectWorkspacePage() {
                           updated[idx] = { ...updated[idx], operand: e.target.value };
                           setFilters(updated);
                         }}
-                        className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                        className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
                       >
                         <option value="=">=</option>
                         <option value="!=">!=</option>
@@ -1871,6 +1897,8 @@ export default function ProjectWorkspacePage() {
                         <option value="<=">&lt;=</option>
                         <option value="LIKE">LIKE</option>
                         <option value="IN">IN</option>
+                        <option value="BEGINS WITH">BEGINS WITH</option>
+                        <option value="ENDS WITH">ENDS WITH</option>
                       </select>
                       <input
                         type="text"
@@ -2124,20 +2152,37 @@ export default function ProjectWorkspacePage() {
                         <p className="text-sm text-red-600">{savedQueryError}</p>
                       )}
                       {savedQueryResult && savedQueryResult.rows.length > 0 && (
-                        <TablescopeDataGrid
-                          columns={savedQueryResult.columns}
-                          rows={savedQueryResult.rows}
-                          queryId={q.id}
-                          queryName={q.name}
-                          projectId={projectId}
-                          availableQueries={(queriesQuery.data ?? []).map((sq) => ({
-                            id: sq.id,
-                            name: sq.name,
-                            sql: sq.sql_text,
-                            leftDatasource: sq.left_datasource,
-                          }))}
-                          canEditScopes={canEdit}
-                        />
+                        USE_TANSTACK_GRID ? (
+                          <TanStackDataGrid
+                            columns={savedQueryResult.columns}
+                            rows={savedQueryResult.rows}
+                            queryId={q.id}
+                            queryName={q.name}
+                            projectId={projectId}
+                            availableQueries={(queriesQuery.data ?? []).map((sq) => ({
+                              id: sq.id,
+                              name: sq.name,
+                              sql: sq.sql_text,
+                              leftDatasource: sq.left_datasource,
+                            }))}
+                            canEditScopes={canEdit}
+                          />
+                        ) : (
+                          <TablescopeDataGrid
+                            columns={savedQueryResult.columns}
+                            rows={savedQueryResult.rows}
+                            queryId={q.id}
+                            queryName={q.name}
+                            projectId={projectId}
+                            availableQueries={(queriesQuery.data ?? []).map((sq) => ({
+                              id: sq.id,
+                              name: sq.name,
+                              sql: sq.sql_text,
+                              leftDatasource: sq.left_datasource,
+                            }))}
+                            canEditScopes={canEdit}
+                          />
+                        )
                       )}
                       {savedQueryResult && savedQueryResult.rows.length === 0 && (
                         <p className="text-sm text-slate-400">Query returned no results.</p>

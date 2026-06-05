@@ -257,9 +257,17 @@ export function WidgetRenderer({ widget, data }: Props) {
     height: 50,
   };
 
+  const barXAxisProps = {
+    ...commonAxisProps,
+    interval: 0 as const,
+    tick: { fontSize: 11, fill: "#334155" },
+    height: 40,
+  };
+
   const yAxisProps = {
     ...commonAxisProps,
     width: 55,
+    tick: { fontSize: 11, fill: "#334155" },
   };
 
   const renderChart = () => {
@@ -297,7 +305,7 @@ export function WidgetRenderer({ widget, data }: Props) {
       case "bar":
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} margin={{ top: 10, right: 20, bottom: 25, left: isHorizontal ? 5 : 10 }}>
+            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} margin={{ top: 10, right: 20, bottom: 5, left: isHorizontal ? 5 : 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!isHorizontal} horizontal={isHorizontal} />
               {isHorizontal ? (
                 <>
@@ -306,7 +314,7 @@ export function WidgetRenderer({ widget, data }: Props) {
                 </>
               ) : (
                 <>
-                  <XAxis dataKey={xKey} {...xAxisProps} />
+                  <XAxis dataKey={xKey} {...barXAxisProps} />
                   <YAxis {...yAxisProps} tickFormatter={fmtAxis} />
                 </>
               )}

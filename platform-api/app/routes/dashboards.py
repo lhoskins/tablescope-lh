@@ -459,6 +459,12 @@ def _build_where(filters: list[WidgetFilter]) -> list[str]:
                 clauses.append(f"{col} NOT IN ({vals})")
         elif op == "contains":
             clauses.append(f"{col} LIKE {_sql_val(f'%{val}%')}")
+        elif op == "begins_with":
+            clauses.append(f"{col} LIKE {_sql_val(f'{val}%')}")
+        elif op == "ends_with":
+            clauses.append(f"{col} LIKE {_sql_val(f'%{val}')}")
+        elif op == "like":
+            clauses.append(f"{col} LIKE {_sql_val(val)}")
     return clauses
 
 

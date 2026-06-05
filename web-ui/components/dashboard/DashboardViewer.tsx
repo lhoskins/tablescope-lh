@@ -28,6 +28,19 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
 
   const [widgetData, setWidgetData] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const [showConfigPanel, setShowConfigPanel] = useState(false);
+  const [dashboardStatus, setDashboardStatus] = useState(dashboard.status);
+
+  const toggleStatusMutation = useMutation({
+    mutationFn: async () => {
+      const newStatus = dashboardStatus === "published" ? "draft" : "published";
+      await apiClient.patch(`/projects/${projectId}/dashboards/${dashboard.id}`, { status: newStatus });
+      return newStatus;
+    },
+    onSuccess: (newStatus: string) => {
+      setDashboardStatus(newStatus);
+      queryClient.invalidateQueries({ queryKey: ["dashboards", projectId] });
+    },
+  });
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
 
   const viewNames = useMemo(() => {
@@ -210,11 +223,26 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             </button>
             <div className="h-4 w-px bg-slate-600" />
             <h2 className="text-sm font-bold text-white">{dashboard.name}</h2>
-            <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-              dashboard.status === "published" ? "bg-emerald-900/50 text-emerald-300" : "bg-amber-900/50 text-amber-300"
-            }`}>
-              {dashboard.status}
-            </span>
+            {dashboardStatus !== "published" && (
+              <span className="rounded-full bg-amber-900/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+                {dashboardStatus}
+              </span>
+            )}
+            <button
+              onClick={() => toggleStatusMutation.mutate()}
+              disabled={toggleStatusMutation.isPending}
+              className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${
+                dashboardStatus === "published"
+                  ? "border border-slate-600 text-slate-300 hover:bg-slate-700"
+                  : "bg-emerald-600 text-white hover:bg-emerald-700"
+              } disabled:opacity-50`}
+            >
+              {toggleStatusMutation.isPending
+                ? "Updating..."
+                : dashboardStatus === "published"
+                  ? "Unpublish"
+                  : "Publish"}
+            </button>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-slate-500">

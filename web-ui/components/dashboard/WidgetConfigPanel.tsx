@@ -68,6 +68,9 @@ const FILTER_OPERATORS = [
   { value: "lte", label: "<=" },
   { value: "in", label: "in" },
   { value: "contains", label: "contains" },
+  { value: "begins_with", label: "begins with" },
+  { value: "ends_with", label: "ends with" },
+  { value: "like", label: "LIKE" },
 ];
 
 type SavedQuery = { id: number; name: string; sql_text?: string | null };
