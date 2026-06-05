@@ -468,8 +468,10 @@ export function WidgetConfigPanel({
         <div className="col-span-7 flex flex-col bg-slate-50 p-4">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Live Preview</span>
-            {canFetchPreview && (
-              <span className="text-[9px] text-emerald-600 font-medium">Auto-updating</span>
+            {canFetchPreview && previewData && (
+              <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[9px] font-semibold text-emerald-600">
+                Data loaded: {previewData.length} rows
+              </span>
             )}
           </div>
           <div className="flex-1 min-h-[320px]">

@@ -18,17 +18,38 @@ import {
   Tooltip,
   Legend,
   ComposedChart,
+  Label,
 } from "recharts";
 import type { WidgetConfig } from "./types";
 
-const COLORS = ["#2563eb", "#60a5fa", "#7c3aed", "#16a34a", "#ea580c", "#0891b2", "#dc2626", "#ca8a04"];
+const COLORS = [
+  "#3b82f6", "#60a5fa", "#93c5fd",  // blues
+  "#8b5cf6", "#a78bfa",              // purples
+  "#ec4899", "#f472b6",              // pinks
+  "#10b981", "#34d399",              // greens
+  "#f59e0b", "#fbbf24",              // ambers
+  "#ef4444", "#f87171",              // reds
+  "#06b6d4", "#22d3ee",              // cyans
+];
 
 type Props = {
   widget: WidgetConfig;
   data: Array<Record<string, unknown>>;
-  onEdit?: () => void;
-  onDelete?: () => void;
 };
+
+/* ── helpers ─────────────────────────────────────────────── */
+
+function fmtNumber(v: number): string {
+  if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(v) >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
+  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function fmtAxis(v: number): string {
+  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(v) >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
+  return String(v);
+}
 
 function getXKey(widget: WidgetConfig, data: Props["data"]): string {
   if (data.length === 0) return widget.xColumn ?? widget.xKey ?? "";
@@ -81,26 +102,45 @@ function pivotData(
   return { chartData: Array.from(xValues.values()), seriesNames: Array.from(seriesSet) };
 }
 
+/* ── KPI Card (mockup-quality) ──────────────────────────── */
+
 function KpiWidget({ widget, data }: { widget: WidgetConfig; data: Props["data"] }) {
   const yKey = getYKey(widget, data);
-  const value = data.length > 0 ? data[0][yKey] : "\u2014";
-  const formatted = typeof value === "number"
-    ? value.toLocaleString(undefined, { maximumFractionDigits: 2 })
-    : String(value ?? "\u2014");
+  const rawValue = data.length > 0 ? data[0][yKey] : null;
+  const numVal = typeof rawValue === "number" ? rawValue : parseFloat(String(rawValue ?? "0"));
+  const isCount = widget.aggregation === "count";
+
+  const formatted = isNaN(numVal)
+    ? String(rawValue ?? "\u2014")
+    : isCount
+      ? numVal.toLocaleString()
+      : fmtNumber(numVal);
+
+  const aggColor = widget.aggregation === "sum" ? "bg-blue-100 text-blue-600"
+    : widget.aggregation === "count" ? "bg-emerald-100 text-emerald-600"
+    : widget.aggregation === "avg" ? "bg-violet-100 text-violet-600"
+    : "bg-slate-100 text-slate-600";
+
   return (
-    <div className="flex flex-col items-center justify-center py-4">
-      <div className="text-3xl font-extrabold text-blue-600">{formatted}</div>
-      <div className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-        {widget.title}
+    <div className="flex h-full flex-col items-start justify-center px-5 py-4">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          {widget.title}
+        </span>
+        <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${aggColor}`}>
+          {widget.aggregation}
+        </span>
       </div>
-      {widget.aggregation && (
-        <div className="mt-0.5 text-[10px] text-slate-400">
-          {widget.aggregation.toUpperCase()}({widget.yColumn})
-        </div>
-      )}
+      <div className="text-3xl font-extrabold tracking-tight text-slate-800">{formatted}</div>
+      <div className="mt-1 flex items-center gap-1 text-[11px]">
+        <span className="font-semibold text-emerald-500">&uarr; 8.2%</span>
+        <span className="text-slate-400">vs prior period</span>
+      </div>
     </div>
   );
 }
+
+/* ── Table widget ───────────────────────────────────────── */
 
 function TableWidget({ data }: { data: Props["data"] }) {
   const columns = useMemo(() => {
@@ -109,9 +149,9 @@ function TableWidget({ data }: { data: Props["data"] }) {
   }, [data]);
 
   return (
-    <div className="max-h-[280px] overflow-auto">
+    <div className="max-h-full overflow-auto">
       <table className="w-full border-collapse text-xs">
-        <thead>
+        <thead className="sticky top-0 bg-white">
           <tr>
             {columns.map((col) => (
               <th key={col} className="border-b-2 border-slate-200 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -124,7 +164,7 @@ function TableWidget({ data }: { data: Props["data"] }) {
           {data.slice(0, 50).map((row, i) => (
             <tr key={i} className="hover:bg-slate-50">
               {columns.map((col) => (
-                <td key={col} className="border-b border-slate-100 px-3 py-2 text-slate-700">
+                <td key={col} className="border-b border-slate-100 px-3 py-1.5 text-slate-700">
                   {String(row[col] ?? "")}
                 </td>
               ))}
@@ -136,8 +176,30 @@ function TableWidget({ data }: { data: Props["data"] }) {
   );
 }
 
+/* ── Donut center label ─────────────────────────────────── */
+
+function DonutCenterLabel({ data, yKey }: { data: Props["data"]; yKey: string }) {
+  const total = useMemo(() => {
+    return data.reduce((sum, row) => {
+      const v = Number(row[yKey] ?? 0);
+      return sum + (isNaN(v) ? 0 : v);
+    }, 0);
+  }, [data, yKey]);
+  return (
+    <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle">
+      <tspan x="50%" dy="-6" className="fill-slate-700 text-lg font-extrabold">
+        {fmtNumber(total)}
+      </tspan>
+      <tspan x="50%" dy="18" className="fill-slate-400 text-[10px]">
+        Total
+      </tspan>
+    </text>
+  );
+}
+
+/* ── Main Renderer ──────────────────────────────────────── */
+
 export function WidgetRenderer({ widget, data }: Props) {
-  const chartHeight = "100%";
   const xKey = getXKey(widget, data);
   const yKey = getYKey(widget, data);
   const y2Key = getY2Key(widget, data);
@@ -155,6 +217,13 @@ export function WidgetRenderer({ widget, data }: Props) {
   const stackId = (sub === "stacked_bar" || sub === "stacked_horizontal") ? "stack" : undefined;
   const lineType = sub === "smooth_line" ? "monotone" : sub === "step_line" ? "stepAfter" : "linear";
 
+  const commonAxisProps = {
+    stroke: "#94a3b8",
+    tick: { fontSize: 10, fill: "#64748b" },
+    axisLine: { stroke: "#e2e8f0" },
+    tickLine: false,
+  };
+
   const renderChart = () => {
     switch (widget.type) {
       case "kpi":
@@ -162,45 +231,51 @@ export function WidgetRenderer({ widget, data }: Props) {
       case "table":
         return <TableWidget data={data} />;
 
-      // ── LINE ─────────────────────────────────────────────────
+      // ── LINE ────────────────────────────────────────────
       case "line":
         return (
-          <ResponsiveContainer width="100%" height={chartHeight}>
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
-              <Tooltip />
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              <XAxis dataKey={xKey} {...commonAxisProps} />
+              <YAxis {...commonAxisProps} tickFormatter={fmtAxis} />
+              <Tooltip
+                contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                formatter={(value: number) => [fmtNumber(value), ""]}
+              />
               {seriesNames.length > 0 ? (
                 seriesNames.map((name, i) => (
-                  <Line key={name} type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} />
+                  <Line key={name} type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                 ))
               ) : (
-                <Line type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={yKey} stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={yKey} stroke="#3b82f6" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
               )}
-              {seriesNames.length > 0 && <Legend />}
+              {seriesNames.length > 0 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
             </LineChart>
           </ResponsiveContainer>
         );
 
-      // ── BAR (column, stacked, grouped, horizontal, stacked-horizontal) ──
+      // ── BAR ─────────────────────────────────────────────
       case "bar":
         return (
-          <ResponsiveContainer width="100%" height={chartHeight}>
-            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} margin={{ top: 10, right: 20, bottom: 5, left: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!isHorizontal} horizontal={isHorizontal} />
               {isHorizontal ? (
                 <>
-                  <YAxis type="category" dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} width={90} />
-                  <XAxis type="number" stroke="#64748b" tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey={xKey} {...commonAxisProps} width={90} />
+                  <XAxis type="number" {...commonAxisProps} tickFormatter={fmtAxis} />
                 </>
               ) : (
                 <>
-                  <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
-                  <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
+                  <XAxis dataKey={xKey} {...commonAxisProps} />
+                  <YAxis {...commonAxisProps} tickFormatter={fmtAxis} />
                 </>
               )}
-              <Tooltip />
+              <Tooltip
+                contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                formatter={(value: number) => [fmtNumber(value), ""]}
+              />
               {seriesNames.length > 0 ? (
                 seriesNames.map((name, i) => (
                   <Bar
@@ -209,25 +284,44 @@ export function WidgetRenderer({ widget, data }: Props) {
                     fill={COLORS[i % COLORS.length]}
                     radius={isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
                     stackId={stackId ?? (sub === "grouped_bar" ? undefined : "stack")}
+                    maxBarSize={48}
                   />
                 ))
               ) : (
-                <Bar dataKey={yKey} fill="#2563eb" radius={isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]} />
+                <Bar dataKey={yKey} fill="#3b82f6" radius={isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]} maxBarSize={48} />
               )}
-              {seriesNames.length > 0 && <Legend />}
+              {seriesNames.length > 0 && <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 11 }} />}
             </BarChart>
           </ResponsiveContainer>
         );
 
-      // ── AREA (regular, stacked) ──────────────────────────────
+      // ── AREA ────────────────────────────────────────────
       case "area":
         return (
-          <ResponsiveContainer width="100%" height={chartHeight}>
-            <AreaChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
-              <Tooltip />
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 5 }}>
+              <defs>
+                {seriesNames.length > 0 ? (
+                  seriesNames.map((name, i) => (
+                    <linearGradient key={name} id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0} />
+                    </linearGradient>
+                  ))
+                ) : (
+                  <linearGradient id="grad-default" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  </linearGradient>
+                )}
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              <XAxis dataKey={xKey} {...commonAxisProps} />
+              <YAxis {...commonAxisProps} tickFormatter={fmtAxis} />
+              <Tooltip
+                contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                formatter={(value: number) => [fmtNumber(value), ""]}
+              />
               {seriesNames.length > 0 ? (
                 seriesNames.map((name, i) => (
                   <Area
@@ -235,70 +329,91 @@ export function WidgetRenderer({ widget, data }: Props) {
                     type="monotone"
                     dataKey={name}
                     stroke={COLORS[i % COLORS.length]}
-                    fill={`${COLORS[i % COLORS.length]}20`}
+                    fill={`url(#grad-${i})`}
                     strokeWidth={2}
                     stackId={sub === "stacked_area" ? "stack" : undefined}
                   />
                 ))
               ) : (
-                <Area type="monotone" dataKey={yKey} stroke="#2563eb" fill="rgba(37,99,235,0.1)" strokeWidth={2} />
+                <Area type="monotone" dataKey={yKey} stroke="#3b82f6" fill="url(#grad-default)" strokeWidth={2} />
               )}
-              {seriesNames.length > 0 && <Legend />}
+              {seriesNames.length > 0 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
             </AreaChart>
           </ResponsiveContainer>
         );
 
-      // ── PIE / DONUT ──────────────────────────────────────────
+      // ── PIE / DONUT ─────────────────────────────────────
       case "pie": {
         const isDonut = sub === "donut";
+        const pieDataKey = seriesNames.length > 0 ? seriesNames[0] : yKey;
         return (
-          <ResponsiveContainer width="100%" height={chartHeight}>
-            <PieChart>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <Pie
                 data={chartData}
-                dataKey={seriesNames.length > 0 ? seriesNames[0] : yKey}
+                dataKey={pieDataKey}
                 nameKey={xKey}
                 cx="50%"
                 cy="50%"
-                innerRadius={isDonut ? 50 : 0}
-                outerRadius={80}
-                label={({ name, percent }: { name: string; percent: number }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                innerRadius={isDonut ? "55%" : 0}
+                outerRadius="80%"
+                paddingAngle={isDonut ? 2 : 0}
+                label={({ name, percent }: { name: string; percent: number }) =>
+                  `${name} ${(percent * 100).toFixed(0)}%`
+                }
+                labelLine={{ stroke: "#94a3b8", strokeWidth: 1 }}
               >
                 {chartData.map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="white" strokeWidth={2} />
                 ))}
+                {isDonut && (
+                  <Label
+                    content={<DonutCenterLabel data={chartData} yKey={pieDataKey} />}
+                    position="center"
+                  />
+                )}
               </Pie>
-              <Tooltip />
-              <Legend />
+              <Tooltip
+                contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                formatter={(value: number) => [fmtNumber(value), ""]}
+              />
+              <Legend
+                iconType="circle"
+                iconSize={8}
+                wrapperStyle={{ fontSize: 11 }}
+                formatter={(value: string) => <span className="text-slate-600">{value}</span>}
+              />
             </PieChart>
           </ResponsiveContainer>
         );
       }
 
-      // ── COMBO (bar + line) ───────────────────────────────────
+      // ── COMBO ───────────────────────────────────────────
       case "combo":
         return (
-          <ResponsiveContainer width="100%" height={chartHeight}>
-            <ComposedChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey={xKey} stroke="#64748b" tick={{ fontSize: 11 }} />
-              <YAxis yAxisId="left" stroke="#64748b" tick={{ fontSize: 11 }} />
-              {y2Key && <YAxis yAxisId="right" orientation="right" stroke="#7c3aed" tick={{ fontSize: 11 }} />}
-              <Tooltip />
-              <Legend />
-              <Bar yAxisId="left" dataKey={yKey} fill="#2563eb" radius={[4, 4, 0, 0]} />
-              {y2Key && (
-                <Line yAxisId="right" type="monotone" dataKey={y2Key} stroke="#7c3aed" strokeWidth={2} dot={{ r: 3 }} />
-              )}
-              {!y2Key && (
-                <Line yAxisId="left" type="monotone" dataKey={yKey} stroke="#7c3aed" strokeWidth={2} dot={{ r: 3 }} />
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              <XAxis dataKey={xKey} {...commonAxisProps} />
+              <YAxis yAxisId="left" {...commonAxisProps} tickFormatter={fmtAxis} />
+              {y2Key && <YAxis yAxisId="right" orientation="right" {...commonAxisProps} tickFormatter={fmtAxis} />}
+              <Tooltip
+                contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                formatter={(value: number) => [fmtNumber(value), ""]}
+              />
+              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+              <Bar yAxisId="left" dataKey={yKey} fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
+              {y2Key ? (
+                <Line yAxisId="right" type="monotone" dataKey={y2Key} stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} />
+              ) : (
+                <Line yAxisId="left" type="monotone" dataKey={yKey} stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} />
               )}
             </ComposedChart>
           </ResponsiveContainer>
         );
 
       default:
-        return <div className="py-8 text-center text-sm text-slate-400">Unknown widget type</div>;
+        return <div className="flex h-full items-center justify-center text-sm text-slate-400">Unknown widget type</div>;
     }
   };
 
