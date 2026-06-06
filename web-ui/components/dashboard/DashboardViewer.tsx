@@ -43,10 +43,39 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   });
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
 
+  // Collect query IDs referenced by widgets that aren't in the provided savedQueries
+  const missingQueryIds = useMemo(() => {
+    const ids: number[] = [];
+    widgets.forEach((w) => {
+      if (w.dataSource?.kind === "query" && w.dataSource.queryId) {
+        if (!savedQueries.find((q) => q.id === w.dataSource.queryId)) {
+          ids.push(w.dataSource.queryId);
+        }
+      }
+    });
+    return [...new Set(ids)];
+  }, [widgets, savedQueries]);
+
+  // Fetch missing queries (e.g. AI-generated ones not yet in parent's cache)
+  const { data: fetchedQueries = [] } = useQuery({
+    queryKey: ["missing-queries", projectId, missingQueryIds],
+    queryFn: () =>
+      apiClient.get<SavedQuery[]>(`/api/projects/${projectId}/queries`),
+    enabled: missingQueryIds.length > 0,
+  });
+
+  // Merged list of all queries available to widgets
+  const allQueries = useMemo(() => {
+    const map = new Map<number, SavedQuery>();
+    savedQueries.forEach((q) => map.set(q.id, q));
+    fetchedQueries.forEach((q: SavedQuery) => map.set(q.id, q));
+    return Array.from(map.values());
+  }, [savedQueries, fetchedQueries]);
+
   const viewNames = useMemo(() => {
     const names = new Set<string>();
     widgets.forEach((w) => {
-      if (w.dataSource.kind === "datasource" && w.dataSource.viewName) {
+      if (w.dataSource?.kind === "datasource" && w.dataSource.viewName) {
         names.add(w.dataSource.viewName);
       }
     });
@@ -122,8 +151,8 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         );
         return resp.rows ?? [];
       }
-      if (w.dataSource.kind === "query" && w.dataSource.queryId) {
-        const query = savedQueries.find((q) => q.id === w.dataSource.queryId);
+      if (w.dataSource?.kind === "query" && w.dataSource.queryId) {
+        const query = allQueries.find((q) => q.id === w.dataSource.queryId);
         if (query?.sql_text) {
           const tableMatch = query.sql_text.match(/FROM\s+"?([A-Za-z0-9_]+)"?/i);
           const tableName = tableMatch ? tableMatch[1] : "dual";
@@ -138,7 +167,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       /* widget shows "No data" */
     }
     return [];
-  }, [savedQueries, projectId, globalFiltersForApi]);
+  }, [allQueries, projectId, globalFiltersForApi]);
 
   useEffect(() => {
     const loadAll = async () => {
