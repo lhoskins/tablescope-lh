@@ -28,20 +28,41 @@ type AIResponse = {
   error?: string;
 };
 
+type SaveResult = {
+  action: string;
+  status: string;
+  query_id?: number;
+  dashboard_id?: number;
+  dashboard_name?: string;
+  widgets_created?: number;
+  queries_created?: number[];
+  name?: string;
+  sql_text?: string;
+  model_used?: string;
+};
+
 type Props = {
   projectId: number;
+  onQuerySaved?: () => void;
+  onDashboardSaved?: () => void;
 };
 
 /* ---------- Component ---------- */
 
-export function AIPanel({ projectId }: Props) {
+export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [activeFeature, setActiveFeature] = useState<
     "ask" | "sql" | "relationships" | "dashboard"
   >("ask");
   const [response, setResponse] = useState<AIResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveResult, setSaveResult] = useState<SaveResult | null>(null);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveDescription, setSaveDescription] = useState("");
+  const [dashboardPrompt, setDashboardPrompt] = useState("");
   const [history, setHistory] = useState<
     Array<{ question: string; answer: string; feature: string }>
   >([]);
@@ -51,6 +72,7 @@ export function AIPanel({ projectId }: Props) {
       setLoading(true);
       setError(null);
       setResponse(null);
+      setSaveResult(null);
       try {
         const endpoints: Record<string, string> = {
           ask: "/api/ai/ask",
@@ -96,6 +118,106 @@ export function AIPanel({ projectId }: Props) {
     callAI("dashboard", { project_id: projectId });
   };
 
+  /* ---------- Save Actions ---------- */
+
+  const handleSaveQuery = async () => {
+    if (!response?.sql || !saveName.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await apiClient.post<SaveResult>("/api/ai/actions/save-query", {
+        project_id: projectId,
+        name: saveName.trim(),
+        description: saveDescription.trim() || undefined,
+        sql_text: response.sql,
+      });
+      setSaveResult(result);
+      setShowSaveDialog(false);
+      setSaveName("");
+      setSaveDescription("");
+      onQuerySaved?.();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save query";
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleGenerateAndSaveQuery = async () => {
+    if (!question.trim() || !saveName.trim()) return;
+    setSaving(true);
+    setError(null);
+    setSaveResult(null);
+    try {
+      const result = await apiClient.post<SaveResult>("/api/ai/actions/generate-and-save-query", {
+        project_id: projectId,
+        prompt: question.trim(),
+        name: saveName.trim(),
+        description: saveDescription.trim() || undefined,
+      });
+      setSaveResult(result);
+      setShowSaveDialog(false);
+      setSaveName("");
+      setSaveDescription("");
+      onQuerySaved?.();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to generate and save query";
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleGenerateAndSaveDashboard = async () => {
+    setSaving(true);
+    setError(null);
+    setSaveResult(null);
+    try {
+      const result = await apiClient.post<SaveResult>("/api/ai/actions/generate-and-save-dashboard", {
+        project_id: projectId,
+        prompt: dashboardPrompt.trim() || undefined,
+        name: saveName.trim() || undefined,
+        description: saveDescription.trim() || undefined,
+      });
+      setSaveResult(result);
+      setShowSaveDialog(false);
+      setSaveName("");
+      setSaveDescription("");
+      setDashboardPrompt("");
+      onDashboardSaved?.();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to generate and save dashboard";
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveDashboardFromSuggestion = async () => {
+    if (!response?.suggestions?.length) return;
+    setSaving(true);
+    setError(null);
+    setSaveResult(null);
+    try {
+      const result = await apiClient.post<SaveResult>("/api/ai/actions/generate-and-save-dashboard", {
+        project_id: projectId,
+        name: saveName.trim() || response.suggestions[0].title,
+        description: saveDescription.trim() || undefined,
+      });
+      setSaveResult(result);
+      setShowSaveDialog(false);
+      setSaveName("");
+      setSaveDescription("");
+      onDashboardSaved?.();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save dashboard";
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* AI boundary notice */}
@@ -125,7 +247,10 @@ export function AIPanel({ projectId }: Props) {
         ).map((f) => (
           <button
             key={f.key}
-            onClick={() => setActiveFeature(f.key)}
+            onClick={() => {
+              setActiveFeature(f.key);
+              setSaveResult(null);
+            }}
             className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
               activeFeature === f.key
                 ? "bg-white text-slate-900 shadow-sm"
@@ -137,29 +262,46 @@ export function AIPanel({ projectId }: Props) {
         ))}
       </div>
 
-      {/* Input area */}
+      {/* Input area for Ask / SQL */}
       {(activeFeature === "ask" || activeFeature === "sql") && (
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAsk()}
-            placeholder={
-              activeFeature === "ask"
-                ? "Ask a question about this project..."
-                : "Describe the query you want (e.g., 'Show revenue by region')..."
-            }
-            className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            disabled={loading}
-          />
-          <button
-            onClick={handleAsk}
-            disabled={loading || !question.trim()}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? "Thinking..." : activeFeature === "ask" ? "Ask" : "Generate"}
-          </button>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAsk()}
+              placeholder={
+                activeFeature === "ask"
+                  ? "Ask a question about this project..."
+                  : "Describe the query you want (e.g., 'Show revenue by region')..."
+              }
+              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              disabled={loading || saving}
+            />
+            <button
+              onClick={handleAsk}
+              disabled={loading || !question.trim()}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? "Thinking..." : activeFeature === "ask" ? "Ask" : "Generate"}
+            </button>
+          </div>
+
+          {/* Generate & Save as Query shortcut */}
+          {activeFeature === "sql" && question.trim() && (
+            <button
+              onClick={() => {
+                setSaveName(`AI: ${question.trim().slice(0, 80)}`);
+                setSaveDescription("");
+                setShowSaveDialog(true);
+              }}
+              disabled={loading || saving}
+              className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+            >
+              Generate &amp; Save as Query
+            </button>
+          )}
         </div>
       )}
 
@@ -175,20 +317,43 @@ export function AIPanel({ projectId }: Props) {
       )}
 
       {activeFeature === "dashboard" && (
-        <button
-          onClick={handleDashboardSuggest}
-          disabled={loading}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? "Generating..." : "Suggest Dashboard Widgets"}
-        </button>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={dashboardPrompt}
+              onChange={(e) => setDashboardPrompt(e.target.value)}
+              placeholder="Describe the dashboard you want (optional)..."
+              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              disabled={loading || saving}
+            />
+            <button
+              onClick={handleDashboardSuggest}
+              disabled={loading}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? "Generating..." : "Suggest"}
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              setSaveName("");
+              setSaveDescription("");
+              setShowSaveDialog(true);
+            }}
+            disabled={loading || saving}
+            className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+          >
+            Generate &amp; Save Dashboard
+          </button>
+        </div>
       )}
 
       {/* Loading indicator */}
-      {loading && (
+      {(loading || saving) && (
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-          Processing with tenant-isolated AI...
+          {saving ? "Saving..." : "Processing with tenant-isolated AI..."}
         </div>
       )}
 
@@ -196,6 +361,38 @@ export function AIPanel({ projectId }: Props) {
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {/* Save success */}
+      {saveResult && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-emerald-800">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            {saveResult.action === "save_query" && (
+              <span>Query saved! (ID: {saveResult.query_id})</span>
+            )}
+            {saveResult.action === "generate_and_save_query" && (
+              <span>Query generated &amp; saved! (ID: {saveResult.query_id})</span>
+            )}
+            {saveResult.action === "generate_and_save_dashboard" && (
+              <span>
+                Dashboard &quot;{saveResult.dashboard_name}&quot; created with {saveResult.widgets_created} widget(s)
+                and {saveResult.queries_created?.length ?? 0} query(ies)
+              </span>
+            )}
+          </div>
+          {saveResult.sql_text && (
+            <pre className="mt-2 overflow-x-auto rounded bg-slate-900 p-2 text-xs text-green-400">
+              {saveResult.sql_text}
+            </pre>
+          )}
+          <p className="mt-1 text-xs text-emerald-600">
+            {saveResult.query_id && "View in the Queries tab."}
+            {saveResult.dashboard_id && "View in the Dashboards tab."}
+          </p>
         </div>
       )}
 
@@ -213,7 +410,20 @@ export function AIPanel({ projectId }: Props) {
           {/* SQL response */}
           {response.sql && (
             <div>
-              <h3 className="mb-2 text-sm font-semibold text-slate-900">Generated SQL</h3>
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-900">Generated SQL</h3>
+                <button
+                  onClick={() => {
+                    setSaveName(`AI: ${question.trim().slice(0, 80)}`);
+                    setSaveDescription(response.explanation || "");
+                    setShowSaveDialog(true);
+                  }}
+                  disabled={saving}
+                  className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Save as Query
+                </button>
+              </div>
               <pre className="overflow-x-auto rounded-md bg-slate-900 p-3 text-sm text-green-400">
                 {response.sql}
               </pre>
@@ -238,7 +448,7 @@ export function AIPanel({ projectId }: Props) {
                     <span className="font-mono text-blue-700">
                       {rel.left_table}.{rel.left_column}
                     </span>
-                    <span className="text-slate-400">→</span>
+                    <span className="text-slate-400">&rarr;</span>
                     <span className="font-mono text-blue-700">
                       {rel.right_table}.{rel.right_column}
                     </span>
@@ -255,9 +465,22 @@ export function AIPanel({ projectId }: Props) {
           {/* Dashboard suggestions */}
           {response.suggestions && response.suggestions.length > 0 && (
             <div>
-              <h3 className="mb-2 text-sm font-semibold text-slate-900">
-                Dashboard Suggestions
-              </h3>
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Dashboard Suggestions
+                </h3>
+                <button
+                  onClick={() => {
+                    setSaveName(response.suggestions?.[0]?.title ?? "AI Dashboard");
+                    setSaveDescription("");
+                    setShowSaveDialog(true);
+                  }}
+                  disabled={saving}
+                  className="rounded-md bg-violet-600 px-3 py-1 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                >
+                  Save as Dashboard
+                </button>
+              </div>
               {response.suggestions.map((sug, i) => (
                 <div key={i} className="mb-3 rounded-md border border-slate-100 p-3">
                   <h4 className="mb-2 font-medium text-slate-800">{sug.title}</h4>
@@ -268,6 +491,11 @@ export function AIPanel({ projectId }: Props) {
                           {w.type}
                         </span>
                         <span className="text-slate-700">{w.title}</span>
+                        {w.sql && (
+                          <span className="ml-auto truncate text-[10px] font-mono text-slate-400" title={w.sql}>
+                            {w.sql.slice(0, 60)}...
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -288,6 +516,109 @@ export function AIPanel({ projectId }: Props) {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Save Dialog (modal overlay) */}
+      {showSaveDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-lg font-semibold text-slate-900">
+              {activeFeature === "dashboard" && !response?.sql
+                ? "Generate & Save Dashboard"
+                : response?.sql
+                  ? "Save Query"
+                  : "Generate & Save Query"}
+            </h2>
+
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Name</label>
+                <input
+                  type="text"
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  placeholder={
+                    activeFeature === "dashboard"
+                      ? "Dashboard name..."
+                      : "Query name..."
+                  }
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Description (optional)
+                </label>
+                <textarea
+                  value={saveDescription}
+                  onChange={(e) => setSaveDescription(e.target.value)}
+                  placeholder="Brief description..."
+                  rows={2}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Dashboard prompt if generating fresh */}
+              {activeFeature === "dashboard" && !response?.suggestions?.length && (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Dashboard prompt (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={dashboardPrompt}
+                    onChange={(e) => setDashboardPrompt(e.target.value)}
+                    placeholder="e.g., 'Create a sales performance dashboard'"
+                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+
+              {/* Show SQL preview for query save */}
+              {response?.sql && (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">SQL</label>
+                  <pre className="max-h-32 overflow-auto rounded bg-slate-900 p-2 text-xs text-green-400">
+                    {response.sql}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowSaveDialog(false);
+                  setSaveName("");
+                  setSaveDescription("");
+                }}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (activeFeature === "dashboard") {
+                    if (response?.suggestions?.length) {
+                      handleSaveDashboardFromSuggestion();
+                    } else {
+                      handleGenerateAndSaveDashboard();
+                    }
+                  } else if (response?.sql) {
+                    handleSaveQuery();
+                  } else {
+                    handleGenerateAndSaveQuery();
+                  }
+                }}
+                disabled={saving || (!response?.sql && activeFeature !== "dashboard" && !saveName.trim())}
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? "Saving..." : activeFeature === "dashboard" ? "Create Dashboard" : "Save Query"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
