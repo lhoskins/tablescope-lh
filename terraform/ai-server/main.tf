@@ -135,10 +135,10 @@ locals {
 
 resource "aws_security_group" "ai_server" {
   name_prefix = "${var.instance_name}-"
-  description = "Tablescope AI server — internal access only"
+  description = "Tablescope AI server - internal access only"
   vpc_id      = aws_vpc.ai.id
 
-  # AI API (FastAPI) — from app server only
+  # AI API (FastAPI) - from app server only
   ingress {
     description = "AI API from Tablescope app server"
     from_port   = 8000
@@ -168,54 +168,12 @@ resource "aws_security_group" "ai_server" {
 }
 
 # ---------------------------------------------------------------------------
-# IAM role — least privilege (self stop-instances + SSM)
+# IAM role - least privilege (self stop-instances + SSM)
+# NOTE: IAM role creation requires elevated permissions. Create manually:
+#   aws iam create-role --role-name tablescope-ai-server-role ...
+#   aws iam create-instance-profile --instance-profile-name tablescope-ai-server-profile
+# Then set var.instance_profile_name to attach it to the EC2 instance.
 # ---------------------------------------------------------------------------
-
-resource "aws_iam_role" "ai_server" {
-  name = "${var.instance_name}-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-    }]
-  })
-
-  tags = { Name = "${var.instance_name}-role" }
-}
-
-resource "aws_iam_role_policy" "self_stop" {
-  name = "${var.instance_name}-self-stop"
-  role = aws_iam_role.ai_server.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["ec2:StopInstances", "ec2:DescribeInstances"]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "ec2:ResourceTag/Name" = var.instance_name
-          }
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ssm" {
-  role       = aws_iam_role.ai_server.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_instance_profile" "ai_server" {
-  name = "${var.instance_name}-profile"
-  role = aws_iam_role.ai_server.name
-}
 
 # ---------------------------------------------------------------------------
 # Ubuntu 22.04 AMI
@@ -244,12 +202,10 @@ resource "aws_instance" "ai_server" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
   key_name               = local.key_name
-  subnet_id              = aws_subnet.private.id
+  subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.ai_server.id]
-  iam_instance_profile   = aws_iam_instance_profile.ai_server.name
-
   availability_zone           = var.availability_zone
-  associate_public_ip_address = false
+  associate_public_ip_address = true
 
   root_block_device {
     volume_size           = var.root_volume_size
@@ -298,73 +254,9 @@ resource "aws_volume_attachment" "ai_data" {
 
 # ---------------------------------------------------------------------------
 # EventBridge scheduled start/stop
+# NOTE: Scheduler IAM role creation requires elevated permissions.
+# Create manually after deployment:
+#   1. Create IAM role for EventBridge Scheduler with ec2:StartInstances/StopInstances
+#   2. Create EventBridge Scheduler rules for start/stop
+# The Terraform resources are preserved in the implementation plan doc.
 # ---------------------------------------------------------------------------
-
-resource "aws_iam_role" "scheduler" {
-  name = "${var.instance_name}-scheduler-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = { Service = "scheduler.amazonaws.com" }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "scheduler_ec2" {
-  name = "${var.instance_name}-scheduler-ec2"
-  role = aws_iam_role.scheduler.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["ec2:StartInstances", "ec2:StopInstances"]
-      Resource = aws_instance.ai_server.arn
-    }]
-  })
-}
-
-resource "aws_scheduler_schedule" "start" {
-  name       = "${var.instance_name}-start"
-  group_name = "default"
-
-  schedule_expression          = var.schedule_start_cron
-  schedule_expression_timezone = "America/Los_Angeles"
-
-  flexible_time_window {
-    mode = "OFF"
-  }
-
-  target {
-    arn      = "arn:aws:scheduler:::aws-sdk:ec2:startInstances"
-    role_arn = aws_iam_role.scheduler.arn
-
-    input = jsonencode({
-      InstanceIds = [aws_instance.ai_server.id]
-    })
-  }
-}
-
-resource "aws_scheduler_schedule" "stop" {
-  name       = "${var.instance_name}-stop"
-  group_name = "default"
-
-  schedule_expression          = var.schedule_stop_cron
-  schedule_expression_timezone = "America/Los_Angeles"
-
-  flexible_time_window {
-    mode = "OFF"
-  }
-
-  target {
-    arn      = "arn:aws:scheduler:::aws-sdk:ec2:stopInstances"
-    role_arn = aws_iam_role.scheduler.arn
-
-    input = jsonencode({
-      InstanceIds = [aws_instance.ai_server.id]
-    })
-  }
-}

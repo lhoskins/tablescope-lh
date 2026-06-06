@@ -35,9 +35,9 @@ def upgrade() -> None:
     op.create_table(
         "ai_documents",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("organization.id"), nullable=False),
-        sa.Column("project_id", sa.Integer(), sa.ForeignKey("project.id"), nullable=False),
-        sa.Column("owner_user_id", sa.Integer(), sa.ForeignKey("user.id"), nullable=True),
+        sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("tenants.id"), nullable=False),
+        sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id"), nullable=False),
+        sa.Column("owner_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("visibility", sa.String(50), nullable=False, server_default="shared_project"),
         sa.Column("access_group_id", sa.Integer(), nullable=True),
         sa.Column("source_type", sa.String(100), nullable=False),

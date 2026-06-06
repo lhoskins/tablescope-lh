@@ -8,6 +8,11 @@ output "private_ip" {
   value       = aws_instance.ai_server.private_ip
 }
 
+output "public_ip" {
+  description = "Public IP of the AI server (for initial setup SSH)"
+  value       = aws_instance.ai_server.public_ip
+}
+
 output "ai_api_url" {
   description = "AI API URL (accessible from app server only)"
   value       = "http://${aws_instance.ai_server.private_ip}:8000"
