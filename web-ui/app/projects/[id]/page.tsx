@@ -11,6 +11,7 @@ import { DataGrid } from "@/components/data-grid/DataGrid";
 import { TanStackDataGrid } from "@/components/data-grid/TanStackDataGrid";
 import { DashboardTab } from "@/components/dashboard/DashboardTab";
 import { AIPanel } from "@/components/ai/AIPanel";
+import { AIPromptBar } from "@/components/ai/AIPromptBar";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -831,6 +832,29 @@ export default function ProjectWorkspacePage() {
   // ── Tab state ─────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "dashboards" | "ai" | "members">("datasources");
 
+  // ── AI generation state ─────────────────────────────────────────
+  const [aiQueryLoading, setAiQueryLoading] = useState(false);
+  const [aiQueryError, setAiQueryError] = useState<string | null>(null);
+  const [aiQuerySuccess, setAiQuerySuccess] = useState<string | null>(null);
+
+  const handleAIGenerateQuery = useCallback(async (prompt: string) => {
+    setAiQueryLoading(true);
+    setAiQueryError(null);
+    setAiQuerySuccess(null);
+    try {
+      const result = await apiClient.post<{ query_id: number; name: string; sql_text: string }>(
+        "/api/ai/actions/generate-and-save-query",
+        { project_id: projectId, prompt, name: `AI: ${prompt.slice(0, 80)}` },
+      );
+      setAiQuerySuccess(`Query saved: ${result.name}`);
+      queryClient.invalidateQueries({ queryKey: ["project-queries", projectId] });
+    } catch (err) {
+      setAiQueryError(err instanceof Error ? err.message : "AI query generation failed");
+    } finally {
+      setAiQueryLoading(false);
+    }
+  }, [projectId, queryClient]);
+
   // ── Query builder state ───────────────────────────────────────────
   const [buildingQuery, setBuildingQuery] = useState(false);
   const [leftDs, setLeftDs] = useState<Datasource | null>(null);
@@ -1550,12 +1574,28 @@ export default function ProjectWorkspacePage() {
       {activeTab === "queries" && (
         <div>
           {!buildingQuery && canEdit && (
-            <button
-              onClick={() => setBuildingQuery(true)}
-              className="mb-4 rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90"
-            >
-              Create New Query
-            </button>
+            <div className="mb-4 flex items-start gap-4">
+              <button
+                onClick={() => setBuildingQuery(true)}
+                className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 whitespace-nowrap"
+              >
+                Create New Query
+              </button>
+              <div className="flex-1">
+                <AIPromptBar
+                  placeholder="Describe the query you want to generate…"
+                  submitLabel="Generate Query"
+                  onSubmit={handleAIGenerateQuery}
+                  loading={aiQueryLoading}
+                />
+                {aiQueryError && (
+                  <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{aiQueryError}</div>
+                )}
+                {aiQuerySuccess && (
+                  <div className="mt-2 rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">{aiQuerySuccess}</div>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Query Builder */}

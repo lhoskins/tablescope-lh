@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { Dashboard, DashboardConfig } from "./types";
 import { CreateDashboardWizard } from "./CreateDashboardWizard";
 import { DashboardViewer } from "./DashboardViewer";
+import { AIPromptBar } from "@/components/ai/AIPromptBar";
 
 type SavedQuery = { id: number; name: string; sql_text: string | null };
 type Datasource = { viewName: string; fileName: string };
@@ -27,6 +28,27 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<Dashboard | null>(null);
+  const [aiDashLoading, setAiDashLoading] = useState(false);
+  const [aiDashError, setAiDashError] = useState<string | null>(null);
+  const [aiDashSuccess, setAiDashSuccess] = useState<string | null>(null);
+
+  const handleAIGenerateDashboard = useCallback(async (prompt: string) => {
+    setAiDashLoading(true);
+    setAiDashError(null);
+    setAiDashSuccess(null);
+    try {
+      const result = await apiClient.post<{ dashboard_id: number; dashboard_name: string; widgets_created: number }>(
+        "/api/ai/actions/generate-and-save-dashboard",
+        { project_id: projectId, prompt, name: `AI: ${prompt.slice(0, 80)}` },
+      );
+      setAiDashSuccess(`Dashboard created: ${result.dashboard_name} (${result.widgets_created} widgets)`);
+      queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
+    } catch (err) {
+      setAiDashError(err instanceof Error ? err.message : "AI dashboard generation failed");
+    } finally {
+      setAiDashLoading(false);
+    }
+  }, [projectId, queryClient]);
 
   const { data: dashboards = [], isLoading } = useQuery<Dashboard[]>({
     queryKey: ["project-dashboards", projectId],
@@ -83,13 +105,27 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
   return (
     <div>
       {canEdit && (
-        <div className="mb-4">
+        <div className="mb-4 flex items-start gap-4">
           <button
             onClick={() => setCreating(true)}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90"
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 whitespace-nowrap"
           >
             + Create Dashboard
           </button>
+          <div className="flex-1">
+            <AIPromptBar
+              placeholder="Describe the dashboard you want to generate…"
+              submitLabel="Generate Dashboard"
+              onSubmit={handleAIGenerateDashboard}
+              loading={aiDashLoading}
+            />
+            {aiDashError && (
+              <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{aiDashError}</div>
+            )}
+            {aiDashSuccess && (
+              <div className="mt-2 rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">{aiDashSuccess}</div>
+            )}
+          </div>
         </div>
       )}
 
