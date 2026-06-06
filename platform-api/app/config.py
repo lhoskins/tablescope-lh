@@ -72,6 +72,14 @@ class Settings(BaseSettings):
 
     cors_allow_origins: str = "*"
 
+    # --- AI Server integration ---
+    tablescope_ai_enabled: bool = False
+    tablescope_ai_api_url: str = ""
+    tablescope_ai_signing_secret: str = ""
+    tablescope_ai_default_scope: str = "project"
+    tablescope_ai_cross_project_enabled: bool = False
+    tablescope_ai_tenant_scope_enabled: bool = False
+
     @field_validator("log_level")
     @classmethod
     def _validate_log_level(cls, value: str) -> str:

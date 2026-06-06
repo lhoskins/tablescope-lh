@@ -1,0 +1,66 @@
+# Tablescope AI Server — Docker Compose
+# Runs: FastAPI AI API, Ollama (LLM), Qdrant (Vector DB), AI Worker
+
+services:
+  tablescope-ai-api:
+    build:
+      context: ./tablescope-ai-api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - QDRANT_URL=http://qdrant:6333
+    volumes:
+      - /mnt/tablescope-ai/logs:/var/log/tablescope-ai
+      - /mnt/tablescope-ai/runtime:/var/run/tablescope-ai
+    depends_on:
+      ollama:
+        condition: service_started
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - /mnt/tablescope-ai/ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    # NOT exposed outside Docker network — only accessible via AI API
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - /mnt/tablescope-ai/qdrant:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    # NOT exposed outside Docker network — only accessible via AI API
+
+  ai-worker:
+    build:
+      context: ./tablescope-ai-api
+    command: python -m app.worker
+    env_file: .env
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - QDRANT_URL=http://qdrant:6333
+    volumes:
+      - /mnt/tablescope-ai/logs:/var/log/tablescope-ai
+    depends_on:
+      ollama:
+        condition: service_started
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped

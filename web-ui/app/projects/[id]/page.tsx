@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 import { TanStackDataGrid } from "@/components/data-grid/TanStackDataGrid";
 import { DashboardTab } from "@/components/dashboard/DashboardTab";
+import { AIPanel } from "@/components/ai/AIPanel";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -828,7 +829,7 @@ export default function ProjectWorkspacePage() {
   const meta = getUserMeta();
 
   // ── Tab state ─────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "dashboards" | "members">("datasources");
+  const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "dashboards" | "ai" | "members">("datasources");
 
   // ── Query builder state ───────────────────────────────────────────
   const [buildingQuery, setBuildingQuery] = useState(false);
@@ -1410,7 +1411,7 @@ export default function ProjectWorkspacePage() {
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 rounded-lg bg-slate-100 p-1">
-        {(["datasources", "queries", "dashboards", "members"] as const).map((tab) => (
+        {(["datasources", "queries", "dashboards", "ai", "members"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -1420,7 +1421,7 @@ export default function ProjectWorkspacePage() {
                 : "text-slate-500 hover:text-slate-700"
             }`}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === "ai" ? "AI" : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -2191,6 +2192,11 @@ export default function ProjectWorkspacePage() {
           }))}
           canEdit={canEdit}
         />
+      )}
+
+      {/* ── AI Tab ──────────────────────────────────────────────── */}
+      {activeTab === "ai" && (
+        <AIPanel projectId={projectId} />
       )}
 
       {/* ── Members Tab ──────────────────────────────────────────── */}

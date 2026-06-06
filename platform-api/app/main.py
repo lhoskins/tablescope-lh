@@ -17,6 +17,7 @@ from app.auth.middleware import AuthMiddleware
 from app.config import get_settings
 from app.logging_config import configure_logging
 from app.observability import mount_metrics, setup_sentry
+from app.routes import ai_proxy as ai_proxy_routes
 from app.routes import auth as auth_routes
 from app.routes import dashboards as dashboards_routes
 from app.routes import database_sources as database_sources_routes
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
     app.include_router(grid_preferences_routes.router, prefix=api_prefix)
     app.include_router(upload_routes.router, prefix=api_prefix)
     app.include_router(dashboards_routes.router, prefix=api_prefix)
+    app.include_router(ai_proxy_routes.router, prefix=api_prefix)
 
     return app
 
