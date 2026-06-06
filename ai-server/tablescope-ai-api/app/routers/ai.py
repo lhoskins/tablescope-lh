@@ -11,6 +11,7 @@ Every endpoint:
 
 import json
 import logging
+import re
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
@@ -37,6 +38,79 @@ from app.services.sql_validator import SQLValidationError, validate_sql
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["AI"])
+
+def _fix_teiid_group_by(sql: str) -> str:
+    """Replace alias references in GROUP BY / ORDER BY with the actual SELECT expression.
+
+    Teiid does not allow column aliases in GROUP BY.
+    E.g. ``SELECT FORMATDATE(...) AS SalesMonth ... GROUP BY SalesMonth``
+    becomes ``GROUP BY FORMATDATE(...)``.
+    """
+    # Extract SELECT aliases: "expr AS alias"
+    select_match = re.search(r'SELECT\s+(.*?)\s+FROM\s', sql, re.IGNORECASE | re.DOTALL)
+    if not select_match:
+        return sql
+
+    aliases: dict[str, str] = {}
+    select_body = select_match.group(1)
+    # Split on commas that are not inside parentheses
+    depth = 0
+    parts: list[str] = []
+    current: list[str] = []
+    for ch in select_body:
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+        elif ch == ',' and depth == 0:
+            parts.append(''.join(current).strip())
+            current = []
+            continue
+        current.append(ch)
+    parts.append(''.join(current).strip())
+
+    for part in parts:
+        as_match = re.match(r'(.+?)\s+AS\s+(\w+)\s*$', part, re.IGNORECASE)
+        if as_match:
+            expr = as_match.group(1).strip()
+            alias = as_match.group(2).strip()
+            aliases[alias.upper()] = expr
+
+    if not aliases:
+        return sql
+
+    def replace_alias_in_clause(clause_match: re.Match[str]) -> str:
+        keyword = clause_match.group(1)
+        body = clause_match.group(2)
+        for alias_upper, expr in aliases.items():
+            body = re.sub(
+                rf'\b{re.escape(alias_upper)}\b',
+                expr,
+                body,
+                flags=re.IGNORECASE,
+            )
+        return f"{keyword} {body}"
+
+    sql = re.sub(
+        r'(GROUP\s+BY)\s+(.*?)(?=ORDER|HAVING|LIMIT|;|\Z)',
+        replace_alias_in_clause,
+        sql,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return sql
+
+
+def _clean_sql(raw: str) -> str:
+    """Remove markdown fences and fix Teiid-incompatible SQL patterns."""
+    sql = raw.strip()
+    if sql.startswith("```"):
+        sql = sql.split("```")[1]
+        if sql.startswith("sql"):
+            sql = sql[3:]
+        sql = sql.strip()
+    sql = _fix_teiid_group_by(sql)
+    return sql
+
 
 SYSTEM_PROMPT = (
     "You are Tablescope AI.\n"
@@ -277,13 +351,8 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         allowed_tables=allowed_tables,
     )
 
-    # Clean SQL (remove markdown code blocks if present)
-    sql = sql.strip()
-    if sql.startswith("```"):
-        sql = sql.split("```")[1]
-        if sql.startswith("sql"):
-            sql = sql[3:]
-        sql = sql.strip()
+    # Clean SQL (remove markdown code blocks, fix Teiid GROUP BY aliases)
+    sql = _clean_sql(sql)
 
     # Validate generated SQL
     try:
@@ -299,12 +368,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
             context=context_text,
             allowed_tables=allowed_tables,
         )
-        sql = sql.strip()
-        if sql.startswith("```"):
-            sql = sql.split("```")[1]
-            if sql.startswith("sql"):
-                sql = sql[3:]
-            sql = sql.strip()
+        sql = _clean_sql(sql)
 
         # Validate again — if it still fails, return the error
         try:
@@ -408,6 +472,12 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
             suggestions = parsed
     except (json.JSONDecodeError, KeyError):
         logger.warning("Failed to parse dashboard suggestions: %s", raw[:200])
+
+    # Post-process: fix Teiid GROUP BY aliases in each widget's SQL
+    for s in suggestions:
+        for w in s.get("widgets", []):
+            if w.get("sql"):
+                w["sql"] = _clean_sql(w["sql"])
 
     update_activity(req.user_id, req.tenant_id, req.project_id)
 
