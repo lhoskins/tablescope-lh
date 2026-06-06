@@ -75,6 +75,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      - default
+      - tenant_acme_net
 
   platform-api-worker:
     build:
@@ -168,3 +171,8 @@ volumes:
   postgres_data:
   redis_data:
   teiid_data:
+
+networks:
+  default:
+  tenant_acme_net:
+    external: true
