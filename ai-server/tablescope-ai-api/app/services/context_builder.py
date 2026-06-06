@@ -149,6 +149,9 @@ async def build_context(
 
     # 1. Project metadata (tables, columns)
     metadata = await _fetch_project_metadata(tenant_id, project_id)
+    # Use datasources from permissions as fallback/supplement if metadata is empty
+    if not metadata and perms.get("datasources"):
+        metadata = perms["datasources"]
 
     # 2. Vector search (if question provided)
     documents: list[dict[str, Any]] = []

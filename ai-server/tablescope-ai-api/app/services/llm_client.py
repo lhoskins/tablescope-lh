@@ -62,6 +62,12 @@ async def generate_sql(
         "Do not use SELECT *.\n"
         "Do not generate INSERT, UPDATE, DELETE, DROP, or any write operations.\n"
         "Return only the SQL query, no explanation.\n\n"
+        "IMPORTANT: This database uses Teiid which imports CSV columns as strings.\n"
+        "For ANY arithmetic operation (*, /, +, -) or aggregation (SUM, AVG, MIN, MAX) "
+        "on numeric columns, you MUST wrap each column in CAST(column AS double).\n"
+        "Example: SUM(CAST(\"UnitPrice\" AS double) * CAST(\"Quantity\" AS double))\n"
+        "Example: AVG(CAST(\"Revenue\" AS double))\n"
+        "COUNT does not need CAST. Only use CAST for arithmetic and SUM/AVG/MIN/MAX.\n\n"
         f"Allowed tables: {', '.join(allowed_tables)}\n\n"
         f"Context:\n{context}"
     )
