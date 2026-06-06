@@ -521,7 +521,7 @@ async def ai_generate_and_save_query(
         "allowed_tables": allowed_tables,
     }
     ai_result = await _forward_to_ai("/ai/query/generate", payload)
-    generated_sql = ai_result.get("sql", "")
+    generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
 
     if not generated_sql:
         raise HTTPException(
@@ -616,7 +616,7 @@ async def ai_generate_and_save_dashboard(
     created_queries: list[int] = []
 
     for idx, w in enumerate(widget_defs):
-        widget_sql = w.get("sql", "") or ""
+        widget_sql = (w.get("sql", "") or "").rstrip().rstrip(";")
         widget_title = w.get("title", f"Widget {idx + 1}")
         widget_type = w.get("type", "bar")
         x_col = w.get("x_column") or ""

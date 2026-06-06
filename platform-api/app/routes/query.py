@@ -245,11 +245,9 @@ async def query_datasource(
     endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
 
     if payload.sql:
-        sql = _auto_cast_aggregates(payload.sql)
-        if "LIMIT" not in sql.upper():
-            sql += f" LIMIT {payload.limit}"
+        sql = _auto_cast_aggregates(payload.sql).rstrip().rstrip(";")
     else:
-        sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
+        sql = f'SELECT * FROM "{payload.tableName}"'
 
     return await _run_sql(
         database=database,
