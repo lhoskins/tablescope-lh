@@ -349,13 +349,39 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
 
     context_text = context_builder.context_to_prompt_text(ctx)
 
+    # Determine allowed tables
+    allowed_tables = req.allowed_tables
+    if not allowed_tables:
+        allowed_tables = [
+            ds.get("view_name", ds.get("name", ""))
+            for ds in ctx.allowed_context.get("metadata", [])
+            if ds.get("view_name") or ds.get("name")
+        ]
+
+    user_instruction = ""
+    if req.prompt:
+        user_instruction = f"\nUser request: {req.prompt}\n"
+
+    teiid_rules = (
+        "IMPORTANT: This database uses Teiid (not MySQL, not PostgreSQL).\n"
+        "All CSV columns are imported as strings.\n"
+        "- For SUM/AVG/MIN/MAX or arithmetic (*, /, +, -), CAST columns: CAST(col AS double)\n"
+        "- Do NOT use DATE_FORMAT, MONTH(), YEAR() (MySQL). Use FORMATDATE, EXTRACT, DATE_TRUNC.\n"
+        "- For monthly grouping: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM')\n"
+        "- Alias columns with safe identifiers (no reserved words like Month).\n"
+        "- GROUP BY must match SELECT expression exactly.\n"
+    )
+
     prompt = (
         f"{context_text}\n\n"
+        f"Allowed tables: {', '.join(allowed_tables)}\n\n"
+        f"{teiid_rules}\n"
+        f"{user_instruction}"
         "Based on the available tables and their columns, suggest a dashboard "
         "with useful widgets. For each widget, include:\n"
         "- type: one of kpi, bar, line, pie, area, table\n"
         "- title: descriptive title\n"
-        "- sql: a valid SQL query using only the allowed tables\n"
+        "- sql: a valid SQL query using ONLY the allowed tables with proper CAST for numeric ops\n"
         "- x_column, y_column, aggregation where applicable\n\n"
         "Return a JSON object with: title (dashboard name) and widgets (array).\n"
         "Return ONLY the JSON."
@@ -364,7 +390,8 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=settings.sql_model,
+        temperature=0.0,
     )
 
     suggestions = []

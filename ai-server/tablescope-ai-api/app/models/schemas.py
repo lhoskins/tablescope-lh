@@ -45,7 +45,8 @@ class GenerateSQLRequest(AIBaseRequest):
 
 
 class SuggestDashboardRequest(AIBaseRequest):
-    pass
+    prompt: str = ""
+    allowed_tables: list[str] = []
 
 
 # ---------------------------------------------------------------------------

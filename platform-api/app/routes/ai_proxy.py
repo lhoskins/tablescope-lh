@@ -38,7 +38,7 @@ from app.models.saved_query import SavedQuery
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
 
-TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
 
 # ---------------------------------------------------------------------------
@@ -575,11 +575,22 @@ async def ai_generate_and_save_dashboard(
     """
     project = await _check_project_access(session, context, req.project_id)
 
+    # Resolve allowed tables from project datasources
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == req.project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
     # Step 1: Call AI server for dashboard suggestion
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
+        "prompt": req.prompt or "",
+        "allowed_tables": allowed_tables,
     }
     ai_result = await _forward_to_ai("/ai/dashboard/suggest", payload)
     suggestions = ai_result.get("suggestions", [])
