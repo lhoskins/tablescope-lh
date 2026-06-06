@@ -40,7 +40,7 @@ services:
     volumes:
       - /mnt/tablescope-ai/qdrant:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:6333/healthz || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
       interval: 10s
       timeout: 5s
       retries: 5
