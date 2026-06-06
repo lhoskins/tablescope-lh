@@ -2,12 +2,21 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+interface SpeechRecognitionResult {
+  readonly 0: { readonly transcript: string };
+}
+interface SpeechRecognitionResultList {
+  readonly length: number;
+  readonly [index: number]: SpeechRecognitionResult;
+}
+interface SpeechRecognitionResultEvent {
+  readonly results: SpeechRecognitionResultList;
+}
 interface SpeechRecognitionLike {
   lang: string;
   interimResults: boolean;
   continuous: boolean;
-  onresult: ((event: any) => void) | null;
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null;
   onerror: (() => void) | null;
   onend: (() => void) | null;
   start(): void;
@@ -66,7 +75,7 @@ export function AIPromptBar({
     recognition.interimResults = true;
     recognition.continuous = true;
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionResultEvent) => {
       let transcript = "";
       for (let i = 0; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript;
