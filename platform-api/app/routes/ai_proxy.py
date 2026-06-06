@@ -144,7 +144,12 @@ async def _forward_to_ai(path: str, payload: dict[str, Any]) -> dict[str, Any]:
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as e:
-            detail = e.response.json().get("detail", str(e)) if e.response.content else str(e)
+            detail = str(e)
+            if e.response.content:
+                try:
+                    detail = e.response.json().get("detail", detail)
+                except Exception:
+                    detail = e.response.text[:500] or detail
             raise HTTPException(status_code=e.response.status_code, detail=detail) from e
         except httpx.RequestError as e:
             logger.error("AI server unreachable: %s", e)

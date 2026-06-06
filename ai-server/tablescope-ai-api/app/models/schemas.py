@@ -94,10 +94,10 @@ class GenerateSQLResponse(BaseModel):
 class DashboardWidgetSuggestion(BaseModel):
     type: str  # kpi | bar | line | pie | area | table
     title: str
-    sql: str
-    x_column: str = ""
-    y_column: str = ""
-    aggregation: str = ""
+    sql: str = ""
+    x_column: str | None = ""
+    y_column: str | None = ""
+    aggregation: str | None = ""
 
 
 class DashboardSuggestion(BaseModel):
