@@ -616,40 +616,48 @@ async def ai_generate_and_save_dashboard(
     created_queries: list[int] = []
 
     for idx, w in enumerate(widget_defs):
-        widget_sql = w.get("sql", "")
+        widget_sql = w.get("sql", "") or ""
         widget_title = w.get("title", f"Widget {idx + 1}")
         widget_type = w.get("type", "bar")
-        x_col = w.get("x_column", "")
-        y_col = w.get("y_column", "")
-        aggregation = w.get("aggregation", "count")
+        x_col = w.get("x_column") or ""
+        y_col = w.get("y_column") or ""
+        aggregation = w.get("aggregation") or "count"
 
         # Create a SavedQuery for this widget's SQL
+        data_source: dict[str, Any] = {"kind": "custom_sql", "customSql": ""}
         if widget_sql:
+            # Detect which datasource the SQL references
+            left_ds = _detect_datasource(widget_sql, allowed_tables)
             query = SavedQuery(
                 project_id=project.id,
                 owner_id=context.user_id,
                 name=f"{dashboard_title} — {widget_title}",
                 description=f"Auto-created for AI dashboard widget: {widget_title}",
                 sql_text=widget_sql,
+                left_datasource=left_ds,
             )
             session.add(query)
             await session.flush()
             created_queries.append(query.id)
-            data_source_ref = f"query:{query.id}"
-        else:
-            data_source_ref = ""
+            data_source = {"kind": "query", "queryId": query.id}
 
         widgets_config.append({
             "id": f"ai_widget_{idx}",
             "title": widget_title,
-            "chartType": _map_chart_type(widget_type),
+            "type": _map_chart_type(widget_type),
             "chartSubtype": _map_chart_subtype(widget_type),
-            "dataSource": data_source_ref,
+            "dataSource": data_source,
             "xColumn": x_col,
             "yColumn": y_col,
-            "aggregation": aggregation,
-            "size": "half" if widget_type != "table" else "full",
-            "layout": {"x": (idx % 2) * 6, "y": (idx // 2) * 4, "w": 6, "h": 4},
+            "aggregation": aggregation.lower() if aggregation else "count",
+            "sortBy": "x_asc",
+            "filters": [],
+            "colSpan": 6 if widget_type != "table" else 12,
+            "position": idx,
+            "gridX": (idx % 2) * 6,
+            "gridY": (idx // 2) * 4,
+            "gridW": 6,
+            "gridH": 4,
         })
 
     # Step 4: Create the Dashboard
