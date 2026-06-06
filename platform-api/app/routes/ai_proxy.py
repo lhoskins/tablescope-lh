@@ -101,6 +101,14 @@ class AIGenerateAndSaveDashboardRequest(BaseModel):
     description: str | None = None
 
 
+class AICreateScopeRequest(BaseModel):
+    """Create a single scope from an AI suggestion."""
+    sourceTable: str
+    sourceColumn: str
+    targetTable: str
+    targetColumn: str
+
+
 class AIPermissionsResponse(BaseModel):
     tenant_id: int
     user_id: int
@@ -282,6 +290,41 @@ async def generate_relationships(
         "project_id": req.project_id,
     }
     return await _forward_to_ai("/ai/project/relationships/generate", payload)
+
+
+@router.post("/project/scope-map/generate")
+async def generate_scope_map(
+    req: AIGenerateRelationshipsRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate AI scope map — drill-down relationship suggestions."""
+    await _check_project_access(session, context, req.project_id)
+
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+    }
+    result = await _forward_to_ai("/ai/project/relationships/generate", payload)
+
+    # Also fetch existing scopes so the UI can show which are already created
+    from app.services.scope_proxy import ScopeProxyService
+    svc = ScopeProxyService()
+    existing = await svc.list_scopes(tenant_id=context.tenant_id)
+    existing_keys = {
+        f"{s.source_table}.{s.source_column}" for s in existing
+    }
+
+    # Tag each suggestion with whether it already exists as a scope
+    relationships = result.get("relationships", [])
+    for rel in relationships:
+        key = f"{rel.get('left_table', '')}.{rel.get('left_column', '')}"
+        rel["scope_exists"] = key in existing_keys
+
+    result["relationships"] = relationships
+    result["existing_scope_count"] = len(existing)
+    return result
 
 
 @router.post("/dashboard/suggest")

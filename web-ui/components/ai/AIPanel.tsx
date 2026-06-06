@@ -45,17 +45,20 @@ type Props = {
   projectId: number;
   onQuerySaved?: () => void;
   onDashboardSaved?: () => void;
+  onScopeCreated?: () => void;
 };
 
 /* ---------- Component ---------- */
 
-export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
+export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCreated }: Props) {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeFeature, setActiveFeature] = useState<
-    "ask" | "sql" | "relationships" | "dashboard"
+    "ask" | "sql" | "relationships" | "scopemap" | "dashboard"
   >("ask");
+  const [creatingScope, setCreatingScope] = useState<string | null>(null);
+  const [scopeCreated, setScopeCreated] = useState<Set<string>>(new Set());
   const [response, setResponse] = useState<AIResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null);
@@ -78,6 +81,7 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
           ask: "/api/ai/ask",
           sql: "/api/ai/query/generate",
           relationships: "/api/ai/project/relationships/generate",
+          scopemap: "/api/ai/project/scope-map/generate",
           dashboard: "/api/ai/dashboard/suggest",
         };
         const resp = await apiClient.post<AIResponse>(
@@ -112,6 +116,31 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
 
   const handleRelationships = () => {
     callAI("relationships", { project_id: projectId });
+  };
+
+  const handleScopeMap = () => {
+    setScopeCreated(new Set());
+    callAI("scopemap", { project_id: projectId });
+  };
+
+  const handleCreateScope = async (rel: NonNullable<AIResponse["relationships"]>[0]) => {
+    const key = `${rel.left_table}.${rel.left_column}`;
+    setCreatingScope(key);
+    try {
+      await apiClient.post("/api/scopes", {
+        sourceTable: rel.left_table,
+        sourceColumn: rel.left_column,
+        targetTable: rel.right_table,
+        targetColumn: rel.right_column,
+      });
+      setScopeCreated((prev) => new Set(prev).add(key));
+      onScopeCreated?.();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to create scope";
+      setError(msg);
+    } finally {
+      setCreatingScope(null);
+    }
   };
 
   const handleDashboardSuggest = () => {
@@ -242,6 +271,7 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
             { key: "ask", label: "Ask AI" },
             { key: "sql", label: "Generate SQL" },
             { key: "relationships", label: "Relationships" },
+            { key: "scopemap", label: "Scope Map" },
             { key: "dashboard", label: "Suggest Dashboard" },
           ] as const
         ).map((f) => (
@@ -313,6 +343,16 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {loading ? "Analyzing..." : "Generate Relationship Map"}
+        </button>
+      )}
+
+      {activeFeature === "scopemap" && (
+        <button
+          onClick={handleScopeMap}
+          disabled={loading}
+          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+        >
+          {loading ? "Analyzing..." : "Generate Scope Map"}
         </button>
       )}
 
@@ -459,6 +499,71 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Scope Map response */}
+          {activeFeature === "scopemap" && response.relationships && response.relationships.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-slate-900">
+                AI Scope Map ({response.relationships.length} suggestions)
+              </h3>
+              <p className="mb-3 text-xs text-slate-500">
+                Click &quot;Create Scope&quot; to add a drill-down scope. Source column clicks will navigate to the target table filtered by that value.
+              </p>
+              <div className="space-y-2">
+                {response.relationships.map((rel, i) => {
+                  const key = `${rel.left_table}.${rel.left_column}`;
+                  const alreadyCreated = scopeCreated.has(key) || (rel as Record<string, unknown>).scope_exists === true;
+                  const isCreating = creatingScope === key;
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-center gap-2 rounded-md border p-3 text-sm ${
+                        alreadyCreated
+                          ? "border-green-200 bg-green-50"
+                          : "border-slate-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex flex-1 flex-wrap items-center gap-2">
+                        <span className="rounded bg-blue-100 px-2 py-1 font-mono text-xs text-blue-800">
+                          {rel.left_table}
+                        </span>
+                        <span className="font-mono text-xs text-slate-600">.{rel.left_column}</span>
+                        <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        </svg>
+                        <span className="rounded bg-indigo-100 px-2 py-1 font-mono text-xs text-indigo-800">
+                          {rel.right_table}
+                        </span>
+                        <span className="font-mono text-xs text-slate-600">.{rel.right_column}</span>
+                        <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
+                          {Math.round(rel.confidence * 100)}%
+                        </span>
+                      </div>
+                      <span className="hidden text-xs text-slate-400 sm:inline">{rel.reason}</span>
+                      {alreadyCreated ? (
+                        <span className="whitespace-nowrap rounded bg-green-200 px-3 py-1.5 text-xs font-medium text-green-800">
+                          Scope Created
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleCreateScope(rel)}
+                          disabled={isCreating || !!creatingScope}
+                          className="whitespace-nowrap rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          {isCreating ? "Creating..." : "Create Scope"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {scopeCreated.size > 0 && (
+                <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-2 text-xs text-green-700">
+                  {scopeCreated.size} scope(s) created. View them on the Scopes page.
+                </div>
+              )}
             </div>
           )}
 
