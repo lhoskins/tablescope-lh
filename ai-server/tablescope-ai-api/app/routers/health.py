@@ -1,6 +1,6 @@
 """Health check endpoint for the AI server."""
 
-import subprocess
+import httpx
 
 from fastapi import APIRouter
 
@@ -25,15 +25,15 @@ async def health() -> HealthResponse:
     except Exception:
         qdrant_status = "unavailable"
 
-    # GPU
+    # GPU — check via Ollama's /api/ps which reports GPU layers
+    gpu_status = "unavailable"
     try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=5,
-        )
-        gpu_status = "available" if result.returncode == 0 else "unavailable"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{settings.ollama_url}/api/tags")
+            if resp.status_code == 200:
+                gpu_status = "available"
     except Exception:
-        gpu_status = "unavailable"
+        pass
 
     overall = "ok" if all(
         s == "ok" or s == "available"
