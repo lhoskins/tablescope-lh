@@ -33,7 +33,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const toggleStatusMutation = useMutation({
     mutationFn: async () => {
       const newStatus = dashboardStatus === "published" ? "draft" : "published";
-      await apiClient.patch(`/projects/${projectId}/dashboards/${dashboard.id}`, { status: newStatus });
+      await apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, { status: newStatus });
       return newStatus;
     },
     onSuccess: (newStatus: string) => {

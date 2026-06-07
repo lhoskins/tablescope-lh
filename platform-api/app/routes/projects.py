@@ -163,6 +163,8 @@ async def update_project(
         project.type = payload.type
     if payload.is_shared is not None:
         project.is_shared = payload.is_shared
+    if payload.scoping_enabled is not None:
+        project.scoping_enabled = payload.scoping_enabled
 
     await session.commit()
     await session.refresh(project)

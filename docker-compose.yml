@@ -56,6 +56,9 @@ services:
       SUPABASE_ISSUER: ${SUPABASE_ISSUER:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       PROMETHEUS_ENABLED: "true"
+      TABLESCOPE_AI_ENABLED: ${TABLESCOPE_AI_ENABLED:-false}
+      TABLESCOPE_AI_API_URL: ${TABLESCOPE_AI_API_URL:-}
+      TABLESCOPE_AI_SIGNING_SECRET: ${TABLESCOPE_AI_SIGNING_SECRET:-}
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       # Read-write access to per-tenant root so the platform API can manage

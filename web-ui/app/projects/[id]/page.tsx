@@ -62,6 +62,7 @@ type Project = {
   name: string;
   description: string | null;
   is_shared: boolean;
+  scoping_enabled: boolean;
   owner_id: number | null;
 };
 
@@ -832,6 +833,10 @@ export default function ProjectWorkspacePage() {
   // ── Tab state ─────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "dashboards" | "ai" | "members">("datasources");
 
+  // ── Collapsible panels ──────────────────────────────────────────
+  const [dsListOpen, setDsListOpen] = useState(false);
+  const [queryListOpen, setQueryListOpen] = useState(false);
+
   // ── AI generation state ─────────────────────────────────────────
   const [aiQueryLoading, setAiQueryLoading] = useState(false);
   const [aiQueryError, setAiQueryError] = useState<string | null>(null);
@@ -945,6 +950,28 @@ export default function ProjectWorkspacePage() {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["project-datasources", projectId] });
+    },
+  });
+
+  // ── Scoping toggle mutation ──────────────────────────────────────
+  const [scopingLoading, setScopingLoading] = useState(false);
+  const toggleScopingMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const result = await apiClient.put<Project>(`/api/projects/${projectId}`, { scoping_enabled: enabled });
+      if (enabled) {
+        setScopingLoading(true);
+        try {
+          await apiClient.post(`/api/ai/project/scope-map/generate`, { project_id: projectId });
+        } catch {
+          console.warn("AI scope generation failed — scoping enabled but no auto-scopes created");
+        } finally {
+          setScopingLoading(false);
+        }
+      }
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
     },
   });
 
@@ -1429,6 +1456,30 @@ export default function ProjectWorkspacePage() {
                 ? "Updating..."
                 : project.is_shared ? "Shared" : "Private"}
             </span>
+            {/* Scoping toggle */}
+            <div className="ml-3 h-5 w-px bg-slate-200" />
+            {isOwner ? (
+              <button
+                onClick={() => toggleScopingMutation.mutate(!project.scoping_enabled)}
+                disabled={toggleScopingMutation.isPending || scopingLoading}
+                className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors ${
+                  project.scoping_enabled ? "bg-indigo-500" : "bg-slate-300"
+                } disabled:opacity-50`}
+                title={project.scoping_enabled ? "Click to disable scoping" : "Click to enable scoping"}
+              >
+                <span
+                  className="inline-block h-5 w-5 rounded-full bg-white shadow transition-transform"
+                  style={{ transform: project.scoping_enabled ? "translateX(30px)" : "translateX(4px)" }}
+                />
+              </button>
+            ) : null}
+            <span className={`text-xs font-medium ${
+              project.scoping_enabled ? "text-indigo-700" : "text-slate-500"
+            }`}>
+              {toggleScopingMutation.isPending || scopingLoading
+                ? "Updating..."
+                : project.scoping_enabled ? "Scopes On" : "Scopes Off"}
+            </span>
           </div>
         </div>
       </header>
@@ -1479,6 +1530,16 @@ export default function ProjectWorkspacePage() {
             <p className="text-sm text-slate-400">No datasources. Upload files or connect a database table.</p>
           )}
           {projectDatasources.length > 0 && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setDsListOpen((v) => !v)}
+                className="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <svg className={`h-4 w-4 text-slate-400 transition-transform ${dsListOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                All Datasources ({projectDatasources.length})
+              </button>
+            {dsListOpen && (
             <div className="grid gap-2">
               {projectDatasources.map((ds) => (
                 <div
@@ -1544,6 +1605,8 @@ export default function ProjectWorkspacePage() {
                   </div>
                 </div>
               ))}
+            </div>
+            )}
             </div>
           )}
           {dsActionError && (
@@ -2087,6 +2150,16 @@ export default function ProjectWorkspacePage() {
             <p className="text-sm text-slate-400">No saved queries yet.</p>
           )}
           {queriesQuery.data && queriesQuery.data.length > 0 && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setQueryListOpen((v) => !v)}
+                className="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <svg className={`h-4 w-4 text-slate-400 transition-transform ${queryListOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                All Queries ({queriesQuery.data.length})
+              </button>
+            {queryListOpen && (
             <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
               {queriesQuery.data.map((q) => (
                 <li key={q.id} className="px-4 py-3">
@@ -2213,6 +2286,8 @@ export default function ProjectWorkspacePage() {
                 </li>
               ))}
             </ul>
+            )}
+            </div>
           )}
         </div>
       )}

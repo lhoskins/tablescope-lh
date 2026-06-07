@@ -343,7 +343,7 @@ export function TanStackDataGrid({
           }
           return (
             <span
-              className="cursor-pointer text-blue-700 underline decoration-dotted underline-offset-2"
+              className="cursor-pointer"
               title="Click to drill down"
               onClick={() => drilldown(field, val)}
             >
