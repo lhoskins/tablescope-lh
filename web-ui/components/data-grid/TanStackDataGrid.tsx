@@ -59,6 +59,7 @@ type TanStackDataGridProps = {
   canEditScopes?: boolean;
   projectId?: number;
   columnTypes?: { field: string; name?: string; type: string }[];
+  scopeEnabled?: boolean;
 };
 
 const _currencyFmt = new Intl.NumberFormat(undefined, {
@@ -123,6 +124,7 @@ export function TanStackDataGrid({
   canEditScopes = false,
   projectId,
   columnTypes = [],
+  scopeEnabled = true,
 }: TanStackDataGridProps) {
   // ── Drill-down breadcrumb ───────────────────────────────────────
   const [levels, setLevels] = useState<Level[]>([
@@ -150,7 +152,7 @@ export function TanStackDataGrid({
     } catch { setScopes([]); }
   }, []);
 
-  useEffect(() => { loadScopes(currentQueryId); }, [currentQueryId, loadScopes]);
+  useEffect(() => { if (scopeEnabled) loadScopes(currentQueryId); else setScopes([]); }, [currentQueryId, loadScopes, scopeEnabled]);
 
   const scopesByField = useMemo(() => {
     const m: Record<string, QueryScope> = {};
@@ -316,7 +318,7 @@ export function TanStackDataGrid({
   }, [columnTypes]);
 
   // ── TanStack column defs ────────────────────────────────────────
-  const scopeEnabled = canEditScopes && currentQueryId != null;
+  const scopeActive = scopeEnabled && canEditScopes && currentQueryId != null;
 
   const tableColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
     () =>
@@ -470,7 +472,7 @@ export function TanStackDataGrid({
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       {/* Scope trace */}
-      {scopeEnabled && scopes.length > 0 && (
+      {scopeActive && scopes.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs text-slate-700">
           <span className="font-semibold uppercase tracking-wide text-blue-700">Scopes:</span>
           {scopes.map((s) => {
@@ -549,7 +551,7 @@ export function TanStackDataGrid({
                         style={{ width: header.getSize(), position: "relative" }}
                         className="border-b border-slate-200 px-2 py-1.5 text-left font-semibold text-slate-700 select-none"
                         onContextMenu={(e) => {
-                          if (scopeEnabled) {
+                          if (scopeActive) {
                             e.preventDefault();
                             setContextMenu({ x: e.clientX, y: e.clientY, field: header.id });
                           }

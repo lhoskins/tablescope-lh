@@ -176,6 +176,20 @@ export function WidgetConfigPanel({
   const xColumnType = columns.find((c) => c.name === xColumn)?.type;
   const currentChartDef = CHART_TYPES.find((ct) => ct.type === chartType);
 
+  // Auto-detect X/Y for AI-generated widgets if columns loaded but names don't match
+  useEffect(() => {
+    if (columns.length > 0 && editingWidget) {
+      if (xColumn && !columns.find((c) => c.name === xColumn)) {
+        const match = columns.find((c) => c.name.toLowerCase() === xColumn.toLowerCase());
+        if (match) setXColumn(match.name);
+      }
+      if (yColumn && !columns.find((c) => c.name === yColumn)) {
+        const match = columns.find((c) => c.name.toLowerCase() === yColumn.toLowerCase());
+        if (match) setYColumn(match.name);
+      }
+    }
+  }, [columns, editingWidget, xColumn, yColumn]);
+
   // Auto-select first sensible columns
   useEffect(() => {
     if (columns.length > 0 && !editingWidget) {
