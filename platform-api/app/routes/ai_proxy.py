@@ -345,12 +345,13 @@ def _extract_select_columns(sql: str) -> list[str]:
 async def generate_scope_map(
     req: AIGenerateRelationshipsRequest,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict[str, Any]:
     """Generate query-based scope map by analyzing saved queries.
 
     Finds common column names between queries to suggest drill-down scopes.
     Scopes are query_id-based, NOT datasource-based.
+    Auto-creates QueryScope records for every discovered relationship.
     """
     from app.models.query_scope import QueryScope
 
@@ -363,7 +364,7 @@ async def generate_scope_map(
     queries = list(queries_result)
 
     if not queries:
-        return {"relationships": [], "status": "ok"}
+        return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
     # Build a map: query_id -> list of column names from SQL
     query_columns: dict[int, list[str]] = {}
@@ -388,8 +389,9 @@ async def generate_scope_map(
         for s in existing_scopes
     }
 
-    # Find matching columns between query pairs → suggest scopes
+    # Find matching columns between query pairs → create scopes automatically
     relationships: list[dict[str, Any]] = []
+    scopes_created = 0
     for source_q in queries:
         source_cols = query_columns.get(source_q.id, [])
         for target_q in queries:
@@ -401,7 +403,24 @@ async def generate_scope_map(
                 # Find the original-cased field name from each query
                 src_field = next((c for c in source_cols if c.lower() == field_lower), field_lower)
                 tgt_field = next((c for c in target_cols if c.lower() == field_lower), field_lower)
-                scope_exists = (source_q.id, src_field, target_q.id, tgt_field) in existing_keys
+                key = (source_q.id, src_field, target_q.id, tgt_field)
+                already_existed = key in existing_keys
+
+                # Auto-create the scope if it doesn't exist yet
+                if not already_existed:
+                    scope = QueryScope(
+                        tenant_id=context.tenant_id,
+                        project_id=req.project_id,
+                        query_id=source_q.id,
+                        source_field=src_field,
+                        target_query_id=target_q.id,
+                        target_field=tgt_field,
+                        created_by=context.user_id,
+                    )
+                    session.add(scope)
+                    existing_keys.add(key)
+                    scopes_created += 1
+
                 relationships.append({
                     "left_table": query_names[source_q.id],
                     "left_column": src_field,
@@ -415,10 +434,17 @@ async def generate_scope_map(
                         f"clicking a value in '{query_names[source_q.id]}' can "
                         f"drill down into '{query_names[target_q.id]}'"
                     ),
-                    "scope_exists": scope_exists,
+                    "scope_exists": True,  # always true — auto-created
                 })
 
-    return {"relationships": relationships, "status": "ok"}
+    if scopes_created > 0:
+        await session.commit()
+
+    return {
+        "relationships": relationships,
+        "scopes_created": scopes_created,
+        "status": "ok",
+    }
 
 
 @router.post("/project/scope-map/auto-create")
