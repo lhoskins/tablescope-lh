@@ -327,6 +327,98 @@ async def generate_scope_map(
     return result
 
 
+@router.post("/project/scope-map/auto-create")
+async def auto_create_scopes_from_queries(
+    req: AIGenerateRelationshipsRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Auto-create QueryScope records by analyzing saved queries.
+
+    When scoping is toggled ON, this endpoint:
+    1. Fetches all saved queries for the project
+    2. Finds matching fields between queries (same column name = drill-down)
+    3. Creates QueryScope records for each match
+    """
+    from app.models.query_scope import QueryScope
+
+    await _check_project_access(session, context, req.project_id)
+
+    # Get all saved queries for this project
+    queries_result = await session.scalars(
+        select(SavedQuery).where(SavedQuery.project_id == req.project_id)
+    )
+    queries = list(queries_result)
+
+    if not queries:
+        return {"scopes_created": 0, "message": "No saved queries in project"}
+
+    # Build a map: query_id -> list of field names (from datasource columns)
+    # We'll parse the SQL or use left_datasource to find columns
+    query_fields: dict[int, list[str]] = {}
+    for q in queries:
+        fields: list[str] = []
+        # Get columns from the datasource
+        if q.left_datasource:
+            ds_result = await session.scalars(
+                select(FileSourceMeta).where(
+                    FileSourceMeta.view_name == q.left_datasource,
+                    FileSourceMeta.tenant_id == context.tenant_id,
+                )
+            )
+            ds = ds_result.first()
+            if ds and ds.column_types:
+                fields = [c.get("name", "") for c in ds.column_types if c.get("name")]
+        query_fields[q.id] = fields
+
+    # Find matching fields between queries and create scopes
+    scopes_created = 0
+    existing_scopes = await session.scalars(
+        select(QueryScope).where(
+            QueryScope.project_id == req.project_id,
+            QueryScope.tenant_id == context.tenant_id,
+        )
+    )
+    existing_keys = {
+        (s.query_id, s.source_field, s.target_query_id, s.target_field)
+        for s in existing_scopes
+    }
+
+    for source_q in queries:
+        source_fields = query_fields.get(source_q.id, [])
+        for target_q in queries:
+            if source_q.id == target_q.id:
+                continue
+            target_fields = query_fields.get(target_q.id, [])
+            # Find common fields (potential drill-down relationships)
+            common = set(source_fields) & set(target_fields)
+            for field in common:
+                key = (source_q.id, field, target_q.id, field)
+                if key in existing_keys:
+                    continue
+                scope = QueryScope(
+                    tenant_id=context.tenant_id,
+                    project_id=req.project_id,
+                    query_id=source_q.id,
+                    source_field=field,
+                    target_query_id=target_q.id,
+                    target_field=field,
+                    created_by=context.user_id,
+                )
+                session.add(scope)
+                existing_keys.add(key)
+                scopes_created += 1
+
+    if scopes_created > 0:
+        await session.commit()
+
+    return {
+        "scopes_created": scopes_created,
+        "total_queries": len(queries),
+        "message": f"Created {scopes_created} scope(s) from {len(queries)} queries",
+    }
+
+
 @router.post("/dashboard/suggest")
 async def suggest_dashboard(
     req: AISuggestDashboardRequest,

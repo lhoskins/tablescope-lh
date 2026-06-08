@@ -283,8 +283,8 @@ function EditQueryForm({
   const [sqlText, setSqlText] = useState(savedSql);
   // Show join config only when a join is in play (right datasource present).
   const [showJoin, setShowJoin] = useState(!!query.right_datasource);
-  // Fields panel always expanded.
-  const [fieldsOpen, setFieldsOpen] = useState(true);
+  // Collapsible "view fields" panel for the selected table(s).
+  const [fieldsOpen, setFieldsOpen] = useState(false);
   // Once the user touches the visual params we regenerate SQL from them;
   // until then we keep showing the explicit saved SQL (with field selection).
   const [visualDirty, setVisualDirty] = useState(false);
@@ -932,9 +932,9 @@ export default function ProjectWorkspacePage() {
       if (enabled) {
         setScopingLoading(true);
         try {
-          await apiClient.post(`/api/ai/project/scope-map/generate`, { project_id: projectId });
+          await apiClient.post(`/api/ai/project/scope-map/auto-create`, { project_id: projectId });
         } catch {
-          console.warn("AI scope generation failed — scoping enabled but no auto-scopes created");
+          console.warn("Auto scope creation failed — scoping enabled but no scopes created");
         } finally {
           setScopingLoading(false);
         }
@@ -970,7 +970,7 @@ export default function ProjectWorkspacePage() {
       setQueryDesc("");
       // 6D: trigger AI scope refresh if scoping is enabled
       if (projectQuery.data?.scoping_enabled) {
-        apiClient.post("/api/ai/project/scope-map/generate", { project_id: projectId }).catch(() => {});
+        apiClient.post("/api/ai/project/scope-map/auto-create", { project_id: projectId }).catch(() => {});
       }
     },
   });
@@ -1021,7 +1021,7 @@ export default function ProjectWorkspacePage() {
       }
       // 6D: trigger AI scope refresh if scoping is enabled
       if (projectQuery.data?.scoping_enabled) {
-        apiClient.post("/api/ai/project/scope-map/generate", { project_id: projectId }).catch(() => {});
+        apiClient.post("/api/ai/project/scope-map/auto-create", { project_id: projectId }).catch(() => {});
       }
     },
   });
@@ -1093,7 +1093,6 @@ export default function ProjectWorkspacePage() {
     setSavedQueryLoading(true);
     setSavedQueryError(null);
     setSavedQueryResult(null);
-    setQueryListOpen(false);
     try {
       const tableName = q.left_datasource ?? "";
       const result = await apiClient.post<QueryResult>("/api/query/datasource", {
@@ -1123,7 +1122,6 @@ export default function ProjectWorkspacePage() {
     setDsLoading(true);
     setDsError(null);
     setDsResult(null);
-    setDsListOpen(false);
     try {
       const result = await apiClient.post<QueryResult>("/api/query/datasource", {
         tableName: ds.viewName,
@@ -1523,9 +1521,10 @@ export default function ProjectWorkspacePage() {
               <button
                 type="button"
                 onClick={() => setDsListOpen((v) => !v)}
-                className="mb-2 w-full text-left px-2 py-1.5 text-sm font-semibold text-slate-700 hover:text-slate-900 transition-colors"
+                className="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
               >
-                All Datasources
+                <svg className={`h-4 w-4 text-slate-400 transition-transform ${dsListOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                All Datasources ({projectDatasources.length})
               </button>
             {dsListOpen && (
             <div className="grid gap-2">
@@ -2210,9 +2209,10 @@ export default function ProjectWorkspacePage() {
               <button
                 type="button"
                 onClick={() => setQueryListOpen((v) => !v)}
-                className="mb-2 w-full text-left px-2 py-1.5 text-sm font-semibold text-slate-700 hover:text-slate-900 transition-colors"
+                className="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
               >
-                All Queries
+                <svg className={`h-4 w-4 text-slate-400 transition-transform ${queryListOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                All Queries ({queriesQuery.data.length})
               </button>
             {queryListOpen && (
             <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
