@@ -14,6 +14,8 @@ type AIResponse = {
     left_column: string;
     right_table: string;
     right_column: string;
+    source_query_id?: number;
+    target_query_id?: number;
     confidence: number;
     reason: string;
   }>;
@@ -124,15 +126,24 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
   };
 
   const handleCreateScope = async (rel: NonNullable<AIResponse["relationships"]>[0]) => {
-    const key = `${rel.left_table}.${rel.left_column}`;
+    const key = `${rel.source_query_id ?? rel.left_table}.${rel.left_column}.${rel.target_query_id ?? rel.right_table}`;
     setCreatingScope(key);
     try {
-      await apiClient.post("/api/scopes", {
-        sourceTable: rel.left_table,
-        sourceColumn: rel.left_column,
-        targetTable: rel.right_table,
-        targetColumn: rel.right_column,
-      });
+      if (rel.source_query_id && rel.target_query_id) {
+        await apiClient.post("/api/query-scopes", {
+          query_id: rel.source_query_id,
+          source_field: rel.left_column,
+          target_query_id: rel.target_query_id,
+          target_field: rel.right_column,
+        });
+      } else {
+        await apiClient.post("/api/scopes", {
+          sourceTable: rel.left_table,
+          sourceColumn: rel.left_column,
+          targetTable: rel.right_table,
+          targetColumn: rel.right_column,
+        });
+      }
       setScopeCreated((prev) => new Set(prev).add(key));
       onScopeCreated?.();
     } catch (err: unknown) {
@@ -509,11 +520,11 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
                 AI Scope Map ({response.relationships.length} suggestions)
               </h3>
               <p className="mb-3 text-xs text-slate-500">
-                Click &quot;Create Scope&quot; to add a drill-down scope. Source column clicks will navigate to the target table filtered by that value.
+                Click &quot;Create Scope&quot; to add a drill-down scope. Source query column clicks will drill into the target query filtered by that value.
               </p>
               <div className="space-y-2">
                 {response.relationships.map((rel, i) => {
-                  const key = `${rel.left_table}.${rel.left_column}`;
+                  const key = `${rel.source_query_id ?? rel.left_table}.${rel.left_column}.${rel.target_query_id ?? rel.right_table}`;
                   const alreadyCreated = scopeCreated.has(key) || (rel as Record<string, unknown>).scope_exists === true;
                   const isCreating = creatingScope === key;
                   return (
@@ -537,6 +548,9 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
                           {rel.right_table}
                         </span>
                         <span className="font-mono text-xs text-slate-600">.{rel.right_column}</span>
+                        {rel.source_query_id && (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">query-based</span>
+                        )}
                         <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
                           {Math.round(rel.confidence * 100)}%
                         </span>

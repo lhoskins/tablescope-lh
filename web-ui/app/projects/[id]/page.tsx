@@ -12,6 +12,7 @@ import { TanStackDataGrid } from "@/components/data-grid/TanStackDataGrid";
 import { DashboardTab } from "@/components/dashboard/DashboardTab";
 import { AIPanel } from "@/components/ai/AIPanel";
 import { AIPromptBar } from "@/components/ai/AIPromptBar";
+import { ScopesTab } from "@/components/scopes/ScopesTab";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -800,7 +801,7 @@ export default function ProjectWorkspacePage() {
   const meta = getUserMeta();
 
   // ── Tab state ─────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "dashboards" | "ai" | "members">("datasources");
+  const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "dashboards" | "scopes" | "ai" | "members">("datasources");
 
   // ── Collapsible panels ──────────────────────────────────────────
   const [dsListOpen, setDsListOpen] = useState(false);
@@ -1473,7 +1474,7 @@ export default function ProjectWorkspacePage() {
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 rounded-lg bg-slate-100 p-1">
-        {(["datasources", "queries", "dashboards", "ai", "members"] as const).map((tab) => (
+        {(["datasources", "queries", "dashboards", "scopes", "ai", "members"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -2363,6 +2364,11 @@ export default function ProjectWorkspacePage() {
           }))}
           canEdit={canEdit}
         />
+      )}
+
+      {/* ── Scopes Tab ────────────────────────────────────────── */}
+      {activeTab === "scopes" && (
+        <ScopesTab projectId={projectId} />
       )}
 
       {/* ── AI Tab ──────────────────────────────────────────────── */}

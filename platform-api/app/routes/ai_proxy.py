@@ -293,39 +293,132 @@ async def generate_relationships(
     return await _forward_to_ai("/ai/project/relationships/generate", payload)
 
 
+def _extract_select_columns(sql: str) -> list[str]:
+    """Extract column names/aliases from a SQL SELECT clause using regex.
+
+    Returns the alias (AS name) or the raw column reference for each item.
+    """
+    import re
+
+    cols: list[str] = []
+
+    # Extract text between SELECT and FROM (first occurrence, skip nested subqueries)
+    m = re.search(r"\bSELECT\s+(.*?)\s+FROM\s+", sql, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return cols
+    raw = m.group(1)
+
+    # Split by commas (respecting parentheses)
+    items: list[str] = []
+    current: list[str] = []
+    paren_depth = 0
+    for ch in raw:
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth -= 1
+        if ch == "," and paren_depth == 0:
+            items.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        items.append("".join(current).strip())
+
+    for item in items:
+        if not item or item == "*":
+            continue
+        # Check for AS alias
+        alias_match = re.search(r"\bAS\s+[\"']?(\w+)[\"']?\s*$", item, re.IGNORECASE)
+        if alias_match:
+            cols.append(alias_match.group(1))
+            continue
+        # No alias — take the last identifier (column name after any dot)
+        # Strip surrounding quotes
+        ident_match = re.search(r'[\".]?(\w+)[\"]*\s*$', item.rstrip())
+        if ident_match:
+            cols.append(ident_match.group(1))
+    return cols
+
+
 @router.post("/project/scope-map/generate")
 async def generate_scope_map(
     req: AIGenerateRelationshipsRequest,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
-    """Generate AI scope map — drill-down relationship suggestions."""
+    """Generate query-based scope map by analyzing saved queries.
+
+    Finds common column names between queries to suggest drill-down scopes.
+    Scopes are query_id-based, NOT datasource-based.
+    """
+    from app.models.query_scope import QueryScope
+
     await _check_project_access(session, context, req.project_id)
 
-    payload = {
-        "tenant_id": context.tenant_id,
-        "user_id": context.user_id,
-        "project_id": req.project_id,
-    }
-    result = await _forward_to_ai("/ai/project/relationships/generate", payload)
+    # Get all saved queries for this project
+    queries_result = await session.scalars(
+        select(SavedQuery).where(SavedQuery.project_id == req.project_id)
+    )
+    queries = list(queries_result)
 
-    # Also fetch existing scopes so the UI can show which are already created
-    from app.services.scope_proxy import ScopeProxyService
-    svc = ScopeProxyService()
-    existing = await svc.list_scopes(tenant_id=context.tenant_id)
+    if not queries:
+        return {"relationships": [], "status": "ok"}
+
+    # Build a map: query_id -> list of column names from SQL
+    query_columns: dict[int, list[str]] = {}
+    query_names: dict[int, str] = {}
+    for q in queries:
+        query_names[q.id] = q.name
+        if q.sql_text:
+            cols = _extract_select_columns(q.sql_text)
+            query_columns[q.id] = cols
+        else:
+            query_columns[q.id] = []
+
+    # Find existing scopes
+    existing_scopes = await session.scalars(
+        select(QueryScope).where(
+            QueryScope.project_id == req.project_id,
+            QueryScope.tenant_id == context.tenant_id,
+        )
+    )
     existing_keys = {
-        f"{s.source_table}.{s.source_column}" for s in existing
+        (s.query_id, s.source_field, s.target_query_id, s.target_field)
+        for s in existing_scopes
     }
 
-    # Tag each suggestion with whether it already exists as a scope
-    relationships = result.get("relationships", [])
-    for rel in relationships:
-        key = f"{rel.get('left_table', '')}.{rel.get('left_column', '')}"
-        rel["scope_exists"] = key in existing_keys
+    # Find matching columns between query pairs → suggest scopes
+    relationships: list[dict[str, Any]] = []
+    for source_q in queries:
+        source_cols = query_columns.get(source_q.id, [])
+        for target_q in queries:
+            if source_q.id == target_q.id:
+                continue
+            target_cols = query_columns.get(target_q.id, [])
+            common = set(c.lower() for c in source_cols) & set(c.lower() for c in target_cols)
+            for field_lower in common:
+                # Find the original-cased field name from each query
+                src_field = next((c for c in source_cols if c.lower() == field_lower), field_lower)
+                tgt_field = next((c for c in target_cols if c.lower() == field_lower), field_lower)
+                scope_exists = (source_q.id, src_field, target_q.id, tgt_field) in existing_keys
+                relationships.append({
+                    "left_table": query_names[source_q.id],
+                    "left_column": src_field,
+                    "right_table": query_names[target_q.id],
+                    "right_column": tgt_field,
+                    "source_query_id": source_q.id,
+                    "target_query_id": target_q.id,
+                    "confidence": 1.0,
+                    "reason": (
+                        f"Both queries have a column named '{src_field}' — "
+                        f"clicking a value in '{query_names[source_q.id]}' can "
+                        f"drill down into '{query_names[target_q.id]}'"
+                    ),
+                    "scope_exists": scope_exists,
+                })
 
-    result["relationships"] = relationships
-    result["existing_scope_count"] = len(existing)
-    return result
+    return {"relationships": relationships, "status": "ok"}
 
 
 @router.post("/project/scope-map/auto-create")

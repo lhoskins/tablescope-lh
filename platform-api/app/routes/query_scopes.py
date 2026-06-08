@@ -47,18 +47,33 @@ async def _get_project_for_query(
 
 @router.get("", response_model=list[QueryScopeRead])
 async def list_query_scopes(
-    query_id: int,
+    query_id: int | None = None,
+    project_id: int | None = None,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[QueryScopeRead]:
-    """List scopes whose *source* is the given query."""
-    await _get_project_for_query(session, query_id=query_id, tenant_id=context.tenant_id)
-    rows = await session.scalars(
-        select(QueryScope).where(
-            QueryScope.tenant_id == context.tenant_id,
-            QueryScope.query_id == query_id,
+    """List scopes. Filter by query_id (source query) and/or project_id."""
+    if query_id is not None:
+        await _get_project_for_query(session, query_id=query_id, tenant_id=context.tenant_id)
+        rows = await session.scalars(
+            select(QueryScope).where(
+                QueryScope.tenant_id == context.tenant_id,
+                QueryScope.query_id == query_id,
+            )
         )
-    )
+    elif project_id is not None:
+        rows = await session.scalars(
+            select(QueryScope).where(
+                QueryScope.tenant_id == context.tenant_id,
+                QueryScope.project_id == project_id,
+            )
+        )
+    else:
+        rows = await session.scalars(
+            select(QueryScope).where(
+                QueryScope.tenant_id == context.tenant_id,
+            )
+        )
     return [QueryScopeRead.model_validate(s.to_dict()) for s in rows]
 
 
