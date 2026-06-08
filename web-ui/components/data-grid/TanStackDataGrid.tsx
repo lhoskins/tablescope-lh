@@ -141,16 +141,20 @@ export function TanStackDataGrid({
   const current = levels[levels.length - 1];
   const currentQueryId = current.queryId;
 
-  // ── Scopes ──────────────────────────────────────────────────────
+  // ── Scopes (query_id-based, NOT datasource-based) ───────────────
   const [scopes, setScopes] = useState<QueryScope[]>([]);
 
   const loadScopes = useCallback(async (qid: number | null) => {
-    if (qid == null) { setScopes([]); return; }
+    if (qid == null) {
+      if (scopeEnabled) console.warn("[TanStackDataGrid] Scoping enabled but no query_id — scoping disabled for this grid");
+      setScopes([]);
+      return;
+    }
     try {
       const data = await apiClient.get<QueryScope[]>(`/api/query-scopes?query_id=${qid}`);
       setScopes(data);
     } catch { setScopes([]); }
-  }, []);
+  }, [scopeEnabled]);
 
   useEffect(() => { if (scopeEnabled) loadScopes(currentQueryId); else setScopes([]); }, [currentQueryId, loadScopes, scopeEnabled]);
 

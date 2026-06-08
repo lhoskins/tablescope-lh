@@ -79,6 +79,7 @@ async def _verify_permissions(
         "datasources": [],
         "saved_queries": [],
         "dashboards": [],
+        "query_scopes": [],
     }
 
 
@@ -170,9 +171,10 @@ async def build_context(
         except Exception as e:
             logger.warning("Vector search failed: %s", e)
 
-    # 3. Saved queries and dashboards from permissions context
+    # 3. Saved queries, dashboards, and query scopes from permissions context
     queries = perms.get("saved_queries", [])
     dashboards = perms.get("dashboards", [])
+    query_scopes = perms.get("query_scopes", [])
 
     # Build context package
     context = ContextPackage(
@@ -182,7 +184,8 @@ async def build_context(
         allowed_context={
             "metadata": metadata,
             "documents": documents,
-            "relationships": [],
+            "relationships": query_scopes,
+            "scopes": query_scopes,
             "queries": queries,
             "dashboards": dashboards,
             "memories": [],
@@ -198,9 +201,9 @@ async def build_context(
 
     logger.info(
         "Built context for tenant=%d project=%d user=%d scope=%s: "
-        "%d metadata, %d documents, %d queries, %d dashboards",
+        "%d metadata, %d documents, %d queries, %d dashboards, %d scopes",
         tenant_id, project_id, user_id, scope,
-        len(metadata), len(documents), len(queries), len(dashboards),
+        len(metadata), len(documents), len(queries), len(dashboards), len(query_scopes),
     )
 
     return context
@@ -244,5 +247,14 @@ def context_to_prompt_text(context: ContextPackage) -> str:
             sql = q.get("sql_text", q.get("sql", ""))
             name = q.get("name", "unnamed")
             parts.append(f"  - {name}: {sql[:200]}")
+
+    # Query scopes (drill-down relationships between queries)
+    if context.allowed_context.get("scopes"):
+        parts.append("\nExisting query scopes (drill-down relationships):")
+        for s in context.allowed_context["scopes"]:
+            parts.append(
+                f"  - Scope {s.get('id')}: query {s.get('query_id')}.{s.get('source_field')} "
+                f"-> query {s.get('target_query_id')}.{s.get('target_field')}"
+            )
 
     return "\n".join(parts)

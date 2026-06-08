@@ -119,6 +119,7 @@ class AIPermissionsResponse(BaseModel):
     datasources: list[dict[str, Any]]
     saved_queries: list[dict[str, Any]]
     dashboards: list[dict[str, Any]]
+    query_scopes: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +557,25 @@ async def check_permissions(
         for d in dash_result.scalars()
     ]
 
+    # Fetch query scopes for this project
+    from app.models.query_scope import QueryScope
+    scope_stmt = select(QueryScope).where(
+        QueryScope.project_id == project_id,
+        QueryScope.tenant_id == tenant_id,
+    )
+    scope_result = await session.execute(scope_stmt)
+    query_scopes = [
+        {
+            "id": s.id,
+            "query_id": s.query_id,
+            "source_field": s.source_field,
+            "target_query_id": s.target_query_id,
+            "target_field": s.target_field,
+            "project_id": s.project_id,
+        }
+        for s in scope_result.scalars()
+    ]
+
     return AIPermissionsResponse(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -566,6 +586,7 @@ async def check_permissions(
         datasources=datasources,
         saved_queries=saved_queries,
         dashboards=dashboards,
+        query_scopes=query_scopes,
     )
 
 
