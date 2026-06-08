@@ -283,8 +283,8 @@ function EditQueryForm({
   const [sqlText, setSqlText] = useState(savedSql);
   // Show join config only when a join is in play (right datasource present).
   const [showJoin, setShowJoin] = useState(!!query.right_datasource);
-  // Collapsible "view fields" panel for the selected table(s).
-  const [fieldsOpen, setFieldsOpen] = useState(false);
+  // Fields panel always expanded.
+  const [fieldsOpen, setFieldsOpen] = useState(true);
   // Once the user touches the visual params we regenerate SQL from them;
   // until then we keep showing the explicit saved SQL (with field selection).
   const [visualDirty, setVisualDirty] = useState(false);
@@ -594,8 +594,8 @@ function EditQueryForm({
           {groupBy.length === 0 && (
             <button
               type="button"
-              onClick={() => { markDirty(); setGroupBy((p) => [...p, ""]); }}
-              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+              onClick={() => { markDirty(); setGroupBy([""]); }}
+              className="rounded-md border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100"
             >
               + Group By
             </button>
@@ -603,8 +603,8 @@ function EditQueryForm({
           {orderBy.length === 0 && (
             <button
               type="button"
-              onClick={() => { markDirty(); setOrderBy((p) => [...p, { column: "", dir: "ASC" }]); }}
-              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+              onClick={() => { markDirty(); setOrderBy([{ column: "", dir: "ASC" }]); }}
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
             >
               + Order By
             </button>
@@ -665,85 +665,54 @@ function EditQueryForm({
         </div>
       )}
 
-      {/* Group By (expanded once a column is added) */}
+      {/* Group By — clickable field chips */}
       {leftDs && groupBy.length > 0 && (
         <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-slate-700">Group By</span>
-            <button
-              type="button"
-              onClick={() => { markDirty(); setGroupBy((p) => [...p, ""]); }}
-              className="text-xs text-blue-600 hover:text-blue-800"
-            >
-              + Group By
-            </button>
+            <button type="button" onClick={() => { markDirty(); setGroupBy([]); }} className="text-xs text-red-500 hover:text-red-700">Clear</button>
           </div>
-          {groupBy.map((g, idx) => (
-            <div key={idx} className="mb-2 flex items-center gap-2">
-              <select
-                value={g}
-                onChange={(e) => { markDirty(); setGroupBy((p) => p.map((x, i) => i === idx ? e.target.value : x)); }}
-                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              >
-                <option value="">Column...</option>
-                {allFields.map((c) => (
-                  <option key={c} value={c}>{c.split(".")[1]}{showJoin && rightDs ? ` (${c.split(".")[0]})` : ""}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => { markDirty(); setGroupBy((p) => p.filter((_, i) => i !== idx)); }}
-                className="text-xs text-red-500 hover:text-red-700"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
+          <div className="flex flex-wrap gap-1">
+            {allFields.map((f) => {
+              const col = f.split(".")[1] ?? f;
+              const on = groupBy.includes(f);
+              return (
+                <button key={f} type="button"
+                  onClick={() => { markDirty(); setGroupBy((p) => on ? p.filter((x) => x !== f) : [...p, f]); }}
+                  className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${on ? "border-purple-500 bg-purple-500 text-white" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"}`}
+                >{col}</button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Order By (expanded once a column is added) */}
+      {/* Order By — clickable field chips with direction toggle */}
       {leftDs && orderBy.length > 0 && (
         <div className="mb-3 rounded-md border border-slate-200 bg-white p-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-slate-700">Order By</span>
-            <button
-              type="button"
-              onClick={() => { markDirty(); setOrderBy((p) => [...p, { column: "", dir: "ASC" }]); }}
-              className="text-xs text-blue-600 hover:text-blue-800"
-            >
-              + Order By
-            </button>
+            <button type="button" onClick={() => { markDirty(); setOrderBy([]); }} className="text-xs text-red-500 hover:text-red-700">Clear</button>
           </div>
-          {orderBy.map((o, idx) => (
-            <div key={idx} className="mb-2 flex items-center gap-2">
-              <select
-                value={o.column}
-                onChange={(e) => { markDirty(); setOrderBy((p) => p.map((x, i) => i === idx ? { ...x, column: e.target.value } : x)); }}
-                className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              >
-                <option value="">Column...</option>
-                {allFields.map((c) => (
-                  <option key={c} value={c}>{c.split(".")[1]}{showJoin && rightDs ? ` (${c.split(".")[0]})` : ""}</option>
-                ))}
-              </select>
-              <select
-                value={o.dir}
-                onChange={(e) => { markDirty(); setOrderBy((p) => p.map((x, i) => i === idx ? { ...x, dir: e.target.value } : x)); }}
-                className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              >
-                <option value="ASC">Ascending</option>
-                <option value="DESC">Descending</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => { markDirty(); setOrderBy((p) => p.filter((_, i) => i !== idx)); }}
-                className="text-xs text-red-500 hover:text-red-700"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
+          <div className="flex flex-wrap gap-1">
+            {allFields.map((f) => {
+              const col = f.split(".")[1] ?? f;
+              const idx = orderBy.findIndex((o) => o.column === f);
+              const on = idx >= 0;
+              const dir = on ? orderBy[idx].dir : "ASC";
+              return (
+                <button key={f} type="button"
+                  onClick={() => {
+                    markDirty();
+                    if (!on) { setOrderBy((p) => [...p, { column: f, dir: "ASC" }]); }
+                    else if (dir === "ASC") { setOrderBy((p) => p.map((x) => x.column === f ? { ...x, dir: "DESC" } : x)); }
+                    else { setOrderBy((p) => p.filter((x) => x.column !== f)); }
+                  }}
+                  className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${on ? "border-amber-500 bg-amber-500 text-white" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"}`}
+                >{col}{on ? (dir === "ASC" ? " ↑" : " ↓") : ""}</button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -876,6 +845,8 @@ export default function ProjectWorkspacePage() {
   const [rightCols, setRightCols] = useState<string[]>([]);
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [filters, setFilters] = useState<{ column: string; operand: string; value: string }[]>([]);
+  const [mainGroupBy, setMainGroupBy] = useState<string[]>([]);
+  const [mainOrderBy, setMainOrderBy] = useState<{ column: string; dir: string }[]>([]);
   const [mainSqlEditing, setMainSqlEditing] = useState(false);
   const [customSql, setCustomSql] = useState("");
 
@@ -1122,6 +1093,7 @@ export default function ProjectWorkspacePage() {
     setSavedQueryLoading(true);
     setSavedQueryError(null);
     setSavedQueryResult(null);
+    setQueryListOpen(false);
     try {
       const tableName = q.left_datasource ?? "";
       const result = await apiClient.post<QueryResult>("/api/query/datasource", {
@@ -1151,6 +1123,7 @@ export default function ProjectWorkspacePage() {
     setDsLoading(true);
     setDsError(null);
     setDsResult(null);
+    setDsListOpen(false);
     try {
       const result = await apiClient.post<QueryResult>("/api/query/datasource", {
         tableName: ds.viewName,
@@ -1344,8 +1317,16 @@ export default function ProjectWorkspacePage() {
         sql += " WHERE " + whereClauses.join(" AND ");
       }
     }
+    if (mainGroupBy.length > 0) {
+      const groups = mainGroupBy.map((f) => { const [tbl, col] = f.split("."); return `"${tbl}"."${col}"`; });
+      sql += " GROUP BY " + groups.join(", ");
+    }
+    if (mainOrderBy.length > 0) {
+      const orders = mainOrderBy.map((o) => { const [tbl, col] = o.column.split("."); return `"${tbl}"."${col}" ${o.dir}`; });
+      sql += " ORDER BY " + orders.join(", ");
+    }
     return sql;
-  }, [leftDs, rightDs, joinType, leftCol, rightCol, selectedFields, filters]);
+  }, [leftDs, rightDs, joinType, leftCol, rightCol, selectedFields, filters, mainGroupBy, mainOrderBy]);
 
   // ── Execute query ─────────────────────────────────────────────────
 
@@ -1542,10 +1523,9 @@ export default function ProjectWorkspacePage() {
               <button
                 type="button"
                 onClick={() => setDsListOpen((v) => !v)}
-                className="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+                className="mb-2 w-full text-left px-2 py-1.5 text-sm font-semibold text-slate-700 hover:text-slate-900 transition-colors"
               >
-                <svg className={`h-4 w-4 text-slate-400 transition-transform ${dsListOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                All Datasources ({projectDatasources.length})
+                All Datasources
               </button>
             {dsListOpen && (
             <div className="grid gap-2">
@@ -1949,15 +1929,83 @@ export default function ProjectWorkspacePage() {
                 </div>
               )}
 
-              {/* + Add Filter button (collapsed, same row style as Group By / Order By) */}
-              {leftDs && allAvailableCols.length > 0 && filters.length === 0 && (
-                <div className="mb-4">
-                  <button
-                    onClick={() => setFilters((prev) => [...prev, { column: "", operand: "=", value: "" }])}
-                    className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-                  >
-                    + Add Filter
-                  </button>
+              {/* + Add Filter / + Group By / + Order By buttons */}
+              {leftDs && allAvailableCols.length > 0 && (
+                <div className="mb-4 flex gap-2">
+                  {filters.length === 0 && (
+                    <button
+                      onClick={() => setFilters((prev) => [...prev, { column: "", operand: "=", value: "" }])}
+                      className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                    >
+                      + Add Filter
+                    </button>
+                  )}
+                  {mainGroupBy.length === 0 && (
+                    <button
+                      onClick={() => setMainGroupBy([""])}
+                      className="rounded-md border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100"
+                    >
+                      + Group By
+                    </button>
+                  )}
+                  {mainOrderBy.length === 0 && (
+                    <button
+                      onClick={() => setMainOrderBy([{ column: "", dir: "ASC" }])}
+                      className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                    >
+                      + Order By
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Group By field chips (Create Query) */}
+              {leftDs && allAvailableCols.length > 0 && mainGroupBy.length > 0 && (
+                <div className="mb-4 rounded-md border border-slate-200 bg-white p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-slate-700">Group By</span>
+                    <button type="button" onClick={() => setMainGroupBy([])} className="text-xs text-red-500 hover:text-red-700">Clear</button>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {allAvailableCols.map((f) => {
+                      const col = f.split(".")[1] ?? f;
+                      const on = mainGroupBy.includes(f);
+                      return (
+                        <button key={f} type="button"
+                          onClick={() => setMainGroupBy((p) => on ? p.filter((x) => x !== f) : [...p.filter(Boolean), f])}
+                          className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${on ? "border-purple-500 bg-purple-500 text-white" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"}`}
+                        >{col}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Order By field chips (Create Query) */}
+              {leftDs && allAvailableCols.length > 0 && mainOrderBy.length > 0 && (
+                <div className="mb-4 rounded-md border border-slate-200 bg-white p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-slate-700">Order By</span>
+                    <button type="button" onClick={() => setMainOrderBy([])} className="text-xs text-red-500 hover:text-red-700">Clear</button>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {allAvailableCols.map((f) => {
+                      const col = f.split(".")[1] ?? f;
+                      const idx = mainOrderBy.findIndex((o) => o.column === f);
+                      const on = idx >= 0;
+                      const dir = on ? mainOrderBy[idx].dir : "ASC";
+                      return (
+                        <button key={f} type="button"
+                          onClick={() => {
+                            if (!on) { setMainOrderBy((p) => [...p.filter((x) => x.column), { column: f, dir: "ASC" }]); }
+                            else if (dir === "ASC") { setMainOrderBy((p) => p.map((x) => x.column === f ? { ...x, dir: "DESC" } : x)); }
+                            else { setMainOrderBy((p) => p.filter((x) => x.column !== f)); }
+                          }}
+                          className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${on ? "border-amber-500 bg-amber-500 text-white" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"}`}
+                        >{col}{on ? (dir === "ASC" ? " ↑" : " ↓") : ""}</button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -2162,10 +2210,9 @@ export default function ProjectWorkspacePage() {
               <button
                 type="button"
                 onClick={() => setQueryListOpen((v) => !v)}
-                className="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+                className="mb-2 w-full text-left px-2 py-1.5 text-sm font-semibold text-slate-700 hover:text-slate-900 transition-colors"
               >
-                <svg className={`h-4 w-4 text-slate-400 transition-transform ${queryListOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                All Queries ({queriesQuery.data.length})
+                All Queries
               </button>
             {queryListOpen && (
             <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">

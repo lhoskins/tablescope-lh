@@ -302,20 +302,30 @@ export function WidgetRenderer({ widget, data }: Props) {
         );
 
       // ── BAR ─────────────────────────────────────────────
-      case "bar":
+      case "bar": {
+        const barXLabel = widget.xColumn || xKey;
+        const barYLabel = widget.yColumn || yKey;
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} margin={{ top: 10, right: 20, bottom: 25, left: isHorizontal ? 5 : 10 }}>
+            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} margin={{ top: 10, right: 20, bottom: 40, left: isHorizontal ? 10 : 50 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!isHorizontal} horizontal={isHorizontal} />
               {isHorizontal ? (
                 <>
-                  <YAxis type="category" dataKey={xKey} {...commonAxisProps} width={90} label={widget.xColumn ? { value: widget.xColumn, angle: -90, position: "insideLeft", style: { fontSize: 10, fill: "#64748b" } } : undefined} />
-                  <XAxis type="number" {...commonAxisProps} tickFormatter={fmtAxis} label={widget.yColumn ? { value: widget.yColumn, position: "insideBottom", offset: -5, style: { fontSize: 10, fill: "#64748b" } } : undefined} />
+                  <YAxis type="category" dataKey={xKey} {...commonAxisProps} width={100}>
+                    <Label value={barXLabel} angle={-90} position="insideLeft" offset={-5} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
+                  </YAxis>
+                  <XAxis type="number" {...commonAxisProps} tickFormatter={fmtAxis}>
+                    <Label value={barYLabel} position="insideBottom" offset={-10} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
+                  </XAxis>
                 </>
               ) : (
                 <>
-                  <XAxis dataKey={xKey} {...barXAxisProps} label={widget.xColumn ? { value: widget.xColumn, position: "insideBottom", offset: -15, style: { fontSize: 10, fill: "#64748b" } } : undefined} />
-                  <YAxis {...yAxisProps} tickFormatter={fmtAxis} label={widget.yColumn ? { value: widget.yColumn, angle: -90, position: "insideLeft", offset: 10, style: { fontSize: 10, fill: "#64748b" } } : undefined} />
+                  <XAxis dataKey={xKey} {...barXAxisProps}>
+                    <Label value={barXLabel} position="insideBottom" offset={-20} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
+                  </XAxis>
+                  <YAxis {...yAxisProps} tickFormatter={fmtAxis}>
+                    <Label value={barYLabel} angle={-90} position="insideLeft" offset={-35} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
+                  </YAxis>
                 </>
               )}
               <Tooltip
@@ -340,6 +350,7 @@ export function WidgetRenderer({ widget, data }: Props) {
             </BarChart>
           </ResponsiveContainer>
         );
+      }
 
       // ── AREA ────────────────────────────────────────────
       case "area":
