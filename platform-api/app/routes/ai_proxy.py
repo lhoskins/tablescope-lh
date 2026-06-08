@@ -747,9 +747,17 @@ async def ai_save_query(
     await session.commit()
     await session.refresh(query)
 
+    # Auto-create scopes for this query
+    from app.services.auto_scope import auto_create_scopes_for_query
+    scopes = await auto_create_scopes_for_query(
+        session, query=query, tenant_id=context.tenant_id, user_id=context.user_id,
+    )
+    if scopes > 0:
+        await session.commit()
+
     logger.info(
-        "AI action: save_query | query_id=%d project=%d tenant=%d user=%d",
-        query.id, project.id, context.tenant_id, context.user_id,
+        "AI action: save_query | query_id=%d project=%d tenant=%d user=%d scopes=%d",
+        query.id, project.id, context.tenant_id, context.user_id, scopes,
     )
     return {
         "action": "save_query",
@@ -823,9 +831,17 @@ async def ai_generate_and_save_query(
     await session.commit()
     await session.refresh(query)
 
+    # Auto-create scopes for this query
+    from app.services.auto_scope import auto_create_scopes_for_query
+    scopes = await auto_create_scopes_for_query(
+        session, query=query, tenant_id=context.tenant_id, user_id=context.user_id,
+    )
+    if scopes > 0:
+        await session.commit()
+
     logger.info(
-        "AI action: generate_and_save_query | query_id=%d project=%d tenant=%d user=%d",
-        query.id, project.id, context.tenant_id, context.user_id,
+        "AI action: generate_and_save_query | query_id=%d project=%d tenant=%d user=%d scopes=%d",
+        query.id, project.id, context.tenant_id, context.user_id, scopes,
     )
     return {
         "action": "generate_and_save_query",

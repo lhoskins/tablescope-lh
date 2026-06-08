@@ -33,6 +33,7 @@ from app.schemas.project import (
     SavedQueryRead,
     SavedQueryUpdate,
 )
+from app.services.auto_scope import auto_create_scopes_for_query
 from app.services.customer_folders import CustomerFolderService
 from app.services.file_sources import display_source
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
@@ -812,6 +813,14 @@ async def create_saved_query(
     session.add(query)
     await session.commit()
     await session.refresh(query)
+
+    # Auto-create scopes for this new query
+    scopes = await auto_create_scopes_for_query(
+        session, query=query, tenant_id=context.tenant_id, user_id=context.user_id,
+    )
+    if scopes > 0:
+        await session.commit()
+
     return SavedQueryRead.model_validate(query)
 
 
@@ -849,6 +858,14 @@ async def update_saved_query(
 
     await session.commit()
     await session.refresh(query)
+
+    # Auto-create scopes for the updated query
+    scopes = await auto_create_scopes_for_query(
+        session, query=query, tenant_id=context.tenant_id, user_id=context.user_id,
+    )
+    if scopes > 0:
+        await session.commit()
+
     return SavedQueryRead.model_validate(query)
 
 
