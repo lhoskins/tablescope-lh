@@ -2255,11 +2255,7 @@ export default function ProjectWorkspacePage() {
                       >
                         <p className="text-sm font-medium text-slate-900">{q.name}</p>
                         {q.description && <p className="text-xs text-slate-500">{q.description}</p>}
-                        {q.sql_text && (
-                          <p className="mt-1 text-xs font-mono text-slate-400 truncate max-w-md">
-                            {q.sql_text}
-                          </p>
-                        )}
+                        {/* SQL preview removed for cleaner UI */}
                       </div>
                     )}
                     <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
