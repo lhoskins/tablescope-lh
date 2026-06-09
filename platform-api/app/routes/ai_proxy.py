@@ -415,17 +415,59 @@ async def _ai_analyze_and_create_scopes(
     if not query_infos:
         return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
-    # Call AI server for scope analysis
+    # Build a prompt describing the queries and ask AI to suggest scopes
+    query_descriptions = "\n\n".join(
+        f"Query ID={q['id']}, Name=\"{q['name']}\", SQL:\n{q['sql']}"
+        for q in query_infos
+    )
+    scope_prompt = (
+        f"Analyze these {len(query_infos)} saved SQL queries and find drill-down "
+        f"scope relationships.\n\n"
+        f"QUERIES:\n{query_descriptions}\n\n"
+        "TASK: Find pairs where clicking a cell in the SOURCE query should filter "
+        "the TARGET query by that value.\n\n"
+        "RULES:\n"
+        "1. Only use identifier/name columns (ProductName, CategoryName, CustomerID, "
+        "OrderID) — NEVER numeric/aggregate columns (Revenue, Amount, Total, Count, "
+        "Price, Quantity)\n"
+        "2. Direction: summarized (GROUP BY/SUM/COUNT) → detailed (no aggregation). "
+        "Source = aggregated query, Target = raw/detail query.\n"
+        "3. source_field and target_field = exact column alias from SELECT clause.\n"
+        "4. One scope per query-pair per column — no duplicates, no reverse.\n"
+        "5. Both queries must SELECT the column.\n\n"
+        "Return ONLY a JSON array: [{\"source_query_id\": int, "
+        "\"source_query_name\": str, \"source_field\": str, "
+        "\"target_query_id\": int, \"target_query_name\": str, "
+        "\"target_field\": str, \"confidence\": float, \"reason\": str}]"
+    )
+
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": project_id,
-        "queries": query_infos,
+        "question": scope_prompt,
+        "scope": "project",
+        "include_query_history": False,
+        "include_dashboard_context": False,
     }
-    ai_response = await _forward_to_ai("/ai/project/scopes/analyze", payload)
+    ai_response = await _forward_to_ai("/ai/ask", payload)
 
-    # Parse AI suggestions and create scopes
-    scopes_list = ai_response.get("scopes", [])
+    # Parse scope suggestions from the AI answer
+    import json as _json
+    raw_answer = ai_response.get("answer", "")
+    scopes_list: list[dict[str, Any]] = []
+    try:
+        json_text = raw_answer.strip()
+        if json_text.startswith("```"):
+            json_text = json_text.split("```")[1]
+            if json_text.startswith("json"):
+                json_text = json_text[4:]
+        parsed = _json.loads(json_text)
+        if isinstance(parsed, list):
+            scopes_list = parsed
+    except (_json.JSONDecodeError, IndexError, ValueError):
+        pass
+
     if not scopes_list:
         return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
