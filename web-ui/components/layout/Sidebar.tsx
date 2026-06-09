@@ -125,7 +125,7 @@ export function Sidebar() {
       </div>
 
       {/* Pill navigation */}
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="flex flex-col gap-2 mb-4">
         {pillItems.map((item) => (
           <PillLink
             key={item.href}

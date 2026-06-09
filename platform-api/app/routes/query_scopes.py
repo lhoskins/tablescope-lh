@@ -175,13 +175,27 @@ def _literal(value: Any) -> str:
 def _find_qualified_column(sql: str, field: str) -> str:
     """Find the qualified reference (e.g. p.CategoryID) for a column in SQL.
 
-    Scans the SELECT clause and GROUP BY for a qualified reference like
-    ``alias.field`` or ``"table".field``. Falls back to ``"field"`` if no
-    qualified reference is found (single-table queries).
+    Handles aliased columns: if the field is an alias (e.g. ``Category``
+    from ``c.CategoryName AS Category``), resolves to the actual column
+    expression (``c."CategoryName"``).
+
+    Falls back to ``"field"`` if no qualified reference is found.
     """
     import re
-    # Look for alias.field or "table".field patterns in the full SQL
-    # Patterns: p.CategoryID, "NW_Products_CSV".CategoryID, p."CategoryID"
+
+    # Step 1: Check if 'field' is an alias defined via AS in the SELECT clause
+    # Pattern: <expr> AS <field>  (e.g. c.CategoryName AS Category)
+    alias_pat = re.compile(
+        rf'(\w+\.\w+|\w+\."?\w+"?|"?\w+"?\.\w+)\s+AS\s+"?{re.escape(field)}"?(?:\s|,|$)',
+        re.IGNORECASE,
+    )
+    alias_match = alias_pat.search(sql)
+    if alias_match:
+        # Return the original expression (e.g. c.CategoryName) instead of alias
+        original_expr = alias_match.group(1)
+        return original_expr
+
+    # Step 2: Look for alias.field or "table".field patterns in the full SQL
     patterns = [
         rf'(\w+)\.{re.escape(field)}\b',                  # alias.field
         rf'(\w+)\."?{re.escape(field)}"?',                # alias."field"

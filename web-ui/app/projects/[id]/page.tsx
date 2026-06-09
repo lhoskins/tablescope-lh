@@ -1512,15 +1512,9 @@ export default function ProjectWorkspacePage() {
           )}
           {projectDatasources.length > 0 && (
             <div>
-              <button
-                type="button"
-                onClick={() => setDsListOpen((v) => !v)}
-                className="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
-              >
-                <svg className={`h-4 w-4 text-slate-400 transition-transform ${dsListOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+              <p className="mb-2 px-2 text-sm font-medium text-slate-700">
                 All Datasources ({projectDatasources.length})
-              </button>
-            {dsListOpen && (
+              </p>
             <div className="grid gap-2">
               {projectDatasources.map((ds) => (
                 <div
@@ -1587,7 +1581,6 @@ export default function ProjectWorkspacePage() {
                 </div>
               ))}
             </div>
-            )}
             </div>
           )}
           {dsActionError && (
@@ -2200,15 +2193,9 @@ export default function ProjectWorkspacePage() {
           )}
           {queriesQuery.data && queriesQuery.data.length > 0 && (
             <div>
-              <button
-                type="button"
-                onClick={() => setQueryListOpen((v) => !v)}
-                className="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
-              >
-                <svg className={`h-4 w-4 text-slate-400 transition-transform ${queryListOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+              <p className="mb-2 px-2 text-sm font-medium text-slate-700">
                 All Queries ({queriesQuery.data.length})
-              </button>
-            {queryListOpen && (
+              </p>
             <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
               {queriesQuery.data.map((q) => (
                 <li key={q.id} className="px-4 py-3">
@@ -2332,7 +2319,6 @@ export default function ProjectWorkspacePage() {
                 </li>
               ))}
             </ul>
-            )}
             </div>
           )}
         </div>

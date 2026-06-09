@@ -31,6 +31,8 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
   const [aiDashLoading, setAiDashLoading] = useState(false);
   const [aiDashError, setAiDashError] = useState<string | null>(null);
   const [aiDashSuccess, setAiDashSuccess] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const handleAIGenerateDashboard = useCallback(async (prompt: string) => {
     setAiDashLoading(true);
@@ -70,6 +72,15 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
       apiClient.delete(`/api/projects/${projectId}/dashboards/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
+    },
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      apiClient.put(`/api/projects/${projectId}/dashboards/${id}`, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
+      setRenamingId(null);
     },
   });
 
@@ -153,9 +164,51 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
               >
                 <div
                   className="flex-1 cursor-pointer"
-                  onClick={() => setViewing(dash)}
+                  onClick={() => { if (renamingId !== dash.id) setViewing(dash); }}
                 >
-                  <div className="font-semibold text-slate-900 text-sm">{dash.name}</div>
+                  {renamingId === dash.id ? (
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && renameValue.trim()) {
+                            renameMutation.mutate({ id: dash.id, name: renameValue.trim() });
+                          } else if (e.key === "Escape") {
+                            setRenamingId(null);
+                          }
+                        }}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-sm font-semibold"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => renameValue.trim() && renameMutation.mutate({ id: dash.id, name: renameValue.trim() })}
+                        className="text-xs text-brand hover:text-brand/80"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setRenamingId(null)}
+                        className="text-xs text-slate-400 hover:text-slate-600"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      className="font-semibold text-slate-900 text-sm"
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        if (canEdit) {
+                          setRenamingId(dash.id);
+                          setRenameValue(dash.name);
+                        }
+                      }}
+                    >
+                      {dash.name}
+                    </div>
+                  )}
                   <div className="mt-0.5 text-xs text-slate-400">
                     {widgetCount} widget{widgetCount !== 1 ? "s" : ""} ·{" "}
                     Updated {new Date(dash.updated_at).toLocaleDateString()}
@@ -166,20 +219,32 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
                     {badge.label}
                   </span>
                   {canEdit && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`Delete dashboard "${dash.name}"?`)) {
-                          deleteMutation.mutate(dash.id);
-                        }
-                      }}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
-                      title="Delete"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRenamingId(dash.id);
+                          setRenameValue(dash.name);
+                        }}
+                        className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Delete dashboard "${dash.name}"?`)) {
+                            deleteMutation.mutate(dash.id);
+                          }
+                        }}
+                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                        title="Delete"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </>
                   )}
                   <span
                     onClick={() => setViewing(dash)}
