@@ -400,24 +400,28 @@ async def _ai_analyze_and_create_scopes(
     if not queries:
         return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
-    # Only send queries that have SQL
+    # Only send queries that have SQL — include extracted columns for clarity
     query_infos = []
     query_names: dict[int, str] = {}
     for q in queries:
         query_names[q.id] = q.name
         if q.sql_text:
+            cols = _extract_select_columns(q.sql_text)
             query_infos.append({
                 "id": q.id,
                 "name": q.name,
                 "sql": q.sql_text,
+                "columns": cols,
             })
 
     if not query_infos:
         return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
-    # Build a prompt describing the queries and ask AI to suggest scopes
+    # Build a prompt describing the queries with their exact columns
     query_descriptions = "\n\n".join(
-        f"Query ID={q['id']}, Name=\"{q['name']}\", SQL:\n{q['sql']}"
+        f"Query ID={q['id']}, Name=\"{q['name']}\"\n"
+        f"  SELECT columns: {q['columns']}\n"
+        f"  SQL: {q['sql']}"
         for q in query_infos
     )
     scope_prompt = (
@@ -432,9 +436,12 @@ async def _ai_analyze_and_create_scopes(
         "Price, Quantity)\n"
         "2. Direction: summarized (GROUP BY/SUM/COUNT) → detailed (no aggregation). "
         "Source = aggregated query, Target = raw/detail query.\n"
-        "3. source_field and target_field = exact column alias from SELECT clause.\n"
+        "3. CRITICAL: source_field and target_field MUST be the EXACT same column "
+        "name that appears in both queries' SELECT columns list above. "
+        "CategoryName and CategoryID are DIFFERENT columns — do NOT match them. "
+        "Only match columns with the EXACT SAME NAME in both queries.\n"
         "4. One scope per query-pair per column — no duplicates, no reverse.\n"
-        "5. Both queries must SELECT the column.\n\n"
+        "5. Both queries must have the EXACT column name in their SELECT columns list.\n\n"
         "Return ONLY a JSON array: [{\"source_query_id\": int, "
         "\"source_query_name\": str, \"source_field\": str, "
         "\"target_query_id\": int, \"target_query_name\": str, "
@@ -471,6 +478,16 @@ async def _ai_analyze_and_create_scopes(
     if not scopes_list:
         return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
+    # Build column map for validation: query_id -> set of column names (lowercase)
+    # This catches AI hallucinations where it suggests fields that don't exist
+    query_col_map: dict[int, set[str]] = {}
+    for q in queries:
+        if q.sql_text:
+            cols = _extract_select_columns(q.sql_text)
+            query_col_map[q.id] = {c.lower() for c in cols}
+        else:
+            query_col_map[q.id] = set()
+
     # Find existing scopes to avoid duplicates
     existing_scopes = await session.scalars(
         select(QueryScope).where(
@@ -498,6 +515,12 @@ async def _ai_analyze_and_create_scopes(
         if src_qid not in valid_ids or tgt_qid not in valid_ids:
             continue
         if not src_field or not tgt_field:
+            continue
+
+        # Validate fields actually exist in the queries' SELECT clauses
+        src_cols = query_col_map.get(src_qid, set())
+        tgt_cols = query_col_map.get(tgt_qid, set())
+        if src_field.lower() not in src_cols or tgt_field.lower() not in tgt_cols:
             continue
 
         key = (src_qid, src_field, tgt_qid, tgt_field)
