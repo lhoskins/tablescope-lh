@@ -721,6 +721,61 @@ async def _ai_analyze_and_create_scopes(
                         "reason": f"Cell-level value overlap ({overlap:.0%})",
                     })
 
+    # ── Phase 2c: Exact column-name matching (fallback) ────────────
+    # When sampling fails or the AI omits a suggestion, matching column
+    # names across two queries is still a strong signal.  This catches
+    # cases like CategoryID↔CategoryID where the AI skipped it and
+    # sampling returned no data.
+    for i, qi in enumerate(query_infos):
+        for qj in query_infos[i + 1:]:
+            if qi["id"] == qj["id"]:
+                continue
+            common_cols = set(c.lower() for c in qi["columns"]) & set(
+                c.lower() for c in qj["columns"]
+            )
+            for col_lower in common_cols:
+                if _is_numeric_column(col_lower):
+                    continue
+                # Find original-case column name from each query
+                col_i = next((c for c in qi["columns"] if c.lower() == col_lower), col_lower)
+                col_j = next((c for c in qj["columns"] if c.lower() == col_lower), col_lower)
+
+                # Determine direction
+                i_summ = _is_summarized_query(qi["sql"])
+                j_summ = _is_summarized_query(qj["sql"])
+                if i_summ and not j_summ:
+                    src_qid, src_field = qi["id"], col_i
+                    tgt_qid, tgt_field = qj["id"], col_j
+                elif j_summ and not i_summ:
+                    src_qid, src_field = qj["id"], col_j
+                    tgt_qid, tgt_field = qi["id"], col_i
+                elif i_summ and j_summ:
+                    continue
+                else:
+                    if len(qi["columns"]) <= len(qj["columns"]):
+                        src_qid, src_field = qi["id"], col_i
+                        tgt_qid, tgt_field = qj["id"], col_j
+                    else:
+                        src_qid, src_field = qj["id"], col_j
+                        tgt_qid, tgt_field = qi["id"], col_i
+
+                key = (src_qid, src_field, tgt_qid, tgt_field)
+                rev_key = (tgt_qid, tgt_field, src_qid, src_field)
+                if key in discovered_keys or rev_key in discovered_keys:
+                    continue
+                discovered_keys.add(key)
+
+                validated_scopes.append({
+                    "source_query_id": src_qid,
+                    "source_query_name": query_names.get(src_qid, ""),
+                    "source_field": src_field,
+                    "target_query_id": tgt_qid,
+                    "target_query_name": query_names.get(tgt_qid, ""),
+                    "target_field": tgt_field,
+                    "confidence": 0.85,
+                    "reason": f"Exact column name match ({col_lower})",
+                })
+
     # ── Write validated scopes to database ───────────────────────────
     existing_scopes = await session.scalars(
         select(QueryScope).where(
