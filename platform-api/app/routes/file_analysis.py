@@ -210,6 +210,7 @@ async def finalize_upload(
                     "org_id": str(tenant.id),
                     "user_id": str(user.id),
                     "vdb_type": "user",
+                    "replace": "true",
                 },
                 files={"file": (final_filename, content, "application/octet-stream")},
             )
