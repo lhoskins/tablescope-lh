@@ -76,11 +76,23 @@ function formatTypedValue(value: unknown, type: string | undefined): string {
   }
   if (type === "number") {
     const n = Number(text.replace(/,/g, ""));
-    return Number.isFinite(n) ? n.toLocaleString() : text;
+    if (!Number.isFinite(n)) return text;
+    // Format with 2 decimal places if the number has a fractional part
+    if (!Number.isInteger(n)) {
+      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return n.toLocaleString();
   }
   if (type === "date") {
     const d = new Date(text);
     return Number.isNaN(d.getTime()) ? text : d.toLocaleDateString();
+  }
+  // Auto-detect numeric values with decimals even without explicit type
+  if (type === undefined || type === "string") {
+    const n = Number(text);
+    if (Number.isFinite(n) && text.includes(".") && !Number.isInteger(n)) {
+      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
   }
   return text;
 }

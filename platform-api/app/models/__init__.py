@@ -3,6 +3,12 @@
 from app.models.base import Base
 from app.models.connector_credential import ConnectorCredential
 from app.models.dashboard import Dashboard
+from app.models.data_source_ai_profile import (
+    DataSourceAIProfile,
+    DataSourceAIRecommendation,
+    DataSourceFieldProfile,
+    DataSourceTag,
+)
 from app.models.database_connection import DatabaseConnection
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.file_source_meta import FileSourceMeta
@@ -22,6 +28,10 @@ __all__ = [
     "Base",
     "ConnectorCredential",
     "Dashboard",
+    "DataSourceAIProfile",
+    "DataSourceAIRecommendation",
+    "DataSourceFieldProfile",
+    "DataSourceTag",
     "DatabaseConnection",
     "DataSourceColumn",
     "DatabaseDataSource",

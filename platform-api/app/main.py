@@ -32,6 +32,7 @@ from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
 from app.routes import tenant_data_planes as tenant_data_planes_routes
 from app.routes import tenants as tenants_routes
+from app.routes import file_analysis as file_analysis_routes
 from app.routes import upload as upload_routes
 from app.services.connection_pool import pool_manager
 
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
     app.include_router(saas_sources_routes.router, prefix=api_prefix)
     app.include_router(grid_preferences_routes.router, prefix=api_prefix)
     app.include_router(upload_routes.router, prefix=api_prefix)
+    app.include_router(file_analysis_routes.router, prefix=api_prefix)
     app.include_router(dashboards_routes.router, prefix=api_prefix)
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)
 
