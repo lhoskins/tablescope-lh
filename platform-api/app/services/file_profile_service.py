@@ -144,7 +144,7 @@ def _profile_fields(
         null_count = len(values) - len(non_empty)
         null_percent = (null_count / len(values) * 100) if values else 0
 
-        distinct_values = set()
+        distinct_values: set[str] = set()
         lengths: list[int] = []
         for v in non_empty:
             if len(distinct_values) < MAX_DISTINCT_TRACK:
