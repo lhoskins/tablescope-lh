@@ -412,25 +412,44 @@ async def _sample_query_values(
             s = str(val).strip()
             if not s:
                 continue
-            # Skip purely numeric values — we want identifiers/names
-            try:
-                float(s.replace(",", ""))
-                continue
-            except ValueError:
-                pass
             col_values.setdefault(col, set()).add(s)
     return col_values
 
 
-def _value_overlap(vals_a: set[str], vals_b: set[str]) -> float:
-    """Return the fraction of overlapping values between two sets (Jaccard-like).
+def _has_string_values(vals: set[str]) -> bool:
+    """Return True if the set contains at least one non-numeric string value."""
+    for v in vals:
+        try:
+            float(v.replace(",", ""))
+        except ValueError:
+            return True
+    return False
 
-    Returns 0.0 if either set is empty.
+
+def _string_values(vals: set[str]) -> set[str]:
+    """Return only the non-numeric string values from a set."""
+    result: set[str] = set()
+    for v in vals:
+        try:
+            float(v.replace(",", ""))
+        except ValueError:
+            result.add(v)
+    return result
+
+
+def _value_overlap(vals_a: set[str], vals_b: set[str]) -> float:
+    """Return the fraction of overlapping string values (Jaccard-like).
+
+    Filters out purely numeric values before comparing, so that ID
+    columns (1, 2, 3) don't get compared against name columns.
+    Returns 0.0 if either filtered set is empty.
     """
-    if not vals_a or not vals_b:
+    str_a = _string_values(vals_a)
+    str_b = _string_values(vals_b)
+    if not str_a or not str_b:
         return 0.0
-    intersection = vals_a & vals_b
-    union = vals_a | vals_b
+    intersection = str_a & str_b
+    union = str_a | str_b
     return len(intersection) / len(union) if union else 0.0
 
 
@@ -594,13 +613,19 @@ async def _ai_analyze_and_create_scopes(
         tgt_vals = query_values.get(tgt_qid, {}).get(tgt_field, set())
         overlap = _value_overlap(src_vals, tgt_vals)
 
-        # Accept if: values overlap OR we have no sample data (empty queries)
-        if overlap == 0.0 and src_vals and tgt_vals:
+        # If both queries were sampled (returned data), require overlap.
+        # _value_overlap filters out numeric values, so a column with only
+        # numeric IDs (CategoryID = 1,2,3) will have 0 string values and
+        # overlap will be 0.0 — which correctly rejects CategoryName→CategoryID.
+        src_sampled = src_qid in query_values and bool(query_values[src_qid])
+        tgt_sampled = tgt_qid in query_values and bool(query_values[tgt_qid])
+        if overlap == 0.0 and src_sampled and tgt_sampled:
             logger.info(
-                "Rejected AI scope %s.%s → %s.%s — zero value overlap "
-                "(src=%r, tgt=%r)",
+                "Rejected AI scope %s.%s → %s.%s — zero string value overlap "
+                "(src_strings=%r, tgt_strings=%r)",
                 src_qid, src_field, tgt_qid, tgt_field,
-                list(src_vals)[:3], list(tgt_vals)[:3],
+                list(_string_values(src_vals))[:3],
+                list(_string_values(tgt_vals))[:3],
             )
             continue
 
