@@ -1353,6 +1353,19 @@ async def ai_generate_and_save_dashboard(
             if not existing:
                 existing = await _find_matching_query(widget_sql, widget_title)
 
+            # Tier 3: name-based match — if a query with the same name exists,
+            # reuse it to avoid duplicate-named queries in the project
+            if not existing:
+                candidate_name = f"AI - {widget_title}".lower().strip()
+                for eq in existing_queries:
+                    if eq.name and eq.name.lower().strip() == candidate_name:
+                        existing = eq
+                        logger.info(
+                            "Name-match: reusing query %d (%s) for widget: %s",
+                            eq.id, eq.name, widget_title,
+                        )
+                        break
+
             if existing:
                 reused_queries.append(existing.id)
                 data_source = {"kind": "query", "queryId": existing.id}
