@@ -293,6 +293,27 @@ async def generate_relationships(
     return await _forward_to_ai("/ai/project/relationships/generate", payload)
 
 
+def _is_numeric_column(name: str) -> bool:
+    """Return True if a column name looks like a numeric/aggregate value.
+
+    Numeric columns (Revenue, Amount, Cost, Price, Quantity, Count, Sum, Total,
+    etc.) should NOT be used for drill-down scopes — only identifier/name columns
+    (ProductName, CategoryName, CustomerID, OrderID, etc.) are meaningful for
+    drill-down relationships.
+    """
+    numeric_keywords = {
+        "revenue", "amount", "cost", "price", "quantity", "count", "sum",
+        "total", "average", "avg", "min", "max", "profit", "discount",
+        "sales", "units", "weight", "balance", "fee", "rate", "percent",
+        "percentage", "margin", "tax", "freight", "subtotal",
+    }
+    lower = name.lower()
+    for kw in numeric_keywords:
+        if kw in lower:
+            return True
+    return False
+
+
 def _extract_select_columns(sql: str) -> list[str]:
     """Extract column names/aliases from a SQL SELECT clause using regex.
 
@@ -390,8 +411,13 @@ async def generate_scope_map(
     }
 
     # Find matching columns between query pairs → create scopes automatically
+    # Rules:
+    # 1. Skip numeric columns (Revenue, Amount, Cost, etc.) — only name/ID cols
+    # 2. One-way only: if (A→B) exists, skip (B→A) for same field
     relationships: list[dict[str, Any]] = []
     scopes_created = 0
+    seen_pairs: set[tuple[str, int, int]] = set()  # (field_lower, min_id, max_id)
+
     for source_q in queries:
         source_cols = query_columns.get(source_q.id, [])
         for target_q in queries:
@@ -400,7 +426,15 @@ async def generate_scope_map(
             target_cols = query_columns.get(target_q.id, [])
             common = set(c.lower() for c in source_cols) & set(c.lower() for c in target_cols)
             for field_lower in common:
-                # Find the original-cased field name from each query
+                # Rule 1: skip numeric columns
+                if _is_numeric_column(field_lower):
+                    continue
+                # Rule 2: one-way only — use sorted IDs to detect reverse
+                pair_key = (field_lower, min(source_q.id, target_q.id), max(source_q.id, target_q.id))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+
                 src_field = next((c for c in source_cols if c.lower() == field_lower), field_lower)
                 tgt_field = next((c for c in target_cols if c.lower() == field_lower), field_lower)
                 key = (source_q.id, src_field, target_q.id, tgt_field)
@@ -495,6 +529,9 @@ async def auto_create_scopes_from_queries(
     }
 
     # Find matching columns between query pairs → create scopes
+    # Rules: skip numeric columns, one-way only (no bidirectional duplicates)
+    seen_pairs: set[tuple[str, int, int]] = set()
+
     for source_q in queries:
         source_cols = query_columns.get(source_q.id, [])
         for target_q in queries:
@@ -503,6 +540,13 @@ async def auto_create_scopes_from_queries(
             target_cols = query_columns.get(target_q.id, [])
             common = set(c.lower() for c in source_cols) & set(c.lower() for c in target_cols)
             for field_lower in common:
+                if _is_numeric_column(field_lower):
+                    continue
+                pair_key = (field_lower, min(source_q.id, target_q.id), max(source_q.id, target_q.id))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+
                 src_field = next((c for c in source_cols if c.lower() == field_lower), field_lower)
                 tgt_field = next((c for c in target_cols if c.lower() == field_lower), field_lower)
                 key = (source_q.id, src_field, target_q.id, tgt_field)
