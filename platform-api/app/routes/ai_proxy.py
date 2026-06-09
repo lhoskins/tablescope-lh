@@ -1143,11 +1143,10 @@ async def ai_generate_and_save_query(
 ) -> dict[str, Any]:
     """Generate SQL from a natural language prompt, validate, and save.
 
-    Full action flow:
-    1. Forward prompt to AI server → LLM generates SQL
-    2. Tablescope validates the SQL
-    3. Tablescope creates the SavedQuery
-    4. Tablescope logs the audit trail
+    Supports both new query creation and modification of existing queries.
+    When the prompt indicates modification intent (modify, update, edit,
+    change, add to, etc.) and references an existing query name, the
+    existing query is updated in place instead of creating a new one.
     """
     project = await _check_project_access(session, context, req.project_id)
 
@@ -1162,12 +1161,60 @@ async def ai_generate_and_save_query(
         ds_result = await session.execute(ds_stmt)
         allowed_tables = [ds.view_name for ds in ds_result.scalars()]
 
+    # ── Detect modification intent ────────────────────────────────────
+    import re as _re
+    _MODIFY_PATTERN = _re.compile(
+        r"^(?:modify|update|edit|change|alter|revise|adjust|fix|add\s+to|"
+        r"add\s+.+?\s+to|remove\s+from|include\s+.+?\s+in)\s+",
+        _re.IGNORECASE,
+    )
+    is_modification = bool(_MODIFY_PATTERN.search(req.prompt.strip()))
+
+    # If modification, find the referenced existing query
+    existing_query: SavedQuery | None = None
+    if is_modification:
+        existing_result = await session.scalars(
+            select(SavedQuery).where(SavedQuery.project_id == project.id)
+        )
+        all_queries = list(existing_result)
+        prompt_lower = req.prompt.lower()
+        # Score each query by how well its name matches the prompt
+        best_match: SavedQuery | None = None
+        best_score = 0
+        for eq in all_queries:
+            if not eq.name:
+                continue
+            eq_name_lower = eq.name.lower().strip()
+            # Check if the query name appears in the prompt
+            if eq_name_lower in prompt_lower:
+                score = len(eq_name_lower)
+                if score > best_score:
+                    best_score = score
+                    best_match = eq
+        existing_query = best_match
+        if existing_query:
+            logger.info(
+                "Modification intent detected — updating query %d (%s)",
+                existing_query.id, existing_query.name,
+            )
+
     # Step 1: Call AI server to generate SQL
+    prompt_text = req.prompt
+    if existing_query and existing_query.sql_text:
+        # Include the existing SQL so the AI can modify it
+        prompt_text = (
+            f"{req.prompt}\n\n"
+            f"Here is the current SQL for the query \"{existing_query.name}\":\n"
+            f"{existing_query.sql_text}\n\n"
+            f"Please modify this SQL according to the request above. "
+            f"Return ONLY the modified SQL."
+        )
+
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
-        "prompt": req.prompt,
+        "prompt": prompt_text,
         "allowed_tables": allowed_tables,
     }
     ai_result = await _forward_to_ai("/ai/query/generate", payload)
@@ -1182,10 +1229,30 @@ async def ai_generate_and_save_query(
     # Detect which datasource the SQL references
     left_datasource = _detect_datasource(generated_sql, allowed_tables)
 
+    if existing_query:
+        # Update the existing query in place
+        existing_query.sql_text = generated_sql
+        existing_query.left_datasource = left_datasource
+        existing_query.description = req.description or req.prompt
+        await session.commit()
+        await session.refresh(existing_query)
+
+        logger.info(
+            "AI action: update_query | query_id=%d project=%d tenant=%d user=%d",
+            existing_query.id, project.id, context.tenant_id, context.user_id,
+        )
+        return {
+            "action": "update_query",
+            "status": "updated",
+            "query_id": existing_query.id,
+            "name": existing_query.name,
+            "sql_text": existing_query.sql_text,
+        }
+
     # Step 2: Derive a name if not provided
     name = req.name or _shorten_ai_name(req.prompt)
 
-    # Step 3: Save as query
+    # Step 3: Save as new query
     query = SavedQuery(
         project_id=project.id,
         owner_id=context.user_id,

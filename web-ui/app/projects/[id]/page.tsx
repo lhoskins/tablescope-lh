@@ -817,11 +817,12 @@ export default function ProjectWorkspacePage() {
     setAiQueryError(null);
     setAiQuerySuccess(null);
     try {
-      const result = await apiClient.post<{ query_id: number; name: string; sql_text: string }>(
+      const result = await apiClient.post<{ query_id: number; name: string; sql_text: string; status: string }>(
         "/api/ai/actions/generate-and-save-query",
         { project_id: projectId, prompt },
       );
-      setAiQuerySuccess(`Query saved: ${result.name}`);
+      const verb = result.status === "updated" ? "updated" : "saved";
+      setAiQuerySuccess(`Query ${verb}: ${result.name}`);
       queryClient.invalidateQueries({ queryKey: ["project-queries", projectId] });
     } catch (err) {
       setAiQueryError(err instanceof Error ? err.message : "AI query generation failed");
