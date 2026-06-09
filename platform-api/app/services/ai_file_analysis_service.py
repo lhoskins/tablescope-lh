@@ -57,8 +57,19 @@ Return ONLY valid JSON. No markdown, no explanation outside JSON.
 async def analyze_file_with_ai(
     profile: dict[str, Any],
     project_context: dict[str, Any] | None = None,
+    tenant_id: int = 0,
+    user_id: int = 0,
+    project_id: int = 0,
 ) -> dict[str, Any]:
-    """Send compact file profile to AI and return structured analysis."""
+    """Send compact file profile to AI and return structured analysis.
+
+    Uses the existing /ai/analyze-file endpoint if available, otherwise falls
+    back to the generic /ai/ask endpoint (which is always deployed).
+    """
+    import hashlib
+    import hmac
+    import time
+
     settings = get_settings()
     if not settings.tablescope_ai_enabled or not settings.tablescope_ai_api_url:
         logger.info("AI not configured — returning system-only profile")
@@ -79,26 +90,25 @@ async def analyze_file_with_ai(
         sample_rows=sample_rows_text,
     )
 
-    try:
-        import hashlib
-        import hmac
-        import time
-
-        payload = {
-            "prompt": prompt,
-            "task": "file_analysis",
-            "response_format": "json",
-            "timestamp": time.time(),
-        }
+    def _sign(payload: dict[str, Any]) -> str:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        payload["signature"] = hmac.new(
+        return hmac.new(
             settings.tablescope_ai_signing_secret.encode(),
             canonical.encode(),
             hashlib.sha256,
         ).hexdigest()
 
-        url = f"{settings.tablescope_ai_api_url}/api/v1/analyze-file"
+    # Try dedicated analyze-file endpoint first
+    try:
+        payload: dict[str, Any] = {
+            "prompt": prompt,
+            "task": "file_analysis",
+            "response_format": "json",
+            "timestamp": time.time(),
+        }
+        payload["signature"] = _sign(payload)
 
+        url = f"{settings.tablescope_ai_api_url}/ai/analyze-file"
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
@@ -109,8 +119,77 @@ async def analyze_file_with_ai(
         return _validate_ai_result(result, profile)
 
     except Exception as e:
-        logger.warning("AI file analysis failed, using fallback: %s", e)
+        logger.info("analyze-file endpoint unavailable (%s), using /ai/ask", e)
+
+    # Fallback: use the generic /ai/ask endpoint (always deployed)
+    try:
+        ask_payload: dict[str, Any] = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "question": prompt,
+            "scope": "project",
+            "include_query_history": False,
+            "include_dashboard_context": False,
+            "timestamp": time.time(),
+        }
+        ask_payload["signature"] = _sign(ask_payload)
+
+        url = f"{settings.tablescope_ai_api_url}/ai/ask"
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.post(url, json=ask_payload)
+            resp.raise_for_status()
+            result = resp.json()
+
+        answer = result.get("answer", "")
+        # Parse JSON from the answer text
+        parsed = _extract_json(answer)
+        if parsed:
+            return _validate_ai_result(parsed, profile)
+
+        logger.warning("Could not parse JSON from AI /ask response")
         return _fallback_analysis(profile)
+
+    except Exception as e:
+        logger.warning("AI file analysis failed completely, using fallback: %s", e)
+        return _fallback_analysis(profile)
+
+
+def _extract_json(text: str) -> dict[str, Any] | None:
+    """Extract a JSON object from text that might have markdown fences."""
+    cleaned = text.strip()
+    # Strip markdown code fences
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        # Remove first line (```json) and last line (```)
+        start = 1
+        end = len(lines)
+        for i in range(len(lines) - 1, 0, -1):
+            if lines[i].strip() == "```":
+                end = i
+                break
+        cleaned = "\n".join(lines[start:end])
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find JSON object in the text
+    brace_start = cleaned.find("{")
+    if brace_start >= 0:
+        depth = 0
+        for i in range(brace_start, len(cleaned)):
+            if cleaned[i] == "{":
+                depth += 1
+            elif cleaned[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(cleaned[brace_start : i + 1])
+                    except json.JSONDecodeError:
+                        break
+    return None
 
 
 def _format_field_profiles(fields: list[dict[str, Any]]) -> str:
