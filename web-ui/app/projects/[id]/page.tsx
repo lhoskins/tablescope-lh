@@ -969,10 +969,6 @@ export default function ProjectWorkspacePage() {
       setShowJoinDialog(false);
       setQueryName("");
       setQueryDesc("");
-      // 6D: trigger AI scope refresh if scoping is enabled
-      if (projectQuery.data?.scoping_enabled) {
-        apiClient.post("/api/ai/project/scope-map/auto-create", { project_id: projectId }).catch(() => {});
-      }
     },
   });
 
@@ -1019,10 +1015,6 @@ export default function ProjectWorkspacePage() {
           .then((result) => setSavedQueryResult(result))
           .catch((err) => setSavedQueryError((err as Error).message))
           .finally(() => setSavedQueryLoading(false));
-      }
-      // 6D: trigger AI scope refresh if scoping is enabled
-      if (projectQuery.data?.scoping_enabled) {
-        apiClient.post("/api/ai/project/scope-map/auto-create", { project_id: projectId }).catch(() => {});
       }
     },
   });

@@ -473,25 +473,15 @@ async def auto_create_scopes_from_queries(
     if not queries:
         return {"scopes_created": 0, "message": "No saved queries in project"}
 
-    # Build a map: query_id -> list of field names (from datasource columns)
-    # We'll parse the SQL or use left_datasource to find columns
-    query_fields: dict[int, list[str]] = {}
+    # Build a map: query_id -> list of column names extracted from SQL
+    query_columns: dict[int, list[str]] = {}
     for q in queries:
-        fields: list[str] = []
-        # Get columns from the datasource
-        if q.left_datasource:
-            ds_result = await session.scalars(
-                select(FileSourceMeta).where(
-                    FileSourceMeta.view_name == q.left_datasource,
-                    FileSourceMeta.tenant_id == context.tenant_id,
-                )
-            )
-            ds = ds_result.first()
-            if ds and ds.column_types:
-                fields = [c.get("name", "") for c in ds.column_types if c.get("name")]
-        query_fields[q.id] = fields
+        if q.sql_text:
+            query_columns[q.id] = _extract_select_columns(q.sql_text)
+        else:
+            query_columns[q.id] = []
 
-    # Find matching fields between queries and create scopes
+    # Find existing scopes to avoid duplicates
     scopes_created = 0
     existing_scopes = await session.scalars(
         select(QueryScope).where(
@@ -504,25 +494,27 @@ async def auto_create_scopes_from_queries(
         for s in existing_scopes
     }
 
+    # Find matching columns between query pairs → create scopes
     for source_q in queries:
-        source_fields = query_fields.get(source_q.id, [])
+        source_cols = query_columns.get(source_q.id, [])
         for target_q in queries:
             if source_q.id == target_q.id:
                 continue
-            target_fields = query_fields.get(target_q.id, [])
-            # Find common fields (potential drill-down relationships)
-            common = set(source_fields) & set(target_fields)
-            for field in common:
-                key = (source_q.id, field, target_q.id, field)
+            target_cols = query_columns.get(target_q.id, [])
+            common = set(c.lower() for c in source_cols) & set(c.lower() for c in target_cols)
+            for field_lower in common:
+                src_field = next((c for c in source_cols if c.lower() == field_lower), field_lower)
+                tgt_field = next((c for c in target_cols if c.lower() == field_lower), field_lower)
+                key = (source_q.id, src_field, target_q.id, tgt_field)
                 if key in existing_keys:
                     continue
                 scope = QueryScope(
                     tenant_id=context.tenant_id,
                     project_id=req.project_id,
                     query_id=source_q.id,
-                    source_field=field,
+                    source_field=src_field,
                     target_query_id=target_q.id,
-                    target_field=field,
+                    target_field=tgt_field,
                     created_by=context.user_id,
                 )
                 session.add(scope)
@@ -747,17 +739,9 @@ async def ai_save_query(
     await session.commit()
     await session.refresh(query)
 
-    # Auto-create scopes for this query
-    from app.services.auto_scope import auto_create_scopes_for_query
-    scopes = await auto_create_scopes_for_query(
-        session, query=query, tenant_id=context.tenant_id, user_id=context.user_id,
-    )
-    if scopes > 0:
-        await session.commit()
-
     logger.info(
-        "AI action: save_query | query_id=%d project=%d tenant=%d user=%d scopes=%d",
-        query.id, project.id, context.tenant_id, context.user_id, scopes,
+        "AI action: save_query | query_id=%d project=%d tenant=%d user=%d",
+        query.id, project.id, context.tenant_id, context.user_id,
     )
     return {
         "action": "save_query",
@@ -831,17 +815,9 @@ async def ai_generate_and_save_query(
     await session.commit()
     await session.refresh(query)
 
-    # Auto-create scopes for this query
-    from app.services.auto_scope import auto_create_scopes_for_query
-    scopes = await auto_create_scopes_for_query(
-        session, query=query, tenant_id=context.tenant_id, user_id=context.user_id,
-    )
-    if scopes > 0:
-        await session.commit()
-
     logger.info(
-        "AI action: generate_and_save_query | query_id=%d project=%d tenant=%d user=%d scopes=%d",
-        query.id, project.id, context.tenant_id, context.user_id, scopes,
+        "AI action: generate_and_save_query | query_id=%d project=%d tenant=%d user=%d",
+        query.id, project.id, context.tenant_id, context.user_id,
     )
     return {
         "action": "generate_and_save_query",
