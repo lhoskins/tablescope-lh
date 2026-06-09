@@ -1234,9 +1234,10 @@ async def ai_generate_and_save_dashboard(
     )
     existing_queries = list(existing_queries_result)
 
+    import re as _re
+
     def _normalize_sql(sql: str) -> str:
         """Normalize SQL for comparison — collapse whitespace and lowercase."""
-        import re as _re
         return _re.sub(r"\s+", " ", sql.strip().rstrip(";").lower())
 
     # Build lookup: normalized_sql → SavedQuery
@@ -1244,6 +1245,52 @@ async def ai_generate_and_save_dashboard(
     for eq in existing_queries:
         if eq.sql_text:
             sql_to_query[_normalize_sql(eq.sql_text)] = eq
+
+    # Build summary of existing queries for AI semantic matching
+    existing_summaries = "\n".join(
+        f"  ID={eq.id}, Name=\"{eq.name}\", SQL: {eq.sql_text}"
+        for eq in existing_queries
+        if eq.sql_text
+    )
+
+    async def _find_matching_query(widget_sql: str, widget_title: str) -> SavedQuery | None:
+        """Use AI to find an existing query that serves the same purpose."""
+        if not existing_summaries:
+            return None
+        match_prompt = (
+            f"A new dashboard widget needs this query:\n"
+            f"  Title: \"{widget_title}\"\n"
+            f"  SQL: {widget_sql}\n\n"
+            f"Here are the existing saved queries in the project:\n"
+            f"{existing_summaries}\n\n"
+            f"Does any existing query produce the SAME result (same columns, "
+            f"same data, same aggregations, same grouping)? Minor differences "
+            f"like column order, aliases, CAST wrappers, LIMIT values, or "
+            f"whitespace don't matter — only whether the data returned is "
+            f"functionally equivalent.\n\n"
+            f"If YES: respond with ONLY the number: MATCH=<id>\n"
+            f"If NO existing query matches: respond with ONLY: NO_MATCH"
+        )
+        try:
+            match_response = await _forward_to_ai("/ai/ask", {
+                "tenant_id": context.tenant_id,
+                "user_id": context.user_id,
+                "project_id": req.project_id,
+                "question": match_prompt,
+                "scope": "project",
+                "include_query_history": False,
+                "include_dashboard_context": False,
+            })
+            answer = match_response.get("answer", "").strip()
+            match = _re.search(r"MATCH\s*=\s*(\d+)", answer)
+            if match:
+                match_id = int(match.group(1))
+                for eq in existing_queries:
+                    if eq.id == match_id:
+                        return eq
+        except Exception:
+            logger.warning("AI query matching failed, will create new query")
+        return None
 
     for idx, w in enumerate(widget_defs):
         widget_sql = (w.get("sql", "") or "").rstrip().rstrip(";")
@@ -1255,11 +1302,15 @@ async def ai_generate_and_save_dashboard(
 
         data_source: dict[str, Any] = {"kind": "custom_sql", "customSql": ""}
         if widget_sql:
+            # Tier 1: exact normalized SQL match (instant)
             norm_sql = _normalize_sql(widget_sql)
             existing = sql_to_query.get(norm_sql)
 
+            # Tier 2: AI semantic match (checks if purpose/result is the same)
+            if not existing:
+                existing = await _find_matching_query(widget_sql, widget_title)
+
             if existing:
-                # Reuse existing query instead of creating a duplicate
                 reused_queries.append(existing.id)
                 data_source = {"kind": "query", "queryId": existing.id}
                 logger.info(
@@ -1267,7 +1318,7 @@ async def ai_generate_and_save_dashboard(
                     existing.id, existing.name, widget_title,
                 )
             else:
-                # Create a new SavedQuery
+                # No match — create a new SavedQuery
                 left_ds = _detect_datasource(widget_sql, allowed_tables)
                 query = SavedQuery(
                     project_id=project.id,
@@ -1281,9 +1332,9 @@ async def ai_generate_and_save_dashboard(
                 await session.flush()
                 created_queries.append(query.id)
                 data_source = {"kind": "query", "queryId": query.id}
-                # Add to lookup so subsequent widgets in the same dashboard
-                # can also reuse this query
                 sql_to_query[norm_sql] = query
+                # Also add to existing_queries so AI can match subsequent widgets
+                existing_queries.append(query)
 
         widgets_config.append({
             "id": f"ai_widget_{idx}",
