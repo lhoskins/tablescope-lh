@@ -3,6 +3,26 @@
 import { useState, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
 
+/* ---------- Helpers ---------- */
+
+/** Convert an AI prompt into a short, clean title (mirrors backend _shorten_ai_name). */
+function shortenAiName(prompt: string): string {
+  let s = prompt.trim().replace(/\.$/, "");
+  s = s.replace(
+    /^(?:generate|create|show|build|make|give me|write|produce)\s+(?:a\s+)?(?:query|dashboard|report|chart|table|widget|view)?\s*(?:showing|with|for|of|that shows|to show|displaying)?\s*/i,
+    "",
+  ).trim();
+  if (/^SELECT\b/i.test(s)) s = "Custom SQL Query";
+  if (!s) s = "Query";
+  // Title case, keeping small words lowercase
+  const small = new Set(["by", "of", "and", "the", "in", "for", "with", "to", "a"]);
+  s = s
+    .split(/\s+/)
+    .map((w, i) => (i > 0 && small.has(w.toLowerCase())) ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  return `AI - ${s}`;
+}
+
 /* ---------- Types ---------- */
 
 type AIResponse = {
@@ -333,7 +353,7 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
           {activeFeature === "sql" && question.trim() && (
             <button
               onClick={() => {
-                setSaveName(`AI: ${question.trim().slice(0, 80)}`);
+                setSaveName(shortenAiName(question.trim()));
                 setSaveDescription("");
                 setShowSaveDialog(true);
               }}
@@ -465,7 +485,7 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
                 <h3 className="text-sm font-semibold text-slate-900">Generated SQL</h3>
                 <button
                   onClick={() => {
-                    setSaveName(`AI: ${question.trim().slice(0, 80)}`);
+                    setSaveName(shortenAiName(question.trim()));
                     setSaveDescription(response.explanation || "");
                     setShowSaveDialog(true);
                   }}

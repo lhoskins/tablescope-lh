@@ -39,7 +39,7 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
     try {
       const result = await apiClient.post<{ dashboard_id: number; dashboard_name: string; widgets_created: number }>(
         "/api/ai/actions/generate-and-save-dashboard",
-        { project_id: projectId, prompt, name: `AI: ${prompt.slice(0, 80)}` },
+        { project_id: projectId, prompt },
       );
       setAiDashSuccess(`Dashboard created: ${result.dashboard_name} (${result.widgets_created} widgets)`);
       queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });

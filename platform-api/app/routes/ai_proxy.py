@@ -1258,7 +1258,12 @@ async def ai_generate_and_save_dashboard(
 
     # Take the first suggestion (or the one matching the prompt best)
     suggestion = suggestions[0]
-    dashboard_title = req.name or suggestion.get("title", f"AI Dashboard - {req.prompt or 'auto'}")
+    if req.name:
+        dashboard_title = req.name
+    elif req.prompt:
+        dashboard_title = _shorten_ai_name(req.prompt)
+    else:
+        dashboard_title = suggestion.get("title", "AI - Dashboard")
     widget_defs = suggestion.get("widgets", [])
 
     # Step 2 & 3: For each widget, reuse or create a SavedQuery and build widget config

@@ -819,7 +819,7 @@ export default function ProjectWorkspacePage() {
     try {
       const result = await apiClient.post<{ query_id: number; name: string; sql_text: string }>(
         "/api/ai/actions/generate-and-save-query",
-        { project_id: projectId, prompt, name: `AI: ${prompt.slice(0, 80)}` },
+        { project_id: projectId, prompt },
       );
       setAiQuerySuccess(`Query saved: ${result.name}`);
       queryClient.invalidateQueries({ queryKey: ["project-queries", projectId] });
