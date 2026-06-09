@@ -437,19 +437,31 @@ def _string_values(vals: set[str]) -> set[str]:
     return result
 
 
-def _value_overlap(vals_a: set[str], vals_b: set[str]) -> float:
-    """Return the fraction of overlapping string values (Jaccard-like).
+def _value_overlap(
+    vals_a: set[str],
+    vals_b: set[str],
+    *,
+    same_column_name: bool = False,
+) -> float:
+    """Return the fraction of overlapping values (Jaccard-like).
 
-    Filters out purely numeric values before comparing, so that ID
-    columns (1, 2, 3) don't get compared against name columns.
-    Returns 0.0 if either filtered set is empty.
+    When ``same_column_name`` is False (different column names), filters
+    out numeric values before comparing so that ID columns (1, 2, 3)
+    don't get matched against name columns.
+
+    When ``same_column_name`` is True, compares ALL values including
+    numeric ones — two columns both named "CategoryID" with values
+    {1, 2, 3} should match.
     """
-    str_a = _string_values(vals_a)
-    str_b = _string_values(vals_b)
-    if not str_a or not str_b:
+    if same_column_name:
+        a, b = vals_a, vals_b
+    else:
+        a = _string_values(vals_a)
+        b = _string_values(vals_b)
+    if not a or not b:
         return 0.0
-    intersection = str_a & str_b
-    union = str_a | str_b
+    intersection = a & b
+    union = a | b
     return len(intersection) / len(union) if union else 0.0
 
 
@@ -608,24 +620,24 @@ async def _ai_analyze_and_create_scopes(
         if src_field.lower() not in src_cols or tgt_field.lower() not in tgt_cols:
             continue
 
-        # Validate with sampled cell values — require some overlap
+        # Validate with sampled cell values — require some overlap.
+        # When column names match (e.g. CategoryID↔CategoryID), compare ALL
+        # values including numeric ones. When names differ (e.g.
+        # CategoryName↔CategoryID), only compare string values to prevent
+        # false matches between text and numeric columns.
         src_vals = query_values.get(src_qid, {}).get(src_field, set())
         tgt_vals = query_values.get(tgt_qid, {}).get(tgt_field, set())
-        overlap = _value_overlap(src_vals, tgt_vals)
+        names_match = src_field.lower() == tgt_field.lower()
+        overlap = _value_overlap(src_vals, tgt_vals, same_column_name=names_match)
 
-        # If both queries were sampled (returned data), require overlap.
-        # _value_overlap filters out numeric values, so a column with only
-        # numeric IDs (CategoryID = 1,2,3) will have 0 string values and
-        # overlap will be 0.0 — which correctly rejects CategoryName→CategoryID.
         src_sampled = src_qid in query_values and bool(query_values[src_qid])
         tgt_sampled = tgt_qid in query_values and bool(query_values[tgt_qid])
         if overlap == 0.0 and src_sampled and tgt_sampled:
             logger.info(
-                "Rejected AI scope %s.%s → %s.%s — zero string value overlap "
-                "(src_strings=%r, tgt_strings=%r)",
+                "Rejected AI scope %s.%s → %s.%s — zero value overlap "
+                "(src=%r, tgt=%r, names_match=%s)",
                 src_qid, src_field, tgt_qid, tgt_field,
-                list(_string_values(src_vals))[:3],
-                list(_string_values(tgt_vals))[:3],
+                list(src_vals)[:3], list(tgt_vals)[:3], names_match,
             )
             continue
 
@@ -667,7 +679,8 @@ async def _ai_analyze_and_create_scopes(
                 for col_j, v_j in vals_j.items():
                     if _is_numeric_column(col_j):
                         continue
-                    overlap = _value_overlap(v_i, v_j)
+                    names_match = col_i.lower() == col_j.lower()
+                    overlap = _value_overlap(v_i, v_j, same_column_name=names_match)
                     if overlap < MIN_OVERLAP:
                         continue
 
