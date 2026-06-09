@@ -378,18 +378,82 @@ def _extract_select_columns(sql: str) -> list[str]:
     return cols
 
 
+async def _sample_query_values(
+    *,
+    sql: str,
+    database: str,
+    teiid_host: str | None = None,
+    teiid_port: int | None = None,
+) -> dict[str, set[str]]:
+    """Execute a query with LIMIT 10 and return distinct string values per column.
+
+    Returns a dict mapping column_name → set of non-null, non-numeric
+    distinct string values found in the sample rows.
+    """
+    from app.routes.query import _auto_cast_aggregates, _run_sql
+
+    sample_sql = _auto_cast_aggregates(sql.rstrip().rstrip(";")) + " LIMIT 10"
+    try:
+        result = await _run_sql(
+            database=database, sql=sample_sql,
+            teiid_host=teiid_host, teiid_port=teiid_port,
+        )
+    except Exception:
+        logger.warning("Failed to sample query for scope validation: %s", sql[:80])
+        return {}
+
+    col_values: dict[str, set[str]] = {}
+    for col in result.get("columns", []):
+        col_values[col] = set()
+    for row in result.get("rows", []):
+        for col, val in row.items():
+            if val is None:
+                continue
+            s = str(val).strip()
+            if not s:
+                continue
+            # Skip purely numeric values — we want identifiers/names
+            try:
+                float(s.replace(",", ""))
+                continue
+            except ValueError:
+                pass
+            col_values.setdefault(col, set()).add(s)
+    return col_values
+
+
+def _value_overlap(vals_a: set[str], vals_b: set[str]) -> float:
+    """Return the fraction of overlapping values between two sets (Jaccard-like).
+
+    Returns 0.0 if either set is empty.
+    """
+    if not vals_a or not vals_b:
+        return 0.0
+    intersection = vals_a & vals_b
+    union = vals_a | vals_b
+    return len(intersection) / len(union) if union else 0.0
+
+
 async def _ai_analyze_and_create_scopes(
     *,
     session: AsyncSession,
     context: RequestContext,
     project_id: int,
 ) -> dict[str, Any]:
-    """Send queries to AI server for scope analysis and create QueryScope records.
+    """Hybrid scope analysis: AI suggestions validated by cell-level data.
 
-    The AI determines which columns are meaningful for drill-down and the
-    correct direction (summarized → detailed). No hardcoded rules.
+    Phase 1 — AI Analysis: LLM analyzes SQL structure to suggest scopes
+      (direction, meaningful columns).
+    Phase 2 — Cell Validation: execute each query with LIMIT 10, compare
+      actual cell values to validate AI suggestions and discover cross-column
+      relationships the AI may have missed (e.g. CategoryID ↔ CategoryName
+      when they share actual values).
     """
+    import asyncio
+
     from app.models.query_scope import QueryScope
+    from app.routes.query import _resolve_vdb_database
+    from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
     # Get all saved queries for this project
     queries_result = await session.scalars(
@@ -401,7 +465,7 @@ async def _ai_analyze_and_create_scopes(
         return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
     # Only send queries that have SQL — include extracted columns for clarity
-    query_infos = []
+    query_infos: list[dict[str, Any]] = []
     query_names: dict[int, str] = {}
     for q in queries:
         query_names[q.id] = q.name
@@ -417,7 +481,7 @@ async def _ai_analyze_and_create_scopes(
     if not query_infos:
         return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
-    # Build a prompt describing the queries with their exact columns
+    # ── Phase 1: AI structural analysis ──────────────────────────────
     query_descriptions = "\n\n".join(
         f"Query ID={q['id']}, Name=\"{q['name']}\"\n"
         f"  SELECT columns: {q['columns']}\n"
@@ -429,19 +493,18 @@ async def _ai_analyze_and_create_scopes(
         f"scope relationships.\n\n"
         f"QUERIES:\n{query_descriptions}\n\n"
         "TASK: Find pairs where clicking a cell in the SOURCE query should filter "
-        "the TARGET query by that value.\n\n"
+        "the TARGET query by that value. Columns may have DIFFERENT NAMES across "
+        "queries but still be related (e.g. CategoryName in one query may "
+        "correspond to CategoryID in another if they reference the same entity).\n\n"
         "RULES:\n"
-        "1. Only use identifier/name columns (ProductName, CategoryName, CustomerID, "
-        "OrderID) — NEVER numeric/aggregate columns (Revenue, Amount, Total, Count, "
-        "Price, Quantity)\n"
+        "1. Only use identifier/name columns — NEVER numeric/aggregate columns "
+        "(Revenue, Amount, Total, Count, Price, Quantity)\n"
         "2. Direction: summarized (GROUP BY/SUM/COUNT) → detailed (no aggregation). "
         "Source = aggregated query, Target = raw/detail query.\n"
-        "3. CRITICAL: source_field and target_field MUST be the EXACT same column "
-        "name that appears in both queries' SELECT columns list above. "
-        "CategoryName and CategoryID are DIFFERENT columns — do NOT match them. "
-        "Only match columns with the EXACT SAME NAME in both queries.\n"
-        "4. One scope per query-pair per column — no duplicates, no reverse.\n"
-        "5. Both queries must have the EXACT column name in their SELECT columns list.\n\n"
+        "3. source_field and target_field must be actual column names from the "
+        "respective query's SELECT columns list. They CAN be different names if "
+        "they reference the same business entity.\n"
+        "4. One scope per query-pair per relationship — no duplicates, no reverse.\n\n"
         "Return ONLY a JSON array: [{\"source_query_id\": int, "
         "\"source_query_name\": str, \"source_field\": str, "
         "\"target_query_id\": int, \"target_query_name\": str, "
@@ -457,9 +520,30 @@ async def _ai_analyze_and_create_scopes(
         "include_query_history": False,
         "include_dashboard_context": False,
     }
-    ai_response = await _forward_to_ai("/ai/ask", payload)
 
-    # Parse scope suggestions from the AI answer
+    # Run AI analysis and data sampling in parallel
+    database = await _resolve_vdb_database(
+        session=session, context=context, project_id=project_id,
+    )
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+
+    async def _sample_one(q: dict[str, Any]) -> tuple[int, dict[str, set[str]]]:
+        vals = await _sample_query_values(
+            sql=q["sql"], database=database,
+            teiid_host=endpoint.pg_host, teiid_port=endpoint.pg_port,
+        )
+        return q["id"], vals
+
+    ai_task = asyncio.create_task(_forward_to_ai("/ai/ask", payload))
+    sample_tasks = [asyncio.create_task(_sample_one(q)) for q in query_infos]
+    ai_response, *sample_results = await asyncio.gather(ai_task, *sample_tasks)
+
+    # Build query_id → {column_name: set(values)} from samples
+    query_values: dict[int, dict[str, set[str]]] = {}
+    for qid, col_vals in sample_results:
+        query_values[qid] = col_vals
+
+    # Parse AI suggestions
     import json as _json
     raw_answer = ai_response.get("answer", "")
     scopes_list: list[dict[str, Any]] = []
@@ -475,11 +559,7 @@ async def _ai_analyze_and_create_scopes(
     except (_json.JSONDecodeError, IndexError, ValueError):
         pass
 
-    if not scopes_list:
-        return {"relationships": [], "scopes_created": 0, "status": "ok"}
-
-    # Build column map for validation: query_id -> set of column names (lowercase)
-    # This catches AI hallucinations where it suggests fields that don't exist
+    # Build column map: query_id → set of column names (lowercase)
     query_col_map: dict[int, set[str]] = {}
     for q in queries:
         if q.sql_text:
@@ -488,7 +568,122 @@ async def _ai_analyze_and_create_scopes(
         else:
             query_col_map[q.id] = set()
 
-    # Find existing scopes to avoid duplicates
+    # ── Phase 2: Validate AI suggestions with cell-level data ────────
+    valid_ids = {q.id for q in queries}
+    validated_scopes: list[dict[str, Any]] = []
+
+    for suggestion in scopes_list:
+        src_qid = suggestion.get("source_query_id")
+        tgt_qid = suggestion.get("target_query_id")
+        src_field = suggestion.get("source_field", "")
+        tgt_field = suggestion.get("target_field", "")
+
+        if src_qid not in valid_ids or tgt_qid not in valid_ids:
+            continue
+        if not src_field or not tgt_field:
+            continue
+
+        # Check fields exist in SELECT clauses
+        src_cols = query_col_map.get(src_qid, set())
+        tgt_cols = query_col_map.get(tgt_qid, set())
+        if src_field.lower() not in src_cols or tgt_field.lower() not in tgt_cols:
+            continue
+
+        # Validate with sampled cell values — require some overlap
+        src_vals = query_values.get(src_qid, {}).get(src_field, set())
+        tgt_vals = query_values.get(tgt_qid, {}).get(tgt_field, set())
+        overlap = _value_overlap(src_vals, tgt_vals)
+
+        # Accept if: values overlap OR we have no sample data (empty queries)
+        if overlap == 0.0 and src_vals and tgt_vals:
+            logger.info(
+                "Rejected AI scope %s.%s → %s.%s — zero value overlap "
+                "(src=%r, tgt=%r)",
+                src_qid, src_field, tgt_qid, tgt_field,
+                list(src_vals)[:3], list(tgt_vals)[:3],
+            )
+            continue
+
+        conf = suggestion.get("confidence", 1.0)
+        if overlap > 0:
+            conf = max(conf, overlap)
+
+        validated_scopes.append({
+            "source_query_id": src_qid,
+            "source_query_name": suggestion.get("source_query_name", query_names.get(src_qid, "")),
+            "source_field": src_field,
+            "target_query_id": tgt_qid,
+            "target_query_name": suggestion.get("target_query_name", query_names.get(tgt_qid, "")),
+            "target_field": tgt_field,
+            "confidence": conf,
+            "reason": suggestion.get("reason", ""),
+        })
+
+    # ── Phase 2b: Discover cross-column relationships via value overlap ──
+    # Find columns across different queries that share values even if
+    # the AI didn't suggest them (e.g. CategoryID ↔ CategoryName when the
+    # underlying values are the same entity strings).
+    MIN_OVERLAP = 0.3
+    discovered_keys = {
+        (s["source_query_id"], s["source_field"],
+         s["target_query_id"], s["target_field"])
+        for s in validated_scopes
+    }
+
+    for i, qi in enumerate(query_infos):
+        for qj in query_infos[i + 1:]:
+            if qi["id"] == qj["id"]:
+                continue
+            vals_i = query_values.get(qi["id"], {})
+            vals_j = query_values.get(qj["id"], {})
+            for col_i, v_i in vals_i.items():
+                if _is_numeric_column(col_i):
+                    continue
+                for col_j, v_j in vals_j.items():
+                    if _is_numeric_column(col_j):
+                        continue
+                    overlap = _value_overlap(v_i, v_j)
+                    if overlap < MIN_OVERLAP:
+                        continue
+
+                    # Determine direction: summarized → detailed
+                    i_summ = _is_summarized_query(qi["sql"])
+                    j_summ = _is_summarized_query(qj["sql"])
+                    if i_summ and not j_summ:
+                        src_qid, src_field = qi["id"], col_i
+                        tgt_qid, tgt_field = qj["id"], col_j
+                    elif j_summ and not i_summ:
+                        src_qid, src_field = qj["id"], col_j
+                        tgt_qid, tgt_field = qi["id"], col_i
+                    elif i_summ and j_summ:
+                        continue  # both summarized — skip
+                    else:
+                        # Neither is summarized — pick the shorter one as source
+                        if len(qi["columns"]) <= len(qj["columns"]):
+                            src_qid, src_field = qi["id"], col_i
+                            tgt_qid, tgt_field = qj["id"], col_j
+                        else:
+                            src_qid, src_field = qj["id"], col_j
+                            tgt_qid, tgt_field = qi["id"], col_i
+
+                    key = (src_qid, src_field, tgt_qid, tgt_field)
+                    rev_key = (tgt_qid, tgt_field, src_qid, src_field)
+                    if key in discovered_keys or rev_key in discovered_keys:
+                        continue
+                    discovered_keys.add(key)
+
+                    validated_scopes.append({
+                        "source_query_id": src_qid,
+                        "source_query_name": query_names.get(src_qid, ""),
+                        "source_field": src_field,
+                        "target_query_id": tgt_qid,
+                        "target_query_name": query_names.get(tgt_qid, ""),
+                        "target_field": tgt_field,
+                        "confidence": overlap,
+                        "reason": f"Cell-level value overlap ({overlap:.0%})",
+                    })
+
+    # ── Write validated scopes to database ───────────────────────────
     existing_scopes = await session.scalars(
         select(QueryScope).where(
             QueryScope.project_id == project_id,
@@ -500,68 +695,41 @@ async def _ai_analyze_and_create_scopes(
         for s in existing_scopes
     }
 
-    # Valid query IDs in this project
-    valid_ids = {q.id for q in queries}
-
     relationships: list[dict[str, Any]] = []
     scopes_created = 0
-    for suggestion in scopes_list:
-        src_qid = suggestion.get("source_query_id")
-        tgt_qid = suggestion.get("target_query_id")
-        src_field = suggestion.get("source_field", "")
-        tgt_field = suggestion.get("target_field", "")
+    for s in validated_scopes:
+        key = (s["source_query_id"], s["source_field"],
+               s["target_query_id"], s["target_field"])
 
-        # Validate that IDs belong to this project
-        if src_qid not in valid_ids or tgt_qid not in valid_ids:
-            continue
-        if not src_field or not tgt_field:
-            continue
+        rel = {
+            "left_table": s["source_query_name"],
+            "left_column": s["source_field"],
+            "right_table": s["target_query_name"],
+            "right_column": s["target_field"],
+            "source_query_id": s["source_query_id"],
+            "target_query_id": s["target_query_id"],
+            "confidence": s["confidence"],
+            "reason": s["reason"],
+            "scope_exists": True,
+        }
 
-        # Validate fields actually exist in the queries' SELECT clauses
-        src_cols = query_col_map.get(src_qid, set())
-        tgt_cols = query_col_map.get(tgt_qid, set())
-        if src_field.lower() not in src_cols or tgt_field.lower() not in tgt_cols:
-            continue
-
-        key = (src_qid, src_field, tgt_qid, tgt_field)
         if key in existing_keys:
-            relationships.append({
-                "left_table": suggestion.get("source_query_name", query_names.get(src_qid, "")),
-                "left_column": src_field,
-                "right_table": suggestion.get("target_query_name", query_names.get(tgt_qid, "")),
-                "right_column": tgt_field,
-                "source_query_id": src_qid,
-                "target_query_id": tgt_qid,
-                "confidence": suggestion.get("confidence", 1.0),
-                "reason": suggestion.get("reason", ""),
-                "scope_exists": True,
-            })
+            relationships.append(rel)
             continue
 
         scope = QueryScope(
             tenant_id=context.tenant_id,
             project_id=project_id,
-            query_id=src_qid,
-            source_field=src_field,
-            target_query_id=tgt_qid,
-            target_field=tgt_field,
+            query_id=s["source_query_id"],
+            source_field=s["source_field"],
+            target_query_id=s["target_query_id"],
+            target_field=s["target_field"],
             created_by=context.user_id,
         )
         session.add(scope)
         existing_keys.add(key)
         scopes_created += 1
-
-        relationships.append({
-            "left_table": suggestion.get("source_query_name", query_names.get(src_qid, "")),
-            "left_column": src_field,
-            "right_table": suggestion.get("target_query_name", query_names.get(tgt_qid, "")),
-            "right_column": tgt_field,
-            "source_query_id": src_qid,
-            "target_query_id": tgt_qid,
-            "confidence": suggestion.get("confidence", 1.0),
-            "reason": suggestion.get("reason", ""),
-            "scope_exists": True,
-        })
+        relationships.append(rel)
 
     if scopes_created > 0:
         await session.commit()
