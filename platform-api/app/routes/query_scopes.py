@@ -20,6 +20,7 @@ from app.models.project import Project
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
 from app.routes.query import _resolve_vdb_database, _run_sql
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.schemas.query_scope import (
     QueryScopeCreate,
     QueryScopeFilterRequest,
@@ -241,7 +242,13 @@ async def filter_by_scope(
     database = await _resolve_vdb_database(
         session=session, context=context, project_id=project.id
     )
-    result = await _run_sql(database=database, sql=wrapped)
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    result = await _run_sql(
+        database=database,
+        sql=wrapped,
+        teiid_host=endpoint.pg_host,
+        teiid_port=endpoint.pg_port,
+    )
     return QueryScopeFilterResponse(
         columns=result["columns"],
         rows=result["rows"],
