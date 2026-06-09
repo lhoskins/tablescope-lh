@@ -19,7 +19,7 @@ from app.database import get_db
 from app.models.project import Project
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
-from app.routes.query import _resolve_vdb_database, _run_sql
+from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.schemas.query_scope import (
     QueryScopeCreate,
@@ -231,6 +231,9 @@ async def filter_by_scope(
         raise HTTPException(status_code=400, detail="Target query has no SQL")
     if not _FIELD_RE.match(scope.target_field):
         raise HTTPException(status_code=400, detail="Invalid target field")
+
+    # Auto-cast aggregates (SUM/AVG/MIN/MAX) for Teiid CSV string columns
+    base_sql = _auto_cast_aggregates(base_sql)
 
     limit = max(1, min(payload.limit, 10_000))
     # Inject the filter directly into the target SQL rather than wrapping in a
