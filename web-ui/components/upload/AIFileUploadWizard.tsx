@@ -62,16 +62,14 @@ type AnalysisResult = {
   status: string;
 };
 
-type WizardStep = "upload" | "analyzing" | "summary" | "fields" | "tags" | "recommendations" | "notes" | "finalize";
+type WizardStep = "upload" | "analyzing" | "summary" | "tags" | "notes" | "finalize";
 
-const STEP_ORDER: WizardStep[] = ["upload", "analyzing", "summary", "fields", "tags", "recommendations", "notes", "finalize"];
+const STEP_ORDER: WizardStep[] = ["upload", "analyzing", "summary", "tags", "notes", "finalize"];
 const STEP_LABELS: Record<WizardStep, string> = {
   upload: "Upload",
   analyzing: "Analyzing",
   summary: "Summary",
-  fields: "Fields",
   tags: "Tags",
-  recommendations: "Recommendations",
   notes: "Notes",
   finalize: "Finalize",
 };
@@ -91,7 +89,6 @@ export function AIFileUploadWizard({
   // User edits
   const [tags, setTags] = useState<TagChip[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [fields, setFields] = useState<FieldProfile[]>([]);
   const [userNotes, setUserNotes] = useState("");
   const [userNuances, setUserNuances] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -120,7 +117,6 @@ export function AIFileUploadWizard({
         setAnalysis(result);
         setTags(result.tags);
         setRecommendations(result.recommendations);
-        setFields(result.fields.map((f) => ({ ...f, include_in_ai: f.include_in_ai ?? true })));
         setDisplayName(result.file.file_name);
         setStep("summary");
       } catch (e) {
@@ -235,19 +231,9 @@ export function AIFileUploadWizard({
         <SummaryStep analysis={analysis} displayName={displayName} onDisplayNameChange={setDisplayName} />
       )}
 
-      {/* STEP: Fields */}
-      {step === "fields" && (
-        <FieldsStep fields={fields} onFieldsChange={setFields} />
-      )}
-
       {/* STEP: Tags */}
       {step === "tags" && (
         <TagsStep tags={tags} onTagsChange={setTags} />
-      )}
-
-      {/* STEP: Recommendations */}
-      {step === "recommendations" && (
-        <RecommendationsStep recommendations={recommendations} onRecommendationsChange={setRecommendations} />
       )}
 
       {/* STEP: Notes */}
@@ -417,71 +403,6 @@ function SummaryStep({
   );
 }
 
-function FieldsStep({
-  fields,
-  onFieldsChange,
-}: {
-  fields: FieldProfile[];
-  onFieldsChange: (fields: FieldProfile[]) => void;
-}) {
-  function toggleInclude(idx: number) {
-    const updated = [...fields];
-    updated[idx] = { ...updated[idx], include_in_ai: !updated[idx].include_in_ai };
-    onFieldsChange(updated);
-  }
-
-  return (
-    <div>
-      <h2 className="mb-3 text-lg font-semibold text-slate-900">Field Profiles</h2>
-      <div className="overflow-x-auto rounded-lg border border-slate-200">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Field</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Type</th>
-              <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Nulls</th>
-              <th className="px-3 py-2 text-right text-xs font-medium text-slate-500">Distinct</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">Sample</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500">AI Notes</th>
-              <th className="px-3 py-2 text-center text-xs font-medium text-slate-500">Include</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {fields.map((f, i) => (
-              <tr key={f.field_name} className="hover:bg-slate-50">
-                <td className="px-3 py-2 font-medium text-slate-900">{f.field_name}</td>
-                <td className="px-3 py-2">
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
-                    {f.recommended_type || f.detected_type}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-right text-slate-600">
-                  {f.null_percent > 0 ? `${f.null_percent.toFixed(1)}%` : "\u2014"}
-                </td>
-                <td className="px-3 py-2 text-right text-slate-600">{f.distinct_count}</td>
-                <td className="px-3 py-2 text-slate-500 truncate max-w-[200px]">
-                  {f.sample_values?.slice(0, 3).join(", ")}
-                </td>
-                <td className="px-3 py-2 text-xs text-slate-500 max-w-[200px]">
-                  {f.ai_description || f.ai_quality_notes || "\u2014"}
-                </td>
-                <td className="px-3 py-2 text-center">
-                  <input
-                    type="checkbox"
-                    checked={f.include_in_ai !== false}
-                    onChange={() => toggleInclude(i)}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600"
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 function TagsStep({
   tags,
   onTagsChange,
@@ -554,84 +475,6 @@ function TagsStep({
           + Add Tag
         </button>
       </div>
-    </div>
-  );
-}
-
-function RecommendationsStep({
-  recommendations,
-  onRecommendationsChange,
-}: {
-  recommendations: Recommendation[];
-  onRecommendationsChange: (recs: Recommendation[]) => void;
-}) {
-  function setStatus(idx: number, status: string) {
-    const updated = [...recommendations];
-    updated[idx] = { ...updated[idx], status };
-    onRecommendationsChange(updated);
-  }
-
-  const severityColor: Record<string, string> = {
-    critical: "border-red-200 bg-red-50",
-    warning: "border-amber-200 bg-amber-50",
-    info: "border-blue-200 bg-blue-50",
-  };
-
-  return (
-    <div>
-      <h2 className="mb-3 text-lg font-semibold text-slate-900">AI Recommendations</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Review AI suggestions. Accept or reject each recommendation.
-      </p>
-
-      {recommendations.length === 0 ? (
-        <p className="text-sm text-slate-400">No recommendations generated.</p>
-      ) : (
-        <div className="space-y-3">
-          {recommendations.map((r, i) => (
-            <div key={i} className={`rounded-lg border p-4 ${severityColor[r.severity] || severityColor.info}`}>
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                      r.severity === "critical" ? "bg-red-200 text-red-700" :
-                      r.severity === "warning" ? "bg-amber-200 text-amber-700" :
-                      "bg-blue-200 text-blue-700"
-                    }`}>
-                      {r.severity}
-                    </span>
-                    <span className="text-xs text-slate-400">{r.recommendation_type}</span>
-                  </div>
-                  <h3 className="mt-1 font-medium text-slate-900">{r.title}</h3>
-                  <p className="mt-1 text-sm text-slate-600">{r.description}</p>
-                </div>
-                <div className="ml-4 flex gap-2">
-                  <button
-                    onClick={() => setStatus(i, "accepted")}
-                    className={`rounded-md px-3 py-1 text-xs font-medium ${
-                      r.status === "accepted"
-                        ? "bg-green-600 text-white"
-                        : "border border-green-300 text-green-600 hover:bg-green-50"
-                    }`}
-                  >
-                    Accept
-                  </button>
-                  <button
-                    onClick={() => setStatus(i, "rejected")}
-                    className={`rounded-md px-3 py-1 text-xs font-medium ${
-                      r.status === "rejected"
-                        ? "bg-red-600 text-white"
-                        : "border border-red-300 text-red-600 hover:bg-red-50"
-                    }`}
-                  >
-                    Reject
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
