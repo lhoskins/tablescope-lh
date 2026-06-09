@@ -314,6 +314,22 @@ def _is_numeric_column(name: str) -> bool:
     return False
 
 
+def _is_summarized_query(sql: str) -> bool:
+    """Return True if the SQL is an aggregated/summarized query.
+
+    A query is considered summarized if it contains GROUP BY or aggregate
+    functions (SUM, COUNT, AVG, MIN, MAX). Summarized queries drill DOWN
+    into detailed queries, not the other way around.
+    """
+    import re
+    upper = sql.upper()
+    if re.search(r"\bGROUP\s+BY\b", upper):
+        return True
+    if re.search(r"\b(SUM|COUNT|AVG|MIN|MAX)\s*\(", upper):
+        return True
+    return False
+
+
 def _extract_select_columns(sql: str) -> list[str]:
     """Extract column names/aliases from a SQL SELECT clause using regex.
 
@@ -362,46 +378,61 @@ def _extract_select_columns(sql: str) -> list[str]:
     return cols
 
 
-@router.post("/project/scope-map/generate")
-async def generate_scope_map(
-    req: AIGenerateRelationshipsRequest,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.EDITOR)),
+async def _ai_analyze_and_create_scopes(
+    *,
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
 ) -> dict[str, Any]:
-    """Generate query-based scope map by analyzing saved queries.
+    """Send queries to AI server for scope analysis and create QueryScope records.
 
-    Finds common column names between queries to suggest drill-down scopes.
-    Scopes are query_id-based, NOT datasource-based.
-    Auto-creates QueryScope records for every discovered relationship.
+    The AI determines which columns are meaningful for drill-down and the
+    correct direction (summarized → detailed). No hardcoded rules.
     """
     from app.models.query_scope import QueryScope
 
-    await _check_project_access(session, context, req.project_id)
-
     # Get all saved queries for this project
     queries_result = await session.scalars(
-        select(SavedQuery).where(SavedQuery.project_id == req.project_id)
+        select(SavedQuery).where(SavedQuery.project_id == project_id)
     )
     queries = list(queries_result)
 
     if not queries:
         return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
-    # Build a map: query_id -> list of column names from SQL
-    query_columns: dict[int, list[str]] = {}
+    # Only send queries that have SQL
+    query_infos = []
     query_names: dict[int, str] = {}
     for q in queries:
         query_names[q.id] = q.name
         if q.sql_text:
-            cols = _extract_select_columns(q.sql_text)
-            query_columns[q.id] = cols
-        else:
-            query_columns[q.id] = []
+            query_infos.append({
+                "id": q.id,
+                "name": q.name,
+                "sql": q.sql_text,
+            })
 
-    # Find existing scopes
+    if not query_infos:
+        return {"relationships": [], "scopes_created": 0, "status": "ok"}
+
+    # Call AI server for scope analysis
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": project_id,
+        "queries": query_infos,
+    }
+    ai_response = await _forward_to_ai("/ai/project/scopes/analyze", payload)
+
+    # Parse AI suggestions and create scopes
+    scopes_list = ai_response.get("scopes", [])
+    if not scopes_list:
+        return {"relationships": [], "scopes_created": 0, "status": "ok"}
+
+    # Find existing scopes to avoid duplicates
     existing_scopes = await session.scalars(
         select(QueryScope).where(
-            QueryScope.project_id == req.project_id,
+            QueryScope.project_id == project_id,
             QueryScope.tenant_id == context.tenant_id,
         )
     )
@@ -410,66 +441,62 @@ async def generate_scope_map(
         for s in existing_scopes
     }
 
-    # Find matching columns between query pairs → create scopes automatically
-    # Rules:
-    # 1. Skip numeric columns (Revenue, Amount, Cost, etc.) — only name/ID cols
-    # 2. One-way only: if (A→B) exists, skip (B→A) for same field
+    # Valid query IDs in this project
+    valid_ids = {q.id for q in queries}
+
     relationships: list[dict[str, Any]] = []
     scopes_created = 0
-    seen_pairs: set[tuple[str, int, int]] = set()  # (field_lower, min_id, max_id)
+    for suggestion in scopes_list:
+        src_qid = suggestion.get("source_query_id")
+        tgt_qid = suggestion.get("target_query_id")
+        src_field = suggestion.get("source_field", "")
+        tgt_field = suggestion.get("target_field", "")
 
-    for source_q in queries:
-        source_cols = query_columns.get(source_q.id, [])
-        for target_q in queries:
-            if source_q.id == target_q.id:
-                continue
-            target_cols = query_columns.get(target_q.id, [])
-            common = set(c.lower() for c in source_cols) & set(c.lower() for c in target_cols)
-            for field_lower in common:
-                # Rule 1: skip numeric columns
-                if _is_numeric_column(field_lower):
-                    continue
-                # Rule 2: one-way only — use sorted IDs to detect reverse
-                pair_key = (field_lower, min(source_q.id, target_q.id), max(source_q.id, target_q.id))
-                if pair_key in seen_pairs:
-                    continue
-                seen_pairs.add(pair_key)
+        # Validate that IDs belong to this project
+        if src_qid not in valid_ids or tgt_qid not in valid_ids:
+            continue
+        if not src_field or not tgt_field:
+            continue
 
-                src_field = next((c for c in source_cols if c.lower() == field_lower), field_lower)
-                tgt_field = next((c for c in target_cols if c.lower() == field_lower), field_lower)
-                key = (source_q.id, src_field, target_q.id, tgt_field)
-                already_existed = key in existing_keys
+        key = (src_qid, src_field, tgt_qid, tgt_field)
+        if key in existing_keys:
+            relationships.append({
+                "left_table": suggestion.get("source_query_name", query_names.get(src_qid, "")),
+                "left_column": src_field,
+                "right_table": suggestion.get("target_query_name", query_names.get(tgt_qid, "")),
+                "right_column": tgt_field,
+                "source_query_id": src_qid,
+                "target_query_id": tgt_qid,
+                "confidence": suggestion.get("confidence", 1.0),
+                "reason": suggestion.get("reason", ""),
+                "scope_exists": True,
+            })
+            continue
 
-                # Auto-create the scope if it doesn't exist yet
-                if not already_existed:
-                    scope = QueryScope(
-                        tenant_id=context.tenant_id,
-                        project_id=req.project_id,
-                        query_id=source_q.id,
-                        source_field=src_field,
-                        target_query_id=target_q.id,
-                        target_field=tgt_field,
-                        created_by=context.user_id,
-                    )
-                    session.add(scope)
-                    existing_keys.add(key)
-                    scopes_created += 1
+        scope = QueryScope(
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            query_id=src_qid,
+            source_field=src_field,
+            target_query_id=tgt_qid,
+            target_field=tgt_field,
+            created_by=context.user_id,
+        )
+        session.add(scope)
+        existing_keys.add(key)
+        scopes_created += 1
 
-                relationships.append({
-                    "left_table": query_names[source_q.id],
-                    "left_column": src_field,
-                    "right_table": query_names[target_q.id],
-                    "right_column": tgt_field,
-                    "source_query_id": source_q.id,
-                    "target_query_id": target_q.id,
-                    "confidence": 1.0,
-                    "reason": (
-                        f"Both queries have a column named '{src_field}' — "
-                        f"clicking a value in '{query_names[source_q.id]}' can "
-                        f"drill down into '{query_names[target_q.id]}'"
-                    ),
-                    "scope_exists": True,  # always true — auto-created
-                })
+        relationships.append({
+            "left_table": suggestion.get("source_query_name", query_names.get(src_qid, "")),
+            "left_column": src_field,
+            "right_table": suggestion.get("target_query_name", query_names.get(tgt_qid, "")),
+            "right_column": tgt_field,
+            "source_query_id": src_qid,
+            "target_query_id": tgt_qid,
+            "confidence": suggestion.get("confidence", 1.0),
+            "reason": suggestion.get("reason", ""),
+            "scope_exists": True,
+        })
 
     if scopes_created > 0:
         await session.commit()
@@ -481,97 +508,45 @@ async def generate_scope_map(
     }
 
 
+@router.post("/project/scope-map/generate")
+async def generate_scope_map(
+    req: AIGenerateRelationshipsRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Generate query-based scope map using AI analysis.
+
+    Sends all saved queries to the AI server which determines:
+    1. Which columns are meaningful for drill-down (not aggregates)
+    2. The correct direction (summarized → detailed)
+    Auto-creates QueryScope records from AI suggestions.
+    """
+    await _check_project_access(session, context, req.project_id)
+    return await _ai_analyze_and_create_scopes(
+        session=session, context=context, project_id=req.project_id
+    )
+
+
 @router.post("/project/scope-map/auto-create")
 async def auto_create_scopes_from_queries(
     req: AIGenerateRelationshipsRequest,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict[str, Any]:
-    """Auto-create QueryScope records by analyzing saved queries.
+    """Auto-create QueryScope records using AI analysis.
 
-    When scoping is toggled ON, this endpoint:
-    1. Fetches all saved queries for the project
-    2. Finds matching fields between queries (same column name = drill-down)
-    3. Creates QueryScope records for each match
+    When scoping is toggled ON, this endpoint sends all saved queries to
+    the AI server which determines meaningful drill-down scopes and their
+    direction (summarized → detailed).
     """
-    from app.models.query_scope import QueryScope
-
     await _check_project_access(session, context, req.project_id)
-
-    # Get all saved queries for this project
-    queries_result = await session.scalars(
-        select(SavedQuery).where(SavedQuery.project_id == req.project_id)
+    result = await _ai_analyze_and_create_scopes(
+        session=session, context=context, project_id=req.project_id
     )
-    queries = list(queries_result)
-
-    if not queries:
-        return {"scopes_created": 0, "message": "No saved queries in project"}
-
-    # Build a map: query_id -> list of column names extracted from SQL
-    query_columns: dict[int, list[str]] = {}
-    for q in queries:
-        if q.sql_text:
-            query_columns[q.id] = _extract_select_columns(q.sql_text)
-        else:
-            query_columns[q.id] = []
-
-    # Find existing scopes to avoid duplicates
-    scopes_created = 0
-    existing_scopes = await session.scalars(
-        select(QueryScope).where(
-            QueryScope.project_id == req.project_id,
-            QueryScope.tenant_id == context.tenant_id,
-        )
-    )
-    existing_keys = {
-        (s.query_id, s.source_field, s.target_query_id, s.target_field)
-        for s in existing_scopes
-    }
-
-    # Find matching columns between query pairs → create scopes
-    # Rules: skip numeric columns, one-way only (no bidirectional duplicates)
-    seen_pairs: set[tuple[str, int, int]] = set()
-
-    for source_q in queries:
-        source_cols = query_columns.get(source_q.id, [])
-        for target_q in queries:
-            if source_q.id == target_q.id:
-                continue
-            target_cols = query_columns.get(target_q.id, [])
-            common = set(c.lower() for c in source_cols) & set(c.lower() for c in target_cols)
-            for field_lower in common:
-                if _is_numeric_column(field_lower):
-                    continue
-                pair_key = (field_lower, min(source_q.id, target_q.id), max(source_q.id, target_q.id))
-                if pair_key in seen_pairs:
-                    continue
-                seen_pairs.add(pair_key)
-
-                src_field = next((c for c in source_cols if c.lower() == field_lower), field_lower)
-                tgt_field = next((c for c in target_cols if c.lower() == field_lower), field_lower)
-                key = (source_q.id, src_field, target_q.id, tgt_field)
-                if key in existing_keys:
-                    continue
-                scope = QueryScope(
-                    tenant_id=context.tenant_id,
-                    project_id=req.project_id,
-                    query_id=source_q.id,
-                    source_field=src_field,
-                    target_query_id=target_q.id,
-                    target_field=tgt_field,
-                    created_by=context.user_id,
-                )
-                session.add(scope)
-                existing_keys.add(key)
-                scopes_created += 1
-
-    if scopes_created > 0:
-        await session.commit()
-
     return {
-        "scopes_created": scopes_created,
-        "total_queries": len(queries),
-        "message": f"Created {scopes_created} scope(s) from {len(queries)} queries",
+        "scopes_created": result["scopes_created"],
+        "total_queries": len(result.get("relationships", [])),
+        "message": f"Created {result['scopes_created']} scope(s) via AI analysis",
     }
 
 
