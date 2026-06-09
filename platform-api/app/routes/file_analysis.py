@@ -15,9 +15,9 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.file_source_meta import FileSourceMeta
-from app.services.file_profile_service import profile_uploaded_file
-from app.services.ai_file_analysis_service import analyze_file_with_ai
 from app.services import data_source_metadata_service as metadata_svc
+from app.services.ai_file_analysis_service import analyze_file_with_ai
+from app.services.file_profile_service import profile_uploaded_file
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/data-sources", tags=["file-analysis"])
@@ -154,6 +154,9 @@ async def finalize_upload(
     project_id = req.project_id or upload_data.get("project_id")
 
     # Forward file to Teiid via the existing upload mechanism
+    import httpx
+
+    from app.models.project import Project
     from app.models.tenant import Tenant
     from app.models.user import User
     from app.services.file_sources import (
@@ -165,10 +168,6 @@ async def finalize_upload(
         sanitize_xlsx_content,
     )
     from app.services.tenant_teiid_resolver import TenantTeiidResolver
-    from app.config import get_settings
-    from app.models.project import Project
-
-    import httpx
 
     user = await session.get(User, context.user_id)
     if user is None:

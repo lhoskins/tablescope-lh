@@ -75,7 +75,7 @@ def _profile_csv(
         "column_count": col_count,
         "sheet_name": None,
         "fields": fields,
-        "sample_rows": [dict(zip(headers, r)) for r in sample_rows[:10]],
+        "sample_rows": [dict(zip(headers, r, strict=False)) for r in sample_rows[:10]],
     }
 
 
@@ -122,7 +122,7 @@ def _profile_excel(
         "column_count": col_count,
         "sheet_name": sheet_name,
         "fields": fields,
-        "sample_rows": [dict(zip(headers, r)) for r in rows[:10]],
+        "sample_rows": [dict(zip(headers, r, strict=False)) for r in rows[:10]],
     }
 
 

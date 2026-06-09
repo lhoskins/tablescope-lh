@@ -21,6 +21,7 @@ from app.routes import ai_proxy as ai_proxy_routes
 from app.routes import auth as auth_routes
 from app.routes import dashboards as dashboards_routes
 from app.routes import database_sources as database_sources_routes
+from app.routes import file_analysis as file_analysis_routes
 from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
 from app.routes import projects as projects_routes
@@ -32,7 +33,6 @@ from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
 from app.routes import tenant_data_planes as tenant_data_planes_routes
 from app.routes import tenants as tenants_routes
-from app.routes import file_analysis as file_analysis_routes
 from app.routes import upload as upload_routes
 from app.services.connection_pool import pool_manager
 
