@@ -172,6 +172,31 @@ def _literal(value: Any) -> str:
     return f"'{text}'"
 
 
+def _find_qualified_column(sql: str, field: str) -> str:
+    """Find the qualified reference (e.g. p.CategoryID) for a column in SQL.
+
+    Scans the SELECT clause and GROUP BY for a qualified reference like
+    ``alias.field`` or ``"table".field``. Falls back to ``"field"`` if no
+    qualified reference is found (single-table queries).
+    """
+    import re
+    # Look for alias.field or "table".field patterns in the full SQL
+    # Patterns: p.CategoryID, "NW_Products_CSV".CategoryID, p."CategoryID"
+    patterns = [
+        rf'(\w+)\.{re.escape(field)}\b',                  # alias.field
+        rf'(\w+)\."?{re.escape(field)}"?',                # alias."field"
+        rf'"(\w+)"\.{re.escape(field)}\b',                # "table".field
+        rf'"(\w+)"\."?{re.escape(field)}"?',              # "table"."field"
+    ]
+    for pat in patterns:
+        m = re.search(pat, sql, re.IGNORECASE)
+        if m:
+            qualifier = m.group(1)
+            return f'{qualifier}."{field}"'
+    # No qualified reference found — use quoted field name
+    return f'"{field}"'
+
+
 def _inject_where(sql: str, condition: str, limit: int) -> str:
     """Inject a WHERE/AND condition into a SQL query without subquery wrapping.
 
@@ -238,8 +263,11 @@ async def filter_by_scope(
     limit = max(1, min(payload.limit, 10_000))
     # Inject the filter directly into the target SQL rather than wrapping in a
     # derived table (Teiid can't infer types for computed columns in subqueries).
+    # Use the qualified column reference from the SELECT clause when available
+    # to avoid "ambiguous column" errors in JOINed queries.
     field = scope.target_field.split(".")[-1]
-    filter_clause = f'"{field}" = {_literal(payload.value)}'
+    qualified_field = _find_qualified_column(base_sql, field)
+    filter_clause = f'{qualified_field} = {_literal(payload.value)}'
     wrapped = _inject_where(base_sql, filter_clause, limit)
 
     database = await _resolve_vdb_database(
