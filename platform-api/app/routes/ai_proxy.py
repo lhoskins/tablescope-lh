@@ -1223,9 +1223,27 @@ async def ai_generate_and_save_dashboard(
     dashboard_title = req.name or suggestion.get("title", f"AI Dashboard - {req.prompt or 'auto'}")
     widget_defs = suggestion.get("widgets", [])
 
-    # Step 2 & 3: For each widget, create a SavedQuery and build widget config
+    # Step 2 & 3: For each widget, reuse or create a SavedQuery and build widget config
     widgets_config: list[dict[str, Any]] = []
     created_queries: list[int] = []
+    reused_queries: list[int] = []
+
+    # Pre-fetch all existing saved queries for this project to check for duplicates
+    existing_queries_result = await session.scalars(
+        select(SavedQuery).where(SavedQuery.project_id == project.id)
+    )
+    existing_queries = list(existing_queries_result)
+
+    def _normalize_sql(sql: str) -> str:
+        """Normalize SQL for comparison — collapse whitespace and lowercase."""
+        import re as _re
+        return _re.sub(r"\s+", " ", sql.strip().rstrip(";").lower())
+
+    # Build lookup: normalized_sql → SavedQuery
+    sql_to_query: dict[str, SavedQuery] = {}
+    for eq in existing_queries:
+        if eq.sql_text:
+            sql_to_query[_normalize_sql(eq.sql_text)] = eq
 
     for idx, w in enumerate(widget_defs):
         widget_sql = (w.get("sql", "") or "").rstrip().rstrip(";")
@@ -1235,23 +1253,37 @@ async def ai_generate_and_save_dashboard(
         y_col = w.get("y_column") or ""
         aggregation = w.get("aggregation") or "count"
 
-        # Create a SavedQuery for this widget's SQL
         data_source: dict[str, Any] = {"kind": "custom_sql", "customSql": ""}
         if widget_sql:
-            # Detect which datasource the SQL references
-            left_ds = _detect_datasource(widget_sql, allowed_tables)
-            query = SavedQuery(
-                project_id=project.id,
-                owner_id=context.user_id,
-                name=f"{dashboard_title} — {widget_title}",
-                description=f"Auto-created for AI dashboard widget: {widget_title}",
-                sql_text=widget_sql,
-                left_datasource=left_ds,
-            )
-            session.add(query)
-            await session.flush()
-            created_queries.append(query.id)
-            data_source = {"kind": "query", "queryId": query.id}
+            norm_sql = _normalize_sql(widget_sql)
+            existing = sql_to_query.get(norm_sql)
+
+            if existing:
+                # Reuse existing query instead of creating a duplicate
+                reused_queries.append(existing.id)
+                data_source = {"kind": "query", "queryId": existing.id}
+                logger.info(
+                    "Reusing existing query %d (%s) for dashboard widget: %s",
+                    existing.id, existing.name, widget_title,
+                )
+            else:
+                # Create a new SavedQuery
+                left_ds = _detect_datasource(widget_sql, allowed_tables)
+                query = SavedQuery(
+                    project_id=project.id,
+                    owner_id=context.user_id,
+                    name=f"{dashboard_title} — {widget_title}",
+                    description=f"Auto-created for AI dashboard widget: {widget_title}",
+                    sql_text=widget_sql,
+                    left_datasource=left_ds,
+                )
+                session.add(query)
+                await session.flush()
+                created_queries.append(query.id)
+                data_source = {"kind": "query", "queryId": query.id}
+                # Add to lookup so subsequent widgets in the same dashboard
+                # can also reuse this query
+                sql_to_query[norm_sql] = query
 
         widgets_config.append({
             "id": f"ai_widget_{idx}",
@@ -1292,10 +1324,10 @@ async def ai_generate_and_save_dashboard(
     await session.refresh(dashboard)
 
     logger.info(
-        "AI action: generate_and_save_dashboard | dashboard_id=%d widgets=%d queries=%d "
-        "project=%d tenant=%d user=%d",
+        "AI action: generate_and_save_dashboard | dashboard_id=%d widgets=%d "
+        "queries_created=%d queries_reused=%d project=%d tenant=%d user=%d",
         dashboard.id, len(widgets_config), len(created_queries),
-        project.id, context.tenant_id, context.user_id,
+        len(reused_queries), project.id, context.tenant_id, context.user_id,
     )
     return {
         "action": "generate_and_save_dashboard",
@@ -1304,6 +1336,7 @@ async def ai_generate_and_save_dashboard(
         "dashboard_name": dashboard_title,
         "widgets_created": len(widgets_config),
         "queries_created": created_queries,
+        "queries_reused": reused_queries,
         "model_used": ai_result.get("model_used", ""),
     }
 
