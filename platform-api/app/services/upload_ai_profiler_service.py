@@ -106,20 +106,33 @@ async def profile_uploaded_file(
 
     col_names_lower = {c.get("name", "").lower().replace("_", "") for c in columns}
 
-    def _col_overlap(example_fields: list[str]) -> bool:
-        for ef in example_fields:
-            if ef.lower().replace("_", "") in col_names_lower:
-                return True
-        return False
+    GENERIC_FIELDS = {
+        "status", "priority", "category", "service", "type", "date",
+        "name", "id", "description", "owner", "notes",
+    }
 
-    relevant_tags = [
-        t for t in catalog_data["reference_tags"]
-        if _col_overlap(t.get("example_fields", []))
+    def _col_match_score(example_fields: list[str]) -> int:
+        score = 0
+        for ef in example_fields:
+            norm = ef.lower().replace("_", "")
+            if norm in col_names_lower:
+                if norm in GENERIC_FIELDS:
+                    score += 1
+                else:
+                    score += 3
+        return score
+
+    scored_tags = [
+        (t, _col_match_score(t.get("example_fields", [])))
+        for t in catalog_data["reference_tags"]
     ]
-    relevant_kpis = [
-        k for k in catalog_data["reference_kpis"]
-        if _col_overlap(k.get("required_fields", []))
+    scored_kpis = [
+        (k, _col_match_score(k.get("required_fields", [])))
+        for k in catalog_data["reference_kpis"]
     ]
+
+    relevant_tags = [t for t, s in scored_tags if s >= 3]
+    relevant_kpis = [k for k, s in scored_kpis if s >= 3]
 
     if not relevant_tags:
         relevant_tags = catalog_data["reference_tags"]
