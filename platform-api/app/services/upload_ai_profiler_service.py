@@ -104,8 +104,30 @@ async def profile_uploaded_file(
 
     catalog_data = await get_tags_and_kpis_for_ai_prompt(session, tenant_id)
 
-    ref_tags_text = json.dumps(catalog_data["reference_tags"], indent=2)
-    ref_kpis_text = json.dumps(catalog_data["reference_kpis"], indent=2)
+    col_names_lower = {c.get("name", "").lower().replace("_", "") for c in columns}
+
+    def _col_overlap(example_fields: list[str]) -> bool:
+        for ef in example_fields:
+            if ef.lower().replace("_", "") in col_names_lower:
+                return True
+        return False
+
+    relevant_tags = [
+        t for t in catalog_data["reference_tags"]
+        if _col_overlap(t.get("example_fields", []))
+    ]
+    relevant_kpis = [
+        k for k in catalog_data["reference_kpis"]
+        if _col_overlap(k.get("required_fields", []))
+    ]
+
+    if not relevant_tags:
+        relevant_tags = catalog_data["reference_tags"]
+    if not relevant_kpis:
+        relevant_kpis = catalog_data["reference_kpis"]
+
+    ref_tags_text = json.dumps(relevant_tags, indent=2)
+    ref_kpis_text = json.dumps(relevant_kpis, indent=2)
 
     columns_text = "\n".join(
         f"- {c.get('name', '?')}: type={c.get('type', '?')}"
@@ -128,7 +150,24 @@ async def profile_uploaded_file(
         reference_kpis=ref_kpis_text,
     )
 
+    logger.info(
+        "Catalog profiling %s: %d columns [%s], %d relevant tags, %d relevant KPIs",
+        file_name,
+        len(columns),
+        ", ".join(c.get("name", "?") for c in columns),
+        len(relevant_tags),
+        len(relevant_kpis),
+    )
+
     ai_result = await _call_ai(settings, prompt, tenant_id, user_id, project_id)
+    if ai_result:
+        logger.info(
+            "Catalog profile result for %s: domain=%s, tags=%s, kpis=%s",
+            file_name,
+            ai_result.get("business_domain"),
+            [t.get("tag_key") for t in ai_result.get("suggested_tags", [])],
+            [k.get("kpi_key") for k in ai_result.get("suggested_kpis", [])],
+        )
 
     if ai_result and persist and source_id and project_id:
         await _persist_suggestions(
