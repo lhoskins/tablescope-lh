@@ -124,6 +124,9 @@ class AIPermissionsResponse(BaseModel):
     accepted_kpis: list[dict[str, Any]] = []
     enabled_reference_tags: list[dict[str, Any]] = []
     enabled_reference_kpis: list[dict[str, Any]] = []
+    documents: list[dict[str, Any]] = []
+    graph_nodes: list[dict[str, Any]] = []
+    graph_edges: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------
@@ -1099,6 +1102,64 @@ async def check_permissions(
     ref_tags = await get_reference_tags(session, tenant_id)
     ref_kpis = await get_reference_kpis(session, tenant_id)
 
+    # Fetch project documents (unstructured assets with AI profiles)
+    from app.models.project_asset import ProjectAsset
+    doc_stmt = select(ProjectAsset).where(
+        ProjectAsset.project_id == project_id,
+        ProjectAsset.tenant_id == tenant_id,
+        ProjectAsset.status != "deleted",
+    )
+    doc_result = await session.execute(doc_stmt)
+    documents: list[dict[str, Any]] = []
+    for doc in doc_result.scalars():
+        doc_entry: dict[str, Any] = {
+            "id": doc.id,
+            "title": doc.title or doc.filename,
+            "filename": doc.filename,
+            "asset_type": doc.asset_type,
+            "ai_summary": doc.ai_summary or "",
+            "ai_status": doc.ai_status or "",
+        }
+        if doc.ai_metadata:
+            doc_entry["tags"] = [
+                t.get("tag_key", t.get("display_name", ""))
+                for t in doc.ai_metadata.get("tags", [])
+            ]
+            doc_entry["entities"] = doc.ai_metadata.get("entities", [])
+            doc_entry["recommended_kpis"] = [
+                k.get("kpi_key", k.get("display_name", ""))
+                for k in doc.ai_metadata.get("recommended_kpis", [])
+            ]
+        documents.append(doc_entry)
+
+    # Fetch project graph nodes and edges
+    from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
+    node_stmt = select(AIProjectGraphNode).where(
+        AIProjectGraphNode.project_id == project_id,
+        AIProjectGraphNode.tenant_id == tenant_id,
+    )
+    node_result = await session.execute(node_stmt)
+    graph_nodes = [
+        {"id": n.id, "node_type": n.node_type, "name": n.name, "label": n.name}
+        for n in node_result.scalars()
+    ]
+
+    edge_stmt = select(AIProjectGraphEdge).where(
+        AIProjectGraphEdge.project_id == project_id,
+        AIProjectGraphEdge.tenant_id == tenant_id,
+    )
+    edge_result = await session.execute(edge_stmt)
+    graph_edges = [
+        {
+            "id": e.id,
+            "from_node_id": e.from_node_id,
+            "to_node_id": e.to_node_id,
+            "edge_type": e.edge_type,
+            "confidence": e.confidence,
+        }
+        for e in edge_result.scalars()
+    ]
+
     return AIPermissionsResponse(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -1114,6 +1175,9 @@ async def check_permissions(
         accepted_kpis=accepted_kpis,
         enabled_reference_tags=ref_tags,
         enabled_reference_kpis=ref_kpis,
+        documents=documents,
+        graph_nodes=graph_nodes,
+        graph_edges=graph_edges,
     )
 
 

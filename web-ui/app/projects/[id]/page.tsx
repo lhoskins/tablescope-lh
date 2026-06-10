@@ -14,6 +14,7 @@ import { AIPanel } from "@/components/ai/AIPanel";
 import { AIPromptBar } from "@/components/ai/AIPromptBar";
 import { ScopesTab } from "@/components/scopes/ScopesTab";
 import { QueryBuilder } from "@/components/query-builder/QueryBuilder";
+import { DocumentsTab } from "@/components/documents/DocumentsTab";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -130,7 +131,7 @@ export default function ProjectWorkspacePage() {
   const meta = getUserMeta();
 
   // ── Tab state ─────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "dashboards" | "scopes" | "ai" | "members">("datasources");
+  const [activeTab, setActiveTab] = useState<"datasources" | "queries" | "dashboards" | "documents" | "scopes" | "ai" | "members">("datasources");
 
   // ── Collapsible panels ──────────────────────────────────────────
   const [dsListOpen, setDsListOpen] = useState(false);
@@ -617,7 +618,7 @@ export default function ProjectWorkspacePage() {
 
       {/* Tabs */}
       <div className="mb-6 flex gap-1 rounded-lg bg-slate-100 p-1">
-        {(["datasources", "queries", "dashboards", "scopes", "ai", "members"] as const).map((tab) => (
+        {(["datasources", "queries", "dashboards", "documents", "scopes", "ai", "members"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => { setActiveTab(tab); setActiveDsName(null); setDsResult(null); setDsError(null); }}
@@ -971,6 +972,11 @@ export default function ProjectWorkspacePage() {
           }))}
           canEdit={canEdit}
         />
+      )}
+
+      {/* ── Documents Tab ──────────────────────────────────────── */}
+      {activeTab === "documents" && (
+        <DocumentsTab projectId={projectId} canEdit={canEdit} />
       )}
 
       {/* ── Scopes Tab ────────────────────────────────────────── */}

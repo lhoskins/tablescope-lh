@@ -26,6 +26,8 @@ from app.models.schemas import (
     AnalyzeScopesResponse,
     AskRequest,
     AskResponse,
+    DocumentProfileRequest,
+    DocumentProfileResponse,
     GenerateRelationshipsRequest,
     GenerateRelationshipsResponse,
     GenerateSQLRequest,
@@ -629,3 +631,120 @@ async def analyze_file(req: AnalyzeFileRequest):
         request_id=request_id,
         model_used=settings.reasoning_model,
     )
+
+
+# ── Document Profile ─────────────────────────────────────────────────
+
+@router.post("/document/profile", response_model=DocumentProfileResponse)
+async def profile_document(req: DocumentProfileRequest):
+    """Profile an uploaded document — extract summary, tags, entities, KPIs, relationships."""
+    update_activity()
+    request_id = uuid.uuid4().hex[:12]
+    logger.info("[%s] document/profile file=%s type=%s", request_id, req.filename, req.asset_type)
+
+    tags_str = ", ".join(req.enabled_reference_tags[:50]) if req.enabled_reference_tags else "none"
+    kpis_str = ", ".join(req.enabled_reference_kpis[:50]) if req.enabled_reference_kpis else "none"
+
+    chunk_text = ""
+    for c in req.chunks[:5]:
+        chunk_text += f"\n--- Chunk {c.get('chunk_index', 0)} ---\n{c.get('text', '')[:1500]}\n"
+
+    prompt = f"""You are a document analyst. Analyze this document and return a JSON profile.
+
+File: {req.filename}
+Type: {req.asset_type}
+Content-Type: {req.content_type}
+
+Available reference tags (use these first): {tags_str}
+Available reference KPIs (use these first): {kpis_str}
+
+Document text preview:
+{req.text_preview[:3000]}
+
+Document chunks:
+{chunk_text}
+
+Return ONLY valid JSON with this exact structure:
+{{
+  "summary": "2-3 sentence summary of the document's purpose and key content",
+  "document_type": "type classification (e.g., audit_report, policy, contract, procedure, meeting_notes)",
+  "business_domain": "primary business domain (e.g., supply_chain, finance, it_operations, manufacturing)",
+  "process_area": "relevant process area (e.g., supplier_performance, quality_management, cost_management)",
+  "tags": [
+    {{"tag_key": "matching_tag_from_catalog", "display_name": "Human Readable Name", "confidence": 0.9, "source": "catalog"}}
+  ],
+  "entities": [
+    {{"entity_type": "supplier|customer|product|process|risk|action", "name": "Entity Name", "confidence": 0.85, "evidence": "Brief quote or reference from document"}}
+  ],
+  "recommended_kpis": [
+    {{"kpi_key": "matching_kpi_from_catalog", "display_name": "KPI Name", "confidence": 0.8, "reason": "Why this KPI is relevant"}}
+  ],
+  "relationship_hints": [
+    {{"from_type": "document", "from_name": "{req.filename}", "relationship_type": "references_supplier|identifies_risk|governs_process|describes_policy", "to_type": "supplier|risk|process|policy", "to_name": "Target Name", "confidence": 0.8, "evidence": "Brief evidence"}}
+  ],
+  "data_quality_notes": ["Any data quality observations"],
+  "suggested_questions": ["Question a user might ask about this document"]
+}}
+
+Rules:
+- Use reference tags/KPIs from the catalog when they match. Only suggest custom tags if no catalog tag fits.
+- Return confidence scores between 0.0 and 1.0.
+- Return evidence strings for entities and relationships.
+- Only include information supported by the actual document text.
+- Be specific — don't suggest generic tags unrelated to this document's content."""
+
+    try:
+        raw = await llm_client.generate(
+            prompt=prompt,
+            model=settings.reasoning_model,
+            temperature=0.1,
+            max_tokens=2000,
+        )
+
+        # Parse JSON from response
+        profile = _parse_json_response(raw)
+        if not profile:
+            profile = {"summary": raw[:500], "tags": [], "entities": [], "recommended_kpis": [], "relationship_hints": []}
+
+        return DocumentProfileResponse(
+            summary=profile.get("summary", ""),
+            document_type=profile.get("document_type", ""),
+            business_domain=profile.get("business_domain", ""),
+            process_area=profile.get("process_area", ""),
+            tags=profile.get("tags", []),
+            entities=profile.get("entities", []),
+            recommended_kpis=profile.get("recommended_kpis", []),
+            relationship_hints=profile.get("relationship_hints", []),
+            data_quality_notes=profile.get("data_quality_notes", []),
+            suggested_questions=profile.get("suggested_questions", []),
+            request_id=request_id,
+            model_used=settings.reasoning_model,
+        )
+    except Exception as exc:
+        logger.exception("[%s] document profile failed: %s", request_id, exc)
+        return DocumentProfileResponse(
+            summary=f"Document: {req.filename}",
+            request_id=request_id,
+            model_used=settings.reasoning_model,
+        )
+
+
+def _parse_json_response(text: str) -> dict | None:
+    """Extract JSON object from LLM response text."""
+    import json as _json
+
+    # Try direct parse
+    try:
+        return _json.loads(text)
+    except _json.JSONDecodeError:
+        pass
+
+    # Try to find JSON block
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        try:
+            return _json.loads(match.group())
+        except _json.JSONDecodeError:
+            pass
+
+    return None

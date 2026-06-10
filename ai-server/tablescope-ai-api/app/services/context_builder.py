@@ -176,6 +176,13 @@ async def build_context(
     dashboards = perms.get("dashboards", [])
     query_scopes = perms.get("query_scopes", [])
 
+    # 4. Project documents (unstructured assets)
+    project_documents = perms.get("documents", [])
+
+    # 5. Project graph nodes/edges
+    graph_nodes = perms.get("graph_nodes", [])
+    graph_edges = perms.get("graph_edges", [])
+
     # Build context package
     context = ContextPackage(
         tenant_id=tenant_id,
@@ -184,10 +191,13 @@ async def build_context(
         allowed_context={
             "metadata": metadata,
             "documents": documents,
+            "project_documents": project_documents,
             "relationships": query_scopes,
             "scopes": query_scopes,
             "queries": queries,
             "dashboards": dashboards,
+            "graph_nodes": graph_nodes,
+            "graph_edges": graph_edges,
             "memories": [],
         },
         retrieval_filters={
@@ -256,5 +266,32 @@ def context_to_prompt_text(context: ContextPackage) -> str:
                 f"  - Scope {s.get('id')}: query {s.get('query_id')}.{s.get('source_field')} "
                 f"-> query {s.get('target_query_id')}.{s.get('target_field')}"
             )
+
+    # Project documents (unstructured assets)
+    if context.allowed_context.get("project_documents"):
+        parts.append("\nProject documents:")
+        for doc in context.allowed_context["project_documents"]:
+            title = doc.get("title", doc.get("filename", "unknown"))
+            summary = doc.get("ai_summary", "")
+            tags = doc.get("tags", [])
+            tag_str = ", ".join(tags) if tags else ""
+            line = f"  - {title}"
+            if summary:
+                line += f": {summary[:200]}"
+            if tag_str:
+                line += f" [tags: {tag_str}]"
+            parts.append(line)
+
+    # Knowledge graph relationships
+    if context.allowed_context.get("graph_edges"):
+        parts.append("\nProject knowledge graph relationships:")
+        nodes_map: dict[int, str] = {}
+        for n in context.allowed_context.get("graph_nodes", []):
+            nodes_map[n.get("id", 0)] = n.get("name", n.get("label", "unknown"))
+        for e in context.allowed_context["graph_edges"]:
+            from_name = nodes_map.get(e.get("from_node_id", e.get("source", 0)), "?")
+            to_name = nodes_map.get(e.get("to_node_id", e.get("target", 0)), "?")
+            edge_type = e.get("edge_type", e.get("type", "related_to"))
+            parts.append(f"  - {from_name} --{edge_type}--> {to_name}")
 
     return "\n".join(parts)

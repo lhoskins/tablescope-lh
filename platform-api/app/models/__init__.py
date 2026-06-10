@@ -1,5 +1,6 @@
 """SQLAlchemy ORM models for the platform API."""
 
+from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.models.ai_asset_metadata import (
     AIAssetKPI,
     AIAssetKPISuggestion,
@@ -29,6 +30,7 @@ from app.models.file_source_meta import FileSourceMeta
 from app.models.grid_preference import GridPreference
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
+from app.models.project_asset import ProjectAsset
 from app.models.query_scope import QueryScope
 from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.saved_query import SavedQuery
@@ -39,6 +41,8 @@ from app.models.user import User
 from app.models.user_vdb import UserVDB
 
 __all__ = [
+    "AIProjectGraphEdge",
+    "AIProjectGraphNode",
     "AIAssetKPI",
     "AIAssetKPISuggestion",
     "AIAssetTag",
@@ -63,6 +67,7 @@ __all__ = [
     "GridPreference",
     "OrganizationVDB",
     "Project",
+    "ProjectAsset",
     "ProjectMember",
     "QueryScope",
     "SaasObjectDataSource",

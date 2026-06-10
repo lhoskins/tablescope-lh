@@ -35,6 +35,8 @@ from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
 from app.routes import tenant_data_planes as tenant_data_planes_routes
 from app.routes import tenants as tenants_routes
+from app.routes import project_assets as project_assets_routes
+from app.routes import project_graph as project_graph_routes
 from app.routes import upload as upload_routes
 from app.services.connection_pool import pool_manager
 
@@ -150,6 +152,8 @@ def create_app() -> FastAPI:
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)
     app.include_router(ai_reference_catalog_routes.router, prefix=api_prefix)
     app.include_router(ai_asset_metadata_routes.router, prefix=api_prefix)
+    app.include_router(project_assets_routes.router, prefix=api_prefix)
+    app.include_router(project_graph_routes.router, prefix=api_prefix)
 
     return app
 
