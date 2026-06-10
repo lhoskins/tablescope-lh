@@ -13,8 +13,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project_asset import ProjectAsset
-from app.services.document_extraction_service import extract_text
 from app.services.document_chunking_service import chunk_document
+from app.services.document_extraction_service import extract_text
 
 logger = logging.getLogger(__name__)
 

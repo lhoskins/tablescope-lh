@@ -15,11 +15,10 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select, delete as sa_delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -173,7 +172,7 @@ async def upload_asset(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(),
 ):
-    project = await _require_project_access(project_id, session, context)
+    await _require_project_access(project_id, session, context)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")

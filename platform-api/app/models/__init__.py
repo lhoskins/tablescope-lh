@@ -1,12 +1,12 @@
 """SQLAlchemy ORM models for the platform API."""
 
-from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.models.ai_asset_metadata import (
     AIAssetKPI,
     AIAssetKPISuggestion,
     AIAssetTag,
     AIAssetTagSuggestion,
 )
+from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.models.ai_reference_catalog import (
     AIReferenceCatalog,
     AIReferenceKPI,

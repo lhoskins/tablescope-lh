@@ -26,6 +26,8 @@ from app.routes import database_sources as database_sources_routes
 from app.routes import file_analysis as file_analysis_routes
 from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
+from app.routes import project_assets as project_assets_routes
+from app.routes import project_graph as project_graph_routes
 from app.routes import projects as projects_routes
 from app.routes import query as query_routes
 from app.routes import query_scopes as query_scopes_routes
@@ -35,8 +37,6 @@ from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
 from app.routes import tenant_data_planes as tenant_data_planes_routes
 from app.routes import tenants as tenants_routes
-from app.routes import project_assets as project_assets_routes
-from app.routes import project_graph as project_graph_routes
 from app.routes import upload as upload_routes
 from app.services.connection_pool import pool_manager
 
