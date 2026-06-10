@@ -81,11 +81,12 @@ async def analyze_upload(
         tenant_id=context.tenant_id,
         user_id=context.user_id,
         project_id=project_id or 0,
-        source_id=0,  # Not persisted yet — finalize will re-persist
+        source_id=0,
         view_name=file_name.rsplit(".", 1)[0] if "." in file_name else file_name,
         file_name=file_name,
         columns=columns_for_catalog,
         sample_rows=file_profile.get("sample_rows", []),
+        persist=False,  # Don't persist yet — finalize will persist with real IDs
     )
 
     # Store in upload session

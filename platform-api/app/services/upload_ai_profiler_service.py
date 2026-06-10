@@ -84,8 +84,9 @@ async def profile_uploaded_file(
     file_name: str,
     columns: list[dict[str, Any]],
     sample_rows: list[dict[str, Any]],
+    persist: bool = True,
 ) -> dict[str, Any]:
-    """Classify an uploaded file against the reference catalog and persist suggestions."""
+    """Classify an uploaded file against the reference catalog and optionally persist suggestions."""
     settings = get_settings()
 
     catalog_data = await get_tags_and_kpis_for_ai_prompt(session, tenant_id)
@@ -116,7 +117,7 @@ async def profile_uploaded_file(
 
     ai_result = await _call_ai(settings, prompt, tenant_id, user_id, project_id)
 
-    if ai_result:
+    if ai_result and persist and source_id and project_id:
         await _persist_suggestions(
             session, tenant_id, project_id, user_id, source_id, ai_result
         )
