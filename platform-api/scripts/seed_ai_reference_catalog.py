@@ -52,25 +52,43 @@ async def seed_catalogs() -> dict[str, int]:
             data = json.loads(path.read_text())
             catalog_key = data["catalog_key"]
 
+            new_version = data.get("version", "1.0")
             existing = await session.scalar(
                 select(AIReferenceCatalog).where(AIReferenceCatalog.catalog_key == catalog_key)
             )
-            if existing:
-                logger.info("Catalog '%s' already exists (id=%s), skipping", catalog_key, existing.id)
+            if existing and existing.version == new_version:
+                logger.info("Catalog '%s' v%s up to date, skipping", catalog_key, new_version)
                 stats["skipped"] += 1
                 continue
 
-            catalog = AIReferenceCatalog(
-                catalog_key=catalog_key,
-                name=data["name"],
-                description=data.get("description"),
-                industry=data.get("industry"),
-                source_framework=data.get("source_framework"),
-                version=data.get("version", "1.0"),
-                is_system=True,
-                is_active=True,
-            )
-            session.add(catalog)
+            if existing:
+                logger.info("Catalog '%s' upgrading %s -> %s", catalog_key, existing.version, new_version)
+                old_tags = (await session.scalars(
+                    select(AIReferenceTag).where(AIReferenceTag.catalog_id == existing.id)
+                )).all()
+                for ot in old_tags:
+                    await session.delete(ot)
+                old_kpis = (await session.scalars(
+                    select(AIReferenceKPI).where(AIReferenceKPI.catalog_id == existing.id)
+                )).all()
+                for ok in old_kpis:
+                    await session.delete(ok)
+                existing.version = new_version  # type: ignore[assignment]
+                existing.name = data["name"]  # type: ignore[assignment]
+                existing.description = data.get("description")  # type: ignore[assignment]
+                catalog = existing
+            else:
+                catalog = AIReferenceCatalog(
+                    catalog_key=catalog_key,
+                    name=data["name"],
+                    description=data.get("description"),
+                    industry=data.get("industry"),
+                    source_framework=data.get("source_framework"),
+                    version=new_version,
+                    is_system=True,
+                    is_active=True,
+                )
+                session.add(catalog)
             await session.flush()
             stats["catalogs"] += 1
 

@@ -30,45 +30,58 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 
-CATALOG_PROFILE_PROMPT = """You are analyzing a data file uploaded into Tablescope, a business analytics platform with a governed metadata catalog.
+CATALOG_PROFILE_PROMPT = """You are a data classification expert analyzing ONE specific uploaded file.
 
-## File Information
+## THIS FILE
 File name: {file_name}
 View name: {view_name}
-Row count: {row_count}
-Column count: {column_count}
+Rows: {row_count} | Columns: {column_count}
 
-## Columns
+## THIS FILE'S COLUMNS (analyze these carefully)
 {columns_text}
 
-## Sample Rows (first {sample_count})
+## THIS FILE'S SAMPLE DATA (first {sample_count} rows)
 {sample_rows}
 
-## Reference Tags (governed catalog)
+## Available Reference Tags
 {reference_tags}
 
-## Reference KPIs (governed catalog)
+## Available Reference KPIs
 {reference_kpis}
 
-## Instructions
-Classify this file against the provided reference catalog. Return STRICT JSON with these keys:
+## CRITICAL RULES
+1. You MUST analyze THIS specific file's columns and sample data. Do NOT give generic answers.
+2. Each tag you suggest must be justified by actual column names or data values in THIS file.
+3. Each KPI you suggest must have its required_fields mappable to actual columns in THIS file.
+4. Compare each reference tag's "example_fields" against THIS file's actual columns. Only suggest tags where there is a clear match.
+5. Compare each reference KPI's "required_fields" against THIS file's actual columns. Only suggest KPIs where the required columns exist.
+6. Do NOT suggest tags/KPIs about infrastructure monitoring (uptime, downtime, MTBF) for a file about patch compliance or change management. The file's ACTUAL columns determine what tags/KPIs apply.
 
-1. "summary" — What is this file? (1-2 sentences)
-2. "business_domain" — The most relevant business domain from the catalog (e.g. "sales_operations", "supply_chain")
-3. "process_area" — The most relevant process area (e.g. "order_management", "logistics")
-4. "suggested_tags" — Array of tags from the reference catalog that match this file:
-   [{{"tag_key": "...", "display_name": "...", "confidence": 0.0-1.0, "reason": "brief explanation"}}]
-   IMPORTANT: Use ONLY tag_key values from the reference tags list above. Do not invent new tags unless absolutely no catalog tag fits.
-   If you must suggest a new tag, mark it as: {{"tag_key": "custom_...", "display_name": "...", "confidence": ..., "reason": "...", "is_custom": true}}
-   Suggest 2-8 tags.
-5. "suggested_kpis" — Array of KPIs from the reference catalog that this file can support:
-   [{{"kpi_key": "...", "display_name": "...", "confidence": 0.0-1.0, "field_mapping": {{"required_field_name": "actual_column_name"}}, "reason": "brief explanation"}}]
-   IMPORTANT: Only suggest KPIs whose required_fields are present (or can be confidently mapped) in the file columns.
-   Suggest 1-6 KPIs.
-6. "relationship_hints" — Array of likely foreign key relationships:
-   [{{"source_field": "ColumnName", "possible_target": "TableName.ColumnName", "confidence": 0.0-1.0}}]
-7. "data_quality_notes" — Array of data quality observations:
-   ["note 1", "note 2"]
+## COLUMN MATCHING EXAMPLES
+- File has "AssetID", "PatchStatus", "OperatingSystem" → suggests "asset_inventory", "patch_management"
+- File has "ChangeID", "Outcome", "RiskLevel" → suggests "change_management"
+- File has "CostUSD", "Provider", "Service" → suggests "cloud_cost"
+- File has "IncidentID", "Priority", "ResolvedDate" → suggests "incident_management"
+
+## Return STRICT JSON:
+{{
+  "summary": "1-2 sentences describing what THIS specific file contains based on its columns and data",
+  "business_domain": "domain from catalog matching THIS file's content",
+  "process_area": "process area matching THIS file's content",
+  "suggested_tags": [
+    {{"tag_key": "from_catalog", "display_name": "...", "confidence": 0.0-1.0, "reason": "THIS file has columns X, Y that match this tag"}}
+  ],
+  "suggested_kpis": [
+    {{"kpi_key": "from_catalog", "display_name": "...", "confidence": 0.0-1.0, "field_mapping": {{"required_field": "actual_column_in_this_file"}}, "reason": "THIS file has column X that maps to required_field Y"}}
+  ],
+  "relationship_hints": [
+    {{"source_field": "ActualColumnInThisFile", "possible_target": "OtherTable.Column", "confidence": 0.0-1.0}}
+  ],
+  "data_quality_notes": ["observations about THIS file's data"]
+}}
+
+IMPORTANT: Only use tag_key/kpi_key values from the reference lists above. If no catalog tag fits, create: {{"tag_key": "custom_...", "display_name": "...", "is_custom": true}}.
+Suggest 3-8 tags and 2-6 KPIs that are SPECIFIC to THIS file.
 
 Return ONLY valid JSON. No markdown, no explanation outside JSON.
 """
