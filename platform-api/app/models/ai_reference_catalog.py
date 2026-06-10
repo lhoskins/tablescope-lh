@@ -25,10 +25,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import JSON
 
 from app.models.base import Base
 
-_JSON = JSONB().with_variant(JSONB(), "sqlite")
+_JSON = JSONB().with_variant(JSON(), "sqlite")
 
 
 class AIReferenceCatalog(Base):
