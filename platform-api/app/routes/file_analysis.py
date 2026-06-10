@@ -309,15 +309,16 @@ async def finalize_upload(
         _persist_suggestions,
         _update_file_meta,
     )
-    if catalog_result and meta.id:
+    if catalog_result and meta.id and resolved_project_id:
         await _persist_suggestions(
-            session, context.tenant_id, resolved_project_id or 0,
+            session, context.tenant_id, resolved_project_id,
             context.user_id, meta.id, catalog_result,
         )
+    if catalog_result and meta.id:
         await _update_file_meta(session, meta.id, catalog_result)
 
-    # Auto-accept tags/KPIs based on user selections
-    if req.accepted_tag_keys or req.rejected_tag_keys:
+    # Auto-accept tags/KPIs based on user selections (requires project)
+    if resolved_project_id and (req.accepted_tag_keys or req.rejected_tag_keys):
         from app.models.ai_asset_metadata import (
             AIAssetTag,
             AIAssetTagSuggestion,
@@ -338,7 +339,7 @@ async def finalize_upload(
                 s.status = "accepted"
                 session.add(AIAssetTag(
                     tenant_id=context.tenant_id,
-                    project_id=resolved_project_id or 0,
+                    project_id=resolved_project_id,
                     source_type="file_datasource",
                     source_id=meta.id,
                     tag_key=s.tag_key,
@@ -350,7 +351,7 @@ async def finalize_upload(
             elif s.tag_key in rejected_keys:
                 s.status = "rejected"
 
-    if req.accepted_kpi_keys or req.rejected_kpi_keys:
+    if resolved_project_id and (req.accepted_kpi_keys or req.rejected_kpi_keys):
         from app.models.ai_asset_metadata import (
             AIAssetKPI,
             AIAssetKPISuggestion,
@@ -371,7 +372,7 @@ async def finalize_upload(
                 s.status = "accepted"
                 session.add(AIAssetKPI(
                     tenant_id=context.tenant_id,
-                    project_id=resolved_project_id or 0,
+                    project_id=resolved_project_id,
                     source_type="file_datasource",
                     source_id=meta.id,
                     kpi_key=s.kpi_key,
