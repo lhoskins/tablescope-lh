@@ -13,6 +13,7 @@ import { DashboardTab } from "@/components/dashboard/DashboardTab";
 import { AIPanel } from "@/components/ai/AIPanel";
 import { AIPromptBar } from "@/components/ai/AIPromptBar";
 import { ScopesTab } from "@/components/scopes/ScopesTab";
+import { QueryBuilder } from "@/components/query-builder/QueryBuilder";
 
 // Small badge describing where a datasource comes from (file type or DB engine).
 function SourceBadge({ ds }: { ds: Datasource }) {
@@ -833,29 +834,6 @@ export default function ProjectWorkspacePage() {
 
   // ── Query builder state ───────────────────────────────────────────
   const [buildingQuery, setBuildingQuery] = useState(false);
-  const [leftDs, setLeftDs] = useState<Datasource | null>(null);
-  const [rightDs, setRightDs] = useState<Datasource | null>(null);
-  const [showJoinDialog, setShowJoinDialog] = useState(false);
-  // Whether the user has opted into a join (reveals the second datasource box).
-  const [joinMode, setJoinMode] = useState(false);
-  // Collapsible "view fields" panel for the selected table(s) in the builder.
-  const [builderFieldsOpen, setBuilderFieldsOpen] = useState(false);
-  const [joinType, setJoinType] = useState("INNER JOIN");
-  const [leftCol, setLeftCol] = useState("");
-  const [rightCol, setRightCol] = useState("");
-  const [leftCols, setLeftCols] = useState<string[]>([]);
-  const [rightCols, setRightCols] = useState<string[]>([]);
-  const [selectedFields, setSelectedFields] = useState<string[]>([]);
-  const [filters, setFilters] = useState<{ column: string; operand: string; value: string }[]>([]);
-  const [mainGroupBy, setMainGroupBy] = useState<string[]>([]);
-  const [mainOrderBy, setMainOrderBy] = useState<{ column: string; dir: string }[]>([]);
-  const [mainSqlEditing, setMainSqlEditing] = useState(false);
-  const [customSql, setCustomSql] = useState("");
-
-  // ── Save dialog ───────────────────────────────────────────────────
-  const [showSave, setShowSave] = useState(false);
-  const [queryName, setQueryName] = useState("");
-  const [queryDesc, setQueryDesc] = useState("");
 
   // ── Inline rename ─────────────────────────────────────────────────
   const [renamingId, setRenamingId] = useState<number | null>(null);
@@ -869,11 +847,6 @@ export default function ProjectWorkspacePage() {
 
   // ── Edit query state ──────────────────────────────────────────────
   const [editingQuery, setEditingQuery] = useState<SavedQuery | null>(null);
-
-  // ── Query execution result ────────────────────────────────────────
-  const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
-  const [queryError, setQueryError] = useState<string | null>(null);
-  const [executing, setExecuting] = useState(false);
 
   // ── Datasource click-to-view result ───────────────────────────────
   const [dsResult, setDsResult] = useState<QueryResult | null>(null);
@@ -964,12 +937,6 @@ export default function ProjectWorkspacePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-queries", projectId] });
       setBuildingQuery(false);
-      setLeftDs(null);
-      setRightDs(null);
-      setShowSave(false);
-      setShowJoinDialog(false);
-      setQueryName("");
-      setQueryDesc("");
     },
   });
 
@@ -1058,21 +1025,6 @@ export default function ProjectWorkspacePage() {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["project-members", projectId] }),
   });
-
-  // ── Column fetching ───────────────────────────────────────────────
-
-  const fetchColumns = useCallback(async (viewName: string): Promise<string[]> => {
-    try {
-      const result = await apiClient.post<QueryResult>("/api/query/datasource", {
-        tableName: viewName,
-        limit: 1,
-        project_id: projectId,
-      });
-      return result.columns;
-    } catch {
-      return [];
-    }
-  }, []);
 
   // ── Click-to-execute saved query ─────────────────────────────────
 
@@ -1204,7 +1156,7 @@ export default function ProjectWorkspacePage() {
     }
   }, [pendingReplace, queryClient, projectId]);
 
-  // ── Drag-and-drop handlers ────────────────────────────────────────
+  // ── Drag-and-drop handlers (for datasource row drag) ────────────
 
   const handleDragStart = useCallback(
     (e: DragEvent<HTMLDivElement>, ds: Datasource) => {
@@ -1212,136 +1164,6 @@ export default function ProjectWorkspacePage() {
       e.dataTransfer.effectAllowed = "copy";
     },
     []
-  );
-
-  const handleDropLeft = useCallback(
-    async (e: DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      const data = e.dataTransfer.getData("application/json");
-      if (!data) return;
-      const ds: Datasource = JSON.parse(data);
-      setLeftDs(ds);
-      const cols = await fetchColumns(ds.viewName);
-      setLeftCols(cols);
-      if (rightDs) setShowJoinDialog(true);
-    },
-    [rightDs, fetchColumns]
-  );
-
-  const handleDropRight = useCallback(
-    async (e: DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      const data = e.dataTransfer.getData("application/json");
-      if (!data) return;
-      const ds: Datasource = JSON.parse(data);
-      setRightDs(ds);
-      const cols = await fetchColumns(ds.viewName);
-      setRightCols(cols);
-      if (leftDs) setShowJoinDialog(true);
-    },
-    [leftDs, fetchColumns]
-  );
-
-  const allowDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  }, []);
-
-  // ── Build SQL from query config ───────────────────────────────────
-
-  const allAvailableCols = useMemo(() => {
-    const cols: string[] = [];
-    if (leftDs) {
-      leftCols.forEach((c) => cols.push(leftDs.viewName + "." + c));
-    }
-    if (rightDs) {
-      rightCols.forEach((c) => cols.push(rightDs.viewName + "." + c));
-    }
-    return cols;
-  }, [leftDs, rightDs, leftCols, rightCols]);
-
-  const generatedSql = useMemo(() => {
-    if (!leftDs) return "";
-    const l = `"${leftDs.viewName}"`;
-    const fieldList = selectedFields.length > 0
-      ? selectedFields.map((f) => {
-          const [tbl, col] = f.split(".");
-          return `"${tbl}"."${col}"`;
-        }).join(", ")
-      : "*";
-
-    let sql: string;
-    if (!rightDs) {
-      sql = `SELECT ${fieldList} FROM ${l}`;
-    } else {
-      const r = `"${rightDs.viewName}"`;
-      if (joinType === "CROSS JOIN") {
-        sql = `SELECT ${fieldList} FROM ${l} ${joinType} ${r}`;
-      } else if (leftCol && rightCol) {
-        sql = `SELECT ${fieldList} FROM ${l} ${joinType} ${r} ON ${l}."${leftCol}" = ${r}."${rightCol}"`;
-      } else {
-        return "";
-      }
-    }
-
-    if (filters.length > 0) {
-      const whereClauses = filters
-        .filter((f) => f.column && f.operand && f.value)
-        .map((f) => {
-          const [tbl, col] = f.column.split(".");
-          const qualCol = `"${tbl}"."${col}"`;
-          if (f.operand === "IN") {
-            const vals = f.value.split(",").map((v) => `'${v.trim()}'`).join(", ");
-            return `${qualCol} IN (${vals})`;
-          }
-          if (f.operand === "LIKE") {
-            return `${qualCol} LIKE '${f.value}'`;
-          }
-          if (f.operand === "BEGINS WITH") {
-            return `${qualCol} LIKE '${f.value}%'`;
-          }
-          if (f.operand === "ENDS WITH") {
-            return `${qualCol} LIKE '%${f.value}'`;
-          }
-          return `${qualCol} ${f.operand} '${f.value}'`;
-        });
-      if (whereClauses.length > 0) {
-        sql += " WHERE " + whereClauses.join(" AND ");
-      }
-    }
-    if (mainGroupBy.length > 0) {
-      const groups = mainGroupBy.map((f) => { const [tbl, col] = f.split("."); return `"${tbl}"."${col}"`; });
-      sql += " GROUP BY " + groups.join(", ");
-    }
-    if (mainOrderBy.length > 0) {
-      const orders = mainOrderBy.map((o) => { const [tbl, col] = o.column.split("."); return `"${tbl}"."${col}" ${o.dir}`; });
-      sql += " ORDER BY " + orders.join(", ");
-    }
-    return sql;
-  }, [leftDs, rightDs, joinType, leftCol, rightCol, selectedFields, filters, mainGroupBy, mainOrderBy]);
-
-  // ── Execute query ─────────────────────────────────────────────────
-
-  const executeQuery = useCallback(
-    async (sql: string) => {
-      setExecuting(true);
-      setQueryError(null);
-      setQueryResult(null);
-      try {
-        const result = await apiClient.post<QueryResult>("/api/query/datasource", {
-          tableName: leftDs?.viewName ?? "",
-          limit: 100,
-          project_id: projectId,
-          sql,
-        });
-        setQueryResult(result);
-      } catch (err) {
-        setQueryError((err as Error).message);
-      } finally {
-        setExecuting(false);
-      }
-    },
-    [leftDs, projectId]
   );
 
   // ── Permission checks ────────────────────────────────────────────
@@ -1470,7 +1292,7 @@ export default function ProjectWorkspacePage() {
         {(["datasources", "queries", "dashboards", "scopes", "ai", "members"] as const).map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => { setActiveTab(tab); setActiveDsName(null); setDsResult(null); setDsError(null); }}
             className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
               activeTab === tab
                 ? "bg-white text-slate-900 shadow-sm"
@@ -1587,22 +1409,37 @@ export default function ProjectWorkspacePage() {
             <p className="mt-2 text-sm text-red-600">{dsActionError}</p>
           )}
 
-          {/* Datasource data view */}
-          {dsLoading && <p className="mt-4 text-sm text-slate-500">Loading data...</p>}
-          {dsError && <p className="mt-4 text-sm text-red-600">{dsError}</p>}
-          {dsResult && dsResult.rows.length > 0 && (
-            <div className="mt-4">
-              <DataGrid
-                columns={dsResult.columns}
-                rows={dsResult.rows}
-                columnTypes={
-                  projectDatasources.find((d) => d.viewName === activeDsName)?.columnTypes
-                }
-              />
+          {/* Datasource data view — inline panel with close button */}
+          {activeDsName && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
+                <span className="text-sm font-medium text-slate-700">
+                  {projectDatasources.find((d) => d.viewName === activeDsName)?.fileName ?? activeDsName}
+                </span>
+                <button
+                  onClick={() => { setActiveDsName(null); setDsResult(null); setDsError(null); }}
+                  className="rounded-md bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="p-4">
+                {dsLoading && <p className="text-sm text-slate-500">Loading data...</p>}
+                {dsError && <p className="text-sm text-red-600">{dsError}</p>}
+                {dsResult && dsResult.rows.length > 0 && (
+                  <DataGrid
+                    columns={dsResult.columns}
+                    rows={dsResult.rows}
+                    columnTypes={
+                      projectDatasources.find((d) => d.viewName === activeDsName)?.columnTypes
+                    }
+                  />
+                )}
+                {dsResult && dsResult.rows.length === 0 && (
+                  <p className="text-sm text-slate-400">No data in this datasource.</p>
+                )}
+              </div>
             </div>
-          )}
-          {dsResult && dsResult.rows.length === 0 && (
-            <p className="mt-4 text-sm text-slate-400">No data in this datasource.</p>
           )}
         </div>
       )}
@@ -1637,552 +1474,17 @@ export default function ProjectWorkspacePage() {
 
           {/* Query Builder */}
           {buildingQuery && (
-            <div className="mb-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-slate-900">Query Builder</h3>
-                <button
-                  onClick={() => {
-                    setBuildingQuery(false);
-                    setLeftDs(null);
-                    setRightDs(null);
-                    setShowJoinDialog(false);
-                    setJoinMode(false);
-                    setShowSave(false);
-                    setSelectedFields([]);
-                    setFilters([]);
-                    setMainSqlEditing(false);
-                    setCustomSql("");
-                  }}
-                  className="text-sm text-slate-500 hover:text-slate-700"
-                >
-                  Cancel
-                </button>
-              </div>
-
-              {/* Draggable datasource list inside query builder */}
-              <div className="mb-4">
-                <h4 className="mb-2 text-sm font-medium text-slate-700">
-                  Available Datasources
-                  <span className="ml-2 text-xs text-slate-400 font-normal">
-                    Drag into boxes below
-                  </span>
-                </h4>
-                {projectDatasources.length === 0 ? (
-                  <p className="text-xs text-slate-400">No datasources available. Upload files first.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {projectDatasources.map((ds) => (
-                      <div
-                        key={ds.viewName}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, ds)}
-                        className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm cursor-grab active:cursor-grabbing hover:border-brand hover:bg-brand/5"
-                      >
-                        <span>{ds.fileName}</span>
-                        <SourceBadge ds={ds} />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className={`grid gap-4 mb-4 ${joinMode ? "grid-cols-2" : "grid-cols-1"}`}>
-                {/* Left box */}
-                <div
-                  onDrop={handleDropLeft}
-                  onDragOver={allowDrop}
-                  className={`flex min-h-[120px] items-center justify-center rounded-lg border-2 border-dashed p-4 transition-colors ${
-                    leftDs
-                      ? "border-brand bg-brand/5"
-                      : "border-slate-300 hover:border-slate-400"
-                  }`}
-                >
-                  {leftDs ? (
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-slate-900">{leftDs.fileName}</p>
-                      <p className="text-xs text-slate-400 font-mono">{leftDs.viewName}</p>
-                      <button
-                        onClick={() => {
-                          setLeftDs(null);
-                          setLeftCols([]);
-                          setSelectedFields([]);
-                          setFilters([]);
-                          setShowJoinDialog(false);
-                          setJoinMode(false);
-                          setRightDs(null);
-                          setRightCols([]);
-                        }}
-                        className="mt-2 text-xs text-red-500 hover:text-red-700"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-400">Drop datasource here</p>
-                  )}
-                </div>
-
-                {/* Right box — only when the user has added a join */}
-                {joinMode && (
-                  <div
-                    onDrop={handleDropRight}
-                    onDragOver={allowDrop}
-                    className={`flex min-h-[120px] items-center justify-center rounded-lg border-2 border-dashed p-4 transition-colors ${
-                      rightDs
-                        ? "border-brand bg-brand/5"
-                        : "border-slate-300 hover:border-slate-400"
-                    }`}
-                  >
-                    {rightDs ? (
-                      <div className="text-center">
-                        <p className="text-sm font-medium text-slate-900">{rightDs.fileName}</p>
-                        <p className="text-xs text-slate-400 font-mono">{rightDs.viewName}</p>
-                        <button
-                          onClick={() => {
-                            setRightDs(null);
-                            setRightCols([]);
-                            setSelectedFields((prev) => prev.filter((f) => !f.startsWith(rightDs.viewName + ".")));
-                            setShowJoinDialog(false);
-                          }}
-                          className="mt-2 text-xs text-red-500 hover:text-red-700"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-400">Drop second datasource here</p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Add / remove join control — join info is hidden until added */}
-              {leftDs && (
-                <div className="mb-4">
-                  {!joinMode ? (
-                    <button
-                      onClick={() => setJoinMode(true)}
-                      className="rounded-md border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
-                    >
-                      + Add Join
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        setJoinMode(false);
-                        if (rightDs) {
-                          setSelectedFields((prev) => prev.filter((f) => !f.startsWith(rightDs.viewName + ".")));
-                        }
-                        setRightDs(null);
-                        setRightCols([]);
-                        setShowJoinDialog(false);
-                        setLeftCol("");
-                        setRightCol("");
-                      }}
-                      className="text-xs text-red-500 hover:text-red-700"
-                    >
-                      Remove Join
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Join Parameters Dialog (only when both datasources present) */}
-              {showJoinDialog && leftDs && rightDs && (
-                <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
-                  <h4 className="mb-3 text-sm font-semibold text-blue-900">
-                    Join Configuration
-                  </h4>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Left Column ({leftDs.fileName})
-                      </label>
-                      <select
-                        value={leftCol}
-                        onChange={(e) => setLeftCol(e.target.value)}
-                        className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                      >
-                        <option value="">Select column...</option>
-                        {leftCols.map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Join Type
-                      </label>
-                      <select
-                        value={joinType}
-                        onChange={(e) => setJoinType(e.target.value)}
-                        className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                      >
-                        {JOIN_TYPES.map((jt) => (
-                          <option key={jt.value} value={jt.value}>{jt.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Right Column ({rightDs.fileName})
-                      </label>
-                      <select
-                        value={rightCol}
-                        onChange={(e) => setRightCol(e.target.value)}
-                        className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                      >
-                        <option value="">Select column...</option>
-                        {rightCols.map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Field Selection — collapsible */}
-              {leftDs && allAvailableCols.length > 0 && (
-                <div className="mb-4 rounded-lg border border-slate-200 bg-white">
-                  <div className="flex items-center justify-between px-4 py-2">
-                    <button
-                      type="button"
-                      onClick={() => setBuilderFieldsOpen((o) => !o)}
-                      className="flex items-center gap-2 text-sm font-semibold text-slate-900"
-                    >
-                      <span className="text-slate-400">{builderFieldsOpen ? "▲" : "▼"}</span>
-                      Select Fields
-                      <span className="text-xs font-normal text-slate-400">
-                        ({selectedFields.length === 0 ? "all" : selectedFields.length} selected)
-                      </span>
-                    </button>
-                    {builderFieldsOpen && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setSelectedFields([...allAvailableCols])}
-                          className="text-xs text-blue-600 hover:text-blue-800"
-                        >
-                          Select All
-                        </button>
-                        <button
-                          onClick={() => setSelectedFields([])}
-                          className="text-xs text-slate-500 hover:text-slate-700"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {builderFieldsOpen && (
-                    <div className="border-t border-slate-100 p-4">
-                      <div className="flex flex-wrap gap-2">
-                        {allAvailableCols.map((col) => {
-                          const on = selectedFields.length === 0 || selectedFields.includes(col);
-                          return (
-                            <button
-                              key={col}
-                              type="button"
-                              onClick={() => {
-                                setSelectedFields((prev) => {
-                                  const base = prev.length === 0 ? [...allAvailableCols] : prev;
-                                  const next = base.includes(col)
-                                    ? base.filter((f) => f !== col)
-                                    : [...base, col];
-                                  if (next.length === allAvailableCols.length) return [];
-                                  return next;
-                                });
-                              }}
-                              className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
-                                on
-                                  ? "border-blue-500 bg-blue-500 text-white"
-                                  : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
-                              }`}
-                            >
-                              <span>{col.split(".")[1]}</span>
-                              {rightDs && (
-                                <span className={on ? "text-blue-100" : "text-slate-400"}>({col.split(".")[0]})</span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="mt-1 text-xs text-slate-400">
-                        {selectedFields.length === 0 ? "All fields selected (SELECT *)" : `${selectedFields.length} field(s) selected`}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* + Add Filter / + Group By / + Order By buttons */}
-              {leftDs && allAvailableCols.length > 0 && (
-                <div className="mb-4 flex gap-2">
-                  {filters.length === 0 && (
-                    <button
-                      onClick={() => setFilters((prev) => [...prev, { column: "", operand: "=", value: "" }])}
-                      className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-                    >
-                      + Add Filter
-                    </button>
-                  )}
-                  {mainGroupBy.length === 0 && (
-                    <button
-                      onClick={() => setMainGroupBy([""])}
-                      className="rounded-md border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100"
-                    >
-                      + Group By
-                    </button>
-                  )}
-                  {mainOrderBy.length === 0 && (
-                    <button
-                      onClick={() => setMainOrderBy([{ column: "", dir: "ASC" }])}
-                      className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
-                    >
-                      + Order By
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Group By field chips (Create Query) */}
-              {leftDs && allAvailableCols.length > 0 && mainGroupBy.length > 0 && (
-                <div className="mb-4 rounded-md border border-slate-200 bg-white p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-slate-700">Group By</span>
-                    <button type="button" onClick={() => setMainGroupBy([])} className="text-xs text-red-500 hover:text-red-700">Clear</button>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {allAvailableCols.map((f) => {
-                      const col = f.split(".")[1] ?? f;
-                      const on = mainGroupBy.includes(f);
-                      return (
-                        <button key={f} type="button"
-                          onClick={() => setMainGroupBy((p) => on ? p.filter((x) => x !== f) : [...p.filter(Boolean), f])}
-                          className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${on ? "border-purple-500 bg-purple-500 text-white" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"}`}
-                        >{col}</button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Order By field chips (Create Query) */}
-              {leftDs && allAvailableCols.length > 0 && mainOrderBy.length > 0 && (
-                <div className="mb-4 rounded-md border border-slate-200 bg-white p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-slate-700">Order By</span>
-                    <button type="button" onClick={() => setMainOrderBy([])} className="text-xs text-red-500 hover:text-red-700">Clear</button>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {allAvailableCols.map((f) => {
-                      const col = f.split(".")[1] ?? f;
-                      const idx = mainOrderBy.findIndex((o) => o.column === f);
-                      const on = idx >= 0;
-                      const dir = on ? mainOrderBy[idx].dir : "ASC";
-                      return (
-                        <button key={f} type="button"
-                          onClick={() => {
-                            if (!on) { setMainOrderBy((p) => [...p.filter((x) => x.column), { column: f, dir: "ASC" }]); }
-                            else if (dir === "ASC") { setMainOrderBy((p) => p.map((x) => x.column === f ? { ...x, dir: "DESC" } : x)); }
-                            else { setMainOrderBy((p) => p.filter((x) => x.column !== f)); }
-                          }}
-                          className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${on ? "border-amber-500 bg-amber-500 text-white" : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"}`}
-                        >{col}{on ? (dir === "ASC" ? " ↑" : " ↓") : ""}</button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Filters — expanded once a filter is added */}
-              {leftDs && allAvailableCols.length > 0 && filters.length > 0 && (
-                <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-sm font-semibold text-slate-900">Filters</h4>
-                    <button
-                      onClick={() => setFilters((prev) => [...prev, { column: "", operand: "=", value: "" }])}
-                      className="text-xs text-blue-600 hover:text-blue-800"
-                    >
-                      + Add Filter
-                    </button>
-                  </div>
-                  {filters.map((f, idx) => (
-                    <div key={idx} className="flex items-center gap-2 mb-2">
-                      <select
-                        value={f.column}
-                        onChange={(e) => {
-                          const updated = [...filters];
-                          updated[idx] = { ...updated[idx], column: e.target.value };
-                          setFilters(updated);
-                        }}
-                        className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                      >
-                        <option value="">Column...</option>
-                        {allAvailableCols.map((c) => (
-                          <option key={c} value={c}>{c.split(".")[1]}{rightDs ? ` (${c.split(".")[0]})` : ""}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={f.operand}
-                        onChange={(e) => {
-                          const updated = [...filters];
-                          updated[idx] = { ...updated[idx], operand: e.target.value };
-                          setFilters(updated);
-                        }}
-                        className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                      >
-                        <option value="=">=</option>
-                        <option value="!=">!=</option>
-                        <option value=">">&gt;</option>
-                        <option value="<">&lt;</option>
-                        <option value=">=">&gt;=</option>
-                        <option value="<=">&lt;=</option>
-                        <option value="LIKE">LIKE</option>
-                        <option value="IN">IN</option>
-                        <option value="BEGINS WITH">BEGINS WITH</option>
-                        <option value="ENDS WITH">ENDS WITH</option>
-                      </select>
-                      <input
-                        type="text"
-                        value={f.value}
-                        onChange={(e) => {
-                          const updated = [...filters];
-                          updated[idx] = { ...updated[idx], value: e.target.value };
-                          setFilters(updated);
-                        }}
-                        placeholder={f.operand === "IN" ? "val1, val2, ..." : "Value"}
-                        className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                      />
-                      <button
-                        onClick={() => setFilters((prev) => prev.filter((_, i) => i !== idx))}
-                        className="text-xs text-red-500 hover:text-red-700"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* SQL Preview + Actions */}
-              {leftDs && (
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-medium text-slate-600">SQL</label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (mainSqlEditing) {
-                          setCustomSql("");
-                          setMainSqlEditing(false);
-                        } else {
-                          setCustomSql(generatedSql);
-                          setMainSqlEditing(true);
-                        }
-                      }}
-                      className="text-xs text-blue-600 hover:text-blue-800"
-                    >
-                      {mainSqlEditing ? "Reset to generated" : "Edit SQL directly"}
-                    </button>
-                  </div>
-                  {mainSqlEditing ? (
-                    <textarea
-                      value={customSql}
-                      onChange={(e) => setCustomSql(e.target.value)}
-                      rows={3}
-                      className="w-full rounded-md border border-blue-400 bg-white px-2 py-1.5 text-xs font-mono text-slate-900 mb-3"
-                    />
-                  ) : (
-                    generatedSql && (
-                      <div className="mb-3 rounded bg-slate-800 p-3">
-                        <p className="text-xs font-mono text-slate-300 break-all">{generatedSql}</p>
-                      </div>
-                    )
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setShowSave(true)}
-                      disabled={!(mainSqlEditing ? customSql : generatedSql)}
-                      className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => executeQuery(mainSqlEditing ? customSql : generatedSql)}
-                      disabled={!(mainSqlEditing ? customSql : generatedSql) || executing}
-                      className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      {executing ? "Executing..." : "Execute"}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Save Dialog */}
-              {showSave && (
-                <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
-                  <h4 className="mb-3 text-sm font-semibold text-slate-900">Save Query</h4>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Query Name
-                      </label>
-                      <input
-                        type="text"
-                        value={queryName}
-                        onChange={(e) => setQueryName(e.target.value)}
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                        placeholder="My Query"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Description
-                      </label>
-                      <textarea
-                        value={queryDesc}
-                        onChange={(e) => setQueryDesc(e.target.value)}
-                        rows={2}
-                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                        placeholder="Optional description"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          createQueryMutation.mutate({
-                            name: queryName,
-                            description: queryDesc,
-                            left_datasource: leftDs?.viewName ?? "",
-                            right_datasource: rightDs?.viewName ?? "",
-                            join_type: joinType,
-                            left_column: leftCol,
-                            right_column: rightCol,
-                            sql_text: mainSqlEditing ? customSql : generatedSql,
-                          });
-                        }}
-                        disabled={!queryName.trim() || createQueryMutation.isPending}
-                        className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
-                      >
-                        {createQueryMutation.isPending ? "Saving..." : "Save Query"}
-                      </button>
-                      <button
-                        onClick={() => setShowSave(false)}
-                        className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Execution results */}
-              {queryError && <p className="text-sm text-red-600 mb-4">{queryError}</p>}
-              {queryResult && queryResult.rows.length > 0 && (
-                <DataGrid columns={queryResult.columns} rows={queryResult.rows} />
-              )}
+            <div className="mb-6">
+              <QueryBuilder
+                projectId={projectId}
+                datasources={projectDatasources}
+                onCancel={() => setBuildingQuery(false)}
+                onSave={(payload) => {
+                  createQueryMutation.mutate(payload);
+                }}
+                isSaving={createQueryMutation.isPending}
+                initialSql=""
+              />
             </div>
           )}
 
