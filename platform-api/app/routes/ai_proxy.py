@@ -120,6 +120,10 @@ class AIPermissionsResponse(BaseModel):
     saved_queries: list[dict[str, Any]]
     dashboards: list[dict[str, Any]]
     query_scopes: list[dict[str, Any]] = []
+    accepted_tags: list[dict[str, Any]] = []
+    accepted_kpis: list[dict[str, Any]] = []
+    enabled_reference_tags: list[dict[str, Any]] = []
+    enabled_reference_kpis: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------
@@ -1070,6 +1074,31 @@ async def check_permissions(
         for s in scope_result.scalars()
     ]
 
+    # Fetch accepted tags for this project
+    from app.models.ai_asset_metadata import AIAssetKPI, AIAssetTag
+    accepted_tags_stmt = select(AIAssetTag).where(
+        AIAssetTag.tenant_id == tenant_id,
+        AIAssetTag.project_id == project_id,
+    )
+    at_result = await session.execute(accepted_tags_stmt)
+    accepted_tags = [t.to_dict() for t in at_result.scalars()]
+
+    # Fetch accepted KPIs for this project
+    accepted_kpis_stmt = select(AIAssetKPI).where(
+        AIAssetKPI.tenant_id == tenant_id,
+        AIAssetKPI.project_id == project_id,
+    )
+    ak_result = await session.execute(accepted_kpis_stmt)
+    accepted_kpis = [k.to_dict() for k in ak_result.scalars()]
+
+    # Fetch enabled reference tags and KPIs for the tenant
+    from app.services.reference_catalog_service import (
+        get_reference_kpis,
+        get_reference_tags,
+    )
+    ref_tags = await get_reference_tags(session, tenant_id)
+    ref_kpis = await get_reference_kpis(session, tenant_id)
+
     return AIPermissionsResponse(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -1081,6 +1110,10 @@ async def check_permissions(
         saved_queries=saved_queries,
         dashboards=dashboards,
         query_scopes=query_scopes,
+        accepted_tags=accepted_tags,
+        accepted_kpis=accepted_kpis,
+        enabled_reference_tags=ref_tags,
+        enabled_reference_kpis=ref_kpis,
     )
 
 

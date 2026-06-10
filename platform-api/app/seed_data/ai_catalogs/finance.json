@@ -1,0 +1,32 @@
+{
+  "catalog_key": "finance",
+  "name": "Finance KPI Catalog",
+  "description": "Tags and KPIs for accounting, budgeting, receivables, payables, and financial reporting.",
+  "industry": "finance",
+  "source_framework": "Tablescope Finance Core",
+  "version": "1.0",
+  "tags": [
+    {"tag_key": "revenue", "display_name": "Revenue", "business_domain": "financial_reporting", "process_area": "income", "synonyms": ["income", "earnings", "top_line"], "example_fields": ["Revenue", "Amount", "InvoiceTotal"]},
+    {"tag_key": "expenses", "display_name": "Expenses", "business_domain": "financial_reporting", "process_area": "cost_management", "synonyms": ["costs", "spending", "disbursements"], "example_fields": ["ExpenseAmount", "Category", "GLAccount"]},
+    {"tag_key": "accounts_receivable", "display_name": "Accounts Receivable", "business_domain": "financial_reporting", "process_area": "collections", "synonyms": ["AR", "receivables", "customer balances"], "example_fields": ["InvoiceID", "DueDate", "Balance", "CustomerID"]},
+    {"tag_key": "accounts_payable", "display_name": "Accounts Payable", "business_domain": "financial_reporting", "process_area": "payments", "synonyms": ["AP", "payables", "vendor balances"], "example_fields": ["InvoiceID", "VendorID", "DueDate", "Amount"]},
+    {"tag_key": "cash_flow", "display_name": "Cash Flow", "business_domain": "treasury", "process_area": "liquidity", "synonyms": ["cash position", "cash movement"], "example_fields": ["Date", "Inflow", "Outflow", "NetCash"]},
+    {"tag_key": "budget", "display_name": "Budget", "business_domain": "planning", "process_area": "budgeting", "synonyms": ["plan", "forecast", "allocation"], "example_fields": ["Department", "BudgetAmount", "Period"]},
+    {"tag_key": "forecast", "display_name": "Forecast", "business_domain": "planning", "process_area": "forecasting", "synonyms": ["projection", "estimate", "outlook"], "example_fields": ["Period", "ForecastAmount", "ActualAmount"]},
+    {"tag_key": "margin", "display_name": "Margin", "business_domain": "financial_reporting", "process_area": "profitability", "synonyms": ["profit margin", "gross margin", "net margin"], "example_fields": ["Revenue", "COGS", "GrossProfit"]},
+    {"tag_key": "profitability", "display_name": "Profitability", "business_domain": "financial_reporting", "process_area": "profitability", "synonyms": ["profit", "bottom line", "net income"], "example_fields": ["NetIncome", "Revenue", "Expenses"]},
+    {"tag_key": "billing", "display_name": "Billing", "business_domain": "revenue_cycle", "process_area": "invoicing", "synonyms": ["invoicing", "charges", "fees"], "example_fields": ["InvoiceID", "Amount", "BillingDate"]}
+  ],
+  "kpis": [
+    {"kpi_key": "total_revenue", "display_name": "Total Revenue", "business_domain": "financial_reporting", "process_area": "income", "formula": "SUM(revenue)", "required_fields": ["revenue"], "related_tags": ["revenue"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "gross_margin", "display_name": "Gross Margin", "business_domain": "financial_reporting", "process_area": "profitability", "formula": "(revenue - cogs) / revenue", "required_fields": ["revenue", "cogs"], "related_tags": ["margin", "revenue"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "net_margin", "display_name": "Net Margin", "business_domain": "financial_reporting", "process_area": "profitability", "formula": "net_income / revenue", "required_fields": ["net_income", "revenue"], "related_tags": ["profitability", "margin"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "operating_expense", "display_name": "Operating Expense", "business_domain": "financial_reporting", "process_area": "cost_management", "formula": "SUM(operating_expenses)", "required_fields": ["expense_amount", "expense_type"], "related_tags": ["expenses"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "budget_variance", "display_name": "Budget Variance", "business_domain": "planning", "process_area": "budgeting", "formula": "actual - budget", "required_fields": ["actual_amount", "budget_amount"], "related_tags": ["budget"], "recommended_chart_type": "bar"},
+    {"kpi_key": "ar_aging", "display_name": "AR Aging", "business_domain": "financial_reporting", "process_area": "collections", "formula": "GROUP BY aging_bucket", "required_fields": ["invoice_id", "due_date", "balance"], "related_tags": ["accounts_receivable"], "recommended_chart_type": "bar"},
+    {"kpi_key": "days_sales_outstanding", "display_name": "Days Sales Outstanding (DSO)", "business_domain": "financial_reporting", "process_area": "collections", "formula": "(accounts_receivable / revenue) * days_in_period", "required_fields": ["accounts_receivable", "revenue"], "related_tags": ["accounts_receivable", "revenue"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "cash_conversion_cycle", "display_name": "Cash Conversion Cycle", "business_domain": "treasury", "process_area": "liquidity", "formula": "DSO + DIO - DPO", "required_fields": ["dso", "dio", "dpo"], "related_tags": ["cash_flow", "accounts_receivable", "accounts_payable"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "revenue_growth", "display_name": "Revenue Growth", "business_domain": "financial_reporting", "process_area": "income", "formula": "(current_revenue - prior_revenue) / prior_revenue", "required_fields": ["revenue", "period"], "related_tags": ["revenue"], "recommended_chart_type": "line"},
+    {"kpi_key": "expense_ratio", "display_name": "Expense Ratio", "business_domain": "financial_reporting", "process_area": "cost_management", "formula": "total_expenses / total_revenue", "required_fields": ["expenses", "revenue"], "related_tags": ["expenses", "revenue"], "recommended_chart_type": "kpi"}
+  ]
+}

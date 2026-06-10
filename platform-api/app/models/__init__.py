@@ -1,5 +1,19 @@
 """SQLAlchemy ORM models for the platform API."""
 
+from app.models.ai_asset_metadata import (
+    AIAssetKPI,
+    AIAssetKPISuggestion,
+    AIAssetTag,
+    AIAssetTagSuggestion,
+)
+from app.models.ai_reference_catalog import (
+    AIReferenceCatalog,
+    AIReferenceKPI,
+    AIReferenceTag,
+    TenantCustomKPI,
+    TenantCustomTag,
+    TenantReferenceCatalog,
+)
 from app.models.base import Base
 from app.models.connector_credential import ConnectorCredential
 from app.models.dashboard import Dashboard
@@ -25,6 +39,16 @@ from app.models.user import User
 from app.models.user_vdb import UserVDB
 
 __all__ = [
+    "AIAssetKPI",
+    "AIAssetKPISuggestion",
+    "AIAssetTag",
+    "AIAssetTagSuggestion",
+    "AIReferenceCatalog",
+    "AIReferenceKPI",
+    "AIReferenceTag",
+    "TenantCustomKPI",
+    "TenantCustomTag",
+    "TenantReferenceCatalog",
     "Base",
     "ConnectorCredential",
     "Dashboard",

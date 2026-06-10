@@ -1,0 +1,31 @@
+{
+  "catalog_key": "manufacturing",
+  "name": "Manufacturing KPI Catalog",
+  "description": "Tags and KPIs for production, quality, equipment, and workforce operations.",
+  "industry": "manufacturing",
+  "source_framework": "Tablescope Manufacturing Core",
+  "version": "1.0",
+  "tags": [
+    {"tag_key": "production", "display_name": "Production", "business_domain": "production_operations", "process_area": "execution", "synonyms": ["manufacturing", "output", "assembly"], "example_fields": ["WorkOrderID", "Quantity", "LineID"]},
+    {"tag_key": "work_orders", "display_name": "Work Orders", "business_domain": "production_operations", "process_area": "execution", "synonyms": ["production orders", "jobs", "shop orders"], "example_fields": ["WorkOrderID", "ItemID", "StartDate", "EndDate", "QuantityPlanned"]},
+    {"tag_key": "equipment_downtime", "display_name": "Equipment Downtime", "business_domain": "equipment_maintenance", "process_area": "asset_performance", "synonyms": ["machine downtime", "outage", "line down"], "example_fields": ["AssetID", "DowntimeStart", "DowntimeEnd", "ReasonCode"]},
+    {"tag_key": "maintenance", "display_name": "Maintenance", "business_domain": "equipment_maintenance", "process_area": "asset_management", "synonyms": ["preventive maintenance", "corrective maintenance", "repairs"], "example_fields": ["WorkOrderID", "AssetID", "MaintenanceType", "CompletedDate"]},
+    {"tag_key": "scrap", "display_name": "Scrap", "business_domain": "quality_management", "process_area": "defect_reduction", "synonyms": ["waste", "rejected units", "material loss"], "example_fields": ["ScrapQty", "ProducedQty", "ReasonCode"]},
+    {"tag_key": "yield", "display_name": "Yield", "business_domain": "quality_management", "process_area": "defect_reduction", "synonyms": ["first pass yield", "good units"], "example_fields": ["GoodUnits", "TotalUnits", "YieldPercent"]},
+    {"tag_key": "throughput", "display_name": "Throughput", "business_domain": "production_operations", "process_area": "capacity", "synonyms": ["output rate", "production rate"], "example_fields": ["UnitsPerHour", "LineID", "ShiftID"]},
+    {"tag_key": "cycle_time", "display_name": "Cycle Time", "business_domain": "production_operations", "process_area": "execution", "synonyms": ["takt time", "processing time"], "example_fields": ["StartTime", "EndTime", "OperationID"]},
+    {"tag_key": "nonconformance", "display_name": "Nonconformance", "business_domain": "quality_management", "process_area": "quality_assurance", "synonyms": ["NCR", "defects", "deviations"], "example_fields": ["NCRID", "DefectType", "Severity", "RootCause"]},
+    {"tag_key": "lot_traceability", "display_name": "Lot Traceability", "business_domain": "quality_management", "process_area": "traceability", "synonyms": ["batch tracking", "lot tracking"], "example_fields": ["LotNumber", "BatchID", "ExpirationDate"]}
+  ],
+  "kpis": [
+    {"kpi_key": "overall_equipment_effectiveness", "display_name": "Overall Equipment Effectiveness (OEE)", "business_domain": "equipment_maintenance", "process_area": "asset_performance", "formula": "availability * performance * quality", "required_fields": ["availability", "performance", "quality"], "optional_fields": ["asset_id", "production_line"], "related_tags": ["equipment_downtime", "production"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "production_attainment", "display_name": "Production Attainment", "business_domain": "production_operations", "process_area": "execution", "formula": "actual_production / planned_production", "required_fields": ["actual_qty", "planned_qty"], "related_tags": ["production", "work_orders"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "scrap_rate", "display_name": "Scrap Rate", "business_domain": "quality_management", "process_area": "defect_reduction", "formula": "scrap_qty / total_produced", "required_fields": ["scrap_qty", "total_produced"], "related_tags": ["scrap", "quality"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "first_pass_yield", "display_name": "First Pass Yield", "business_domain": "quality_management", "process_area": "defect_reduction", "formula": "good_units_first_pass / total_units", "required_fields": ["good_units", "total_units"], "related_tags": ["yield", "quality"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "downtime_minutes", "display_name": "Downtime Minutes", "business_domain": "equipment_maintenance", "process_area": "asset_performance", "formula": "SUM(downtime_end - downtime_start)", "required_fields": ["downtime_start", "downtime_end"], "optional_fields": ["asset_id", "reason_code"], "related_tags": ["equipment_downtime"], "recommended_chart_type": "bar"},
+    {"kpi_key": "mean_time_between_failures", "display_name": "Mean Time Between Failures (MTBF)", "business_domain": "equipment_maintenance", "process_area": "reliability", "formula": "total_uptime / number_of_failures", "required_fields": ["asset_id", "failure_date"], "related_tags": ["equipment_downtime", "maintenance"], "recommended_chart_type": "line"},
+    {"kpi_key": "preventive_maintenance_compliance", "display_name": "PM Compliance", "business_domain": "equipment_maintenance", "process_area": "asset_management", "formula": "completed_pm_orders / scheduled_pm_orders", "required_fields": ["work_order_id", "scheduled_date", "completed_date"], "related_tags": ["maintenance"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "labor_efficiency", "display_name": "Labor Efficiency", "business_domain": "production_operations", "process_area": "workforce", "formula": "standard_hours / actual_hours", "required_fields": ["standard_hours", "actual_hours"], "related_tags": ["production"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "capacity_utilization", "display_name": "Capacity Utilization", "business_domain": "production_operations", "process_area": "capacity", "formula": "actual_output / max_capacity", "required_fields": ["actual_output", "max_capacity"], "related_tags": ["throughput", "production"], "recommended_chart_type": "kpi"}
+  ]
+}

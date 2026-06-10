@@ -1,0 +1,29 @@
+{
+  "catalog_key": "supply_chain",
+  "name": "Supply Chain KPI Catalog",
+  "description": "Tags and KPIs for supply chain, logistics, procurement, and fulfillment operations.",
+  "industry": "supply_chain",
+  "source_framework": "Tablescope Supply Chain Core",
+  "version": "1.0",
+  "tags": [
+    {"tag_key": "supplier_performance", "display_name": "Supplier Performance", "business_domain": "procurement", "process_area": "vendor_management", "synonyms": ["vendor performance", "supplier scorecard"], "example_fields": ["SupplierID", "Rating", "DefectRate"]},
+    {"tag_key": "procurement", "display_name": "Procurement", "business_domain": "procurement", "process_area": "purchasing", "synonyms": ["purchasing", "sourcing", "buying"], "example_fields": ["PurchaseOrderID", "VendorID", "Amount"]},
+    {"tag_key": "purchase_orders", "display_name": "Purchase Orders", "business_domain": "procurement", "process_area": "purchasing", "synonyms": ["POs", "buy orders"], "example_fields": ["POID", "PODate", "VendorID", "Amount"]},
+    {"tag_key": "delivery", "display_name": "Delivery", "business_domain": "logistics", "process_area": "distribution", "synonyms": ["shipment", "dispatch", "transport"], "example_fields": ["DeliveryDate", "TrackingID", "Carrier"]},
+    {"tag_key": "returns", "display_name": "Returns", "business_domain": "logistics", "process_area": "reverse_logistics", "synonyms": ["RMA", "refunds", "returned goods"], "example_fields": ["ReturnID", "Reason", "ReturnDate"]},
+    {"tag_key": "order_fulfillment", "display_name": "Order Fulfillment", "business_domain": "supply_chain", "process_area": "deliver", "synonyms": ["fulfillment", "pick_pack_ship"], "example_fields": ["OrderID", "ShipDate", "CustomerID"]},
+    {"tag_key": "lead_time", "display_name": "Lead Time", "business_domain": "supply_chain", "process_area": "planning", "synonyms": ["cycle time", "delivery time"], "example_fields": ["OrderDate", "DeliveryDate", "LeadTimeDays"]},
+    {"tag_key": "backlog", "display_name": "Backlog", "business_domain": "supply_chain", "process_area": "planning", "synonyms": ["backorders", "pending orders"], "example_fields": ["OrderID", "Status", "DueDate"]}
+  ],
+  "kpis": [
+    {"kpi_key": "on_time_delivery_rate", "display_name": "On-Time Delivery Rate", "business_domain": "logistics", "process_area": "distribution", "formula": "on_time_deliveries / total_deliveries", "required_fields": ["delivery_id", "promised_date", "actual_date"], "related_tags": ["delivery", "order_fulfillment"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "supplier_defect_rate", "display_name": "Supplier Defect Rate", "business_domain": "procurement", "process_area": "vendor_management", "formula": "defective_units / total_received", "required_fields": ["supplier_id", "defective_count", "total_received"], "related_tags": ["supplier_performance"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "purchase_order_cycle_time", "display_name": "PO Cycle Time", "business_domain": "procurement", "process_area": "purchasing", "formula": "AVG(received_date - order_date)", "required_fields": ["po_id", "order_date", "received_date"], "related_tags": ["purchase_orders", "procurement"], "recommended_chart_type": "line"},
+    {"kpi_key": "inventory_turnover", "display_name": "Inventory Turnover", "business_domain": "supply_chain", "process_area": "stock_management", "formula": "cost_of_goods_sold / average_inventory", "required_fields": ["cogs", "average_inventory"], "related_tags": ["inventory"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "fill_rate", "display_name": "Fill Rate", "business_domain": "supply_chain", "process_area": "deliver", "formula": "lines_shipped_complete / total_lines", "required_fields": ["order_line_id", "shipped_qty", "ordered_qty"], "related_tags": ["order_fulfillment"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "perfect_order_rate", "display_name": "Perfect Order Rate", "business_domain": "supply_chain", "process_area": "deliver", "formula": "perfect_orders / total_orders", "required_fields": ["order_id", "on_time", "complete", "damage_free", "correct_docs"], "related_tags": ["order_fulfillment", "delivery"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "backorder_rate", "display_name": "Backorder Rate", "business_domain": "supply_chain", "process_area": "planning", "formula": "backordered_lines / total_lines", "required_fields": ["order_line_id", "status"], "related_tags": ["backlog"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "return_rate", "display_name": "Return Rate", "business_domain": "logistics", "process_area": "reverse_logistics", "formula": "returned_units / shipped_units", "required_fields": ["units_returned", "units_shipped"], "related_tags": ["returns"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "supplier_lead_time", "display_name": "Supplier Lead Time", "business_domain": "procurement", "process_area": "vendor_management", "formula": "AVG(received_date - po_date)", "required_fields": ["supplier_id", "po_date", "received_date"], "related_tags": ["lead_time", "supplier_performance"], "recommended_chart_type": "bar"}
+  ]
+}

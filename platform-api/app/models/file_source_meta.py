@@ -68,6 +68,17 @@ class FileSourceMeta(TimestampMixin, Base):
         _JSON, nullable=True
     )
 
+    # AI catalog metadata (added by migration 0019)
+    ai_metadata: Mapped[dict[str, Any]] = mapped_column(
+        _JSON, nullable=False, default=dict, server_default="{}"
+    )
+    ai_profile_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pending", server_default="pending"
+    )
+    ai_profiled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,

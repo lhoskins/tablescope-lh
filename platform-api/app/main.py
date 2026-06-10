@@ -18,6 +18,8 @@ from app.config import get_settings
 from app.logging_config import configure_logging
 from app.observability import mount_metrics, setup_sentry
 from app.routes import ai_proxy as ai_proxy_routes
+from app.routes import ai_reference_catalog as ai_reference_catalog_routes
+from app.routes import ai_asset_metadata as ai_asset_metadata_routes
 from app.routes import auth as auth_routes
 from app.routes import dashboards as dashboards_routes
 from app.routes import database_sources as database_sources_routes
@@ -64,6 +66,17 @@ async def _reconcile_db_sources_on_startup() -> None:
             )
 
 
+async def _seed_reference_catalogs() -> None:
+    """Seed AI reference catalogs on startup (idempotent)."""
+    await asyncio.sleep(5)
+    try:
+        from scripts.seed_ai_reference_catalog import seed_catalogs
+        stats = await seed_catalogs()
+        logger.info("AI reference catalog seed: %s", stats)
+    except Exception as exc:
+        logger.warning("AI reference catalog seed failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -71,10 +84,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     setup_sentry()
     logger.info("Platform API starting (env=%s, version=%s)", settings.environment, __version__)
     reconcile_task = asyncio.create_task(_reconcile_db_sources_on_startup())
+    seed_task = asyncio.create_task(_seed_reference_catalogs())
     try:
         yield
     finally:
         reconcile_task.cancel()
+        seed_task.cancel()
         await pool_manager.close_all()
         logger.info("Platform API shutdown complete")
 
@@ -133,6 +148,8 @@ def create_app() -> FastAPI:
     app.include_router(file_analysis_routes.router, prefix=api_prefix)
     app.include_router(dashboards_routes.router, prefix=api_prefix)
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)
+    app.include_router(ai_reference_catalog_routes.router, prefix=api_prefix)
+    app.include_router(ai_asset_metadata_routes.router, prefix=api_prefix)
 
     return app
 

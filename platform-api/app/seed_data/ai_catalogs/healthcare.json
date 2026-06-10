@@ -1,0 +1,32 @@
+{
+  "catalog_key": "healthcare",
+  "name": "Healthcare KPI Catalog",
+  "description": "Tags and KPIs for patient care, revenue cycle, claims, and clinical operations.",
+  "industry": "healthcare",
+  "source_framework": "Tablescope Healthcare Core",
+  "version": "1.0",
+  "tags": [
+    {"tag_key": "patients", "display_name": "Patients", "business_domain": "clinical_operations", "process_area": "patient_management", "synonyms": ["members", "enrollees"], "example_fields": ["PatientID", "DOB", "Gender", "MRN"]},
+    {"tag_key": "appointments", "display_name": "Appointments", "business_domain": "clinical_operations", "process_area": "scheduling", "synonyms": ["visits", "bookings", "slots"], "example_fields": ["AppointmentID", "Date", "ProviderID", "Status"]},
+    {"tag_key": "claims", "display_name": "Claims", "business_domain": "revenue_cycle", "process_area": "billing", "synonyms": ["billing claims", "insurance claims"], "example_fields": ["ClaimID", "PayerID", "Amount", "Status"]},
+    {"tag_key": "denials", "display_name": "Denials", "business_domain": "revenue_cycle", "process_area": "denial_management", "synonyms": ["claim denials", "rejected claims"], "example_fields": ["DenialID", "ReasonCode", "Amount"]},
+    {"tag_key": "providers", "display_name": "Providers", "business_domain": "clinical_operations", "process_area": "provider_management", "synonyms": ["physicians", "doctors", "clinicians"], "example_fields": ["ProviderID", "Specialty", "NPI"]},
+    {"tag_key": "encounters", "display_name": "Encounters", "business_domain": "clinical_operations", "process_area": "patient_management", "synonyms": ["visits", "episodes"], "example_fields": ["EncounterID", "PatientID", "Date", "DiagnosisCode"]},
+    {"tag_key": "readmissions", "display_name": "Readmissions", "business_domain": "care_quality", "process_area": "outcomes", "synonyms": ["30-day readmit", "return visits"], "example_fields": ["PatientID", "AdmissionDate", "DischargeDate", "ReadmitDate"]},
+    {"tag_key": "utilization", "display_name": "Utilization", "business_domain": "operations", "process_area": "capacity", "synonyms": ["bed utilization", "resource use"], "example_fields": ["BedID", "Unit", "OccupancyRate"]},
+    {"tag_key": "revenue_cycle", "display_name": "Revenue Cycle", "business_domain": "revenue_cycle", "process_area": "billing", "synonyms": ["RCM", "charge capture"], "example_fields": ["ChargeID", "CPTCode", "Amount"]},
+    {"tag_key": "care_quality", "display_name": "Care Quality", "business_domain": "care_quality", "process_area": "outcomes", "synonyms": ["quality measures", "patient outcomes", "clinical quality"], "example_fields": ["MeasureID", "Score", "Benchmark"]}
+  ],
+  "kpis": [
+    {"kpi_key": "patient_volume", "display_name": "Patient Volume", "business_domain": "clinical_operations", "process_area": "patient_management", "formula": "COUNT(DISTINCT patient_id)", "required_fields": ["patient_id"], "related_tags": ["patients", "encounters"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "appointment_utilization", "display_name": "Appointment Utilization", "business_domain": "clinical_operations", "process_area": "scheduling", "formula": "booked_slots / available_slots", "required_fields": ["appointment_id", "status"], "related_tags": ["appointments"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "claim_denial_rate", "display_name": "Claim Denial Rate", "business_domain": "revenue_cycle", "process_area": "denial_management", "formula": "denied_claims / total_claims", "required_fields": ["claim_id", "status"], "related_tags": ["claims", "denials"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "days_in_ar", "display_name": "Days in AR", "business_domain": "revenue_cycle", "process_area": "billing", "formula": "total_ar / average_daily_charges", "required_fields": ["ar_balance", "daily_charges"], "related_tags": ["revenue_cycle", "claims"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "readmission_rate", "display_name": "Readmission Rate", "business_domain": "care_quality", "process_area": "outcomes", "formula": "readmissions_within_30_days / total_discharges", "required_fields": ["patient_id", "admission_date", "discharge_date"], "related_tags": ["readmissions", "care_quality"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "average_length_of_stay", "display_name": "Average Length of Stay (ALOS)", "business_domain": "clinical_operations", "process_area": "patient_management", "formula": "AVG(discharge_date - admission_date)", "required_fields": ["admission_date", "discharge_date"], "related_tags": ["encounters", "patients"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "provider_productivity", "display_name": "Provider Productivity", "business_domain": "clinical_operations", "process_area": "provider_management", "formula": "encounters_per_provider / target", "required_fields": ["provider_id", "encounter_count"], "related_tags": ["providers", "encounters"], "recommended_chart_type": "bar"},
+    {"kpi_key": "no_show_rate", "display_name": "No-Show Rate", "business_domain": "clinical_operations", "process_area": "scheduling", "formula": "no_shows / total_appointments", "required_fields": ["appointment_id", "status"], "related_tags": ["appointments"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "revenue_per_encounter", "display_name": "Revenue per Encounter", "business_domain": "revenue_cycle", "process_area": "billing", "formula": "total_revenue / total_encounters", "required_fields": ["revenue", "encounter_count"], "related_tags": ["revenue_cycle", "encounters"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "claims_cycle_time", "display_name": "Claims Cycle Time", "business_domain": "revenue_cycle", "process_area": "billing", "formula": "AVG(payment_date - submission_date)", "required_fields": ["claim_id", "submission_date", "payment_date"], "related_tags": ["claims"], "recommended_chart_type": "line"}
+  ]
+}

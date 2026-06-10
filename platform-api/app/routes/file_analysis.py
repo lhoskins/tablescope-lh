@@ -18,6 +18,9 @@ from app.models.file_source_meta import FileSourceMeta
 from app.services import data_source_metadata_service as metadata_svc
 from app.services.ai_file_analysis_service import analyze_file_with_ai
 from app.services.file_profile_service import profile_uploaded_file
+from app.services.upload_ai_profiler_service import (
+    profile_uploaded_file as catalog_profile_file,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/data-sources", tags=["file-analysis"])
@@ -68,6 +71,23 @@ async def analyze_upload(
         project_id=project_id or 0,
     )
 
+    # Run catalog-based profiling (governed tags + KPIs)
+    columns_for_catalog = [
+        {"name": f["field_name"], "type": f.get("detected_type", "string")}
+        for f in file_profile.get("fields", [])
+    ]
+    catalog_result = await catalog_profile_file(
+        session=session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id or 0,
+        source_id=0,  # Not persisted yet — finalize will re-persist
+        view_name=file_name.rsplit(".", 1)[0] if "." in file_name else file_name,
+        file_name=file_name,
+        columns=columns_for_catalog,
+        sample_rows=file_profile.get("sample_rows", []),
+    )
+
     # Store in upload session
     session_id = str(uuid.uuid4())
     _upload_sessions[session_id] = {
@@ -80,6 +100,7 @@ async def analyze_upload(
         "user_id": context.user_id,
         "file_profile": file_profile,
         "ai_result": ai_result,
+        "catalog_result": catalog_result,
     }
 
     return {
@@ -93,9 +114,11 @@ async def analyze_upload(
             "sheet_name": file_profile.get("sheet_name"),
         },
         "summary": {
-            "ai_summary": ai_result.get("summary", ""),
+            "ai_summary": catalog_result.get("summary") or ai_result.get("summary", ""),
             "ai_usage_summary": ai_result.get("usage_summary", ""),
             "ai_quality_summary": ai_result.get("quality_summary", ""),
+            "business_domain": catalog_result.get("business_domain", ""),
+            "process_area": catalog_result.get("process_area", ""),
         },
         "fields": [
             {
@@ -114,9 +137,18 @@ async def analyze_upload(
             for pf in file_profile["fields"]
         ],
         "tags": [
+            {**t, "source": "catalog", "accepted": True}
+            for t in catalog_result.get("suggested_tags", [])
+        ] or [
             {**t, "source": "ai", "accepted": True}
             for t in ai_result.get("tags", [])
         ],
+        "kpis": [
+            {**k, "source": "catalog", "accepted": True}
+            for k in catalog_result.get("suggested_kpis", [])
+        ],
+        "relationship_hints": catalog_result.get("relationship_hints", []),
+        "data_quality_notes": catalog_result.get("data_quality_notes", []),
         "recommendations": [
             {**r, "client_id": f"rec_{i}", "status": "pending"}
             for i, r in enumerate(ai_result.get("recommendations", []))
@@ -130,6 +162,10 @@ class FinalizeRequest(BaseModel):
     project_id: int | None = None
     display_name: str | None = None
     accepted_tags: list[dict[str, Any]] | None = None
+    accepted_tag_keys: list[str] | None = None
+    rejected_tag_keys: list[str] | None = None
+    accepted_kpi_keys: list[str] | None = None
+    rejected_kpi_keys: list[str] | None = None
     recommendation_decisions: list[dict[str, Any]] | None = None
     user_notes: str | None = None
     user_nuances: str | None = None
@@ -265,6 +301,89 @@ async def finalize_upload(
         meta.archived_at = None
 
     await session.flush()
+
+    # Persist catalog tag/KPI suggestions with real source_id
+    catalog_result = upload_data.get("catalog_result", {})
+    from app.services.upload_ai_profiler_service import (
+        _persist_suggestions,
+        _update_file_meta,
+    )
+    if catalog_result and meta.id:
+        await _persist_suggestions(
+            session, context.tenant_id, resolved_project_id or 0,
+            context.user_id, meta.id, catalog_result,
+        )
+        await _update_file_meta(session, meta.id, catalog_result)
+
+    # Auto-accept tags/KPIs based on user selections
+    if req.accepted_tag_keys or req.rejected_tag_keys:
+        from app.models.ai_asset_metadata import (
+            AIAssetTag,
+            AIAssetTagSuggestion,
+        )
+        suggestions = (
+            await session.scalars(
+                select(AIAssetTagSuggestion).where(
+                    AIAssetTagSuggestion.source_id == meta.id,
+                    AIAssetTagSuggestion.source_type == "file_datasource",
+                    AIAssetTagSuggestion.tenant_id == context.tenant_id,
+                )
+            )
+        ).all()
+        accepted_keys = set(req.accepted_tag_keys or [])
+        rejected_keys = set(req.rejected_tag_keys or [])
+        for s in suggestions:
+            if s.tag_key in accepted_keys:
+                s.status = "accepted"
+                session.add(AIAssetTag(
+                    tenant_id=context.tenant_id,
+                    project_id=resolved_project_id or 0,
+                    source_type="file_datasource",
+                    source_id=meta.id,
+                    tag_key=s.tag_key,
+                    display_name=s.display_name,
+                    confidence=s.confidence,
+                    source="ai_suggested",
+                    created_by=context.user_id,
+                ))
+            elif s.tag_key in rejected_keys:
+                s.status = "rejected"
+
+    if req.accepted_kpi_keys or req.rejected_kpi_keys:
+        from app.models.ai_asset_metadata import (
+            AIAssetKPI,
+            AIAssetKPISuggestion,
+        )
+        kpi_suggestions = (
+            await session.scalars(
+                select(AIAssetKPISuggestion).where(
+                    AIAssetKPISuggestion.source_id == meta.id,
+                    AIAssetKPISuggestion.source_type == "file_datasource",
+                    AIAssetKPISuggestion.tenant_id == context.tenant_id,
+                )
+            )
+        ).all()
+        accepted_kpi_keys = set(req.accepted_kpi_keys or [])
+        rejected_kpi_keys = set(req.rejected_kpi_keys or [])
+        for s in kpi_suggestions:
+            if s.kpi_key in accepted_kpi_keys:
+                s.status = "accepted"
+                session.add(AIAssetKPI(
+                    tenant_id=context.tenant_id,
+                    project_id=resolved_project_id or 0,
+                    source_type="file_datasource",
+                    source_id=meta.id,
+                    kpi_key=s.kpi_key,
+                    display_name=s.display_name,
+                    field_mapping=s.field_mapping,
+                    formula=s.formula,
+                    recommended_chart_type=s.recommended_chart_type,
+                    confidence=s.confidence,
+                    source="ai_suggested",
+                    created_by=context.user_id,
+                ))
+            elif s.kpi_key in rejected_kpi_keys:
+                s.status = "rejected"
 
     # Apply user overrides to AI result
     if req.user_notes:
