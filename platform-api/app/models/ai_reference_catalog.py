@@ -2,12 +2,12 @@
 
 Tables
 ------
-- ai_reference_catalogs  – catalog packs (Tablescope Core, Manufacturing, …)
-- ai_reference_tags      – governed business tags within a catalog
-- ai_reference_kpis      – governed KPI definitions within a catalog
-- tenant_reference_catalogs – per-tenant catalog enablement
-- tenant_custom_tags     – tenant-created tags
-- tenant_custom_kpis     – tenant-created KPIs
+- ai_reference_catalogs  - catalog packs (Tablescope Core, Manufacturing, etc.)
+- ai_reference_tags      - governed business tags within a catalog
+- ai_reference_kpis      - governed KPI definitions within a catalog
+- tenant_reference_catalogs - per-tenant catalog enablement
+- tenant_custom_tags     - tenant-created tags
+- tenant_custom_kpis     - tenant-created KPIs
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
-    Numeric,
     String,
     Text,
     UniqueConstraint,

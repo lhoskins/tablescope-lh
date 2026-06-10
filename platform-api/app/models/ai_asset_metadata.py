@@ -1,11 +1,11 @@
-"""SQLAlchemy models for AI asset metadata — tag/KPI suggestions and accepted values.
+"""SQLAlchemy models for AI asset metadata - tag/KPI suggestions and accepted values.
 
 Tables
 ------
-- ai_asset_tag_suggestions  – AI-suggested tags (suggested/accepted/rejected)
-- ai_asset_tags             – accepted tags for an asset
-- ai_asset_kpi_suggestions  – AI-suggested KPIs (suggested/accepted/rejected)
-- ai_asset_kpis             – accepted KPIs for an asset
+- ai_asset_tag_suggestions  - AI-suggested tags (suggested/accepted/rejected)
+- ai_asset_tags             - accepted tags for an asset
+- ai_asset_kpi_suggestions  - AI-suggested KPIs (suggested/accepted/rejected)
+- ai_asset_kpis             - accepted KPIs for an asset
 """
 
 from __future__ import annotations

@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -293,7 +293,7 @@ async def _update_file_meta(
     result: dict[str, Any],
 ) -> None:
     """Update file_source_meta with the AI metadata."""
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     ai_metadata = {
         "summary": result.get("summary", ""),
@@ -311,7 +311,7 @@ async def _update_file_meta(
         .values(
             ai_metadata=ai_metadata,
             ai_profile_status="profiled",
-            ai_profiled_at=datetime.now(timezone.utc),
+            ai_profiled_at=datetime.now(UTC),
         )
     )
     await session.flush()
