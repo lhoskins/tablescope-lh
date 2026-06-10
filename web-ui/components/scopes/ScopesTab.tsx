@@ -29,6 +29,17 @@ export function ScopesTab({ projectId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
 
+  // Manual creation state
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newSourceQuery, setNewSourceQuery] = useState<number | "">("");
+  const [newSourceField, setNewSourceField] = useState("");
+  const [newTargetQuery, setNewTargetQuery] = useState<number | "">("");
+  const [newTargetField, setNewTargetField] = useState("");
+  const [sourceFields, setSourceFields] = useState<string[]>([]);
+  const [targetFields, setTargetFields] = useState<string[]>([]);
+  const [loadingFields, setLoadingFields] = useState(false);
+
   const queryName = useCallback(
     (qid: number) => queries.find((q) => q.id === qid)?.name ?? `Query #${qid}`,
     [queries],
@@ -55,6 +66,37 @@ export function ScopesTab({ projectId }: Props) {
     loadData();
   }, [loadData]);
 
+  // Load columns when source/target query changes
+  const loadColumns = useCallback(async (queryId: number, target: "source" | "target") => {
+    setLoadingFields(true);
+    try {
+      const q = queries.find((qq) => qq.id === queryId);
+      if (!q) return;
+      const result = await apiClient.get<{ columns: string[] }>(`/api/projects/${projectId}/queries/${queryId}/columns`);
+      if (target === "source") setSourceFields(result.columns || []);
+      else setTargetFields(result.columns || []);
+    } catch {
+      // If columns endpoint doesn't exist, try running the query to get columns
+      try {
+        const queryData = await apiClient.get<{ sql_text: string }>(`/api/projects/${projectId}/queries/${queryId}`);
+        if (queryData.sql_text) {
+          const result = await apiClient.post<{ columns: string[]; rows: Record<string, unknown>[] }>(`/api/query/execute`, {
+            project_id: projectId,
+            sql_text: queryData.sql_text,
+            limit: 1,
+          });
+          const cols = result.columns || (result.rows?.[0] ? Object.keys(result.rows[0]) : []);
+          if (target === "source") setSourceFields(cols);
+          else setTargetFields(cols);
+        }
+      } catch {
+        // Silently fail — user can type manually
+      }
+    } finally {
+      setLoadingFields(false);
+    }
+  }, [projectId, queries]);
+
   const handleDelete = async (scopeId: number) => {
     setDeleting(scopeId);
     try {
@@ -64,6 +106,32 @@ export function ScopesTab({ projectId }: Props) {
       setError(err instanceof Error ? err.message : "Failed to delete scope");
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!newSourceQuery || !newSourceField.trim() || !newTargetQuery || !newTargetField.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await apiClient.post("/api/query-scopes", {
+        query_id: newSourceQuery,
+        source_field: newSourceField.trim(),
+        target_query_id: newTargetQuery,
+        target_field: newTargetField.trim(),
+      });
+      setShowCreate(false);
+      setNewSourceQuery("");
+      setNewSourceField("");
+      setNewTargetQuery("");
+      setNewTargetField("");
+      setSourceFields([]);
+      setTargetFields([]);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create scope");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -85,13 +153,132 @@ export function ScopesTab({ projectId }: Props) {
             Drill-down relationships between saved queries. Click a scoped cell in a query result to drill into the target query filtered by that value.
           </p>
         </div>
-        <button
-          onClick={loadData}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowCreate(!showCreate)}
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            {showCreate ? "Cancel" : "Create Scope"}
+          </button>
+          <button
+            onClick={loadData}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {/* Create Scope Form */}
+      {showCreate && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-slate-900">Create New Scope</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Source Query</label>
+              <select
+                value={newSourceQuery}
+                onChange={(e) => {
+                  const val = Number(e.target.value) || "";
+                  setNewSourceQuery(val);
+                  setNewSourceField("");
+                  setSourceFields([]);
+                  if (val) loadColumns(val as number, "source");
+                }}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="">Select query...</option>
+                {queries.map((q) => (
+                  <option key={q.id} value={q.id}>{q.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Source Field</label>
+              {sourceFields.length > 0 ? (
+                <select
+                  value={newSourceField}
+                  onChange={(e) => setNewSourceField(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">Select field...</option>
+                  {sourceFields.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={newSourceField}
+                  onChange={(e) => setNewSourceField(e.target.value)}
+                  placeholder="Field name..."
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Target Query</label>
+              <select
+                value={newTargetQuery}
+                onChange={(e) => {
+                  const val = Number(e.target.value) || "";
+                  setNewTargetQuery(val);
+                  setNewTargetField("");
+                  setTargetFields([]);
+                  if (val) loadColumns(val as number, "target");
+                }}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="">Select query...</option>
+                {queries.map((q) => (
+                  <option key={q.id} value={q.id}>{q.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Target Field</label>
+              {targetFields.length > 0 ? (
+                <select
+                  value={newTargetField}
+                  onChange={(e) => setNewTargetField(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">Select field...</option>
+                  {targetFields.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={newTargetField}
+                  onChange={(e) => setNewTargetField(e.target.value)}
+                  placeholder="Field name..."
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+              )}
+            </div>
+          </div>
+          {loadingFields && (
+            <p className="mt-2 text-xs text-slate-500">Loading fields...</p>
+          )}
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={handleCreate}
+              disabled={creating || !newSourceQuery || !newSourceField.trim() || !newTargetQuery || !newTargetField.trim()}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {creating ? "Creating..." : "Create Scope"}
+            </button>
+            <button
+              onClick={() => { setShowCreate(false); setSourceFields([]); setTargetFields([]); }}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -99,14 +286,14 @@ export function ScopesTab({ projectId }: Props) {
         </div>
       )}
 
-      {scopes.length === 0 ? (
+      {scopes.length === 0 && !showCreate ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
           <p className="text-sm text-slate-500">No scopes configured for this project.</p>
           <p className="mt-1 text-xs text-slate-400">
-            Use the AI tab → Scope Map to generate scope suggestions, or create them manually.
+            Click &quot;Create Scope&quot; above to add one manually, or use the AI tab to generate suggestions.
           </p>
         </div>
-      ) : (
+      ) : scopes.length > 0 ? (
         <div className="overflow-hidden rounded-lg border border-slate-200">
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
@@ -176,7 +363,7 @@ export function ScopesTab({ projectId }: Props) {
             {scopes.length} scope{scopes.length !== 1 ? "s" : ""} total
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

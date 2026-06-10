@@ -14,7 +14,6 @@ function shortenAiName(prompt: string): string {
   ).trim();
   if (/^SELECT\b/i.test(s)) s = "Custom SQL Query";
   if (!s) s = "Query";
-  // Title case, keeping small words lowercase
   const small = new Set(["by", "of", "and", "the", "in", "for", "with", "to", "a"]);
   s = s
     .split(/\s+/)
@@ -50,6 +49,33 @@ type AIResponse = {
   error?: string;
 };
 
+type QuerySuggestion = {
+  title: string;
+  description: string;
+  sql?: string;
+};
+
+type DashboardSuggestion = {
+  title: string;
+  description: string;
+  widgets?: Array<{ type: string; title: string; sql: string }>;
+};
+
+type InsightItem = {
+  title: string;
+  description: string;
+  action?: string;
+  action_type?: "create" | "run";
+  action_params?: Record<string, unknown>;
+};
+
+type SuggestionResponse = {
+  query_suggestions?: QuerySuggestion[];
+  dashboard_suggestions?: DashboardSuggestion[];
+  insights?: InsightItem[];
+  answer?: string;
+};
+
 type SaveResult = {
   action: string;
   status: string;
@@ -72,25 +98,29 @@ type Props = {
 
 /* ---------- Component ---------- */
 
-export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCreated }: Props) {
+export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [activeFeature, setActiveFeature] = useState<
-    "ask" | "sql" | "relationships" | "scopemap" | "dashboard"
-  >("ask");
-  const [creatingScope, setCreatingScope] = useState<string | null>(null);
-  const [scopeCreated, setScopeCreated] = useState<Set<string>>(new Set());
+  const [activeFeature, setActiveFeature] = useState<"ask" | "suggestions">("ask");
   const [response, setResponse] = useState<AIResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [saveDescription, setSaveDescription] = useState("");
-  const [dashboardPrompt, setDashboardPrompt] = useState("");
   const [history, setHistory] = useState<
     Array<{ question: string; answer: string; feature: string }>
   >([]);
+
+  // Suggestion state
+  const [suggestionType, setSuggestionType] = useState<"queries" | "dashboards" | "insights" | null>(null);
+  const [querySuggestions, setQuerySuggestions] = useState<QuerySuggestion[]>([]);
+  const [dashboardSuggestions, setDashboardSuggestions] = useState<DashboardSuggestion[]>([]);
+  const [insights, setInsights] = useState<InsightItem[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [creatingSuggestion, setCreatingSuggestion] = useState<number | null>(null);
+  const [runningInsight, setRunningInsight] = useState<number | null>(null);
 
   const callAI = useCallback(
     async (feature: string, body: Record<string, unknown>) => {
@@ -102,8 +132,6 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
         const endpoints: Record<string, string> = {
           ask: "/api/ai/ask",
           sql: "/api/ai/query/generate",
-          relationships: "/api/ai/project/relationships/generate",
-          scopemap: "/api/ai/project/scope-map/generate",
           dashboard: "/api/ai/dashboard/suggest",
         };
         const resp = await apiClient.post<AIResponse>(
@@ -129,53 +157,187 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
 
   const handleAsk = () => {
     if (!question.trim()) return;
-    callAI(activeFeature, {
+    callAI("ask", {
       project_id: projectId,
       question: question.trim(),
       prompt: question.trim(),
     });
   };
 
-  const handleRelationships = () => {
-    callAI("relationships", { project_id: projectId });
-  };
+  /* ---------- Suggestion Actions ---------- */
 
-  const handleScopeMap = () => {
-    setScopeCreated(new Set());
-    callAI("scopemap", { project_id: projectId });
-  };
-
-  const handleCreateScope = async (rel: NonNullable<AIResponse["relationships"]>[0]) => {
-    const key = `${rel.source_query_id ?? rel.left_table}.${rel.left_column}.${rel.target_query_id ?? rel.right_table}`;
-    setCreatingScope(key);
+  const fetchQuerySuggestions = async () => {
+    setSuggestionType("queries");
+    setLoadingSuggestions(true);
+    setError(null);
+    setQuerySuggestions([]);
     try {
-      if (rel.source_query_id && rel.target_query_id) {
-        await apiClient.post("/api/query-scopes", {
-          query_id: rel.source_query_id,
-          source_field: rel.left_column,
-          target_query_id: rel.target_query_id,
-          target_field: rel.right_column,
-        });
-      } else {
-        await apiClient.post("/api/scopes", {
-          sourceTable: rel.left_table,
-          sourceColumn: rel.left_column,
-          targetTable: rel.right_table,
-          targetColumn: rel.right_column,
-        });
+      const resp = await apiClient.post<SuggestionResponse>("/api/ai/ask", {
+        project_id: projectId,
+        question: "Suggest 5 useful SQL queries I could create for this project's data sources. For each suggestion provide a title, description, and the actual SQL query. Return your answer as JSON with a 'query_suggestions' array where each item has 'title', 'description', and 'sql' fields.",
+      });
+      if (resp.answer) {
+        try {
+          const parsed = JSON.parse(resp.answer);
+          setQuerySuggestions(parsed.query_suggestions || []);
+        } catch {
+          // Try to extract JSON from markdown code blocks
+          const jsonMatch = resp.answer.match(/```(?:json)?\s*([\s\S]*?)```/);
+          if (jsonMatch) {
+            try {
+              const parsed = JSON.parse(jsonMatch[1]);
+              setQuerySuggestions(parsed.query_suggestions || parsed || []);
+            } catch {
+              setQuerySuggestions([{ title: "AI Response", description: resp.answer }]);
+            }
+          } else {
+            setQuerySuggestions([{ title: "AI Response", description: resp.answer }]);
+          }
+        }
       }
-      setScopeCreated((prev) => new Set(prev).add(key));
-      onScopeCreated?.();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to create scope";
-      setError(msg);
+      setError(err instanceof Error ? err.message : "Failed to get query suggestions");
     } finally {
-      setCreatingScope(null);
+      setLoadingSuggestions(false);
     }
   };
 
-  const handleDashboardSuggest = () => {
-    callAI("dashboard", { project_id: projectId });
+  const fetchDashboardSuggestions = async () => {
+    setSuggestionType("dashboards");
+    setLoadingSuggestions(true);
+    setError(null);
+    setDashboardSuggestions([]);
+    try {
+      const resp = await apiClient.post<SuggestionResponse>("/api/ai/ask", {
+        project_id: projectId,
+        question: "Suggest 3 useful dashboards I could create for this project's data sources. For each suggestion provide a title and description of what the dashboard would show. Return your answer as JSON with a 'dashboard_suggestions' array where each item has 'title' and 'description' fields.",
+      });
+      if (resp.answer) {
+        try {
+          const parsed = JSON.parse(resp.answer);
+          setDashboardSuggestions(parsed.dashboard_suggestions || []);
+        } catch {
+          const jsonMatch = resp.answer.match(/```(?:json)?\s*([\s\S]*?)```/);
+          if (jsonMatch) {
+            try {
+              const parsed = JSON.parse(jsonMatch[1]);
+              setDashboardSuggestions(parsed.dashboard_suggestions || parsed || []);
+            } catch {
+              setDashboardSuggestions([{ title: "AI Response", description: resp.answer }]);
+            }
+          } else {
+            setDashboardSuggestions([{ title: "AI Response", description: resp.answer }]);
+          }
+        }
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to get dashboard suggestions");
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
+  const fetchInsights = async () => {
+    setSuggestionType("insights");
+    setLoadingSuggestions(true);
+    setError(null);
+    setInsights([]);
+    try {
+      const resp = await apiClient.post<SuggestionResponse>("/api/ai/ask", {
+        project_id: projectId,
+        question: "Analyze this project's data sources and provide insights and opportunities. For each insight, provide a title, description, and optionally an action the user can take (such as creating a query or running an analysis). Return your answer as JSON with an 'insights' array where each item has 'title', 'description', and optionally 'action' (text description of what to do), 'action_type' ('create' or 'run'), and 'action_params' (object with any parameters needed).",
+      });
+      if (resp.answer) {
+        try {
+          const parsed = JSON.parse(resp.answer);
+          setInsights(parsed.insights || []);
+        } catch {
+          const jsonMatch = resp.answer.match(/```(?:json)?\s*([\s\S]*?)```/);
+          if (jsonMatch) {
+            try {
+              const parsed = JSON.parse(jsonMatch[1]);
+              setInsights(parsed.insights || parsed || []);
+            } catch {
+              setInsights([{ title: "AI Insight", description: resp.answer }]);
+            }
+          } else {
+            setInsights([{ title: "AI Insight", description: resp.answer }]);
+          }
+        }
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to get insights");
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
+  const handleCreateQueryFromSuggestion = async (suggestion: QuerySuggestion, index: number) => {
+    if (!suggestion.sql) return;
+    setCreatingSuggestion(index);
+    setError(null);
+    try {
+      const result = await apiClient.post<SaveResult>("/api/ai/actions/save-query", {
+        project_id: projectId,
+        name: shortenAiName(suggestion.title),
+        description: suggestion.description,
+        sql_text: suggestion.sql,
+      });
+      setSaveResult(result);
+      onQuerySaved?.();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create query");
+    } finally {
+      setCreatingSuggestion(null);
+    }
+  };
+
+  const handleCreateDashboardFromSuggestion = async (suggestion: DashboardSuggestion, index: number) => {
+    setCreatingSuggestion(index);
+    setError(null);
+    try {
+      const result = await apiClient.post<SaveResult>("/api/ai/actions/generate-and-save-dashboard", {
+        project_id: projectId,
+        prompt: suggestion.description,
+        name: shortenAiName(suggestion.title),
+        description: suggestion.description,
+      });
+      setSaveResult(result);
+      onDashboardSaved?.();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create dashboard");
+    } finally {
+      setCreatingSuggestion(null);
+    }
+  };
+
+  const handleRunInsightAction = async (insight: InsightItem, index: number) => {
+    if (!insight.action) return;
+    setRunningInsight(index);
+    setError(null);
+    try {
+      if (insight.action_type === "create") {
+        // Create a query from the insight's action
+        const result = await apiClient.post<SaveResult>("/api/ai/actions/generate-and-save-query", {
+          project_id: projectId,
+          prompt: insight.action,
+          name: shortenAiName(insight.title),
+        });
+        setSaveResult(result);
+        onQuerySaved?.();
+      } else {
+        // Run/execute the action as an AI question
+        const resp = await apiClient.post<AIResponse>("/api/ai/ask", {
+          project_id: projectId,
+          question: insight.action,
+        });
+        setResponse(resp);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to execute action");
+    } finally {
+      setRunningInsight(null);
+    }
   };
 
   /* ---------- Save Actions ---------- */
@@ -229,55 +391,6 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
     }
   };
 
-  const handleGenerateAndSaveDashboard = async () => {
-    setSaving(true);
-    setError(null);
-    setSaveResult(null);
-    try {
-      const result = await apiClient.post<SaveResult>("/api/ai/actions/generate-and-save-dashboard", {
-        project_id: projectId,
-        prompt: dashboardPrompt.trim() || undefined,
-        name: saveName.trim() || undefined,
-        description: saveDescription.trim() || undefined,
-      });
-      setSaveResult(result);
-      setShowSaveDialog(false);
-      setSaveName("");
-      setSaveDescription("");
-      setDashboardPrompt("");
-      onDashboardSaved?.();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to generate and save dashboard";
-      setError(msg);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSaveDashboardFromSuggestion = async () => {
-    if (!response?.suggestions?.length) return;
-    setSaving(true);
-    setError(null);
-    setSaveResult(null);
-    try {
-      const result = await apiClient.post<SaveResult>("/api/ai/actions/generate-and-save-dashboard", {
-        project_id: projectId,
-        name: saveName.trim() || response.suggestions[0].title,
-        description: saveDescription.trim() || undefined,
-      });
-      setSaveResult(result);
-      setShowSaveDialog(false);
-      setSaveName("");
-      setSaveDescription("");
-      onDashboardSaved?.();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to save dashboard";
-      setError(msg);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <div className="space-y-4">
       {/* AI boundary notice */}
@@ -295,15 +408,12 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
         </div>
       </div>
 
-      {/* Feature tabs */}
+      {/* Feature tabs — only Ask AI and Make Suggestions */}
       <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
         {(
           [
             { key: "ask", label: "Ask AI" },
-            { key: "sql", label: "Generate SQL" },
-            { key: "relationships", label: "Relationships" },
-            { key: "scopemap", label: "Scope Map" },
-            { key: "dashboard", label: "Suggest Dashboard" },
+            { key: "suggestions", label: "Make Suggestions" },
           ] as const
         ).map((f) => (
           <button
@@ -323,8 +433,8 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
         ))}
       </div>
 
-      {/* Input area for Ask / SQL */}
-      {(activeFeature === "ask" || activeFeature === "sql") && (
+      {/* Ask AI input */}
+      {activeFeature === "ask" && (
         <div className="space-y-2">
           <div className="flex gap-2">
             <input
@@ -332,11 +442,7 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAsk()}
-              placeholder={
-                activeFeature === "ask"
-                  ? "Ask a question about this project..."
-                  : "Describe the query you want (e.g., 'Show revenue by region')..."
-              }
+              placeholder="Ask a question about this project..."
               className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               disabled={loading || saving}
             />
@@ -345,12 +451,11 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
               disabled={loading || !question.trim()}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {loading ? "Thinking..." : activeFeature === "ask" ? "Ask" : "Generate"}
+              {loading ? "Thinking..." : "Ask"}
             </button>
           </div>
 
-          {/* Generate & Save as Query shortcut */}
-          {activeFeature === "sql" && question.trim() && (
+          {question.trim() && (
             <button
               onClick={() => {
                 setSaveName(shortenAiName(question.trim()));
@@ -366,57 +471,144 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
         </div>
       )}
 
-      {/* Action buttons for non-text features */}
-      {activeFeature === "relationships" && (
-        <button
-          onClick={handleRelationships}
-          disabled={loading}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? "Analyzing..." : "Generate Relationship Map"}
-        </button>
-      )}
-
-      {activeFeature === "scopemap" && (
-        <button
-          onClick={handleScopeMap}
-          disabled={loading}
-          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-        >
-          {loading ? "Analyzing..." : "Generate Scope Map"}
-        </button>
-      )}
-
-      {activeFeature === "dashboard" && (
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={dashboardPrompt}
-              onChange={(e) => setDashboardPrompt(e.target.value)}
-              placeholder="Describe the dashboard you want (optional)..."
-              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              disabled={loading || saving}
-            />
+      {/* Make Suggestions tab */}
+      {activeFeature === "suggestions" && (
+        <div className="space-y-4">
+          {/* Three action buttons */}
+          <div className="grid grid-cols-3 gap-3">
             <button
-              onClick={handleDashboardSuggest}
-              disabled={loading}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              onClick={fetchQuerySuggestions}
+              disabled={loadingSuggestions}
+              className={`rounded-lg border-2 p-4 text-left transition-colors ${
+                suggestionType === "queries"
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50"
+              }`}
             >
-              {loading ? "Generating..." : "Suggest"}
+              <div className="mb-1 text-sm font-semibold text-slate-900">New Query Suggestions</div>
+              <p className="text-xs text-slate-500">AI suggests useful queries for your data</p>
+            </button>
+            <button
+              onClick={fetchDashboardSuggestions}
+              disabled={loadingSuggestions}
+              className={`rounded-lg border-2 p-4 text-left transition-colors ${
+                suggestionType === "dashboards"
+                  ? "border-violet-500 bg-violet-50"
+                  : "border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50/50"
+              }`}
+            >
+              <div className="mb-1 text-sm font-semibold text-slate-900">New Dashboard Suggestions</div>
+              <p className="text-xs text-slate-500">AI suggests dashboards to visualize your data</p>
+            </button>
+            <button
+              onClick={fetchInsights}
+              disabled={loadingSuggestions}
+              className={`rounded-lg border-2 p-4 text-left transition-colors ${
+                suggestionType === "insights"
+                  ? "border-amber-500 bg-amber-50"
+                  : "border-slate-200 bg-white hover:border-amber-300 hover:bg-amber-50/50"
+              }`}
+            >
+              <div className="mb-1 text-sm font-semibold text-slate-900">Insights &amp; Opportunities</div>
+              <p className="text-xs text-slate-500">AI analyzes your data for actionable insights</p>
             </button>
           </div>
-          <button
-            onClick={() => {
-              setSaveName("");
-              setSaveDescription("");
-              setShowSaveDialog(true);
-            }}
-            disabled={loading || saving}
-            className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
-          >
-            Generate &amp; Save Dashboard
-          </button>
+
+          {/* Loading */}
+          {loadingSuggestions && (
+            <div className="flex items-center gap-2 py-4 text-sm text-slate-500">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+              Generating suggestions...
+            </div>
+          )}
+
+          {/* Query Suggestions */}
+          {suggestionType === "queries" && querySuggestions.length > 0 && !loadingSuggestions && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-slate-900">Query Suggestions</h3>
+              {querySuggestions.map((sug, i) => (
+                <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-sm font-medium text-slate-900">{sug.title}</h4>
+                    <p className="mt-0.5 text-xs text-slate-500">{sug.description}</p>
+                    {sug.sql && (
+                      <pre className="mt-2 max-h-20 overflow-auto rounded bg-slate-900 p-2 text-[10px] text-green-400">
+                        {sug.sql}
+                      </pre>
+                    )}
+                  </div>
+                  {sug.sql && (
+                    <button
+                      onClick={() => handleCreateQueryFromSuggestion(sug, i)}
+                      disabled={creatingSuggestion === i}
+                      className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {creatingSuggestion === i ? "Creating..." : "Create"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Dashboard Suggestions */}
+          {suggestionType === "dashboards" && dashboardSuggestions.length > 0 && !loadingSuggestions && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-slate-900">Dashboard Suggestions</h3>
+              {dashboardSuggestions.map((sug, i) => (
+                <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-sm font-medium text-slate-900">{sug.title}</h4>
+                    <p className="mt-0.5 text-xs text-slate-500">{sug.description}</p>
+                  </div>
+                  <button
+                    onClick={() => handleCreateDashboardFromSuggestion(sug, i)}
+                    disabled={creatingSuggestion === i}
+                    className="shrink-0 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    {creatingSuggestion === i ? "Creating..." : "Create"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Insights & Opportunities */}
+          {suggestionType === "insights" && insights.length > 0 && !loadingSuggestions && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-slate-900">Insights &amp; Opportunities</h3>
+              {insights.map((insight, i) => (
+                <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-sm font-medium text-slate-900">{insight.title}</h4>
+                    <p className="mt-0.5 text-xs text-slate-500">{insight.description}</p>
+                    {insight.action && (
+                      <p className="mt-1 text-xs text-blue-600">
+                        Action: {insight.action}
+                      </p>
+                    )}
+                  </div>
+                  {insight.action && (
+                    <button
+                      onClick={() => handleRunInsightAction(insight, i)}
+                      disabled={runningInsight === i}
+                      className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 ${
+                        insight.action_type === "create"
+                          ? "bg-emerald-600 hover:bg-emerald-700"
+                          : "bg-amber-600 hover:bg-amber-700"
+                      }`}
+                    >
+                      {runningInsight === i
+                        ? "Running..."
+                        : insight.action_type === "create"
+                          ? "Create"
+                          : "Run"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -443,23 +635,17 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
             {saveResult.action === "save_query" && (
-              <span>Query saved! (ID: {saveResult.query_id})</span>
+              <span>Query saved: {saveResult.name} (ID: {saveResult.query_id})</span>
             )}
             {saveResult.action === "generate_and_save_query" && (
-              <span>Query generated &amp; saved! (ID: {saveResult.query_id})</span>
+              <span>Query generated &amp; saved: {saveResult.name} (ID: {saveResult.query_id})</span>
             )}
             {saveResult.action === "generate_and_save_dashboard" && (
               <span>
                 Dashboard &quot;{saveResult.dashboard_name}&quot; created with {saveResult.widgets_created} widget(s)
-                and {saveResult.queries_created?.length ?? 0} query(ies)
               </span>
             )}
           </div>
-          {saveResult.sql_text && (
-            <pre className="mt-2 overflow-x-auto rounded bg-slate-900 p-2 text-xs text-green-400">
-              {saveResult.sql_text}
-            </pre>
-          )}
           <p className="mt-1 text-xs text-emerald-600">
             {saveResult.query_id && "View in the Queries tab."}
             {saveResult.dashboard_id && "View in the Dashboards tab."}
@@ -467,10 +653,9 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
         </div>
       )}
 
-      {/* Response display */}
-      {response && !error && (
+      {/* Response display (Ask AI responses) */}
+      {response && !error && activeFeature === "ask" && (
         <div className="rounded-lg border border-slate-200 bg-white p-4">
-          {/* Ask response */}
           {response.answer && (
             <div>
               <h3 className="mb-2 text-sm font-semibold text-slate-900">AI Response</h3>
@@ -478,7 +663,6 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
             </div>
           )}
 
-          {/* SQL response */}
           {response.sql && (
             <div>
               <div className="mb-2 flex items-center justify-between">
@@ -504,146 +688,6 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
             </div>
           )}
 
-          {/* Relationships response */}
-          {response.relationships && response.relationships.length > 0 && (
-            <div>
-              <h3 className="mb-2 text-sm font-semibold text-slate-900">
-                Suggested Relationships ({response.relationships.length})
-              </h3>
-              <div className="space-y-2">
-                {response.relationships.map((rel, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-2 rounded-md border border-slate-100 bg-slate-50 p-2 text-sm"
-                  >
-                    <span className="font-mono text-blue-700">
-                      {rel.left_table}.{rel.left_column}
-                    </span>
-                    <span className="text-slate-400">&rarr;</span>
-                    <span className="font-mono text-blue-700">
-                      {rel.right_table}.{rel.right_column}
-                    </span>
-                    <span className="ml-auto rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                      {Math.round(rel.confidence * 100)}%
-                    </span>
-                    <span className="text-xs text-slate-500">{rel.reason}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Scope Map response */}
-          {activeFeature === "scopemap" && response.relationships && response.relationships.length > 0 && (
-            <div>
-              <h3 className="mb-2 text-sm font-semibold text-slate-900">
-                AI Scope Map ({response.relationships.length} suggestions)
-              </h3>
-              <p className="mb-3 text-xs text-slate-500">
-                Click &quot;Create Scope&quot; to add a drill-down scope. Source query column clicks will drill into the target query filtered by that value.
-              </p>
-              <div className="space-y-2">
-                {response.relationships.map((rel, i) => {
-                  const key = `${rel.source_query_id ?? rel.left_table}.${rel.left_column}.${rel.target_query_id ?? rel.right_table}`;
-                  const alreadyCreated = scopeCreated.has(key) || (rel as Record<string, unknown>).scope_exists === true;
-                  const isCreating = creatingScope === key;
-                  return (
-                    <div
-                      key={i}
-                      className={`flex items-center gap-2 rounded-md border p-3 text-sm ${
-                        alreadyCreated
-                          ? "border-green-200 bg-green-50"
-                          : "border-slate-200 bg-white"
-                      }`}
-                    >
-                      <div className="flex flex-1 flex-wrap items-center gap-2">
-                        <span className="rounded bg-blue-100 px-2 py-1 font-mono text-xs text-blue-800">
-                          {rel.left_table}
-                        </span>
-                        <span className="font-mono text-xs text-slate-600">.{rel.left_column}</span>
-                        <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                        </svg>
-                        <span className="rounded bg-indigo-100 px-2 py-1 font-mono text-xs text-indigo-800">
-                          {rel.right_table}
-                        </span>
-                        <span className="font-mono text-xs text-slate-600">.{rel.right_column}</span>
-                        {rel.source_query_id && (
-                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">query-based</span>
-                        )}
-                        <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
-                          {Math.round(rel.confidence * 100)}%
-                        </span>
-                      </div>
-                      <span className="hidden text-xs text-slate-400 sm:inline">{rel.reason}</span>
-                      {alreadyCreated ? (
-                        <span className="whitespace-nowrap rounded bg-green-200 px-3 py-1.5 text-xs font-medium text-green-800">
-                          Scope Created
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleCreateScope(rel)}
-                          disabled={isCreating || !!creatingScope}
-                          className="whitespace-nowrap rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-                        >
-                          {isCreating ? "Creating..." : "Create Scope"}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              {scopeCreated.size > 0 && (
-                <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-2 text-xs text-green-700">
-                  {scopeCreated.size} scope(s) created. View them on the Scopes page.
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Dashboard suggestions */}
-          {response.suggestions && response.suggestions.length > 0 && (
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Dashboard Suggestions
-                </h3>
-                <button
-                  onClick={() => {
-                    setSaveName(response.suggestions?.[0]?.title ?? "AI Dashboard");
-                    setSaveDescription("");
-                    setShowSaveDialog(true);
-                  }}
-                  disabled={saving}
-                  className="rounded-md bg-violet-600 px-3 py-1 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-                >
-                  Save as Dashboard
-                </button>
-              </div>
-              {response.suggestions.map((sug, i) => (
-                <div key={i} className="mb-3 rounded-md border border-slate-100 p-3">
-                  <h4 className="mb-2 font-medium text-slate-800">{sug.title}</h4>
-                  <div className="space-y-1">
-                    {sug.widgets.map((w, j) => (
-                      <div key={j} className="flex items-center gap-2 text-sm">
-                        <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-700">
-                          {w.type}
-                        </span>
-                        <span className="text-slate-700">{w.title}</span>
-                        {w.sql && (
-                          <span className="ml-auto truncate text-[10px] font-mono text-slate-400" title={w.sql}>
-                            {w.sql.slice(0, 60)}...
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Context summary */}
           {response.context_summary && (
             <div className="mt-3 flex gap-3 border-t border-slate-100 pt-3 text-xs text-slate-400">
               {response.request_id && <span>Request: {response.request_id.slice(0, 8)}...</span>}
@@ -663,11 +707,7 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
             <h2 className="mb-4 text-lg font-semibold text-slate-900">
-              {activeFeature === "dashboard" && !response?.sql
-                ? "Generate & Save Dashboard"
-                : response?.sql
-                  ? "Save Query"
-                  : "Generate & Save Query"}
+              {response?.sql ? "Save Query" : "Generate & Save Query"}
             </h2>
 
             <div className="space-y-3">
@@ -677,11 +717,7 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
                   type="text"
                   value={saveName}
                   onChange={(e) => setSaveName(e.target.value)}
-                  placeholder={
-                    activeFeature === "dashboard"
-                      ? "Dashboard name..."
-                      : "Query name..."
-                  }
+                  placeholder="Query name..."
                   className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
@@ -699,23 +735,6 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
                 />
               </div>
 
-              {/* Dashboard prompt if generating fresh */}
-              {activeFeature === "dashboard" && !response?.suggestions?.length && (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">
-                    Dashboard prompt (optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={dashboardPrompt}
-                    onChange={(e) => setDashboardPrompt(e.target.value)}
-                    placeholder="e.g., 'Create a sales performance dashboard'"
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-              )}
-
-              {/* Show SQL preview for query save */}
               {response?.sql && (
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">SQL</label>
@@ -739,22 +758,16 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved, onScopeCrea
               </button>
               <button
                 onClick={() => {
-                  if (activeFeature === "dashboard") {
-                    if (response?.suggestions?.length) {
-                      handleSaveDashboardFromSuggestion();
-                    } else {
-                      handleGenerateAndSaveDashboard();
-                    }
-                  } else if (response?.sql) {
+                  if (response?.sql) {
                     handleSaveQuery();
                   } else {
                     handleGenerateAndSaveQuery();
                   }
                 }}
-                disabled={saving || (!response?.sql && activeFeature !== "dashboard" && !saveName.trim())}
+                disabled={saving || (!response?.sql && !saveName.trim())}
                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {saving ? "Saving..." : activeFeature === "dashboard" ? "Create Dashboard" : "Save Query"}
+                {saving ? "Saving..." : "Save Query"}
               </button>
             </div>
           </div>

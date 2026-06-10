@@ -14,6 +14,7 @@ export type ExchangeResponse = {
 };
 
 const USER_META_KEY = "tablescope.user_meta";
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 export function storeUserMeta(meta: {
   role: string;
@@ -79,8 +80,38 @@ export async function loginWithPassword(
 }
 
 export function signOut() {
+  const meta = getUserMeta();
+  const slug = meta?.tenant_slug;
   clearToken();
   if (typeof window !== "undefined") {
-    window.location.href = "/login";
+    window.localStorage.removeItem(USER_META_KEY);
+    window.location.href = slug ? `/${slug}/login` : "/login";
   }
+}
+
+// ── Idle timeout ─────────────────────────────────────────────────────
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function resetIdleTimer() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    signOut();
+  }, IDLE_TIMEOUT_MS);
+}
+
+export function startIdleTimer() {
+  if (typeof window === "undefined") return;
+  const events = ["mousedown", "mousemove", "keydown", "scroll", "touchstart", "click"];
+  events.forEach((evt) => window.addEventListener(evt, resetIdleTimer, { passive: true }));
+  resetIdleTimer();
+}
+
+export function stopIdleTimer() {
+  if (typeof window === "undefined") return;
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+  const events = ["mousedown", "mousemove", "keydown", "scroll", "touchstart", "click"];
+  events.forEach((evt) => window.removeEventListener(evt, resetIdleTimer));
 }

@@ -282,6 +282,7 @@ export function TanStackDataGrid({
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [pageSize, setPageSize] = useState(50);
+  const [pageIndex, setPageIndex] = useState(0);
 
   const persistPrefs = useCallback(
     (order: string[], hidden: string[]) => {
@@ -387,7 +388,12 @@ export function TanStackDataGrid({
   const table = useReactTable({
     data: tableData,
     columns: tableColumns,
-    state: { sorting, columnFilters, globalFilter, columnVisibility, columnOrder, columnSizing, pagination: { pageIndex: 0, pageSize } },
+    state: { sorting, columnFilters, globalFilter, columnVisibility, columnOrder, columnSizing, pagination: { pageIndex, pageSize } },
+    onPaginationChange: (updater) => {
+      const next = typeof updater === "function" ? updater({ pageIndex, pageSize }) : updater;
+      setPageIndex(next.pageIndex);
+      setPageSize(next.pageSize);
+    },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
@@ -461,7 +467,6 @@ export function TanStackDataGrid({
 
   // ── Pagination ──────────────────────────────────────────────────
   const pageCount = table.getPageCount();
-  const pageIndex = table.getState().pagination.pageIndex;
 
   const targetQueryChoices = availableQueries;
 
@@ -629,7 +634,7 @@ export function TanStackDataGrid({
           <span>Rows per page:</span>
           <select
             value={pageSize}
-            onChange={(e) => { setPageSize(Number(e.target.value)); table.setPageSize(Number(e.target.value)); }}
+            onChange={(e) => { const s = Number(e.target.value); setPageSize(s); setPageIndex(0); table.setPageSize(s); }}
             className="rounded border border-slate-300 px-1 py-0.5 text-xs"
           >
             {[25, 50, 100].map((s) => (<option key={s} value={s}>{s}</option>))}

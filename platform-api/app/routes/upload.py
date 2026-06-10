@@ -478,6 +478,25 @@ async def delete_file_source(
     if not removed_any:
         logger.warning("No physical file found for %s in %s", view_name, uploads_dir)
 
+    # Remove Teiid view and foreign table (best-effort)
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0)
+        ) as teiid_client:
+            teiid_resp = await teiid_client.post(
+                f"{endpoint.servlet_url}/TeiidExcelImporterTest/deleteDataSource",
+                data={"dataSourceName": view_name},
+            )
+            if teiid_resp.status_code == 200:
+                logger.info("Teiid view/foreign-table removed for %s", view_name)
+            else:
+                logger.warning(
+                    "Teiid deleteDataSource returned %s for %s: %s",
+                    teiid_resp.status_code, view_name, teiid_resp.text,
+                )
+    except httpx.RequestError as exc:
+        logger.warning("Failed to contact Teiid servlet to delete %s: %s", view_name, exc)
+
     # Also clean up any orphaned AI profile data
     from app.models.data_source_ai_profile import (
         DataSourceAIProfile,

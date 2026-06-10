@@ -2348,7 +2348,12 @@ export default function ProjectWorkspacePage() {
 
       {/* ── AI Tab ──────────────────────────────────────────────── */}
       {activeTab === "ai" && (
-        <AIPanel projectId={projectId} />
+        <AIPanel
+          projectId={projectId}
+          onQuerySaved={() => queryClient.invalidateQueries({ queryKey: ["project-queries", projectId] })}
+          onDashboardSaved={() => queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] })}
+          onScopeCreated={() => {}}
+        />
       )}
 
       {/* ── Members Tab ──────────────────────────────────────────── */}
