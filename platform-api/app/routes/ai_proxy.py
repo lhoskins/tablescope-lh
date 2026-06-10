@@ -1492,10 +1492,31 @@ async def ai_generate_and_save_dashboard(
                 # Also add to existing_queries so AI can match subsequent widgets
                 existing_queries.append(query)
 
+        mapped_type = _map_chart_type(widget_type)
+
+        # Use AI-suggested layout or fall back to sensible defaults
+        ai_grid_w = w.get("gridW") or w.get("grid_w")
+        ai_grid_h = w.get("gridH") or w.get("grid_h")
+        ai_grid_x = w.get("gridX") or w.get("grid_x")
+        ai_grid_y = w.get("gridY") or w.get("grid_y")
+
+        # Default sizing by chart type if AI didn't specify
+        default_w = {"kpi": 3, "table": 12, "pie": 4}.get(mapped_type, 6)
+        default_h = {"kpi": 2, "table": 5}.get(mapped_type, 4)
+        grid_w = int(ai_grid_w) if ai_grid_w is not None else default_w
+        grid_h = int(ai_grid_h) if ai_grid_h is not None else default_h
+        grid_x = int(ai_grid_x) if ai_grid_x is not None else (idx % 2) * 6
+        grid_y = int(ai_grid_y) if ai_grid_y is not None else (idx // 2) * 4
+
+        # Clamp to valid grid bounds
+        grid_w = max(2, min(12, grid_w))
+        grid_h = max(1, min(8, grid_h))
+        grid_x = max(0, min(11, grid_x))
+
         widgets_config.append({
             "id": f"ai_widget_{idx}",
             "title": widget_title,
-            "type": _map_chart_type(widget_type),
+            "type": mapped_type,
             "chartSubtype": _map_chart_subtype(widget_type),
             "dataSource": data_source,
             "xColumn": x_col,
@@ -1503,12 +1524,12 @@ async def ai_generate_and_save_dashboard(
             "aggregation": aggregation.lower() if aggregation else "count",
             "sortBy": "x_asc",
             "filters": [],
-            "colSpan": 6 if widget_type != "table" else 12,
+            "colSpan": grid_w,
             "position": idx,
-            "gridX": (idx % 2) * 6,
-            "gridY": (idx // 2) * 4,
-            "gridW": 6,
-            "gridH": 4,
+            "gridX": grid_x,
+            "gridY": grid_y,
+            "gridW": grid_w,
+            "gridH": grid_h,
         })
 
     # Step 4: Create the Dashboard

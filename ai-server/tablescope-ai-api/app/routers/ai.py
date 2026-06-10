@@ -447,11 +447,31 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         f"{teiid_rules}\n"
         f"{user_instruction}"
         "Based on the available tables and their columns, suggest a dashboard "
-        "with useful widgets. For each widget, include:\n"
+        "with useful widgets. Analyze the data carefully and choose the BEST "
+        "chart type for each metric — do NOT default everything to bar charts.\n\n"
+        "Guidelines for chart type selection:\n"
+        "- kpi: single-number metrics (totals, counts, averages) — use gridW=3 or 4, gridH=2\n"
+        "- bar: comparisons across categories — use gridW=6, gridH=4\n"
+        "- line: trends over time — use gridW=6 or 8, gridH=4\n"
+        "- pie: proportions/shares of a whole (limit to 5-8 slices) — use gridW=4 or 6, gridH=4\n"
+        "- area: cumulative trends or stacked comparisons — use gridW=6, gridH=4\n"
+        "- table: detailed data listings — use gridW=12, gridH=5\n\n"
+        "For each widget provide:\n"
         "- type: one of kpi, bar, line, pie, area, table\n"
         "- title: descriptive title\n"
-        "- sql: a valid SQL query using ONLY the allowed tables with proper CAST for numeric ops\n"
-        "- x_column, y_column, aggregation where applicable\n\n"
+        "- sql: valid SQL using ONLY the allowed tables with proper CAST for numeric ops\n"
+        "- x_column: the column for the X axis or category\n"
+        "- y_column: the column for the Y axis or value\n"
+        "- aggregation: count, sum, avg, min, max\n"
+        "- gridX: X position on a 12-column grid (0-11)\n"
+        "- gridY: Y position in grid rows\n"
+        "- gridW: width in grid columns (1-12)\n"
+        "- gridH: height in grid rows (2 for kpi, 4-5 for charts)\n\n"
+        "Layout rules:\n"
+        "- Grid is 12 columns wide. Place KPI widgets across the top row.\n"
+        "- Vary the layout — mix sizes, use full-width charts where appropriate.\n"
+        "- Don't place all widgets in the same size or same column arrangement.\n"
+        "- Create a visually balanced dashboard with 4-8 widgets.\n\n"
         "Return a JSON object with: title (dashboard name) and widgets (array).\n"
         "Return ONLY the JSON."
     )
@@ -460,7 +480,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         prompt=prompt,
         system_prompt=SYSTEM_PROMPT,
         model=settings.sql_model,
-        temperature=0.0,
+        temperature=0.3,
     )
 
     suggestions = []
