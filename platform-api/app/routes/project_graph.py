@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
+from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.project import Project
 
@@ -56,7 +57,7 @@ async def get_project_graph(
     project_id: int,
     node_id: int | None = None,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ):
     await _require_project_access(project_id, session, context)
 

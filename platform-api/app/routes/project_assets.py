@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
+from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.project import Project
 from app.models.project_asset import ProjectAsset
@@ -170,7 +171,7 @@ async def upload_asset(
     title: str | None = Form(None),
     description: str | None = Form(None),
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
 ):
     await _require_project_access(project_id, session, context)
 
@@ -272,7 +273,7 @@ async def upload_asset(
 async def list_assets(
     project_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ):
     await _require_project_access(project_id, session, context)
     result = await session.execute(
@@ -289,7 +290,7 @@ async def get_asset(
     project_id: int,
     asset_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ):
     await _require_project_access(project_id, session, context)
     asset = await session.get(ProjectAsset, asset_id)
@@ -303,7 +304,7 @@ async def delete_asset(
     project_id: int,
     asset_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
 ):
     await _require_project_access(project_id, session, context)
     asset = await session.get(ProjectAsset, asset_id)
@@ -353,7 +354,7 @@ async def trigger_ai_processing(
     asset_id: int,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
 ):
     await _require_project_access(project_id, session, context)
     asset = await session.get(ProjectAsset, asset_id)
@@ -375,7 +376,7 @@ async def get_asset_ai_profile(
     project_id: int,
     asset_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
 ):
     await _require_project_access(project_id, session, context)
     asset = await session.get(ProjectAsset, asset_id)
