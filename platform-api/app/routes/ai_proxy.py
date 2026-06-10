@@ -1340,11 +1340,26 @@ async def ai_generate_and_save_dashboard(
     allowed_tables = [ds.view_name for ds in ds_result.scalars()]
 
     # Step 1: Call AI server for dashboard suggestion
+    # Inject layout instructions into the prompt so the AI server includes
+    # them even if the AI server itself hasn't been updated with the latest prompt.
+    layout_instructions = (
+        "\n\nIMPORTANT: For each widget, also include layout fields: "
+        "gridX (0-11), gridY (row position), gridW (width 1-12), gridH (height). "
+        "Choose chart type carefully based on the data: "
+        "kpi (gridW=3,gridH=2) for single metrics, "
+        "bar (gridW=6,gridH=4) for category comparisons, "
+        "line (gridW=6-8,gridH=4) for time trends, "
+        "pie (gridW=4-6,gridH=4) for proportions, "
+        "table (gridW=12,gridH=5) for detailed data. "
+        "Place KPIs across the top row. Create a varied, balanced layout with 4-8 widgets. "
+        "Do NOT use the same chart type for every widget."
+    )
+    effective_prompt = (req.prompt or "") + layout_instructions
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
-        "prompt": req.prompt or "",
+        "prompt": effective_prompt,
         "allowed_tables": allowed_tables,
     }
     ai_result = await _forward_to_ai("/ai/dashboard/suggest", payload)
