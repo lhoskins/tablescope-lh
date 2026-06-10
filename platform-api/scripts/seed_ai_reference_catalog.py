@@ -9,11 +9,10 @@ Idempotent: skips catalogs/tags/KPIs that already exist (matched by key).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
-
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,6 @@ PACK_FILES = [
 async def seed_catalogs() -> dict[str, int]:
     """Insert reference catalog data. Returns counts."""
     from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.database import SessionLocal as async_session_factory
     from app.models.ai_reference_catalog import (
@@ -45,7 +43,6 @@ async def seed_catalogs() -> dict[str, int]:
     stats: dict[str, int] = {"catalogs": 0, "tags": 0, "kpis": 0, "skipped": 0}
 
     async with async_session_factory() as session:
-        session: AsyncSession
         for pack_file in PACK_FILES:
             path = SEED_DIR / pack_file
             if not path.exists():

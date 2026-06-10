@@ -336,7 +336,7 @@ async def finalize_upload(
         rejected_keys = set(req.rejected_tag_keys or [])
         for s in suggestions:
             if s.tag_key in accepted_keys:
-                s.status = "accepted"
+                s.status = "accepted"  # type: ignore[assignment]
                 session.add(AIAssetTag(
                     tenant_id=context.tenant_id,
                     project_id=resolved_project_id,
@@ -349,7 +349,7 @@ async def finalize_upload(
                     created_by=context.user_id,
                 ))
             elif s.tag_key in rejected_keys:
-                s.status = "rejected"
+                s.status = "rejected"  # type: ignore[assignment]
 
     if resolved_project_id and (req.accepted_kpi_keys or req.rejected_kpi_keys):
         from app.models.ai_asset_metadata import (
@@ -367,25 +367,25 @@ async def finalize_upload(
         ).all()
         accepted_kpi_keys = set(req.accepted_kpi_keys or [])
         rejected_kpi_keys = set(req.rejected_kpi_keys or [])
-        for s in kpi_suggestions:
-            if s.kpi_key in accepted_kpi_keys:
-                s.status = "accepted"
+        for ks in kpi_suggestions:
+            if ks.kpi_key in accepted_kpi_keys:
+                ks.status = "accepted"  # type: ignore[assignment]
                 session.add(AIAssetKPI(
                     tenant_id=context.tenant_id,
                     project_id=resolved_project_id,
                     source_type="file_datasource",
                     source_id=meta.id,
-                    kpi_key=s.kpi_key,
-                    display_name=s.display_name,
-                    field_mapping=s.field_mapping,
-                    formula=s.formula,
-                    recommended_chart_type=s.recommended_chart_type,
-                    confidence=s.confidence,
+                    kpi_key=ks.kpi_key,
+                    display_name=ks.display_name,
+                    field_mapping=ks.field_mapping,
+                    formula=ks.formula,
+                    recommended_chart_type=ks.recommended_chart_type,
+                    confidence=ks.confidence,
                     source="ai_suggested",
                     created_by=context.user_id,
                 ))
-            elif s.kpi_key in rejected_kpi_keys:
-                s.status = "rejected"
+            elif ks.kpi_key in rejected_kpi_keys:
+                ks.status = "rejected"  # type: ignore[assignment]
 
     # Apply user overrides to AI result
     if req.user_notes:

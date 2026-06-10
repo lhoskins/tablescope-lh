@@ -270,7 +270,7 @@ async def _persist_suggestions(
         session.add(suggestion)
 
     for kpi in result.get("suggested_kpis", []):
-        suggestion = AIAssetKPISuggestion(
+        kpi_suggestion = AIAssetKPISuggestion(
             tenant_id=tenant_id,
             project_id=project_id,
             source_type="file_datasource",
@@ -283,7 +283,7 @@ async def _persist_suggestions(
             status="suggested",
             created_by=user_id,
         )
-        session.add(suggestion)
+        session.add(kpi_suggestion)
 
     await session.flush()
 

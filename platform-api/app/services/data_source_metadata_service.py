@@ -82,7 +82,7 @@ async def create_ai_profile(
             tenant_id=tenant_id,
             user_id=user_id,
             project_id=project_id,
-            tag=tag_data["tag"],
+            tag=tag_data.get("tag") or tag_data.get("tag_key") or tag_data.get("display_name", ""),
             tag_type=tag_data.get("tag_type", "user"),
             source="ai",
             confidence=tag_data.get("confidence"),
@@ -176,7 +176,7 @@ async def update_tags(
             tenant_id=tenant_id,
             user_id=user_id,
             project_id=project_id,
-            tag=tag_data["tag"],
+            tag=tag_data.get("tag") or tag_data.get("tag_key") or tag_data.get("display_name", ""),
             tag_type=tag_data.get("tag_type", "user"),
             source=tag_data.get("source", "user"),
             confidence=tag_data.get("confidence"),
@@ -251,7 +251,7 @@ async def get_ai_context_for_data_source(
         return {}
 
     profile = full.get("profile", {})
-    tags = [t["tag"] for t in full.get("tags", []) if t.get("accepted")]
+    tags = [t.get("tag") or t.get("tag_key") or t.get("display_name", "") for t in full.get("tags", []) if t.get("accepted")]
 
     fields = []
     for f in full.get("fields", []):
