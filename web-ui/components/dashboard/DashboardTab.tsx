@@ -4,7 +4,6 @@ import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { Dashboard, DashboardConfig } from "./types";
-import { CreateDashboardWizard } from "./CreateDashboardWizard";
 import { DashboardViewer } from "./DashboardViewer";
 import { AIPromptBar } from "@/components/ai/AIPromptBar";
 
@@ -26,7 +25,6 @@ const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
 
 export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: Props) {
   const queryClient = useQueryClient();
-  const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<Dashboard | null>(null);
   const [aiDashLoading, setAiDashLoading] = useState(false);
   const [aiDashError, setAiDashError] = useState<string | null>(null);
@@ -62,10 +60,17 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
       apiClient.post<Dashboard>(`/api/projects/${projectId}/dashboards`, payload),
     onSuccess: (newDash) => {
       queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
-      setCreating(false);
       setViewing(newDash);
     },
   });
+
+  const handleCreateDashboard = useCallback(() => {
+    createMutation.mutate({
+      name: `Dashboard ${(dashboards.length || 0) + 1}`,
+      description: "",
+      config: { widgets: [], globalFilters: [] },
+    });
+  }, [createMutation, dashboards.length]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
@@ -98,30 +103,17 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
     );
   }
 
-  // Creating a dashboard
-  if (creating) {
-    return (
-      <CreateDashboardWizard
-        projectId={projectId}
-        savedQueries={savedQueries}
-        datasources={datasources}
-        onCancel={() => setCreating(false)}
-        onSubmit={(payload) => createMutation.mutate(payload)}
-        isSubmitting={createMutation.isPending}
-      />
-    );
-  }
-
   // Dashboard list
   return (
     <div>
       {canEdit && (
         <div className="mb-4 flex items-start gap-4">
           <button
-            onClick={() => setCreating(true)}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 whitespace-nowrap"
+            onClick={handleCreateDashboard}
+            disabled={createMutation.isPending}
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 whitespace-nowrap disabled:opacity-50"
           >
-            + Create Dashboard
+            {createMutation.isPending ? "Creating..." : "+ Create Dashboard"}
           </button>
           <div className="flex-1">
             <AIPromptBar

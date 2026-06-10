@@ -296,6 +296,43 @@ export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSavin
     return cols;
   }, [leftDs, rightDs, leftCols, rightCols]);
 
+  // Qualify bare field names once columns are available (handles edit mode
+  // where saved SQL may use bare column names like "BusinessUnit" instead
+  // of fully qualified "IT_Assets_Patch_Compliance_CSV.BusinessUnit").
+  useEffect(() => {
+    if (allCols.length === 0 || selectedFields.length === 0) return;
+    const alreadyQualified = selectedFields.every((f) => f.includes("."));
+    if (alreadyQualified) return;
+    const qualified = selectedFields
+      .map((f) => {
+        if (f.includes(".")) return f;
+        const match = allCols.find((c) => c.endsWith(`.${f}`));
+        return match ?? f;
+      })
+      .filter((f) => allCols.includes(f));
+    if (qualified.length > 0 && qualified.join(",") !== selectedFields.join(",")) {
+      setSelectedFields(qualified);
+    }
+  }, [allCols, selectedFields]);
+
+  // Also qualify bare names in groupBy and orderBy
+  useEffect(() => {
+    if (allCols.length === 0) return;
+    const qualifyBare = (f: string) => {
+      if (f.includes(".")) return f;
+      return allCols.find((c) => c.endsWith(`.${f}`)) ?? f;
+    };
+    if (groupBy.length > 0 && groupBy.some((f) => !f.includes("."))) {
+      setGroupBy((prev) => prev.map(qualifyBare));
+    }
+    if (orderBy.length > 0 && orderBy.some((o) => !o.column.includes("."))) {
+      setOrderBy((prev) => prev.map((o) => ({ ...o, column: qualifyBare(o.column) })));
+    }
+    if (filters.length > 0 && filters.some((f) => !f.column.includes("."))) {
+      setFilters((prev) => prev.map((f) => ({ ...f, column: qualifyBare(f.column) })));
+    }
+  }, [allCols, groupBy, orderBy, filters]);
+
   // Generate SQL from visual state
   const generatedSql = useMemo(() => {
     return buildSql(leftDs, rightDs, joinType, leftCol, rightCol, selectedFields, filters, groupBy, orderBy);
