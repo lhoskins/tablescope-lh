@@ -114,18 +114,7 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
 
   // Dashboard list
   return (
-    <div className="relative">
-      {/* Loading overlay for AI dashboard generation */}
-      {aiDashLoading && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-white/80 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-3 rounded-xl bg-white px-8 py-6 shadow-lg border border-slate-200">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
-            <p className="text-sm font-medium text-slate-700">Generating dashboard with AI...</p>
-            <p className="text-xs text-slate-400">This may take a moment</p>
-          </div>
-        </div>
-      )}
-
+    <div>
       {canEdit && (
         <div className="mb-4 flex items-start gap-4">
           <button

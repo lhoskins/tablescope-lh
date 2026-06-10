@@ -18,22 +18,37 @@ type Filter = { column: string; operand: string; value: string };
 type OrderByItem = { column: string; dir: string };
 type QueryResult = { columns: string[]; rows: Record<string, unknown>[] };
 
+type SavePayload = {
+  name: string;
+  description: string;
+  left_datasource: string;
+  right_datasource: string;
+  join_type: string;
+  left_column: string;
+  right_column: string;
+  sql_text: string;
+};
+
+type EditQuery = {
+  name: string;
+  description: string | null;
+  left_datasource: string | null;
+  right_datasource: string | null;
+  join_type: string | null;
+  left_column: string | null;
+  right_column: string | null;
+  sql_text: string | null;
+};
+
 type Props = {
   projectId: number;
   datasources: Datasource[];
   onCancel: () => void;
-  onSave: (payload: {
-    name: string;
-    description: string;
-    left_datasource: string;
-    right_datasource: string;
-    join_type: string;
-    left_column: string;
-    right_column: string;
-    sql_text: string;
-  }) => void;
+  onSave: (payload: SavePayload) => void;
   isSaving: boolean;
   initialSql?: string;
+  editQuery?: EditQuery;
+  saveLabel?: string;
 };
 
 const JOIN_TYPES = [
@@ -201,33 +216,42 @@ function buildSql(
 
 // ── Component ───────────────────────────────────────────────────────
 
-export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSaving, initialSql }: Props) {
+export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSaving, initialSql, editQuery, saveLabel }: Props) {
+  const isEdit = !!editQuery;
   // Datasource selection
-  const [leftDs, setLeftDs] = useState<string>("");
-  const [rightDs, setRightDs] = useState<string>("");
+  const [leftDs, setLeftDs] = useState<string>(editQuery?.left_datasource ?? "");
+  const [rightDs, setRightDs] = useState<string>(editQuery?.right_datasource ?? "");
   const [leftCols, setLeftCols] = useState<string[]>([]);
   const [rightCols, setRightCols] = useState<string[]>([]);
-  const [joinMode, setJoinMode] = useState(false);
-  const [joinType, setJoinType] = useState("INNER JOIN");
-  const [leftCol, setLeftCol] = useState("");
-  const [rightCol, setRightCol] = useState("");
+  const [joinMode, setJoinMode] = useState(!!editQuery?.right_datasource);
+  const [joinType, setJoinType] = useState(editQuery?.join_type || "INNER JOIN");
+  const [leftCol, setLeftCol] = useState(editQuery?.left_column ?? "");
+  const [rightCol, setRightCol] = useState(editQuery?.right_column ?? "");
 
   // Field selection
-  const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [selectedFields, setSelectedFields] = useState<string[]>(() =>
+    editQuery?.sql_text ? parseSelectedFields(editQuery.sql_text) : []
+  );
 
   // Clauses
-  const [filters, setFilters] = useState<Filter[]>([]);
-  const [groupBy, setGroupBy] = useState<string[]>([]);
-  const [orderBy, setOrderBy] = useState<OrderByItem[]>([]);
+  const [filters, setFilters] = useState<Filter[]>(() =>
+    editQuery?.sql_text ? parseWhere(editQuery.sql_text) : []
+  );
+  const [groupBy, setGroupBy] = useState<string[]>(() =>
+    editQuery?.sql_text ? parseGroupBy(editQuery.sql_text) : []
+  );
+  const [orderBy, setOrderBy] = useState<OrderByItem[]>(() =>
+    editQuery?.sql_text ? parseOrderBy(editQuery.sql_text) : []
+  );
 
   // SQL editing
-  const [sqlText, setSqlText] = useState(initialSql || "");
+  const [sqlText, setSqlText] = useState(editQuery?.sql_text || initialSql || "");
   const [sqlEditing, setSqlEditing] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   // Save form
-  const [queryName, setQueryName] = useState("");
-  const [queryDesc, setQueryDesc] = useState("");
+  const [queryName, setQueryName] = useState(editQuery?.name ?? "");
+  const [queryDesc, setQueryDesc] = useState(editQuery?.description ?? "");
 
   // Execution
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
@@ -404,7 +428,7 @@ export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSavin
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-        <h3 className="text-lg font-semibold text-slate-900">Query Builder</h3>
+        <h3 className="text-lg font-semibold text-slate-900">{isEdit ? "Edit Query" : "Query Builder"}</h3>
         <button onClick={onCancel} className="text-sm text-slate-500 hover:text-slate-700">
           Cancel
         </button>
@@ -870,7 +894,7 @@ export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSavin
               disabled={!queryName.trim() || !effectiveSql || isSaving}
               className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
             >
-              {isSaving ? "Saving..." : "Save Query"}
+              {isSaving ? "Saving..." : (saveLabel ?? (isEdit ? "Update Query" : "Save Query"))}
             </button>
           </div>
         </div>

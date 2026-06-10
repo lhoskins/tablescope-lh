@@ -171,10 +171,14 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
 
   useEffect(() => {
     const loadAll = async () => {
+      const entries = await Promise.all(
+        widgets.map(async (w) => {
+          const rows = await fetchWidgetData(w);
+          return [w.id, rows] as const;
+        }),
+      );
       const results: Record<string, Array<Record<string, unknown>>> = {};
-      for (const w of widgets) {
-        results[w.id] = await fetchWidgetData(w);
-      }
+      for (const [id, rows] of entries) results[id] = rows;
       setWidgetData(results);
     };
     if (widgets.length > 0) loadAll();
