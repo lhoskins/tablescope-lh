@@ -73,9 +73,9 @@ async def seed_catalogs() -> dict[str, int]:
                 )).all()
                 for ok in old_kpis:
                     await session.delete(ok)
-                existing.version = new_version  # type: ignore[assignment]
-                existing.name = data["name"]  # type: ignore[assignment]
-                existing.description = data.get("description")  # type: ignore[assignment]
+                existing.version = new_version
+                existing.name = data["name"]
+                existing.description = data.get("description")
                 catalog = existing
             else:
                 catalog = AIReferenceCatalog(
