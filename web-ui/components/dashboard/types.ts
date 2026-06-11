@@ -35,8 +35,15 @@ export type VisualizationOptions = {
   fillOpacity?: number;
   // Bar
   roundedCorners?: boolean;
+  barLayout?: "vertical" | "horizontal";
+  showBackground?: boolean;
+  minPointSize?: number;
   // Pie / Donut
   innerRadius?: number;
+  outerRadius?: number;
+  startAngle?: number;
+  endAngle?: number;
+  paddingAngle?: number;
   labelMode?: "none" | "percentage" | "value" | "name";
   maxSlices?: number;
   groupSmallSlices?: boolean;

@@ -261,6 +261,9 @@ export function WidgetRenderer({ widget, data }: Props) {
 
   // Registry-backed visualization options merged over defaults.
   const opts: VisualizationOptions = withDefaults(widget.type, widget.visualizationOptions);
+  // Raw (unmerged) options let us tell when a value was explicitly set vs. a
+  // default, so legacy chartSubtype behaviour still wins for old dashboards.
+  const rawOpts: VisualizationOptions = widget.visualizationOptions ?? {};
   const tiny = !!opts.tinyMode;
   const showGrid = tiny ? false : opts.showGrid !== false;
   const showLegend = tiny ? false : opts.showLegend !== false;
@@ -353,14 +356,21 @@ export function WidgetRenderer({ widget, data }: Props) {
       case "bar": {
         const barXLabel = widget.xColumn || xKey;
         const barYLabel = widget.yColumn || yKey;
-        const grouped = sub === "grouped_bar";
-        const barStackId = grouped ? undefined : isStacked || seriesNames.length > 0 ? "stack" : undefined;
+        const barHorizontal = rawOpts.barLayout !== undefined ? rawOpts.barLayout === "horizontal" : isHorizontal;
+        // When stacking is set via options, "none" means grouped (side-by-side).
+        // For older dashboards (no option), preserve the legacy default where
+        // multi-series bars stack unless the grouped subtype was chosen.
+        const stackExplicit = rawOpts.stackMode !== undefined;
+        const barGrouped = stackExplicit ? !isStacked : sub === "grouped_bar";
+        const barStackId = barGrouped ? undefined : isStacked || seriesNames.length > 0 ? "stack" : undefined;
         const barRadius = opts.roundedCorners === false ? (0 as const) : undefined;
+        const barBackground = opts.showBackground ? { fill: "#f1f5f9" } : undefined;
+        const minBar = opts.minPointSize && opts.minPointSize > 0 ? opts.minPointSize : undefined;
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 40, left: isHorizontal ? 10 : 50 }}>
-              {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!isHorizontal} horizontal={isHorizontal} />}
-              {tiny ? null : isHorizontal ? (
+            <BarChart data={chartData} layout={barHorizontal ? "vertical" : "horizontal"} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 40, left: barHorizontal ? 10 : 50 }}>
+              {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!barHorizontal} horizontal={barHorizontal} />}
+              {tiny ? null : barHorizontal ? (
                 <>
                   <YAxis type="category" dataKey={xKey} {...commonAxisProps} width={100}>
                     <Label value={barXLabel} angle={-90} position="insideLeft" offset={-5} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
@@ -389,16 +399,18 @@ export function WidgetRenderer({ widget, data }: Props) {
                     key={name}
                     dataKey={name}
                     fill={COLORS[i % COLORS.length]}
-                    radius={barRadius ?? (isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0])}
+                    radius={barRadius ?? (barHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0])}
                     stackId={barStackId}
                     maxBarSize={48}
+                    minPointSize={minBar}
+                    background={barBackground}
                   >
-                    {showDataLabels && <LabelList dataKey={name} position={isHorizontal ? "right" : "top"} style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
+                    {showDataLabels && <LabelList dataKey={name} position={barHorizontal ? "right" : "top"} style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
                   </Bar>
                 ))
               ) : (
-                <Bar dataKey={yKey} fill="#3b82f6" radius={barRadius ?? (isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0])} maxBarSize={48}>
-                  {showDataLabels && <LabelList dataKey={yKey} position={isHorizontal ? "right" : "top"} style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
+                <Bar dataKey={yKey} fill="#3b82f6" radius={barRadius ?? (barHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0])} maxBarSize={48} minPointSize={minBar} background={barBackground}>
+                  {showDataLabels && <LabelList dataKey={yKey} position={barHorizontal ? "right" : "top"} style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
                 </Bar>
               )}
               {renderReferenceLines(opts.referenceLines)}
@@ -413,6 +425,7 @@ export function WidgetRenderer({ widget, data }: Props) {
         const areaStackId = isStacked ? "stack" : undefined;
         const areaCurve = lineType as "linear" | "monotone" | "stepAfter";
         const fillOp = opts.fillOpacity ?? 0.35;
+        const areaDot = opts.showDots ? { r: 2 } : false;
         return (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 25, left: 10 }}>
@@ -450,10 +463,11 @@ export function WidgetRenderer({ widget, data }: Props) {
                     strokeWidth={2}
                     connectNulls={opts.connectNulls}
                     stackId={areaStackId}
+                    dot={areaDot}
                   />
                 ))
               ) : (
-                <Area type={areaCurve} dataKey={yKey} stroke="#3b82f6" fill="url(#grad-default)" fillOpacity={fillOp} strokeWidth={2} connectNulls={opts.connectNulls} />
+                <Area type={areaCurve} dataKey={yKey} stroke="#3b82f6" fill="url(#grad-default)" fillOpacity={fillOp} strokeWidth={2} connectNulls={opts.connectNulls} dot={areaDot} />
               )}
               {renderReferenceLines(opts.referenceLines)}
               {showLegend && seriesNames.length > 0 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
@@ -468,6 +482,10 @@ export function WidgetRenderer({ widget, data }: Props) {
         // innerRadius option (0..90 %) takes precedence; legacy "donut" subtype = 55%.
         const innerPct = opts.innerRadius && opts.innerRadius > 0 ? opts.innerRadius : sub === "donut" ? 55 : 0;
         const isDonut = innerPct > 0;
+        const outerPct = opts.outerRadius && opts.outerRadius > 0 ? opts.outerRadius : 80;
+        const padAngle = isDonut ? Math.max(opts.paddingAngle ?? 2, 0) : (opts.paddingAngle ?? 0);
+        const startAngle = opts.startAngle ?? 90;
+        const endAngle = opts.endAngle ?? -270;
         const pieData = preparePieData(chartData, {
           nameKey: xKey,
           valueKey: pieDataKey,
@@ -493,8 +511,10 @@ export function WidgetRenderer({ widget, data }: Props) {
                 cx="50%"
                 cy="50%"
                 innerRadius={`${innerPct}%`}
-                outerRadius="80%"
-                paddingAngle={isDonut ? 2 : 0}
+                outerRadius={`${outerPct}%`}
+                startAngle={startAngle}
+                endAngle={endAngle}
+                paddingAngle={padAngle}
                 label={pieLabel}
                 labelLine={labelMode === "none" ? false : { stroke: "#94a3b8", strokeWidth: 1 }}
               >
@@ -539,11 +559,13 @@ export function WidgetRenderer({ widget, data }: Props) {
                 formatter={(value: number) => [fmtNumber(value), ""]}
               />
               {showLegend && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
-              <Bar yAxisId="left" dataKey={yKey} fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
+              <Bar yAxisId="left" dataKey={yKey} fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40}>
+                {showDataLabels && <LabelList dataKey={yKey} position="top" style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
+              </Bar>
               {y2Key ? (
-                <Line yAxisId="right" type="monotone" dataKey={y2Key} stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} />
+                <Line yAxisId="right" type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={y2Key} stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} />
               ) : (
-                <Line yAxisId="left" type="monotone" dataKey={yKey} stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} />
+                <Line yAxisId="left" type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={yKey} stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} />
               )}
               {renderReferenceLines(opts.referenceLines, y2Key ? "right" : "left")}
             </ComposedChart>

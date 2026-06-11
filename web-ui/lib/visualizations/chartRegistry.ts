@@ -97,6 +97,19 @@ const LINE_OPTIONS: ChartOptionDefinition[] = [
   { key: "dualAxis", label: "Dual Y axis", type: "boolean", group: "advanced", defaultValue: false },
 ];
 
+const CURVE_OPTION: ChartOptionDefinition = {
+  key: "curveType",
+  label: "Curve",
+  type: "select",
+  group: "style",
+  defaultValue: "monotone",
+  options: [
+    { label: "Straight", value: "linear" },
+    { label: "Smooth", value: "monotone" },
+    { label: "Step", value: "step" },
+  ],
+};
+
 const AREA_OPTIONS: ChartOptionDefinition[] = [
   ...SHARED_DISPLAY_OPTIONS,
   {
@@ -111,6 +124,8 @@ const AREA_OPTIONS: ChartOptionDefinition[] = [
       { label: "100% stacked", value: "percent" },
     ],
   },
+  CURVE_OPTION,
+  { key: "showDots", label: "Show points", type: "boolean", group: "style", defaultValue: false },
   { key: "connectNulls", label: "Connect nulls", type: "boolean", group: "advanced", defaultValue: false },
   {
     key: "fillOpacity",
@@ -127,23 +142,48 @@ const AREA_OPTIONS: ChartOptionDefinition[] = [
 const BAR_OPTIONS: ChartOptionDefinition[] = [
   ...SHARED_DISPLAY_OPTIONS,
   {
+    key: "barLayout",
+    label: "Orientation",
+    type: "select",
+    group: "chart",
+    defaultValue: "vertical",
+    options: [
+      { label: "Vertical bars", value: "vertical" },
+      { label: "Horizontal bars", value: "horizontal" },
+    ],
+    description: "Horizontal is best for Top-N rankings.",
+  },
+  {
     key: "stackMode",
     label: "Stacking",
     type: "select",
     group: "chart",
     defaultValue: "none",
     options: [
-      { label: "None", value: "none" },
+      { label: "None (grouped)", value: "none" },
       { label: "Stacked", value: "stacked" },
       { label: "100% stacked", value: "percent" },
     ],
   },
   { key: "roundedCorners", label: "Rounded corners", type: "boolean", group: "style", defaultValue: true },
+  { key: "showBackground", label: "Show bar background", type: "boolean", group: "style", defaultValue: false },
+  {
+    key: "minPointSize",
+    label: "Min bar size (px)",
+    type: "number",
+    group: "advanced",
+    defaultValue: 0,
+    min: 0,
+    max: 20,
+    step: 1,
+    description: "Keeps tiny values visible.",
+  },
 ];
 
 const COMPOSED_OPTIONS: ChartOptionDefinition[] = [
   ...SHARED_DISPLAY_OPTIONS,
   { key: "dualAxis", label: "Dual Y axis", type: "boolean", group: "chart", defaultValue: true },
+  CURVE_OPTION,
 ];
 
 const PIE_OPTIONS: ChartOptionDefinition[] = [
@@ -171,6 +211,47 @@ const PIE_OPTIONS: ChartOptionDefinition[] = [
     max: 90,
     step: 5,
     description: "0 = full pie; raise for a donut.",
+  },
+  {
+    key: "outerRadius",
+    label: "Outer radius %",
+    type: "number",
+    group: "style",
+    defaultValue: 80,
+    min: 40,
+    max: 95,
+    step: 5,
+  },
+  {
+    key: "paddingAngle",
+    label: "Slice gap",
+    type: "number",
+    group: "style",
+    defaultValue: 0,
+    min: 0,
+    max: 10,
+    step: 1,
+  },
+  {
+    key: "startAngle",
+    label: "Start angle",
+    type: "number",
+    group: "advanced",
+    defaultValue: 90,
+    min: -360,
+    max: 360,
+    step: 90,
+    description: "Use 180/0 for a semi-circle.",
+  },
+  {
+    key: "endAngle",
+    label: "End angle",
+    type: "number",
+    group: "advanced",
+    defaultValue: -270,
+    min: -360,
+    max: 360,
+    step: 90,
   },
   { key: "groupSmallSlices", label: "Group small slices into 'Other'", type: "boolean", group: "advanced", defaultValue: true },
   {
