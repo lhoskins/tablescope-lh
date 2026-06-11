@@ -305,6 +305,7 @@ async def _index_document_vectors(
         "document_id": document_id,
         "source_type": "project_asset",
         "source_id": source_id,
+        "file_path": "",
         "content": content,
         "visibility": visibility or "shared_project",
         "timestamp": time.time(),
