@@ -323,6 +323,9 @@ async def delete_asset(
     # Remove ai_documents + chunks
     try:
         from sqlalchemy import text
+
+        from app.services.project_graph_service import archive_empty_family
+
         await session.execute(
             text("DELETE FROM ai_document_chunks WHERE document_id IN (SELECT id FROM ai_documents WHERE source_type='project_asset' AND source_id=:sid)"),
             {"sid": asset_id},
@@ -331,6 +334,21 @@ async def delete_asset(
             text("DELETE FROM ai_documents WHERE source_type='project_asset' AND source_id=:sid"),
             {"sid": asset_id},
         )
+        # Capture families this document belonged to before its edges are removed,
+        # so we can archive any that become empty.
+        fam_rows = await session.execute(
+            text(
+                """
+                SELECT DISTINCT e.to_node_id
+                FROM ai_project_graph_edges e
+                JOIN ai_project_graph_nodes n ON n.id = e.from_node_id
+                WHERE n.source_type='project_asset' AND n.source_id=:sid
+                  AND e.relationship_type='belongs_to_family'
+                """
+            ),
+            {"sid": asset_id},
+        )
+        family_ids = [r[0] for r in fam_rows.fetchall()]
         # Remove graph nodes/edges for this asset
         await session.execute(
             text("DELETE FROM ai_project_graph_edges WHERE from_node_id IN (SELECT id FROM ai_project_graph_nodes WHERE source_type='project_asset' AND source_id=:sid) OR to_node_id IN (SELECT id FROM ai_project_graph_nodes WHERE source_type='project_asset' AND source_id=:sid)"),
@@ -340,6 +358,8 @@ async def delete_asset(
             text("DELETE FROM ai_project_graph_nodes WHERE source_type='project_asset' AND source_id=:sid"),
             {"sid": asset_id},
         )
+        for fid in family_ids:
+            await archive_empty_family(session, context.tenant_id, project_id, fid)
     except Exception:
         logger.exception("Error cleaning up AI data for asset %d", asset_id)
 

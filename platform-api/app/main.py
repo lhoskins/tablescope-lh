@@ -23,6 +23,7 @@ from app.routes import ai_reference_catalog as ai_reference_catalog_routes
 from app.routes import auth as auth_routes
 from app.routes import dashboards as dashboards_routes
 from app.routes import database_sources as database_sources_routes
+from app.routes import document_families as document_families_routes
 from app.routes import file_analysis as file_analysis_routes
 from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
@@ -154,6 +155,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_asset_metadata_routes.router, prefix=api_prefix)
     app.include_router(project_assets_routes.router, prefix=api_prefix)
     app.include_router(project_graph_routes.router, prefix=api_prefix)
+    app.include_router(document_families_routes.router, prefix=api_prefix)
 
     return app
 

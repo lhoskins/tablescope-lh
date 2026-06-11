@@ -52,33 +52,67 @@ async def _require_project_access(
     return project
 
 
+FAMILY_NODE_TYPES = {"document_family"}
+FAMILY_EDGE_TYPES = {
+    "belongs_to_family", "governs", "responds_to", "supersedes", "superseded_by",
+    "depends_on", "implements", "references", "exception_to", "procedure_for",
+    "policy_for", "evidence_for", "supports", "contradicts", "updates",
+    "appendix_to", "template_for", "meeting_notes_for", "postmortem_for",
+    "remediation_for", "audit_evidence_for", "related_family_member",
+    "measures_process", "incident_impact",
+}
+
+
 @router.get("", response_model=GraphResponse)
 async def get_project_graph(
     project_id: int,
     node_id: int | None = None,
+    family_id: int | None = None,
+    asset_id: int | None = None,
+    include_families: bool = True,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ):
     await _require_project_access(project_id, session, context)
 
-    if node_id:
+    # asset_id is a convenience: resolve it to the asset's document node and
+    # center the subgraph there.
+    center_id = node_id or family_id
+    if center_id is None and asset_id is not None:
+        res = await session.execute(
+            text("""
+                SELECT id FROM ai_project_graph_nodes
+                WHERE tenant_id=:tid AND project_id=:pid
+                  AND source_type='project_asset' AND source_id=:sid AND is_active=true
+                ORDER BY id LIMIT 1
+            """),
+            {"tid": context.tenant_id, "pid": project_id, "sid": asset_id},
+        )
+        row = res.fetchone()
+        if row:
+            center_id = row[0]
+        else:
+            return GraphResponse(nodes=[], edges=[])
+
+    if center_id is not None:
         # Get subgraph centered on a specific node
         nodes_result = await session.execute(
             text("""
                 SELECT DISTINCT n.id, n.node_type, n.name, n.source_type, n.source_id, n.properties
                 FROM ai_project_graph_nodes n
-                LEFT JOIN ai_project_graph_edges e ON (n.id = e.from_node_id OR n.id = e.to_node_id)
-                WHERE n.tenant_id=:tid AND n.project_id=:pid
+                LEFT JOIN ai_project_graph_edges e
+                  ON (n.id = e.from_node_id OR n.id = e.to_node_id) AND e.is_active=true
+                WHERE n.tenant_id=:tid AND n.project_id=:pid AND n.is_active=true
                   AND (n.id=:nid OR e.from_node_id=:nid OR e.to_node_id=:nid)
             """),
-            {"tid": context.tenant_id, "pid": project_id, "nid": node_id},
+            {"tid": context.tenant_id, "pid": project_id, "nid": center_id},
         )
     else:
         nodes_result = await session.execute(
             text("""
                 SELECT id, node_type, name, source_type, source_id, properties
                 FROM ai_project_graph_nodes
-                WHERE tenant_id=:tid AND project_id=:pid
+                WHERE tenant_id=:tid AND project_id=:pid AND is_active=true
                 ORDER BY id
             """),
             {"tid": context.tenant_id, "pid": project_id},
@@ -88,6 +122,8 @@ async def get_project_graph(
     node_ids = set()
     for row in nodes_result.fetchall():
         nid, ntype, name, stype, sid, props = row
+        if not include_families and ntype in FAMILY_NODE_TYPES:
+            continue
         node_ids.add(nid)
         nodes.append(GraphNodeRead(
             id=nid, type=ntype, label=name,
@@ -102,7 +138,7 @@ async def get_project_graph(
         text("""
             SELECT id, from_node_id, to_node_id, relationship_type, confidence, evidence
             FROM ai_project_graph_edges
-            WHERE tenant_id=:tid AND project_id=:pid
+            WHERE tenant_id=:tid AND project_id=:pid AND is_active=true
         """),
         {"tid": context.tenant_id, "pid": project_id},
     )
@@ -110,6 +146,8 @@ async def get_project_graph(
     edges = []
     for row in edges_result.fetchall():
         eid, fid, tid_edge, etype, conf, ev = row
+        if not include_families and etype in FAMILY_EDGE_TYPES:
+            continue
         if fid in node_ids and tid_edge in node_ids:
             ev_str = str(ev) if ev and not isinstance(ev, str) else (ev or "")
             edges.append(GraphEdgeRead(

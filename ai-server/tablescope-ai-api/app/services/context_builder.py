@@ -183,6 +183,9 @@ async def build_context(
     graph_nodes = perms.get("graph_nodes", [])
     graph_edges = perms.get("graph_edges", [])
 
+    # 6. Document families (family-aware retrieval)
+    document_families = perms.get("document_families", [])
+
     # Build context package
     context = ContextPackage(
         tenant_id=tenant_id,
@@ -198,6 +201,7 @@ async def build_context(
             "dashboards": dashboards,
             "graph_nodes": graph_nodes,
             "graph_edges": graph_edges,
+            "document_families": document_families,
             "memories": [],
         },
         retrieval_filters={
@@ -293,5 +297,24 @@ def context_to_prompt_text(context: ContextPackage) -> str:
             to_name = nodes_map.get(e.get("to_node_id", e.get("target", 0)), "?")
             edge_type = e.get("edge_type", e.get("type", "related_to"))
             parts.append(f"  - {from_name} --{edge_type}--> {to_name}")
+
+    # Document families (grouped, family-aware context)
+    if context.allowed_context.get("document_families"):
+        parts.append("\nDocument families:")
+        for fam in context.allowed_context["document_families"]:
+            name = fam.get("family_name", "unknown")
+            ftype = fam.get("family_type", "")
+            header = f"  - {name}"
+            if ftype:
+                header += f" ({ftype})"
+            summary = fam.get("summary", "")
+            if summary:
+                header += f": {summary[:200]}"
+            parts.append(header)
+            members = fam.get("members", {}) or {}
+            for kind in ("documents", "datasources", "kpis", "queries", "dashboards"):
+                vals = members.get(kind) or []
+                if vals:
+                    parts.append(f"      {kind}: {', '.join(str(v) for v in vals)}")
 
     return "\n".join(parts)

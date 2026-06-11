@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Integer, Numeric, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +30,7 @@ class AIProjectGraphNode(Base):
         String(50), nullable=False, server_default="shared_project",
     )
     access_group_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_by: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(),
@@ -52,6 +53,7 @@ class AIProjectGraphEdge(Base):
         String(50), nullable=False, server_default="shared_project",
     )
     access_group_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_by: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(),

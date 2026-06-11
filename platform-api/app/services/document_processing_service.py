@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.models.project_asset import ProjectAsset
 from app.services.document_chunking_service import chunk_document
 from app.services.document_extraction_service import extract_text
+from app.services.project_graph_service import apply_document_family
 
 logger = logging.getLogger(__name__)
 
@@ -411,6 +412,16 @@ async def _build_graph(
                 confidence=entity.get("confidence", 0.8),
                 evidence=entity.get("evidence", ""),
             )
+
+    # Document family: auto-link (confidence >= 0.90) or store suggestion.
+    try:
+        await apply_document_family(
+            session, tenant_id, project_id,
+            document_node_id=doc_node_id, asset_id=asset.id,
+            profile=profile, created_by=user_id,
+        )
+    except Exception:
+        logger.exception("Family linking failed for asset %d", asset.id)
 
 
 async def _link_to_datasources(

@@ -127,6 +127,7 @@ class AIPermissionsResponse(BaseModel):
     documents: list[dict[str, Any]] = []
     graph_nodes: list[dict[str, Any]] = []
     graph_edges: list[dict[str, Any]] = []
+    document_families: list[dict[str, Any]] = []
 
 
 # ---------------------------------------------------------------------------
@@ -1094,11 +1095,13 @@ async def check_permissions(
             ]
         documents.append(doc_entry)
 
-    # Fetch project graph nodes and edges
+    # Fetch project graph nodes and edges (active only)
     from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
+    from app.services.project_graph_service import get_family_members
     node_stmt = select(AIProjectGraphNode).where(
         AIProjectGraphNode.project_id == project_id,
         AIProjectGraphNode.tenant_id == tenant_id,
+        AIProjectGraphNode.is_active.is_(True),
     )
     node_result = await session.execute(node_stmt)
     graph_nodes = [
@@ -1109,6 +1112,7 @@ async def check_permissions(
     edge_stmt = select(AIProjectGraphEdge).where(
         AIProjectGraphEdge.project_id == project_id,
         AIProjectGraphEdge.tenant_id == tenant_id,
+        AIProjectGraphEdge.is_active.is_(True),
     )
     edge_result = await session.execute(edge_stmt)
     graph_edges = [
@@ -1121,6 +1125,29 @@ async def check_permissions(
         }
         for e in edge_result.scalars()
     ]
+
+    # Document families with rolled-up members (family-aware retrieval).
+    document_families: list[dict[str, Any]] = []
+    for fam in graph_nodes:
+        if fam["node_type"] != "document_family":
+            continue
+        members = await get_family_members(session, tenant_id, project_id, fam["id"])
+        fam_props_stmt = select(AIProjectGraphNode).where(AIProjectGraphNode.id == fam["id"])
+        fam_node = (await session.execute(fam_props_stmt)).scalar_one_or_none()
+        props = fam_node.properties if (fam_node and isinstance(fam_node.properties, dict)) else {}
+        document_families.append({
+            "family_node_id": fam["id"],
+            "family_name": fam["name"],
+            "family_type": props.get("family_type", ""),
+            "summary": props.get("family_summary", props.get("description", "")),
+            "members": {
+                "documents": [d["name"] for d in members["documents"]],
+                "datasources": [d["name"] for d in members["datasources"]],
+                "queries": [d["name"] for d in members["queries"]],
+                "dashboards": [d["name"] for d in members["dashboards"]],
+                "kpis": [d["name"] for d in members["kpis"]],
+            },
+        })
 
     return AIPermissionsResponse(
         tenant_id=tenant_id,
@@ -1140,6 +1167,7 @@ async def check_permissions(
         documents=documents,
         graph_nodes=graph_nodes,
         graph_edges=graph_edges,
+        document_families=document_families,
     )
 
 

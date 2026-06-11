@@ -8,6 +8,10 @@ const KnowledgeGraph = lazy(() =>
   import("./KnowledgeGraph").then((m) => ({ default: m.KnowledgeGraph }))
 );
 
+const FamilyDetailDrawer = lazy(() =>
+  import("./FamilyDetailDrawer").then((m) => ({ default: m.FamilyDetailDrawer }))
+);
+
 // ── Types ──────────────────────────────────────────────────────────
 
 type ProjectDocument = {
@@ -44,6 +48,24 @@ type AIEntity = {
 type AIKPI = {
   kpi_key: string;
   display_name: string;
+  confidence: number;
+  reason: string;
+};
+
+type DocumentFamily = {
+  family_name: string;
+  family_key: string;
+  family_type: string;
+  confidence: number;
+  role: string;
+  reason: string;
+  auto_link: boolean;
+};
+
+type FamilyMemberSuggested = {
+  member_type: string;
+  member_name: string;
+  relationship_type: string;
   confidence: number;
   reason: string;
 };
@@ -94,6 +116,21 @@ export function DocumentsTab({ projectId, canEdit }: { projectId: number; canEdi
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [openFamilyId, setOpenFamilyId] = useState<number | null>(null);
+
+  type FamilyListItem = {
+    family_node_id: number;
+    family_name: string;
+    family_key: string;
+    family_type: string;
+  };
+  const familiesQuery = useQuery<FamilyListItem[]>({
+    queryKey: ["document-families", projectId],
+    queryFn: () => apiClient.get(`/api/projects/${projectId}/document-families`),
+  });
+  const familyIdByKey = new Map(
+    (familiesQuery.data ?? []).map((f) => [f.family_key, f.family_node_id]),
+  );
 
   // ── Fetch documents ────────────────────────────────────────────
   const docsQuery = useQuery<ProjectDocument[]>({
@@ -143,6 +180,32 @@ export function DocumentsTab({ projectId, canEdit }: { projectId: number; canEdi
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-documents", projectId] });
     },
+  });
+
+  // ── Family actions ─────────────────────────────────────────────
+  const invalidateFamily = () => {
+    queryClient.invalidateQueries({ queryKey: ["project-documents", projectId] });
+    queryClient.invalidateQueries({ queryKey: ["document-families", projectId] });
+  };
+
+  const acceptFamilyMutation = useMutation({
+    mutationFn: (assetId: number) =>
+      apiClient.post(`/api/projects/${projectId}/assets/${assetId}/family/accept`, {}),
+    onSuccess: invalidateFamily,
+  });
+
+  const changeFamilyMutation = useMutation({
+    mutationFn: ({ assetId, familyName }: { assetId: number; familyName: string }) =>
+      apiClient.post(`/api/projects/${projectId}/assets/${assetId}/family/change`, {
+        family_name: familyName,
+      }),
+    onSuccess: invalidateFamily,
+  });
+
+  const removeFamilyMutation = useMutation({
+    mutationFn: (assetId: number) =>
+      apiClient.delete(`/api/projects/${projectId}/assets/${assetId}/family`),
+    onSuccess: invalidateFamily,
   });
 
   // ── Render ─────────────────────────────────────────────────────
@@ -232,6 +295,9 @@ export function DocumentsTab({ projectId, canEdit }: { projectId: number; canEdi
             const domain = meta?.business_domain as string | undefined;
             const docType = meta?.document_type as string | undefined;
             const questions = (meta?.suggested_questions ?? []) as string[];
+            const family = (meta?.document_family ?? null) as DocumentFamily | null;
+            const familyMembersSuggested = (meta?.family_members_suggested ?? []) as FamilyMemberSuggested[];
+            const familyNodeId = family ? familyIdByKey.get(family.family_key) : undefined;
 
             return (
               <div
@@ -250,6 +316,19 @@ export function DocumentsTab({ projectId, canEdit }: { projectId: number; canEdi
                         {doc.title || doc.original_filename || doc.filename}
                       </span>
                       {statusBadge(doc.ai_status)}
+                      {family && (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            family.auto_link
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-amber-100 text-amber-700"
+                          }`}
+                          title={family.auto_link ? "Family" : "Suggested family"}
+                        >
+                          {family.auto_link ? "Family" : "Suggested"}: {family.family_name}
+                          <span className="opacity-70">{Math.round(family.confidence * 100)}%</span>
+                        </span>
+                      )}
                       <span className="text-[10px] text-slate-400 uppercase">
                         {doc.file_extension?.replace(".", "") ?? doc.asset_type}
                       </span>
@@ -282,6 +361,107 @@ export function DocumentsTab({ projectId, canEdit }: { projectId: number; canEdi
                       <div>
                         <h4 className="text-xs font-semibold text-slate-500 uppercase mb-1">AI Summary</h4>
                         <p className="text-sm text-slate-700">{doc.ai_summary}</p>
+                      </div>
+                    )}
+
+                    {/* Document Family */}
+                    {family && (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-semibold text-slate-500 uppercase">Document Family</h4>
+                          {!family.auto_link && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                              Suggested
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-sm font-medium text-slate-900">
+                          {family.family_name}{" "}
+                          <span className="text-xs font-normal text-slate-500">
+                            {Math.round(family.confidence * 100)}%
+                          </span>
+                        </p>
+                        <div className="mt-1 flex flex-wrap gap-4 text-xs text-slate-600">
+                          {family.family_type && (
+                            <span>
+                              <span className="text-slate-400">Family Type: </span>
+                              {family.family_type.replace(/_/g, " ")}
+                            </span>
+                          )}
+                          {family.role && family.role !== "unknown" && (
+                            <span>
+                              <span className="text-slate-400">Role: </span>
+                              {family.role.replace(/_/g, " ")}
+                            </span>
+                          )}
+                        </div>
+                        {family.reason && (
+                          <p className="mt-1 text-xs text-slate-500">{family.reason}</p>
+                        )}
+
+                        {familyMembersSuggested.length > 0 && (
+                          <div className="mt-2">
+                            <span className="text-[10px] uppercase text-slate-400">Related Family Members</span>
+                            <div className="mt-1 flex flex-wrap gap-1.5">
+                              {familyMembersSuggested.map((m, i) => (
+                                <span
+                                  key={i}
+                                  className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs text-slate-700 ring-1 ring-slate-200"
+                                  title={m.reason}
+                                >
+                                  <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-500">
+                                    {m.member_type}
+                                  </span>
+                                  {m.member_name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {canEdit && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {familyNodeId !== undefined && (
+                              <button
+                                type="button"
+                                onClick={() => setOpenFamilyId(familyNodeId)}
+                                className="rounded-md bg-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-300"
+                              >
+                                View Family
+                              </button>
+                            )}
+                            {!family.auto_link && (
+                              <button
+                                type="button"
+                                onClick={() => acceptFamilyMutation.mutate(doc.id)}
+                                disabled={acceptFamilyMutation.isPending}
+                                className="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                              >
+                                Accept Suggested Family
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const name = prompt("Move to which family?", family.family_name);
+                                if (name && name.trim()) {
+                                  changeFamilyMutation.mutate({ assetId: doc.id, familyName: name.trim() });
+                                }
+                              }}
+                              className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                            >
+                              Change Family
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeFamilyMutation.mutate(doc.id)}
+                              disabled={removeFamilyMutation.isPending}
+                              className="rounded-md bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-50"
+                            >
+                              Remove from Family
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -430,6 +610,17 @@ export function DocumentsTab({ projectId, canEdit }: { projectId: number; canEdi
         </div>
       )}
       </div>
+      )}
+
+      {openFamilyId !== null && (
+        <Suspense fallback={null}>
+          <FamilyDetailDrawer
+            projectId={projectId}
+            familyNodeId={openFamilyId}
+            canEdit={canEdit}
+            onClose={() => setOpenFamilyId(null)}
+          />
+        </Suspense>
       )}
     </div>
   );
