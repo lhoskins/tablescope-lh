@@ -16,7 +16,7 @@ import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import get_settings
 from app.models.project_asset import ProjectAsset
 from app.services.document_chunking_service import chunk_document
 from app.services.document_extraction_service import extract_text
@@ -194,6 +194,7 @@ async def _call_ai_profile(
     ref_kpis: list[str],
 ) -> dict[str, Any]:
     """Call the AI server to profile a document."""
+    settings = get_settings()
     if not settings.tablescope_ai_enabled or not settings.tablescope_ai_api_url:
         logger.info("AI not configured, skipping document profile")
         return {"summary": f"Document: {filename}", "tags": [], "entities": [], "recommended_kpis": []}
