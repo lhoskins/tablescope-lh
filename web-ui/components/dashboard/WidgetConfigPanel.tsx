@@ -3,8 +3,10 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { WidgetConfig, WidgetType, ChartSubtype, WidgetFilter, ColumnInfo } from "./types";
+import type { WidgetConfig, WidgetType, ChartSubtype, WidgetFilter, ColumnInfo, VisualizationOptions } from "./types";
 import { WidgetRenderer } from "./WidgetRenderer";
+import { ChartOptionsPanel } from "./ChartOptionsPanel";
+import { getDefaultOptions } from "@/lib/visualizations/chartRegistry";
 
 // ── Chart type / subtype definitions ────────────────────────────────
 type SubtypeDef = { value: ChartSubtype | ""; label: string };
@@ -115,6 +117,9 @@ export function WidgetConfigPanel({
   const [colSpan, setColSpan] = useState(editingWidget?.colSpan ?? 6);
   const [y2Column, setY2Column] = useState(editingWidget?.y2Column ?? "");
   const [y2Aggregation, setY2Aggregation] = useState<(typeof AGGREGATIONS)[number]>(editingWidget?.y2Aggregation ?? "avg");
+  const [vizOptions, setVizOptions] = useState<VisualizationOptions>(
+    editingWidget?.visualizationOptions ?? {}
+  );
 
   const viewName = sourceKind === "datasource" ? sourceId : "";
   const selectedQuery = sourceKind === "query" ? savedQueries.find((q) => q.id === Number(sourceId)) : null;
@@ -227,9 +232,10 @@ export function WidgetConfigPanel({
     sortBy: sortBy as WidgetConfig["sortBy"],
     limit: limit ? parseInt(limit, 10) : undefined,
     filters,
+    visualizationOptions: Object.keys(vizOptions).length > 0 ? vizOptions : undefined,
     colSpan,
     position: 0,
-  }), [chartType, chartSubtype, title, sourceKind, sourceId, xColumn, xColumnType, dateGranularity, yColumn, aggregation, y2Column, y2Aggregation, groupByColumn, sortBy, limit, filters, colSpan]);
+  }), [chartType, chartSubtype, title, sourceKind, sourceId, xColumn, xColumnType, dateGranularity, yColumn, aggregation, y2Column, y2Aggregation, groupByColumn, sortBy, limit, filters, vizOptions, colSpan]);
 
   const canFetchPreview = !!sourceId && !!xColumn && !!yColumn;
 
@@ -285,6 +291,8 @@ export function WidgetConfigPanel({
     const def = CHART_TYPES.find((ct) => ct.type === type);
     if (def && def.subtypes.length > 0) setChartSubtype(def.subtypes[0].value as ChartSubtype);
     else setChartSubtype("");
+    // Seed registry defaults for the newly selected chart type.
+    setVizOptions(getDefaultOptions(type));
   };
 
   return (
@@ -484,6 +492,14 @@ export function WidgetConfigPanel({
               ))}
             </div>
           </div>
+
+          {/* Chart Options (registry-driven) */}
+          {chartType !== "kpi" && chartType !== "table" && (
+            <div className="border-t border-slate-100 pt-3">
+              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Chart Options</label>
+              <ChartOptionsPanel chartType={chartType} value={vizOptions} onChange={setVizOptions} />
+            </div>
+          )}
         </div>
 
         {/* Right: Live Preview */}

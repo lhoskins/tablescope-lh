@@ -1,5 +1,47 @@
 export type WidgetType = "kpi" | "line" | "bar" | "area" | "pie" | "table" | "combo";
 
+/**
+ * Reference line drawn on a cartesian chart (line/area/bar/combo).
+ */
+export type ReferenceLineConfig = {
+  axis?: "x" | "y";
+  value: number;
+  label?: string;
+};
+
+/**
+ * Option-driven visualization settings layered on top of the base
+ * chart `type` + `chartSubtype`. Every field is optional; renderers fall
+ * back to defaults that preserve the previous (pre-options) appearance,
+ * which keeps existing saved dashboards working unchanged.
+ */
+export type VisualizationOptions = {
+  // Shared
+  showLegend?: boolean;
+  showLabels?: boolean;
+  showGrid?: boolean;
+  tinyMode?: boolean;
+  // Line / Area
+  lineStyle?: "solid" | "dashed";
+  curveType?: "linear" | "monotone" | "step";
+  connectNulls?: boolean;
+  showDots?: boolean;
+  referenceLines?: ReferenceLineConfig[];
+  // Line / Composed dual axis: series names rendered on the right axis
+  dualAxis?: boolean;
+  rightAxisSeries?: string[];
+  // Area / Bar stacking
+  stackMode?: "none" | "stacked" | "percent";
+  fillOpacity?: number;
+  // Bar
+  roundedCorners?: boolean;
+  // Pie / Donut
+  innerRadius?: number;
+  labelMode?: "none" | "percentage" | "value" | "name";
+  maxSlices?: number;
+  groupSmallSlices?: boolean;
+};
+
 export type ChartSubtype =
   // Bar variants
   | "column"           // vertical bars (default bar)
@@ -53,6 +95,8 @@ export type WidgetConfig = {
   limit?: number;
   // Filters
   filters: WidgetFilter[];
+  // Option-driven visualization settings (registry-backed)
+  visualizationOptions?: VisualizationOptions;
   // Layout (grid-based)
   colSpan: number;
   rowSpan?: number;

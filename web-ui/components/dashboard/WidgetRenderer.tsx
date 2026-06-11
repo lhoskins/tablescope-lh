@@ -19,8 +19,29 @@ import {
   Legend,
   ComposedChart,
   Label,
+  LabelList,
+  ReferenceLine,
 } from "recharts";
-import type { WidgetConfig } from "./types";
+import type { WidgetConfig, ReferenceLineConfig, VisualizationOptions } from "./types";
+import { withDefaults } from "@/lib/visualizations/chartRegistry";
+import { validateChartConfig } from "@/lib/visualizations/validateChartConfig";
+import { preparePieData } from "@/lib/visualizations/dataTransforms";
+
+/** Renders configured reference lines onto a cartesian chart. */
+function renderReferenceLines(refs: ReferenceLineConfig[] | undefined, yAxisId?: string) {
+  if (!refs || refs.length === 0) return null;
+  return refs.map((r, i) => (
+    <ReferenceLine
+      key={`ref-${i}`}
+      y={r.axis === "x" ? undefined : r.value}
+      x={r.axis === "x" ? r.value : undefined}
+      yAxisId={r.axis === "x" ? undefined : yAxisId}
+      stroke="#ef4444"
+      strokeDasharray="4 4"
+      label={r.label ? { value: r.label, fontSize: 10, fill: "#ef4444", position: "insideTopRight" } : undefined}
+    />
+  ));
+}
 
 const COLORS = [
   "#3b82f6", "#60a5fa", "#93c5fd",  // blues
@@ -239,8 +260,25 @@ export function WidgetRenderer({ widget, data }: Props) {
     return { chartData: coercedData, seriesNames: [] as string[] };
   }, [coercedData, xKey, yKey, hasGroupBy, widget.groupByColumn]);
 
-  const stackId = (sub === "stacked_bar" || sub === "stacked_horizontal") ? "stack" : undefined;
-  const lineType = sub === "smooth_line" ? "monotone" : sub === "step_line" ? "stepAfter" : "linear";
+  // Registry-backed visualization options merged over defaults.
+  const opts: VisualizationOptions = withDefaults(widget.type, widget.visualizationOptions);
+  const tiny = !!opts.tinyMode;
+  const showGrid = tiny ? false : opts.showGrid !== false;
+  const showLegend = tiny ? false : opts.showLegend !== false;
+  const showDataLabels = !tiny && !!opts.showLabels;
+  // stackMode option takes precedence; otherwise infer from the legacy subtype.
+  const optStack = opts.stackMode && opts.stackMode !== "none";
+  const isStacked = optStack || sub === "stacked_bar" || sub === "stacked_horizontal" || sub === "stacked_area";
+  const isPercentStack = opts.stackMode === "percent";
+  const curve = opts.curveType ?? (sub === "smooth_line" ? "monotone" : sub === "step_line" ? "step" : "monotone");
+  const lineType = curve === "monotone" ? "monotone" : curve === "step" ? "stepAfter" : "linear";
+  const dashArray = opts.lineStyle === "dashed" ? "6 4" : undefined;
+  // Dual axis: use the explicit right-axis series when provided, otherwise
+  // auto-assign every series after the first to the right axis.
+  const explicitRight = opts.rightAxisSeries ?? [];
+  const autoRight = explicitRight.length === 0 && seriesNames.length > 1 ? seriesNames.slice(1) : explicitRight;
+  const rightSeries = new Set(autoRight);
+  const useDualAxis = !!opts.dualAxis && rightSeries.size > 0;
 
   const commonAxisProps = {
     stroke: "#94a3b8",
@@ -278,38 +316,52 @@ export function WidgetRenderer({ widget, data }: Props) {
         return <TableWidget data={data} />;
 
       // ── LINE ────────────────────────────────────────────
-      case "line":
+      case "line": {
+        const lt = lineType as "linear" | "monotone" | "stepAfter";
+        const dot = opts.showDots ? { r: 2 } : false;
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 25, left: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis dataKey={xKey} {...xAxisProps} />
-              <YAxis {...yAxisProps} tickFormatter={fmtAxis} />
+            <LineChart data={chartData} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 25, left: 10 }}>
+              {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />}
+              {!tiny && <XAxis dataKey={xKey} {...xAxisProps} />}
+              {!tiny && <YAxis yAxisId="left" {...yAxisProps} tickFormatter={fmtAxis} />}
+              {!tiny && useDualAxis && <YAxis yAxisId="right" orientation="right" {...yAxisProps} tickFormatter={fmtAxis} />}
+              {tiny && <YAxis yAxisId="left" hide />}
+              {tiny && useDualAxis && <YAxis yAxisId="right" hide />}
               <Tooltip
                 contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
                 formatter={(value: number) => [fmtNumber(value), ""]}
               />
               {seriesNames.length > 0 ? (
                 seriesNames.map((name, i) => (
-                  <Line key={name} type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                  <Line key={name} yAxisId={useDualAxis && rightSeries.has(name) ? "right" : "left"} type={lt} dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2.5} strokeDasharray={dashArray} connectNulls={opts.connectNulls} dot={dot} activeDot={{ r: 4 }}>
+                    {showDataLabels && <LabelList dataKey={name} position="top" style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
+                  </Line>
                 ))
               ) : (
-                <Line type={lineType as "linear" | "monotone" | "stepAfter"} dataKey={yKey} stroke="#3b82f6" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                <Line yAxisId={useDualAxis && rightSeries.has(yKey) ? "right" : "left"} type={lt} dataKey={yKey} stroke="#3b82f6" strokeWidth={2.5} strokeDasharray={dashArray} connectNulls={opts.connectNulls} dot={dot} activeDot={{ r: 4 }}>
+                  {showDataLabels && <LabelList dataKey={yKey} position="top" style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
+                </Line>
               )}
-              {seriesNames.length > 0 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
+              {renderReferenceLines(opts.referenceLines, "left")}
+              {showLegend && seriesNames.length > 0 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
             </LineChart>
           </ResponsiveContainer>
         );
+      }
 
       // ── BAR ─────────────────────────────────────────────
       case "bar": {
         const barXLabel = widget.xColumn || xKey;
         const barYLabel = widget.yColumn || yKey;
+        const grouped = sub === "grouped_bar";
+        const barStackId = grouped ? undefined : isStacked || seriesNames.length > 0 ? "stack" : undefined;
+        const barRadius = opts.roundedCorners === false ? (0 as const) : undefined;
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} margin={{ top: 10, right: 20, bottom: 40, left: isHorizontal ? 10 : 50 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!isHorizontal} horizontal={isHorizontal} />
-              {isHorizontal ? (
+            <BarChart data={chartData} layout={isHorizontal ? "vertical" : "horizontal"} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 40, left: isHorizontal ? 10 : 50 }}>
+              {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!isHorizontal} horizontal={isHorizontal} />}
+              {tiny ? null : isHorizontal ? (
                 <>
                   <YAxis type="category" dataKey={xKey} {...commonAxisProps} width={100}>
                     <Label value={barXLabel} angle={-90} position="insideLeft" offset={-5} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
@@ -338,25 +390,33 @@ export function WidgetRenderer({ widget, data }: Props) {
                     key={name}
                     dataKey={name}
                     fill={COLORS[i % COLORS.length]}
-                    radius={isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
-                    stackId={stackId ?? (sub === "grouped_bar" ? undefined : "stack")}
+                    radius={barRadius ?? (isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0])}
+                    stackId={barStackId}
                     maxBarSize={48}
-                  />
+                  >
+                    {showDataLabels && <LabelList dataKey={name} position={isHorizontal ? "right" : "top"} style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
+                  </Bar>
                 ))
               ) : (
-                <Bar dataKey={yKey} fill="#3b82f6" radius={isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]} maxBarSize={48} />
+                <Bar dataKey={yKey} fill="#3b82f6" radius={barRadius ?? (isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0])} maxBarSize={48}>
+                  {showDataLabels && <LabelList dataKey={yKey} position={isHorizontal ? "right" : "top"} style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
+                </Bar>
               )}
-              {seriesNames.length > 0 && <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 11 }} />}
+              {renderReferenceLines(opts.referenceLines)}
+              {showLegend && seriesNames.length > 0 && <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 11 }} />}
             </BarChart>
           </ResponsiveContainer>
         );
       }
 
       // ── AREA ────────────────────────────────────────────
-      case "area":
+      case "area": {
+        const areaStackId = isStacked ? "stack" : undefined;
+        const areaCurve = lineType as "linear" | "monotone" | "stepAfter";
+        const fillOp = opts.fillOpacity ?? 0.35;
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 20, bottom: 25, left: 10 }}>
+            <AreaChart data={chartData} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 25, left: 10 }}>
               <defs>
                 {seriesNames.length > 0 ? (
                   seriesNames.map((name, i) => (
@@ -372,9 +432,9 @@ export function WidgetRenderer({ widget, data }: Props) {
                   </linearGradient>
                 )}
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis dataKey={xKey} {...xAxisProps} />
-              <YAxis {...yAxisProps} tickFormatter={fmtAxis} />
+              {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />}
+              {!tiny && <XAxis dataKey={xKey} {...xAxisProps} />}
+              {!tiny && <YAxis {...yAxisProps} tickFormatter={fmtAxis} />}
               <Tooltip
                 contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
                 formatter={(value: number) => [fmtNumber(value), ""]}
@@ -383,49 +443,68 @@ export function WidgetRenderer({ widget, data }: Props) {
                 seriesNames.map((name, i) => (
                   <Area
                     key={name}
-                    type="monotone"
+                    type={areaCurve}
                     dataKey={name}
                     stroke={COLORS[i % COLORS.length]}
                     fill={`url(#grad-${i})`}
+                    fillOpacity={fillOp}
                     strokeWidth={2}
-                    stackId={sub === "stacked_area" ? "stack" : undefined}
+                    connectNulls={opts.connectNulls}
+                    stackId={areaStackId}
                   />
                 ))
               ) : (
-                <Area type="monotone" dataKey={yKey} stroke="#3b82f6" fill="url(#grad-default)" strokeWidth={2} />
+                <Area type={areaCurve} dataKey={yKey} stroke="#3b82f6" fill="url(#grad-default)" fillOpacity={fillOp} strokeWidth={2} connectNulls={opts.connectNulls} />
               )}
-              {seriesNames.length > 0 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
+              {renderReferenceLines(opts.referenceLines)}
+              {showLegend && seriesNames.length > 0 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
             </AreaChart>
           </ResponsiveContainer>
         );
+      }
 
       // ── PIE / DONUT ─────────────────────────────────────
       case "pie": {
-        const isDonut = sub === "donut";
         const pieDataKey = seriesNames.length > 0 ? seriesNames[0] : yKey;
+        // innerRadius option (0..90 %) takes precedence; legacy "donut" subtype = 55%.
+        const innerPct = opts.innerRadius && opts.innerRadius > 0 ? opts.innerRadius : sub === "donut" ? 55 : 0;
+        const isDonut = innerPct > 0;
+        const pieData = preparePieData(chartData, {
+          nameKey: xKey,
+          valueKey: pieDataKey,
+          maxSlices: opts.maxSlices ?? 7,
+          groupSmallSlices: opts.groupSmallSlices !== false,
+        });
+        const labelMode = opts.labelMode ?? "percentage";
+        const pieLabel =
+          labelMode === "none"
+            ? false
+            : ({ name, value, percent }: { name: string; value: number; percent: number }) => {
+                if (labelMode === "name") return name;
+                if (labelMode === "value") return `${name} ${fmtAxis(value)}`;
+                return `${name} ${(percent * 100).toFixed(0)}%`;
+              };
         return (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <Pie
-                data={chartData}
+                data={pieData}
                 dataKey={pieDataKey}
                 nameKey={xKey}
                 cx="50%"
                 cy="50%"
-                innerRadius={isDonut ? "55%" : 0}
+                innerRadius={`${innerPct}%`}
                 outerRadius="80%"
                 paddingAngle={isDonut ? 2 : 0}
-                label={({ name, percent }: { name: string; percent: number }) =>
-                  `${name} ${(percent * 100).toFixed(0)}%`
-                }
-                labelLine={{ stroke: "#94a3b8", strokeWidth: 1 }}
+                label={pieLabel}
+                labelLine={labelMode === "none" ? false : { stroke: "#94a3b8", strokeWidth: 1 }}
               >
-                {chartData.map((_, i) => (
+                {pieData.map((_, i) => (
                   <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="white" strokeWidth={2} />
                 ))}
                 {isDonut && (
                   <Label
-                    content={<DonutCenterLabel data={chartData} yKey={pieDataKey} />}
+                    content={<DonutCenterLabel data={pieData} yKey={pieDataKey} />}
                     position="center"
                   />
                 )}
@@ -434,12 +513,14 @@ export function WidgetRenderer({ widget, data }: Props) {
                 contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
                 formatter={(value: number) => [fmtNumber(value), ""]}
               />
-              <Legend
-                iconType="circle"
-                iconSize={8}
-                wrapperStyle={{ fontSize: 11 }}
-                formatter={(value: string) => <span className="text-slate-600">{value}</span>}
-              />
+              {showLegend && (
+                <Legend
+                  iconType="circle"
+                  iconSize={8}
+                  wrapperStyle={{ fontSize: 11 }}
+                  formatter={(value: string) => <span className="text-slate-600">{value}</span>}
+                />
+              )}
             </PieChart>
           </ResponsiveContainer>
         );
@@ -450,7 +531,7 @@ export function WidgetRenderer({ widget, data }: Props) {
         return (
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 25, left: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />}
               <XAxis dataKey={xKey} {...xAxisProps} />
               <YAxis yAxisId="left" {...yAxisProps} tickFormatter={fmtAxis} />
               {y2Key && <YAxis yAxisId="right" orientation="right" {...yAxisProps} tickFormatter={fmtAxis} />}
@@ -458,13 +539,14 @@ export function WidgetRenderer({ widget, data }: Props) {
                 contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
                 formatter={(value: number) => [fmtNumber(value), ""]}
               />
-              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+              {showLegend && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
               <Bar yAxisId="left" dataKey={yKey} fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={40} />
               {y2Key ? (
                 <Line yAxisId="right" type="monotone" dataKey={y2Key} stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} />
               ) : (
                 <Line yAxisId="left" type="monotone" dataKey={yKey} stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} />
               )}
+              {renderReferenceLines(opts.referenceLines, y2Key ? "right" : "left")}
             </ComposedChart>
           </ResponsiveContainer>
         );
@@ -474,11 +556,24 @@ export function WidgetRenderer({ widget, data }: Props) {
     }
   };
 
+  // Validate the chart config; on hard errors fall back to a table so the
+  // widget still shows its data instead of rendering blank.
+  const validation = validateChartConfig(widget, coercedData);
+
   return (
     <div className="h-full w-full">
       {data.length === 0 ? (
         <div className="flex h-full items-center justify-center text-xs text-slate-400">
           No data available
+        </div>
+      ) : !validation.ok && widget.type !== "table" && widget.type !== "kpi" ? (
+        <div className="flex h-full flex-col">
+          <div className="border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-[10px] text-amber-700">
+            {validation.errors[0]} Showing table instead.
+          </div>
+          <div className="min-h-0 flex-1">
+            <TableWidget data={data} />
+          </div>
         </div>
       ) : (
         renderChart()
