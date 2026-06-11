@@ -295,7 +295,8 @@ async def accept_family(
     asset = await _require_asset(project_id, asset_id, session, context)
 
     meta = asset.ai_metadata if isinstance(asset.ai_metadata, dict) else {}
-    suggested = meta.get("document_family") if isinstance(meta.get("document_family"), dict) else {}
+    suggested_raw = meta.get("document_family")
+    suggested: dict[str, Any] = suggested_raw if isinstance(suggested_raw, dict) else {}
 
     family_name = (body.family_name or suggested.get("family_name") or "").strip()
     if not family_name:
