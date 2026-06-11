@@ -25,15 +25,20 @@ async def generate(
     system_prompt: str = "",
     model: str | None = None,
     temperature: float = 0.1,
+    max_tokens: int | None = None,
 ) -> str:
     """Generate text completion from Ollama."""
     model = model or settings.reasoning_model
+
+    options: dict[str, Any] = {"temperature": temperature}
+    if max_tokens is not None:
+        options["num_predict"] = max_tokens
 
     payload: dict[str, Any] = {
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "options": {"temperature": temperature},
+        "options": options,
     }
     if system_prompt:
         payload["system"] = system_prompt

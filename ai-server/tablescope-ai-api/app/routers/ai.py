@@ -723,10 +723,9 @@ Rules:
         )
     except Exception as exc:
         logger.exception("[%s] document profile failed: %s", request_id, exc)
-        return DocumentProfileResponse(
-            summary=f"Document: {req.filename}",
-            request_id=request_id,
-            model_used=settings.reasoning_model,
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Document profiling failed: {exc}",
         )
 
 
