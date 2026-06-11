@@ -557,44 +557,17 @@ async def _ai_analyze_and_create_scopes(
     if not query_infos:
         return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
-    # ── Phase 1: AI structural analysis ──────────────────────────────
-    query_descriptions = "\n\n".join(
-        f"Query ID={q['id']}, Name=\"{q['name']}\"\n"
-        f"  SELECT columns: {q['columns']}\n"
-        f"  SQL: {q['sql']}"
-        for q in query_infos
-    )
-    scope_prompt = (
-        f"Analyze these {len(query_infos)} saved SQL queries and find drill-down "
-        f"scope relationships.\n\n"
-        f"QUERIES:\n{query_descriptions}\n\n"
-        "TASK: Find pairs where clicking a cell in the SOURCE query should filter "
-        "the TARGET query by that value. Columns may have DIFFERENT NAMES across "
-        "queries but still be related (e.g. CategoryName in one query may "
-        "correspond to CategoryID in another if they reference the same entity).\n\n"
-        "RULES:\n"
-        "1. Only use identifier/name columns — NEVER numeric/aggregate columns "
-        "(Revenue, Amount, Total, Count, Price, Quantity)\n"
-        "2. Direction: summarized (GROUP BY/SUM/COUNT) → detailed (no aggregation). "
-        "Source = aggregated query, Target = raw/detail query.\n"
-        "3. source_field and target_field must be actual column names from the "
-        "respective query's SELECT columns list. They CAN be different names if "
-        "they reference the same business entity.\n"
-        "4. One scope per query-pair per relationship — no duplicates, no reverse.\n\n"
-        "Return ONLY a JSON array: [{\"source_query_id\": int, "
-        "\"source_query_name\": str, \"source_field\": str, "
-        "\"target_query_id\": int, \"target_query_name\": str, "
-        "\"target_field\": str, \"confidence\": float, \"reason\": str}]"
-    )
-
+    # ── Phase 1: AI structural analysis via the dedicated scopes endpoint ──
+    # Uses /ai/project/scopes/analyze (NOT the generic /ai/ask): the AI server
+    # has a purpose-built prompt that returns structured ScopeSuggestion JSON.
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": project_id,
-        "question": scope_prompt,
-        "scope": "project",
-        "include_query_history": False,
-        "include_dashboard_context": False,
+        "queries": [
+            {"id": q["id"], "name": q["name"], "sql": q["sql"]}
+            for q in query_infos
+        ],
     }
 
     # Run AI analysis and data sampling in parallel
@@ -610,7 +583,9 @@ async def _ai_analyze_and_create_scopes(
         )
         return q["id"], vals
 
-    ai_task = asyncio.create_task(_forward_to_ai("/ai/ask", payload))
+    ai_task = asyncio.create_task(
+        _forward_to_ai("/ai/project/scopes/analyze", payload)
+    )
     sample_tasks = [asyncio.create_task(_sample_one(q)) for q in query_infos]
     ai_response, *sample_results = await asyncio.gather(ai_task, *sample_tasks)
 
@@ -619,21 +594,8 @@ async def _ai_analyze_and_create_scopes(
     for qid, col_vals in sample_results:
         query_values[qid] = col_vals
 
-    # Parse AI suggestions
-    import json as _json
-    raw_answer = ai_response.get("answer", "")
-    scopes_list: list[dict[str, Any]] = []
-    try:
-        json_text = raw_answer.strip()
-        if json_text.startswith("```"):
-            json_text = json_text.split("```")[1]
-            if json_text.startswith("json"):
-                json_text = json_text[4:]
-        parsed = _json.loads(json_text)
-        if isinstance(parsed, list):
-            scopes_list = parsed
-    except (_json.JSONDecodeError, IndexError, ValueError):
-        pass
+    # The dedicated endpoint returns structured scope suggestions directly.
+    scopes_list: list[dict[str, Any]] = ai_response.get("scopes", []) or []
 
     # Build column map: query_id → set of column names (lowercase)
     query_col_map: dict[int, set[str]] = {}
