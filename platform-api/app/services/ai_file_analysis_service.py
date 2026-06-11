@@ -63,8 +63,8 @@ async def analyze_file_with_ai(
 ) -> dict[str, Any]:
     """Send compact file profile to AI and return structured analysis.
 
-    Uses the existing /ai/analyze-file endpoint if available, otherwise falls
-    back to the generic /ai/ask endpoint (which is always deployed).
+    Uses ONLY the dedicated /ai/analyze-file endpoint. If it is unavailable,
+    degrades to a deterministic system-only profile (no /ai/ask fallback).
     """
     import hashlib
     import hmac

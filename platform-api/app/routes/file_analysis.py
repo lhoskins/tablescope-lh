@@ -63,7 +63,7 @@ async def analyze_upload(
     if file_profile["column_count"] == 0:
         raise HTTPException(status_code=422, detail="No columns detected in file")
 
-    # Run AI analysis (pass tenant/user/project context for the /ai/ask fallback)
+    # Run AI analysis via the dedicated /ai/analyze-file endpoint
     ai_result = await analyze_file_with_ai(
         file_profile,
         tenant_id=context.tenant_id,
