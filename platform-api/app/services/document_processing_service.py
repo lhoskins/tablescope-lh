@@ -244,6 +244,8 @@ async def _call_ai_profile(
             "tenant_id": tenant_id,
             "user_id": user_id,
             "scope": "project",
+            "include_query_history": False,
+            "include_dashboard_context": False,
             "timestamp": time.time(),
         }
         ask_payload["signature"] = _sign(ask_payload)
