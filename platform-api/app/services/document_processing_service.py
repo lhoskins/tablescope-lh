@@ -24,6 +24,10 @@ from app.services.document_extraction_service import extract_text
 logger = logging.getLogger(__name__)
 
 
+class DocumentProfileError(Exception):
+    """Raised when the AI document profiler cannot produce a profile."""
+
+
 async def process_document_asset(
     session: AsyncSession,
     asset: ProjectAsset,
@@ -135,20 +139,32 @@ async def process_document_asset(
     text_preview = doc_text[:4000]
     chunk_previews = [{"chunk_index": c["chunk_index"], "text": c["chunk_text"][:1000]} for c in chunks[:5]]
 
-    profile = await _call_ai_profile(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        project_id=project_id,
-        asset_id=asset.id,
-        document_id=ai_doc_id,
-        filename=asset.filename,
-        asset_type=asset.asset_type,
-        content_type=asset.content_type or "",
-        text_preview=text_preview,
-        chunks=chunk_previews,
-        ref_tags=ref_tags,
-        ref_kpis=ref_kpis,
-    )
+    try:
+        profile = await _call_ai_profile(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            project_id=project_id,
+            asset_id=asset.id,
+            document_id=ai_doc_id,
+            filename=asset.filename,
+            asset_type=asset.asset_type,
+            content_type=asset.content_type or "",
+            text_preview=text_preview,
+            chunks=chunk_previews,
+            ref_tags=ref_tags,
+            ref_kpis=ref_kpis,
+        )
+    except DocumentProfileError as exc:
+        logger.error("AI profiling failed for asset %d: %s", asset.id, exc)
+        asset.ai_status = "failed"
+        asset.ai_error_message = f"AI profiling failed: {exc}"
+        if ai_doc_id:
+            await session.execute(
+                text("UPDATE ai_documents SET status='failed' WHERE id=:did"),
+                {"did": ai_doc_id},
+            )
+        await session.commit()
+        return
 
     # ── Step 5: Persist profile ──────────────────────────────────────
     asset.ai_summary = profile.get("summary", "")
@@ -193,11 +209,15 @@ async def _call_ai_profile(
     ref_tags: list[str],
     ref_kpis: list[str],
 ) -> dict[str, Any]:
-    """Call the AI server to profile a document."""
+    """Call the AI server's dedicated document profiling endpoint.
+
+    Raises DocumentProfileError on any failure. There is no /ai/ask fallback:
+    the generic Q&A endpoint refuses extraction tasks, so a failure here must
+    surface as a failed document rather than silently degrading.
+    """
     settings = get_settings()
     if not settings.tablescope_ai_enabled or not settings.tablescope_ai_api_url:
-        logger.info("AI not configured, skipping document profile")
-        return {"summary": f"Document: {filename}", "tags": [], "entities": [], "recommended_kpis": []}
+        raise DocumentProfileError("AI is not configured (tablescope_ai_enabled / tablescope_ai_api_url)")
 
     ai_url = settings.tablescope_ai_api_url
 
@@ -209,7 +229,6 @@ async def _call_ai_profile(
             hashlib.sha256,
         ).hexdigest()
 
-    # Try dedicated endpoint first, fallback to /ai/ask
     payload: dict[str, Any] = {
         "tenant_id": tenant_id,
         "user_id": user_id,
@@ -228,100 +247,17 @@ async def _call_ai_profile(
     payload["signature"] = _sign(payload)
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             resp = await client.post(f"{ai_url}/ai/document/profile", json=payload)
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception:
-        logger.debug("Dedicated /ai/document/profile not available, using /ai/ask fallback")
+    except Exception as exc:
+        raise DocumentProfileError(f"Could not reach AI document profiler: {exc}") from exc
 
-    # Fallback: use generic /ai/ask with a profiling prompt
-    prompt = _build_profile_prompt(filename, asset_type, text_preview, ref_tags, ref_kpis)
-    try:
-        ask_payload: dict[str, Any] = {
-            "question": prompt,
-            "project_id": project_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "scope": "project",
-            "include_query_history": False,
-            "include_dashboard_context": False,
-            "timestamp": time.time(),
-        }
-        ask_payload["signature"] = _sign(ask_payload)
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                f"{ai_url}/ai/ask",
-                json=ask_payload,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                answer = data.get("answer", "")
-                return _parse_profile_from_text(answer, filename)
-    except Exception:
-        logger.exception("AI profile fallback failed")
+    if resp.status_code != 200:
+        raise DocumentProfileError(
+            f"AI document profiler returned HTTP {resp.status_code}: {resp.text[:300]}"
+        )
 
-    # Minimal fallback
-    return {
-        "summary": f"Document: {filename}",
-        "tags": [],
-        "entities": [],
-        "recommended_kpis": [],
-        "relationship_hints": [],
-    }
-
-
-def _build_profile_prompt(
-    filename: str, asset_type: str, text_preview: str,
-    ref_tags: list[str], ref_kpis: list[str],
-) -> str:
-    tags_str = ", ".join(ref_tags[:50]) if ref_tags else "none available"
-    kpis_str = ", ".join(ref_kpis[:50]) if ref_kpis else "none available"
-    return f"""Analyze this document and return a JSON profile.
-
-File: {filename}
-Type: {asset_type}
-
-Available reference tags: {tags_str}
-Available reference KPIs: {kpis_str}
-
-Document text (preview):
-{text_preview}
-
-Return ONLY valid JSON with this structure:
-{{
-  "summary": "2-3 sentence summary of the document",
-  "document_type": "type of document (e.g., audit_report, policy, contract)",
-  "business_domain": "primary business domain",
-  "process_area": "relevant process area",
-  "tags": [{{"tag_key": "...", "display_name": "...", "confidence": 0.9, "source": "catalog"}}],
-  "entities": [{{"entity_type": "supplier|customer|product|process", "name": "...", "confidence": 0.9, "evidence": "..."}}],
-  "recommended_kpis": [{{"kpi_key": "...", "display_name": "...", "confidence": 0.8, "reason": "..."}}],
-  "relationship_hints": [{{"from_type": "document", "from_name": "{filename}", "relationship_type": "...", "to_type": "...", "to_name": "...", "confidence": 0.8, "evidence": "..."}}],
-  "suggested_questions": ["question 1", "question 2"]
-}}"""
-
-
-def _parse_profile_from_text(text: str, filename: str) -> dict[str, Any]:
-    """Try to extract JSON from AI response text."""
-    import json
-    import re
-
-    # Try to find JSON in the response
-    json_match = re.search(r"\{[\s\S]*\}", text)
-    if json_match:
-        try:
-            return json.loads(json_match.group())
-        except json.JSONDecodeError:
-            pass
-
-    return {
-        "summary": text[:500] if text else f"Document: {filename}",
-        "tags": [],
-        "entities": [],
-        "recommended_kpis": [],
-        "relationship_hints": [],
-    }
+    return resp.json()
 
 
 async def _build_graph(

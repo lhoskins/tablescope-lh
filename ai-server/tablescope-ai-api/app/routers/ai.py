@@ -639,6 +639,7 @@ async def analyze_file(req: AnalyzeFileRequest):
 async def profile_document(req: DocumentProfileRequest):
     """Profile an uploaded document — extract summary, tags, entities, KPIs, relationships."""
     update_activity()
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
     request_id = uuid.uuid4().hex[:12]
     logger.info("[%s] document/profile file=%s type=%s", request_id, req.filename, req.asset_type)
 
