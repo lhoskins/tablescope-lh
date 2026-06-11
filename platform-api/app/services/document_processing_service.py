@@ -186,6 +186,7 @@ async def process_document_asset(
         await session.commit()
     except Exception:
         logger.exception("Graph building failed for asset %d", asset.id)
+        await session.rollback()
 
     # ── Step 7: Link to existing datasources ─────────────────────────
     try:
@@ -193,6 +194,7 @@ async def process_document_asset(
         await session.commit()
     except Exception:
         logger.exception("Datasource linking failed for asset %d", asset.id)
+        await session.rollback()
 
 
 async def _call_ai_profile(
@@ -519,7 +521,7 @@ async def _upsert_edge(
             INSERT INTO ai_project_graph_edges
                 (tenant_id, project_id, from_node_id, to_node_id, relationship_type,
                  confidence, evidence, visibility, created_by)
-            VALUES (:tid, :pid, :fid, :toid, :et, :conf, :ev::jsonb, 'shared_project', :uid)
+            VALUES (:tid, :pid, :fid, :toid, :et, :conf, :ev, 'shared_project', :uid)
             RETURNING id
         """),
         {
