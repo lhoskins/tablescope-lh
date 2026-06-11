@@ -119,39 +119,13 @@ async def analyze_file_with_ai(
         return _validate_ai_result(result, profile)
 
     except Exception as e:
-        logger.info("analyze-file endpoint unavailable (%s), using /ai/ask", e)
-
-    # Fallback: use the generic /ai/ask endpoint (always deployed)
-    try:
-        ask_payload: dict[str, Any] = {
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "project_id": project_id,
-            "question": prompt,
-            "scope": "project",
-            "include_query_history": False,
-            "include_dashboard_context": False,
-            "timestamp": time.time(),
-        }
-        ask_payload["signature"] = _sign(ask_payload)
-
-        url = f"{settings.tablescope_ai_api_url}/ai/ask"
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.post(url, json=ask_payload)
-            resp.raise_for_status()
-            result = resp.json()
-
-        answer = result.get("answer", "")
-        # Parse JSON from the answer text
-        parsed = _extract_json(answer)
-        if parsed:
-            return _validate_ai_result(parsed, profile)
-
-        logger.warning("Could not parse JSON from AI /ask response")
-        return _fallback_analysis(profile)
-
-    except Exception as e:
-        logger.warning("AI file analysis failed completely, using fallback: %s", e)
+        # No /ai/ask fallback: file analysis uses ONLY the dedicated
+        # /ai/analyze-file endpoint. The generic Q&A endpoint is SQL-oriented
+        # and produces unusable output for extraction. If the dedicated
+        # endpoint fails, degrade to a deterministic system-only profile.
+        logger.warning(
+            "analyze-file endpoint failed (%s) — returning system-only profile", e,
+        )
         return _fallback_analysis(profile)
 
 

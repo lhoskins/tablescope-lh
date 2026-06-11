@@ -1430,45 +1430,31 @@ async def ai_generate_and_save_dashboard(
         if eq.sql_text:
             sql_to_query[_normalize_sql(eq.sql_text)] = eq
 
-    # Build summary of existing queries for AI semantic matching
-    existing_summaries = "\n".join(
-        f"  ID={eq.id}, Name=\"{eq.name}\", SQL: {eq.sql_text}"
-        for eq in existing_queries
-        if eq.sql_text
-    )
+    # Existing queries with SQL, sent to the dedicated query-match endpoint.
+    existing_with_sql = [eq for eq in existing_queries if eq.sql_text]
 
     async def _find_matching_query(widget_sql: str, widget_title: str) -> SavedQuery | None:
-        """Use AI to find an existing query that serves the same purpose."""
-        if not existing_summaries:
+        """Use the dedicated /ai/query/match endpoint to find an equivalent query.
+
+        Uses /ai/query/match (NOT the generic /ai/ask): the comparison is a
+        purpose-built equivalence check that returns a structured match_id.
+        """
+        if not existing_with_sql:
             return None
-        match_prompt = (
-            f"A new dashboard widget needs this query:\n"
-            f"  Title: \"{widget_title}\"\n"
-            f"  SQL: {widget_sql}\n\n"
-            f"Here are the existing saved queries in the project:\n"
-            f"{existing_summaries}\n\n"
-            f"Does any existing query produce the SAME result (same columns, "
-            f"same data, same aggregations, same grouping)? Minor differences "
-            f"like column order, aliases, CAST wrappers, LIMIT values, or "
-            f"whitespace don't matter — only whether the data returned is "
-            f"functionally equivalent.\n\n"
-            f"If YES: respond with ONLY the number: MATCH=<id>\n"
-            f"If NO existing query matches: respond with ONLY: NO_MATCH"
-        )
         try:
-            match_response = await _forward_to_ai("/ai/ask", {
+            match_response = await _forward_to_ai("/ai/query/match", {
                 "tenant_id": context.tenant_id,
                 "user_id": context.user_id,
                 "project_id": req.project_id,
-                "question": match_prompt,
-                "scope": "project",
-                "include_query_history": False,
-                "include_dashboard_context": False,
+                "candidate_title": widget_title,
+                "candidate_sql": widget_sql,
+                "existing_queries": [
+                    {"id": eq.id, "name": eq.name, "sql": eq.sql_text}
+                    for eq in existing_with_sql
+                ],
             })
-            answer = match_response.get("answer", "").strip()
-            match = _re.search(r"MATCH\s*=\s*(\d+)", answer)
-            if match:
-                match_id = int(match.group(1))
+            match_id = match_response.get("match_id")
+            if match_id is not None:
                 for eq in existing_queries:
                     if eq.id == match_id:
                         return eq

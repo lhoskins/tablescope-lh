@@ -211,29 +211,27 @@ async def _call_ai(
             hashlib.sha256,
         ).hexdigest()
 
+    # Use the dedicated /ai/analyze-file endpoint (NOT the generic /ai/ask):
+    # the prompt is a self-contained extraction task that must return JSON, and
+    # /ai/ask injects SQL/table context that makes the model refuse or emit SQL.
     try:
         payload: dict[str, Any] = {
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "project_id": project_id,
-            "question": prompt,
-            "scope": "project",
-            "include_query_history": False,
-            "include_dashboard_context": False,
+            "prompt": prompt,
+            "task": "file_analysis",
+            "response_format": "json",
             "timestamp": time.time(),
         }
         payload["signature"] = _sign(payload)
 
-        url = f"{settings.tablescope_ai_api_url}/ai/ask"
+        url = f"{settings.tablescope_ai_api_url}/ai/analyze-file"
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             result = resp.json()
 
-        answer = result.get("answer", "")
-        parsed = _extract_json(answer)
-        if parsed:
-            return _validate_catalog_result(parsed)
+        analysis = result.get("analysis", result)
+        if isinstance(analysis, dict) and analysis:
+            return _validate_catalog_result(analysis)
 
         logger.warning("Could not parse JSON from AI catalog profile response")
         return None

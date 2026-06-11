@@ -93,6 +93,20 @@ class AnalyzeScopesResponse(BaseModel):
     model_used: str
 
 
+class MatchQueryRequest(AIBaseRequest):
+    """Find an existing saved query functionally equivalent to a candidate."""
+    candidate_title: str = ""
+    candidate_sql: str
+    existing_queries: list[QueryInfo] = Field(default_factory=list)
+
+
+class MatchQueryResponse(BaseModel):
+    """Result of a query-equivalence check. match_id is None when none match."""
+    match_id: int | None = None
+    request_id: str
+    model_used: str
+
+
 class DocumentProfileRequest(BaseModel):
     """Request to profile an uploaded document."""
     tenant_id: int

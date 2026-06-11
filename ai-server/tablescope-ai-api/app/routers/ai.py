@@ -33,6 +33,8 @@ from app.models.schemas import (
     GenerateSQLRequest,
     GenerateSQLResponse,
     IndexDocumentRequest,
+    MatchQueryRequest,
+    MatchQueryResponse,
     RelationshipSuggestion,
     ScopeSuggestion,
     SuggestDashboardRequest,
@@ -597,10 +599,67 @@ async def analyze_scopes(req: AnalyzeScopesRequest) -> AnalyzeScopesResponse:
     )
 
 
+@router.post("/query/match", response_model=MatchQueryResponse)
+async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
+    """Find an existing saved query functionally equivalent to a candidate.
+
+    Used during dashboard creation to avoid creating duplicate queries. Returns
+    match_id of the equivalent existing query, or None if none match.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+
+    if not req.existing_queries:
+        return MatchQueryResponse(
+            match_id=None, request_id=request_id, model_used=settings.reasoning_model,
+        )
+
+    existing_text = "\n".join(
+        f"  ID={q.id}, Name=\"{q.name}\", SQL: {q.sql}"
+        for q in req.existing_queries
+    )
+    prompt = (
+        f"A new dashboard widget needs this query:\n"
+        f"  Title: \"{req.candidate_title}\"\n"
+        f"  SQL: {req.candidate_sql}\n\n"
+        f"Here are the existing saved queries in the project:\n"
+        f"{existing_text}\n\n"
+        f"Does any existing query produce the SAME result (same columns, same "
+        f"data, same aggregations, same grouping)? Minor differences like column "
+        f"order, aliases, CAST wrappers, LIMIT values, or whitespace don't "
+        f"matter — only whether the data returned is functionally equivalent.\n\n"
+        f"If YES: respond with ONLY: MATCH=<id>\n"
+        f"If NO existing query matches: respond with ONLY: NO_MATCH"
+    )
+
+    raw = await llm_client.generate(
+        prompt=prompt,
+        system_prompt=(
+            "You compare SQL queries for functional equivalence. "
+            "Respond with ONLY 'MATCH=<id>' or 'NO_MATCH' — no other text."
+        ),
+        model=settings.reasoning_model,
+        temperature=0.0,
+    )
+
+    match_id: int | None = None
+    m = re.search(r"MATCH\s*=\s*(\d+)", raw)
+    if m:
+        candidate_id = int(m.group(1))
+        if any(q.id == candidate_id for q in req.existing_queries):
+            match_id = candidate_id
+
+    update_activity(req.user_id, req.tenant_id, req.project_id)
+
+    return MatchQueryResponse(
+        match_id=match_id, request_id=request_id, model_used=settings.reasoning_model,
+    )
+
+
 @router.post("/analyze-file", response_model=AnalyzeFileResponse)
 async def analyze_file(req: AnalyzeFileRequest):
     """Analyze a file profile and return structured metadata."""
-    verify_signature(req.model_dump())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
 
     request_id = str(uuid.uuid4())
     logger.info("[%s] File analysis request", request_id)

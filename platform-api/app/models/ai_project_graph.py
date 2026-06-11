@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, Numeric, String, Text, func
+from sqlalchemy import JSON, DateTime, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
 
-_JSON = JSONB().with_variant(JSONB(), "sqlite")
+# JSONB on Postgres, plain JSON on other dialects (e.g. SQLite used in tests).
+_JSON = JSONB().with_variant(JSON(), "sqlite")
 
 
 class AIProjectGraphNode(Base):
