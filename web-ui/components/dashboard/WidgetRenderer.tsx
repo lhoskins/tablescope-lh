@@ -365,7 +365,10 @@ export function WidgetRenderer({ widget, data }: Props) {
         const barStackId = barGrouped ? undefined : isStacked || seriesNames.length > 0 ? "stack" : undefined;
         const barRadius = opts.roundedCorners === false ? (0 as const) : undefined;
         const barBackground = opts.showBackground ? { fill: "#f1f5f9" } : undefined;
-        const minBar = opts.minPointSize && opts.minPointSize > 0 ? opts.minPointSize : undefined;
+        // Must stay a number: recharts merges {...Bar.defaultProps, ...props}
+        // and calls minPointSize as a function when it isn't a number, so an
+        // explicit `undefined` here overrides the default 0 and throws.
+        const minBar = opts.minPointSize && opts.minPointSize > 0 ? opts.minPointSize : 0;
         return (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} layout={barHorizontal ? "vertical" : "horizontal"} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 40, left: barHorizontal ? 10 : 50 }}>
