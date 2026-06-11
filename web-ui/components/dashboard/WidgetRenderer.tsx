@@ -24,7 +24,6 @@ import {
 } from "recharts";
 import type { WidgetConfig, ReferenceLineConfig, VisualizationOptions } from "./types";
 import { withDefaults } from "@/lib/visualizations/chartRegistry";
-import { validateChartConfig } from "@/lib/visualizations/validateChartConfig";
 import { preparePieData } from "@/lib/visualizations/dataTransforms";
 
 /** Renders configured reference lines onto a cartesian chart. */
@@ -556,24 +555,11 @@ export function WidgetRenderer({ widget, data }: Props) {
     }
   };
 
-  // Validate the chart config; on hard errors fall back to a table so the
-  // widget still shows its data instead of rendering blank.
-  const validation = validateChartConfig(widget, coercedData);
-
   return (
     <div className="h-full w-full">
       {data.length === 0 ? (
         <div className="flex h-full items-center justify-center text-xs text-slate-400">
           No data available
-        </div>
-      ) : !validation.ok && widget.type !== "table" && widget.type !== "kpi" ? (
-        <div className="flex h-full flex-col">
-          <div className="border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-[10px] text-amber-700">
-            {validation.errors[0]} Showing table instead.
-          </div>
-          <div className="min-h-0 flex-1">
-            <TableWidget data={data} />
-          </div>
         </div>
       ) : (
         renderChart()

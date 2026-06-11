@@ -26,10 +26,15 @@ describe("WidgetRenderer routing", () => {
     expect(screen.getByText(/no data available/i)).toBeTruthy();
   });
 
-  it("falls back to a table with a notice when the config is invalid", () => {
+  it("still renders the chart (no table fallback) when a column is unset", () => {
     const widget = makeWidget({ xColumn: "", xKey: undefined });
-    render(<WidgetRenderer widget={widget} data={[{ Category: "A", Value: 5 }]} />);
-    expect(screen.getByText(/showing table instead/i)).toBeTruthy();
+    const { container } = render(
+      <WidgetRenderer widget={widget} data={[{ Category: "A", Value: 5 }]} />
+    );
+    // No fallback notice and no empty state — the chart container renders.
+    expect(screen.queryByText(/showing table instead/i)).toBeNull();
+    expect(screen.queryByText(/no data available/i)).toBeNull();
+    expect(container.querySelector(".recharts-responsive-container")).toBeTruthy();
   });
 
   it("renders a KPI value for kpi widgets", () => {
