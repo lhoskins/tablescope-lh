@@ -196,6 +196,20 @@ async def process_document_asset(
         logger.exception("Datasource linking failed for asset %d", asset.id)
         await session.rollback()
 
+    # ── Step 8: Index document text into the vector store for AI Ask ──
+    try:
+        await _index_document_vectors(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            project_id=project_id,
+            document_id=ai_doc_id or asset.id,
+            source_id=asset.id,
+            visibility=asset.visibility,
+            content=doc_text,
+        )
+    except Exception:
+        logger.exception("Vector indexing failed for asset %d", asset.id)
+
 
 async def _call_ai_profile(
     tenant_id: int,
@@ -260,6 +274,55 @@ async def _call_ai_profile(
         )
 
     return resp.json()
+
+
+async def _index_document_vectors(
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    document_id: int,
+    source_id: int,
+    visibility: str,
+    content: str,
+) -> None:
+    """Embed and index the document text into the tenant vector store for AI Ask.
+
+    Lets users ask detailed, passage-level questions about the document via
+    semantic retrieval, not just summary-level questions.
+    """
+    settings = get_settings()
+    if not settings.tablescope_ai_enabled or not settings.tablescope_ai_api_url:
+        return
+    if not content.strip():
+        return
+
+    ai_url = settings.tablescope_ai_api_url
+
+    payload: dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "project_id": project_id,
+        "document_id": document_id,
+        "source_type": "project_asset",
+        "source_id": source_id,
+        "content": content,
+        "visibility": visibility or "shared_project",
+        "timestamp": time.time(),
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    payload["signature"] = hmac.new(
+        settings.tablescope_ai_signing_secret.encode(),
+        canonical.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    async with httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(f"{ai_url}/ai/index/document", json=payload)
+    if resp.status_code != 200:
+        logger.warning(
+            "Vector indexing returned HTTP %d for document %d: %s",
+            resp.status_code, document_id, resp.text[:200],
+        )
 
 
 async def _build_graph(
