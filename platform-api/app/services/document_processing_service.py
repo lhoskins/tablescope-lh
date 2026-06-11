@@ -5,20 +5,23 @@ Called as a background task after document upload.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
+import time
 from typing import Any
 
 import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.project_asset import ProjectAsset
 from app.services.document_chunking_service import chunk_document
 from app.services.document_extraction_service import extract_text
 
 logger = logging.getLogger(__name__)
-
-AI_SERVER_URL = "http://ai-server:8100"
 
 
 async def process_document_asset(
@@ -191,9 +194,22 @@ async def _call_ai_profile(
     ref_kpis: list[str],
 ) -> dict[str, Any]:
     """Call the AI server to profile a document."""
+    if not settings.tablescope_ai_enabled or not settings.tablescope_ai_api_url:
+        logger.info("AI not configured, skipping document profile")
+        return {"summary": f"Document: {filename}", "tags": [], "entities": [], "recommended_kpis": []}
+
+    ai_url = settings.tablescope_ai_api_url
+
+    def _sign(p: dict[str, Any]) -> str:
+        canonical = json.dumps(p, sort_keys=True, separators=(",", ":"))
+        return hmac.new(
+            settings.tablescope_ai_signing_secret.encode(),
+            canonical.encode(),
+            hashlib.sha256,
+        ).hexdigest()
 
     # Try dedicated endpoint first, fallback to /ai/ask
-    payload = {
+    payload: dict[str, Any] = {
         "tenant_id": tenant_id,
         "user_id": user_id,
         "project_id": project_id,
@@ -206,11 +222,13 @@ async def _call_ai_profile(
         "chunks": chunks,
         "enabled_reference_tags": ref_tags,
         "enabled_reference_kpis": ref_kpis,
+        "timestamp": time.time(),
     }
+    payload["signature"] = _sign(payload)
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(f"{AI_SERVER_URL}/ai/document/profile", json=payload)
+            resp = await client.post(f"{ai_url}/ai/document/profile", json=payload)
             if resp.status_code == 200:
                 return resp.json()
     except Exception:
@@ -219,15 +237,19 @@ async def _call_ai_profile(
     # Fallback: use generic /ai/ask with a profiling prompt
     prompt = _build_profile_prompt(filename, asset_type, text_preview, ref_tags, ref_kpis)
     try:
+        ask_payload: dict[str, Any] = {
+            "question": prompt,
+            "project_id": project_id,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "scope": "project",
+            "timestamp": time.time(),
+        }
+        ask_payload["signature"] = _sign(ask_payload)
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(
-                f"{AI_SERVER_URL}/ai/ask",
-                json={
-                    "question": prompt,
-                    "project_id": project_id,
-                    "tenant_id": tenant_id,
-                    "user_id": user_id,
-                },
+                f"{ai_url}/ai/ask",
+                json=ask_payload,
             )
             if resp.status_code == 200:
                 data = resp.json()
