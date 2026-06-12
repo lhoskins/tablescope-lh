@@ -1,4 +1,4 @@
-function resolveApiUrl(): string {
+export function getApiBaseUrl(): string {
   // Build-time env takes precedence when set to a non-default value
   if (
     typeof process !== "undefined" &&
@@ -10,14 +10,21 @@ function resolveApiUrl(): string {
   // In the browser, derive the API URL from the current host so the app
   // works on any deployment without hard-coding the IP/domain at build time.
   if (typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+    const { protocol, hostname, port } = window.location;
+    // Behind the reverse proxy (HTTPS or standard ports), the API is served
+    // same-origin and nginx routes /api to the platform API.
+    if (protocol === "https:" || port === "" || port === "443" || port === "80") {
+      return `${protocol}//${hostname}`;
+    }
+    // Direct access (e.g. http://host:3000): the API is on :8000 of the host.
+    return `${protocol}//${hostname}:8000`;
   }
   // Server-side rendering fallback (containers share a Docker network)
   return "http://localhost:8000";
 }
 
 function getApiUrl(): string {
-  return resolveApiUrl();
+  return getApiBaseUrl();
 }
 
 const TOKEN_KEY = "tablescope.token";

@@ -1,0 +1,1655 @@
+"""AI proxy routes — the ONLY path from the frontend to the AI server.
+
+The frontend never calls the AI server directly. This proxy:
+1. Validates the user's session and permissions
+2. Resolves tenant, project, and user scope
+3. Signs the request with HMAC
+4. Forwards to the AI server
+5. Returns the AI response
+
+Also provides a /permissions endpoint called by the AI server to verify
+access before retrieving vectors or building context.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import logging
+import time
+from typing import Any
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.context import RequestContext
+from app.auth.rbac import Role, require_role
+from app.config import get_settings
+from app.database import get_db
+from app.models.dashboard import Dashboard
+from app.models.file_source_meta import FileSourceMeta
+from app.models.project import Project, ProjectMember
+from app.models.saved_query import SavedQuery
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/ai", tags=["AI"])
+
+TIMEOUT = httpx.Timeout(300.0, connect=10.0)
+
+
+# ---------------------------------------------------------------------------
+# Request/Response schemas for the proxy
+# ---------------------------------------------------------------------------
+
+class AIAskRequest(BaseModel):
+    project_id: int
+    question: str
+    scope: str = "project"
+    include_query_history: bool = True
+    include_dashboard_context: bool = True
+
+
+class AIGenerateSQLRequest(BaseModel):
+    project_id: int
+    prompt: str
+    allowed_tables: list[str] = []
+
+
+class AIGenerateRelationshipsRequest(BaseModel):
+    project_id: int
+
+
+class AISuggestDashboardRequest(BaseModel):
+    project_id: int
+
+
+class AIIndexDocumentRequest(BaseModel):
+    project_id: int
+    document_id: int
+    source_type: str
+    source_id: int
+    content: str = ""
+    visibility: str = "shared_project"
+
+
+class AISaveQueryRequest(BaseModel):
+    """Save AI-generated SQL as a project query."""
+    project_id: int
+    name: str
+    description: str | None = None
+    sql_text: str
+
+
+class AIGenerateAndSaveQueryRequest(BaseModel):
+    """Generate SQL from prompt and save as a project query."""
+    project_id: int
+    prompt: str
+    name: str | None = None
+    description: str | None = None
+    allowed_tables: list[str] = []
+
+
+class AIGenerateAndSaveDashboardRequest(BaseModel):
+    """Generate a full dashboard with widgets from a prompt and save."""
+    project_id: int
+    prompt: str | None = None
+    name: str | None = None
+    description: str | None = None
+
+
+class AICreateScopeRequest(BaseModel):
+    """Create a single scope from an AI suggestion."""
+    sourceTable: str
+    sourceColumn: str
+    targetTable: str
+    targetColumn: str
+
+
+class AIPermissionsResponse(BaseModel):
+    tenant_id: int
+    user_id: int
+    project_id: int
+    is_member: bool
+    is_owner: bool
+    project_visibility: str
+    datasources: list[dict[str, Any]]
+    saved_queries: list[dict[str, Any]]
+    dashboards: list[dict[str, Any]]
+    query_scopes: list[dict[str, Any]] = []
+    accepted_tags: list[dict[str, Any]] = []
+    accepted_kpis: list[dict[str, Any]] = []
+    enabled_reference_tags: list[dict[str, Any]] = []
+    enabled_reference_kpis: list[dict[str, Any]] = []
+    documents: list[dict[str, Any]] = []
+    graph_nodes: list[dict[str, Any]] = []
+    graph_edges: list[dict[str, Any]] = []
+    document_families: list[dict[str, Any]] = []
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _sign_payload(payload: dict[str, Any], secret: str) -> str:
+    """Generate HMAC-SHA256 signature for a request payload."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hmac.new(
+        secret.encode(), canonical.encode(), hashlib.sha256,
+    ).hexdigest()
+
+
+async def _forward_to_ai(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Sign and forward request to the AI server."""
+    settings = get_settings()
+    if not settings.tablescope_ai_enabled or not settings.tablescope_ai_api_url:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI server is not configured",
+        )
+
+    payload["timestamp"] = time.time()
+    payload["signature"] = _sign_payload(payload, settings.tablescope_ai_signing_secret)
+
+    url = f"{settings.tablescope_ai_api_url}{path}"
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        try:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            detail = str(e)
+            if e.response.content:
+                try:
+                    detail = e.response.json().get("detail", detail)
+                except Exception:
+                    detail = e.response.text[:500] or detail
+            raise HTTPException(status_code=e.response.status_code, detail=detail) from e
+        except httpx.RequestError as e:
+            logger.error("AI server unreachable: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI server is unreachable",
+            ) from e
+
+
+async def _check_project_access(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+) -> Project:
+    """Verify user has access to the project within their tenant."""
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.tenant_id == context.tenant_id,
+    )
+    result = await session.execute(stmt)
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found in your tenant",
+        )
+
+    # Check membership for shared projects
+    if project.is_shared:
+        member_stmt = select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == context.user_id,
+            ProjectMember.is_active.is_(True),
+        )
+        member_result = await session.execute(member_stmt)
+        if not member_result.scalar_one_or_none():
+            if project.owner_id != context.user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You are not a member of this project",
+                )
+    else:
+        # Private project — owner only
+        if project.owner_id != context.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This is a private project and you are not the owner",
+            )
+
+    return project
+
+
+def _detect_datasource(sql: str, allowed_tables: list[str]) -> str | None:
+    """Find which datasource view_name is referenced in the generated SQL."""
+    sql_upper = sql.upper()
+    for table in allowed_tables:
+        # Check for table name in FROM/JOIN clauses (with or without quotes)
+        if table.upper() in sql_upper or f'"{table}"'.upper() in sql_upper:
+            return table
+    return allowed_tables[0] if len(allowed_tables) == 1 else None
+
+
+# ---------------------------------------------------------------------------
+# AI Proxy endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/ask")
+async def ask(
+    req: AIAskRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Ask Tablescope AI a question about the active project."""
+    await _check_project_access(session, context, req.project_id)
+
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+        "question": req.question,
+        "scope": req.scope,
+        "include_query_history": req.include_query_history,
+        "include_dashboard_context": req.include_dashboard_context,
+    }
+    return await _forward_to_ai("/ai/ask", payload)
+
+
+@router.post("/query/generate")
+async def generate_sql(
+    req: AIGenerateSQLRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate SQL from a natural language prompt."""
+    await _check_project_access(session, context, req.project_id)
+
+    # Resolve allowed tables from project datasources if not provided
+    allowed_tables = req.allowed_tables
+    if not allowed_tables:
+        ds_stmt = select(FileSourceMeta).where(
+            FileSourceMeta.project_id == req.project_id,
+            FileSourceMeta.tenant_id == context.tenant_id,
+            FileSourceMeta.archived.is_(False),
+        )
+        ds_result = await session.execute(ds_stmt)
+        allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+        "prompt": req.prompt,
+        "allowed_tables": allowed_tables,
+    }
+    return await _forward_to_ai("/ai/query/generate", payload)
+
+
+@router.post("/project/relationships/generate")
+async def generate_relationships(
+    req: AIGenerateRelationshipsRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate suggested relationships between project tables."""
+    await _check_project_access(session, context, req.project_id)
+
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+    }
+    return await _forward_to_ai("/ai/project/relationships/generate", payload)
+
+
+def _shorten_ai_name(prompt: str) -> str:
+    """Convert an AI prompt into a short, clean query/widget title.
+
+    Examples:
+        "Generate a query showing total revenue by category." → "AI - Total Revenue by Category"
+        "Generate a dashboard with total revenue, total orders, ..." → "AI - Total Revenue, Total Orders"
+        "Show monthly sales trend" → "AI - Monthly Sales Trend"
+    """
+    import re as _re
+
+    s = prompt.strip().rstrip(".")
+
+    # Strip common AI prompt prefixes
+    s = _re.sub(
+        r"^(?:generate|create|show|build|make|give me|write|produce)"
+        r"\s+(?:a\s+)?(?:query|dashboard|report|chart|table|widget|view)?"
+        r"\s*(?:showing|with|for|of|that shows|to show|displaying)?\s*",
+        "", s, flags=_re.IGNORECASE,
+    ).strip()
+
+    # If the result starts with a SELECT statement, just use the first meaningful part
+    if _re.match(r"^SELECT\b", s, _re.IGNORECASE):
+        s = "Custom SQL Query"
+
+    # Title-case and prefix
+    if s:
+        s = s.title()
+        # Preserve common lowercase words
+        for word in ("by", "of", "and", "the", "in", "for", "with", "to", "a"):
+            s = _re.sub(rf"\b{word.title()}\b", word, s)
+        # Ensure first char is uppercase
+        s = s[0].upper() + s[1:]
+    else:
+        s = "Query"
+
+    return f"AI - {s}"
+
+
+def _is_numeric_column(name: str) -> bool:
+    """Return True if a column name looks like a numeric/aggregate value.
+
+    Numeric columns (Revenue, Amount, Cost, Price, Quantity, Count, Sum, Total,
+    etc.) should NOT be used for drill-down scopes — only identifier/name columns
+    (ProductName, CategoryName, CustomerID, OrderID, etc.) are meaningful for
+    drill-down relationships.
+    """
+    numeric_keywords = {
+        "revenue", "amount", "cost", "price", "quantity", "count", "sum",
+        "total", "average", "avg", "min", "max", "profit", "discount",
+        "sales", "units", "weight", "balance", "fee", "rate", "percent",
+        "percentage", "margin", "tax", "freight", "subtotal",
+    }
+    lower = name.lower()
+    for kw in numeric_keywords:
+        if kw in lower:
+            return True
+    return False
+
+
+def _is_summarized_query(sql: str) -> bool:
+    """Return True if the SQL is an aggregated/summarized query.
+
+    A query is considered summarized if it contains GROUP BY or aggregate
+    functions (SUM, COUNT, AVG, MIN, MAX). Summarized queries drill DOWN
+    into detailed queries, not the other way around.
+    """
+    import re
+    upper = sql.upper()
+    if re.search(r"\bGROUP\s+BY\b", upper):
+        return True
+    if re.search(r"\b(SUM|COUNT|AVG|MIN|MAX)\s*\(", upper):
+        return True
+    return False
+
+
+def _extract_select_columns(sql: str) -> list[str]:
+    """Extract column names/aliases from a SQL SELECT clause using regex.
+
+    Returns the alias (AS name) or the raw column reference for each item.
+    """
+    import re
+
+    cols: list[str] = []
+
+    # Extract text between SELECT and FROM (first occurrence, skip nested subqueries)
+    m = re.search(r"\bSELECT\s+(.*?)\s+FROM\s+", sql, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return cols
+    raw = m.group(1)
+
+    # Split by commas (respecting parentheses)
+    items: list[str] = []
+    current: list[str] = []
+    paren_depth = 0
+    for ch in raw:
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth -= 1
+        if ch == "," and paren_depth == 0:
+            items.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        items.append("".join(current).strip())
+
+    for item in items:
+        if not item or item == "*":
+            continue
+        # Check for AS alias
+        alias_match = re.search(r"\bAS\s+[\"']?(\w+)[\"']?\s*$", item, re.IGNORECASE)
+        if alias_match:
+            cols.append(alias_match.group(1))
+            continue
+        # No alias — take the last identifier (column name after any dot)
+        # Strip surrounding quotes
+        ident_match = re.search(r'[\".]?(\w+)[\"]*\s*$', item.rstrip())
+        if ident_match:
+            cols.append(ident_match.group(1))
+    return cols
+
+
+async def _sample_query_values(
+    *,
+    sql: str,
+    database: str,
+    teiid_host: str | None = None,
+    teiid_port: int | None = None,
+) -> dict[str, set[str]]:
+    """Execute a query with LIMIT 10 and return distinct string values per column.
+
+    Returns a dict mapping column_name → set of non-null, non-numeric
+    distinct string values found in the sample rows.
+    """
+    from app.routes.query import _auto_cast_aggregates, _run_sql
+
+    sample_sql = _auto_cast_aggregates(sql.rstrip().rstrip(";")) + " LIMIT 10"
+    try:
+        result = await _run_sql(
+            database=database, sql=sample_sql,
+            teiid_host=teiid_host, teiid_port=teiid_port,
+        )
+    except Exception:
+        logger.warning("Failed to sample query for scope validation: %s", sql[:80])
+        return {}
+
+    col_values: dict[str, set[str]] = {}
+    for col in result.get("columns", []):
+        col_values[col] = set()
+    for row in result.get("rows", []):
+        for col, val in row.items():
+            if val is None:
+                continue
+            s = str(val).strip()
+            if not s:
+                continue
+            col_values.setdefault(col, set()).add(s)
+    return col_values
+
+
+def _has_string_values(vals: set[str]) -> bool:
+    """Return True if the set contains at least one non-numeric string value."""
+    for v in vals:
+        try:
+            float(v.replace(",", ""))
+        except ValueError:
+            return True
+    return False
+
+
+def _string_values(vals: set[str]) -> set[str]:
+    """Return only the non-numeric string values from a set."""
+    result: set[str] = set()
+    for v in vals:
+        try:
+            float(v.replace(",", ""))
+        except ValueError:
+            result.add(v)
+    return result
+
+
+def _value_overlap(
+    vals_a: set[str],
+    vals_b: set[str],
+    *,
+    same_column_name: bool = False,
+) -> float:
+    """Return the fraction of overlapping values (Jaccard-like).
+
+    When ``same_column_name`` is False (different column names), filters
+    out numeric values before comparing so that ID columns (1, 2, 3)
+    don't get matched against name columns.
+
+    When ``same_column_name`` is True, compares ALL values including
+    numeric ones — two columns both named "CategoryID" with values
+    {1, 2, 3} should match.
+    """
+    if same_column_name:
+        a, b = vals_a, vals_b
+    else:
+        a = _string_values(vals_a)
+        b = _string_values(vals_b)
+    if not a or not b:
+        return 0.0
+    intersection = a & b
+    union = a | b
+    return len(intersection) / len(union) if union else 0.0
+
+
+async def _ai_analyze_and_create_scopes(
+    *,
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+) -> dict[str, Any]:
+    """Hybrid scope analysis: AI suggestions validated by cell-level data.
+
+    Phase 1 — AI Analysis: LLM analyzes SQL structure to suggest scopes
+      (direction, meaningful columns).
+    Phase 2 — Cell Validation: execute each query with LIMIT 10, compare
+      actual cell values to validate AI suggestions and discover cross-column
+      relationships the AI may have missed (e.g. CategoryID ↔ CategoryName
+      when they share actual values).
+    """
+    import asyncio
+
+    from app.models.query_scope import QueryScope
+    from app.routes.query import _resolve_vdb_database
+    from app.services.tenant_teiid_resolver import TenantTeiidResolver
+
+    # Get all saved queries for this project
+    queries_result = await session.scalars(
+        select(SavedQuery).where(SavedQuery.project_id == project_id)
+    )
+    queries = list(queries_result)
+
+    if not queries:
+        return {"relationships": [], "scopes_created": 0, "status": "ok"}
+
+    # Only send queries that have SQL — include extracted columns for clarity
+    query_infos: list[dict[str, Any]] = []
+    query_names: dict[int, str] = {}
+    for q in queries:
+        query_names[q.id] = q.name
+        if q.sql_text:
+            cols = _extract_select_columns(q.sql_text)
+            query_infos.append({
+                "id": q.id,
+                "name": q.name,
+                "sql": q.sql_text,
+                "columns": cols,
+            })
+
+    if not query_infos:
+        return {"relationships": [], "scopes_created": 0, "status": "ok"}
+
+    # ── Phase 1: AI structural analysis via the dedicated scopes endpoint ──
+    # Uses /ai/project/scopes/analyze (NOT the generic /ai/ask): the AI server
+    # has a purpose-built prompt that returns structured ScopeSuggestion JSON.
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": project_id,
+        "queries": [
+            {"id": q["id"], "name": q["name"], "sql": q["sql"]}
+            for q in query_infos
+        ],
+    }
+
+    # Run AI analysis and data sampling in parallel
+    database = await _resolve_vdb_database(
+        session=session, context=context, project_id=project_id,
+    )
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+
+    async def _sample_one(q: dict[str, Any]) -> tuple[int, dict[str, set[str]]]:
+        vals = await _sample_query_values(
+            sql=q["sql"], database=database,
+            teiid_host=endpoint.pg_host, teiid_port=endpoint.pg_port,
+        )
+        return q["id"], vals
+
+    ai_task = asyncio.create_task(
+        _forward_to_ai("/ai/project/scopes/analyze", payload)
+    )
+    sample_tasks = [asyncio.create_task(_sample_one(q)) for q in query_infos]
+    ai_response, *sample_results = await asyncio.gather(ai_task, *sample_tasks)
+
+    # Build query_id → {column_name: set(values)} from samples
+    query_values: dict[int, dict[str, set[str]]] = {}
+    for qid, col_vals in sample_results:
+        query_values[qid] = col_vals
+
+    # The dedicated endpoint returns structured scope suggestions directly.
+    scopes_list: list[dict[str, Any]] = ai_response.get("scopes", []) or []
+
+    # Build column map: query_id → set of column names (lowercase)
+    query_col_map: dict[int, set[str]] = {}
+    for q in queries:
+        if q.sql_text:
+            cols = _extract_select_columns(q.sql_text)
+            query_col_map[q.id] = {c.lower() for c in cols}
+        else:
+            query_col_map[q.id] = set()
+
+    # ── Phase 2: Validate AI suggestions with cell-level data ────────
+    valid_ids = {q.id for q in queries}
+    validated_scopes: list[dict[str, Any]] = []
+
+    for suggestion in scopes_list:
+        src_qid = suggestion.get("source_query_id")
+        tgt_qid = suggestion.get("target_query_id")
+        src_field = suggestion.get("source_field", "")
+        tgt_field = suggestion.get("target_field", "")
+
+        if src_qid not in valid_ids or tgt_qid not in valid_ids:
+            continue
+        if not src_field or not tgt_field:
+            continue
+
+        # Check fields exist in SELECT clauses
+        src_cols = query_col_map.get(src_qid, set())
+        tgt_cols = query_col_map.get(tgt_qid, set())
+        if src_field.lower() not in src_cols or tgt_field.lower() not in tgt_cols:
+            continue
+
+        # Validate with sampled cell values — require some overlap.
+        # When column names match (e.g. CategoryID↔CategoryID), compare ALL
+        # values including numeric ones. When names differ (e.g.
+        # CategoryName↔CategoryID), only compare string values to prevent
+        # false matches between text and numeric columns.
+        src_vals = query_values.get(src_qid, {}).get(src_field, set())
+        tgt_vals = query_values.get(tgt_qid, {}).get(tgt_field, set())
+        names_match = src_field.lower() == tgt_field.lower()
+        overlap = _value_overlap(src_vals, tgt_vals, same_column_name=names_match)
+
+        src_sampled = src_qid in query_values and bool(query_values[src_qid])
+        tgt_sampled = tgt_qid in query_values and bool(query_values[tgt_qid])
+        if overlap == 0.0 and src_sampled and tgt_sampled:
+            logger.info(
+                "Rejected AI scope %s.%s → %s.%s — zero value overlap "
+                "(src=%r, tgt=%r, names_match=%s)",
+                src_qid, src_field, tgt_qid, tgt_field,
+                list(src_vals)[:3], list(tgt_vals)[:3], names_match,
+            )
+            continue
+
+        conf = suggestion.get("confidence", 1.0)
+        if overlap > 0:
+            conf = max(conf, overlap)
+
+        validated_scopes.append({
+            "source_query_id": src_qid,
+            "source_query_name": suggestion.get("source_query_name", query_names.get(src_qid, "")),
+            "source_field": src_field,
+            "target_query_id": tgt_qid,
+            "target_query_name": suggestion.get("target_query_name", query_names.get(tgt_qid, "")),
+            "target_field": tgt_field,
+            "confidence": conf,
+            "reason": suggestion.get("reason", ""),
+        })
+
+    # ── Phase 2b: Discover cross-column relationships via value overlap ──
+    # Find columns across different queries that share values even if
+    # the AI didn't suggest them (e.g. CategoryID ↔ CategoryName when the
+    # underlying values are the same entity strings).
+    MIN_OVERLAP = 0.3
+    discovered_keys = {
+        (s["source_query_id"], s["source_field"],
+         s["target_query_id"], s["target_field"])
+        for s in validated_scopes
+    }
+
+    for i, qi in enumerate(query_infos):
+        for qj in query_infos[i + 1:]:
+            if qi["id"] == qj["id"]:
+                continue
+            vals_i = query_values.get(qi["id"], {})
+            vals_j = query_values.get(qj["id"], {})
+            for col_i, v_i in vals_i.items():
+                if _is_numeric_column(col_i):
+                    continue
+                for col_j, v_j in vals_j.items():
+                    if _is_numeric_column(col_j):
+                        continue
+                    names_match = col_i.lower() == col_j.lower()
+                    overlap = _value_overlap(v_i, v_j, same_column_name=names_match)
+                    if overlap < MIN_OVERLAP:
+                        continue
+
+                    # Determine direction: summarized → detailed
+                    i_summ = _is_summarized_query(qi["sql"])
+                    j_summ = _is_summarized_query(qj["sql"])
+                    if i_summ and not j_summ:
+                        src_qid, src_field = qi["id"], col_i
+                        tgt_qid, tgt_field = qj["id"], col_j
+                    elif j_summ and not i_summ:
+                        src_qid, src_field = qj["id"], col_j
+                        tgt_qid, tgt_field = qi["id"], col_i
+                    elif i_summ and j_summ:
+                        continue  # both summarized — skip
+                    else:
+                        # Neither is summarized — pick the shorter one as source
+                        if len(qi["columns"]) <= len(qj["columns"]):
+                            src_qid, src_field = qi["id"], col_i
+                            tgt_qid, tgt_field = qj["id"], col_j
+                        else:
+                            src_qid, src_field = qj["id"], col_j
+                            tgt_qid, tgt_field = qi["id"], col_i
+
+                    key = (src_qid, src_field, tgt_qid, tgt_field)
+                    rev_key = (tgt_qid, tgt_field, src_qid, src_field)
+                    if key in discovered_keys or rev_key in discovered_keys:
+                        continue
+                    discovered_keys.add(key)
+
+                    validated_scopes.append({
+                        "source_query_id": src_qid,
+                        "source_query_name": query_names.get(src_qid, ""),
+                        "source_field": src_field,
+                        "target_query_id": tgt_qid,
+                        "target_query_name": query_names.get(tgt_qid, ""),
+                        "target_field": tgt_field,
+                        "confidence": overlap,
+                        "reason": f"Cell-level value overlap ({overlap:.0%})",
+                    })
+
+    # ── Phase 2c: Exact column-name matching (fallback) ────────────
+    # When sampling fails or the AI omits a suggestion, matching column
+    # names across two queries is still a strong signal.  This catches
+    # cases like CategoryID↔CategoryID where the AI skipped it and
+    # sampling returned no data.
+    for i, qi in enumerate(query_infos):
+        for qj in query_infos[i + 1:]:
+            if qi["id"] == qj["id"]:
+                continue
+            common_cols = set(c.lower() for c in qi["columns"]) & set(
+                c.lower() for c in qj["columns"]
+            )
+            for col_lower in common_cols:
+                if _is_numeric_column(col_lower):
+                    continue
+                # Find original-case column name from each query
+                col_i = next((c for c in qi["columns"] if c.lower() == col_lower), col_lower)
+                col_j = next((c for c in qj["columns"] if c.lower() == col_lower), col_lower)
+
+                # Determine direction
+                i_summ = _is_summarized_query(qi["sql"])
+                j_summ = _is_summarized_query(qj["sql"])
+                if i_summ and not j_summ:
+                    src_qid, src_field = qi["id"], col_i
+                    tgt_qid, tgt_field = qj["id"], col_j
+                elif j_summ and not i_summ:
+                    src_qid, src_field = qj["id"], col_j
+                    tgt_qid, tgt_field = qi["id"], col_i
+                elif i_summ and j_summ:
+                    continue
+                else:
+                    if len(qi["columns"]) <= len(qj["columns"]):
+                        src_qid, src_field = qi["id"], col_i
+                        tgt_qid, tgt_field = qj["id"], col_j
+                    else:
+                        src_qid, src_field = qj["id"], col_j
+                        tgt_qid, tgt_field = qi["id"], col_i
+
+                key = (src_qid, src_field, tgt_qid, tgt_field)
+                rev_key = (tgt_qid, tgt_field, src_qid, src_field)
+                if key in discovered_keys or rev_key in discovered_keys:
+                    continue
+                discovered_keys.add(key)
+
+                validated_scopes.append({
+                    "source_query_id": src_qid,
+                    "source_query_name": query_names.get(src_qid, ""),
+                    "source_field": src_field,
+                    "target_query_id": tgt_qid,
+                    "target_query_name": query_names.get(tgt_qid, ""),
+                    "target_field": tgt_field,
+                    "confidence": 0.85,
+                    "reason": f"Exact column name match ({col_lower})",
+                })
+
+    # ── Write validated scopes to database ───────────────────────────
+    existing_scopes = await session.scalars(
+        select(QueryScope).where(
+            QueryScope.project_id == project_id,
+            QueryScope.tenant_id == context.tenant_id,
+        )
+    )
+    existing_keys = {
+        (s.query_id, s.source_field, s.target_query_id, s.target_field)
+        for s in existing_scopes
+    }
+
+    relationships: list[dict[str, Any]] = []
+    scopes_created = 0
+    for s in validated_scopes:
+        key = (s["source_query_id"], s["source_field"],
+               s["target_query_id"], s["target_field"])
+
+        rel = {
+            "left_table": s["source_query_name"],
+            "left_column": s["source_field"],
+            "right_table": s["target_query_name"],
+            "right_column": s["target_field"],
+            "source_query_id": s["source_query_id"],
+            "target_query_id": s["target_query_id"],
+            "confidence": s["confidence"],
+            "reason": s["reason"],
+            "scope_exists": True,
+        }
+
+        if key in existing_keys:
+            relationships.append(rel)
+            continue
+
+        scope = QueryScope(
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            query_id=s["source_query_id"],
+            source_field=s["source_field"],
+            target_query_id=s["target_query_id"],
+            target_field=s["target_field"],
+            created_by=context.user_id,
+        )
+        session.add(scope)
+        existing_keys.add(key)
+        scopes_created += 1
+        relationships.append(rel)
+
+    if scopes_created > 0:
+        await session.commit()
+
+    return {
+        "relationships": relationships,
+        "scopes_created": scopes_created,
+        "status": "ok",
+    }
+
+
+@router.post("/project/scope-map/generate")
+async def generate_scope_map(
+    req: AIGenerateRelationshipsRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Generate query-based scope map using AI analysis.
+
+    Sends all saved queries to the AI server which determines:
+    1. Which columns are meaningful for drill-down (not aggregates)
+    2. The correct direction (summarized → detailed)
+    Auto-creates QueryScope records from AI suggestions.
+    """
+    await _check_project_access(session, context, req.project_id)
+    return await _ai_analyze_and_create_scopes(
+        session=session, context=context, project_id=req.project_id
+    )
+
+
+@router.post("/project/scope-map/auto-create")
+async def auto_create_scopes_from_queries(
+    req: AIGenerateRelationshipsRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Auto-create QueryScope records using AI analysis.
+
+    When scoping is toggled ON, this endpoint sends all saved queries to
+    the AI server which determines meaningful drill-down scopes and their
+    direction (summarized → detailed).
+    """
+    await _check_project_access(session, context, req.project_id)
+    result = await _ai_analyze_and_create_scopes(
+        session=session, context=context, project_id=req.project_id
+    )
+    return {
+        "scopes_created": result["scopes_created"],
+        "total_queries": len(result.get("relationships", [])),
+        "message": f"Created {result['scopes_created']} scope(s) via AI analysis",
+    }
+
+
+@router.post("/dashboard/suggest")
+async def suggest_dashboard(
+    req: AISuggestDashboardRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Suggest dashboard widgets based on project data."""
+    await _check_project_access(session, context, req.project_id)
+
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+    }
+    return await _forward_to_ai("/ai/dashboard/suggest", payload)
+
+
+@router.post("/index/document")
+async def index_document(
+    req: AIIndexDocumentRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Index a project document into the AI vector store."""
+    await _check_project_access(session, context, req.project_id)
+
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+        "document_id": req.document_id,
+        "source_type": req.source_type,
+        "source_id": req.source_id,
+        "content": req.content,
+        "visibility": req.visibility,
+    }
+    return await _forward_to_ai("/ai/index/document", payload)
+
+
+@router.get("/status")
+async def ai_status(
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> dict[str, Any]:
+    """Check AI server health (admin only)."""
+    settings = get_settings()
+    if not settings.tablescope_ai_enabled or not settings.tablescope_ai_api_url:
+        return {"enabled": False, "status": "not_configured"}
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+            resp = await client.get(f"{settings.tablescope_ai_api_url}/health")
+            resp.raise_for_status()
+            return {"enabled": True, **resp.json()}
+    except Exception as e:
+        return {"enabled": True, "status": "unreachable", "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Permissions endpoint — called by the AI server to verify access
+# ---------------------------------------------------------------------------
+
+@router.get("/permissions", response_model=AIPermissionsResponse)
+async def check_permissions(
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+) -> AIPermissionsResponse:
+    """Called by the AI server to verify user permissions before building context.
+
+    Returns tenant/project membership info plus available datasources/queries.
+    This endpoint is NOT exposed to the frontend — only reachable from the
+    AI server's private network.
+    """
+    # Verify project exists in tenant
+    stmt = select(Project).where(
+        Project.id == project_id,
+        Project.tenant_id == tenant_id,
+    )
+    result = await session.execute(stmt)
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    # Check membership
+    is_owner = project.owner_id == user_id
+    is_member = is_owner
+    if not is_member:
+        member_stmt = select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user_id,
+            ProjectMember.is_active.is_(True),
+        )
+        member_result = await session.execute(member_stmt)
+        is_member = member_result.scalar_one_or_none() is not None
+
+    # Fetch datasources (file_source_meta rows for this project)
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == project_id,
+        FileSourceMeta.tenant_id == tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    datasources: list[dict[str, Any]] = []
+    for ds in ds_result.scalars():
+        ds_entry: dict[str, Any] = {
+            "id": ds.id,
+            "view_name": ds.view_name,
+            "file_name": ds.file_name,
+            "name": ds.view_name,
+        }
+        if ds.column_types:
+            ds_entry["columns"] = [
+                {"name": c.get("name", ""), "type": c.get("type", "string")}
+                for c in ds.column_types
+            ]
+        datasources.append(ds_entry)
+
+    # Fetch saved queries
+    query_stmt = select(SavedQuery).where(SavedQuery.project_id == project_id)
+    query_result = await session.execute(query_stmt)
+    saved_queries = [
+        {"id": q.id, "name": q.name, "sql_text": q.sql_text}
+        for q in query_result.scalars()
+    ]
+
+    # Fetch dashboards
+    dash_stmt = select(Dashboard).where(Dashboard.project_id == project_id)
+    dash_result = await session.execute(dash_stmt)
+    dashboards = [
+        {"id": d.id, "name": d.name}
+        for d in dash_result.scalars()
+    ]
+
+    # Fetch query scopes for this project
+    from app.models.query_scope import QueryScope
+    scope_stmt = select(QueryScope).where(
+        QueryScope.project_id == project_id,
+        QueryScope.tenant_id == tenant_id,
+    )
+    scope_result = await session.execute(scope_stmt)
+    query_scopes = [
+        {
+            "id": s.id,
+            "query_id": s.query_id,
+            "source_field": s.source_field,
+            "target_query_id": s.target_query_id,
+            "target_field": s.target_field,
+            "project_id": s.project_id,
+        }
+        for s in scope_result.scalars()
+    ]
+
+    # Fetch accepted tags for this project
+    from app.models.ai_asset_metadata import AIAssetKPI, AIAssetTag
+    accepted_tags_stmt = select(AIAssetTag).where(
+        AIAssetTag.tenant_id == tenant_id,
+        AIAssetTag.project_id == project_id,
+    )
+    at_result = await session.execute(accepted_tags_stmt)
+    accepted_tags = [t.to_dict() for t in at_result.scalars()]
+
+    # Fetch accepted KPIs for this project
+    accepted_kpis_stmt = select(AIAssetKPI).where(
+        AIAssetKPI.tenant_id == tenant_id,
+        AIAssetKPI.project_id == project_id,
+    )
+    ak_result = await session.execute(accepted_kpis_stmt)
+    accepted_kpis = [k.to_dict() for k in ak_result.scalars()]
+
+    # Fetch enabled reference tags and KPIs for the tenant
+    from app.services.reference_catalog_service import (
+        get_reference_kpis,
+        get_reference_tags,
+    )
+    ref_tags = await get_reference_tags(session, tenant_id)
+    ref_kpis = await get_reference_kpis(session, tenant_id)
+
+    # Fetch project documents (unstructured assets with AI profiles)
+    from app.models.project_asset import ProjectAsset
+    doc_stmt = select(ProjectAsset).where(
+        ProjectAsset.project_id == project_id,
+        ProjectAsset.tenant_id == tenant_id,
+        ProjectAsset.status != "deleted",
+    )
+    doc_result = await session.execute(doc_stmt)
+    documents: list[dict[str, Any]] = []
+    for doc in doc_result.scalars():
+        doc_entry: dict[str, Any] = {
+            "id": doc.id,
+            "title": doc.title or doc.filename,
+            "filename": doc.filename,
+            "asset_type": doc.asset_type,
+            "ai_summary": doc.ai_summary or "",
+            "ai_status": doc.ai_status or "",
+        }
+        if doc.ai_metadata:
+            doc_entry["tags"] = [
+                t.get("tag_key", t.get("display_name", ""))
+                for t in doc.ai_metadata.get("tags", [])
+            ]
+            doc_entry["entities"] = doc.ai_metadata.get("entities", [])
+            doc_entry["recommended_kpis"] = [
+                k.get("kpi_key", k.get("display_name", ""))
+                for k in doc.ai_metadata.get("recommended_kpis", [])
+            ]
+        documents.append(doc_entry)
+
+    # Fetch project graph nodes and edges (active only)
+    from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
+    from app.services.project_graph_service import get_family_members
+    node_stmt = select(AIProjectGraphNode).where(
+        AIProjectGraphNode.project_id == project_id,
+        AIProjectGraphNode.tenant_id == tenant_id,
+        AIProjectGraphNode.is_active.is_(True),
+    )
+    node_result = await session.execute(node_stmt)
+    graph_nodes: list[dict[str, Any]] = [
+        {"id": n.id, "node_type": n.node_type, "name": n.name, "label": n.name}
+        for n in node_result.scalars()
+    ]
+
+    edge_stmt = select(AIProjectGraphEdge).where(
+        AIProjectGraphEdge.project_id == project_id,
+        AIProjectGraphEdge.tenant_id == tenant_id,
+        AIProjectGraphEdge.is_active.is_(True),
+    )
+    edge_result = await session.execute(edge_stmt)
+    graph_edges = [
+        {
+            "id": e.id,
+            "from_node_id": e.from_node_id,
+            "to_node_id": e.to_node_id,
+            "edge_type": e.edge_type,
+            "confidence": e.confidence,
+        }
+        for e in edge_result.scalars()
+    ]
+
+    # Document families with rolled-up members (family-aware retrieval).
+    document_families: list[dict[str, Any]] = []
+    for fam in graph_nodes:
+        if fam["node_type"] != "document_family":
+            continue
+        fam_id = int(fam["id"])
+        members = await get_family_members(session, tenant_id, project_id, fam_id)
+        fam_props_stmt = select(AIProjectGraphNode).where(AIProjectGraphNode.id == fam_id)
+        fam_node = (await session.execute(fam_props_stmt)).scalar_one_or_none()
+        props = fam_node.properties if (fam_node and isinstance(fam_node.properties, dict)) else {}
+        document_families.append({
+            "family_node_id": fam_id,
+            "family_name": fam["name"],
+            "family_type": props.get("family_type", ""),
+            "summary": props.get("family_summary", props.get("description", "")),
+            "members": {
+                "documents": [d["name"] for d in members["documents"]],
+                "datasources": [d["name"] for d in members["datasources"]],
+                "queries": [d["name"] for d in members["queries"]],
+                "dashboards": [d["name"] for d in members["dashboards"]],
+                "kpis": [d["name"] for d in members["kpis"]],
+            },
+        })
+
+    return AIPermissionsResponse(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        project_id=project_id,
+        is_member=is_member,
+        is_owner=is_owner,
+        project_visibility="shared" if project.is_shared else "private",
+        datasources=datasources,
+        saved_queries=saved_queries,
+        dashboards=dashboards,
+        query_scopes=query_scopes,
+        accepted_tags=accepted_tags,
+        accepted_kpis=accepted_kpis,
+        enabled_reference_tags=ref_tags,
+        enabled_reference_kpis=ref_kpis,
+        documents=documents,
+        graph_nodes=graph_nodes,
+        graph_edges=graph_edges,
+        document_families=document_families,
+    )
+
+
+# ---------------------------------------------------------------------------
+# AI Action endpoints — LLM proposes, Tablescope validates & executes
+# ---------------------------------------------------------------------------
+
+@router.post("/actions/save-query")
+async def ai_save_query(
+    req: AISaveQueryRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Save AI-generated SQL as a project query.
+
+    Pattern: LLM already proposed the SQL → Tablescope validates → saves.
+    """
+    project = await _check_project_access(session, context, req.project_id)
+
+    # Detect which datasource the SQL references
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == req.project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    view_names = [ds.view_name for ds in ds_result.scalars()]
+    left_datasource = _detect_datasource(req.sql_text, view_names)
+
+    query = SavedQuery(
+        project_id=project.id,
+        owner_id=context.user_id,
+        name=req.name,
+        description=req.description or "",
+        sql_text=req.sql_text,
+        left_datasource=left_datasource,
+    )
+    session.add(query)
+    await session.commit()
+    await session.refresh(query)
+
+    logger.info(
+        "AI action: save_query | query_id=%d project=%d tenant=%d user=%d",
+        query.id, project.id, context.tenant_id, context.user_id,
+    )
+    return {
+        "action": "save_query",
+        "status": "saved",
+        "query_id": query.id,
+        "name": query.name,
+        "sql_text": query.sql_text,
+    }
+
+
+@router.post("/actions/generate-and-save-query")
+async def ai_generate_and_save_query(
+    req: AIGenerateAndSaveQueryRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Generate SQL from a natural language prompt, validate, and save.
+
+    Supports both new query creation and modification of existing queries.
+    When the prompt indicates modification intent (modify, update, edit,
+    change, add to, etc.) and references an existing query name, the
+    existing query is updated in place instead of creating a new one.
+    """
+    project = await _check_project_access(session, context, req.project_id)
+
+    # Resolve allowed tables from project datasources if not provided
+    allowed_tables = req.allowed_tables
+    if not allowed_tables:
+        ds_stmt = select(FileSourceMeta).where(
+            FileSourceMeta.project_id == req.project_id,
+            FileSourceMeta.tenant_id == context.tenant_id,
+            FileSourceMeta.archived.is_(False),
+        )
+        ds_result = await session.execute(ds_stmt)
+        allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
+    # ── Detect modification intent ────────────────────────────────────
+    import re as _re
+    _MODIFY_PATTERN = _re.compile(
+        r"^(?:modify|update|edit|change|alter|revise|adjust|fix|add\s+to|"
+        r"add\s+.+?\s+to|remove\s+from|include\s+.+?\s+in)\s+",
+        _re.IGNORECASE,
+    )
+    is_modification = bool(_MODIFY_PATTERN.search(req.prompt.strip()))
+
+    # If modification, find the referenced existing query
+    existing_query: SavedQuery | None = None
+    if is_modification:
+        existing_result = await session.scalars(
+            select(SavedQuery).where(SavedQuery.project_id == project.id)
+        )
+        all_queries = list(existing_result)
+        prompt_lower = req.prompt.lower()
+        # Score each query by how well its name matches the prompt
+        best_match: SavedQuery | None = None
+        best_score = 0
+        for eq in all_queries:
+            if not eq.name:
+                continue
+            eq_name_lower = eq.name.lower().strip()
+            # Check if the query name appears in the prompt
+            if eq_name_lower in prompt_lower:
+                score = len(eq_name_lower)
+                if score > best_score:
+                    best_score = score
+                    best_match = eq
+        existing_query = best_match
+        if existing_query:
+            logger.info(
+                "Modification intent detected — updating query %d (%s)",
+                existing_query.id, existing_query.name,
+            )
+
+    # Step 1: Call AI server to generate SQL
+    prompt_text = req.prompt
+    if existing_query and existing_query.sql_text:
+        # Include the existing SQL so the AI can modify it
+        prompt_text = (
+            f"{req.prompt}\n\n"
+            f"Here is the current SQL for the query \"{existing_query.name}\":\n"
+            f"{existing_query.sql_text}\n\n"
+            f"Please modify this SQL according to the request above. "
+            f"Return ONLY the modified SQL."
+        )
+
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+        "prompt": prompt_text,
+        "allowed_tables": allowed_tables,
+    }
+    ai_result = await _forward_to_ai("/ai/query/generate", payload)
+    generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
+
+    if not generated_sql:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="AI could not generate SQL for this prompt",
+        )
+
+    # Detect which datasource the SQL references
+    left_datasource = _detect_datasource(generated_sql, allowed_tables)
+
+    if existing_query:
+        # Update the existing query in place
+        existing_query.sql_text = generated_sql
+        existing_query.left_datasource = left_datasource
+        existing_query.description = req.description or req.prompt
+        await session.commit()
+        await session.refresh(existing_query)
+
+        logger.info(
+            "AI action: update_query | query_id=%d project=%d tenant=%d user=%d",
+            existing_query.id, project.id, context.tenant_id, context.user_id,
+        )
+        return {
+            "action": "update_query",
+            "status": "updated",
+            "query_id": existing_query.id,
+            "name": existing_query.name,
+            "sql_text": existing_query.sql_text,
+        }
+
+    # Step 2: Derive a name if not provided
+    name = req.name or _shorten_ai_name(req.prompt)
+
+    # Step 3: Save as new query
+    query = SavedQuery(
+        project_id=project.id,
+        owner_id=context.user_id,
+        name=name,
+        description=req.description or req.prompt,
+        sql_text=generated_sql,
+        left_datasource=left_datasource,
+    )
+    session.add(query)
+    await session.commit()
+    await session.refresh(query)
+
+    logger.info(
+        "AI action: generate_and_save_query | query_id=%d project=%d tenant=%d user=%d",
+        query.id, project.id, context.tenant_id, context.user_id,
+    )
+    return {
+        "action": "generate_and_save_query",
+        "status": "saved",
+        "query_id": query.id,
+        "name": query.name,
+        "sql_text": generated_sql,
+        "explanation": ai_result.get("explanation", ""),
+        "model_used": ai_result.get("model_used", ""),
+    }
+
+
+@router.post("/actions/generate-and-save-dashboard")
+async def ai_generate_and_save_dashboard(
+    req: AIGenerateAndSaveDashboardRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Generate a full dashboard with widgets and save everything.
+
+    Full action flow:
+    1. Forward to AI server → LLM proposes dashboard (title, widgets with SQL)
+    2. Tablescope validates each widget's SQL
+    3. For each widget query, create a SavedQuery
+    4. Create Dashboard with widget config referencing queries
+    5. Audit trail
+    """
+    project = await _check_project_access(session, context, req.project_id)
+
+    # Resolve allowed tables from project datasources
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == req.project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
+    # Step 1: Call AI server for dashboard suggestion
+    # Inject layout instructions into the prompt so the AI server includes
+    # them even if the AI server itself hasn't been updated with the latest prompt.
+    layout_instructions = (
+        "\n\nIMPORTANT: For each widget, also include layout fields: "
+        "gridX (0-11), gridY (row position), gridW (width 1-12), gridH (height). "
+        "Choose chart type carefully based on the data: "
+        "kpi (gridW=3,gridH=2) for single metrics, "
+        "bar (gridW=6,gridH=4) for category comparisons, "
+        "line (gridW=6-8,gridH=4) for time trends, "
+        "pie (gridW=4-6,gridH=4) for proportions, "
+        "table (gridW=12,gridH=5) for detailed data. "
+        "Place KPIs across the top row. Create a varied, balanced layout with 4-8 widgets. "
+        "Do NOT use the same chart type for every widget."
+    )
+    effective_prompt = (req.prompt or "") + layout_instructions
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+        "prompt": effective_prompt,
+        "allowed_tables": allowed_tables,
+    }
+    ai_result = await _forward_to_ai("/ai/dashboard/suggest", payload)
+    suggestions = ai_result.get("suggestions", [])
+
+    if not suggestions:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="AI could not generate dashboard suggestions",
+        )
+
+    # Take the first suggestion (or the one matching the prompt best)
+    suggestion = suggestions[0]
+    if req.name:
+        dashboard_title = req.name
+    elif req.prompt:
+        dashboard_title = _shorten_ai_name(req.prompt)
+    else:
+        dashboard_title = suggestion.get("title", "AI - Dashboard")
+    widget_defs = suggestion.get("widgets", [])
+
+    # Step 2 & 3: For each widget, reuse or create a SavedQuery and build widget config
+    widgets_config: list[dict[str, Any]] = []
+    created_queries: list[int] = []
+    reused_queries: list[int] = []
+
+    # Pre-fetch all existing saved queries for this project to check for duplicates
+    existing_queries_result = await session.scalars(
+        select(SavedQuery).where(SavedQuery.project_id == project.id)
+    )
+    existing_queries = list(existing_queries_result)
+
+    import re as _re
+
+    def _normalize_sql(sql: str) -> str:
+        """Normalize SQL for comparison — collapse whitespace and lowercase."""
+        return _re.sub(r"\s+", " ", sql.strip().rstrip(";").lower())
+
+    # Build lookup: normalized_sql → SavedQuery
+    sql_to_query: dict[str, SavedQuery] = {}
+    for eq in existing_queries:
+        if eq.sql_text:
+            sql_to_query[_normalize_sql(eq.sql_text)] = eq
+
+    # Existing queries with SQL, sent to the dedicated query-match endpoint.
+    existing_with_sql = [eq for eq in existing_queries if eq.sql_text]
+
+    async def _find_matching_query(widget_sql: str, widget_title: str) -> SavedQuery | None:
+        """Use the dedicated /ai/query/match endpoint to find an equivalent query.
+
+        Uses /ai/query/match (NOT the generic /ai/ask): the comparison is a
+        purpose-built equivalence check that returns a structured match_id.
+        """
+        if not existing_with_sql:
+            return None
+        try:
+            match_response = await _forward_to_ai("/ai/query/match", {
+                "tenant_id": context.tenant_id,
+                "user_id": context.user_id,
+                "project_id": req.project_id,
+                "candidate_title": widget_title,
+                "candidate_sql": widget_sql,
+                "existing_queries": [
+                    {"id": eq.id, "name": eq.name, "sql": eq.sql_text}
+                    for eq in existing_with_sql
+                ],
+            })
+            match_id = match_response.get("match_id")
+            if match_id is not None:
+                for eq in existing_queries:
+                    if eq.id == match_id:
+                        return eq
+        except Exception:
+            logger.warning("AI query matching failed, will create new query")
+        return None
+
+    for idx, w in enumerate(widget_defs):
+        widget_sql = (w.get("sql", "") or "").rstrip().rstrip(";")
+        widget_title = w.get("title", f"Widget {idx + 1}")
+        widget_type = w.get("type", "bar")
+        x_col = w.get("x_column") or ""
+        y_col = w.get("y_column") or ""
+        aggregation = w.get("aggregation") or "count"
+
+        data_source: dict[str, Any] = {"kind": "custom_sql", "customSql": ""}
+        if widget_sql:
+            # Tier 1: exact normalized SQL match (instant)
+            norm_sql = _normalize_sql(widget_sql)
+            existing = sql_to_query.get(norm_sql)
+
+            # Tier 2: AI semantic match (checks if purpose/result is the same)
+            if not existing:
+                existing = await _find_matching_query(widget_sql, widget_title)
+
+            # Tier 3: name-based match — if a query with the same name exists,
+            # reuse it to avoid duplicate-named queries in the project
+            if not existing:
+                candidate_name = f"AI - {widget_title}".lower().strip()
+                for eq in existing_queries:
+                    if eq.name and eq.name.lower().strip() == candidate_name:
+                        existing = eq
+                        logger.info(
+                            "Name-match: reusing query %d (%s) for widget: %s",
+                            eq.id, eq.name, widget_title,
+                        )
+                        break
+
+            if existing:
+                reused_queries.append(existing.id)
+                data_source = {"kind": "query", "queryId": existing.id}
+                logger.info(
+                    "Reusing existing query %d (%s) for dashboard widget: %s",
+                    existing.id, existing.name, widget_title,
+                )
+            else:
+                # No match — create a new SavedQuery
+                left_ds = _detect_datasource(widget_sql, allowed_tables)
+                query = SavedQuery(
+                    project_id=project.id,
+                    owner_id=context.user_id,
+                    name=f"AI - {widget_title}",
+                    description="",
+                    sql_text=widget_sql,
+                    left_datasource=left_ds,
+                )
+                session.add(query)
+                await session.flush()
+                created_queries.append(query.id)
+                data_source = {"kind": "query", "queryId": query.id}
+                sql_to_query[norm_sql] = query
+                # Also add to existing_queries so AI can match subsequent widgets
+                existing_queries.append(query)
+
+        mapped_type = _map_chart_type(widget_type)
+
+        # Use AI-suggested layout or fall back to sensible defaults
+        ai_grid_w = w.get("gridW") or w.get("grid_w")
+        ai_grid_h = w.get("gridH") or w.get("grid_h")
+        ai_grid_x = w.get("gridX") or w.get("grid_x")
+        ai_grid_y = w.get("gridY") or w.get("grid_y")
+
+        # Default sizing by chart type if AI didn't specify
+        default_w = {"kpi": 3, "table": 12, "pie": 4}.get(mapped_type, 6)
+        default_h = {"kpi": 2, "table": 5}.get(mapped_type, 4)
+        grid_w = int(ai_grid_w) if ai_grid_w is not None else default_w
+        grid_h = int(ai_grid_h) if ai_grid_h is not None else default_h
+        grid_x = int(ai_grid_x) if ai_grid_x is not None else (idx % 2) * 6
+        grid_y = int(ai_grid_y) if ai_grid_y is not None else (idx // 2) * 4
+
+        # Clamp to valid grid bounds
+        grid_w = max(2, min(12, grid_w))
+        grid_h = max(1, min(8, grid_h))
+        grid_x = max(0, min(11, grid_x))
+
+        widgets_config.append({
+            "id": f"ai_widget_{idx}",
+            "title": widget_title,
+            "type": mapped_type,
+            "chartSubtype": _map_chart_subtype(widget_type),
+            "dataSource": data_source,
+            "xColumn": x_col,
+            "yColumn": y_col,
+            "aggregation": aggregation.lower() if aggregation else "count",
+            "sortBy": "x_asc",
+            "filters": [],
+            "colSpan": grid_w,
+            "position": idx,
+            "gridX": grid_x,
+            "gridY": grid_y,
+            "gridW": grid_w,
+            "gridH": grid_h,
+        })
+
+    # Step 4: Create the Dashboard
+    dashboard = Dashboard(
+        project_id=project.id,
+        owner_id=context.user_id,
+        tenant_id=context.tenant_id,
+        name=dashboard_title,
+        description=req.description or req.prompt or "",
+        status="draft",
+        config={
+            "widgets": widgets_config,
+            "filters": [],
+            "layout": "grid",
+            "ai_generated": True,
+        },
+    )
+    session.add(dashboard)
+    await session.commit()
+    await session.refresh(dashboard)
+
+    logger.info(
+        "AI action: generate_and_save_dashboard | dashboard_id=%d widgets=%d "
+        "queries_created=%d queries_reused=%d project=%d tenant=%d user=%d",
+        dashboard.id, len(widgets_config), len(created_queries),
+        len(reused_queries), project.id, context.tenant_id, context.user_id,
+    )
+    return {
+        "action": "generate_and_save_dashboard",
+        "status": "saved",
+        "dashboard_id": dashboard.id,
+        "dashboard_name": dashboard_title,
+        "widgets_created": len(widgets_config),
+        "queries_created": created_queries,
+        "queries_reused": reused_queries,
+        "model_used": ai_result.get("model_used", ""),
+    }
+
+
+def _map_chart_type(ai_type: str) -> str:
+    """Map AI-suggested chart types to the dashboard widget chart type."""
+    mapping = {
+        "kpi": "kpi",
+        "bar": "bar",
+        "line": "line",
+        "pie": "pie",
+        "area": "area",
+        "table": "table",
+        "donut": "pie",
+        "scatter": "line",
+    }
+    return mapping.get(ai_type.lower(), "bar")
+
+
+def _map_chart_subtype(ai_type: str) -> str:
+    """Map AI-suggested type to a chart subtype."""
+    mapping = {
+        "kpi": "kpi",
+        "bar": "column",
+        "line": "straight",
+        "pie": "pie",
+        "donut": "donut",
+        "area": "area",
+        "table": "table",
+        "scatter": "straight",
+    }
+    return mapping.get(ai_type.lower(), "column")

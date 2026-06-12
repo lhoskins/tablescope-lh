@@ -1,14 +1,29 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import { ResponsiveGridLayout, type Layout, type LayoutItem } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import { apiClient } from "@/lib/api-client";
-import type { Dashboard, WidgetConfig, DashboardConfig, DashboardFilter, ColumnInfo, WidgetFilter } from "./types";
+import type {
+  Dashboard,
+  WidgetConfig,
+  DashboardConfig,
+  DashboardFilter,
+  ColumnInfo,
+  WidgetFilter,
+  DashboardRuntimeState,
+  DashboardDateRange,
+  ChartClickEvent,
+  CrossFilter,
+} from "./types";
+import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { WidgetConfigPanel } from "./WidgetConfigPanel";
 import { FilterBar } from "./FilterBar";
+import { DateRangeControl } from "./DateRangeControl";
+import { DrilldownPanel, type DrilldownState } from "./DrilldownPanel";
+import { buildRuntimeWidgetFilters } from "@/lib/dashboard/runtimeFilters";
 
 type SavedQuery = { id: number; name: string; sql_text: string | null };
 type Datasource = { viewName: string; fileName: string };
@@ -30,10 +45,16 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [dashboardStatus, setDashboardStatus] = useState(dashboard.status);
 
+  // Ephemeral interaction state (not persisted): date range + cross-filters.
+  const [runtime, setRuntime] = useState<DashboardRuntimeState>({ dateRange: null, crossFilters: [] });
+  const [drilldown, setDrilldown] = useState<DrilldownState>({
+    open: false, loading: false, error: null, title: "", targetQueryName: null, columns: [], rows: [],
+  });
+
   const toggleStatusMutation = useMutation({
     mutationFn: async () => {
       const newStatus = dashboardStatus === "published" ? "draft" : "published";
-      await apiClient.patch(`/projects/${projectId}/dashboards/${dashboard.id}`, { status: newStatus });
+      await apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, { status: newStatus });
       return newStatus;
     },
     onSuccess: (newStatus: string) => {
@@ -43,27 +64,84 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   });
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
 
+  // Collect query IDs referenced by widgets that aren't in the provided savedQueries
+  const missingQueryIds = useMemo(() => {
+    const ids: number[] = [];
+    widgets.forEach((w) => {
+      if (w.dataSource?.kind === "query" && w.dataSource.queryId) {
+        if (!savedQueries.find((q) => q.id === w.dataSource.queryId)) {
+          ids.push(w.dataSource.queryId);
+        }
+      }
+    });
+    return [...new Set(ids)];
+  }, [widgets, savedQueries]);
+
+  // Fetch missing queries (e.g. AI-generated ones not yet in parent's cache)
+  const { data: fetchedQueries = [] } = useQuery({
+    queryKey: ["missing-queries", projectId, missingQueryIds],
+    queryFn: () =>
+      apiClient.get<SavedQuery[]>(`/api/projects/${projectId}/queries`),
+    enabled: missingQueryIds.length > 0,
+  });
+
+  // Merged list of all queries available to widgets
+  const allQueries = useMemo(() => {
+    const map = new Map<number, SavedQuery>();
+    savedQueries.forEach((q) => map.set(q.id, q));
+    fetchedQueries.forEach((q: SavedQuery) => map.set(q.id, q));
+    return Array.from(map.values());
+  }, [savedQueries, fetchedQueries]);
+
   const viewNames = useMemo(() => {
     const names = new Set<string>();
     widgets.forEach((w) => {
-      if (w.dataSource.kind === "datasource" && w.dataSource.viewName) {
+      if (w.dataSource?.kind === "datasource" && w.dataSource.viewName) {
         names.add(w.dataSource.viewName);
       }
     });
     return Array.from(names);
   }, [widgets]);
 
-  const { data: schemaData } = useQuery({
-    queryKey: ["datasource-schema", projectId, viewNames[0]],
-    queryFn: async () => {
-      if (!viewNames[0]) return { columns: [] };
-      return apiClient.get<{ columns: ColumnInfo[] }>(
-        `/api/projects/${projectId}/dashboards/schema/${viewNames[0]}`
-      );
-    },
-    enabled: viewNames.length > 0,
+  // Fetch the schema for every distinct view so we can (a) populate the filter
+  // bar with columns across all widgets and (b) decide which widgets a runtime
+  // cross-filter / date range is compatible with.
+  const schemaQueries = useQueries({
+    queries: viewNames.map((vn) => ({
+      queryKey: ["datasource-schema", projectId, vn],
+      queryFn: async () =>
+        apiClient.get<{ columns: ColumnInfo[] }>(`/api/projects/${projectId}/dashboards/schema/${vn}`),
+      enabled: !!vn,
+      staleTime: 60_000,
+    })),
   });
-  const allColumns: ColumnInfo[] = schemaData?.columns ?? [];
+
+  const viewColumns = useMemo(() => {
+    const map: Record<string, ColumnInfo[]> = {};
+    viewNames.forEach((vn, i) => {
+      map[vn] = schemaQueries[i]?.data?.columns ?? [];
+    });
+    return map;
+  }, [viewNames, schemaQueries]);
+
+  const allColumns: ColumnInfo[] = useMemo(() => {
+    const map = new Map<string, ColumnInfo>();
+    for (const cols of Object.values(viewColumns)) {
+      for (const c of cols) if (!map.has(c.name)) map.set(c.name, c);
+    }
+    return Array.from(map.values());
+  }, [viewColumns]);
+
+  // Known column names for a widget (used for runtime filter compatibility).
+  const columnNamesForWidget = useCallback((w: WidgetConfig): string[] => {
+    if (w.dataSource?.kind === "datasource" && w.dataSource.viewName) {
+      const cols = viewColumns[w.dataSource.viewName];
+      if (cols && cols.length > 0) return cols.map((c) => c.name);
+    }
+    const loaded = widgetData[w.id];
+    if (loaded && loaded.length > 0) return Object.keys(loaded[0]);
+    return [];
+  }, [viewColumns, widgetData]);
 
   const updateMutation = useMutation({
     mutationFn: (body: { config: DashboardConfig }) =>
@@ -98,6 +176,9 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const fetchWidgetData = useCallback(async (w: WidgetConfig) => {
     try {
       if (w.xColumn && w.yColumn && w.dataSource.kind === "datasource" && w.dataSource.viewName) {
+        // Persisted global filters + ephemeral runtime filters (cross-filter +
+        // date range), applied only to compatible widgets.
+        const runtimeFilters = buildRuntimeWidgetFilters(w, runtime, columnNamesForWidget(w));
         const resp = await apiClient.post<{ columns: string[]; rows: Record<string, unknown>[]; sql: string }>(
           `/api/projects/${projectId}/dashboards/widget-query`,
           {
@@ -110,7 +191,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             sort_by: w.sortBy ?? "x_asc",
             limit: w.limit ?? null,
             filters: w.filters ?? [],
-            global_filters: globalFiltersForApi(),
+            global_filters: [...globalFiltersForApi(), ...runtimeFilters],
           }
         );
         return resp.rows ?? [];
@@ -122,8 +203,8 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
         );
         return resp.rows ?? [];
       }
-      if (w.dataSource.kind === "query" && w.dataSource.queryId) {
-        const query = savedQueries.find((q) => q.id === w.dataSource.queryId);
+      if (w.dataSource?.kind === "query" && w.dataSource.queryId) {
+        const query = allQueries.find((q) => q.id === w.dataSource.queryId);
         if (query?.sql_text) {
           const tableMatch = query.sql_text.match(/FROM\s+"?([A-Za-z0-9_]+)"?/i);
           const tableName = tableMatch ? tableMatch[1] : "dual";
@@ -138,14 +219,18 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       /* widget shows "No data" */
     }
     return [];
-  }, [savedQueries, projectId, globalFiltersForApi]);
+  }, [allQueries, projectId, globalFiltersForApi, runtime, columnNamesForWidget]);
 
   useEffect(() => {
     const loadAll = async () => {
+      const entries = await Promise.all(
+        widgets.map(async (w) => {
+          const rows = await fetchWidgetData(w);
+          return [w.id, rows] as const;
+        }),
+      );
       const results: Record<string, Array<Record<string, unknown>>> = {};
-      for (const w of widgets) {
-        results[w.id] = await fetchWidgetData(w);
-      }
+      for (const [id, rows] of entries) results[id] = rows;
       setWidgetData(results);
     };
     if (widgets.length > 0) loadAll();
@@ -176,6 +261,94 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const handleFiltersChange = (newFilters: DashboardFilter[]) => {
     updateMutation.mutate({ config: { widgets, globalFilters: newFilters } });
   };
+
+  // ── Runtime interactions: cross-filter + drilldown ────────────────
+
+  const setDateRange = useCallback((range: DashboardDateRange | null) => {
+    setRuntime((prev) => ({ ...prev, dateRange: range }));
+  }, []);
+
+  const addCrossFilter = useCallback((cf: CrossFilter) => {
+    setRuntime((prev) => {
+      const existing = prev.crossFilters.find(
+        (f) => f.sourceField === cf.sourceField && f.sourceWidgetId === cf.sourceWidgetId,
+      );
+      // Clicking the same value again clears the filter (toggle off).
+      if (existing && String(existing.value) === String(cf.value)) {
+        return { ...prev, crossFilters: prev.crossFilters.filter((f) => f.id !== existing.id) };
+      }
+      const without = prev.crossFilters.filter(
+        (f) => !(f.sourceField === cf.sourceField && f.sourceWidgetId === cf.sourceWidgetId),
+      );
+      return { ...prev, crossFilters: [...without, cf] };
+    });
+  }, []);
+
+  const removeCrossFilter = useCallback((id: string) => {
+    setRuntime((prev) => ({ ...prev, crossFilters: prev.crossFilters.filter((f) => f.id !== id) }));
+  }, []);
+
+  const clearRuntimeFilters = useCallback(() => {
+    setRuntime({ dateRange: null, crossFilters: [] });
+  }, []);
+
+  const openDrilldown = useCallback(async (w: WidgetConfig, ev: ChartClickEvent) => {
+    setDrilldown({
+      open: true, loading: true, error: null,
+      title: `Drilldown: ${ev.label}`, targetQueryName: null, columns: [], rows: [],
+    });
+    try {
+      // Resolve the scope: prefer an explicit scopeId, else look one up by the
+      // widget's source query + clicked field.
+      let scopeId = w.interactions?.scopeId ?? null;
+      if (scopeId == null && w.dataSource?.kind === "query" && w.dataSource.queryId) {
+        const scopes = await apiClient.get<QueryScope[]>(
+          `/api/query-scopes?query_id=${w.dataSource.queryId}`,
+        );
+        const match = scopes.find(
+          (s) => s.source_field.toLowerCase() === ev.sourceField.toLowerCase(),
+        );
+        scopeId = match?.id ?? null;
+      }
+      if (scopeId == null) {
+        setDrilldown((d) => ({
+          ...d, loading: false,
+          error: "No drill-down scope is configured for this widget's field. Add a query scope mapping the source field to a target query.",
+        }));
+        return;
+      }
+      const res = await apiClient.post<QueryScopeFilterResponse>(
+        "/api/query-scopes/filter",
+        { scope_id: scopeId, value: ev.value, limit: 1000 },
+      );
+      setDrilldown({
+        open: true, loading: false, error: null,
+        title: `Drilldown: ${ev.label}`,
+        targetQueryName: res.target_query_name,
+        columns: res.columns, rows: res.rows,
+      });
+    } catch (e) {
+      setDrilldown((d) => ({ ...d, loading: false, error: (e as Error).message }));
+    }
+  }, []);
+
+  const handleElementClick = useCallback((w: WidgetConfig, ev: ChartClickEvent) => {
+    const inter = w.interactions;
+    const action = inter?.clickAction ?? "none";
+    if (!inter?.enabled || action === "none") return;
+    if (action === "cross_filter" || action === "drilldown_and_filter") {
+      addCrossFilter({
+        id: `cf-${w.id}-${ev.sourceField}`,
+        sourceWidgetId: w.id,
+        sourceField: ev.sourceField,
+        value: ev.value,
+        label: ev.label,
+      });
+    }
+    if (action === "drilldown" || action === "drilldown_and_filter") {
+      openDrilldown(w, ev);
+    }
+  }, [addCrossFilter, openDrilldown]);
 
   // ── react-grid-layout ────────────────────────────────────────────
   const colSpanToGridW = (span: number) => Math.min(12, Math.max(2, span));
@@ -276,6 +449,23 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
 
       {/* ── Filter Bar ───────────────────────────────────────────── */}
       <div className="border-b border-slate-200 bg-white px-5 py-2">
+        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <DateRangeControl value={runtime.dateRange} onChange={setDateRange} />
+          {runtime.crossFilters.length > 0 && <div className="h-4 w-px bg-slate-200" />}
+          {runtime.crossFilters.map((cf) => (
+            <div key={cf.id} className="flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">
+              <span>{cf.label}</span>
+              <button onClick={() => removeCrossFilter(cf.id)} className="text-blue-400 hover:text-blue-700" title="Remove filter">
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+          ))}
+          {(runtime.crossFilters.length > 0 || runtime.dateRange) && (
+            <button onClick={clearRuntimeFilters} className="text-[11px] font-medium text-slate-400 hover:text-red-500">
+              Clear all
+            </button>
+          )}
+        </div>
         <FilterBar filters={globalFilters} columns={allColumns} onChange={handleFiltersChange} />
       </div>
 
@@ -363,7 +553,11 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                   </div>
                   {/* Chart */}
                   <div className="p-3 overflow-hidden" style={{ height: "calc(100% - 52px)" }}>
-                    <WidgetRenderer widget={w} data={widgetData[w.id] ?? []} />
+                    <WidgetRenderer
+                      widget={w}
+                      data={widgetData[w.id] ?? []}
+                      onElementClick={(ev) => handleElementClick(w, ev)}
+                    />
                   </div>
                 </div>
               </div>
@@ -371,6 +565,8 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
           </ResponsiveGridLayout>
         ) : null}
       </div>
+
+      <DrilldownPanel state={drilldown} onClose={() => setDrilldown((d) => ({ ...d, open: false }))} />
     </div>
   );
 }

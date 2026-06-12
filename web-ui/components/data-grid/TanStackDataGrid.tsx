@@ -59,6 +59,7 @@ type TanStackDataGridProps = {
   canEditScopes?: boolean;
   projectId?: number;
   columnTypes?: { field: string; name?: string; type: string }[];
+  scopeEnabled?: boolean;
 };
 
 const _currencyFmt = new Intl.NumberFormat(undefined, {
@@ -75,11 +76,23 @@ function formatTypedValue(value: unknown, type: string | undefined): string {
   }
   if (type === "number") {
     const n = Number(text.replace(/,/g, ""));
-    return Number.isFinite(n) ? n.toLocaleString() : text;
+    if (!Number.isFinite(n)) return text;
+    // Format with 2 decimal places if the number has a fractional part
+    if (!Number.isInteger(n)) {
+      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return n.toLocaleString();
   }
   if (type === "date") {
     const d = new Date(text);
     return Number.isNaN(d.getTime()) ? text : d.toLocaleDateString();
+  }
+  // Auto-detect numeric values with decimals even without explicit type
+  if (type === undefined || type === "string") {
+    const n = Number(text);
+    if (Number.isFinite(n) && text.includes(".") && !Number.isInteger(n)) {
+      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
   }
   return text;
 }
@@ -123,6 +136,7 @@ export function TanStackDataGrid({
   canEditScopes = false,
   projectId,
   columnTypes = [],
+  scopeEnabled = true,
 }: TanStackDataGridProps) {
   // ── Drill-down breadcrumb ───────────────────────────────────────
   const [levels, setLevels] = useState<Level[]>([
@@ -139,18 +153,22 @@ export function TanStackDataGrid({
   const current = levels[levels.length - 1];
   const currentQueryId = current.queryId;
 
-  // ── Scopes ──────────────────────────────────────────────────────
+  // ── Scopes (query_id-based, NOT datasource-based) ───────────────
   const [scopes, setScopes] = useState<QueryScope[]>([]);
 
   const loadScopes = useCallback(async (qid: number | null) => {
-    if (qid == null) { setScopes([]); return; }
+    if (qid == null) {
+      if (scopeEnabled) console.warn("[TanStackDataGrid] Scoping enabled but no query_id — scoping disabled for this grid");
+      setScopes([]);
+      return;
+    }
     try {
       const data = await apiClient.get<QueryScope[]>(`/api/query-scopes?query_id=${qid}`);
       setScopes(data);
     } catch { setScopes([]); }
-  }, []);
+  }, [scopeEnabled]);
 
-  useEffect(() => { loadScopes(currentQueryId); }, [currentQueryId, loadScopes]);
+  useEffect(() => { if (scopeEnabled) loadScopes(currentQueryId); else setScopes([]); }, [currentQueryId, loadScopes, scopeEnabled]);
 
   const scopesByField = useMemo(() => {
     const m: Record<string, QueryScope> = {};
@@ -264,6 +282,7 @@ export function TanStackDataGrid({
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [pageSize, setPageSize] = useState(50);
+  const [pageIndex, setPageIndex] = useState(0);
 
   const persistPrefs = useCallback(
     (order: string[], hidden: string[]) => {
@@ -316,7 +335,7 @@ export function TanStackDataGrid({
   }, [columnTypes]);
 
   // ── TanStack column defs ────────────────────────────────────────
-  const scopeEnabled = canEditScopes && currentQueryId != null;
+  const scopeActive = scopeEnabled && canEditScopes && currentQueryId != null;
 
   const tableColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
     () =>
@@ -343,7 +362,7 @@ export function TanStackDataGrid({
           }
           return (
             <span
-              className="cursor-pointer text-blue-700 underline decoration-dotted underline-offset-2"
+              className="cursor-pointer"
               title="Click to drill down"
               onClick={() => drilldown(field, val)}
             >
@@ -369,7 +388,12 @@ export function TanStackDataGrid({
   const table = useReactTable({
     data: tableData,
     columns: tableColumns,
-    state: { sorting, columnFilters, globalFilter, columnVisibility, columnOrder, columnSizing, pagination: { pageIndex: 0, pageSize } },
+    state: { sorting, columnFilters, globalFilter, columnVisibility, columnOrder, columnSizing, pagination: { pageIndex, pageSize } },
+    onPaginationChange: (updater) => {
+      const next = typeof updater === "function" ? updater({ pageIndex, pageSize }) : updater;
+      setPageIndex(next.pageIndex);
+      setPageSize(next.pageSize);
+    },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
@@ -443,7 +467,6 @@ export function TanStackDataGrid({
 
   // ── Pagination ──────────────────────────────────────────────────
   const pageCount = table.getPageCount();
-  const pageIndex = table.getState().pagination.pageIndex;
 
   const targetQueryChoices = availableQueries;
 
@@ -470,7 +493,7 @@ export function TanStackDataGrid({
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       {/* Scope trace */}
-      {scopeEnabled && scopes.length > 0 && (
+      {scopeActive && scopes.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs text-slate-700">
           <span className="font-semibold uppercase tracking-wide text-blue-700">Scopes:</span>
           {scopes.map((s) => {
@@ -549,7 +572,7 @@ export function TanStackDataGrid({
                         style={{ width: header.getSize(), position: "relative" }}
                         className="border-b border-slate-200 px-2 py-1.5 text-left font-semibold text-slate-700 select-none"
                         onContextMenu={(e) => {
-                          if (scopeEnabled) {
+                          if (scopeActive) {
                             e.preventDefault();
                             setContextMenu({ x: e.clientX, y: e.clientY, field: header.id });
                           }
@@ -611,7 +634,7 @@ export function TanStackDataGrid({
           <span>Rows per page:</span>
           <select
             value={pageSize}
-            onChange={(e) => { setPageSize(Number(e.target.value)); table.setPageSize(Number(e.target.value)); }}
+            onChange={(e) => { const s = Number(e.target.value); setPageSize(s); setPageIndex(0); table.setPageSize(s); }}
             className="rounded border border-slate-300 px-1 py-0.5 text-xs"
           >
             {[25, 50, 100].map((s) => (<option key={s} value={s}>{s}</option>))}

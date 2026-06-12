@@ -19,13 +19,14 @@ from app.database import get_db
 from app.models.project import Project
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
-from app.routes.query import _resolve_vdb_database, _run_sql
+from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
 from app.schemas.query_scope import (
     QueryScopeCreate,
     QueryScopeFilterRequest,
     QueryScopeFilterResponse,
     QueryScopeRead,
 )
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 router = APIRouter(prefix="/query-scopes", tags=["query-scopes"])
 
@@ -47,18 +48,33 @@ async def _get_project_for_query(
 
 @router.get("", response_model=list[QueryScopeRead])
 async def list_query_scopes(
-    query_id: int,
+    query_id: int | None = None,
+    project_id: int | None = None,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[QueryScopeRead]:
-    """List scopes whose *source* is the given query."""
-    await _get_project_for_query(session, query_id=query_id, tenant_id=context.tenant_id)
-    rows = await session.scalars(
-        select(QueryScope).where(
-            QueryScope.tenant_id == context.tenant_id,
-            QueryScope.query_id == query_id,
+    """List scopes. Filter by query_id (source query) and/or project_id."""
+    if query_id is not None:
+        await _get_project_for_query(session, query_id=query_id, tenant_id=context.tenant_id)
+        rows = await session.scalars(
+            select(QueryScope).where(
+                QueryScope.tenant_id == context.tenant_id,
+                QueryScope.query_id == query_id,
+            )
         )
-    )
+    elif project_id is not None:
+        rows = await session.scalars(
+            select(QueryScope).where(
+                QueryScope.tenant_id == context.tenant_id,
+                QueryScope.project_id == project_id,
+            )
+        )
+    else:
+        rows = await session.scalars(
+            select(QueryScope).where(
+                QueryScope.tenant_id == context.tenant_id,
+            )
+        )
     return [QueryScopeRead.model_validate(s.to_dict()) for s in rows]
 
 
@@ -156,6 +172,85 @@ def _literal(value: Any) -> str:
     return f"'{text}'"
 
 
+def _find_qualified_column(sql: str, field: str) -> str:
+    """Find the qualified reference (e.g. p.CategoryID) for a column in SQL.
+
+    Handles aliased columns: if the field is an alias (e.g. ``Category``
+    from ``c.CategoryName AS Category``), resolves to the actual column
+    expression (``c."CategoryName"``).
+
+    Falls back to ``"field"`` if no qualified reference is found.
+    """
+    import re
+
+    # Step 1: Check if 'field' is an alias defined via AS in the SELECT clause
+    # Pattern: <expr> AS <field>  (e.g. c.CategoryName AS Category)
+    alias_pat = re.compile(
+        rf'(\w+\.\w+|\w+\."?\w+"?|"?\w+"?\.\w+)\s+AS\s+"?{re.escape(field)}"?(?:\s|,|$)',
+        re.IGNORECASE,
+    )
+    alias_match = alias_pat.search(sql)
+    if alias_match:
+        # Return the original expression (e.g. c.CategoryName) instead of alias
+        original_expr = alias_match.group(1)
+        return original_expr
+
+    # Step 2: Look for alias.field or "table".field patterns in the full SQL
+    patterns = [
+        rf'(\w+)\.{re.escape(field)}\b',                  # alias.field
+        rf'(\w+)\."?{re.escape(field)}"?',                # alias."field"
+        rf'"(\w+)"\.{re.escape(field)}\b',                # "table".field
+        rf'"(\w+)"\."?{re.escape(field)}"?',              # "table"."field"
+    ]
+    for pat in patterns:
+        m = re.search(pat, sql, re.IGNORECASE)
+        if m:
+            qualifier = m.group(1)
+            return f'{qualifier}."{field}"'
+    # No qualified reference found — use quoted field name
+    return f'"{field}"'
+
+
+def _inject_where(sql: str, condition: str, limit: int) -> str:
+    """Inject a WHERE/AND condition into a SQL query without subquery wrapping.
+
+    Teiid cannot infer types for computed columns in derived tables, so we
+    inject the filter directly into the original SQL:
+    - If there's a WHERE clause: add AND <condition> after it (before GROUP BY)
+    - If no WHERE: insert WHERE <condition> before GROUP BY / ORDER BY / LIMIT
+    - Always append LIMIT if not already present
+    """
+    import re
+
+    # Find positions of key clauses
+    # Use regex to find whole-word occurrences (not inside strings)
+    group_match = re.search(r"\bGROUP\s+BY\b", sql, re.IGNORECASE)
+    order_match = re.search(r"\bORDER\s+BY\b", sql, re.IGNORECASE)
+    where_match = re.search(r"\bWHERE\b", sql, re.IGNORECASE)
+    having_match = re.search(r"\bHAVING\b", sql, re.IGNORECASE)
+
+    if where_match:
+        # Find the end of the WHERE clause (before GROUP BY, ORDER BY, HAVING, or end)
+        where_end = len(sql)
+        for m in (group_match, order_match, having_match):
+            if m and m.start() > where_match.end():
+                where_end = min(where_end, m.start())
+        # Insert AND condition at the end of the WHERE clause
+        result = sql[:where_end].rstrip() + f" AND {condition} " + sql[where_end:]
+    else:
+        # No WHERE clause — insert before GROUP BY, ORDER BY, HAVING, or at end
+        insert_pos = len(sql)
+        for m in (group_match, order_match, having_match):
+            if m:
+                insert_pos = min(insert_pos, m.start())
+        result = sql[:insert_pos].rstrip() + f" WHERE {condition} " + sql[insert_pos:]
+
+    # Strip any existing LIMIT and add our own
+    result = re.sub(r"\bLIMIT\s+\d+\b", "", result, flags=re.IGNORECASE).rstrip()
+    result += f" LIMIT {limit}"
+    return result
+
+
 @router.post("/filter", response_model=QueryScopeFilterResponse)
 async def filter_by_scope(
     payload: QueryScopeFilterRequest,
@@ -176,20 +271,29 @@ async def filter_by_scope(
     if not _FIELD_RE.match(scope.target_field):
         raise HTTPException(status_code=400, detail="Invalid target field")
 
+    # Auto-cast aggregates (SUM/AVG/MIN/MAX) for Teiid CSV string columns
+    base_sql = _auto_cast_aggregates(base_sql)
+
     limit = max(1, min(payload.limit, 10_000))
-    # Wrap the target query as a derived table so we can filter by the target
-    # field on the *result* columns regardless of how the inner SQL is shaped.
+    # Inject the filter directly into the target SQL rather than wrapping in a
+    # derived table (Teiid can't infer types for computed columns in subqueries).
+    # Use the qualified column reference from the SELECT clause when available
+    # to avoid "ambiguous column" errors in JOINed queries.
     field = scope.target_field.split(".")[-1]
-    wrapped = (
-        f'SELECT * FROM ({base_sql}) AS scope_t '
-        f'WHERE scope_t."{field}" = {_literal(payload.value)} '
-        f"LIMIT {limit}"
-    )
+    qualified_field = _find_qualified_column(base_sql, field)
+    filter_clause = f'{qualified_field} = {_literal(payload.value)}'
+    wrapped = _inject_where(base_sql, filter_clause, limit)
 
     database = await _resolve_vdb_database(
         session=session, context=context, project_id=project.id
     )
-    result = await _run_sql(database=database, sql=wrapped)
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    result = await _run_sql(
+        database=database,
+        sql=wrapped,
+        teiid_host=endpoint.pg_host,
+        teiid_port=endpoint.pg_port,
+    )
     return QueryScopeFilterResponse(
         columns=result["columns"],
         rows=result["rows"],

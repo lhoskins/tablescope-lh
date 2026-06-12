@@ -1,0 +1,31 @@
+{
+  "catalog_key": "government",
+  "name": "Government KPI Catalog",
+  "description": "Tags and KPIs for public sector contracts, grants, compliance, and citizen services.",
+  "industry": "government",
+  "source_framework": "Tablescope Government Core",
+  "version": "1.0",
+  "tags": [
+    {"tag_key": "contracts", "display_name": "Contracts", "business_domain": "procurement", "process_area": "contract_management", "synonyms": ["agreements", "awards", "task orders"], "example_fields": ["ContractID", "VendorID", "Amount", "StartDate"]},
+    {"tag_key": "grants", "display_name": "Grants", "business_domain": "finance", "process_area": "grant_management", "synonyms": ["funding", "awards", "assistance"], "example_fields": ["GrantID", "Recipient", "Amount", "ProgramCode"]},
+    {"tag_key": "compliance", "display_name": "Compliance", "business_domain": "governance", "process_area": "regulatory", "synonyms": ["regulatory", "policy", "standards"], "example_fields": ["ControlID", "Status", "DueDate"]},
+    {"tag_key": "budget", "display_name": "Budget", "business_domain": "finance", "process_area": "budgeting", "synonyms": ["appropriation", "allocation", "funding"], "example_fields": ["FundCode", "BudgetAmount", "ObligatedAmount"]},
+    {"tag_key": "procurement", "display_name": "Procurement", "business_domain": "procurement", "process_area": "acquisition", "synonyms": ["acquisition", "purchasing", "solicitation"], "example_fields": ["SolicitationID", "VendorID", "AwardDate"]},
+    {"tag_key": "case_management", "display_name": "Case Management", "business_domain": "citizen_services", "process_area": "case_processing", "synonyms": ["cases", "applications", "requests"], "example_fields": ["CaseID", "Status", "OpenDate", "CloseDate"]},
+    {"tag_key": "citizen_services", "display_name": "Citizen Services", "business_domain": "citizen_services", "process_area": "service_delivery", "synonyms": ["public services", "constituent services"], "example_fields": ["ServiceID", "RequestDate", "ResolutionDate"]},
+    {"tag_key": "audit", "display_name": "Audit", "business_domain": "governance", "process_area": "audit", "synonyms": ["inspection", "review", "examination"], "example_fields": ["AuditID", "FindingCount", "AuditDate"]},
+    {"tag_key": "risk", "display_name": "Risk", "business_domain": "governance", "process_area": "risk_management", "synonyms": ["risk assessment", "risk register"], "example_fields": ["RiskID", "Likelihood", "Impact", "MitigationStatus"]},
+    {"tag_key": "performance_reporting", "display_name": "Performance Reporting", "business_domain": "governance", "process_area": "program_management", "synonyms": ["program performance", "metrics", "KPIs"], "example_fields": ["MetricID", "Target", "Actual", "Period"]}
+  ],
+  "kpis": [
+    {"kpi_key": "budget_utilization", "display_name": "Budget Utilization", "business_domain": "finance", "process_area": "budgeting", "formula": "obligated_amount / total_budget", "required_fields": ["obligated_amount", "total_budget"], "related_tags": ["budget"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "contract_obligation_rate", "display_name": "Contract Obligation Rate", "business_domain": "procurement", "process_area": "contract_management", "formula": "obligated_contracts / total_contracts", "required_fields": ["contract_id", "status"], "related_tags": ["contracts"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "grant_spend_rate", "display_name": "Grant Spend Rate", "business_domain": "finance", "process_area": "grant_management", "formula": "spent_amount / awarded_amount", "required_fields": ["grant_id", "spent", "awarded"], "related_tags": ["grants"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "case_resolution_time", "display_name": "Case Resolution Time", "business_domain": "citizen_services", "process_area": "case_processing", "formula": "AVG(close_date - open_date)", "required_fields": ["case_id", "open_date", "close_date"], "related_tags": ["case_management"], "recommended_chart_type": "line"},
+    {"kpi_key": "sla_compliance", "display_name": "SLA Compliance", "business_domain": "citizen_services", "process_area": "service_delivery", "formula": "on_time_cases / total_cases", "required_fields": ["case_id", "due_date", "completion_date"], "related_tags": ["citizen_services", "compliance"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "audit_findings_count", "display_name": "Audit Findings Count", "business_domain": "governance", "process_area": "audit", "formula": "COUNT(findings)", "required_fields": ["finding_id", "severity"], "related_tags": ["audit", "compliance"], "recommended_chart_type": "bar"},
+    {"kpi_key": "procurement_cycle_time", "display_name": "Procurement Cycle Time", "business_domain": "procurement", "process_area": "acquisition", "formula": "AVG(award_date - solicitation_date)", "required_fields": ["solicitation_id", "solicitation_date", "award_date"], "related_tags": ["procurement"], "recommended_chart_type": "line"},
+    {"kpi_key": "program_performance_score", "display_name": "Program Performance Score", "business_domain": "governance", "process_area": "program_management", "formula": "actual / target * 100", "required_fields": ["metric_id", "actual", "target"], "related_tags": ["performance_reporting"], "recommended_chart_type": "kpi"},
+    {"kpi_key": "compliance_completion_rate", "display_name": "Compliance Completion Rate", "business_domain": "governance", "process_area": "regulatory", "formula": "completed_controls / total_controls", "required_fields": ["control_id", "status"], "related_tags": ["compliance"], "recommended_chart_type": "kpi"}
+  ]
+}

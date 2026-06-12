@@ -1,14 +1,36 @@
 """SQLAlchemy ORM models for the platform API."""
 
+from app.models.ai_asset_metadata import (
+    AIAssetKPI,
+    AIAssetKPISuggestion,
+    AIAssetTag,
+    AIAssetTagSuggestion,
+)
+from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
+from app.models.ai_reference_catalog import (
+    AIReferenceCatalog,
+    AIReferenceKPI,
+    AIReferenceTag,
+    TenantCustomKPI,
+    TenantCustomTag,
+    TenantReferenceCatalog,
+)
 from app.models.base import Base
 from app.models.connector_credential import ConnectorCredential
 from app.models.dashboard import Dashboard
+from app.models.data_source_ai_profile import (
+    DataSourceAIProfile,
+    DataSourceAIRecommendation,
+    DataSourceFieldProfile,
+    DataSourceTag,
+)
 from app.models.database_connection import DatabaseConnection
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.file_source_meta import FileSourceMeta
 from app.models.grid_preference import GridPreference
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
+from app.models.project_asset import ProjectAsset
 from app.models.query_scope import QueryScope
 from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.saved_query import SavedQuery
@@ -19,9 +41,25 @@ from app.models.user import User
 from app.models.user_vdb import UserVDB
 
 __all__ = [
+    "AIProjectGraphEdge",
+    "AIProjectGraphNode",
+    "AIAssetKPI",
+    "AIAssetKPISuggestion",
+    "AIAssetTag",
+    "AIAssetTagSuggestion",
+    "AIReferenceCatalog",
+    "AIReferenceKPI",
+    "AIReferenceTag",
+    "TenantCustomKPI",
+    "TenantCustomTag",
+    "TenantReferenceCatalog",
     "Base",
     "ConnectorCredential",
     "Dashboard",
+    "DataSourceAIProfile",
+    "DataSourceAIRecommendation",
+    "DataSourceFieldProfile",
+    "DataSourceTag",
     "DatabaseConnection",
     "DataSourceColumn",
     "DatabaseDataSource",
@@ -29,6 +67,7 @@ __all__ = [
     "GridPreference",
     "OrganizationVDB",
     "Project",
+    "ProjectAsset",
     "ProjectMember",
     "QueryScope",
     "SaasObjectDataSource",

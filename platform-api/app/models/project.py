@@ -30,6 +30,7 @@ class Project(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    scoping_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
 
     tenant: Mapped[Tenant] = relationship(back_populates="projects")  # type: ignore[name-defined]  # noqa: F821
     owner: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821

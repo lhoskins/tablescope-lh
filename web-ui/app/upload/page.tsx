@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileDropzone } from "@/components/upload/FileDropzone";
+import { AIFileUploadWizard } from "@/components/upload/AIFileUploadWizard";
 import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -275,6 +276,8 @@ export default function UploadPage() {
     }
   }
 
+  const [uploadMode, setUploadMode] = useState<"quick" | "ai">("ai");
+
   return (
     <section>
       <header className="mb-6">
@@ -286,15 +289,48 @@ export default function UploadPage() {
         </p>
       </header>
 
-      <FileDropzone onUploaded={handleUploaded} />
-
-      <div className="mt-4">
-        <ConnectorsMenu
-          onCreated={() =>
-            queryClient.invalidateQueries({ queryKey: ["datasources"] })
-          }
-        />
+      {/* Upload mode toggle */}
+      <div className="mb-4 flex gap-2">
+        <button
+          onClick={() => setUploadMode("ai")}
+          className={`rounded-md px-4 py-2 text-sm font-medium ${
+            uploadMode === "ai"
+              ? "bg-blue-600 text-white"
+              : "border border-slate-300 text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          AI-Assisted Upload
+        </button>
+        <button
+          onClick={() => setUploadMode("quick")}
+          className={`rounded-md px-4 py-2 text-sm font-medium ${
+            uploadMode === "quick"
+              ? "bg-blue-600 text-white"
+              : "border border-slate-300 text-slate-700 hover:bg-slate-50"
+          }`}
+        >
+          Quick Upload
+        </button>
       </div>
+
+      {uploadMode === "ai" ? (
+        <AIFileUploadWizard
+          onComplete={() => {
+            queryClient.invalidateQueries({ queryKey: ["datasources"] });
+          }}
+        />
+      ) : (
+        <>
+          <FileDropzone onUploaded={handleUploaded} />
+          <div className="mt-4">
+            <ConnectorsMenu
+              onCreated={() =>
+                queryClient.invalidateQueries({ queryKey: ["datasources"] })
+              }
+            />
+          </div>
+        </>
+      )}
 
       {/* Datasources list */}
       <div className="mt-8">

@@ -33,8 +33,11 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-grid-layout": "^2.2.3",
-    "recharts": "^2.13.0",
+    "recharts": "^2.15.0",
     "tailwind-merge": "^2.5.4"
+  },
+  "overrides": {
+    "react-is": "^19.0.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.5.0",

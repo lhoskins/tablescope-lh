@@ -451,12 +451,68 @@ async def delete_file_source(
         / str(context.user_id)
         / "uploads"
     )
-    target = uploads_dir / meta.file_name
+    # Remove all file variants (original + converted CSV).
+    # XLSX files are converted to CSV on upload, so both may exist.
+    candidates = [
+        uploads_dir / meta.file_name,
+    ]
+    # If the stored name ends with .xlsx/.xls, also try the .csv variant
+    stem = meta.file_name.rsplit(".", 1)[0] if "." in meta.file_name else meta.file_name
+    for ext in (".csv", ".xlsx", ".xls", ".txt", ".tsv"):
+        candidates.append(uploads_dir / f"{stem}{ext}")
+    # Also try matching by view_name stem (e.g., ManagmentReport from ManagmentReport_CSV)
+    view_stem = view_name.rsplit("_", 1)[0] if "_" in view_name else view_name
+    for ext in (".csv", ".xlsx", ".xls", ".txt", ".tsv"):
+        candidates.append(uploads_dir / f"{view_stem}{ext}")
+
+    removed_any = False
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                candidate.unlink()
+                removed_any = True
+                logger.info("Removed file: %s", candidate)
+        except OSError as exc:
+            logger.warning("Failed to remove file %s: %s", candidate, exc)
+
+    if not removed_any:
+        logger.warning("No physical file found for %s in %s", view_name, uploads_dir)
+
+    # Remove Teiid view and foreign table (best-effort)
     try:
-        if target.is_file():
-            target.unlink()
-    except OSError as exc:
-        logger.warning("Failed to remove file %s: %s", target, exc)
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0)
+        ) as teiid_client:
+            teiid_resp = await teiid_client.post(
+                f"{endpoint.servlet_url}/TeiidExcelImporterTest/deleteDataSource",
+                data={"dataSourceName": view_name},
+            )
+            if teiid_resp.status_code == 200:
+                logger.info("Teiid view/foreign-table removed for %s", view_name)
+            else:
+                logger.warning(
+                    "Teiid deleteDataSource returned %s for %s: %s",
+                    teiid_resp.status_code, view_name, teiid_resp.text,
+                )
+    except httpx.RequestError as exc:
+        logger.warning("Failed to contact Teiid servlet to delete %s: %s", view_name, exc)
+
+    # Also clean up any orphaned AI profile data
+    from app.models.data_source_ai_profile import (
+        DataSourceAIProfile,
+        DataSourceAIRecommendation,
+        DataSourceFieldProfile,
+        DataSourceTag,
+    )
+
+    for model in (DataSourceAIRecommendation, DataSourceTag, DataSourceFieldProfile, DataSourceAIProfile):
+        orphans = (
+            await session.scalars(
+                select(model).where(model.data_source_id == meta.id)
+            )
+        ).all()
+        for o in orphans:
+            await session.delete(o)
 
     await session.delete(meta)
     await session.commit()

@@ -19,6 +19,7 @@ class ProjectUpdate(BaseModel):
     description: str | None = None
     type: str | None = None
     is_shared: bool | None = None
+    scoping_enabled: bool | None = None
 
 
 class ProjectRead(BaseModel):
@@ -31,6 +32,7 @@ class ProjectRead(BaseModel):
     description: str | None
     type: str | None
     is_shared: bool
+    scoping_enabled: bool
     created_at: datetime
     updated_at: datetime
 

@@ -123,3 +123,23 @@ async def test_dashboard_not_found(client, service_headers) -> None:
 
     r = await client.get(f"/api/projects/{pid}/dashboards/9999", headers=headers)
     assert r.status_code == 404
+
+
+async def test_widget_query_rejects_foreign_view(client, service_headers) -> None:
+    """A widget querying a view that is not one of the project's datasources
+    (e.g. an AI-hallucinated table from another tenant) must be rejected."""
+    _, _, project, headers = await _setup_tenant_and_project(client, service_headers)
+    pid = project["id"]
+
+    r = await client.post(
+        f"/api/projects/{pid}/dashboards/widget-query",
+        json={
+            "view_name": "NW_Products_CSV",
+            "x_column": "category",
+            "y_column": "revenue",
+            "aggregation": "sum",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 403
+    assert "not a datasource" in r.json()["detail"]

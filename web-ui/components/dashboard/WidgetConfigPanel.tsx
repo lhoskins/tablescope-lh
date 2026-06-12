@@ -3,8 +3,18 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { WidgetConfig, WidgetType, ChartSubtype, WidgetFilter, ColumnInfo } from "./types";
+import type { WidgetConfig, WidgetType, ChartSubtype, WidgetFilter, ColumnInfo, VisualizationOptions, WidgetInteractions, WidgetClickAction, WidgetDateField } from "./types";
+import type { QueryScope } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
+import { ChartOptionsPanel } from "./ChartOptionsPanel";
+import { getDefaultOptions, getChartDefinition } from "@/lib/visualizations/chartRegistry";
+
+const CLICK_ACTIONS: { value: WidgetClickAction; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "cross_filter", label: "Filter dashboard" },
+  { value: "drilldown", label: "Drill down to details" },
+  { value: "drilldown_and_filter", label: "Filter + show details" },
+];
 
 // ── Chart type / subtype definitions ────────────────────────────────
 type SubtypeDef = { value: ChartSubtype | ""; label: string };
@@ -47,6 +57,30 @@ const CHART_TYPES: ChartTypeDef[] = [
     type: "combo", label: "Combo", icon: "\u{1F4CA}\u{1F4C8}",
     subtypes: [{ value: "bar_line", label: "Bar + Line" }],
   },
+  {
+    type: "scatter", label: "Scatter", icon: "\u{1F4A0}",
+    subtypes: [
+      { value: "", label: "Scatter" },
+      { value: "bubble", label: "Bubble" },
+    ],
+  },
+  {
+    type: "radar", label: "Radar", icon: "\u{1F578}\u{FE0F}",
+    subtypes: [
+      { value: "", label: "Radar" },
+      { value: "scorecard", label: "Scorecard" },
+    ],
+  },
+  {
+    type: "radial_bar", label: "Radial", icon: "\u{1F3AF}",
+    subtypes: [
+      { value: "", label: "Radial Bar" },
+      { value: "multi_ring", label: "Multi-ring" },
+    ],
+  },
+  { type: "treemap", label: "Treemap", icon: "\u{1F9E9}", subtypes: [] },
+  { type: "funnel", label: "Funnel", icon: "\u{1FA9D}", subtypes: [] },
+  { type: "sankey", label: "Sankey", icon: "\u{1F500}", subtypes: [] },
   { type: "kpi", label: "KPI", icon: "\u{1F522}", subtypes: [] },
   { type: "table", label: "Table", icon: "\u{1F4CB}", subtypes: [] },
 ];
@@ -115,6 +149,15 @@ export function WidgetConfigPanel({
   const [colSpan, setColSpan] = useState(editingWidget?.colSpan ?? 6);
   const [y2Column, setY2Column] = useState(editingWidget?.y2Column ?? "");
   const [y2Aggregation, setY2Aggregation] = useState<(typeof AGGREGATIONS)[number]>(editingWidget?.y2Aggregation ?? "avg");
+  const [vizOptions, setVizOptions] = useState<VisualizationOptions>(
+    editingWidget?.visualizationOptions ?? {}
+  );
+  const [interactions, setInteractions] = useState<WidgetInteractions>(
+    editingWidget?.interactions ?? { enabled: false, clickAction: "none" }
+  );
+  const [dateFieldCfg, setDateFieldCfg] = useState<WidgetDateField>(
+    editingWidget?.dateField ?? { enabled: false }
+  );
 
   const viewName = sourceKind === "datasource" ? sourceId : "";
   const selectedQuery = sourceKind === "query" ? savedQueries.find((q) => q.id === Number(sourceId)) : null;
@@ -174,7 +217,37 @@ export function WidgetConfigPanel({
   const numericColumns = columns.filter((c) => c.type === "number");
   const stringColumns = columns.filter((c) => c.type === "string");
   const xColumnType = columns.find((c) => c.name === xColumn)?.type;
-  const currentChartDef = CHART_TYPES.find((ct) => ct.type === chartType);
+  // Variant ("style") buttons are driven by the registry so they stay in sync
+  // with the renderer and carry their option presets.
+  const variantDefs = getChartDefinition(chartType)?.variants ?? [];
+
+  // Existing query scopes for the source query — used to offer a drilldown target.
+  const { data: scopesData = [] } = useQuery({
+    queryKey: ["query-scopes", selectedQuery?.id],
+    queryFn: async () => {
+      if (!selectedQuery) return [] as QueryScope[];
+      return apiClient.get<QueryScope[]>(`/api/query-scopes?query_id=${selectedQuery.id}`);
+    },
+    enabled: sourceKind === "query" && !!selectedQuery,
+  });
+
+  const isChart = chartType !== "kpi" && chartType !== "table";
+  const drilldownSelected =
+    interactions.clickAction === "drilldown" || interactions.clickAction === "drilldown_and_filter";
+
+  // Auto-detect X/Y for AI-generated widgets if columns loaded but names don't match
+  useEffect(() => {
+    if (columns.length > 0 && editingWidget) {
+      if (xColumn && !columns.find((c) => c.name === xColumn)) {
+        const match = columns.find((c) => c.name.toLowerCase() === xColumn.toLowerCase());
+        if (match) setXColumn(match.name);
+      }
+      if (yColumn && !columns.find((c) => c.name === yColumn)) {
+        const match = columns.find((c) => c.name.toLowerCase() === yColumn.toLowerCase());
+        if (match) setYColumn(match.name);
+      }
+    }
+  }, [columns, editingWidget, xColumn, yColumn]);
 
   // Auto-select first sensible columns
   useEffect(() => {
@@ -207,15 +280,18 @@ export function WidgetConfigPanel({
     dateGranularity: xColumnType === "date" && dateGranularity ? (dateGranularity as WidgetConfig["dateGranularity"]) : undefined,
     yColumn,
     aggregation,
-    y2Column: chartType === "combo" && y2Column ? y2Column : undefined,
-    y2Aggregation: chartType === "combo" && y2Column ? y2Aggregation : undefined,
+    y2Column: (chartType === "combo" || chartType === "scatter") && y2Column ? y2Column : undefined,
+    y2Aggregation: (chartType === "combo" || chartType === "scatter") && y2Column ? y2Aggregation : undefined,
     groupByColumn: groupByColumn || undefined,
     sortBy: sortBy as WidgetConfig["sortBy"],
     limit: limit ? parseInt(limit, 10) : undefined,
     filters,
+    visualizationOptions: Object.keys(vizOptions).length > 0 ? vizOptions : undefined,
+    interactions: interactions.enabled ? interactions : undefined,
+    dateField: dateFieldCfg.enabled ? dateFieldCfg : undefined,
     colSpan,
     position: 0,
-  }), [chartType, chartSubtype, title, sourceKind, sourceId, xColumn, xColumnType, dateGranularity, yColumn, aggregation, y2Column, y2Aggregation, groupByColumn, sortBy, limit, filters, colSpan]);
+  }), [chartType, chartSubtype, title, sourceKind, sourceId, xColumn, xColumnType, dateGranularity, yColumn, aggregation, y2Column, y2Aggregation, groupByColumn, sortBy, limit, filters, vizOptions, interactions, dateFieldCfg, colSpan]);
 
   const canFetchPreview = !!sourceId && !!xColumn && !!yColumn;
 
@@ -268,9 +344,18 @@ export function WidgetConfigPanel({
 
   const handleChartTypeChange = (type: WidgetType) => {
     setChartType(type);
-    const def = CHART_TYPES.find((ct) => ct.type === type);
-    if (def && def.subtypes.length > 0) setChartSubtype(def.subtypes[0].value as ChartSubtype);
-    else setChartSubtype("");
+    const variants = getChartDefinition(type)?.variants ?? [];
+    const first = variants[0];
+    setChartSubtype((first?.value ?? "") as ChartSubtype);
+    // Seed registry defaults for the type, then overlay the first variant's preset.
+    setVizOptions({ ...getDefaultOptions(type), ...(first?.defaultOptions ?? {}) });
+  };
+
+  // Selecting a "style" applies that variant's option preset on top of current options.
+  const handleSubtypeChange = (value: string) => {
+    setChartSubtype(value as ChartSubtype);
+    const preset = variantDefs.find((v) => v.value === value)?.defaultOptions;
+    if (preset) setVizOptions((prev) => ({ ...prev, ...preset }));
   };
 
   return (
@@ -312,13 +397,13 @@ export function WidgetConfigPanel({
             </div>
           </div>
 
-          {/* Chart Subtype */}
-          {currentChartDef && currentChartDef.subtypes.length > 0 && (
+          {/* Chart Subtype (variant / style presets, registry-driven) */}
+          {variantDefs.length > 1 && (
             <div>
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Style</label>
               <div className="flex flex-wrap gap-1">
-                {currentChartDef.subtypes.map((st) => (
-                  <button key={st.value} type="button" onClick={() => setChartSubtype(st.value as ChartSubtype)}
+                {variantDefs.map((st) => (
+                  <button key={st.value || "default"} type="button" onClick={() => handleSubtypeChange(st.value)}
                     className={`rounded-md border px-2 py-1 text-[10px] font-medium ${chartSubtype === st.value ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-400 hover:border-indigo-300"}`}>
                     {st.label}
                   </button>
@@ -365,6 +450,23 @@ export function WidgetConfigPanel({
               )}
             </div>
           </div>
+
+          {/* Per-type field-role hints */}
+          {chartType === "sankey" && (
+            <p className="rounded-md bg-amber-50 px-2 py-1 text-[10px] text-amber-700">
+              Sankey: X = source, <strong>Group By</strong> = target, Y = flow value.
+            </p>
+          )}
+          {chartType === "scatter" && (
+            <p className="rounded-md bg-sky-50 px-2 py-1 text-[10px] text-sky-700">
+              Scatter: X &amp; Y are numeric measures. For a bubble, set Secondary Y as the size (Z) and enable Bubble in Chart Options.
+            </p>
+          )}
+          {(chartType === "radar" || chartType === "radial_bar" || chartType === "treemap" || chartType === "funnel") && (
+            <p className="rounded-md bg-violet-50 px-2 py-1 text-[10px] text-violet-700">
+              X = category/label, Y = value{chartType === "radar" ? ". Use Group By to compare multiple entities." : "."}
+            </p>
+          )}
 
           {/* Date granularity */}
           {xColumnType === "date" && (
@@ -424,10 +526,12 @@ export function WidgetConfigPanel({
             </div>
           </div>
 
-          {/* Combo Y2 */}
-          {chartType === "combo" && (
+          {/* Combo Y2 / Scatter Z */}
+          {(chartType === "combo" || chartType === "scatter") && (
             <div className="rounded-md border border-dashed border-indigo-200 bg-indigo-50/30 p-2">
-              <label className="mb-1 block text-[10px] font-semibold text-indigo-600">Secondary Y (Line)</label>
+              <label className="mb-1 block text-[10px] font-semibold text-indigo-600">
+                {chartType === "scatter" ? "Bubble size (Z, optional)" : "Secondary Y (Line)"}
+              </label>
               <div className="grid grid-cols-2 gap-2">
                 <select className="rounded-md border border-slate-200 px-2 py-1 text-[10px]" value={y2Column} onChange={(e) => setY2Column(e.target.value)}>
                   <option value="">Select...</option>
@@ -470,6 +574,110 @@ export function WidgetConfigPanel({
               ))}
             </div>
           </div>
+
+          {/* Chart Options (registry-driven) */}
+          {isChart && (
+            <div className="border-t border-slate-100 pt-3">
+              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Chart Options</label>
+              <ChartOptionsPanel chartType={chartType} value={vizOptions} onChange={setVizOptions} />
+            </div>
+          )}
+
+          {/* Interactions (drilldown / cross-filter) */}
+          {isChart && (
+            <div className="border-t border-slate-100 pt-3">
+              <label className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Interactions
+                <label className="flex items-center gap-1 text-[10px] font-medium normal-case text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={!!interactions.enabled}
+                    onChange={(e) => setInteractions((p) => ({ ...p, enabled: e.target.checked, clickAction: p.clickAction && p.clickAction !== "none" ? p.clickAction : "cross_filter", applyTo: "dashboard" }))}
+                  />
+                  Enable click
+                </label>
+              </label>
+              {interactions.enabled && (
+                <div className="space-y-2">
+                  <div>
+                    <label className="mb-1 block text-[10px] font-medium text-slate-500">Click action</label>
+                    <select
+                      className="w-full rounded border border-slate-200 px-2 py-1 text-[11px]"
+                      value={interactions.clickAction ?? "none"}
+                      onChange={(e) => setInteractions((p) => ({ ...p, clickAction: e.target.value as WidgetClickAction }))}
+                    >
+                      {CLICK_ACTIONS.map((a) => (<option key={a.value} value={a.value}>{a.label}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-medium text-slate-500">Source field</label>
+                    <select
+                      className="w-full rounded border border-slate-200 px-2 py-1 text-[11px]"
+                      value={interactions.sourceField ?? ""}
+                      onChange={(e) => setInteractions((p) => ({ ...p, sourceField: e.target.value || undefined }))}
+                    >
+                      <option value="">X axis ({xColumn || "—"})</option>
+                      {columns.map((c) => (<option key={c.name} value={c.name}>{c.name}</option>))}
+                    </select>
+                  </div>
+                  {drilldownSelected && (
+                    sourceKind === "query" ? (
+                      <div>
+                        <label className="mb-1 block text-[10px] font-medium text-slate-500">Drilldown scope</label>
+                        <select
+                          className="w-full rounded border border-slate-200 px-2 py-1 text-[11px]"
+                          value={interactions.scopeId ?? ""}
+                          onChange={(e) => setInteractions((p) => ({ ...p, scopeId: e.target.value ? Number(e.target.value) : undefined }))}
+                        >
+                          <option value="">Auto (match clicked field)</option>
+                          {scopesData.map((s) => (
+                            <option key={s.id} value={s.id}>{s.source_field} → query #{s.target_query_id}.{s.target_field}</option>
+                          ))}
+                        </select>
+                        {scopesData.length === 0 && (
+                          <p className="mt-1 text-[10px] text-amber-600">No scopes on this query. Create one in the Scopes tab.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-amber-600">Drilldown uses query scopes — set this widget&apos;s data source to a saved query to enable it.</p>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Date field mapping (for dashboard date-range filter) */}
+          {isChart && (
+            <div className="border-t border-slate-100 pt-3">
+              <label className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Date Filter
+                <label className="flex items-center gap-1 text-[10px] font-medium normal-case text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={!!dateFieldCfg.enabled}
+                    onChange={(e) => setDateFieldCfg((p) => ({ ...p, enabled: e.target.checked, field: p.field || dateColumns[0]?.name || xColumn }))}
+                  />
+                  Respond to date range
+                </label>
+              </label>
+              {dateFieldCfg.enabled && (
+                <div>
+                  <label className="mb-1 block text-[10px] font-medium text-slate-500">Date field</label>
+                  <select
+                    className="w-full rounded border border-slate-200 px-2 py-1 text-[11px]"
+                    value={dateFieldCfg.field ?? ""}
+                    onChange={(e) => setDateFieldCfg((p) => ({ ...p, field: e.target.value || undefined }))}
+                  >
+                    <option value="">Select a date column…</option>
+                    {(dateColumns.length > 0 ? dateColumns : columns).map((c) => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right: Live Preview */}

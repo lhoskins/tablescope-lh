@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import sys
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine

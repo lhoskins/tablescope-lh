@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { Dashboard, DashboardConfig } from "./types";
-import { CreateDashboardWizard } from "./CreateDashboardWizard";
 import { DashboardViewer } from "./DashboardViewer";
+import { AIPromptBar } from "@/components/ai/AIPromptBar";
 
 type SavedQuery = { id: number; name: string; sql_text: string | null };
 type Datasource = { viewName: string; fileName: string };
@@ -25,8 +25,30 @@ const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
 
 export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: Props) {
   const queryClient = useQueryClient();
-  const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<Dashboard | null>(null);
+  const [aiDashLoading, setAiDashLoading] = useState(false);
+  const [aiDashError, setAiDashError] = useState<string | null>(null);
+  const [aiDashSuccess, setAiDashSuccess] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const handleAIGenerateDashboard = useCallback(async (prompt: string) => {
+    setAiDashLoading(true);
+    setAiDashError(null);
+    setAiDashSuccess(null);
+    try {
+      const result = await apiClient.post<{ dashboard_id: number; dashboard_name: string; widgets_created: number }>(
+        "/api/ai/actions/generate-and-save-dashboard",
+        { project_id: projectId, prompt },
+      );
+      setAiDashSuccess(`Dashboard created: ${result.dashboard_name} (${result.widgets_created} widgets)`);
+      queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
+    } catch (err) {
+      setAiDashError(err instanceof Error ? err.message : "AI dashboard generation failed");
+    } finally {
+      setAiDashLoading(false);
+    }
+  }, [projectId, queryClient]);
 
   const { data: dashboards = [], isLoading } = useQuery<Dashboard[]>({
     queryKey: ["project-dashboards", projectId],
@@ -38,16 +60,32 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
       apiClient.post<Dashboard>(`/api/projects/${projectId}/dashboards`, payload),
     onSuccess: (newDash) => {
       queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
-      setCreating(false);
       setViewing(newDash);
     },
   });
+
+  const handleCreateDashboard = useCallback(() => {
+    createMutation.mutate({
+      name: `Dashboard ${(dashboards.length || 0) + 1}`,
+      description: "",
+      config: { widgets: [], globalFilters: [] },
+    });
+  }, [createMutation, dashboards.length]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
       apiClient.delete(`/api/projects/${projectId}/dashboards/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
+    },
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      apiClient.put(`/api/projects/${projectId}/dashboards/${id}`, { name }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
+      setRenamingId(null);
     },
   });
 
@@ -65,31 +103,32 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
     );
   }
 
-  // Creating a dashboard
-  if (creating) {
-    return (
-      <CreateDashboardWizard
-        projectId={projectId}
-        savedQueries={savedQueries}
-        datasources={datasources}
-        onCancel={() => setCreating(false)}
-        onSubmit={(payload) => createMutation.mutate(payload)}
-        isSubmitting={createMutation.isPending}
-      />
-    );
-  }
-
   // Dashboard list
   return (
     <div>
       {canEdit && (
-        <div className="mb-4">
+        <div className="mb-4 flex items-start gap-4">
           <button
-            onClick={() => setCreating(true)}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90"
+            onClick={handleCreateDashboard}
+            disabled={createMutation.isPending}
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 whitespace-nowrap disabled:opacity-50"
           >
-            + Create Dashboard
+            {createMutation.isPending ? "Creating..." : "+ Create Dashboard"}
           </button>
+          <div className="flex-1">
+            <AIPromptBar
+              placeholder="Describe the dashboard you want to generate…"
+              submitLabel="Generate Dashboard"
+              onSubmit={handleAIGenerateDashboard}
+              loading={aiDashLoading}
+            />
+            {aiDashError && (
+              <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{aiDashError}</div>
+            )}
+            {aiDashSuccess && (
+              <div className="mt-2 rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">{aiDashSuccess}</div>
+            )}
+          </div>
         </div>
       )}
 
@@ -117,9 +156,51 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
               >
                 <div
                   className="flex-1 cursor-pointer"
-                  onClick={() => setViewing(dash)}
+                  onClick={() => { if (renamingId !== dash.id) setViewing(dash); }}
                 >
-                  <div className="font-semibold text-slate-900 text-sm">{dash.name}</div>
+                  {renamingId === dash.id ? (
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && renameValue.trim()) {
+                            renameMutation.mutate({ id: dash.id, name: renameValue.trim() });
+                          } else if (e.key === "Escape") {
+                            setRenamingId(null);
+                          }
+                        }}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-sm font-semibold"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => renameValue.trim() && renameMutation.mutate({ id: dash.id, name: renameValue.trim() })}
+                        className="text-xs text-brand hover:text-brand/80"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setRenamingId(null)}
+                        className="text-xs text-slate-400 hover:text-slate-600"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      className="font-semibold text-slate-900 text-sm"
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        if (canEdit) {
+                          setRenamingId(dash.id);
+                          setRenameValue(dash.name);
+                        }
+                      }}
+                    >
+                      {dash.name}
+                    </div>
+                  )}
                   <div className="mt-0.5 text-xs text-slate-400">
                     {widgetCount} widget{widgetCount !== 1 ? "s" : ""} ·{" "}
                     Updated {new Date(dash.updated_at).toLocaleDateString()}
@@ -130,20 +211,32 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
                     {badge.label}
                   </span>
                   {canEdit && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`Delete dashboard "${dash.name}"?`)) {
-                          deleteMutation.mutate(dash.id);
-                        }
-                      }}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
-                      title="Delete"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRenamingId(dash.id);
+                          setRenameValue(dash.name);
+                        }}
+                        className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Delete dashboard "${dash.name}"?`)) {
+                            deleteMutation.mutate(dash.id);
+                          }
+                        }}
+                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                        title="Delete"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </>
                   )}
                   <span
                     onClick={() => setViewing(dash)}
