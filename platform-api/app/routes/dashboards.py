@@ -320,6 +320,24 @@ async def execute_widget_query(
     if not _IDENTIFIER_RE.match(body.view_name):
         raise HTTPException(status_code=400, detail=f"Invalid view name: {body.view_name!r}")
 
+    # Defense-in-depth: the requested view must be one of this project's own
+    # datasources. The per-user VDB already isolates tenants, but this rejects
+    # any widget (e.g. an AI-hallucinated one) that references a foreign table.
+    from app.routes.projects import list_project_datasources
+
+    project_sources = await list_project_datasources(
+        project_id=project_id,
+        include_archived=True,
+        session=session,
+        context=context,
+    )
+    allowed_views = {ds.get("viewName") for ds in project_sources}
+    if body.view_name not in allowed_views:
+        raise HTTPException(
+            status_code=403,
+            detail=f"View {body.view_name!r} is not a datasource of this project",
+        )
+
     sql = _build_widget_sql(body)
 
     database = await _resolve_vdb(session=session, context=context, project_id=project_id)

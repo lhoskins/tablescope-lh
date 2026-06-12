@@ -460,6 +460,9 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     prompt = (
         f"{context_text}\n\n"
         f"Allowed tables: {', '.join(allowed_tables)}\n\n"
+        "CRITICAL: Use ONLY the tables listed in 'Allowed tables' above. Do NOT "
+        "invent or assume any other tables (e.g. Sales, Product, Customers) — "
+        "every widget's SQL must reference only those exact table names.\n\n"
         f"{teiid_rules}\n"
         f"{user_instruction}"
         "Based on the available tables and their columns, suggest a dashboard "
@@ -514,11 +517,26 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     except (json.JSONDecodeError, KeyError):
         logger.warning("Failed to parse dashboard suggestions: %s", raw[:200])
 
-    # Post-process: fix Teiid GROUP BY aliases in each widget's SQL
+    # Post-process: fix Teiid GROUP BY aliases in each widget's SQL, then drop
+    # any widget whose SQL references a table outside the project's allowed set.
+    # The LLM occasionally hallucinates generic tables (e.g. "Sales", "Product")
+    # that do not belong to this tenant/project; those must never reach the user.
     for s in suggestions:
+        kept_widgets = []
         for w in s.get("widgets", []):
-            if w.get("sql"):
-                w["sql"] = _clean_sql(w["sql"])
+            sql = w.get("sql")
+            if sql:
+                w["sql"] = _clean_sql(sql)
+                try:
+                    validate_sql(w["sql"], allowed_tables)
+                except SQLValidationError as e:
+                    logger.warning(
+                        "Dropping suggested widget %r: %s",
+                        w.get("title", "untitled"), e.reason,
+                    )
+                    continue
+            kept_widgets.append(w)
+        s["widgets"] = kept_widgets
 
     update_activity(req.user_id, req.tenant_id, req.project_id)
 
