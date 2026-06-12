@@ -3,10 +3,18 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { WidgetConfig, WidgetType, ChartSubtype, WidgetFilter, ColumnInfo, VisualizationOptions } from "./types";
+import type { WidgetConfig, WidgetType, ChartSubtype, WidgetFilter, ColumnInfo, VisualizationOptions, WidgetInteractions, WidgetClickAction, WidgetDateField } from "./types";
+import type { QueryScope } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { ChartOptionsPanel } from "./ChartOptionsPanel";
 import { getDefaultOptions } from "@/lib/visualizations/chartRegistry";
+
+const CLICK_ACTIONS: { value: WidgetClickAction; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "cross_filter", label: "Filter dashboard" },
+  { value: "drilldown", label: "Drill down to details" },
+  { value: "drilldown_and_filter", label: "Filter + show details" },
+];
 
 // ── Chart type / subtype definitions ────────────────────────────────
 type SubtypeDef = { value: ChartSubtype | ""; label: string };
@@ -120,6 +128,12 @@ export function WidgetConfigPanel({
   const [vizOptions, setVizOptions] = useState<VisualizationOptions>(
     editingWidget?.visualizationOptions ?? {}
   );
+  const [interactions, setInteractions] = useState<WidgetInteractions>(
+    editingWidget?.interactions ?? { enabled: false, clickAction: "none" }
+  );
+  const [dateFieldCfg, setDateFieldCfg] = useState<WidgetDateField>(
+    editingWidget?.dateField ?? { enabled: false }
+  );
 
   const viewName = sourceKind === "datasource" ? sourceId : "";
   const selectedQuery = sourceKind === "query" ? savedQueries.find((q) => q.id === Number(sourceId)) : null;
@@ -181,6 +195,20 @@ export function WidgetConfigPanel({
   const xColumnType = columns.find((c) => c.name === xColumn)?.type;
   const currentChartDef = CHART_TYPES.find((ct) => ct.type === chartType);
 
+  // Existing query scopes for the source query — used to offer a drilldown target.
+  const { data: scopesData = [] } = useQuery({
+    queryKey: ["query-scopes", selectedQuery?.id],
+    queryFn: async () => {
+      if (!selectedQuery) return [] as QueryScope[];
+      return apiClient.get<QueryScope[]>(`/api/query-scopes?query_id=${selectedQuery.id}`);
+    },
+    enabled: sourceKind === "query" && !!selectedQuery,
+  });
+
+  const isChart = chartType !== "kpi" && chartType !== "table";
+  const drilldownSelected =
+    interactions.clickAction === "drilldown" || interactions.clickAction === "drilldown_and_filter";
+
   // Auto-detect X/Y for AI-generated widgets if columns loaded but names don't match
   useEffect(() => {
     if (columns.length > 0 && editingWidget) {
@@ -233,9 +261,11 @@ export function WidgetConfigPanel({
     limit: limit ? parseInt(limit, 10) : undefined,
     filters,
     visualizationOptions: Object.keys(vizOptions).length > 0 ? vizOptions : undefined,
+    interactions: interactions.enabled ? interactions : undefined,
+    dateField: dateFieldCfg.enabled ? dateFieldCfg : undefined,
     colSpan,
     position: 0,
-  }), [chartType, chartSubtype, title, sourceKind, sourceId, xColumn, xColumnType, dateGranularity, yColumn, aggregation, y2Column, y2Aggregation, groupByColumn, sortBy, limit, filters, vizOptions, colSpan]);
+  }), [chartType, chartSubtype, title, sourceKind, sourceId, xColumn, xColumnType, dateGranularity, yColumn, aggregation, y2Column, y2Aggregation, groupByColumn, sortBy, limit, filters, vizOptions, interactions, dateFieldCfg, colSpan]);
 
   const canFetchPreview = !!sourceId && !!xColumn && !!yColumn;
 
@@ -494,10 +524,106 @@ export function WidgetConfigPanel({
           </div>
 
           {/* Chart Options (registry-driven) */}
-          {chartType !== "kpi" && chartType !== "table" && (
+          {isChart && (
             <div className="border-t border-slate-100 pt-3">
               <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Chart Options</label>
               <ChartOptionsPanel chartType={chartType} value={vizOptions} onChange={setVizOptions} />
+            </div>
+          )}
+
+          {/* Interactions (drilldown / cross-filter) */}
+          {isChart && (
+            <div className="border-t border-slate-100 pt-3">
+              <label className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Interactions
+                <label className="flex items-center gap-1 text-[10px] font-medium normal-case text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={!!interactions.enabled}
+                    onChange={(e) => setInteractions((p) => ({ ...p, enabled: e.target.checked, clickAction: p.clickAction && p.clickAction !== "none" ? p.clickAction : "cross_filter", applyTo: "dashboard" }))}
+                  />
+                  Enable click
+                </label>
+              </label>
+              {interactions.enabled && (
+                <div className="space-y-2">
+                  <div>
+                    <label className="mb-1 block text-[10px] font-medium text-slate-500">Click action</label>
+                    <select
+                      className="w-full rounded border border-slate-200 px-2 py-1 text-[11px]"
+                      value={interactions.clickAction ?? "none"}
+                      onChange={(e) => setInteractions((p) => ({ ...p, clickAction: e.target.value as WidgetClickAction }))}
+                    >
+                      {CLICK_ACTIONS.map((a) => (<option key={a.value} value={a.value}>{a.label}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-medium text-slate-500">Source field</label>
+                    <select
+                      className="w-full rounded border border-slate-200 px-2 py-1 text-[11px]"
+                      value={interactions.sourceField ?? ""}
+                      onChange={(e) => setInteractions((p) => ({ ...p, sourceField: e.target.value || undefined }))}
+                    >
+                      <option value="">X axis ({xColumn || "—"})</option>
+                      {columns.map((c) => (<option key={c.name} value={c.name}>{c.name}</option>))}
+                    </select>
+                  </div>
+                  {drilldownSelected && (
+                    sourceKind === "query" ? (
+                      <div>
+                        <label className="mb-1 block text-[10px] font-medium text-slate-500">Drilldown scope</label>
+                        <select
+                          className="w-full rounded border border-slate-200 px-2 py-1 text-[11px]"
+                          value={interactions.scopeId ?? ""}
+                          onChange={(e) => setInteractions((p) => ({ ...p, scopeId: e.target.value ? Number(e.target.value) : undefined }))}
+                        >
+                          <option value="">Auto (match clicked field)</option>
+                          {scopesData.map((s) => (
+                            <option key={s.id} value={s.id}>{s.source_field} → query #{s.target_query_id}.{s.target_field}</option>
+                          ))}
+                        </select>
+                        {scopesData.length === 0 && (
+                          <p className="mt-1 text-[10px] text-amber-600">No scopes on this query. Create one in the Scopes tab.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-amber-600">Drilldown uses query scopes — set this widget&apos;s data source to a saved query to enable it.</p>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Date field mapping (for dashboard date-range filter) */}
+          {isChart && (
+            <div className="border-t border-slate-100 pt-3">
+              <label className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Date Filter
+                <label className="flex items-center gap-1 text-[10px] font-medium normal-case text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={!!dateFieldCfg.enabled}
+                    onChange={(e) => setDateFieldCfg((p) => ({ ...p, enabled: e.target.checked, field: p.field || dateColumns[0]?.name || xColumn }))}
+                  />
+                  Respond to date range
+                </label>
+              </label>
+              {dateFieldCfg.enabled && (
+                <div>
+                  <label className="mb-1 block text-[10px] font-medium text-slate-500">Date field</label>
+                  <select
+                    className="w-full rounded border border-slate-200 px-2 py-1 text-[11px]"
+                    value={dateFieldCfg.field ?? ""}
+                    onChange={(e) => setDateFieldCfg((p) => ({ ...p, field: e.target.value || undefined }))}
+                  >
+                    <option value="">Select a date column…</option>
+                    {(dateColumns.length > 0 ? dateColumns : columns).map((c) => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           )}
         </div>

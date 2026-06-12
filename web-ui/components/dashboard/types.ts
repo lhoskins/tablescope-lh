@@ -80,6 +80,31 @@ export type WidgetFilter = {
   value2?: number; // for "between"
 };
 
+/**
+ * Click-interaction configuration for a widget. Stored in widget JSON so no
+ * migration is required. `sourceField` defaults to the widget's xColumn when
+ * unset. `scopeId` references an existing query_scope used for drilldown.
+ */
+export type WidgetClickAction =
+  | "none"
+  | "cross_filter"
+  | "drilldown"
+  | "drilldown_and_filter";
+
+export type WidgetInteractions = {
+  enabled?: boolean;
+  clickAction?: WidgetClickAction;
+  sourceField?: string;
+  scopeId?: number;
+  applyTo?: "dashboard";
+};
+
+/** Maps a widget to the date column the dashboard date-range filter applies to. */
+export type WidgetDateField = {
+  enabled?: boolean;
+  field?: string;
+};
+
 export type WidgetConfig = {
   id: string;
   type: WidgetType;
@@ -104,6 +129,10 @@ export type WidgetConfig = {
   filters: WidgetFilter[];
   // Option-driven visualization settings (registry-backed)
   visualizationOptions?: VisualizationOptions;
+  // Click interaction config (drilldown / cross-filter)
+  interactions?: WidgetInteractions;
+  // Date field mapping for the dashboard date-range filter
+  dateField?: WidgetDateField;
   // Layout (grid-based)
   colSpan: number;
   rowSpan?: number;
@@ -147,4 +176,35 @@ export type Dashboard = {
 export type ColumnInfo = {
   name: string;
   type: "date" | "string" | "number" | "boolean";
+};
+
+// ── Dashboard runtime interactivity (ephemeral, not persisted) ────────
+
+/** A normalized click event emitted by a chart element. */
+export type ChartClickEvent = {
+  sourceField: string;
+  value: string | number;
+  label: string;
+};
+
+/** A cross-filter created by clicking a chart in cross-filter mode. */
+export type CrossFilter = {
+  id: string;
+  sourceWidgetId: string;
+  sourceField: string;
+  value: string | number;
+  label: string;
+};
+
+/** The active dashboard-level date range. */
+export type DashboardDateRange = {
+  preset: string; // e.g. "last_30_days", "custom"
+  start: string; // ISO date (yyyy-mm-dd)
+  end: string; // ISO date (yyyy-mm-dd)
+};
+
+/** Ephemeral dashboard interaction state (date range + cross-filters). */
+export type DashboardRuntimeState = {
+  dateRange: DashboardDateRange | null;
+  crossFilters: CrossFilter[];
 };

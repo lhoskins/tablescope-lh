@@ -22,9 +22,10 @@ import {
   LabelList,
   ReferenceLine,
 } from "recharts";
-import type { WidgetConfig, ReferenceLineConfig, VisualizationOptions } from "./types";
+import type { WidgetConfig, ReferenceLineConfig, VisualizationOptions, ChartClickEvent } from "./types";
 import { withDefaults } from "@/lib/visualizations/chartRegistry";
 import { preparePieData } from "@/lib/visualizations/dataTransforms";
+import { normalizeCartesianClick, normalizePieClick, type CartesianClickState } from "@/lib/dashboard/chartClick";
 
 /** Renders configured reference lines onto a cartesian chart. */
 function renderReferenceLines(refs: ReferenceLineConfig[] | undefined, yAxisId?: string) {
@@ -55,6 +56,8 @@ const COLORS = [
 type Props = {
   widget: WidgetConfig;
   data: Array<Record<string, unknown>>;
+  /** Fired when a chart element is clicked (bar/line point/pie slice). */
+  onElementClick?: (event: ChartClickEvent) => void;
 };
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -219,10 +222,25 @@ function DonutCenterLabel({ data, yKey }: { data: Props["data"]; yKey: string })
 
 /* ── Main Renderer ──────────────────────────────────────── */
 
-export function WidgetRenderer({ widget, data }: Props) {
+export function WidgetRenderer({ widget, data, onElementClick }: Props) {
   const xKey = getXKey(widget, data);
   const yKey = getYKey(widget, data);
   const y2Key = getY2Key(widget, data);
+
+  // Field a click emits a filter/drilldown value for; defaults to the X column.
+  const clickField = widget.interactions?.sourceField || widget.xColumn || xKey;
+  const clickable = !!onElementClick && widget.interactions?.enabled === true && (widget.interactions?.clickAction ?? "none") !== "none";
+  const handleCartesianClick = (state: CartesianClickState) => {
+    if (!clickable || !onElementClick) return;
+    const ev = normalizeCartesianClick(state, clickField);
+    if (ev) onElementClick(ev);
+  };
+  const handlePieClick = (entry: Record<string, unknown> | null | undefined) => {
+    if (!clickable || !onElementClick) return;
+    const ev = normalizePieClick(entry, clickField, xKey);
+    if (ev) onElementClick(ev);
+  };
+  const clickCursor = clickable ? { cursor: "pointer" as const } : undefined;
   const hasGroupBy = !!widget.groupByColumn && data.length > 0 && Object.keys(data[0] ?? {}).includes(widget.groupByColumn);
   const sub = widget.chartSubtype ?? "";
   const isHorizontal = sub === "horizontal_bar" || sub === "stacked_horizontal";
@@ -323,7 +341,7 @@ export function WidgetRenderer({ widget, data }: Props) {
         const dot = opts.showDots ? { r: 2 } : false;
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 25, left: 10 }}>
+            <LineChart data={chartData} onClick={handleCartesianClick} style={clickCursor} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 25, left: 10 }}>
               {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />}
               {!tiny && <XAxis dataKey={xKey} {...xAxisProps} />}
               {!tiny && <YAxis yAxisId="left" {...yAxisProps} tickFormatter={fmtAxis} />}
@@ -371,7 +389,7 @@ export function WidgetRenderer({ widget, data }: Props) {
         const minBar = opts.minPointSize && opts.minPointSize > 0 ? opts.minPointSize : 0;
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout={barHorizontal ? "vertical" : "horizontal"} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 40, left: barHorizontal ? 10 : 50 }}>
+            <BarChart data={chartData} onClick={handleCartesianClick} style={clickCursor} layout={barHorizontal ? "vertical" : "horizontal"} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 40, left: barHorizontal ? 10 : 50 }}>
               {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!barHorizontal} horizontal={barHorizontal} />}
               {tiny ? null : barHorizontal ? (
                 <>
@@ -431,7 +449,7 @@ export function WidgetRenderer({ widget, data }: Props) {
         const areaDot = opts.showDots ? { r: 2 } : false;
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 25, left: 10 }}>
+            <AreaChart data={chartData} onClick={handleCartesianClick} style={clickCursor} stackOffset={isPercentStack ? "expand" : undefined} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 25, left: 10 }}>
               <defs>
                 {seriesNames.length > 0 ? (
                   seriesNames.map((name, i) => (
@@ -511,6 +529,8 @@ export function WidgetRenderer({ widget, data }: Props) {
                 data={pieData}
                 dataKey={pieDataKey}
                 nameKey={xKey}
+                onClick={handlePieClick}
+                style={clickCursor}
                 cx="50%"
                 cy="50%"
                 innerRadius={`${innerPct}%`}
@@ -552,7 +572,7 @@ export function WidgetRenderer({ widget, data }: Props) {
       case "combo":
         return (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 25, left: 10 }}>
+            <ComposedChart data={chartData} onClick={handleCartesianClick} style={clickCursor} margin={{ top: 10, right: 20, bottom: 25, left: 10 }}>
               {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />}
               <XAxis dataKey={xKey} {...xAxisProps} />
               <YAxis yAxisId="left" {...yAxisProps} tickFormatter={fmtAxis} />
