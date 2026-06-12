@@ -127,50 +127,10 @@ resource "aws_security_group" "tablescope" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Web UI (Next.js)
-  ingress {
-    description = "Web UI"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_app_cidrs
-  }
-
-  # Platform API (FastAPI)
-  ingress {
-    description = "Platform API"
-    from_port   = 8000
-    to_port     = 8000
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_app_cidrs
-  }
-
-  # Teiid PG wire protocol
-  ingress {
-    description = "Teiid PG wire"
-    from_port   = 35442
-    to_port     = 35442
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_app_cidrs
-  }
-
-  # Teiid servlet
-  ingress {
-    description = "Teiid servlet"
-    from_port   = 8095
-    to_port     = 8095
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_app_cidrs
-  }
-
-  # WildFly management console
-  ingress {
-    description = "WildFly management"
-    from_port   = 9990
-    to_port     = 9990
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_app_cidrs
-  }
+  # The Web UI (3000), Platform API (8000), and Teiid/WildFly data-engine ports
+  # (8095, 9990, 35442) are intentionally NOT exposed publicly. The Web UI and
+  # API are served only through the nginx reverse proxy on 443; the data engine
+  # is reached over the per-tenant site-to-site VPN.
 
   # All outbound
   egress {
