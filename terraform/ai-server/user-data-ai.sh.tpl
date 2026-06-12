@@ -77,7 +77,7 @@ sudo -u ubuntu git checkout "${branch}"
 cat > "$WORK_DIR/ai-server/.env" <<EOF
 OLLAMA_URL=http://ollama:11434
 QDRANT_URL=http://qdrant:6333
-TABLESCOPE_APP_URL=http://${app_server_ip}:8000
+TABLESCOPE_APP_URL=${app_base_url}
 AI_SIGNING_SECRET=${ai_signing_secret}
 IDLE_TIMEOUT_MINUTES=${idle_timeout_minutes}
 DATA_MOUNT=/mnt/tablescope-ai

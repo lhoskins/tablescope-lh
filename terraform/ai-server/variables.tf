@@ -58,6 +58,12 @@ variable "app_server_ip" {
   default     = "13.57.117.13"
 }
 
+variable "app_base_url" {
+  description = "Base URL of the platform-api as reached by the AI server. Use the public HTTPS endpoint (nginx-proxied); the raw :8000 port is firewalled off."
+  type        = string
+  default     = "https://app.tablescope.cloud"
+}
+
 variable "key_name" {
   description = "Existing EC2 key pair name (leave empty to generate new)"
   type        = string
@@ -86,13 +92,13 @@ variable "ai_signing_secret" {
 variable "schedule_start_cron" {
   description = "EventBridge cron for starting the AI server (UTC)"
   type        = string
-  default     = "cron(0 15 ? * MON-FRI *)"  # 8 AM PT
+  default     = "cron(0 15 ? * MON-FRI *)" # 8 AM PT
 }
 
 variable "schedule_stop_cron" {
   description = "EventBridge cron for stopping the AI server (UTC)"
   type        = string
-  default     = "cron(0 1 ? * TUE-SAT *)"   # 6 PM PT
+  default     = "cron(0 1 ? * TUE-SAT *)" # 6 PM PT
 }
 
 variable "idle_timeout_minutes" {

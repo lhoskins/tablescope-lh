@@ -199,11 +199,11 @@ data "aws_ami" "ubuntu" {
 # ---------------------------------------------------------------------------
 
 resource "aws_instance" "ai_server" {
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
-  key_name               = local.key_name
-  subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.ai_server.id]
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = var.instance_type
+  key_name                    = local.key_name
+  subnet_id                   = aws_subnet.public.id
+  vpc_security_group_ids      = [aws_security_group.ai_server.id]
   availability_zone           = var.availability_zone
   associate_public_ip_address = true
 
@@ -219,6 +219,7 @@ resource "aws_instance" "ai_server" {
     branch               = var.branch
     ai_signing_secret    = var.ai_signing_secret
     app_server_ip        = var.app_server_ip
+    app_base_url         = var.app_base_url
     idle_timeout_minutes = var.idle_timeout_minutes
   })
 
