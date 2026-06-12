@@ -1,10 +1,7 @@
 "use client";
 
 import { useState } from "react";
-
-const API_URL =
-  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL) ||
-  "http://localhost:8000";
+import { getApiBaseUrl } from "@/lib/api-client";
 
 const TOKEN_KEY = "tablescope.token";
 
@@ -24,7 +21,7 @@ export function FileUploader({ onUploaded }: { onUploaded?: (path: string) => vo
         typeof window !== "undefined"
           ? window.localStorage.getItem(TOKEN_KEY)
           : null;
-      const response = await fetch(`${API_URL}/api/upload`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/upload`, {
         method: "POST",
         body: form,
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,

@@ -109,6 +109,24 @@ resource "aws_security_group" "tablescope" {
     cidr_blocks = var.allowed_ssh_cidrs
   }
 
+  # HTTP — Let's Encrypt ACME challenge + redirect to HTTPS
+  ingress {
+    description = "HTTP (ACME + HTTPS redirect)"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # HTTPS — nginx reverse proxy in front of the web UI
+  ingress {
+    description = "HTTPS (nginx reverse proxy)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   # Web UI (Next.js)
   ingress {
     description = "Web UI"

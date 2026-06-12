@@ -115,13 +115,41 @@ services:
       db:
         condition: service_healthy
 
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    depends_on:
+      - web-ui
+      - platform-api
+    # Reload periodically so renewed certificates are picked up without a restart.
+    command: >-
+      /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # Attempt renewal twice a day; certbot only renews when near expiry.
+    entrypoint: >-
+      /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done"
+
   web-ui:
     build:
       context: ./web-ui
     image: tablescope-web-ui:latest
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    # Not published to the host: reachable only via the nginx reverse proxy.
+    expose:
+      - "3000"
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
@@ -174,6 +202,8 @@ volumes:
   postgres_data:
   redis_data:
   teiid_data:
+  certbot_conf:
+  certbot_www:
 
 networks:
   default:
