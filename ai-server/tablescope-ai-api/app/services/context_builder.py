@@ -65,10 +65,26 @@ async def _verify_permissions(
             )
             if resp.status_code == 200:
                 return resp.json()
-    except httpx.RequestError:
-        logger.warning("Could not reach app server for permission check")
+            logger.error(
+                "Permission check returned HTTP %s for tenant=%s project=%s",
+                resp.status_code, tenant_id, project_id,
+            )
+    except httpx.RequestError as e:
+        logger.error("Could not reach app server for permission check: %s", e)
 
-    # Fallback: return basic permission context (for dev/testing)
+    # Fail closed: without a verified permission/context response we must NOT
+    # proceed, otherwise the LLM runs on an empty, ungrounded context and
+    # hallucinates data unrelated to the project. Refuse instead.
+    if settings.require_app_server:
+        raise ContextBuildError(
+            reason=(
+                "Permission service unavailable — refusing to build AI context "
+                "without verified project access"
+            ),
+            denied_type="permission_service_unavailable",
+        )
+
+    # Fallback: return basic permission context (for local dev/testing only)
     return {
         "tenant_id": tenant_id,
         "user_id": user_id,
