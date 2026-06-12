@@ -64,6 +64,13 @@ export type VisualizationOptions = {
   bubble?: boolean;
   zColumn?: string;
   showTrendLine?: boolean;
+  // Animation (animated time series, etc.)
+  animate?: boolean;
+  // Pie two-level (inner ring grouped by a second column)
+  innerGroupColumn?: string;
+  // Bar coloring / cumulative behaviours
+  colorBySign?: boolean;
+  cumulative?: boolean;
   // Radar / Radial bar
   domainMin?: number;
   domainMax?: number;
@@ -83,21 +90,33 @@ export type ChartSubtype =
   | "grouped_bar"      // side-by-side bars (grouped)
   | "horizontal_bar"   // horizontal bars
   | "stacked_horizontal"
+  | "positive_negative" // color bars by sign
+  | "waterfall"         // running cumulative total
+  | "population_pyramid" // mirrored horizontal bars
   // Line variants
   | "smooth_line"      // curved/spline
   | "step_line"        // step function
+  | "dashed_line"
+  | "biaxial_line"
+  | "tiny_line"
+  | "animated_line"
   // Area variants
   | "stacked_area"
   // Pie variants
   | "donut"
+  | "two_level"        // inner ring grouped by a second column
+  | "gauge"            // semi-circle gauge
   // Combo
   | "bar_line"         // bars + overlay line
   // Scatter variants
   | "bubble"
+  | "best_fit"         // scatter + linear trend line
   // Radar variants
   | "scorecard"
   // Radial bar variants
-  | "multi_ring";
+  | "multi_ring"
+  // Treemap variants
+  | "nested";
 
 export type WidgetDataSource = {
   kind: "query" | "datasource" | "custom_sql";

@@ -50,6 +50,8 @@ export interface ChartVariantDefinition {
   /** Maps to WidgetConfig.chartSubtype (empty string = default variant). */
   value: string;
   label: string;
+  /** Option overrides applied when this variant is selected in the editor. */
+  defaultOptions?: Partial<VisualizationOptions>;
 }
 
 export interface ChartTypeDefinition {
@@ -101,6 +103,7 @@ const LINE_OPTIONS: ChartOptionDefinition[] = [
   { key: "showDots", label: "Show points", type: "boolean", group: "style", defaultValue: false },
   { key: "connectNulls", label: "Connect nulls", type: "boolean", group: "advanced", defaultValue: false },
   { key: "dualAxis", label: "Dual Y axis", type: "boolean", group: "advanced", defaultValue: false },
+  { key: "animate", label: "Animate", type: "boolean", group: "advanced", defaultValue: false },
 ];
 
 const CURVE_OPTION: ChartOptionDefinition = {
@@ -393,9 +396,13 @@ export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
     description: "Trend over a continuous or time dimension.",
     requiredFields: ["x", "y"],
     variants: [
-      { value: "", label: "Straight" },
-      { value: "smooth_line", label: "Smooth" },
-      { value: "step_line", label: "Step" },
+      { value: "", label: "Straight", defaultOptions: { curveType: "linear", lineStyle: "solid", dualAxis: false, tinyMode: false } },
+      { value: "smooth_line", label: "Smooth", defaultOptions: { curveType: "monotone" } },
+      { value: "step_line", label: "Step", defaultOptions: { curveType: "step" } },
+      { value: "dashed_line", label: "Dashed", defaultOptions: { lineStyle: "dashed" } },
+      { value: "biaxial_line", label: "Biaxial", defaultOptions: { dualAxis: true } },
+      { value: "animated_line", label: "Animated", defaultOptions: { animate: true } },
+      { value: "tiny_line", label: "Tiny", defaultOptions: { tinyMode: true } },
     ],
     options: LINE_OPTIONS,
     bestFor: ["Time trend", "SLA / cost / volume over time"],
@@ -412,8 +419,8 @@ export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
     description: "Cumulative or volume trend.",
     requiredFields: ["x", "y"],
     variants: [
-      { value: "", label: "Area" },
-      { value: "stacked_area", label: "Stacked" },
+      { value: "", label: "Area", defaultOptions: { stackMode: "none" } },
+      { value: "stacked_area", label: "Stacked", defaultOptions: { stackMode: "stacked" } },
     ],
     options: AREA_OPTIONS,
     bestFor: ["Cumulative trend", "Volume over time"],
@@ -427,11 +434,14 @@ export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
     description: "Compare values across categories.",
     requiredFields: ["x", "y"],
     variants: [
-      { value: "column", label: "Column" },
-      { value: "stacked_bar", label: "Stacked" },
-      { value: "grouped_bar", label: "Grouped" },
-      { value: "horizontal_bar", label: "Horizontal" },
-      { value: "stacked_horizontal", label: "Stacked Horiz." },
+      { value: "column", label: "Column", defaultOptions: { barLayout: "vertical", stackMode: "none" } },
+      { value: "stacked_bar", label: "Stacked", defaultOptions: { barLayout: "vertical", stackMode: "stacked" } },
+      { value: "grouped_bar", label: "Grouped", defaultOptions: { barLayout: "vertical", stackMode: "none" } },
+      { value: "horizontal_bar", label: "Horizontal", defaultOptions: { barLayout: "horizontal", stackMode: "none" } },
+      { value: "stacked_horizontal", label: "Stacked Horiz.", defaultOptions: { barLayout: "horizontal", stackMode: "stacked" } },
+      { value: "positive_negative", label: "Pos / Neg", defaultOptions: { barLayout: "vertical", colorBySign: true } },
+      { value: "waterfall", label: "Waterfall", defaultOptions: { barLayout: "vertical", cumulative: true } },
+      { value: "population_pyramid", label: "Pyramid", defaultOptions: { barLayout: "horizontal" } },
     ],
     options: BAR_OPTIONS,
     bestFor: ["Category comparison", "Top-N rankings (horizontal)"],
@@ -462,8 +472,10 @@ export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
     description: "Part-to-whole distribution.",
     requiredFields: ["x", "y"],
     variants: [
-      { value: "", label: "Pie" },
-      { value: "donut", label: "Donut" },
+      { value: "", label: "Pie", defaultOptions: { innerRadius: 0, startAngle: 90, endAngle: -270 } },
+      { value: "donut", label: "Donut", defaultOptions: { innerRadius: 55, startAngle: 90, endAngle: -270 } },
+      { value: "two_level", label: "Two-level", defaultOptions: { innerRadius: 45 } },
+      { value: "gauge", label: "Gauge", defaultOptions: { innerRadius: 55, startAngle: 180, endAngle: 0, groupSmallSlices: false } },
     ],
     options: PIE_OPTIONS,
     bestFor: ["Small part-to-whole distribution (<= 7 categories)"],
@@ -480,8 +492,9 @@ export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
     description: "Correlation between two numeric measures; bubble adds a third.",
     requiredFields: ["x", "y"],
     variants: [
-      { value: "", label: "Scatter" },
-      { value: "bubble", label: "Bubble" },
+      { value: "", label: "Scatter", defaultOptions: { bubble: false, showTrendLine: false } },
+      { value: "bubble", label: "Bubble", defaultOptions: { bubble: true } },
+      { value: "best_fit", label: "Best fit", defaultOptions: { showTrendLine: true } },
     ],
     options: SCATTER_OPTIONS,
     bestFor: ["Cost vs utilization", "Age vs risk", "Correlation analysis"],
@@ -524,7 +537,10 @@ export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
     icon: "\u{1F9E9}",
     description: "Hierarchical part-to-whole by rectangle area.",
     requiredFields: ["x", "y"],
-    variants: [{ value: "", label: "Treemap" }],
+    variants: [
+      { value: "", label: "Treemap" },
+      { value: "nested", label: "Nested" },
+    ],
     options: TREEMAP_OPTIONS,
     bestFor: ["Cloud cost by service", "Spend by category", "Revenue by region"],
     aiRules: ["Use Treemap for hierarchical spend/value."],

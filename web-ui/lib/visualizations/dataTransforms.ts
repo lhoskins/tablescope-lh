@@ -60,14 +60,81 @@ export function toPercentStacked(rows: Row[], xKey: string, seriesNames: string[
  * `nameKey` for the label and `valueKey` for the area. Non-positive values are
  * dropped (treemap requires positive sizes).
  */
+export type TreemapNode = { name: string; size?: number; children?: TreemapNode[] };
+
 export function prepareTreemapData(
   rows: Row[],
+  opts: { nameKey: string; valueKey: string; groupKey?: string }
+): TreemapNode[] {
+  const { nameKey, valueKey, groupKey } = opts;
+  if (!groupKey) {
+    return rows
+      .map((r) => ({ name: String(r[nameKey] ?? ""), size: toNumber(r[valueKey]) ?? 0 }))
+      .filter((d) => (d.size ?? 0) > 0);
+  }
+  const groups = new Map<string, TreemapNode[]>();
+  for (const r of rows) {
+    const size = toNumber(r[valueKey]) ?? 0;
+    if (size <= 0) continue;
+    const group = String(r[groupKey] ?? "Other");
+    const child = { name: String(r[nameKey] ?? ""), size };
+    const existing = groups.get(group);
+    if (existing) existing.push(child);
+    else groups.set(group, [child]);
+  }
+  return [...groups.entries()].map(([name, children]) => ({ name, children }));
+}
+
+/**
+ * Builds waterfall segments: each row gets an invisible `base` (the running
+ * total before it) and a visible `delta`. The renderer stacks base (transparent)
+ * under delta so bars float to show the cumulative running total.
+ */
+export function prepareWaterfallData(
+  rows: Row[],
   opts: { nameKey: string; valueKey: string }
-): Array<{ name: string; size: number }> {
+): Array<{ name: string; base: number; delta: number; value: number; cumulative: number }> {
   const { nameKey, valueKey } = opts;
-  return rows
-    .map((r) => ({ name: String(r[nameKey] ?? ""), size: toNumber(r[valueKey]) ?? 0 }))
-    .filter((d) => d.size > 0);
+  let running = 0;
+  return rows.map((r) => {
+    const delta = toNumber(r[valueKey]) ?? 0;
+    const base = delta >= 0 ? running : running + delta;
+    running += delta;
+    return { name: String(r[nameKey] ?? ""), base, delta: Math.abs(delta), value: delta, cumulative: running };
+  });
+}
+
+/**
+ * Ordinary-least-squares line for scatter points. Returns slope/intercept and
+ * the two endpoints spanning the x range, or null when a line can't be fit.
+ */
+export function linearRegression(
+  rows: Row[],
+  opts: { xKey: string; yKey: string }
+): { slope: number; intercept: number; p1: { x: number; y: number }; p2: { x: number; y: number } } | null {
+  const { xKey, yKey } = opts;
+  const pts = rows
+    .map((r) => ({ x: toNumber(r[xKey]), y: toNumber(r[yKey]) }))
+    .filter((p): p is { x: number; y: number } => p.x !== null && p.y !== null);
+  if (pts.length < 2) return null;
+  const n = pts.length;
+  const sumX = pts.reduce((s, p) => s + p.x, 0);
+  const sumY = pts.reduce((s, p) => s + p.y, 0);
+  const sumXY = pts.reduce((s, p) => s + p.x * p.y, 0);
+  const sumXX = pts.reduce((s, p) => s + p.x * p.x, 0);
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return null;
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  const xs = pts.map((p) => p.x);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  return {
+    slope,
+    intercept,
+    p1: { x: minX, y: slope * minX + intercept },
+    p2: { x: maxX, y: slope * maxX + intercept },
+  };
 }
 
 /**

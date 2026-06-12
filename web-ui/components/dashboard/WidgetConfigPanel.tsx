@@ -7,7 +7,7 @@ import type { WidgetConfig, WidgetType, ChartSubtype, WidgetFilter, ColumnInfo, 
 import type { QueryScope } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { ChartOptionsPanel } from "./ChartOptionsPanel";
-import { getDefaultOptions } from "@/lib/visualizations/chartRegistry";
+import { getDefaultOptions, getChartDefinition } from "@/lib/visualizations/chartRegistry";
 
 const CLICK_ACTIONS: { value: WidgetClickAction; label: string }[] = [
   { value: "none", label: "None" },
@@ -217,7 +217,9 @@ export function WidgetConfigPanel({
   const numericColumns = columns.filter((c) => c.type === "number");
   const stringColumns = columns.filter((c) => c.type === "string");
   const xColumnType = columns.find((c) => c.name === xColumn)?.type;
-  const currentChartDef = CHART_TYPES.find((ct) => ct.type === chartType);
+  // Variant ("style") buttons are driven by the registry so they stay in sync
+  // with the renderer and carry their option presets.
+  const variantDefs = getChartDefinition(chartType)?.variants ?? [];
 
   // Existing query scopes for the source query — used to offer a drilldown target.
   const { data: scopesData = [] } = useQuery({
@@ -342,11 +344,18 @@ export function WidgetConfigPanel({
 
   const handleChartTypeChange = (type: WidgetType) => {
     setChartType(type);
-    const def = CHART_TYPES.find((ct) => ct.type === type);
-    if (def && def.subtypes.length > 0) setChartSubtype(def.subtypes[0].value as ChartSubtype);
-    else setChartSubtype("");
-    // Seed registry defaults for the newly selected chart type.
-    setVizOptions(getDefaultOptions(type));
+    const variants = getChartDefinition(type)?.variants ?? [];
+    const first = variants[0];
+    setChartSubtype((first?.value ?? "") as ChartSubtype);
+    // Seed registry defaults for the type, then overlay the first variant's preset.
+    setVizOptions({ ...getDefaultOptions(type), ...(first?.defaultOptions ?? {}) });
+  };
+
+  // Selecting a "style" applies that variant's option preset on top of current options.
+  const handleSubtypeChange = (value: string) => {
+    setChartSubtype(value as ChartSubtype);
+    const preset = variantDefs.find((v) => v.value === value)?.defaultOptions;
+    if (preset) setVizOptions((prev) => ({ ...prev, ...preset }));
   };
 
   return (
@@ -388,13 +397,13 @@ export function WidgetConfigPanel({
             </div>
           </div>
 
-          {/* Chart Subtype */}
-          {currentChartDef && currentChartDef.subtypes.length > 0 && (
+          {/* Chart Subtype (variant / style presets, registry-driven) */}
+          {variantDefs.length > 1 && (
             <div>
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Style</label>
               <div className="flex flex-wrap gap-1">
-                {currentChartDef.subtypes.map((st) => (
-                  <button key={st.value} type="button" onClick={() => setChartSubtype(st.value as ChartSubtype)}
+                {variantDefs.map((st) => (
+                  <button key={st.value || "default"} type="button" onClick={() => handleSubtypeChange(st.value)}
                     className={`rounded-md border px-2 py-1 text-[10px] font-medium ${chartSubtype === st.value ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-400 hover:border-indigo-300"}`}>
                     {st.label}
                   </button>

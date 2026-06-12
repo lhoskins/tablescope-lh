@@ -75,4 +75,25 @@ describe("chartRegistry", () => {
       expect(getChartDefinition(type)?.options.length).toBeGreaterThan(0);
     }
   });
+
+  it("variant presets carry option overrides applied on selection", () => {
+    const barVariants = getChartDefinition("bar")?.variants ?? [];
+    const waterfall = barVariants.find((v) => v.value === "waterfall");
+    expect(waterfall?.defaultOptions?.cumulative).toBe(true);
+    const posNeg = barVariants.find((v) => v.value === "positive_negative");
+    expect(posNeg?.defaultOptions?.colorBySign).toBe(true);
+
+    const lineVariants = getChartDefinition("line")?.variants ?? [];
+    expect(lineVariants.find((v) => v.value === "dashed_line")?.defaultOptions?.lineStyle).toBe("dashed");
+    expect(lineVariants.find((v) => v.value === "biaxial_line")?.defaultOptions?.dualAxis).toBe(true);
+
+    const scatterVariants = getChartDefinition("scatter")?.variants ?? [];
+    expect(scatterVariants.find((v) => v.value === "best_fit")?.defaultOptions?.showTrendLine).toBe(true);
+
+    const pieVariants = getChartDefinition("pie")?.variants ?? [];
+    expect(pieVariants.find((v) => v.value === "two_level")).toBeDefined();
+    expect(pieVariants.find((v) => v.value === "gauge")?.defaultOptions?.endAngle).toBe(0);
+
+    expect((getChartDefinition("treemap")?.variants ?? []).some((v) => v.value === "nested")).toBe(true);
+  });
 });

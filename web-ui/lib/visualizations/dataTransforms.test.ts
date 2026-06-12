@@ -8,6 +8,8 @@ import {
   prepareFunnelData,
   prepareRadarData,
   prepareSankeyData,
+  prepareWaterfallData,
+  linearRegression,
 } from "./dataTransforms";
 
 describe("toNumber", () => {
@@ -83,6 +85,55 @@ describe("prepareTreemapData", () => {
       { nameKey: "svc", valueKey: "cost" }
     );
     expect(out).toEqual([{ name: "EC2", size: 1000 }, { name: "RDS", size: 250 }]);
+  });
+});
+
+describe("prepareTreemapData (nested)", () => {
+  it("groups rows under a parent key into children", () => {
+    const out = prepareTreemapData(
+      [
+        { svc: "EC2", team: "Infra", cost: 100 },
+        { svc: "S3", team: "Infra", cost: 50 },
+        { svc: "Looker", team: "Data", cost: 30 },
+      ],
+      { nameKey: "svc", valueKey: "cost", groupKey: "team" }
+    );
+    expect(out).toHaveLength(2);
+    const infra = out.find((g) => g.name === "Infra");
+    expect(infra?.children).toEqual([
+      { name: "EC2", size: 100 },
+      { name: "S3", size: 50 },
+    ]);
+  });
+});
+
+describe("prepareWaterfallData", () => {
+  it("computes floating base/delta and a running cumulative total", () => {
+    const out = prepareWaterfallData(
+      [{ k: "Start", v: 100 }, { k: "Loss", v: -40 }, { k: "Gain", v: 25 }],
+      { nameKey: "k", valueKey: "v" }
+    );
+    expect(out[0]).toMatchObject({ name: "Start", base: 0, delta: 100, value: 100, cumulative: 100 });
+    expect(out[1]).toMatchObject({ name: "Loss", base: 60, delta: 40, value: -40, cumulative: 60 });
+    expect(out[2]).toMatchObject({ name: "Gain", base: 60, delta: 25, value: 25, cumulative: 85 });
+  });
+});
+
+describe("linearRegression", () => {
+  it("fits a line through perfectly correlated points", () => {
+    const fit = linearRegression(
+      [{ x: 1, y: 2 }, { x: 2, y: 4 }, { x: 3, y: 6 }],
+      { xKey: "x", yKey: "y" }
+    );
+    expect(fit?.slope).toBeCloseTo(2);
+    expect(fit?.intercept).toBeCloseTo(0);
+    expect(fit?.p1).toEqual({ x: 1, y: 2 });
+    expect(fit?.p2).toEqual({ x: 3, y: 6 });
+  });
+
+  it("returns null when fewer than two numeric points exist", () => {
+    expect(linearRegression([{ x: 1, y: 2 }], { xKey: "x", yKey: "y" })).toBeNull();
+    expect(linearRegression([{ x: "a", y: "b" }], { xKey: "x", yKey: "y" })).toBeNull();
   });
 });
 

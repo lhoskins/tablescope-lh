@@ -44,6 +44,8 @@ import {
   prepareFunnelData,
   prepareRadarData,
   prepareSankeyData,
+  prepareWaterfallData,
+  linearRegression,
 } from "@/lib/visualizations/dataTransforms";
 import { normalizeCartesianClick, normalizePieClick, type CartesianClickState } from "@/lib/dashboard/chartClick";
 
@@ -359,6 +361,7 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
       case "line": {
         const lt = lineType as "linear" | "monotone" | "stepAfter";
         const dot = opts.showDots ? { r: 2 } : false;
+        const animate = !!opts.animate;
         return (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} onClick={handleCartesianClick} style={clickCursor} margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 25, left: 10 }}>
@@ -374,12 +377,12 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
               />
               {seriesNames.length > 0 ? (
                 seriesNames.map((name, i) => (
-                  <Line key={name} yAxisId={useDualAxis && rightSeries.has(name) ? "right" : "left"} type={lt} dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2.5} strokeDasharray={dashArray} connectNulls={opts.connectNulls} dot={dot} activeDot={{ r: 4 }}>
+                  <Line key={name} yAxisId={useDualAxis && rightSeries.has(name) ? "right" : "left"} type={lt} dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2.5} strokeDasharray={dashArray} connectNulls={opts.connectNulls} dot={dot} activeDot={{ r: 4 }} isAnimationActive={animate}>
                     {showDataLabels && <LabelList dataKey={name} position="top" style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
                   </Line>
                 ))
               ) : (
-                <Line yAxisId={useDualAxis && rightSeries.has(yKey) ? "right" : "left"} type={lt} dataKey={yKey} stroke="#3b82f6" strokeWidth={2.5} strokeDasharray={dashArray} connectNulls={opts.connectNulls} dot={dot} activeDot={{ r: 4 }}>
+                <Line yAxisId={useDualAxis && rightSeries.has(yKey) ? "right" : "left"} type={lt} dataKey={yKey} stroke="#3b82f6" strokeWidth={2.5} strokeDasharray={dashArray} connectNulls={opts.connectNulls} dot={dot} activeDot={{ r: 4 }} isAnimationActive={animate}>
                   {showDataLabels && <LabelList dataKey={yKey} position="top" style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
                 </Line>
               )}
@@ -394,6 +397,65 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
       case "bar": {
         const barXLabel = widget.xColumn || xKey;
         const barYLabel = widget.yColumn || yKey;
+        const POS = "#16a34a";
+        const NEG = "#dc2626";
+
+        // Waterfall: floating bars showing a running cumulative total.
+        if (sub === "waterfall" || opts.cumulative) {
+          const wf = prepareWaterfallData(chartData, { nameKey: xKey, valueKey: yKey });
+          return (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={wf} onClick={handleCartesianClick} style={clickCursor} margin={{ top: 10, right: 20, bottom: 40, left: 50 }}>
+                {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />}
+                <XAxis dataKey="name" {...barXAxisProps}>
+                  <Label value={barXLabel} position="insideBottom" offset={-20} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
+                </XAxis>
+                <YAxis {...yAxisProps} tickFormatter={fmtAxis}>
+                  <Label value={barYLabel} angle={-90} position="insideLeft" offset={-35} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
+                </YAxis>
+                <Tooltip
+                  contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                  formatter={(_v: number, _n: string, p: { payload?: { value?: number; cumulative?: number } }) => [`${fmtNumber(p.payload?.value ?? 0)} (Σ ${fmtNumber(p.payload?.cumulative ?? 0)})`, ""]}
+                />
+                <Bar dataKey="base" stackId="wf" fill="transparent" isAnimationActive={false} />
+                <Bar dataKey="delta" stackId="wf" radius={[3, 3, 0, 0]} maxBarSize={48}>
+                  {wf.map((d, i) => (
+                    <Cell key={i} fill={d.value >= 0 ? POS : NEG} />
+                  ))}
+                  {showDataLabels && <LabelList dataKey="value" position="top" style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
+                </Bar>
+                {renderReferenceLines(opts.referenceLines)}
+              </BarChart>
+            </ResponsiveContainer>
+          );
+        }
+
+        // Population pyramid: two series mirrored across a central axis.
+        if (sub === "population_pyramid" && seriesNames.length >= 2) {
+          const [leftSeries, rightSeriesName] = seriesNames;
+          const pyramid = chartData.map((row) => ({
+            ...row,
+            [leftSeries]: -Math.abs(Number(row[leftSeries]) || 0),
+          }));
+          return (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={pyramid} layout="vertical" stackOffset="sign" onClick={handleCartesianClick} style={clickCursor} margin={{ top: 10, right: 20, bottom: 40, left: 10 }}>
+                {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />}
+                <XAxis type="number" {...commonAxisProps} tickFormatter={(v: number) => fmtAxis(Math.abs(v))} />
+                <YAxis type="category" dataKey={xKey} {...commonAxisProps} width={100} />
+                <Tooltip
+                  contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                  formatter={(value: number, name: string) => [fmtNumber(Math.abs(value)), name]}
+                />
+                <Bar dataKey={leftSeries} stackId="pyramid" fill={COLORS[0]} maxBarSize={28} />
+                <Bar dataKey={rightSeriesName} stackId="pyramid" fill={COLORS[1]} maxBarSize={28} />
+                {showLegend && <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 11 }} />}
+              </BarChart>
+            </ResponsiveContainer>
+          );
+        }
+
+        const barColorBySign = sub === "positive_negative" || !!opts.colorBySign;
         const barHorizontal = rawOpts.barLayout !== undefined ? rawOpts.barLayout === "horizontal" : isHorizontal;
         // When stacking is set via options, "none" means grouped (side-by-side).
         // For older dashboards (no option), preserve the legacy default where
@@ -451,6 +513,9 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
                 ))
               ) : (
                 <Bar dataKey={yKey} fill="#3b82f6" radius={barRadius ?? (barHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0])} maxBarSize={48} minPointSize={minBar} background={barBackground}>
+                  {barColorBySign && chartData.map((d, i) => (
+                    <Cell key={i} fill={(Number(d[yKey]) || 0) >= 0 ? POS : NEG} />
+                  ))}
                   {showDataLabels && <LabelList dataKey={yKey} position={barHorizontal ? "right" : "top"} style={{ fontSize: 9, fill: "#64748b" }} formatter={(v: number) => fmtAxis(v)} />}
                 </Bar>
               )}
@@ -519,6 +584,43 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
 
       // ── PIE / DONUT ─────────────────────────────────────
       case "pie": {
+        // Two-level: inner ring = group totals (series), outer ring = each
+        // category split within its group. Requires a Group By (series) column.
+        if (sub === "two_level" && seriesNames.length > 0) {
+          const innerData = seriesNames.map((s) => ({
+            name: s,
+            value: chartData.reduce((acc, r) => acc + (Number(r[s]) || 0), 0),
+          }));
+          const outerData = chartData.flatMap((r, ri) =>
+            seriesNames.map((s, si) => ({
+              name: `${r[xKey]} · ${s}`,
+              value: Number(r[s]) || 0,
+              groupIndex: si,
+              rowIndex: ri,
+            }))
+          ).filter((d) => d.value > 0);
+          return (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                <Pie data={innerData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="45%" labelLine={false}>
+                  {innerData.map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="white" strokeWidth={2} />
+                  ))}
+                </Pie>
+                <Pie data={outerData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius="50%" outerRadius="80%" labelLine={false}>
+                  {outerData.map((d, i) => (
+                    <Cell key={i} fill={COLORS[d.groupIndex % COLORS.length]} fillOpacity={0.45 + 0.4 * ((d.rowIndex % 3) / 2)} stroke="white" strokeWidth={1} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                  formatter={(value: number) => [fmtNumber(value), ""]}
+                />
+                {showLegend && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
+              </PieChart>
+            </ResponsiveContainer>
+          );
+        }
         const pieDataKey = seriesNames.length > 0 ? seriesNames[0] : yKey;
         // innerRadius option (0..90 %) takes precedence; legacy "donut" subtype = 55%.
         const innerPct = opts.innerRadius && opts.innerRadius > 0 ? opts.innerRadius : sub === "donut" ? 55 : 0;
@@ -621,6 +723,7 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
         const isBubble = (opts.bubble || sub === "bubble") && !!zKey;
         const xLabel = widget.xColumn || xKey;
         const yLabel = widget.yColumn || yKey;
+        const trend = opts.showTrendLine || sub === "best_fit" ? linearRegression(chartData, { xKey, yKey }) : null;
         return (
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 30, left: 10 }}>
@@ -649,6 +752,15 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
                 <Scatter name={yLabel} data={chartData} fill="#3b82f6">
                   {showDataLabels && <LabelList dataKey={xKey} position="top" style={{ fontSize: 9, fill: "#64748b" }} />}
                 </Scatter>
+              )}
+              {trend && (
+                <ReferenceLine
+                  ifOverflow="extendDomain"
+                  segment={[trend.p1, trend.p2]}
+                  stroke="#ef4444"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                />
               )}
               {showLegend && seriesNames.length > 0 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
             </ScatterChart>
@@ -735,9 +847,12 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
       // ── TREEMAP ─────────────────────────────────────────
       case "treemap": {
         const treeKey = seriesNames.length > 0 ? seriesNames[0] : yKey;
-        const treeData = prepareTreemapData(chartData, { nameKey: xKey, valueKey: treeKey }).map((d, i) => ({
+        // Nested groups rows under their Group By column into parent rectangles.
+        const treeGroupKey = sub === "nested" && hasGroupBy ? widget.groupByColumn : undefined;
+        const treeData = prepareTreemapData(coercedData, { nameKey: xKey, valueKey: treeKey, groupKey: treeGroupKey }).map((d, i) => ({
           ...d,
           fill: COLORS[i % COLORS.length],
+          children: d.children?.map((c) => ({ ...c, fill: COLORS[i % COLORS.length] })),
         }));
         return (
           <ResponsiveContainer width="100%" height="100%">
