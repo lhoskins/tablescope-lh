@@ -20,12 +20,6 @@ compose() { docker compose "$@"; }
 
 cert_path="/etc/letsencrypt/live/$domain"
 
-echo "### Downloading recommended TLS parameters ..."
-compose run --rm --entrypoint "\
-  sh -c 'mkdir -p /etc/letsencrypt && \
-  curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > /etc/letsencrypt/options-ssl-nginx.conf && \
-  curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem > /etc/letsencrypt/ssl-dhparams.pem'" certbot
-
 echo "### Creating a temporary self-signed certificate for $domain ..."
 compose run --rm --entrypoint "\
   sh -c 'mkdir -p $cert_path && \
