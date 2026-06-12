@@ -245,7 +245,7 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
     try {
       const resp = await apiClient.post<SuggestionResponse>("/api/ai/ask", {
         project_id: projectId,
-        question: "Analyze this project's data sources and provide insights and opportunities. For each insight, provide a title, description, and optionally an action the user can take (such as creating a query or running an analysis). Return your answer as JSON with an 'insights' array where each item has 'title', 'description', and optionally 'action' (text description of what to do), 'action_type' ('create' or 'run'), and 'action_params' (object with any parameters needed).",
+        question: "Analyze BOTH this project's data sources (tables/columns) AND its uploaded documents (their summaries, tags, KPIs, and the knowledge-graph relationships between them) to provide insights and opportunities. Use the documents as first-class evidence — reference relevant documents by name, surface findings that connect a document to the data (e.g. a policy or postmortem that a metric should track), and where useful suggest document-oriented opportunities (e.g. linking related documents, profiling a gap, or tracking a KPI a document recommends). Do not limit yourself to query creation. For each insight, provide a title, description, and optionally an action the user can take. Return your answer as JSON with an 'insights' array where each item has 'title', 'description', and optionally 'action' (text description of what to do), 'action_type' ('create' or 'run'), and 'action_params' (object with any parameters needed).",
       });
       if (resp.answer) {
         try {

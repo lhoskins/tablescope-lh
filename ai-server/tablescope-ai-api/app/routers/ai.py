@@ -194,6 +194,9 @@ async def ask(req: AskRequest) -> AskResponse:
         context_summary={
             "metadata_count": len(ctx.allowed_context.get("metadata", [])),
             "document_count": len(ctx.allowed_context.get("documents", [])),
+            "project_document_count": len(
+                ctx.allowed_context.get("project_documents", [])
+            ),
             "query_count": len(ctx.allowed_context.get("queries", [])),
         },
     )

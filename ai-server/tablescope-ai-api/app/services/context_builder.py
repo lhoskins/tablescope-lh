@@ -300,6 +300,9 @@ def context_to_prompt_text(context: ContextPackage) -> str:
                 line += f": {summary[:200]}"
             if tag_str:
                 line += f" [tags: {tag_str}]"
+            kpis = doc.get("recommended_kpis", [])
+            if kpis:
+                line += f" [recommended KPIs: {', '.join(str(k) for k in kpis)}]"
             parts.append(line)
 
     # Knowledge graph relationships
