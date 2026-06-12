@@ -58,6 +58,23 @@ export function validateChartConfig(widget: WidgetConfig, rows: Row[] = []): Cha
         warnings.push("Dual axis needs at least two series (add a Group By or secondary Y).");
       }
     }
+
+    if (widget.type === "sankey") {
+      const target = widget.visualizationOptions?.targetColumn || widget.groupByColumn;
+      if (!target) {
+        warnings.push("Sankey charts need source (X), target (Group By), and value (Y) fields.");
+      }
+    }
+
+    if (widget.type === "scatter") {
+      const xKey = widget.xColumn || widget.xKey || "";
+      if (xKey && !isNumericColumn(rows, xKey)) {
+        warnings.push("Scatter charts work best when the X axis is numeric.");
+      }
+      if ((widget.visualizationOptions?.bubble || widget.chartSubtype === "bubble") && !widget.visualizationOptions?.zColumn && !widget.y2Column) {
+        warnings.push("Bubble charts need a Z (size) field — set the secondary Y.");
+      }
+    }
   }
 
   return { ok: errors.length === 0, errors, warnings };

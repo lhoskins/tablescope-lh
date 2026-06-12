@@ -10,7 +10,10 @@ import {
 
 describe("chartRegistry", () => {
   it("includes every supported widget type", () => {
-    for (const type of ["kpi", "table", "line", "area", "bar", "combo", "pie"]) {
+    for (const type of [
+      "kpi", "table", "line", "area", "bar", "combo", "pie",
+      "scatter", "radar", "radial_bar", "treemap", "funnel", "sankey",
+    ]) {
       expect(CHART_REGISTRY[type as keyof typeof CHART_REGISTRY]).toBeDefined();
     }
   });
@@ -29,7 +32,8 @@ describe("chartRegistry", () => {
   });
 
   it("resolveRendererType falls back to table for unknown types", () => {
-    expect(resolveRendererType("treemap")).toBe("table");
+    expect(resolveRendererType("sunburst")).toBe("table");
+    expect(resolveRendererType("treemap")).toBe("treemap");
     expect(resolveRendererType("bar")).toBe("bar");
   });
 
@@ -61,5 +65,14 @@ describe("chartRegistry", () => {
     const donut = CHART_ALIASES.find((a) => a.alias === "donut");
     expect(donut?.type).toBe("pie");
     expect(donut?.options?.innerRadius).toBe(55);
+    const bubble = CHART_ALIASES.find((a) => a.alias === "bubble");
+    expect(bubble?.type).toBe("scatter");
+    expect(bubble?.options?.bubble).toBe(true);
+  });
+
+  it("new chart families expose option definitions", () => {
+    for (const type of ["scatter", "radar", "radial_bar", "treemap", "funnel", "sankey"]) {
+      expect(getChartDefinition(type)?.options.length).toBeGreaterThan(0);
+    }
   });
 });

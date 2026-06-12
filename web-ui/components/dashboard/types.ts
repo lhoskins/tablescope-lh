@@ -1,4 +1,17 @@
-export type WidgetType = "kpi" | "line" | "bar" | "area" | "pie" | "table" | "combo";
+export type WidgetType =
+  | "kpi"
+  | "line"
+  | "bar"
+  | "area"
+  | "pie"
+  | "table"
+  | "combo"
+  | "scatter"
+  | "radar"
+  | "radial_bar"
+  | "treemap"
+  | "funnel"
+  | "sankey";
 
 /**
  * Reference line drawn on a cartesian chart (line/area/bar/combo).
@@ -47,6 +60,20 @@ export type VisualizationOptions = {
   labelMode?: "none" | "percentage" | "value" | "name";
   maxSlices?: number;
   groupSmallSlices?: boolean;
+  // Scatter / Bubble
+  bubble?: boolean;
+  zColumn?: string;
+  showTrendLine?: boolean;
+  // Radar / Radial bar
+  domainMin?: number;
+  domainMax?: number;
+  // Treemap / Funnel
+  showTooltip?: boolean;
+  // Sankey
+  sourceColumn?: string;
+  targetColumn?: string;
+  nodePadding?: number;
+  nodeWidth?: number;
 };
 
 export type ChartSubtype =
@@ -64,7 +91,13 @@ export type ChartSubtype =
   // Pie variants
   | "donut"
   // Combo
-  | "bar_line";        // bars + overlay line
+  | "bar_line"         // bars + overlay line
+  // Scatter variants
+  | "bubble"
+  // Radar variants
+  | "scorecard"
+  // Radial bar variants
+  | "multi_ring";
 
 export type WidgetDataSource = {
   kind: "query" | "datasource" | "custom_sql";

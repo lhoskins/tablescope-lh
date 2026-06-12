@@ -21,10 +21,30 @@ import {
   Label,
   LabelList,
   ReferenceLine,
+  ScatterChart,
+  Scatter,
+  ZAxis,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  RadialBarChart,
+  RadialBar,
+  Treemap,
+  FunnelChart,
+  Funnel,
+  Sankey,
 } from "recharts";
 import type { WidgetConfig, ReferenceLineConfig, VisualizationOptions, ChartClickEvent } from "./types";
 import { withDefaults } from "@/lib/visualizations/chartRegistry";
-import { preparePieData } from "@/lib/visualizations/dataTransforms";
+import {
+  preparePieData,
+  prepareTreemapData,
+  prepareFunnelData,
+  prepareRadarData,
+  prepareSankeyData,
+} from "@/lib/visualizations/dataTransforms";
 import { normalizeCartesianClick, normalizePieClick, type CartesianClickState } from "@/lib/dashboard/chartClick";
 
 /** Renders configured reference lines onto a cartesian chart. */
@@ -594,6 +614,215 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
             </ComposedChart>
           </ResponsiveContainer>
         );
+
+      // ── SCATTER / BUBBLE ────────────────────────────────
+      case "scatter": {
+        const zKey = opts.zColumn || widget.y2Column || "";
+        const isBubble = (opts.bubble || sub === "bubble") && !!zKey;
+        const xLabel = widget.xColumn || xKey;
+        const yLabel = widget.yColumn || yKey;
+        return (
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart margin={tiny ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 10, right: 20, bottom: 30, left: 10 }}>
+              {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />}
+              {!tiny && (
+                <XAxis type="number" dataKey={xKey} name={xLabel} {...commonAxisProps} tickFormatter={fmtAxis}>
+                  <Label value={xLabel} position="insideBottom" offset={-15} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
+                </XAxis>
+              )}
+              {!tiny && (
+                <YAxis type="number" dataKey={yKey} name={yLabel} {...yAxisProps} tickFormatter={fmtAxis}>
+                  <Label value={yLabel} angle={-90} position="insideLeft" offset={-35} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
+                </YAxis>
+              )}
+              {isBubble && <ZAxis type="number" dataKey={zKey} range={[40, 400]} name={zKey} />}
+              <Tooltip
+                cursor={{ strokeDasharray: "3 3" }}
+                contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                formatter={(value: number) => [fmtNumber(value), ""]}
+              />
+              {seriesNames.length > 0 ? (
+                seriesNames.map((name, i) => (
+                  <Scatter key={name} name={name} data={chartData} fill={COLORS[i % COLORS.length]} />
+                ))
+              ) : (
+                <Scatter name={yLabel} data={chartData} fill="#3b82f6">
+                  {showDataLabels && <LabelList dataKey={xKey} position="top" style={{ fontSize: 9, fill: "#64748b" }} />}
+                </Scatter>
+              )}
+              {showLegend && seriesNames.length > 0 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
+            </ScatterChart>
+          </ResponsiveContainer>
+        );
+      }
+
+      // ── RADAR ───────────────────────────────────────────
+      case "radar": {
+        const { data: radarData, series: radarSeries } = prepareRadarData(coercedData, {
+          subjectKey: xKey,
+          valueKey: yKey,
+          seriesKey: hasGroupBy ? widget.groupByColumn : undefined,
+        });
+        const domainMax = opts.domainMax && opts.domainMax > 0 ? opts.domainMax : "auto";
+        const domainMin = opts.domainMin ?? 0;
+        const fillOp = opts.fillOpacity ?? 0.25;
+        return (
+          <ResponsiveContainer width="100%" height="100%">
+            <RadarChart data={radarData} margin={{ top: 20, right: 30, bottom: 20, left: 30 }}>
+              <PolarGrid stroke="#e2e8f0" />
+              <PolarAngleAxis dataKey={xKey} tick={{ fontSize: 11, fill: "#475569" }} />
+              <PolarRadiusAxis angle={90} domain={[domainMin, domainMax]} tick={{ fontSize: 9, fill: "#94a3b8" }} />
+              <Tooltip
+                contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                formatter={(value: number) => [fmtNumber(value), ""]}
+              />
+              {radarSeries.map((name, i) => (
+                <Radar
+                  key={name}
+                  name={name}
+                  dataKey={name}
+                  stroke={COLORS[i % COLORS.length]}
+                  fill={COLORS[i % COLORS.length]}
+                  fillOpacity={fillOp}
+                />
+              ))}
+              {showLegend && radarSeries.length > 1 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
+            </RadarChart>
+          </ResponsiveContainer>
+        );
+      }
+
+      // ── RADIAL BAR ──────────────────────────────────────
+      case "radial_bar": {
+        const radialKey = seriesNames.length > 0 ? seriesNames[0] : yKey;
+        const radialData = chartData.map((row, i) => ({
+          name: String(row[xKey] ?? ""),
+          value: Number(row[radialKey] ?? 0),
+          fill: COLORS[i % COLORS.length],
+        }));
+        const innerPct = opts.innerRadius ?? 30;
+        const outerPct = opts.outerRadius ?? 90;
+        const startAngle = opts.startAngle ?? 90;
+        const endAngle = opts.endAngle ?? -270;
+        return (
+          <ResponsiveContainer width="100%" height="100%">
+            <RadialBarChart
+              data={radialData}
+              cx="50%"
+              cy="50%"
+              innerRadius={`${innerPct}%`}
+              outerRadius={`${outerPct}%`}
+              startAngle={startAngle}
+              endAngle={endAngle}
+              barSize={12}
+            >
+              <PolarAngleAxis type="number" domain={[0, opts.domainMax && opts.domainMax > 0 ? opts.domainMax : "auto"]} tick={false} />
+              <RadialBar background dataKey="value" cornerRadius={6}>
+                {showDataLabels && <LabelList dataKey="value" position="insideStart" style={{ fontSize: 9, fill: "#ffffff" }} formatter={(v: number) => fmtAxis(v)} />}
+              </RadialBar>
+              <Tooltip
+                contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                formatter={(value: number) => [fmtNumber(value), ""]}
+              />
+              {showLegend && (
+                <Legend iconType="circle" iconSize={8} layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ fontSize: 11 }} />
+              )}
+            </RadialBarChart>
+          </ResponsiveContainer>
+        );
+      }
+
+      // ── TREEMAP ─────────────────────────────────────────
+      case "treemap": {
+        const treeKey = seriesNames.length > 0 ? seriesNames[0] : yKey;
+        const treeData = prepareTreemapData(chartData, { nameKey: xKey, valueKey: treeKey }).map((d, i) => ({
+          ...d,
+          fill: COLORS[i % COLORS.length],
+        }));
+        return (
+          <ResponsiveContainer width="100%" height="100%">
+            <Treemap
+              data={treeData}
+              dataKey="size"
+              nameKey="name"
+              stroke="#ffffff"
+              isAnimationActive={false}
+            >
+              {opts.showTooltip !== false && (
+                <Tooltip
+                  contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                  formatter={(value: number) => [fmtNumber(value), ""]}
+                />
+              )}
+            </Treemap>
+          </ResponsiveContainer>
+        );
+      }
+
+      // ── FUNNEL ──────────────────────────────────────────
+      case "funnel": {
+        const funnelKey = seriesNames.length > 0 ? seriesNames[0] : yKey;
+        const funnelData = prepareFunnelData(chartData, { nameKey: xKey, valueKey: funnelKey }).map((d, i) => ({
+          ...d,
+          fill: COLORS[i % COLORS.length],
+        }));
+        return (
+          <ResponsiveContainer width="100%" height="100%">
+            <FunnelChart margin={{ top: 10, right: 20, bottom: 10, left: 20 }}>
+              {opts.showTooltip !== false && (
+                <Tooltip
+                  contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                  formatter={(value: number) => [fmtNumber(value), ""]}
+                />
+              )}
+              <Funnel dataKey="value" data={funnelData} isAnimationActive={false}>
+                {opts.showLabels !== false && (
+                  <LabelList position="right" fill="#334155" stroke="none" dataKey="name" style={{ fontSize: 11 }} />
+                )}
+                {opts.showLabels !== false && (
+                  <LabelList position="left" fill="#64748b" stroke="none" dataKey="value" style={{ fontSize: 10 }} formatter={(v: number) => fmtAxis(v)} />
+                )}
+              </Funnel>
+            </FunnelChart>
+          </ResponsiveContainer>
+        );
+      }
+
+      // ── SANKEY ──────────────────────────────────────────
+      case "sankey": {
+        const sourceKey = widget.xColumn || xKey;
+        const targetKey = opts.targetColumn || widget.groupByColumn || "";
+        const valueKey = seriesNames.length > 0 ? seriesNames[0] : yKey;
+        const graph = targetKey
+          ? prepareSankeyData(coercedData, { sourceKey, targetKey, valueKey })
+          : { nodes: [], links: [] };
+        if (graph.nodes.length === 0 || graph.links.length === 0) {
+          return (
+            <div className="flex h-full items-center justify-center px-6 text-center text-xs text-slate-400">
+              Sankey needs a source (X), a target (Group by), and a numeric value (Y).
+            </div>
+          );
+        }
+        return (
+          <ResponsiveContainer width="100%" height="100%">
+            <Sankey
+              data={graph}
+              nodePadding={opts.nodePadding ?? 20}
+              nodeWidth={opts.nodeWidth ?? 12}
+              link={{ stroke: "#cbd5e1", strokeOpacity: 0.4 }}
+              node={{ fill: "#3b82f6" }}
+              margin={{ top: 10, right: 60, bottom: 10, left: 10 }}
+            >
+              {opts.showTooltip !== false && (
+                <Tooltip
+                  contentStyle={{ fontSize: 11, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}
+                  formatter={(value: number) => [fmtNumber(value), ""]}
+                />
+              )}
+            </Sankey>
+          </ResponsiveContainer>
+        );
+      }
 
       default:
         return <div className="flex h-full items-center justify-center text-sm text-slate-400">Unknown widget type</div>;

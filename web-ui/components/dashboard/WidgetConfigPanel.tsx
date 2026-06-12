@@ -57,6 +57,30 @@ const CHART_TYPES: ChartTypeDef[] = [
     type: "combo", label: "Combo", icon: "\u{1F4CA}\u{1F4C8}",
     subtypes: [{ value: "bar_line", label: "Bar + Line" }],
   },
+  {
+    type: "scatter", label: "Scatter", icon: "\u{1F4A0}",
+    subtypes: [
+      { value: "", label: "Scatter" },
+      { value: "bubble", label: "Bubble" },
+    ],
+  },
+  {
+    type: "radar", label: "Radar", icon: "\u{1F578}\u{FE0F}",
+    subtypes: [
+      { value: "", label: "Radar" },
+      { value: "scorecard", label: "Scorecard" },
+    ],
+  },
+  {
+    type: "radial_bar", label: "Radial", icon: "\u{1F3AF}",
+    subtypes: [
+      { value: "", label: "Radial Bar" },
+      { value: "multi_ring", label: "Multi-ring" },
+    ],
+  },
+  { type: "treemap", label: "Treemap", icon: "\u{1F9E9}", subtypes: [] },
+  { type: "funnel", label: "Funnel", icon: "\u{1FA9D}", subtypes: [] },
+  { type: "sankey", label: "Sankey", icon: "\u{1F500}", subtypes: [] },
   { type: "kpi", label: "KPI", icon: "\u{1F522}", subtypes: [] },
   { type: "table", label: "Table", icon: "\u{1F4CB}", subtypes: [] },
 ];
@@ -254,8 +278,8 @@ export function WidgetConfigPanel({
     dateGranularity: xColumnType === "date" && dateGranularity ? (dateGranularity as WidgetConfig["dateGranularity"]) : undefined,
     yColumn,
     aggregation,
-    y2Column: chartType === "combo" && y2Column ? y2Column : undefined,
-    y2Aggregation: chartType === "combo" && y2Column ? y2Aggregation : undefined,
+    y2Column: (chartType === "combo" || chartType === "scatter") && y2Column ? y2Column : undefined,
+    y2Aggregation: (chartType === "combo" || chartType === "scatter") && y2Column ? y2Aggregation : undefined,
     groupByColumn: groupByColumn || undefined,
     sortBy: sortBy as WidgetConfig["sortBy"],
     limit: limit ? parseInt(limit, 10) : undefined,
@@ -418,6 +442,23 @@ export function WidgetConfigPanel({
             </div>
           </div>
 
+          {/* Per-type field-role hints */}
+          {chartType === "sankey" && (
+            <p className="rounded-md bg-amber-50 px-2 py-1 text-[10px] text-amber-700">
+              Sankey: X = source, <strong>Group By</strong> = target, Y = flow value.
+            </p>
+          )}
+          {chartType === "scatter" && (
+            <p className="rounded-md bg-sky-50 px-2 py-1 text-[10px] text-sky-700">
+              Scatter: X &amp; Y are numeric measures. For a bubble, set Secondary Y as the size (Z) and enable Bubble in Chart Options.
+            </p>
+          )}
+          {(chartType === "radar" || chartType === "radial_bar" || chartType === "treemap" || chartType === "funnel") && (
+            <p className="rounded-md bg-violet-50 px-2 py-1 text-[10px] text-violet-700">
+              X = category/label, Y = value{chartType === "radar" ? ". Use Group By to compare multiple entities." : "."}
+            </p>
+          )}
+
           {/* Date granularity */}
           {xColumnType === "date" && (
             <div>
@@ -476,10 +517,12 @@ export function WidgetConfigPanel({
             </div>
           </div>
 
-          {/* Combo Y2 */}
-          {chartType === "combo" && (
+          {/* Combo Y2 / Scatter Z */}
+          {(chartType === "combo" || chartType === "scatter") && (
             <div className="rounded-md border border-dashed border-indigo-200 bg-indigo-50/30 p-2">
-              <label className="mb-1 block text-[10px] font-semibold text-indigo-600">Secondary Y (Line)</label>
+              <label className="mb-1 block text-[10px] font-semibold text-indigo-600">
+                {chartType === "scatter" ? "Bubble size (Z, optional)" : "Secondary Y (Line)"}
+              </label>
               <div className="grid grid-cols-2 gap-2">
                 <select className="rounded-md border border-slate-200 px-2 py-1 text-[10px]" value={y2Column} onChange={(e) => setY2Column(e.target.value)}>
                   <option value="">Select...</option>

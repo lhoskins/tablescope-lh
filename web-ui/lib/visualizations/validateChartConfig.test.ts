@@ -39,7 +39,7 @@ describe("validateChartConfig", () => {
   });
 
   it("errors and reports unknown chart types", () => {
-    const res = validateChartConfig(makeWidget({ type: "sankey" as WidgetConfig["type"] }));
+    const res = validateChartConfig(makeWidget({ type: "sunburst" as WidgetConfig["type"] }));
     expect(res.ok).toBe(false);
     expect(res.errors[0]).toMatch(/unknown chart type/i);
   });

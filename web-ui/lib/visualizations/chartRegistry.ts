@@ -18,7 +18,13 @@ export type ChartFamily =
   | "area"
   | "bar"
   | "composed"
-  | "pie";
+  | "pie"
+  | "scatter"
+  | "radar"
+  | "radial_bar"
+  | "treemap"
+  | "funnel"
+  | "sankey";
 
 export type ChartOptionType = "boolean" | "number" | "select";
 
@@ -266,6 +272,94 @@ const PIE_OPTIONS: ChartOptionDefinition[] = [
   },
 ];
 
+const SCATTER_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showGrid", label: "Show grid", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showLabels", label: "Show point labels", type: "boolean", group: "chart", defaultValue: false },
+  { key: "bubble", label: "Bubble (size by Z)", type: "boolean", group: "chart", defaultValue: false, description: "Sizes each point by the Z column." },
+  { key: "showTrendLine", label: "Line of best fit", type: "boolean", group: "advanced", defaultValue: false },
+];
+
+const RADAR_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showLabels", label: "Show values", type: "boolean", group: "chart", defaultValue: false },
+  {
+    key: "fillOpacity",
+    label: "Fill opacity",
+    type: "number",
+    group: "style",
+    defaultValue: 0.25,
+    min: 0,
+    max: 1,
+    step: 0.05,
+  },
+  { key: "domainMin", label: "Axis min", type: "number", group: "advanced", defaultValue: 0, step: 1 },
+  { key: "domainMax", label: "Axis max (0 = auto)", type: "number", group: "advanced", defaultValue: 0, step: 1 },
+];
+
+const RADIAL_BAR_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showLabels", label: "Show values", type: "boolean", group: "chart", defaultValue: true },
+  {
+    key: "innerRadius",
+    label: "Inner radius %",
+    type: "number",
+    group: "style",
+    defaultValue: 30,
+    min: 0,
+    max: 90,
+    step: 5,
+  },
+  {
+    key: "outerRadius",
+    label: "Outer radius %",
+    type: "number",
+    group: "style",
+    defaultValue: 90,
+    min: 40,
+    max: 100,
+    step: 5,
+  },
+  { key: "domainMax", label: "Max value (0 = auto)", type: "number", group: "advanced", defaultValue: 100, step: 1, description: "Use 100 for percentage-to-target metrics." },
+  {
+    key: "startAngle",
+    label: "Start angle",
+    type: "number",
+    group: "advanced",
+    defaultValue: 90,
+    min: -360,
+    max: 360,
+    step: 90,
+  },
+  {
+    key: "endAngle",
+    label: "End angle",
+    type: "number",
+    group: "advanced",
+    defaultValue: -270,
+    min: -360,
+    max: 360,
+    step: 90,
+  },
+];
+
+const TREEMAP_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showLabels", label: "Show labels", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+];
+
+const FUNNEL_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showLabels", label: "Show labels", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: false },
+];
+
+const SANKEY_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  { key: "nodePadding", label: "Node padding", type: "number", group: "style", defaultValue: 20, min: 0, max: 60, step: 2 },
+  { key: "nodeWidth", label: "Node width", type: "number", group: "style", defaultValue: 12, min: 4, max: 40, step: 2 },
+];
+
 export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
   kpi: {
     type: "kpi",
@@ -378,6 +472,87 @@ export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
       "Group small slices into 'Other' when there are many categories.",
     ],
   },
+  scatter: {
+    type: "scatter",
+    label: "Scatter / Bubble",
+    family: "scatter",
+    icon: "\u{1F4A0}",
+    description: "Correlation between two numeric measures; bubble adds a third.",
+    requiredFields: ["x", "y"],
+    variants: [
+      { value: "", label: "Scatter" },
+      { value: "bubble", label: "Bubble" },
+    ],
+    options: SCATTER_OPTIONS,
+    bestFor: ["Cost vs utilization", "Age vs risk", "Correlation analysis"],
+    aiRules: ["Use Scatter/Bubble for correlation between numeric measures."],
+  },
+  radar: {
+    type: "radar",
+    label: "Radar",
+    family: "radar",
+    icon: "\u{1F578}\u{FE0F}",
+    description: "Compare multiple dimensions for one or more entities.",
+    requiredFields: ["x", "y"],
+    variants: [
+      { value: "", label: "Radar" },
+      { value: "scorecard", label: "Scorecard" },
+    ],
+    options: RADAR_OPTIONS,
+    bestFor: ["Supplier scorecard", "Service health", "Maturity comparison"],
+    aiRules: ["Use Radar when comparing multiple dimensions for one or more entities."],
+  },
+  radial_bar: {
+    type: "radial_bar",
+    label: "Radial Bar",
+    family: "radial_bar",
+    icon: "\u{1F3AF}",
+    description: "Percentage-to-target metrics drawn as concentric arcs.",
+    requiredFields: ["x", "y"],
+    variants: [
+      { value: "", label: "Radial Bar" },
+      { value: "multi_ring", label: "Multi-ring" },
+    ],
+    options: RADIAL_BAR_OPTIONS,
+    bestFor: ["Patch / SLA compliance", "Budget utilization", "OEE"],
+    aiRules: ["Use Radial Bar for percentage-to-target metrics."],
+  },
+  treemap: {
+    type: "treemap",
+    label: "Treemap",
+    family: "treemap",
+    icon: "\u{1F9E9}",
+    description: "Hierarchical part-to-whole by rectangle area.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Treemap" }],
+    options: TREEMAP_OPTIONS,
+    bestFor: ["Cloud cost by service", "Spend by category", "Revenue by region"],
+    aiRules: ["Use Treemap for hierarchical spend/value."],
+  },
+  funnel: {
+    type: "funnel",
+    label: "Funnel",
+    family: "funnel",
+    icon: "\u{1FA9D}",
+    description: "Stage-by-stage progression of a count.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Funnel" }],
+    options: FUNNEL_OPTIONS,
+    bestFor: ["Ticket lifecycle", "Approval stages", "Pipeline"],
+    aiRules: ["Use Funnel for stage progression."],
+  },
+  sankey: {
+    type: "sankey",
+    label: "Sankey",
+    family: "sankey",
+    icon: "\u{1F500}",
+    description: "Flow from source to target categories, weighted by value.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Sankey" }],
+    options: SANKEY_OPTIONS,
+    bestFor: ["Source \u2192 service \u2192 group flows", "Provider \u2192 BU spend"],
+    aiRules: ["Use Sankey for source-to-target flows."],
+  },
 };
 
 /**
@@ -403,6 +578,13 @@ export const CHART_ALIASES: ChartAlias[] = [
   { alias: "combo", label: "Combo Chart", type: "combo", variant: "bar_line", options: { dualAxis: true } },
   { alias: "pie", label: "Pie Chart", type: "pie", variant: "" },
   { alias: "donut", label: "Donut Chart", type: "pie", variant: "donut", options: { innerRadius: 55 } },
+  { alias: "scatter", label: "Scatter Chart", type: "scatter", variant: "" },
+  { alias: "bubble", label: "Bubble Chart", type: "scatter", variant: "bubble", options: { bubble: true } },
+  { alias: "radar", label: "Radar Chart", type: "radar", variant: "" },
+  { alias: "radial_bar", label: "Radial Bar", type: "radial_bar", variant: "" },
+  { alias: "treemap", label: "Treemap", type: "treemap", variant: "" },
+  { alias: "funnel", label: "Funnel", type: "funnel", variant: "" },
+  { alias: "sankey", label: "Sankey", type: "sankey", variant: "" },
   { alias: "kpi", label: "KPI Card", type: "kpi", variant: "" },
   { alias: "table", label: "Table", type: "table", variant: "" },
 ];
