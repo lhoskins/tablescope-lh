@@ -283,7 +283,7 @@ async def test_provision_basic_cloud(db_session):
     membership = await db_session.scalar(
         select(TenantMembership).where(TenantMembership.tenant_id == tenant.id)
     )
-    assert membership.role == "root_admin"
+    assert membership.role == "tenant_admin"
     binding = await db_session.scalar(select(TenantAuthBinding))
     assert binding.supabase_user_id == "supa-root@acme.com"
     assert ("root@acme.com", "root_admin_invite") in email.sent

@@ -4,8 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import { getUserMeta, signOut } from "@/lib/auth";
-import { cn } from "@/lib/cn";
+import { getUserMeta } from "@/lib/auth";
 
 type Tenant = {
   id: number;
@@ -19,8 +18,11 @@ type Tenant = {
 export default function TenantsPage() {
   const meta = getUserMeta();
   const isSuperAdmin = meta?.is_super_admin ?? false;
+  const isRootAdmin = meta?.role === "root_admin";
 
-  return isSuperAdmin ? <SuperAdminView /> : <TenantAdminView />;
+  // root_admin is the platform role (lives in the dedicated root tenant): it
+  // gets the same cross-tenant view as a super-admin.
+  return isSuperAdmin || isRootAdmin ? <SuperAdminView /> : <TenantAdminView />;
 }
 
 // ── Super Admin: Full tenant provisioning ───────────────────────────
@@ -366,60 +368,10 @@ function SuperAdminView() {
 
 // ── Tenant Admin: Own tenant management only ────────────────────────
 
-type VdbInfo = {
-  vdb_id: string;
-  health_status: string;
-  is_active: boolean;
-  last_health_check: string | null;
-};
-
-type VdbStatus = {
-  tenant_id: number;
-  data_plane: { tenant_id: string; status: string; last_health_status: string | null } | null;
-  shared_vdbs: VdbInfo[];
-  user_vdbs: (VdbInfo & { user_id: number })[];
-};
-
-function HealthBadge({ status }: { status: string }) {
-  const ok = status === "deployed" || status === "healthy";
-  return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-xs",
-        ok ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-      )}
-    >
-      {status}
-    </span>
-  );
-}
-
 function TenantAdminView() {
-  const meta = getUserMeta();
-  const isRootAdmin = meta?.role === "root_admin";
-  const queryClient = useQueryClient();
-  const [showDelete, setShowDelete] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState("");
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-
   const myTenantQuery = useQuery<Tenant>({
     queryKey: ["my-tenant"],
     queryFn: () => apiClient.get<Tenant>("/api/tenants/me"),
-  });
-
-  const vdbQuery = useQuery<VdbStatus>({
-    queryKey: ["my-vdb-status"],
-    queryFn: () => apiClient.get<VdbStatus>("/api/tenants/me/vdb-status"),
-    enabled: isRootAdmin,
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => apiClient.delete(`/api/tenants/${id}`),
-    onSuccess: () => {
-      queryClient.clear();
-      signOut();
-    },
-    onError: (err: Error) => setDeleteError(err.message),
   });
 
   const tenant = myTenantQuery.data;
@@ -475,130 +427,12 @@ function TenantAdminView() {
               </a>
             </div>
           </div>
-          {!isRootAdmin && (
-            <div className="mt-4 border-t border-slate-100 pt-4">
-              <p className="text-xs text-slate-400">
-                To manage users within your tenant, go to Admin &gt; Users.
-                Contact a super admin to provision new tenants.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* VDB / data-plane deployment status — root_admin only */}
-      {isRootAdmin && (
-        <div className="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="mb-4 text-lg font-medium text-slate-900">
-            VDB Deployment Status
-          </h2>
-          {vdbQuery.isLoading && <p className="text-sm text-slate-500">Loading status...</p>}
-          {vdbQuery.error && (
-            <p className="text-sm text-red-600">{(vdbQuery.error as Error).message}</p>
-          )}
-          {vdbQuery.data && (
-            <div className="space-y-4">
-              {vdbQuery.data.data_plane && (
-                <div className="flex items-center gap-3 text-sm">
-                  <span className="font-medium text-slate-700">Data plane</span>
-                  <span className="font-mono text-slate-500">
-                    {vdbQuery.data.data_plane.tenant_id}
-                  </span>
-                  <HealthBadge status={vdbQuery.data.data_plane.status} />
-                </div>
-              )}
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase text-slate-400">
-                  Shared VDBs
-                </p>
-                {vdbQuery.data.shared_vdbs.length === 0 ? (
-                  <p className="text-sm text-slate-400">None</p>
-                ) : (
-                  <ul className="space-y-1">
-                    {vdbQuery.data.shared_vdbs.map((v) => (
-                      <li key={v.vdb_id} className="flex items-center gap-3 text-sm">
-                        <span className="font-mono text-slate-600">{v.vdb_id}</span>
-                        <HealthBadge status={v.health_status} />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase text-slate-400">
-                  User VDBs
-                </p>
-                {vdbQuery.data.user_vdbs.length === 0 ? (
-                  <p className="text-sm text-slate-400">None</p>
-                ) : (
-                  <ul className="space-y-1">
-                    {vdbQuery.data.user_vdbs.map((v) => (
-                      <li key={v.vdb_id} className="flex items-center gap-3 text-sm">
-                        <span className="text-slate-500">user #{v.user_id}</span>
-                        <span className="font-mono text-slate-600">{v.vdb_id}</span>
-                        <HealthBadge status={v.health_status} />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Danger zone — root_admin only */}
-      {isRootAdmin && tenant && (
-        <div className="mt-6 rounded-lg border border-red-200 bg-white p-6 shadow-sm">
-          <h2 className="mb-1 text-lg font-medium text-red-700">Danger Zone</h2>
-          <p className="mb-4 text-sm text-slate-500">
-            Permanently delete this tenant and all of its users, projects, data
-            sources and VDBs. This cannot be undone.
-          </p>
-          {!showDelete ? (
-            <button
-              onClick={() => setShowDelete(true)}
-              className="rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
-            >
-              Delete tenant
-            </button>
-          ) : (
-            <div className="rounded-md border border-red-200 bg-red-50 p-4">
-              <p className="mb-2 text-sm text-slate-700">
-                Type the slug <span className="font-mono font-semibold">{tenant.slug}</span> to confirm:
-              </p>
-              <input
-                type="text"
-                value={deleteConfirm}
-                onChange={(e) => setDeleteConfirm(e.target.value)}
-                className="mb-3 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400"
-                placeholder={tenant.slug}
-              />
-              {deleteError && <p className="mb-2 text-sm text-red-600">{deleteError}</p>}
-              <div className="flex gap-2">
-                <button
-                  disabled={deleteConfirm !== tenant.slug || deleteMutation.isPending}
-                  onClick={() => {
-                    setDeleteError(null);
-                    deleteMutation.mutate(tenant.id);
-                  }}
-                  className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {deleteMutation.isPending ? "Deleting..." : "Permanently delete"}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowDelete(false);
-                    setDeleteConfirm("");
-                    setDeleteError(null);
-                  }}
-                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <p className="text-xs text-slate-400">
+              To manage users within your tenant, go to Admin &gt; Users.
+              Contact a super admin to provision new tenants.
+            </p>
+          </div>
         </div>
       )}
     </section>

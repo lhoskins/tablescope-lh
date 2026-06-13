@@ -20,10 +20,10 @@ const tenantAdminItems: NavItem[] = [
   { href: "/admin/tenants", label: "My Tenant" },
 ];
 
-// root_admin is a tenant superset: user management + tenant lifecycle/VDB.
+// root_admin is the platform role (lives in the dedicated root tenant):
+// cross-tenant tenant list/delete + click-into VDB status. No user management.
 const rootAdminItems: NavItem[] = [
-  { href: "/admin/users", label: "Users" },
-  { href: "/admin/tenants", label: "My Tenant" },
+  { href: "/admin/tenants", label: "Tenants" },
 ];
 
 const superAdminItems: NavItem[] = [

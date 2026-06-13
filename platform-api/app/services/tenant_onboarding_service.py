@@ -171,7 +171,7 @@ class TenantOnboardingService:
             supabase_user_id=supa.id,
             email=req.tenant_admin_email,
             tenant_id=tenant.id,
-            role="root_admin",
+            role="tenant_admin",
             first_name=req.tenant_admin_first_name,
             last_name=req.tenant_admin_last_name,
         )
@@ -184,7 +184,7 @@ class TenantOnboardingService:
         )
         if membership is None:
             membership = TenantMembership(
-                tenant_id=tenant.id, user_id=user.id, role="root_admin"
+                tenant_id=tenant.id, user_id=user.id, role="tenant_admin"
             )
             self._session.add(membership)
             await self._session.flush()
@@ -192,10 +192,10 @@ class TenantOnboardingService:
                 audit.TENANT_MEMBERSHIP_CREATED,
                 tenant_id=tenant.id,
                 user_id=user.id,
-                role="root_admin",
+                role="tenant_admin",
             )
-        elif membership.role != "root_admin":
-            membership.role = "root_admin"
+        elif membership.role != "tenant_admin":
+            membership.role = "tenant_admin"
         req.root_admin_status = "membership_created"
         return supa.action_link, user
 

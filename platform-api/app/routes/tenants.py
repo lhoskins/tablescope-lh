@@ -64,16 +64,16 @@ async def _require_user_management(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(get_request_context),
 ) -> RequestContext:
-    """User management is a tenant_admin duty.
+    """User management is a tenant_admin (or super-admin) duty within a tenant.
 
-    ``root_admin`` is a tenant superset (it also owns tenant lifecycle + VDB
-    monitoring), so it is allowed here too; plain editor/viewer are not.
+    ``root_admin`` is a platform role (cross-tenant lifecycle + VDB monitoring)
+    and does NOT manage users, so it is excluded here.
     """
     if context.is_service:
         return context
     if await _is_super_admin(session, context):
         return context
-    if context.role in (Role.ROOT_ADMIN, Role.TENANT_ADMIN, Role.ADMIN):
+    if context.role in (Role.TENANT_ADMIN, Role.ADMIN):
         return context
     raise HTTPException(
         status_code=403,
@@ -81,29 +81,16 @@ async def _require_user_management(
     )
 
 
-async def _require_tenant_delete(
-    tenant_id: int,
+async def _require_root_or_super(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(get_request_context),
 ) -> RequestContext:
-    """Deleting a tenant is reserved for its own root_admin or a super-admin."""
-    if context.is_service:
-        return context
-    if await _is_super_admin(session, context):
-        return context
-    if context.role == Role.ROOT_ADMIN and context.tenant_id == tenant_id:
-        return context
-    raise HTTPException(
-        status_code=403,
-        detail="Only the tenant's root admin or a super admin can delete this tenant",
-    )
+    """Platform-level tenant administration: list all tenants, delete any tenant,
+    and view any tenant's details / VDB status.
 
-
-async def _require_root_admin(
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
-) -> RequestContext:
-    """VDB / deployment status is visible to the tenant's root_admin (or super)."""
+    Allowed for service callers, super-admins, and the ``root_admin`` platform
+    role (which lives in the dedicated root-admin tenant).
+    """
     if context.is_service:
         return context
     if await _is_super_admin(session, context):
@@ -112,7 +99,7 @@ async def _require_root_admin(
         return context
     raise HTTPException(
         status_code=403,
-        detail="Requires the root_admin role",
+        detail="Requires the platform root admin or a super admin",
     )
 
 
@@ -215,7 +202,7 @@ async def create_tenant(
 async def delete_tenant(
     tenant_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(_require_tenant_delete),
+    context: RequestContext = Depends(_require_root_or_super),
 ) -> TenantDeleteResponse:
     """Delete an application (org) tenant and all of its data.
 
@@ -298,7 +285,7 @@ async def list_tenants(
 
     Super-admins see all tenants. Regular admins see only their own.
     """
-    if context.is_service:
+    if context.is_service or context.role == Role.ROOT_ADMIN:
         rows = await session.scalars(select(Tenant).order_by(Tenant.id))
         return [TenantRead.model_validate(t) for t in rows]
 
@@ -315,7 +302,7 @@ async def list_tenants(
 async def get_tenant_details(
     tenant_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(_require_super_admin),
+    context: RequestContext = Depends(_require_root_or_super),
 ) -> dict:
     """Get tenant details including users with VDB info and shared VDBs."""
     tenant = await session.get(Tenant, tenant_id)
@@ -398,65 +385,6 @@ async def get_my_tenant(
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
     return TenantRead.model_validate(tenant)
-
-
-@router.get("/me/vdb-status")
-async def get_my_vdb_status(
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(_require_root_admin),
-) -> dict:
-    """VDB / data-plane deployment status for the caller's own tenant.
-
-    Reserved for the tenant's root_admin (or a platform super-admin).
-    """
-    tenant_id = context.tenant_id
-    shared_rows = await session.scalars(
-        select(SharedVDB).where(SharedVDB.tenant_id == tenant_id)
-    )
-    user_rows = await session.scalars(
-        select(UserVDB).where(UserVDB.tenant_id == tenant_id)
-    )
-    plane = await session.scalar(
-        select(TenantDataPlane).where(TenantDataPlane.org_tenant_id == tenant_id)
-    )
-
-    shared_vdbs = [
-        {
-            "vdb_id": sv.vdb_id,
-            "health_status": sv.health_status,
-            "is_active": sv.is_active,
-            "last_health_check": (
-                sv.last_health_check.isoformat() if sv.last_health_check else None
-            ),
-        }
-        for sv in shared_rows
-    ]
-    user_vdbs = [
-        {
-            "user_id": uv.user_id,
-            "vdb_id": uv.vdb_id,
-            "health_status": uv.health_status,
-            "is_active": uv.is_active,
-            "last_health_check": (
-                uv.last_health_check.isoformat() if uv.last_health_check else None
-            ),
-        }
-        for uv in user_rows
-    ]
-    return {
-        "tenant_id": tenant_id,
-        "data_plane": (
-            {
-                "tenant_id": plane.tenant_id,
-                "status": plane.status,
-                "last_health_status": plane.last_health_status,
-            }
-            if plane is not None
-            else None
-        ),
-        "shared_vdbs": shared_vdbs,
-        "user_vdbs": user_vdbs,
-    }
 
 
 @router.post(
