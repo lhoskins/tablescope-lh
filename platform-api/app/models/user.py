@@ -24,7 +24,14 @@ class User(TimestampMixin, Base):
     external_id: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True, index=True
     )
+    # Supabase Auth subject id (mirrors external_id when Supabase is the IdP).
+    supabase_user_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
     role: Mapped[str] = mapped_column(String(32), default="viewer", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
