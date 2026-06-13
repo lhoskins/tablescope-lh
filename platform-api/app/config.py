@@ -104,6 +104,20 @@ class Settings(BaseSettings):
     stripe_success_url: str = ""
     stripe_cancel_url: str = ""
 
+    # --- Outbound email (branded billing/invite emails) ---
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    email_from: str = "Tablescope <no-reply@tablescope.cloud>"
+    app_base_url: str = "https://app.tablescope.cloud"
+    support_email: str = "support@tablescope.cloud"
+
+    @property
+    def email_configured(self) -> bool:
+        return bool(self.smtp_host and self.email_from)
+
     @property
     def resolved_supabase_project_ref(self) -> str:
         """Project ref, derived from the Supabase URL when not set explicitly."""

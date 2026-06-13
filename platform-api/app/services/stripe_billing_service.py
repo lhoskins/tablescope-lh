@@ -53,11 +53,10 @@ class StripeBillingService:
             existing = stripe.Customer.list(email=email, limit=1)
             if existing.data:
                 return str(existing.data[0].id)
-            created = stripe.Customer.create(
-                email=email,
-                name=company_name or None,
-                metadata=metadata or {},
-            )
+            create_kwargs: dict[str, Any] = {"email": email, "metadata": metadata or {}}
+            if company_name:
+                create_kwargs["name"] = company_name
+            created = stripe.Customer.create(**create_kwargs)
             return str(created.id)
 
         return await to_thread.run_sync(_run)
