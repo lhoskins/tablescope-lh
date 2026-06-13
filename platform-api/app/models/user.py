@@ -47,6 +47,8 @@ class User(TimestampMixin, Base):
     user_vdb: Mapped[UserVDB | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="user",
         uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     __table_args__ = (
