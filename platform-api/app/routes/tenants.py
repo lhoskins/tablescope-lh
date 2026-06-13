@@ -64,16 +64,16 @@ async def _require_user_management(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(get_request_context),
 ) -> RequestContext:
-    """User management is a tenant_admin (or platform super-admin) duty.
+    """User management is a tenant_admin duty.
 
-    ``root_admin`` is intentionally excluded: it owns tenant lifecycle (delete)
-    and VDB monitoring, but not user administration.
+    ``root_admin`` is a tenant superset (it also owns tenant lifecycle + VDB
+    monitoring), so it is allowed here too; plain editor/viewer are not.
     """
     if context.is_service:
         return context
     if await _is_super_admin(session, context):
         return context
-    if context.role in (Role.TENANT_ADMIN, Role.ADMIN):
+    if context.role in (Role.ROOT_ADMIN, Role.TENANT_ADMIN, Role.ADMIN):
         return context
     raise HTTPException(
         status_code=403,

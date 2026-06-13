@@ -20,8 +20,9 @@ const tenantAdminItems: NavItem[] = [
   { href: "/admin/tenants", label: "My Tenant" },
 ];
 
-// root_admin owns tenant lifecycle (delete) + VDB monitoring, not user admin.
+// root_admin is a tenant superset: user management + tenant lifecycle/VDB.
 const rootAdminItems: NavItem[] = [
+  { href: "/admin/users", label: "Users" },
   { href: "/admin/tenants", label: "My Tenant" },
 ];
 
