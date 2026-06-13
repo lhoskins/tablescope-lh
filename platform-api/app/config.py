@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,9 +17,14 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
-    environment: Literal["development", "test", "staging", "production"] = "development"
+    # Accept both ENVIRONMENT (legacy) and APP_ENV (billing plan) env names.
+    environment: Literal["development", "test", "staging", "production"] = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "APP_ENV"),
+    )
     log_level: str = "INFO"
     api_prefix: str = "/api"
 
@@ -79,6 +84,66 @@ class Settings(BaseSettings):
     tablescope_ai_default_scope: str = "project"
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
+
+    # --- Supabase authentication ---
+    # Single environment-configured auth provider (NOT one project per tenant).
+    supabase_env: Literal["test", "staging", "production"] = "test"
+    supabase_url: str = ""
+    supabase_project_ref: str = ""
+    supabase_anon_key: str = ""
+    # Backend-only. Never expose to the frontend.
+    supabase_service_role_key: str = ""
+    supabase_database_url: str = ""
+    supabase_jwt_secret: str = ""
+
+    # --- Stripe billing ---
+    stripe_mode: Literal["test", "live"] = "test"
+    stripe_publishable_key: str = ""
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_success_url: str = ""
+    stripe_cancel_url: str = ""
+
+    @property
+    def resolved_supabase_project_ref(self) -> str:
+        """Project ref, derived from the Supabase URL when not set explicitly."""
+        if self.supabase_project_ref:
+            return self.supabase_project_ref
+        url = self.supabase_url.removeprefix("https://").removeprefix("http://")
+        return url.split(".")[0] if url else ""
+
+    @property
+    def supabase_configured(self) -> bool:
+        return bool(self.supabase_url and self.supabase_service_role_key)
+
+    @property
+    def stripe_configured(self) -> bool:
+        return bool(self.stripe_secret_key)
+
+    @model_validator(mode="after")
+    def _validate_env_safety(self) -> Settings:
+        """Guard against test credentials in production (and vice versa)."""
+        if self.environment == "production":
+            if self.stripe_secret_key and self.stripe_mode != "live":
+                raise ValueError(
+                    "APP_ENV=production requires STRIPE_MODE=live"
+                )
+            if self.supabase_url and self.supabase_env != "production":
+                raise ValueError(
+                    "APP_ENV=production requires SUPABASE_ENV=production"
+                )
+            if self.stripe_secret_key.startswith("sk_test_"):
+                raise ValueError(
+                    "Refusing to use a Stripe test secret key in production"
+                )
+        else:
+            # Non-production must not run live Stripe keys by accident.
+            if self.stripe_secret_key.startswith("sk_live_"):
+                raise ValueError(
+                    f"Refusing to use a Stripe live secret key in "
+                    f"APP_ENV={self.environment}"
+                )
+        return self
 
     @field_validator("log_level")
     @classmethod
