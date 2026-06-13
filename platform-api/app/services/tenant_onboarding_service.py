@@ -289,7 +289,7 @@ class TenantOnboardingService:
         from app.config import get_settings
 
         settings = get_settings()
-        login_url = f"{settings.app_base_url}/demo/login"
+        login_url = f"{settings.app_base_url}/{req.tenant_slug}/login"
         tier_display = req.tier_key.replace("_", " ").title()
 
         invite = render_root_admin_invite(
