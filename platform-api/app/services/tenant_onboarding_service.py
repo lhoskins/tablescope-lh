@@ -137,10 +137,14 @@ class TenantOnboardingService:
     async def _ensure_root_admin(
         self, req: TenantProvisioningRequest, tenant: Tenant
     ) -> tuple[str | None, User]:
+        from app.config import get_settings
+
+        login_url = f"{get_settings().app_base_url}/{tenant.slug}/login"
         supa = await self._supabase.create_or_invite_user(
             req.tenant_admin_email,
             first_name=req.tenant_admin_first_name,
             last_name=req.tenant_admin_last_name,
+            redirect_to=login_url,
         )
         if supa.created:
             req.root_admin_status = "supabase_user_created"

@@ -127,12 +127,21 @@ class SupabaseAuthService:
         u = resp.json()
         return SupabaseUser(id=u["id"], email=u.get("email", email), created=True)
 
-    async def generate_invite_link(self, email: str) -> str:
-        """Generate an invite action link (magic invite) for an email."""
+    async def generate_invite_link(
+        self, email: str, *, redirect_to: str | None = None
+    ) -> str:
+        """Generate an invite action link (magic invite) for an email.
+
+        ``redirect_to`` must be sent top-level (not under ``options``) or GoTrue
+        ignores it and falls back to the project Site URL.
+        """
+        payload: dict[str, Any] = {"type": "invite", "email": email}
+        if redirect_to:
+            payload["redirect_to"] = redirect_to
         resp = await self._request(
             "POST",
             "/auth/v1/admin/generate_link",
-            json={"type": "invite", "email": email},
+            json=payload,
         )
         if resp.status_code not in (200, 201):
             raise SupabaseAdminError(f"generate_link failed: HTTP {resp.status_code}")
@@ -148,6 +157,7 @@ class SupabaseAuthService:
         *,
         first_name: str | None = None,
         last_name: str | None = None,
+        redirect_to: str | None = None,
     ) -> SupabaseUser:
         """Find an existing Supabase user, else create one and generate an invite link.
 
@@ -160,7 +170,9 @@ class SupabaseAuthService:
             email, first_name=first_name, last_name=last_name
         )
         try:
-            user.action_link = await self.generate_invite_link(email)
+            user.action_link = await self.generate_invite_link(
+                email, redirect_to=redirect_to
+            )
         except SupabaseAdminError as exc:  # invite link is best-effort
             logger.warning("could not generate invite link for new user: %s", exc)
         return user

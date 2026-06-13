@@ -43,7 +43,7 @@ class FakeSupabase(SupabaseAuthService):
         self._counter = 0
 
     async def create_or_invite_user(
-        self, email, *, first_name=None, last_name=None
+        self, email, *, first_name=None, last_name=None, redirect_to=None
     ) -> SupabaseUser:
         self._counter += 1
         return SupabaseUser(
