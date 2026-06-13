@@ -72,7 +72,16 @@ class StripeWebhookHandler:
             audit.STRIPE_WEBHOOK_VERIFIED, stripe_event_id=event_id, event_type=event_type
         )
 
-        # Idempotency gate: record the event id first.
+        # Idempotency gate: skip if we've already recorded this event id.
+        already = await self._session.scalar(
+            select(BillingEvent).where(BillingEvent.stripe_event_id == event_id)
+        )
+        if already is not None:
+            audit.audit(
+                audit.STRIPE_EVENT_DUPLICATE_SKIPPED, stripe_event_id=event_id
+            )
+            return {"status": "duplicate"}
+
         record = BillingEvent(
             stripe_event_id=event_id,
             event_type=event_type,
