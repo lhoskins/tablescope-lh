@@ -41,19 +41,36 @@ async def exchange_token(
     if not external_user_id:
         raise HTTPException(status_code=400, detail="External token missing `sub`")
 
-    user = await session.scalar(select(User).where(User.external_id == external_user_id))
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No platform-api user linked to external id {external_user_id}",
-        )
-
+    # Identity is unique per tenant, so when a tenant slug is supplied (every
+    # /{slug}/login does) resolve the user within that tenant. This lets one
+    # Supabase email belong to several tenants (e.g. root_admin in `root` and
+    # tenant_admin in a customer tenant).
     if payload.tenant_slug:
         tenant = await session.scalar(select(Tenant).where(Tenant.slug == payload.tenant_slug))
-        if tenant is None or tenant.id != user.tenant_id:
+        if tenant is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tenant {payload.tenant_slug!r} not found",
+            )
+        user = await session.scalar(
+            select(User).where(
+                User.external_id == external_user_id,
+                User.tenant_id == tenant.id,
+            )
+        )
+        if user is None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User does not belong to requested tenant",
+            )
+    else:
+        user = await session.scalar(
+            select(User).where(User.external_id == external_user_id)
+        )
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No platform-api user linked to external id {external_user_id}",
             )
 
     access_token = create_access_token(

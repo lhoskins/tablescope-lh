@@ -20,6 +20,12 @@ const tenantAdminItems: NavItem[] = [
   { href: "/admin/tenants", label: "My Tenant" },
 ];
 
+// root_admin is the platform role (lives in the dedicated root tenant):
+// cross-tenant tenant list/delete + click-into VDB status. No user management.
+const rootAdminItems: NavItem[] = [
+  { href: "/admin/tenants", label: "Tenants" },
+];
+
 const superAdminItems: NavItem[] = [
   { href: "/admin/users", label: "Users" },
   { href: "/admin/tenants", label: "Tenant Provisioning" },
@@ -87,8 +93,14 @@ export function Sidebar() {
   const pathname = usePathname();
   const meta = getUserMeta();
   const isSuperAdmin = meta?.is_super_admin ?? false;
-  const isAdmin = meta?.role === "admin";
-  const adminNav = isSuperAdmin ? superAdminItems : isAdmin ? tenantAdminItems : [];
+  const role = meta?.role;
+  const adminNav = isSuperAdmin
+    ? superAdminItems
+    : role === "root_admin"
+      ? rootAdminItems
+      : role === "tenant_admin" || role === "admin"
+        ? tenantAdminItems
+        : [];
 
   const [collapsed, setCollapsed] = useState(false);
   const toggle = useCallback(() => setCollapsed((v) => !v), []);

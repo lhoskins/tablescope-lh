@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext, get_request_context
 from app.auth.rbac import Role, require_role
+from app.config import get_settings
 from app.database import get_db
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant
@@ -30,6 +31,12 @@ from app.schemas.tenant import (
     UserUpdate,
 )
 from app.services.customer_folders import CustomerFolderError, CustomerFolderService
+from app.services.email_service import EmailService, render_user_invite
+from app.services.supabase_auth_service import (
+    SupabaseAdminError,
+    SupabaseAuthService,
+    SupabaseConfigError,
+)
 from app.services.tenant_deletion_service import (
     delete_tenant_folders,
     purge_app_tenant,
@@ -53,6 +60,54 @@ async def _require_super_admin(
     if user is None or not user.is_super_admin:
         raise HTTPException(status_code=403, detail="Only super-admins can provision tenants")
     return context
+
+
+async def _is_super_admin(session: AsyncSession, context: RequestContext) -> bool:
+    user = await session.get(User, context.user_id)
+    return bool(user and user.is_super_admin)
+
+
+async def _require_user_management(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(get_request_context),
+) -> RequestContext:
+    """User management is a tenant_admin (or super-admin) duty within a tenant.
+
+    ``root_admin`` is a platform role (cross-tenant lifecycle + VDB monitoring)
+    and does NOT manage users, so it is excluded here.
+    """
+    if context.is_service:
+        return context
+    if await _is_super_admin(session, context):
+        return context
+    if context.role in (Role.TENANT_ADMIN, Role.ADMIN):
+        return context
+    raise HTTPException(
+        status_code=403,
+        detail="User management requires the tenant_admin role",
+    )
+
+
+async def _require_root_or_super(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(get_request_context),
+) -> RequestContext:
+    """Platform-level tenant administration: list all tenants, delete any tenant,
+    and view any tenant's details / VDB status.
+
+    Allowed for service callers, super-admins, and the ``root_admin`` platform
+    role (which lives in the dedicated root-admin tenant).
+    """
+    if context.is_service:
+        return context
+    if await _is_super_admin(session, context):
+        return context
+    if context.role == Role.ROOT_ADMIN:
+        return context
+    raise HTTPException(
+        status_code=403,
+        detail="Requires the platform root admin or a super admin",
+    )
 
 
 @router.post(
@@ -154,7 +209,7 @@ async def create_tenant(
 async def delete_tenant(
     tenant_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(_require_super_admin),
+    context: RequestContext = Depends(_require_root_or_super),
 ) -> TenantDeleteResponse:
     """Delete an application (org) tenant and all of its data.
 
@@ -237,7 +292,7 @@ async def list_tenants(
 
     Super-admins see all tenants. Regular admins see only their own.
     """
-    if context.is_service:
+    if context.is_service or context.role == Role.ROOT_ADMIN:
         rows = await session.scalars(select(Tenant).order_by(Tenant.id))
         return [TenantRead.model_validate(t) for t in rows]
 
@@ -254,7 +309,7 @@ async def list_tenants(
 async def get_tenant_details(
     tenant_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(_require_super_admin),
+    context: RequestContext = Depends(_require_root_or_super),
 ) -> dict:
     """Get tenant details including users with VDB info and shared VDBs."""
     tenant = await session.get(Tenant, tenant_id)
@@ -348,7 +403,7 @@ async def create_user(
     tenant_id: int,
     payload: UserCreate,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.ADMIN)),
+    context: RequestContext = Depends(_require_user_management),
 ) -> UserRead:
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot create users in another tenant")
@@ -357,16 +412,53 @@ async def create_user(
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    user = User(
-        tenant_id=tenant_id,
-        email=payload.email,
-        display_name=payload.display_name,
-        role=payload.role,
-        external_id=payload.external_id,
+    existing = await session.scalar(
+        select(User).where(User.tenant_id == tenant_id, User.email == payload.email)
     )
-    if payload.password:
-        user.set_password(payload.password)
-    session.add(user)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="User already exists")
+
+    # Supabase is the primary authenticator: create/link a Supabase identity and
+    # send a "set your password" invite that lands on the set-password page. No
+    # local password is ever stored. If Supabase is unavailable, the user is NOT
+    # created (no local fallback).
+    settings = get_settings()
+    login_url = f"{settings.app_base_url}/{tenant.slug}/login"
+    setup_url = f"{settings.app_base_url}/{tenant.slug}/set-password"
+    supa = SupabaseAuthService()
+    try:
+        supa_user = await supa.create_or_invite_user(
+            payload.email,
+            first_name=payload.display_name,
+            redirect_to=setup_url,
+        )
+    except (SupabaseConfigError, SupabaseAdminError) as exc:
+        logger.warning("Supabase user creation failed for %s: %s", payload.email, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication provider unavailable; user was not created",
+        ) from exc
+
+    user = await supa.link_local_user(
+        session,
+        supabase_user_id=supa_user.id,
+        email=payload.email,
+        tenant_id=tenant_id,
+        role=payload.role,
+        first_name=payload.display_name,
+    )
+    user.role = payload.role
+    if payload.display_name:
+        user.display_name = payload.display_name
+    invite_link = supa_user.action_link
+    if invite_link is None:
+        try:
+            invite_link = await supa.generate_magic_link(
+                payload.email, redirect_to=setup_url
+            )
+        except SupabaseAdminError as exc:
+            logger.warning("Could not generate set-password link for %s: %s", payload.email, exc)
+
     try:
         await session.flush()
     except IntegrityError as exc:
@@ -374,7 +466,7 @@ async def create_user(
         raise HTTPException(status_code=409, detail="User already exists") from exc
 
     CustomerFolderService().ensure_user_folders(
-        tenant.slug, payload.external_id or str(user.id)
+        tenant.slug, user.external_id or str(user.id)
     )
 
     # Create and deploy user VDB — target the dedicated container if bound.
@@ -408,6 +500,22 @@ async def create_user(
 
     await session.commit()
     await session.refresh(user)
+
+    # Send the branded magic-link invite (best-effort; never fails user creation).
+    if invite_link is not None:
+        try:
+            spec = render_user_invite(
+                company_name=tenant.name,
+                role=payload.role,
+                invite_link=invite_link,
+                login_url=login_url,
+            )
+            await EmailService().send(
+                spec, to=payload.email, template="user_invite"
+            )
+        except Exception as exc:  # delivery is best-effort
+            logger.warning("Failed to send invite email to %s: %s", payload.email, exc)
+
     return UserRead.model_validate(user)
 
 
@@ -415,7 +523,7 @@ async def create_user(
 async def list_users(
     tenant_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(_require_user_management),
 ) -> list[UserRead]:
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot list users in another tenant")
@@ -432,7 +540,7 @@ async def update_user(
     user_id: int,
     payload: UserUpdate,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.ADMIN)),
+    context: RequestContext = Depends(_require_user_management),
 ) -> UserRead:
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot update users in another tenant")
@@ -461,7 +569,7 @@ async def deactivate_user(
     tenant_id: int,
     user_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.ADMIN)),
+    context: RequestContext = Depends(_require_user_management),
 ) -> Response:
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot deactivate users in another tenant")
@@ -482,7 +590,7 @@ async def delete_user_permanently(
     tenant_id: int,
     user_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.ADMIN)),
+    context: RequestContext = Depends(_require_user_management),
 ) -> Response:
     """Hard-delete an inactive user. Only works on deactivated users."""
     if not context.is_service and context.tenant_id != tenant_id:

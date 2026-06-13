@@ -18,8 +18,11 @@ type Tenant = {
 export default function TenantsPage() {
   const meta = getUserMeta();
   const isSuperAdmin = meta?.is_super_admin ?? false;
+  const isRootAdmin = meta?.role === "root_admin";
 
-  return isSuperAdmin ? <SuperAdminView /> : <TenantAdminView />;
+  // root_admin is the platform role (lives in the dedicated root tenant): it
+  // gets the same cross-tenant view as a super-admin.
+  return isSuperAdmin || isRootAdmin ? <SuperAdminView /> : <TenantAdminView />;
 }
 
 // ── Super Admin: Full tenant provisioning ───────────────────────────
@@ -366,12 +369,12 @@ function SuperAdminView() {
 // ── Tenant Admin: Own tenant management only ────────────────────────
 
 function TenantAdminView() {
-  const meta = getUserMeta();
-
   const myTenantQuery = useQuery<Tenant>({
     queryKey: ["my-tenant"],
     queryFn: () => apiClient.get<Tenant>("/api/tenants/me"),
   });
+
+  const tenant = myTenantQuery.data;
 
   return (
     <section>
@@ -387,20 +390,20 @@ function TenantAdminView() {
         <p className="text-red-600">{(myTenantQuery.error as Error).message}</p>
       )}
 
-      {myTenantQuery.data && (
+      {tenant && (
         <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs font-medium uppercase text-slate-400">Organization Name</p>
-              <p className="text-sm text-slate-900">{myTenantQuery.data.name}</p>
+              <p className="text-sm text-slate-900">{tenant.name}</p>
             </div>
             <div>
               <p className="text-xs font-medium uppercase text-slate-400">Slug</p>
-              <p className="text-sm font-mono text-slate-900">{myTenantQuery.data.slug}</p>
+              <p className="text-sm font-mono text-slate-900">{tenant.slug}</p>
             </div>
             <div>
               <p className="text-xs font-medium uppercase text-slate-400">Status</p>
-              {myTenantQuery.data.is_active ? (
+              {tenant.is_active ? (
                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">Active</span>
               ) : (
                 <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">Inactive</span>
@@ -409,18 +412,18 @@ function TenantAdminView() {
             <div>
               <p className="text-xs font-medium uppercase text-slate-400">Created</p>
               <p className="text-sm text-slate-900">
-                {new Date(myTenantQuery.data.created_at).toLocaleDateString()}
+                {new Date(tenant.created_at).toLocaleDateString()}
               </p>
             </div>
             <div className="col-span-2">
               <p className="text-xs font-medium uppercase text-slate-400">Login URL</p>
               <a
-                href={`/${myTenantQuery.data.slug}/login`}
+                href={`/${tenant.slug}/login`}
                 className="text-sm text-brand underline hover:text-brand/80"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                /{myTenantQuery.data.slug}/login
+                /{tenant.slug}/login
               </a>
             </div>
           </div>

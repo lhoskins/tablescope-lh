@@ -1,4 +1,5 @@
 import { apiClient, clearToken, storeToken } from "./api-client";
+import { getSupabaseClient } from "./supabase";
 
 export { storeToken, clearToken };
 
@@ -45,6 +46,24 @@ export function getUserMeta(): {
   }
 }
 
+/**
+ * Read a Supabase access token from the URL hash fragment left by a magic-link
+ * redirect (e.g. `#access_token=...&refresh_token=...`). Clears the fragment so
+ * the credential isn't left in the address bar / history. Returns null if none.
+ */
+export function readSupabaseTokenFromHash(): string | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash;
+  if (!hash || !hash.includes("access_token")) return null;
+  const params = new URLSearchParams(hash.replace(/^#/, ""));
+  const accessToken = params.get("access_token");
+  if (accessToken) {
+    const url = window.location.pathname + window.location.search;
+    window.history.replaceState(null, "", url);
+  }
+  return accessToken;
+}
+
 export async function exchangeWithSupabase(
   providerToken: string,
   tenantSlug?: string,
@@ -67,22 +86,79 @@ export async function exchangeWithClerk(
   });
 }
 
+/**
+ * Sign in with email + password via Supabase (the primary authenticator), then
+ * exchange the resulting Supabase access token for a Tablescope session scoped
+ * to the tenant. There is no local password store.
+ */
 export async function loginWithPassword(
   email: string,
   password: string,
   tenantSlug?: string,
 ): Promise<ExchangeResponse> {
-  return apiClient.post<ExchangeResponse>("/api/auth/login", {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,
-    tenant_slug: tenantSlug,
   });
+  if (error) throw new Error(error.message);
+  const accessToken = data.session?.access_token;
+  if (!accessToken) throw new Error("Supabase did not return a session.");
+  return exchangeWithSupabase(accessToken, tenantSlug);
+}
+
+/**
+ * Email the user a Supabase password-reset link that lands on the tenant's
+ * set-password page.
+ */
+export async function requestPasswordReset(
+  email: string,
+  tenantSlug: string,
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  const redirectTo =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/${tenantSlug}/set-password`
+      : undefined;
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Set the password on the Supabase session established by an invite/recovery
+ * link, then exchange for a Tablescope session.
+ */
+export async function setPasswordAndExchange(
+  password: string,
+  tenantSlug: string,
+): Promise<ExchangeResponse> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw new Error(error.message);
+  const { data } = await supabase.auth.getSession();
+  const accessToken = data.session?.access_token;
+  if (!accessToken) throw new Error("No active Supabase session.");
+  return exchangeWithSupabase(accessToken, tenantSlug);
+}
+
+/** Whether a Supabase recovery/invite session is present (set-password flow). */
+export async function hasSupabaseSession(): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  const { data } = await supabase.auth.getSession();
+  return Boolean(data.session);
 }
 
 export function signOut() {
   const meta = getUserMeta();
   const slug = meta?.tenant_slug;
   clearToken();
+  try {
+    void getSupabaseClient().auth.signOut();
+  } catch {
+    // Supabase may be unconfigured; ignore.
+  }
   if (typeof window !== "undefined") {
     window.localStorage.removeItem(USER_META_KEY);
     window.location.href = slug ? `/${slug}/login` : "/login";

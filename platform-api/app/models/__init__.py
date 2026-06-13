@@ -16,6 +16,13 @@ from app.models.ai_reference_catalog import (
     TenantReferenceCatalog,
 )
 from app.models.base import Base
+from app.models.billing import (
+    BillingCustomer,
+    BillingEvent,
+    BillingSubscription,
+    SubscriptionTierCatalog,
+    TenantProvisioningRequest,
+)
 from app.models.connector_credential import ConnectorCredential
 from app.models.dashboard import Dashboard
 from app.models.data_source_ai_profile import (
@@ -37,6 +44,7 @@ from app.models.saved_query import SavedQuery
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
+from app.models.tenant_membership import TenantAuthBinding, TenantMembership
 from app.models.user import User
 from app.models.user_vdb import UserVDB
 
@@ -54,6 +62,11 @@ __all__ = [
     "TenantCustomTag",
     "TenantReferenceCatalog",
     "Base",
+    "BillingCustomer",
+    "BillingEvent",
+    "BillingSubscription",
+    "SubscriptionTierCatalog",
+    "TenantProvisioningRequest",
     "ConnectorCredential",
     "Dashboard",
     "DataSourceAIProfile",
@@ -76,6 +89,8 @@ __all__ = [
     "Tenant",
     "TenantDataPlane",
     "TenantSecretRef",
+    "TenantAuthBinding",
+    "TenantMembership",
     "User",
     "UserVDB",
 ]

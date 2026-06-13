@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,9 +17,14 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
-    environment: Literal["development", "test", "staging", "production"] = "development"
+    # Accept both ENVIRONMENT (legacy) and APP_ENV (billing plan) env names.
+    environment: Literal["development", "test", "staging", "production"] = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "APP_ENV"),
+    )
     log_level: str = "INFO"
     api_prefix: str = "/api"
 
@@ -79,6 +84,94 @@ class Settings(BaseSettings):
     tablescope_ai_default_scope: str = "project"
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
+
+    # --- Supabase authentication ---
+    # Single environment-configured auth provider (NOT one project per tenant).
+    supabase_env: Literal["test", "staging", "production"] = "test"
+    supabase_url: str = ""
+    supabase_project_ref: str = ""
+    supabase_anon_key: str = ""
+    # Backend-only. Never expose to the frontend.
+    supabase_service_role_key: str = ""
+    supabase_database_url: str = ""
+    supabase_jwt_secret: str = ""
+
+    # --- Stripe billing ---
+    stripe_mode: Literal["test", "live"] = "test"
+    stripe_publishable_key: str = ""
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_success_url: str = ""
+    stripe_cancel_url: str = ""
+
+    # --- Outbound email (branded billing/invite emails) ---
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    email_from: str = "Tablescope <no-reply@tablescope.cloud>"
+    app_base_url: str = "https://app.tablescope.cloud"
+    support_email: str = "support@tablescope.cloud"
+
+    @property
+    def email_configured(self) -> bool:
+        return bool(self.smtp_host and self.email_from)
+
+    @property
+    def resolved_supabase_project_ref(self) -> str:
+        """Project ref, derived from the Supabase URL when not set explicitly."""
+        if self.supabase_project_ref:
+            return self.supabase_project_ref
+        url = self.supabase_url.removeprefix("https://").removeprefix("http://")
+        return url.split(".")[0] if url else ""
+
+    @property
+    def supabase_configured(self) -> bool:
+        return bool(self.supabase_url and self.supabase_service_role_key)
+
+    @property
+    def stripe_configured(self) -> bool:
+        return bool(self.stripe_secret_key)
+
+    @model_validator(mode="after")
+    def _validate_env_safety(self) -> Settings:
+        """Guard against mismatched Stripe credentials.
+
+        The billing mode is keyed off ``STRIPE_MODE`` (not the global app
+        ``ENVIRONMENT``) so that a production app host can run billing in test
+        mode during rollout. The guarantees that still hold:
+          * the secret key must match the declared mode (no test key in live
+            mode and vice-versa), and
+          * live keys may only run when the app ``ENVIRONMENT`` is production.
+        """
+        if self.stripe_secret_key:
+            if self.stripe_mode == "live" and self.stripe_secret_key.startswith("sk_test_"):
+                raise ValueError("STRIPE_MODE=live but a Stripe test secret key was provided")
+            if self.stripe_mode == "test" and self.stripe_secret_key.startswith("sk_live_"):
+                raise ValueError("STRIPE_MODE=test but a Stripe live secret key was provided")
+            if self.stripe_mode == "live" and self.environment != "production":
+                raise ValueError(
+                    f"Refusing to use Stripe live mode in APP_ENV={self.environment}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _derive_supabase_auth_endpoints(self) -> Settings:
+        """Derive the Supabase issuer + JWKS URL from the project URL when unset.
+
+        Supabase access tokens are signed with the project's GoTrue keys and
+        carry ``iss = <supabase_url>/auth/v1``; the matching JWKS lives at
+        ``<supabase_url>/auth/v1/.well-known/jwks.json``. Deriving these means
+        the exchange endpoint works with only ``SUPABASE_URL`` configured.
+        """
+        base = self.supabase_url.rstrip("/")
+        if base:
+            if not self.supabase_issuer:
+                self.supabase_issuer = f"{base}/auth/v1"
+            if not self.supabase_jwks_url:
+                self.supabase_jwks_url = f"{base}/auth/v1/.well-known/jwks.json"
+        return self
 
     @field_validator("log_level")
     @classmethod

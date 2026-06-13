@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
+
 
 @pytest.fixture()
 def customer_dir(monkeypatch, tmp_path):
@@ -20,7 +22,41 @@ def customer_dir(monkeypatch, tmp_path):
         shutil.rmtree(target)
 
 
-async def test_create_tenant_and_user(client, service_headers, customer_dir: Path) -> None:
+class _FakeSupabase(SupabaseAuthService):
+    """Override only the GoTrue network calls; keep real DB mapping."""
+
+    def __init__(self) -> None:
+        pass
+
+    async def create_or_invite_user(
+        self, email, *, first_name=None, last_name=None, redirect_to=None
+    ) -> SupabaseUser:
+        return SupabaseUser(
+            id=f"supa-{email}",
+            email=email,
+            created=True,
+            action_link=f"https://invite/{email}",
+        )
+
+
+class _FakeEmail:
+    async def send(self, spec, *, to, template) -> bool:
+        return True
+
+
+@pytest.fixture()
+def fake_supabase(monkeypatch):
+    """Make user creation go through Supabase (mocked) — there is no local fallback."""
+    import app.routes.tenants as tenants_module
+
+    monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
+    monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
+    yield
+
+
+async def test_create_tenant_and_user(
+    client, service_headers, customer_dir: Path, fake_supabase
+) -> None:
     response = await client.post(
         "/api/tenants",
         json={"slug": "acme", "name": "Acme Co"},
@@ -36,7 +72,6 @@ async def test_create_tenant_and_user(client, service_headers, customer_dir: Pat
             "email": "alice@example.com",
             "display_name": "Alice",
             "role": "editor",
-            "external_id": "ext-alice",
         },
         headers=service_headers,
     )
@@ -53,7 +88,7 @@ async def test_create_tenant_and_user(client, service_headers, customer_dir: Pat
     assert len(response.json()) == 1
 
     assert (customer_dir / "acme").exists()
-    assert (customer_dir / "acme" / "users" / "ext-alice").exists()
+    assert (customer_dir / "acme" / "users" / "supa-alice@example.com").exists()
 
 
 async def test_anonymous_cannot_create_tenant(client) -> None:
