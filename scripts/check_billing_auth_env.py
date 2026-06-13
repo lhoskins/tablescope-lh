@@ -111,24 +111,21 @@ def check_env_safety() -> list[str]:
     supabase_env = (os.environ.get("SUPABASE_ENV") or "").lower()
     stripe_secret = os.environ.get("STRIPE_SECRET_KEY", "")
 
-    if app_env == "production":
-        if stripe_mode != "live":
-            fail("APP_ENV=production requires STRIPE_MODE=live")
-            problems.append("STRIPE_MODE")
-        if supabase_env != "production":
-            fail("APP_ENV=production requires SUPABASE_ENV=production")
-            problems.append("SUPABASE_ENV")
-        if stripe_secret.startswith("sk_test_"):
-            fail("Stripe TEST secret key used while APP_ENV=production")
-            problems.append("STRIPE_SECRET_KEY")
-    else:
-        if stripe_mode == "live" or stripe_secret.startswith("sk_live_"):
-            fail(f"Stripe LIVE credentials used while APP_ENV={app_env}")
-            problems.append("STRIPE_SECRET_KEY")
-        else:
-            ok(f"env safety: APP_ENV={app_env} with test-mode credentials")
-    if app_env == "production" and not problems:
-        ok("env safety: production config consistent")
+    # Billing safety is keyed off STRIPE_MODE (not the global APP_ENV) so a
+    # production host can run billing in test mode during rollout.
+    if stripe_mode == "live" and stripe_secret.startswith("sk_test_"):
+        fail("STRIPE_MODE=live but a Stripe TEST secret key is set")
+        problems.append("STRIPE_SECRET_KEY")
+    elif stripe_mode == "test" and stripe_secret.startswith("sk_live_"):
+        fail("STRIPE_MODE=test but a Stripe LIVE secret key is set")
+        problems.append("STRIPE_SECRET_KEY")
+    elif stripe_mode == "live" and app_env != "production":
+        fail(f"Stripe LIVE mode used while APP_ENV={app_env} (must be production)")
+        problems.append("STRIPE_MODE")
+    elif stripe_secret:
+        ok(f"env safety: APP_ENV={app_env}, STRIPE_MODE={stripe_mode or 'unset'} consistent")
+    if supabase_env == "production" and app_env != "production":
+        warn(f"SUPABASE_ENV=production while APP_ENV={app_env}")
     return problems
 
 

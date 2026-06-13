@@ -109,23 +109,44 @@ def _onboarding(session, supabase=None, email=None) -> TenantOnboardingService:
 # --------------------------------------------------------------------------- #
 
 
-def test_env_safety_production_rejects_test_stripe_key(monkeypatch):
+def test_env_safety_live_mode_rejects_test_key(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("STRIPE_MODE", "live")
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc")
     monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
     monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
-    with pytest.raises(ValueError, match="test secret key in production"):
+    with pytest.raises(ValueError, match="live but a Stripe test secret key"):
         Settings()
 
 
-def test_env_safety_nonprod_rejects_live_stripe_key(monkeypatch):
+def test_env_safety_test_mode_rejects_live_key(monkeypatch):
     monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("STRIPE_MODE", "test")
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_abc")
     monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
     monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
-    with pytest.raises(ValueError, match="live secret key"):
+    with pytest.raises(ValueError, match="test but a Stripe live secret key"):
         Settings()
+
+
+def test_env_safety_live_mode_requires_production(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("STRIPE_MODE", "live")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_abc")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
+    with pytest.raises(ValueError, match="live mode in APP_ENV=staging"):
+        Settings()
+
+
+def test_env_safety_prod_host_allows_test_billing(monkeypatch):
+    # A production app host may run billing in test mode during rollout.
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("STRIPE_MODE", "test")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc")
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
+    assert Settings().stripe_mode == "test"
 
 
 def test_resolved_project_ref_from_url(monkeypatch):

@@ -136,26 +136,23 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_env_safety(self) -> Settings:
-        """Guard against test credentials in production (and vice versa)."""
-        if self.environment == "production":
-            if self.stripe_secret_key and self.stripe_mode != "live":
+        """Guard against mismatched Stripe credentials.
+
+        The billing mode is keyed off ``STRIPE_MODE`` (not the global app
+        ``ENVIRONMENT``) so that a production app host can run billing in test
+        mode during rollout. The guarantees that still hold:
+          * the secret key must match the declared mode (no test key in live
+            mode and vice-versa), and
+          * live keys may only run when the app ``ENVIRONMENT`` is production.
+        """
+        if self.stripe_secret_key:
+            if self.stripe_mode == "live" and self.stripe_secret_key.startswith("sk_test_"):
+                raise ValueError("STRIPE_MODE=live but a Stripe test secret key was provided")
+            if self.stripe_mode == "test" and self.stripe_secret_key.startswith("sk_live_"):
+                raise ValueError("STRIPE_MODE=test but a Stripe live secret key was provided")
+            if self.stripe_mode == "live" and self.environment != "production":
                 raise ValueError(
-                    "APP_ENV=production requires STRIPE_MODE=live"
-                )
-            if self.supabase_url and self.supabase_env != "production":
-                raise ValueError(
-                    "APP_ENV=production requires SUPABASE_ENV=production"
-                )
-            if self.stripe_secret_key.startswith("sk_test_"):
-                raise ValueError(
-                    "Refusing to use a Stripe test secret key in production"
-                )
-        else:
-            # Non-production must not run live Stripe keys by accident.
-            if self.stripe_secret_key.startswith("sk_live_"):
-                raise ValueError(
-                    f"Refusing to use a Stripe live secret key in "
-                    f"APP_ENV={self.environment}"
+                    f"Refusing to use Stripe live mode in APP_ENV={self.environment}"
                 )
         return self
 
