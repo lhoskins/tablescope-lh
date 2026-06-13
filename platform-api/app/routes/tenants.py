@@ -55,6 +55,67 @@ async def _require_super_admin(
     return context
 
 
+async def _is_super_admin(session: AsyncSession, context: RequestContext) -> bool:
+    user = await session.get(User, context.user_id)
+    return bool(user and user.is_super_admin)
+
+
+async def _require_user_management(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(get_request_context),
+) -> RequestContext:
+    """User management is a tenant_admin (or platform super-admin) duty.
+
+    ``root_admin`` is intentionally excluded: it owns tenant lifecycle (delete)
+    and VDB monitoring, but not user administration.
+    """
+    if context.is_service:
+        return context
+    if await _is_super_admin(session, context):
+        return context
+    if context.role in (Role.TENANT_ADMIN, Role.ADMIN):
+        return context
+    raise HTTPException(
+        status_code=403,
+        detail="User management requires the tenant_admin role",
+    )
+
+
+async def _require_tenant_delete(
+    tenant_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(get_request_context),
+) -> RequestContext:
+    """Deleting a tenant is reserved for its own root_admin or a super-admin."""
+    if context.is_service:
+        return context
+    if await _is_super_admin(session, context):
+        return context
+    if context.role == Role.ROOT_ADMIN and context.tenant_id == tenant_id:
+        return context
+    raise HTTPException(
+        status_code=403,
+        detail="Only the tenant's root admin or a super admin can delete this tenant",
+    )
+
+
+async def _require_root_admin(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(get_request_context),
+) -> RequestContext:
+    """VDB / deployment status is visible to the tenant's root_admin (or super)."""
+    if context.is_service:
+        return context
+    if await _is_super_admin(session, context):
+        return context
+    if context.role == Role.ROOT_ADMIN:
+        return context
+    raise HTTPException(
+        status_code=403,
+        detail="Requires the root_admin role",
+    )
+
+
 @router.post(
     "",
     response_model=TenantRead,
@@ -154,7 +215,7 @@ async def create_tenant(
 async def delete_tenant(
     tenant_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(_require_super_admin),
+    context: RequestContext = Depends(_require_tenant_delete),
 ) -> TenantDeleteResponse:
     """Delete an application (org) tenant and all of its data.
 
@@ -339,6 +400,65 @@ async def get_my_tenant(
     return TenantRead.model_validate(tenant)
 
 
+@router.get("/me/vdb-status")
+async def get_my_vdb_status(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(_require_root_admin),
+) -> dict:
+    """VDB / data-plane deployment status for the caller's own tenant.
+
+    Reserved for the tenant's root_admin (or a platform super-admin).
+    """
+    tenant_id = context.tenant_id
+    shared_rows = await session.scalars(
+        select(SharedVDB).where(SharedVDB.tenant_id == tenant_id)
+    )
+    user_rows = await session.scalars(
+        select(UserVDB).where(UserVDB.tenant_id == tenant_id)
+    )
+    plane = await session.scalar(
+        select(TenantDataPlane).where(TenantDataPlane.org_tenant_id == tenant_id)
+    )
+
+    shared_vdbs = [
+        {
+            "vdb_id": sv.vdb_id,
+            "health_status": sv.health_status,
+            "is_active": sv.is_active,
+            "last_health_check": (
+                sv.last_health_check.isoformat() if sv.last_health_check else None
+            ),
+        }
+        for sv in shared_rows
+    ]
+    user_vdbs = [
+        {
+            "user_id": uv.user_id,
+            "vdb_id": uv.vdb_id,
+            "health_status": uv.health_status,
+            "is_active": uv.is_active,
+            "last_health_check": (
+                uv.last_health_check.isoformat() if uv.last_health_check else None
+            ),
+        }
+        for uv in user_rows
+    ]
+    return {
+        "tenant_id": tenant_id,
+        "data_plane": (
+            {
+                "tenant_id": plane.tenant_id,
+                "status": plane.status,
+                "last_health_status": plane.last_health_status,
+            }
+            if plane is not None
+            else None
+        ),
+        "shared_vdbs": shared_vdbs,
+        "user_vdbs": user_vdbs,
+    }
+
+
 @router.post(
     "/{tenant_id}/users",
     response_model=UserRead,
@@ -348,7 +468,7 @@ async def create_user(
     tenant_id: int,
     payload: UserCreate,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.ADMIN)),
+    context: RequestContext = Depends(_require_user_management),
 ) -> UserRead:
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot create users in another tenant")
@@ -415,7 +535,7 @@ async def create_user(
 async def list_users(
     tenant_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(_require_user_management),
 ) -> list[UserRead]:
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot list users in another tenant")
@@ -432,7 +552,7 @@ async def update_user(
     user_id: int,
     payload: UserUpdate,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.ADMIN)),
+    context: RequestContext = Depends(_require_user_management),
 ) -> UserRead:
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot update users in another tenant")
@@ -461,7 +581,7 @@ async def deactivate_user(
     tenant_id: int,
     user_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.ADMIN)),
+    context: RequestContext = Depends(_require_user_management),
 ) -> Response:
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot deactivate users in another tenant")
@@ -482,7 +602,7 @@ async def delete_user_permanently(
     tenant_id: int,
     user_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.ADMIN)),
+    context: RequestContext = Depends(_require_user_management),
 ) -> Response:
     """Hard-delete an inactive user. Only works on deactivated users."""
     if not context.is_service and context.tenant_id != tenant_id:

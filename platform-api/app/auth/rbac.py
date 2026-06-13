@@ -11,6 +11,8 @@ from app.auth.context import RequestContext, get_request_context
 
 
 class Role(StrEnum):
+    ROOT_ADMIN = "root_admin"
+    TENANT_ADMIN = "tenant_admin"
     ADMIN = "admin"
     EDITOR = "editor"
     VIEWER = "viewer"
@@ -20,6 +22,8 @@ _ROLE_ORDER: dict[Role, int] = {
     Role.VIEWER: 0,
     Role.EDITOR: 1,
     Role.ADMIN: 2,
+    Role.TENANT_ADMIN: 3,
+    Role.ROOT_ADMIN: 4,
 }
 
 
