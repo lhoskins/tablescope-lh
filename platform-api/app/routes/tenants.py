@@ -418,49 +418,47 @@ async def create_user(
     if existing is not None:
         raise HTTPException(status_code=409, detail="User already exists")
 
-    # Best-effort: create/find a Supabase identity so the new user can sign in
-    # with a magic link at /{slug}/login. Falls back to a plain local user
-    # (email+password) when Supabase isn't configured.
+    # Supabase is the primary authenticator: create/link a Supabase identity and
+    # send a "set your password" invite that lands on the set-password page. No
+    # local password is ever stored. If Supabase is unavailable, the user is NOT
+    # created (no local fallback).
     settings = get_settings()
     login_url = f"{settings.app_base_url}/{tenant.slug}/login"
+    setup_url = f"{settings.app_base_url}/{tenant.slug}/set-password"
     supa = SupabaseAuthService()
-    invite_link: str | None = None
-    user: User
     try:
         supa_user = await supa.create_or_invite_user(
             payload.email,
             first_name=payload.display_name,
-            redirect_to=login_url,
+            redirect_to=setup_url,
         )
-        user = await supa.link_local_user(
-            session,
-            supabase_user_id=supa_user.id,
-            email=payload.email,
-            tenant_id=tenant_id,
-            role=payload.role,
-            first_name=payload.display_name,
-        )
-        user.role = payload.role
-        if payload.display_name:
-            user.display_name = payload.display_name
-        invite_link = supa_user.action_link
-        if invite_link is None:
-            invite_link = await supa.generate_magic_link(
-                payload.email, redirect_to=login_url
-            )
     except (SupabaseConfigError, SupabaseAdminError) as exc:
-        logger.warning("Supabase invite unavailable, creating local-only user: %s", exc)
-        user = User(
-            tenant_id=tenant_id,
-            email=payload.email,
-            display_name=payload.display_name,
-            role=payload.role,
-            external_id=payload.external_id,
-        )
-        session.add(user)
+        logger.warning("Supabase user creation failed for %s: %s", payload.email, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication provider unavailable; user was not created",
+        ) from exc
 
-    if payload.password:
-        user.set_password(payload.password)
+    user = await supa.link_local_user(
+        session,
+        supabase_user_id=supa_user.id,
+        email=payload.email,
+        tenant_id=tenant_id,
+        role=payload.role,
+        first_name=payload.display_name,
+    )
+    user.role = payload.role
+    if payload.display_name:
+        user.display_name = payload.display_name
+    invite_link = supa_user.action_link
+    if invite_link is None:
+        try:
+            invite_link = await supa.generate_magic_link(
+                payload.email, redirect_to=setup_url
+            )
+        except SupabaseAdminError as exc:
+            logger.warning("Could not generate set-password link for %s: %s", payload.email, exc)
+
     try:
         await session.flush()
     except IntegrityError as exc:

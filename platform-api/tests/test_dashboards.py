@@ -2,7 +2,38 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.auth.jwt import create_access_token
+from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
+
+
+class _FakeSupabase(SupabaseAuthService):
+    def __init__(self) -> None:
+        pass
+
+    async def create_or_invite_user(
+        self, email, *, first_name=None, last_name=None, redirect_to=None
+    ) -> SupabaseUser:
+        return SupabaseUser(
+            id=f"supa-{email}",
+            email=email,
+            created=True,
+            action_link=f"https://invite/{email}",
+        )
+
+
+class _FakeEmail:
+    async def send(self, spec, *, to, template) -> bool:
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _mock_supabase(monkeypatch):
+    import app.routes.tenants as tenants_module
+
+    monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
+    monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
 
 
 def _editor_headers(tenant_id: int = 1, user_id: int = 1) -> dict:

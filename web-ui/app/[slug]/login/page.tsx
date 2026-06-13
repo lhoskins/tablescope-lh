@@ -4,70 +4,77 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
   exchangeWithSupabase,
-  exchangeWithClerk,
   loginWithPassword,
   readSupabaseTokenFromHash,
+  requestPasswordReset,
   storeToken,
   storeUserMeta,
 } from "@/lib/auth";
-
-type AuthMethod = "password" | "supabase" | "clerk";
 
 export default function TenantLoginPage() {
   const router = useRouter();
   const params = useParams<{ slug: string }>();
   const tenantSlug = params.slug;
 
-  const [method, setMethod] = useState<AuthMethod>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  function finishLogin(result: Awaited<ReturnType<typeof loginWithPassword>>) {
+    storeToken(result.access_token);
+    storeUserMeta({
+      role: result.role,
+      is_super_admin: result.is_super_admin,
+      tenant_id: result.tenant_id,
+      user_id: result.user_id,
+      tenant_slug: result.tenant_slug,
+    });
+    router.replace("/dashboard");
+  }
+
+  // Auto sign-in when arriving from a magic/invite link (token in URL hash).
   useEffect(() => {
     const accessToken = readSupabaseTokenFromHash();
     if (!accessToken) return;
     setLoading(true);
     exchangeWithSupabase(accessToken, tenantSlug)
-      .then((result) => {
-        storeToken(result.access_token);
-        storeUserMeta({
-          role: result.role,
-          is_super_admin: result.is_super_admin,
-          tenant_id: result.tenant_id,
-          user_id: result.user_id,
-          tenant_slug: result.tenant_slug,
-        });
-        router.replace("/dashboard");
-      })
+      .then(finishLogin)
       .catch((err) => {
         setError((err as Error).message);
-        setMethod("supabase");
         setLoading(false);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, tenantSlug]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    setNotice(null);
     setLoading(true);
     try {
-      const result =
-        method === "password"
-          ? await loginWithPassword(email, password, tenantSlug)
-          : method === "clerk"
-            ? await exchangeWithClerk(token, tenantSlug)
-            : await exchangeWithSupabase(token, tenantSlug);
-      storeToken(result.access_token);
-      storeUserMeta({
-        role: result.role,
-        is_super_admin: result.is_super_admin,
-        tenant_id: result.tenant_id,
-        user_id: result.user_id,
-        tenant_slug: result.tenant_slug,
-      });
-      router.replace("/dashboard");
+      finishLogin(await loginWithPassword(email, password, tenantSlug));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onForgotPassword() {
+    setError(null);
+    setNotice(null);
+    if (!email) {
+      setError("Enter your email above first, then click \u201cForgot password\u201d.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await requestPasswordReset(email, tenantSlug);
+      setNotice(
+        "If that email has an account, a password-reset link is on its way.",
+      );
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -86,73 +93,49 @@ export default function TenantLoginPage() {
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <label className="mb-1 block text-sm font-medium text-slate-700">
-            Auth method
+            Email
           </label>
-          <select
-            value={method}
-            onChange={(e) => setMethod(e.target.value as AuthMethod)}
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-          >
-            <option value="password">Email &amp; Password</option>
-            <option value="supabase">Supabase</option>
-            <option value="clerk">Clerk</option>
-          </select>
+            placeholder="you@company.com"
+            autoComplete="email"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Password
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+            placeholder="Enter your password"
+            autoComplete="current-password"
+          />
         </div>
 
-        {method === "password" ? (
-          <>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Email
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                placeholder="you@company.com"
-                autoComplete="email"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Password
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                placeholder="Enter your password"
-                autoComplete="current-password"
-              />
-            </div>
-          </>
-        ) : (
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Provider access token (JWT)
-            </label>
-            <textarea
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              rows={5}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-mono"
-              placeholder="eyJhbGciOi..."
-            />
-          </div>
-        )}
-
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {notice && <p className="text-sm text-green-700">{notice}</p>}
+
         <button
           type="submit"
-          disabled={
-            loading ||
-            (method === "password" ? !email || !password : !token)
-          }
+          disabled={loading || !email || !password}
           className="w-full rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg disabled:opacity-50"
         >
           {loading ? "Signing in\u2026" : "Sign in"}
+        </button>
+
+        <button
+          type="button"
+          onClick={onForgotPassword}
+          disabled={loading}
+          className="w-full text-center text-sm text-blue-600 hover:underline disabled:opacity-50"
+        >
+          Forgot password?
         </button>
       </form>
     </main>

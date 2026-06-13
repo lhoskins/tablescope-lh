@@ -27,7 +27,6 @@ export default function UsersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [password, setPassword] = useState("");
   const [role, setRole] = useState("viewer");
   const [error, setError] = useState<string | null>(null);
 
@@ -48,7 +47,6 @@ export default function UsersPage() {
     mutationFn: (payload: {
       email: string;
       display_name: string;
-      password: string;
       role: string;
     }) => apiClient.post<User>(`/api/tenants/${tenantId}/users`, payload),
     onSuccess: () => {
@@ -56,7 +54,6 @@ export default function UsersPage() {
       setShowCreate(false);
       setEmail("");
       setDisplayName("");
-      setPassword("");
       setRole("viewer");
       setError(null);
     },
@@ -99,7 +96,6 @@ export default function UsersPage() {
     createMutation.mutate({
       email,
       display_name: displayName,
-      password,
       role,
     });
   }
@@ -130,9 +126,12 @@ export default function UsersPage() {
           onSubmit={handleSubmit}
           className="mb-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
         >
-          <h2 className="mb-4 text-lg font-medium text-slate-900">
+          <h2 className="mb-1 text-lg font-medium text-slate-900">
             Create New User
           </h2>
+          <p className="mb-4 text-sm text-slate-500">
+            The user will receive an email to set their own password and sign in.
+          </p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-slate-700">
@@ -157,19 +156,6 @@ export default function UsersPage() {
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                 placeholder="John Doe"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700">
-                Password
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                placeholder="Set initial password"
               />
             </div>
             <div>
