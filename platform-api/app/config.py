@@ -156,6 +156,23 @@ class Settings(BaseSettings):
                 )
         return self
 
+    @model_validator(mode="after")
+    def _derive_supabase_auth_endpoints(self) -> Settings:
+        """Derive the Supabase issuer + JWKS URL from the project URL when unset.
+
+        Supabase access tokens are signed with the project's GoTrue keys and
+        carry ``iss = <supabase_url>/auth/v1``; the matching JWKS lives at
+        ``<supabase_url>/auth/v1/.well-known/jwks.json``. Deriving these means
+        the exchange endpoint works with only ``SUPABASE_URL`` configured.
+        """
+        base = self.supabase_url.rstrip("/")
+        if base:
+            if not self.supabase_issuer:
+                self.supabase_issuer = f"{base}/auth/v1"
+            if not self.supabase_jwks_url:
+                self.supabase_jwks_url = f"{base}/auth/v1/.well-known/jwks.json"
+        return self
+
     @field_validator("log_level")
     @classmethod
     def _validate_log_level(cls, value: str) -> str:
