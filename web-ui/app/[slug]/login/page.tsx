@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
   exchangeWithSupabase,
   exchangeWithClerk,
   loginWithPassword,
+  readSupabaseTokenFromHash,
   storeToken,
   storeUserMeta,
 } from "@/lib/auth";
@@ -23,6 +24,29 @@ export default function TenantLoginPage() {
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const accessToken = readSupabaseTokenFromHash();
+    if (!accessToken) return;
+    setLoading(true);
+    exchangeWithSupabase(accessToken, tenantSlug)
+      .then((result) => {
+        storeToken(result.access_token);
+        storeUserMeta({
+          role: result.role,
+          is_super_admin: result.is_super_admin,
+          tenant_id: result.tenant_id,
+          user_id: result.user_id,
+          tenant_slug: result.tenant_slug,
+        });
+        router.replace("/dashboard");
+      })
+      .catch((err) => {
+        setError((err as Error).message);
+        setMethod("supabase");
+        setLoading(false);
+      });
+  }, [router, tenantSlug]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();

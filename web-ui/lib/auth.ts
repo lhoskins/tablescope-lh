@@ -45,6 +45,24 @@ export function getUserMeta(): {
   }
 }
 
+/**
+ * Read a Supabase access token from the URL hash fragment left by a magic-link
+ * redirect (e.g. `#access_token=...&refresh_token=...`). Clears the fragment so
+ * the credential isn't left in the address bar / history. Returns null if none.
+ */
+export function readSupabaseTokenFromHash(): string | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash;
+  if (!hash || !hash.includes("access_token")) return null;
+  const params = new URLSearchParams(hash.replace(/^#/, ""));
+  const accessToken = params.get("access_token");
+  if (accessToken) {
+    const url = window.location.pathname + window.location.search;
+    window.history.replaceState(null, "", url);
+  }
+  return accessToken;
+}
+
 export async function exchangeWithSupabase(
   providerToken: string,
   tenantSlug?: string,
