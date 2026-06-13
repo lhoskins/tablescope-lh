@@ -24,9 +24,11 @@ from app.models.billing import (
     TenantProvisioningRequest,
 )
 from app.models.project import Project
+from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant
 from app.models.tenant_membership import TenantMembership
 from app.models.user import User
+from app.models.user_vdb import UserVDB
 from app.services import billing_audit as audit
 from app.services.email_service import (
     EmailService,
@@ -39,6 +41,8 @@ from app.services.tenant_provisioning_service import (
     TenantAlreadyExists,
     TenantProvisioningService,
 )
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
+from app.services.vdb_management import VDBManagementService, VDBProvisioningError
 
 
 class OnboardingError(RuntimeError):
@@ -91,6 +95,7 @@ class TenantOnboardingService:
             invite_link, root_user = await self._ensure_root_admin(req, tenant)
             await self._link_billing(req, tenant)
             await self._run_tier_automation(req, tenant)
+            await self._ensure_vdbs(req, tenant, root_user)
             await self._ensure_default_project(req, tenant, root_user)
             await self._send_lifecycle_emails(req, invite_link)
 
@@ -270,6 +275,100 @@ class TenantOnboardingService:
         else:
             req.vpn_status = "not_required"
         await self._session.flush()
+
+    async def _ensure_vdbs(
+        self, req: TenantProvisioningRequest, tenant: Tenant, root_user: User
+    ) -> None:
+        """Create the tenant's shared VDB + the admin's user VDB on payment.
+
+        Idempotent (replayed webhooks skip existing rows) and best-effort: a
+        VDBProvisioningError is logged but does not fail provisioning, mirroring
+        the super-admin ``create_tenant`` path.
+        """
+        endpoint = await TenantTeiidResolver(self._session).resolve_for_org(tenant.id)
+
+        existing_shared = await self._session.scalar(
+            select(SharedVDB).where(SharedVDB.tenant_id == tenant.id)
+        )
+        if existing_shared is None:
+            vdb_svc = VDBManagementService(
+                servlet_url=endpoint.servlet_url,
+                pg_host=endpoint.pg_host,
+                pg_port=endpoint.pg_port,
+            )
+            try:
+                shared_result = await vdb_svc.create_shared_vdb(org_id=tenant.id)
+                self._session.add(
+                    SharedVDB(
+                        tenant_id=tenant.id,
+                        vdb_id=shared_result.vdb_id,
+                        vdb_username=shared_result.vdb_username,
+                        encrypted_password=shared_result.vdb_password,
+                        vdb_host=shared_result.vdb_host,
+                        vdb_port=shared_result.vdb_port,
+                        is_active=True,
+                        health_status="deployed",
+                    )
+                )
+                await self._session.flush()
+                audit.audit(
+                    audit.SHARED_VDB_CREATED,
+                    tenant_id=tenant.id,
+                    vdb_id=shared_result.vdb_id,
+                )
+            except VDBProvisioningError as exc:
+                audit.audit(
+                    audit.VDB_PROVISIONING_FAILED,
+                    tenant_id=tenant.id,
+                    error=str(exc)[:200],
+                )
+            finally:
+                await vdb_svc.aclose()
+
+        existing_user = await self._session.scalar(
+            select(UserVDB).where(
+                UserVDB.tenant_id == tenant.id, UserVDB.user_id == root_user.id
+            )
+        )
+        if existing_user is None:
+            vdb_svc = VDBManagementService(
+                servlet_url=endpoint.servlet_url,
+                pg_host=endpoint.pg_host,
+                pg_port=endpoint.pg_port,
+            )
+            try:
+                user_result = await vdb_svc.create_user_vdb(
+                    org_id=tenant.id, user_id=root_user.id
+                )
+                self._session.add(
+                    UserVDB(
+                        tenant_id=tenant.id,
+                        user_id=root_user.id,
+                        vdb_id=user_result.vdb_id,
+                        vdb_username=user_result.vdb_username,
+                        encrypted_password=user_result.vdb_password,
+                        vdb_host=user_result.vdb_host,
+                        vdb_port=user_result.vdb_port,
+                        is_active=True,
+                        health_status="deployed",
+                    )
+                )
+                await self._session.flush()
+                audit.audit(
+                    audit.USER_VDB_CREATED,
+                    tenant_id=tenant.id,
+                    user_id=root_user.id,
+                    vdb_id=user_result.vdb_id,
+                )
+            except VDBProvisioningError as exc:
+                audit.audit(
+                    audit.VDB_PROVISIONING_FAILED,
+                    tenant_id=tenant.id,
+                    user_id=root_user.id,
+                    error=str(exc)[:200],
+                )
+            finally:
+                await vdb_svc.aclose()
 
     async def _ensure_default_project(
         self, req: TenantProvisioningRequest, tenant: Tenant, owner: User
