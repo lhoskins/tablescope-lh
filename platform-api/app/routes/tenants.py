@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext, get_request_context
 from app.auth.rbac import Role, require_role
+from app.config import get_settings
 from app.database import get_db
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant
@@ -30,6 +31,12 @@ from app.schemas.tenant import (
     UserUpdate,
 )
 from app.services.customer_folders import CustomerFolderError, CustomerFolderService
+from app.services.email_service import EmailService, render_user_invite
+from app.services.supabase_auth_service import (
+    SupabaseAdminError,
+    SupabaseAuthService,
+    SupabaseConfigError,
+)
 from app.services.tenant_deletion_service import (
     delete_tenant_folders,
     purge_app_tenant,
@@ -405,16 +412,55 @@ async def create_user(
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    user = User(
-        tenant_id=tenant_id,
-        email=payload.email,
-        display_name=payload.display_name,
-        role=payload.role,
-        external_id=payload.external_id,
+    existing = await session.scalar(
+        select(User).where(User.tenant_id == tenant_id, User.email == payload.email)
     )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="User already exists")
+
+    # Best-effort: create/find a Supabase identity so the new user can sign in
+    # with a magic link at /{slug}/login. Falls back to a plain local user
+    # (email+password) when Supabase isn't configured.
+    settings = get_settings()
+    login_url = f"{settings.app_base_url}/{tenant.slug}/login"
+    supa = SupabaseAuthService()
+    invite_link: str | None = None
+    user: User
+    try:
+        supa_user = await supa.create_or_invite_user(
+            payload.email,
+            first_name=payload.display_name,
+            redirect_to=login_url,
+        )
+        user = await supa.link_local_user(
+            session,
+            supabase_user_id=supa_user.id,
+            email=payload.email,
+            tenant_id=tenant_id,
+            role=payload.role,
+            first_name=payload.display_name,
+        )
+        user.role = payload.role
+        if payload.display_name:
+            user.display_name = payload.display_name
+        invite_link = supa_user.action_link
+        if invite_link is None:
+            invite_link = await supa.generate_magic_link(
+                payload.email, redirect_to=login_url
+            )
+    except (SupabaseConfigError, SupabaseAdminError) as exc:
+        logger.warning("Supabase invite unavailable, creating local-only user: %s", exc)
+        user = User(
+            tenant_id=tenant_id,
+            email=payload.email,
+            display_name=payload.display_name,
+            role=payload.role,
+            external_id=payload.external_id,
+        )
+        session.add(user)
+
     if payload.password:
         user.set_password(payload.password)
-    session.add(user)
     try:
         await session.flush()
     except IntegrityError as exc:
@@ -422,7 +468,7 @@ async def create_user(
         raise HTTPException(status_code=409, detail="User already exists") from exc
 
     CustomerFolderService().ensure_user_folders(
-        tenant.slug, payload.external_id or str(user.id)
+        tenant.slug, user.external_id or str(user.id)
     )
 
     # Create and deploy user VDB — target the dedicated container if bound.
@@ -456,6 +502,22 @@ async def create_user(
 
     await session.commit()
     await session.refresh(user)
+
+    # Send the branded magic-link invite (best-effort; never fails user creation).
+    if invite_link is not None:
+        try:
+            spec = render_user_invite(
+                company_name=tenant.name,
+                role=payload.role,
+                invite_link=invite_link,
+                login_url=login_url,
+            )
+            await EmailService().send(
+                spec, to=payload.email, template="user_invite"
+            )
+        except Exception as exc:  # delivery is best-effort
+            logger.warning("Failed to send invite email to %s: %s", payload.email, exc)
+
     return UserRead.model_validate(user)
 
 

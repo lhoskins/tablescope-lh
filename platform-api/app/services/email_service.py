@@ -49,6 +49,23 @@ def render_root_admin_invite(
     return EmailMessageSpec(to="", subject="You're invited to Tablescope", body=body)
 
 
+def render_user_invite(
+    *, company_name: str, role: str, invite_link: str | None, login_url: str
+) -> EmailMessageSpec:
+    cta = (
+        f"Accept your invite and sign in:\n{invite_link}\n"
+        if invite_link
+        else f"Sign in to get started:\n{login_url}\n"
+    )
+    body = (
+        f"You've been added to the {company_name} workspace on Tablescope "
+        f"as a {role}.\n\n"
+        f"{cta}"
+        f"{_footer()}"
+    )
+    return EmailMessageSpec(to="", subject="You're invited to Tablescope", body=body)
+
+
 def render_tenant_ready(*, company_name: str, login_url: str) -> EmailMessageSpec:
     body = (
         f"Your Tablescope workspace for {company_name} is ready.\n\n"

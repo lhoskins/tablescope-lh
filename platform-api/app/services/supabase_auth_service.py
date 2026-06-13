@@ -127,15 +127,15 @@ class SupabaseAuthService:
         u = resp.json()
         return SupabaseUser(id=u["id"], email=u.get("email", email), created=True)
 
-    async def generate_invite_link(
-        self, email: str, *, redirect_to: str | None = None
+    async def _generate_link(
+        self, *, link_type: str, email: str, redirect_to: str | None
     ) -> str:
-        """Generate an invite action link (magic invite) for an email.
+        """Generate a GoTrue action link of ``link_type`` (``invite``/``magiclink``).
 
         ``redirect_to`` must be sent top-level (not under ``options``) or GoTrue
         ignores it and falls back to the project Site URL.
         """
-        payload: dict[str, Any] = {"type": "invite", "email": email}
+        payload: dict[str, Any] = {"type": link_type, "email": email}
         if redirect_to:
             payload["redirect_to"] = redirect_to
         resp = await self._request(
@@ -150,6 +150,22 @@ class SupabaseAuthService:
         if not link:
             raise SupabaseAdminError("generate_link returned no action_link")
         return str(link)
+
+    async def generate_invite_link(
+        self, email: str, *, redirect_to: str | None = None
+    ) -> str:
+        """Generate an invite action link (for a user not yet confirmed)."""
+        return await self._generate_link(
+            link_type="invite", email=email, redirect_to=redirect_to
+        )
+
+    async def generate_magic_link(
+        self, email: str, *, redirect_to: str | None = None
+    ) -> str:
+        """Generate a single-use magic sign-in link (for an existing user)."""
+        return await self._generate_link(
+            link_type="magiclink", email=email, redirect_to=redirect_to
+        )
 
     async def create_or_invite_user(
         self,
