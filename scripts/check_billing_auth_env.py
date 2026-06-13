@@ -204,23 +204,26 @@ def check_supabase() -> list[str]:
             fail(f"Supabase admin API error: {type(exc).__name__}")
             problems.append("SUPABASE_SERVICE_ROLE_KEY")
 
-    # Anon key: REST root should respond (200/404 acceptable, 401 = bad key).
+    # Anon key validity: the GoTrue settings endpoint requires a valid anon
+    # apikey and returns 200. (The PostgREST root can return 401 for a valid
+    # anon role depending on project data-API config, so it is not a reliable
+    # signal for key validity.)
     if anon:
         try:
             resp = httpx.get(
-                f"{url}/rest/v1/",
+                f"{url}/auth/v1/settings",
                 headers={"apikey": anon, "Authorization": f"Bearer {anon}"},
                 timeout=15.0,
             )
-            if resp.status_code in (200, 404):
-                ok("Supabase anon key accepted by REST endpoint")
+            if resp.status_code == 200:
+                ok("Supabase anon key accepted by Auth settings endpoint")
             elif resp.status_code in (401, 403):
                 fail("Supabase rejected the ANON key (401/403)")
                 problems.append("SUPABASE_ANON_KEY")
             else:
-                warn(f"Supabase REST returned HTTP {resp.status_code}")
+                warn(f"Supabase auth settings returned HTTP {resp.status_code}")
         except Exception as exc:
-            warn(f"Supabase REST check error: {type(exc).__name__}")
+            warn(f"Supabase anon key check error: {type(exc).__name__}")
     return problems
 
 
