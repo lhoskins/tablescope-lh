@@ -195,8 +195,13 @@ class SupabaseAuthService:
         Also records a :class:`TenantAuthBinding`. Idempotent on
         (supabase_user_id) and (tenant_id, email).
         """
+        # Scope identity to the tenant: the same Supabase user can have a
+        # distinct local user in each tenant it belongs to.
         user = await session.scalar(
-            select(User).where(User.supabase_user_id == supabase_user_id)
+            select(User).where(
+                User.supabase_user_id == supabase_user_id,
+                User.tenant_id == tenant_id,
+            )
         )
         if user is None:
             user = await session.scalar(
@@ -224,6 +229,7 @@ class SupabaseAuthService:
             select(TenantAuthBinding).where(
                 TenantAuthBinding.provider == "supabase",
                 TenantAuthBinding.supabase_user_id == supabase_user_id,
+                TenantAuthBinding.tenant_id == tenant_id,
             )
         )
         if binding is None:

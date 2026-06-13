@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -21,8 +21,10 @@ class User(TimestampMixin, Base):
         index=True,
     )
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    # Identity is unique *per tenant* (see uq_users_tenant_external_id below), so
+    # one Supabase email can map to a user in several tenants.
     external_id: Mapped[str | None] = mapped_column(
-        String(255), unique=True, nullable=True, index=True
+        String(255), nullable=True, index=True
     )
     # Supabase Auth subject id (mirrors external_id when Supabase is the IdP).
     supabase_user_id: Mapped[str | None] = mapped_column(
@@ -48,8 +50,14 @@ class User(TimestampMixin, Base):
     )
 
     __table_args__ = (
-        # Email is unique per tenant, not globally.
-        # A composite unique constraint is added in the migration.
+        # Email + identity are unique per tenant, not globally. The
+        # (tenant_id, email) constraint is created in the initial migration.
+        UniqueConstraint(
+            "tenant_id", "external_id", name="uq_users_tenant_external_id"
+        ),
+        UniqueConstraint(
+            "tenant_id", "supabase_user_id", name="uq_users_tenant_supabase"
+        ),
     )
 
     def set_password(self, plain: str) -> None:

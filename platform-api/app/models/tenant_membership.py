@@ -58,8 +58,13 @@ class TenantAuthBinding(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
 
     __table_args__ = (
+        # One binding per (tenant, provider, subject): the same Supabase identity
+        # can be bound to several tenants.
         UniqueConstraint(
-            "provider", "supabase_user_id", name="uq_auth_binding_provider_subject"
+            "tenant_id",
+            "provider",
+            "supabase_user_id",
+            name="uq_auth_binding_tenant_provider_subject",
         ),
     )
 

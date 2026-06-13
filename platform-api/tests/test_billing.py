@@ -439,3 +439,27 @@ async def test_link_local_user_idempotent(db_session):
     bindings = (await db_session.scalars(select(TenantAuthBinding))).all()
     assert len(users) == 1
     assert len(bindings) == 1
+
+
+@pytest.mark.asyncio
+async def test_link_local_user_same_identity_across_tenants(db_session):
+    """One Supabase identity maps to a distinct local user per tenant."""
+    root = Tenant(slug="root", name="root")
+    cust = Tenant(slug="cust", name="Cust")
+    db_session.add_all([root, cust])
+    await db_session.flush()
+    svc = FakeSupabase()
+    u_root = await svc.link_local_user(
+        db_session, supabase_user_id="sub-9", email="a@b.com",
+        tenant_id=root.id, role="root_admin",
+    )
+    u_cust = await svc.link_local_user(
+        db_session, supabase_user_id="sub-9", email="a@b.com",
+        tenant_id=cust.id, role="tenant_admin",
+    )
+    assert u_root.id != u_cust.id
+    assert u_root.tenant_id == root.id and u_root.role == "root_admin"
+    assert u_cust.tenant_id == cust.id and u_cust.role == "tenant_admin"
+    assert u_root.external_id == u_cust.external_id == "sub-9"
+    bindings = (await db_session.scalars(select(TenantAuthBinding))).all()
+    assert {b.tenant_id for b in bindings} == {root.id, cust.id}
