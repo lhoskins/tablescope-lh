@@ -218,3 +218,142 @@ export function useProjectDataSources(projectId: string) {
     enabled: Boolean(projectId),
   });
 }
+
+// ── Relationship graph ───────────────────────────────────────────────
+
+export interface GraphNode {
+  id: number;
+  type: string;
+  label: string;
+  source_type: string | null;
+  source_id: number | null;
+  properties: Record<string, unknown>;
+}
+
+export interface GraphEdge {
+  id: number;
+  source: number;
+  target: number;
+  type: string;
+  confidence: number;
+  evidence: string;
+}
+
+export interface GraphResponse {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export function useProjectGraph(projectId: string) {
+  return useQuery({
+    queryKey: ["project", projectId, "graph"],
+    queryFn: () =>
+      apiClient.get<GraphResponse>(`/api/projects/${projectId}/graph`),
+    enabled: Boolean(projectId),
+  });
+}
+
+// ── Metadata catalog ─────────────────────────────────────────────────
+
+export interface CatalogField {
+  name: string;
+  type: string | null;
+  ai_description: string | null;
+  null_percent: number | null;
+  distinct_count: number | null;
+  sample_values: unknown[];
+  include_in_ai: boolean;
+}
+
+export interface CatalogTable {
+  data_source_id: number;
+  name: string;
+  source: string | null;
+  row_count: number | null;
+  field_count: number | null;
+  ai_summary: string | null;
+  ai_quality_summary: string | null;
+  status: string;
+  last_synced: string | null;
+  fields: CatalogField[];
+}
+
+export interface CatalogDocument {
+  id: number;
+  title: string;
+  type: string;
+  status: string;
+  clauses: number;
+  relationships: number;
+}
+
+export interface MetadataCatalog {
+  tables: CatalogTable[];
+  documents: CatalogDocument[];
+}
+
+export function useProjectMetadataCatalog(projectId: string) {
+  return useQuery({
+    queryKey: ["project", projectId, "metadata-catalog"],
+    queryFn: () =>
+      apiClient.get<MetadataCatalog>(
+        `/api/projects/${projectId}/metadata-catalog`,
+      ),
+    enabled: Boolean(projectId),
+  });
+}
+
+// ── Activity / audit feed ────────────────────────────────────────────
+
+export interface ActivityEvent {
+  id: string;
+  ts: string;
+  category: string;
+  label: string;
+  title: string;
+  detail: string | null;
+  actor: string;
+}
+
+export interface ActivityStats {
+  total_events: number;
+  ai_actions: number;
+  active_users: number;
+  isolation_violations: number;
+}
+
+export interface ProjectActivity {
+  events: ActivityEvent[];
+  stats: ActivityStats;
+}
+
+export function useProjectActivity(projectId: string) {
+  return useQuery({
+    queryKey: ["project", projectId, "activity"],
+    queryFn: () =>
+      apiClient.get<ProjectActivity>(`/api/projects/${projectId}/activity`),
+    enabled: Boolean(projectId),
+  });
+}
+
+// ── AI assistant ─────────────────────────────────────────────────────
+
+export interface AiAskResponse {
+  answer: string;
+  model_used: string;
+  request_id: string;
+  context_summary: Record<string, unknown>;
+  audit_id: number | null;
+}
+
+export function askProjectAi(
+  projectId: string,
+  question: string,
+  scope = "project",
+): Promise<AiAskResponse> {
+  return apiClient.post<AiAskResponse>("/api/ai/ask", {
+    project_id: Number(projectId),
+    question,
+    scope,
+  });
+}
