@@ -10,17 +10,19 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.dashboard import Dashboard
 from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
+from app.models.project_asset import ProjectAsset
 from app.models.saved_query import SavedQuery
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -28,6 +30,7 @@ from app.schemas.project import (
     ProjectCreate,
     ProjectMemberRead,
     ProjectRead,
+    ProjectSummaryRead,
     ProjectUpdate,
     SavedQueryCreate,
     SavedQueryRead,
@@ -72,6 +75,115 @@ async def list_projects(
     )
     rows = await session.scalars(query)
     return [ProjectRead.model_validate(p) for p in rows]
+
+
+def _derive_ai_status(
+    *, doc_total: int, doc_indexing: int, doc_ready: int, has_activity: bool
+) -> str:
+    """Roll an AI status label up from a project's document indexing state."""
+    if doc_indexing > 0:
+        return "indexing"
+    if doc_ready > 0:
+        return "ready"
+    if has_activity:
+        return "active"
+    return "idle"
+
+
+@router.get("/summaries", response_model=list[ProjectSummaryRead])
+async def list_project_summaries(
+    recent: bool = Query(default=False),
+    limit: int | None = Query(default=None, ge=1, le=100),
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[ProjectSummaryRead]:
+    """List visible projects with rollup counts and an AI status badge.
+
+    Used by the Home and Projects screens to render project cards without N+1
+    round-trips. Counts are computed with grouped aggregates over the set of
+    projects the caller can see.
+    """
+    member_sub = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == context.user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    project_query = (
+        select(Project)
+        .where(
+            Project.tenant_id == context.tenant_id,
+            or_(
+                Project.owner_id == context.user_id,
+                Project.id.in_(member_sub),
+            ),
+        )
+        .order_by(
+            Project.updated_at.desc() if recent else Project.created_at.desc()
+        )
+    )
+    if limit is not None:
+        project_query = project_query.limit(limit)
+    projects = list(await session.scalars(project_query))
+    if not projects:
+        return []
+
+    ids = [p.id for p in projects]
+
+    async def _grouped_counts(model) -> dict[int, int]:
+        result = await session.execute(
+            select(model.project_id, func.count())
+            .where(model.project_id.in_(ids))
+            .group_by(model.project_id)
+        )
+        return {pid: count for pid, count in result.all()}
+
+    query_counts = await _grouped_counts(SavedQuery)
+    dashboard_counts = await _grouped_counts(Dashboard)
+    asset_counts = await _grouped_counts(ProjectAsset)
+    member_counts = await _grouped_counts(ProjectMember)
+
+    indexing_states = ("processing", "indexing", "pending")
+    ready_states = ("ready", "completed", "indexed", "complete")
+
+    async def _asset_status_counts(states: tuple[str, ...]) -> dict[int, int]:
+        result = await session.execute(
+            select(ProjectAsset.project_id, func.count())
+            .where(
+                ProjectAsset.project_id.in_(ids),
+                ProjectAsset.ai_status.in_(states),
+            )
+            .group_by(ProjectAsset.project_id)
+        )
+        return {pid: count for pid, count in result.all()}
+
+    indexing_counts = await _asset_status_counts(indexing_states)
+    ready_counts = await _asset_status_counts(ready_states)
+
+    summaries: list[ProjectSummaryRead] = []
+    for p in projects:
+        q_count = query_counts.get(p.id, 0)
+        d_count = dashboard_counts.get(p.id, 0)
+        doc_count = asset_counts.get(p.id, 0)
+        ai_status = _derive_ai_status(
+            doc_total=doc_count,
+            doc_indexing=indexing_counts.get(p.id, 0),
+            doc_ready=ready_counts.get(p.id, 0),
+            has_activity=(q_count > 0 or d_count > 0),
+        )
+        summaries.append(
+            ProjectSummaryRead(
+                id=p.id,
+                name=p.name,
+                is_shared=p.is_shared,
+                updated_at=p.updated_at,
+                document_count=doc_count,
+                query_count=q_count,
+                dashboard_count=d_count,
+                member_count=member_counts.get(p.id, 0),
+                data_source_count=0,
+                ai_status=ai_status,
+            )
+        )
+    return summaries
 
 
 @router.post(

@@ -23,7 +23,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -252,6 +252,56 @@ async def ask(
         "include_dashboard_context": req.include_dashboard_context,
     }
     return await _forward_to_ai("/ai/ask", payload)
+
+
+class RoutePromptRequest(BaseModel):
+    prompt: str
+    project_id: int | None = None
+
+
+class RoutePromptResponse(BaseModel):
+    route: str
+    prefilled: str
+
+
+@router.post("/route-prompt", response_model=RoutePromptResponse)
+async def route_prompt(
+    req: RoutePromptRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> RoutePromptResponse:
+    """Route a Home hero prompt to the right destination.
+
+    If the caller already has a project (or named one), the prompt opens that
+    project's AI assistant pre-filled. Otherwise it seeds new-project creation.
+    """
+    prompt = req.prompt.strip()
+    target_id = req.project_id
+    if target_id is not None:
+        await _check_project_access(session, context, target_id)
+    else:
+        member_sub = select(ProjectMember.project_id).where(
+            ProjectMember.user_id == context.user_id,
+            ProjectMember.is_active.is_(True),
+        )
+        target_id = await session.scalar(
+            select(Project.id)
+            .where(
+                Project.tenant_id == context.tenant_id,
+                or_(
+                    Project.owner_id == context.user_id,
+                    Project.id.in_(member_sub),
+                ),
+            )
+            .order_by(Project.updated_at.desc())
+            .limit(1)
+        )
+
+    if target_id is not None:
+        return RoutePromptResponse(
+            route=f"/projects/{target_id}/ai", prefilled=prompt
+        )
+    return RoutePromptResponse(route="/projects/new", prefilled=prompt)
 
 
 @router.post("/query/generate")

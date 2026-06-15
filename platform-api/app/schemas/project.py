@@ -37,6 +37,23 @@ class ProjectRead(BaseModel):
     updated_at: datetime
 
 
+class ProjectSummaryRead(BaseModel):
+    """Project plus rollup counts and AI status for list/home cards."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    is_shared: bool
+    updated_at: datetime
+    document_count: int = 0
+    query_count: int = 0
+    dashboard_count: int = 0
+    member_count: int = 0
+    data_source_count: int = 0
+    ai_status: str = "idle"
+
+
 class ProjectMemberRead(BaseModel):
     project_id: int
     user_id: int
