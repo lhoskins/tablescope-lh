@@ -219,6 +219,26 @@ export function useProjectDataSources(projectId: string) {
   });
 }
 
+// ── Members ──────────────────────────────────────────────────────────
+
+export interface ProjectMember {
+  project_id: number;
+  user_id: number;
+  role: string;
+  is_active: boolean;
+  email: string;
+  display_name: string | null;
+}
+
+export function useProjectMembers(projectId: string) {
+  return useQuery({
+    queryKey: ["project", projectId, "members"],
+    queryFn: () =>
+      apiClient.get<ProjectMember[]>(`/api/projects/${projectId}/members`),
+    enabled: Boolean(projectId),
+  });
+}
+
 // ── Relationship graph ───────────────────────────────────────────────
 
 export interface GraphNode {

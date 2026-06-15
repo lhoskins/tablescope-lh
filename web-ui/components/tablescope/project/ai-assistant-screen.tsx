@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   IconArrowUp,
   IconSparkles,
@@ -28,9 +29,16 @@ const QUICK_PROMPTS = [
 
 export function AiAssistantScreen({ projectId }: { projectId: string }) {
   const { project, tenant } = useProjectShell(projectId);
+  const searchParams = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Prefill the composer when arriving from the Overview hero / quick prompts.
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q) setInput(q);
+  }, [searchParams]);
 
   const send = async (raw: string) => {
     const question = raw.trim();
