@@ -920,6 +920,8 @@ async def create_saved_query(
         left_column=payload.left_column,
         right_column=payload.right_column,
         sql_text=payload.sql_text,
+        ai_generated=payload.ai_generated,
+        is_shared=payload.is_shared,
     )
     session.add(query)
     await session.commit()
@@ -958,6 +960,10 @@ async def update_saved_query(
         query.right_column = payload.right_column
     if payload.sql_text is not None:
         query.sql_text = payload.sql_text
+    if payload.ai_generated is not None:
+        query.ai_generated = payload.ai_generated
+    if payload.is_shared is not None:
+        query.is_shared = payload.is_shared
 
     await session.commit()
     await session.refresh(query)

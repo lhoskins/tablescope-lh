@@ -75,6 +75,8 @@ class SavedQueryCreate(BaseModel):
     left_column: str | None = None
     right_column: str | None = None
     sql_text: str | None = None
+    ai_generated: bool = False
+    is_shared: bool = False
 
 
 class SavedQueryUpdate(BaseModel):
@@ -86,6 +88,8 @@ class SavedQueryUpdate(BaseModel):
     left_column: str | None = None
     right_column: str | None = None
     sql_text: str | None = None
+    ai_generated: bool | None = None
+    is_shared: bool | None = None
 
 
 class SavedQueryRead(BaseModel):
@@ -102,5 +106,10 @@ class SavedQueryRead(BaseModel):
     left_column: str | None
     right_column: str | None
     sql_text: str | None
+    ai_generated: bool = False
+    is_shared: bool = False
+    run_count: int = 0
+    last_run_at: datetime | None = None
+    avg_runtime_ms: int | None = None
     created_at: datetime
     updated_at: datetime

@@ -148,6 +148,44 @@ async def test_dashboard_crud_lifecycle(client, service_headers) -> None:
     assert r.json() == []
 
 
+async def test_dashboard_workspace_metadata(client, service_headers) -> None:
+    """ai_generated / view_count surface on dashboards for the workspace UI."""
+    _, _, project, headers = await _setup_tenant_and_project(
+        client, service_headers
+    )
+    pid = project["id"]
+
+    # Default create: ai_generated False, view_count 0.
+    r = await client.post(
+        f"/api/projects/{pid}/dashboards",
+        json={"name": "Manual Board"},
+        headers=headers,
+    )
+    assert r.status_code == 201
+    manual = r.json()
+    assert manual["ai_generated"] is False
+    assert manual["view_count"] == 0
+
+    # AI-generated create round-trips.
+    r = await client.post(
+        f"/api/projects/{pid}/dashboards",
+        json={"name": "AI Board", "ai_generated": True, "status": "published"},
+        headers=headers,
+    )
+    assert r.status_code == 201
+    ai = r.json()
+    assert ai["ai_generated"] is True
+
+    # Update can flip ai_generated.
+    r = await client.put(
+        f"/api/projects/{pid}/dashboards/{manual['id']}",
+        json={"ai_generated": True},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["ai_generated"] is True
+
+
 async def test_dashboard_not_found(client, service_headers) -> None:
     _, _, project, headers = await _setup_tenant_and_project(client, service_headers)
     pid = project["id"]

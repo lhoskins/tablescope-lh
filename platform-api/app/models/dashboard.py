@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +36,12 @@ class Dashboard(TimestampMixin, Base):
         String(20), nullable=False, default="draft"
     )
     config: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
+    ai_generated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    view_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     def __repr__(self) -> str:
         return f"Dashboard(id={self.id}, project_id={self.project_id}, name={self.name!r})"

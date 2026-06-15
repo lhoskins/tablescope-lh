@@ -42,6 +42,7 @@ class DashboardCreate(BaseModel):
     description: str | None = None
     config: dict = {}
     status: str = "draft"
+    ai_generated: bool = False
 
 
 class DashboardUpdate(BaseModel):
@@ -49,6 +50,7 @@ class DashboardUpdate(BaseModel):
     description: str | None = None
     config: dict | None = None
     status: str | None = None
+    ai_generated: bool | None = None
 
 
 class DashboardRead(BaseModel):
@@ -60,6 +62,8 @@ class DashboardRead(BaseModel):
     description: str | None
     status: str
     config: dict
+    ai_generated: bool = False
+    view_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -97,6 +101,7 @@ async def create_dashboard(
         description=body.description,
         status=body.status,
         config=body.config,
+        ai_generated=body.ai_generated,
     )
     session.add(dashboard)
     await session.commit()
@@ -156,6 +161,8 @@ async def update_dashboard(
         dashboard.config = body.config
     if body.status is not None:
         dashboard.status = body.status
+    if body.ai_generated is not None:
+        dashboard.ai_generated = body.ai_generated
     await session.commit()
     await session.refresh(dashboard)
     return DashboardRead.model_validate(dashboard, from_attributes=True)
