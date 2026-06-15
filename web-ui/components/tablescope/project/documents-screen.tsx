@@ -19,6 +19,7 @@ import {
   extractionCount,
   type ProjectAsset,
 } from "@/lib/ui/use-project-data";
+import { DocumentDetailView } from "@/components/tablescope/project/detail-views";
 
 type Filter = "all" | "pdf" | "docx" | "xlsx" | "indexed";
 
@@ -80,6 +81,7 @@ export function DocumentsScreen({ projectId }: { projectId: string }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -97,6 +99,7 @@ export function DocumentsScreen({ projectId }: { projectId: string }) {
 
   const selected =
     rows.find((a) => a.id === selectedId) ?? filtered[0] ?? rows[0] ?? null;
+  const detail = rows.find((a) => a.id === detailId) ?? null;
 
   const indexed = rows.filter((a) => INDEXED.has(a.ai_status.toLowerCase())).length;
   const pending = rows.filter((a) => PENDING.has(a.ai_status.toLowerCase())).length;
@@ -120,8 +123,15 @@ export function DocumentsScreen({ projectId }: { projectId: string }) {
           </Button>
         </>
       }
-      contextPanel={<DocumentDetailPanel asset={selected} />}
+      contextPanel={<DocumentDetailPanel asset={detail ?? selected} />}
     >
+      {detail ? (
+        <DocumentDetailView
+          asset={detail}
+          backLabel="Documents"
+          onBack={() => setDetailId(null)}
+        />
+      ) : (
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Total documents" value={rows.length} />
@@ -197,7 +207,10 @@ export function DocumentsScreen({ projectId }: { projectId: string }) {
                   return (
                     <tr
                       key={a.id}
-                      onClick={() => setSelectedId(a.id)}
+                      onClick={() => {
+                        setSelectedId(a.id);
+                        setDetailId(a.id);
+                      }}
                       className={cn(
                         "cursor-pointer border-b border-line-tertiary last:border-0",
                         active ? "bg-brand-50/60" : "hover:bg-bg-secondary",
@@ -258,6 +271,7 @@ export function DocumentsScreen({ projectId }: { projectId: string }) {
           </div>
         </Card>
       </div>
+      )}
     </ProjectShell>
   );
 }

@@ -2,8 +2,18 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconShare, IconSparkles, IconArrowUp } from "@tabler/icons-react";
+import {
+  IconShare,
+  IconSparkles,
+  IconArrowUp,
+  IconPlus,
+} from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
+import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
+import {
+  QueryResultView,
+  DataSourceResultView,
+} from "@/components/tablescope/project/detail-views";
 import {
   ContextPanel,
   ContextSection,
@@ -57,6 +67,10 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const { data: graph } = useProjectGraph(projectId);
   const [scope, setScope] = useState("all");
   const [ask, setAsk] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [detail, setDetail] = useState<
+    { kind: "query"; id: number } | { kind: "source"; name: string } | null
+  >(null);
 
   const queryRows = useMemo(() => queries ?? [], [queries]);
   const sourceRows = useMemo(
@@ -88,6 +102,16 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   ).length;
   const memberCount = (members ?? []).filter((m) => m.is_active).length;
 
+  const detailQuery =
+    detail?.kind === "query"
+      ? (queryRows.find((q) => q.id === detail.id) ?? null)
+      : null;
+  const detailSource =
+    detail?.kind === "source"
+      ? (sourceRows.find((s) => (s.viewName || s.fileName) === detail.name) ??
+        null)
+      : null;
+
   const recentQueries = [...queryRows]
     .sort(
       (a, b) =>
@@ -111,6 +135,10 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
       breadcrumbLabel="Overview"
       actions={
         <>
+          <Button variant="secondary" onClick={() => setShowCreate(true)}>
+            <IconPlus size={14} />
+            New project
+          </Button>
           <Button variant="secondary">
             <IconShare size={14} />
             Share
@@ -218,6 +246,21 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         </ContextPanel>
       }
     >
+      {detailQuery ? (
+        <QueryResultView
+          projectId={projectId}
+          query={detailQuery}
+          backLabel="Overview"
+          onBack={() => setDetail(null)}
+        />
+      ) : detailSource ? (
+        <DataSourceResultView
+          projectId={projectId}
+          source={detailSource}
+          backLabel="Overview"
+          onBack={() => setDetail(null)}
+        />
+      ) : (
       <div className="space-y-4">
         <header className="flex items-start gap-3">
           <span
@@ -356,7 +399,11 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
               </thead>
               <tbody>
                 {recentQueries.map((q) => (
-                  <QueryRow key={q.id} q={q} />
+                  <QueryRow
+                    key={q.id}
+                    q={q}
+                    onClick={() => setDetail({ kind: "query", id: q.id })}
+                  />
                 ))}
               </tbody>
             </table>
@@ -392,7 +439,13 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
                 {sourceRows.slice(0, 5).map((s) => (
                   <tr
                     key={s.viewName || s.fileName}
-                    className="border-b border-line-tertiary last:border-0"
+                    onClick={() =>
+                      setDetail({
+                        kind: "source",
+                        name: s.viewName || s.fileName,
+                      })
+                    }
+                    className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-secondary"
                   >
                     <td className="px-4 py-2.5 font-medium text-ink-primary">
                       {s.viewName || s.fileName}
@@ -415,16 +468,21 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           )}
         </Card>
       </div>
+      )}
+      <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
     </ProjectShell>
   );
 }
 
-function QueryRow({ q }: { q: SavedQuery }) {
+function QueryRow({ q, onClick }: { q: SavedQuery; onClick?: () => void }) {
   const source = [q.left_datasource, q.right_datasource]
     .filter(Boolean)
     .join(", ");
   return (
-    <tr className="border-b border-line-tertiary last:border-0">
+    <tr
+      onClick={onClick}
+      className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-secondary"
+    >
       <td className="px-4 py-2.5 font-medium text-ink-primary">{q.name}</td>
       <td className="px-4 py-2.5 text-ink-secondary">{source || "—"}</td>
       <td className="px-4 py-2.5">

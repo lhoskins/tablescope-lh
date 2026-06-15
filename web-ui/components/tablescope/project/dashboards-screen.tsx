@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { IconSparkles, IconPlus, IconLayoutDashboard } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -12,9 +12,12 @@ import { timeAgo } from "@/lib/ui/format";
 import { accentFor } from "@/lib/ui/color";
 import {
   useProjectDashboards,
+  useProjectQueries,
+  useProjectDataSources,
   widgetCount,
   type Dashboard,
 } from "@/lib/ui/use-project-data";
+import { DashboardDetailView } from "@/components/tablescope/project/detail-views";
 
 function isPublished(d: Dashboard): boolean {
   return d.status.toLowerCase() === "published";
@@ -41,7 +44,11 @@ function Thumb({ dashboard }: { dashboard: Dashboard }) {
 
 export function DashboardsScreen({ projectId }: { projectId: string }) {
   const { data, isLoading } = useProjectDashboards(projectId);
+  const { data: queries } = useProjectQueries(projectId);
+  const { data: sources } = useProjectDataSources(projectId);
   const rows = useMemo(() => data ?? [], [data]);
+  const [viewingId, setViewingId] = useState<number | null>(null);
+  const viewing = rows.find((d) => d.id === viewingId) ?? null;
 
   const published = rows.filter(isPublished).length;
   const aiCount = rows.filter((d) => d.ai_generated).length;
@@ -66,6 +73,15 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
         </>
       }
     >
+      {viewing ? (
+        <DashboardDetailView
+          projectId={projectId}
+          dashboard={viewing}
+          savedQueries={queries ?? []}
+          datasources={sources ?? []}
+          onBack={() => setViewingId(null)}
+        />
+      ) : (
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile
@@ -95,7 +111,11 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
             {rows.map((d) => {
               const pub = isPublished(d);
               return (
-                <Card key={d.id} className="flex flex-col overflow-hidden">
+                <Card
+                  key={d.id}
+                  onClick={() => setViewingId(d.id)}
+                  className="flex cursor-pointer flex-col overflow-hidden transition-colors hover:border-line-secondary"
+                >
                   <div className="p-3">
                     <Thumb dashboard={d} />
                   </div>
@@ -121,10 +141,24 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
                       Updated {timeAgo(d.updated_at)}
                     </span>
                     <div className="flex items-center gap-3 text-[12px] font-medium text-brand-700">
-                      <button type="button" className="hover:underline">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewingId(d.id);
+                        }}
+                        className="hover:underline"
+                      >
                         {pub ? "Share" : "Publish"}
                       </button>
-                      <button type="button" className="hover:underline">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewingId(d.id);
+                        }}
+                        className="hover:underline"
+                      >
                         Edit
                       </button>
                     </div>
@@ -148,6 +182,7 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
           </div>
         )}
       </div>
+      )}
     </ProjectShell>
   );
 }

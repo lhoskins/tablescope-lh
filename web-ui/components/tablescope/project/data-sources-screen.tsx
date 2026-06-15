@@ -23,6 +23,7 @@ import {
   columnLabel,
   type DataSource,
 } from "@/lib/ui/use-project-data";
+import { DataSourceResultView } from "@/components/tablescope/project/detail-views";
 
 function isDatabase(s: DataSource): boolean {
   return s.sourceType === "database_table";
@@ -64,10 +65,12 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
     [data],
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [detailKey, setDetailKey] = useState<string | null>(null);
 
   const keyFor = (s: DataSource) => s.viewName || s.fileName;
   const selected =
     rows.find((s) => keyFor(s) === selectedKey) ?? rows[0] ?? null;
+  const detail = rows.find((s) => keyFor(s) === detailKey) ?? null;
 
   const dbCount = rows.filter(isDatabase).length;
   const fileCount = rows.filter((s) => !isDatabase(s) && !isSaas(s)).length;
@@ -93,8 +96,16 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
           </Button>
         </>
       }
-      contextPanel={<SourceDetailPanel source={selected} />}
+      contextPanel={<SourceDetailPanel source={detail ?? selected} />}
     >
+      {detail ? (
+        <DataSourceResultView
+          projectId={projectId}
+          source={detail}
+          backLabel="Data Sources"
+          onBack={() => setDetailKey(null)}
+        />
+      ) : (
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Total sources" value={rows.length} />
@@ -185,9 +196,13 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
                     </span>
                     <button
                       type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDetailKey(key);
+                      }}
                       className="text-[12px] font-medium text-brand-700 hover:underline"
                     >
-                      Sync now
+                      View data
                     </button>
                   </div>
                 </Card>
@@ -196,6 +211,7 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
           </div>
         )}
       </div>
+      )}
     </ProjectShell>
   );
 }

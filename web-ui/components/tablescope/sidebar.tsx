@@ -163,7 +163,7 @@ export function Sidebar({
               </Link>
             ))}
             <Link
-              href="/projects/new"
+              href="/projects?new=1"
               className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
             >
               <IconPlus size={15} stroke={1.8} />
