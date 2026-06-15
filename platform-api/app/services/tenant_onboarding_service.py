@@ -144,7 +144,7 @@ class TenantOnboardingService:
     ) -> tuple[str | None, User]:
         from app.config import get_settings
 
-        login_url = f"{get_settings().app_base_url}/{tenant.slug}/login"
+        login_url = f"{get_settings().app_base_url}/{tenant.slug}"
         supa = await self._supabase.create_or_invite_user(
             req.tenant_admin_email,
             first_name=req.tenant_admin_first_name,
@@ -392,7 +392,7 @@ class TenantOnboardingService:
         from app.config import get_settings
 
         settings = get_settings()
-        login_url = f"{settings.app_base_url}/{req.tenant_slug}/login"
+        login_url = f"{settings.app_base_url}/{req.tenant_slug}"
         tier_display = req.tier_key.replace("_", " ").title()
 
         invite = render_root_admin_invite(
