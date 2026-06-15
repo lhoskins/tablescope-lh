@@ -6,20 +6,24 @@ import {
   IconArrowLeft,
   IconFileText,
   IconDatabase,
+  IconPencil,
+  IconX,
 } from "@tabler/icons-react";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 import { DashboardViewer } from "@/components/dashboard/DashboardViewer";
+import { QueryBuilder } from "@/components/query-builder/QueryBuilder";
 import type { Dashboard as ViewerDashboard } from "@/components/dashboard/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiClient } from "@/lib/api-client";
 import { timeAgo } from "@/lib/ui/format";
-import type {
-  SavedQuery,
-  DataSource,
-  Dashboard,
-  ProjectAsset,
+import {
+  columnLabel,
+  type SavedQuery,
+  type DataSource,
+  type Dashboard,
+  type ProjectAsset,
 } from "@/lib/ui/use-project-data";
 
 type QueryResult = {
@@ -57,11 +61,13 @@ export function QueryResultView({
   query,
   backLabel,
   onBack,
+  onEdit,
 }: {
   projectId: string;
   query: SavedQuery;
   backLabel: string;
   onBack: () => void;
+  onEdit?: () => void;
 }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["query-result", projectId, query.id],
@@ -92,11 +98,24 @@ export function QueryResultView({
         </div>
       </header>
 
-      {query.sql_text && (
-        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-[#1e1b2e] p-3 font-code text-[12px] leading-relaxed text-[#d6d3e8]">
-          {query.sql_text}
-        </pre>
-      )}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-caption uppercase tracking-wide text-ink-tertiary">
+            SQL
+          </span>
+          {onEdit && (
+            <Button variant="secondary" size="sm" onClick={onEdit}>
+              <IconPencil size={14} />
+              Edit
+            </Button>
+          )}
+        </div>
+        {query.sql_text && (
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-[#1e1b2e] p-3 font-code text-[12px] leading-relaxed text-[#d6d3e8]">
+            {query.sql_text}
+          </pre>
+        )}
+      </div>
 
       <Card className="overflow-hidden p-0">
         {error ? (
@@ -116,6 +135,87 @@ export function QueryResultView({
   );
 }
 
+// ── Query builder (edit an existing saved query) ─────────────────────
+
+export function QueryBuilderEdit({
+  projectId,
+  query,
+  datasources,
+  backLabel,
+  onBack,
+  onSaved,
+}: {
+  projectId: string;
+  query: SavedQuery;
+  datasources: DataSource[];
+  backLabel: string;
+  onBack: () => void;
+  onSaved: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: (payload: {
+      name: string;
+      description: string;
+      left_datasource: string;
+      right_datasource: string;
+      join_type: string;
+      left_column: string;
+      right_column: string;
+      sql_text: string;
+    }) =>
+      apiClient.put(`/api/projects/${projectId}/queries/${query.id}`, {
+        name: payload.name,
+        description: payload.description,
+        left_datasource: payload.left_datasource || null,
+        right_datasource: payload.right_datasource || null,
+        join_type: payload.join_type || null,
+        left_column: payload.left_column || null,
+        right_column: payload.right_column || null,
+        sql_text: payload.sql_text,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "queries"],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["query-result", projectId, query.id],
+      });
+      onSaved();
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <DetailBackBar label={backLabel} onBack={onBack} />
+      <QueryBuilder
+        projectId={Number(projectId)}
+        datasources={datasources.map((d) => ({
+          fileName: d.fileName,
+          viewName: d.viewName || d.fileName,
+          sourceType: d.sourceType,
+          dbType: d.dbType,
+          connectorType: d.connectorType,
+        }))}
+        editQuery={{
+          name: query.name,
+          description: query.description ?? null,
+          left_datasource: query.left_datasource ?? null,
+          right_datasource: query.right_datasource ?? null,
+          join_type: query.join_type ?? null,
+          left_column: query.left_column ?? null,
+          right_column: query.right_column ?? null,
+          sql_text: query.sql_text ?? null,
+        }}
+        onCancel={onBack}
+        onSave={(payload) => save.mutate(payload)}
+        isSaving={save.isPending}
+        saveLabel="Save changes"
+      />
+    </div>
+  );
+}
+
 // ── Data source rows ─────────────────────────────────────────────────
 
 export function DataSourceResultView({
@@ -129,6 +229,7 @@ export function DataSourceResultView({
   backLabel: string;
   onBack: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
   const tableName = source.viewName || source.fileName;
   const { data, isLoading, error } = useQuery({
     queryKey: ["datasource-rows", projectId, tableName],
@@ -145,17 +246,31 @@ export function DataSourceResultView({
   return (
     <div className="space-y-4">
       <DetailBackBar label={backLabel} onBack={onBack} />
-      <header className="flex items-center gap-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-bg-secondary text-ink-tertiary">
-          <IconDatabase size={18} />
-        </span>
-        <div className="min-w-0">
-          <h1 className="text-h1 text-ink-primary">{tableName}</h1>
-          <p className="mt-0.5 text-small text-ink-tertiary">
-            {source.columnTypes?.length ?? 0} columns
-          </p>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-bg-secondary text-ink-tertiary">
+            <IconDatabase size={18} />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-h1 text-ink-primary">{tableName}</h1>
+            <p className="mt-0.5 text-small text-ink-tertiary">
+              {source.columnTypes?.length ?? 0} columns
+            </p>
+          </div>
         </div>
+        <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+          <IconPencil size={14} />
+          Edit
+        </Button>
       </header>
+
+      {editing && (
+        <ColumnTypeEditorModal
+          projectId={projectId}
+          source={source}
+          onClose={() => setEditing(false)}
+        />
+      )}
 
       <Card className="overflow-hidden p-0">
         {error ? (
@@ -171,6 +286,147 @@ export function DataSourceResultView({
           />
         )}
       </Card>
+    </div>
+  );
+}
+
+// ── Column-type editor modal ─────────────────────────────────────────
+
+const FALLBACK_COLUMN_TYPES = [
+  "string",
+  "integer",
+  "long",
+  "short",
+  "double",
+  "float",
+  "bigdecimal",
+  "boolean",
+  "date",
+  "time",
+  "timestamp",
+  "varbinary",
+];
+
+function ColumnTypeEditorModal({
+  projectId,
+  source,
+  onClose,
+}: {
+  projectId: string;
+  source: DataSource;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const initial = (source.columnTypes ?? []).map((c) => columnLabel(c));
+  const [types, setTypes] = useState<Record<string, string>>(() =>
+    Object.fromEntries(initial.map((c) => [c.name, c.type || "string"])),
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: typeOptions } = useQuery({
+    queryKey: ["column-types", projectId],
+    queryFn: () =>
+      apiClient.get<string[]>(
+        `/api/projects/${projectId}/datasources/column-types`,
+      ),
+  });
+  const options = typeOptions ?? FALLBACK_COLUMN_TYPES;
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiClient.put(`/api/projects/${projectId}/datasources/columns`, {
+        kind: source.id != null ? "db" : "file",
+        id: source.id,
+        viewName: source.viewName || source.fileName,
+        columns: initial.map((c) => ({
+          name: c.name,
+          type: types[c.name] || c.type || "string",
+        })),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "datasources"],
+      });
+      onClose();
+    },
+    onError: (e) =>
+      setError(e instanceof Error ? e.message : "Failed to save column types"),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-lg bg-bg-primary shadow-xl">
+        <div className="flex items-center justify-between border-b border-line-tertiary px-5 py-3.5">
+          <h2 className="text-h2 text-ink-primary">Edit column types</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-ink-tertiary hover:bg-bg-secondary"
+            aria-label="Close"
+          >
+            <IconX size={18} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <p className="mb-3 text-small text-ink-tertiary">
+            Choose a type for each column. Saving rebuilds and redeploys the VDB.
+          </p>
+          {initial.length === 0 ? (
+            <div className="py-8 text-center text-small text-ink-tertiary">
+              No columns available to edit for this source.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {initial.map((c) => (
+                <div
+                  key={c.name}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-ink-primary">
+                    {c.name}
+                  </span>
+                  <select
+                    value={types[c.name] ?? "string"}
+                    onChange={(e) =>
+                      setTypes((prev) => ({ ...prev, [c.name]: e.target.value }))
+                    }
+                    className="h-8 rounded-md border border-line-secondary bg-bg-primary px-2 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
+                  >
+                    {options.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+          {error && (
+            <div className="mt-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-small text-danger">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-line-tertiary px-5 py-3">
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setError(null);
+              save.mutate();
+            }}
+            disabled={save.isPending || initial.length === 0}
+          >
+            {save.isPending ? "Saving…" : "Save columns"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

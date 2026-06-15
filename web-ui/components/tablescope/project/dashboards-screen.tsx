@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { IconSparkles, IconPlus, IconLayoutDashboard } from "@tabler/icons-react";
+import { apiClient } from "@/lib/api-client";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
@@ -46,9 +48,25 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
   const { data, isLoading } = useProjectDashboards(projectId);
   const { data: queries } = useProjectQueries(projectId);
   const { data: sources } = useProjectDataSources(projectId);
+  const queryClient = useQueryClient();
   const rows = useMemo(() => data ?? [], [data]);
   const [viewingId, setViewingId] = useState<number | null>(null);
   const viewing = rows.find((d) => d.id === viewingId) ?? null;
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      apiClient.post<Dashboard>(`/api/projects/${projectId}/dashboards`, {
+        name: `Dashboard ${rows.length + 1}`,
+        description: "",
+        config: { widgets: [], globalFilters: [] },
+      }),
+    onSuccess: async (newDash) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "dashboards"],
+      });
+      setViewingId(newDash.id);
+    },
+  });
 
   const published = rows.filter(isPublished).length;
   const aiCount = rows.filter((d) => d.ai_generated).length;
@@ -66,9 +84,13 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
             <IconSparkles size={14} />
             Generate with AI
           </Button>
-          <Button variant="primary">
+          <Button
+            variant="primary"
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending}
+          >
             <IconPlus size={14} />
-            New dashboard
+            {createMutation.isPending ? "Creating…" : "New dashboard"}
           </Button>
         </>
       }
@@ -169,12 +191,16 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
 
             <button
               type="button"
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending}
               className={cn(
-                "flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line-secondary bg-bg-primary text-center hover:border-brand-500 hover:bg-brand-50/40",
+                "flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line-secondary bg-bg-primary text-center hover:border-brand-500 hover:bg-brand-50/40 disabled:opacity-60",
               )}
             >
               <IconLayoutDashboard size={22} className="text-ink-tertiary" />
-              <span className="text-h3 text-ink-secondary">New dashboard</span>
+              <span className="text-h3 text-ink-secondary">
+                {createMutation.isPending ? "Creating…" : "New dashboard"}
+              </span>
               <span className="max-w-[200px] text-small text-ink-tertiary">
                 Build manually or let AI generate from your queries
               </span>

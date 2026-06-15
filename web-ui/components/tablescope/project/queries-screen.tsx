@@ -15,11 +15,12 @@ import { cn } from "@/lib/cn";
 import { timeAgo } from "@/lib/ui/format";
 import {
   useProjectQueries,
+  useProjectDataSources,
   type SavedQuery,
 } from "@/lib/ui/use-project-data";
 import {
   QueryResultView,
-  QueryEditor,
+  QueryBuilderEdit,
 } from "@/components/tablescope/project/detail-views";
 
 type Filter = "all" | "ai" | "manual" | "shared" | "private";
@@ -50,11 +51,13 @@ function tablesFor(q: SavedQuery): string {
 
 export function QueriesScreen({ projectId }: { projectId: string }) {
   const { data, isLoading } = useProjectQueries(projectId);
+  const { data: dataSources } = useProjectDataSources(projectId);
   const rows = useMemo(() => data ?? [], [data]);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -93,19 +96,24 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           </Button>
         </>
       }
-      contextPanel={
-        <QueryPreviewPanel
-          projectId={projectId}
-          query={detailQuery ?? selected}
-        />
-      }
+      contextPanel={<QueryPreviewPanel query={detailQuery ?? selected} />}
     >
-      {detailQuery ? (
+      {detailQuery && editing ? (
+        <QueryBuilderEdit
+          projectId={projectId}
+          query={detailQuery}
+          datasources={dataSources ?? []}
+          backLabel="Back to results"
+          onBack={() => setEditing(false)}
+          onSaved={() => setEditing(false)}
+        />
+      ) : detailQuery ? (
         <QueryResultView
           projectId={projectId}
           query={detailQuery}
           backLabel="Queries"
           onBack={() => setDetailId(null)}
+          onEdit={() => setEditing(true)}
         />
       ) : (
       <div className="space-y-4">
@@ -183,6 +191,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
                       onClick={() => {
                         setSelectedId(q.id);
                         setDetailId(q.id);
+                        setEditing(false);
                       }}
                       className={cn(
                         "cursor-pointer border-b border-line-tertiary last:border-0",
@@ -249,13 +258,10 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
 }
 
 function QueryPreviewPanel({
-  projectId,
   query,
 }: {
-  projectId: string;
   query: SavedQuery | null;
 }) {
-  const [editing, setEditing] = useState(false);
   if (!query) {
     return (
       <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…">
@@ -268,19 +274,8 @@ function QueryPreviewPanel({
   return (
     <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…">
       <div className="space-y-1">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0 truncate text-caption uppercase tracking-wide text-ink-tertiary">
-            {query.name}
-          </div>
-          {!editing && (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="shrink-0 text-[12px] font-medium text-brand-700 hover:underline"
-            >
-              Edit
-            </button>
-          )}
+        <div className="min-w-0 truncate text-caption uppercase tracking-wide text-ink-tertiary">
+          {query.name}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {query.ai_generated && <Badge tone="ai">AI generated</Badge>}
@@ -291,18 +286,10 @@ function QueryPreviewPanel({
         </div>
       </div>
 
-      {editing ? (
-        <QueryEditor
-          projectId={projectId}
-          query={query}
-          onClose={() => setEditing(false)}
-        />
-      ) : (
-        query.sql_text && (
-          <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-[#1e1b2e] p-3 font-code text-[12px] leading-relaxed text-[#d6d3e8]">
-            {query.sql_text}
-          </pre>
-        )
+      {query.sql_text && (
+        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-[#1e1b2e] p-3 font-code text-[12px] leading-relaxed text-[#d6d3e8]">
+          {query.sql_text}
+        </pre>
       )}
 
       <ContextSection title="Query Metadata">

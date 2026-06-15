@@ -1,14 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   IconRefresh,
-  IconPlus,
   IconDatabase,
   IconFileSpreadsheet,
   IconApi,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
+import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
+import { AIFileUploadWizard } from "@/components/upload/AIFileUploadWizard";
 import {
   ContextPanel,
   ContextSection,
@@ -23,6 +25,7 @@ import {
   columnLabel,
   type DataSource,
 } from "@/lib/ui/use-project-data";
+import { metaList } from "@/lib/ui/ai-meta";
 import { DataSourceResultView } from "@/components/tablescope/project/detail-views";
 
 function isDatabase(s: DataSource): boolean {
@@ -60,6 +63,7 @@ function humanSize(bytes: number | null): string {
 
 export function DataSourcesScreen({ projectId }: { projectId: string }) {
   const { data, isLoading } = useProjectDataSources(projectId);
+  const queryClient = useQueryClient();
   const rows = useMemo(
     () => (data ?? []).filter((s) => !s.archived),
     [data],
@@ -90,10 +94,15 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
             <IconRefresh size={14} />
             Sync all
           </Button>
-          <Button variant="primary">
-            <IconPlus size={14} />
-            Connect source
-          </Button>
+          <ConnectorsMenu
+            projectId={Number(projectId)}
+            label="+ Connect Database"
+            onCreated={() =>
+              queryClient.invalidateQueries({
+                queryKey: ["project", projectId, "datasources"],
+              })
+            }
+          />
         </>
       }
       contextPanel={<SourceDetailPanel source={detail ?? selected} />}
@@ -117,6 +126,24 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
             hint="across all sources"
           />
         </div>
+
+        <Card className="p-4">
+          <div className="mb-3">
+            <h3 className="text-h3 text-ink-primary">AI-assisted upload</h3>
+            <p className="text-small text-ink-tertiary">
+              Drop a CSV or Excel file to profile it with AI and add it as a
+              data source.
+            </p>
+          </div>
+          <AIFileUploadWizard
+            projectId={Number(projectId)}
+            onComplete={() =>
+              queryClient.invalidateQueries({
+                queryKey: ["project", projectId, "datasources"],
+              })
+            }
+          />
+        </Card>
 
         {isLoading ? (
           <div className="py-16 text-center text-small text-ink-tertiary">
@@ -227,8 +254,44 @@ function SourceDetailPanel({ source }: { source: DataSource | null }) {
     );
   }
   const cols = source.columnTypes ?? [];
+  const meta = source.aiMetadata ?? null;
+  const tags = metaList(meta, ["suggested_tags", "tags"]);
+  const kpis = metaList(meta, ["suggested_kpis", "recommended_kpis", "kpis"]);
+  const summary =
+    meta && typeof meta.summary === "string" ? meta.summary : null;
   return (
     <ContextPanel title="Source Detail" askPlaceholder="Ask about this source…">
+      {summary && (
+        <div className="rounded-lg border border-brand-100 bg-brand-50/60 p-3 text-[13px] leading-relaxed text-ink-primary">
+          {summary}
+        </div>
+      )}
+
+      {kpis.length > 0 && (
+        <ContextSection title="Recommended KPIs">
+          <ul className="space-y-1 text-[13px]">
+            {kpis.slice(0, 8).map((k, i) => (
+              <li key={`${k}-${i}`} className="flex items-start gap-1.5">
+                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-500" />
+                <span className="text-ink-primary">{k}</span>
+              </li>
+            ))}
+          </ul>
+        </ContextSection>
+      )}
+
+      {tags.length > 0 && (
+        <ContextSection title="Tags">
+          <div className="flex flex-wrap gap-1.5">
+            {tags.slice(0, 12).map((t, i) => (
+              <Badge key={`${t}-${i}`} tone="brand">
+                {t}
+              </Badge>
+            ))}
+          </div>
+        </ContextSection>
+      )}
+
       <ContextSection title="Source">
         <dl className="space-y-1 text-[13px]">
           <Row label="Name" value={source.fileName} />

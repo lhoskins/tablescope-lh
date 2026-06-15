@@ -247,7 +247,10 @@ async def reconcile_database_sources(session, *, only_id: int | None = None) -> 
                     "name_in_source": intro.source_identifier(
                         ds.db_type, c.column_name
                     ),
-                    "teiid_type": intro.map_to_teiid_type(c.data_type or ""),
+                    "teiid_type": (
+                        c.teiid_type_override
+                        or intro.map_to_teiid_type(c.data_type or "")
+                    ),
                 }
                 for c in cols
             ]

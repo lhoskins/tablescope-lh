@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
@@ -41,6 +42,9 @@ from app.schemas.project import (
     SavedQueryUpdate,
 )
 from app.services.customer_folders import CustomerFolderService
+from app.services.database_introspection_service import (
+    map_to_teiid_type as _map_teiid_type,
+)
 from app.services.file_sources import display_source
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
@@ -384,20 +388,28 @@ async def list_project_datasources(
                     "projectId": meta.project_id if meta else None,
                     "ownerId": owner_id,
                     "columnTypes": (meta.column_types or []) if meta else [],
+                    "aiMetadata": (meta.ai_metadata or {}) if meta else {},
                     "archived": is_archived,
                 })
 
     # Append database-backed data sources registered against this project.
-    db_stmt = select(DatabaseDataSource).where(
-        DatabaseDataSource.tenant_id == context.tenant_id,
-        DatabaseDataSource.project_id == project_id,
-        DatabaseDataSource.status == "active",
+    db_stmt = (
+        select(DatabaseDataSource)
+        .where(
+            DatabaseDataSource.tenant_id == context.tenant_id,
+            DatabaseDataSource.project_id == project_id,
+            DatabaseDataSource.status == "active",
+        )
+        .options(selectinload(DatabaseDataSource.columns))
     )
     if not include_archived:
         db_stmt = db_stmt.where(DatabaseDataSource.archived.is_(False))
     db_sources = (await session.scalars(db_stmt)).all()
     for ds in db_sources:
         is_saas = ds.source_type == "saas_object"
+        cols = sorted(
+            ds.columns, key=lambda c: (c.ordinal_position or 0, c.column_name)
+        )
         datasources.append({
             "fileName": ds.display_name,
             "viewName": ds.teiid_view_name,
@@ -407,6 +419,14 @@ async def list_project_datasources(
             "connectorType": ds.connector_type,
             "id": ds.id,
             "ownerId": ds.created_by,
+            "columnTypes": [
+                {
+                    "name": c.column_name,
+                    "type": c.teiid_type_override
+                    or _map_teiid_type(c.data_type or ""),
+                }
+                for c in cols
+            ],
             "archived": ds.archived,
         })
 
@@ -569,6 +589,166 @@ async def add_datasources_to_project(
 
     await session.commit()
     return {"status": "ok", "added": added}
+
+
+# Standard Teiid runtime types offered in the column-type editor (item 5).
+STANDARD_TEIID_TYPES: tuple[str, ...] = (
+    "string",
+    "integer",
+    "long",
+    "short",
+    "double",
+    "float",
+    "bigdecimal",
+    "boolean",
+    "date",
+    "time",
+    "timestamp",
+    "varbinary",
+)
+
+
+@router.get("/{project_id}/datasources/column-types")
+async def list_standard_column_types(
+    project_id: int,
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> list[str]:
+    """Standard Teiid runtime types selectable in the column-type editor."""
+    return list(STANDARD_TEIID_TYPES)
+
+
+@router.put("/{project_id}/datasources/columns")
+async def update_datasource_columns(
+    project_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Update a datasource's column types and redeploy its VDB (item 5).
+
+    Body for a database table::
+
+        {"kind": "db", "id": 123,
+         "columns": [{"name": "Amount", "type": "double"}]}
+
+    Body for an uploaded file::
+
+        {"kind": "file", "viewName": "Sales_CSV",
+         "columns": [{"name": "Amount", "type": "double"}]}
+    """
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    columns = body.get("columns") or []
+    if not isinstance(columns, list) or not columns:
+        raise HTTPException(status_code=400, detail="columns must be a non-empty list")
+
+    type_by_name: dict[str, str] = {}
+    for col in columns:
+        name = (col or {}).get("name")
+        ctype = (col or {}).get("type")
+        if not name or not ctype:
+            continue
+        if ctype not in STANDARD_TEIID_TYPES:
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported column type: {ctype}"
+            )
+        type_by_name[str(name)] = str(ctype)
+
+    if not type_by_name:
+        raise HTTPException(status_code=400, detail="No valid columns provided")
+
+    kind = body.get("kind")
+
+    if kind == "db":
+        from app.models.database_data_source import DataSourceColumn
+        from app.services.teiid_registration_service import (
+            reconcile_database_sources,
+        )
+
+        ds_id = body.get("id")
+        if ds_id is None:
+            raise HTTPException(status_code=400, detail="id is required for db sources")
+        ds = await session.get(DatabaseDataSource, int(ds_id))
+        if ds is None or ds.tenant_id != context.tenant_id:
+            raise HTTPException(status_code=404, detail="Datasource not found")
+        if (
+            ds.created_by != context.user_id
+            and not await _is_project_admin(session, project, context)
+        ):
+            raise HTTPException(status_code=403, detail="Not allowed")
+
+        cols = (
+            await session.scalars(
+                select(DataSourceColumn).where(
+                    DataSourceColumn.data_source_id == ds.id
+                )
+            )
+        ).all()
+        for c in cols:
+            if c.column_name in type_by_name:
+                c.teiid_type_override = type_by_name[c.column_name]
+        await session.commit()
+
+        result = await reconcile_database_sources(session, only_id=ds.id)
+        if result.get("failed"):
+            raise HTTPException(
+                status_code=502,
+                detail="Column types saved but VDB redeploy failed. Try again.",
+            )
+        return {"status": "ok", "redeployed": True, "kind": "db"}
+
+    if kind == "file":
+        from app.models.user_vdb import UserVDB
+        from app.services.vdb_management import VDBManagementService
+
+        view_name = body.get("viewName")
+        if not view_name:
+            raise HTTPException(
+                status_code=400, detail="viewName is required for file sources"
+            )
+        meta = await session.scalar(
+            select(FileSourceMeta).where(
+                FileSourceMeta.tenant_id == context.tenant_id,
+                FileSourceMeta.owner_id == context.user_id,
+                FileSourceMeta.view_name == view_name,
+            )
+        )
+        if meta is None:
+            raise HTTPException(status_code=404, detail="Datasource not found")
+
+        existing = {
+            (c or {}).get("name"): dict(c)
+            for c in (meta.column_types or [])
+            if isinstance(c, dict)
+        }
+        for name, ctype in type_by_name.items():
+            entry = existing.get(name, {"name": name})
+            entry["type"] = ctype
+            existing[name] = entry
+        meta.column_types = list(existing.values())
+        await session.commit()
+
+        user_vdb = await session.scalar(
+            select(UserVDB).where(
+                UserVDB.tenant_id == context.tenant_id,
+                UserVDB.user_id == meta.owner_id,
+            )
+        )
+        if user_vdb is not None:
+            svc = VDBManagementService()
+            try:
+                await svc.redeploy_vdb(user_vdb.vdb_id)
+            except Exception as exc:  # pragma: no cover - servlet failure
+                logger.warning("File VDB redeploy failed for %s: %s", view_name, exc)
+            finally:
+                aclose = getattr(svc, "aclose", None)
+                if aclose is not None:
+                    await aclose()
+        return {"status": "ok", "redeployed": user_vdb is not None, "kind": "file"}
+
+    raise HTTPException(status_code=400, detail="kind must be 'db' or 'file'")
 
 
 async def _is_project_admin(

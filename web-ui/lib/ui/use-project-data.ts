@@ -184,6 +184,7 @@ export interface DataSource {
   fileMetaId?: number | null;
   ownerId?: number | null;
   columnTypes?: unknown[];
+  aiMetadata?: Record<string, unknown> | null;
   archived?: boolean;
 }
 
