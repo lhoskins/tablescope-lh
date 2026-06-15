@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, String, Text
+from datetime import datetime
+
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -29,6 +31,17 @@ class SavedQuery(TimestampMixin, Base):
     left_column: Mapped[str | None] = mapped_column(String(255), nullable=True)
     right_column: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sql_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_generated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    is_shared: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    run_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_run_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    avg_runtime_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     def __repr__(self) -> str:
         return f"SavedQuery(id={self.id}, project_id={self.project_id}, name={self.name!r})"
