@@ -32,3 +32,18 @@ class AuthTokenResponse(BaseModel):
     role: str
     is_super_admin: bool = False
     tenant_slug: str | None = None
+
+
+class CurrentUserResponse(BaseModel):
+    """Identity of the authenticated caller, for the app shell."""
+
+    user_id: int
+    email: str
+    display_name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    role: str
+    is_super_admin: bool = False
+    tenant_id: int
+    tenant_name: str
+    tenant_slug: str | None = None

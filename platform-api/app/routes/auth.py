@@ -15,15 +15,45 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.clerk import verify_external_token
+from app.auth.context import RequestContext, get_request_context
 from app.auth.jwt import AuthError, create_access_token
 from app.config import get_settings
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.schemas.auth import AuthExchangeRequest, AuthTokenResponse, DirectLoginRequest
+from app.schemas.auth import (
+    AuthExchangeRequest,
+    AuthTokenResponse,
+    CurrentUserResponse,
+    DirectLoginRequest,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/me", response_model=CurrentUserResponse)
+async def get_current_user(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(get_request_context),
+) -> CurrentUserResponse:
+    """Return the authenticated caller's identity and tenant for the app shell."""
+    user = await session.get(User, context.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    tenant = await session.get(Tenant, context.tenant_id)
+    return CurrentUserResponse(
+        user_id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        role=user.role,
+        is_super_admin=user.is_super_admin,
+        tenant_id=user.tenant_id,
+        tenant_name=tenant.name if tenant else "",
+        tenant_slug=tenant.slug if tenant else None,
+    )
 
 
 @router.post("/exchange", response_model=AuthTokenResponse)
