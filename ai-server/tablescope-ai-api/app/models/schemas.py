@@ -179,6 +179,24 @@ class IntelligencePlanResponse(BaseModel):
     model_used: str = ""
 
 
+class IntelligenceFixSQLRequest(AIBaseRequest):
+    """Repair a query that the Teiid engine rejected.
+
+    Given the failing SQL, the engine's error message, and the exact schema,
+    the model returns a corrected single-table query (or empty if unfixable).
+    """
+    sql: str = ""
+    error: str = ""
+    allowed_tables: list[str] = Field(default_factory=list)
+    table_schema: list[dict] = Field(default_factory=list)
+
+
+class IntelligenceFixSQLResponse(BaseModel):
+    sql: str = ""
+    request_id: str = ""
+    model_used: str = ""
+
+
 class InterpretAnalysisInput(BaseModel):
     id: str
     category: str = "trend"

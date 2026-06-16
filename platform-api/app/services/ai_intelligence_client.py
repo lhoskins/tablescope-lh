@@ -88,6 +88,39 @@ async def plan(
     return analyses if isinstance(analyses, list) else []
 
 
+async def fix_sql(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    sql: str,
+    error: str,
+    allowed_tables: list[str],
+    table_schema: list[dict[str, Any]] | None = None,
+) -> str | None:
+    """Ask the LLM to repair a query that the engine rejected.
+
+    Returns a corrected SQL string, or None if the AI is unavailable or
+    declines to fix it.
+    """
+    result = await _post(
+        "/ai/intelligence/fix-sql",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "sql": sql,
+            "error": error,
+            "allowed_tables": allowed_tables,
+            "table_schema": table_schema or [],
+        },
+    )
+    if result is None:
+        return None
+    fixed = result.get("sql")
+    return fixed if isinstance(fixed, str) and fixed.strip() else None
+
+
 async def interpret(
     *,
     tenant_id: int,

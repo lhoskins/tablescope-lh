@@ -35,6 +35,8 @@ from app.models.schemas import (
     GenerateSQLRequest,
     GenerateSQLResponse,
     IndexDocumentRequest,
+    IntelligenceFixSQLRequest,
+    IntelligenceFixSQLResponse,
     IntelligenceInterpretRequest,
     IntelligenceInterpretResponse,
     IntelligencePlanRequest,
@@ -568,6 +570,67 @@ _INTEL_SYSTEM_PROMPT = (
 )
 
 
+def _build_schema_lines(table_schema: list[dict]) -> str:
+    """Exact per-table column list so the LLM never invents column names."""
+    if not table_schema:
+        return ""
+    parts: list[str] = []
+    for t in table_schema:
+        tname = t.get("table") or t.get("view_name") or ""
+        cols = t.get("columns") or []
+        col_str = ", ".join(
+            f'"{c.get("name")}" ({c.get("type", "string")})'
+            for c in cols
+            if c.get("name")
+        )
+        if tname and col_str:
+            # Flag text-backed (CSV/file) tables so the LLM always casts.
+            tag = (
+                " [text-backed: CAST every column for math/date]"
+                if t.get("storage") == "text"
+                else ""
+            )
+            parts.append(f'  - "{tname}"{tag}: {col_str}')
+    if not parts:
+        return ""
+    return (
+        "\nExact schema — use ONLY these table and column names, spelled "
+        "exactly as shown (they are case-sensitive). Do NOT invent or guess "
+        "any column that is not listed here. Each column belongs to exactly "
+        "ONE table; never reference a column under a table that does not "
+        "list it:\n" + "\n".join(parts)
+    )
+
+
+_TEIID_SQL_RULES = (
+    "This database uses Teiid (not MySQL/PostgreSQL). Text-backed (CSV/file) "
+    "columns are stored as STRINGS no matter what logical type is shown.\n"
+    "- Query a SINGLE table per analysis. Do NOT write JOINs. (Many tables "
+    'share column names like "SupplierID" — joining causes ambiguity errors. '
+    "One table per query avoids this entirely.)\n"
+    "- Reference ONLY columns listed under the table you select FROM; never "
+    "invent columns and never borrow a column from another table.\n"
+    '- Quote every table and column name with double quotes: "ColName".\n'
+    "- Only CAST columns that hold NUMERIC values (quantities, amounts, counts, "
+    "prices). Do NOT CAST categorical/label text (status, type, rating, name, "
+    "category, country, severity) — filter or GROUP BY those as-is.\n"
+    "- For ANY arithmetic (+ - * /), comparison (>, <), SUM/AVG/MIN/MAX, or "
+    "numeric sort on a numeric text-backed column, you MUST CAST it: "
+    'CAST("col" AS double). Example: SUM(CAST("DefectQty" AS double)) / '
+    'NULLIF(SUM(CAST("ReceivedQty" AS double)), 0).\n'
+    "- For date operations on a text-backed column, CAST to date first: "
+    'CAST("OrderDate" AS date).\n'
+    "- Do NOT use DATE_FORMAT/MONTH()/YEAR(). For year/month grouping prefer "
+    'EXTRACT(YEAR FROM CAST("OrderDate" AS date)).\n'
+    "- Alias columns with a plain identifier or double quotes (e.g. AS Month or "
+    'AS "Month") — NEVER single quotes (AS \'Month\' is a syntax error).\n'
+    "- Do NOT use CTEs (WITH), subqueries in FROM, or derived tables. Query the "
+    "allowed tables directly with WHERE/GROUP BY/aggregations only.\n"
+    "- GROUP BY must repeat the full SELECT expression (Teiid forbids alias "
+    "references in GROUP BY). Never use SELECT *.\n"
+)
+
+
 @router.post("/intelligence/plan", response_model=IntelligencePlanResponse)
 async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanResponse:
     """Propose high-value diagnostic analyses for a project (SQL written in memory).
@@ -612,58 +675,8 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             for d in req.documents[:25]
         )
 
-    # Exact column list per table so the LLM never invents column names.
-    schema_lines = ""
-    if req.table_schema:
-        parts: list[str] = []
-        for t in req.table_schema:
-            tname = t.get("table") or t.get("view_name") or ""
-            cols = t.get("columns") or []
-            col_str = ", ".join(
-                f'"{c.get("name")}" ({c.get("type", "string")})'
-                for c in cols
-                if c.get("name")
-            )
-            if tname and col_str:
-                # Flag text-backed (CSV/file) tables so the LLM always casts.
-                tag = " [text-backed: CAST every column for math/date]" if (
-                    t.get("storage") == "text"
-                ) else ""
-                parts.append(f'  - "{tname}"{tag}: {col_str}')
-        if parts:
-            schema_lines = (
-                "\nExact schema — use ONLY these table and column names, spelled "
-                "exactly as shown (they are case-sensitive). Do NOT invent or guess "
-                "any column that is not listed here. Each column belongs to exactly "
-                "ONE table; never reference a column under a table that does not "
-                "list it:\n" + "\n".join(parts)
-            )
-
-    teiid_rules = (
-        "This database uses Teiid (not MySQL/PostgreSQL). Text-backed (CSV/file) "
-        "columns are stored as STRINGS no matter what logical type is shown.\n"
-        "- Query a SINGLE table per analysis. Do NOT write JOINs. (Many tables "
-        "share column names like \"SupplierID\" — joining causes ambiguity errors. "
-        "One table per query avoids this entirely.)\n"
-        "- Reference ONLY columns listed under the table you select FROM; never "
-        "invent columns and never borrow a column from another table.\n"
-        "- Quote every table and column name with double quotes: \"ColName\".\n"
-        "- For ANY arithmetic (+ - * /), comparison (>, <), SUM/AVG/MIN/MAX, or "
-        "numeric sort on a text-backed column, you MUST CAST it: "
-        "CAST(\"col\" AS double). Example: SUM(CAST(\"DefectQty\" AS double)) / "
-        "SUM(CAST(\"ReceivedQty\" AS double)).\n"
-        "- For date operations on a text-backed column, CAST to date first: "
-        "CAST(\"OrderDate\" AS date).\n"
-        "- Do NOT use DATE_FORMAT/MONTH()/YEAR(). Use FORMATDATE, EXTRACT, DATE_TRUNC.\n"
-        "- Monthly grouping: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM').\n"
-        "- Guard division by zero: only divide when the denominator is non-zero, "
-        "e.g. wrap with NULLIF(CAST(\"ReceivedQty\" AS double), 0).\n"
-        "- Alias columns with a plain identifier or double quotes (e.g. AS Month or "
-        "AS \"Month\") — NEVER single quotes (AS 'Month' is a syntax error).\n"
-        "- Do NOT use CTEs (WITH), subqueries in FROM, or derived tables. Query the "
-        "allowed tables directly with WHERE/GROUP BY/aggregations only.\n"
-        "- GROUP BY must match the SELECT expression exactly. Never use SELECT *.\n"
-    )
+    schema_lines = _build_schema_lines(req.table_schema)
+    teiid_rules = _TEIID_SQL_RULES
 
     # Granularity (1 executive .. 5 granular) steers count + depth + how
     # aggressively to surface smaller, lower-severity signals.
@@ -770,6 +783,61 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
     update_activity(req.user_id, req.tenant_id, req.project_id)
     return IntelligencePlanResponse(
         analyses=analyses,
+        request_id=request_id,
+        model_used=settings.reasoning_model,
+    )
+
+
+@router.post("/intelligence/fix-sql", response_model=IntelligenceFixSQLResponse)
+async def intelligence_fix_sql(
+    req: IntelligenceFixSQLRequest,
+) -> IntelligenceFixSQLResponse:
+    """Repair a single query the engine rejected, using the exact error + schema.
+
+    This closes the analyst loop: when generated SQL fails (CAST on the wrong
+    type, alias-in-GROUP BY, an unsupported function, a wrong-table column, …),
+    the model is shown the precise engine error and asked to return a corrected
+    single-table query. Returns empty SQL if it can't be fixed.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+
+    schema_lines = _build_schema_lines(req.table_schema)
+    prompt = (
+        "A read-only SQL query failed against a Teiid database. Rewrite it so it "
+        "runs, keeping the SAME analytical intent. Fix ONLY what the error "
+        "requires (e.g. CAST the right column, stop casting categorical text, "
+        "repeat the SELECT expression in GROUP BY, drop an unsupported function, "
+        "use a column that actually exists in the queried table). If the query "
+        "cannot be made to work against the allowed tables, return an empty "
+        "string.\n\n"
+        f"Allowed tables (use ONLY these): {', '.join(req.allowed_tables)}\n"
+        f"{schema_lines}\n\n"
+        f"{_TEIID_SQL_RULES}\n"
+        f"Failing SQL:\n{req.sql}\n\n"
+        f"Engine error:\n{req.error[:800]}\n\n"
+        "Return ONLY the corrected SQL query (no markdown, no commentary), or an "
+        "empty response if it cannot be fixed."
+    )
+
+    raw = await llm_client.generate(
+        prompt=prompt,
+        system_prompt=_INTEL_SYSTEM_PROMPT,
+        model=settings.reasoning_model,
+        temperature=0.1,
+        num_ctx=8192,
+    )
+
+    fixed = _clean_sql(raw or "")
+    if fixed:
+        try:
+            validate_sql(fixed, req.allowed_tables)
+        except SQLValidationError as e:
+            logger.warning("fix-sql produced invalid SQL: %s", e.reason)
+            fixed = ""
+
+    return IntelligenceFixSQLResponse(
+        sql=fixed,
         request_id=request_id,
         model_used=settings.reasoning_model,
     )

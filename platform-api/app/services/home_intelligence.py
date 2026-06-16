@@ -269,6 +269,20 @@ async def _safe_query(runner: QueryRunner, sql: str) -> dict[str, Any] | None:
         return None
 
 
+async def _query_with_error(
+    runner: QueryRunner, sql: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Run a query, returning ``(result, None)`` on success or
+    ``(None, error_text)`` when the engine rejects it (so it can be repaired)."""
+    if runner is None:
+        return None, None
+    try:
+        return await runner(sql), None
+    except Exception as exc:
+        logger.info("home-intelligence query failed (will attempt repair): %s", exc)
+        return None, str(exc)
+
+
 def _to_float(value: Any) -> float | None:
     try:
         if value is None:
@@ -747,26 +761,34 @@ async def run_ai_intelligence(
     # Execute each analysis against real data; gather interpret inputs.
     executed: list[dict[str, Any]] = []
     interpret_inputs: list[dict[str, Any]] = []
+
+    def _record_data_analysis(a: dict[str, Any], result: dict[str, Any]) -> None:
+        executed.append({"analysis": a, "result": result})
+        interpret_inputs.append(
+            {
+                "id": a["id"],
+                "category": a.get("category", "trend"),
+                "title": a.get("title", ""),
+                "rationale": a.get("rationale", ""),
+                "chart_type": a.get("chart_type", "bar"),
+                "columns": result.get("columns", []),
+                "rows": result.get("rows", [])[:20],
+                "row_count": len(result.get("rows", [])),
+                "document_context": "",
+            }
+        )
+
+    # Queries the engine rejected on the first pass — repaired below.
+    to_repair: list[tuple[dict[str, Any], str, str]] = []
     for a in analyses:
         sql = (a.get("sql") or "").strip()
         if sql:
-            result = await _safe_query(runner, sql)
-            if not result or not result.get("rows"):
-                continue  # no data -> skip, never fabricate
-            executed.append({"analysis": a, "result": result})
-            interpret_inputs.append(
-                {
-                    "id": a["id"],
-                    "category": a.get("category", "trend"),
-                    "title": a.get("title", ""),
-                    "rationale": a.get("rationale", ""),
-                    "chart_type": a.get("chart_type", "bar"),
-                    "columns": result.get("columns", []),
-                    "rows": result.get("rows", [])[:20],
-                    "row_count": len(result.get("rows", [])),
-                    "document_context": "",
-                }
-            )
+            result, err = await _query_with_error(runner, sql)
+            if result and result.get("rows"):
+                _record_data_analysis(a, result)
+            elif err:
+                to_repair.append((a, sql, err))
+            # else: ran but returned no rows -> skip, never fabricate
         else:
             # Document-grounded finding — supply the doc text for interpretation.
             titles = a.get("source_documents") or []
@@ -791,6 +813,32 @@ async def run_ai_intelligence(
                     "document_context": "\n".join(doc_ctx_parts)[:3000],
                 }
             )
+
+    # Self-repair: feed each rejected query + its exact engine error back to the
+    # LLM (concurrently), then re-run the corrected SQL. Turns Teiid quirks
+    # (wrong CAST, alias-in-GROUP BY, unsupported function, wrong-table column)
+    # into rendered cards instead of silently dropped analyses.
+    if to_repair:
+        fixes = await asyncio.gather(
+            *(
+                ai.fix_sql(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    project_id=project.id,
+                    sql=sql,
+                    error=err,
+                    allowed_tables=allowed_tables,
+                    table_schema=table_schema,
+                )
+                for (_a, sql, err) in to_repair
+            )
+        )
+        for (a, orig_sql, _err), fixed in zip(to_repair, fixes, strict=True):
+            if not fixed or fixed.strip() == orig_sql.strip():
+                continue
+            result, _ = await _query_with_error(runner, fixed)
+            if result and result.get("rows"):
+                _record_data_analysis({**a, "sql": fixed}, result)
 
     if not executed:
         return []
