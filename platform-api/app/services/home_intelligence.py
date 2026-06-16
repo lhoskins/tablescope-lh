@@ -559,7 +559,12 @@ async def run_intelligence_suite(
     prompt_types: list[str],
     runner: QueryRunner = None,
 ) -> list[dict[str, Any]]:
-    """Run the requested prompt types against a project's real data."""
+    """Run the requested prompt types against a project's real data.
+
+    Deterministic fallback path: each built-in prompt is grounded in the
+    project's real tables/documents and skips cleanly when the data isn't there.
+    The primary path is :func:`run_ai_intelligence` (LLM-driven).
+    """
     cards: list[dict[str, Any]] = []
     for pt in prompt_types:
         fn = _PROMPT_FUNCS.get(pt)
@@ -572,6 +577,272 @@ async def run_intelligence_suite(
             card = None
         if card is not None:
             cards.append(card)
+    return cards
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI-driven analyst loop  (plan -> execute real SQL -> interpret)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _tables_in_sql(sql: str, tables: list[TableInfo]) -> list[str]:
+    """Return the project view names referenced by a SQL string."""
+    found: list[str] = []
+    for t in tables:
+        if re.search(rf'(?<![A-Za-z0-9_]){re.escape(t.view_name)}(?![A-Za-z0-9_])', sql):
+            found.append(t.view_name)
+    return found
+
+
+def _pick_columns(
+    columns: list[str], rows: list[dict[str, Any]], label_hint: str, value_hint: str
+) -> tuple[str | None, str | None]:
+    """Resolve the label (category) and value (numeric) columns for a chart."""
+    value_col: str | None = None
+    if value_hint and value_hint in columns:
+        value_col = value_hint
+    else:
+        for col in columns:
+            numeric = [r for r in rows if _to_float(r.get(col)) is not None]
+            if rows and len(numeric) >= max(1, len(rows) // 2):
+                value_col = col
+                break
+    label_col: str | None = None
+    if label_hint and label_hint in columns and label_hint != value_col:
+        label_col = label_hint
+    else:
+        for col in columns:
+            if col != value_col:
+                label_col = col
+                break
+    return label_col, value_col
+
+
+def _build_chart(
+    chart_type: str,
+    title: str,
+    result: dict[str, Any],
+    label_hint: str,
+    value_hint: str,
+) -> dict[str, Any] | None:
+    """Build a chart dict from a real query result (never fabricated)."""
+    columns = result.get("columns", [])
+    rows = result.get("rows", [])
+    if not rows or not columns:
+        return None
+
+    if chart_type == "kpi_grid":
+        kpis: list[dict[str, str]] = []
+        # Single-row result with several numeric columns -> one KPI per column.
+        if len(rows) == 1:
+            row = rows[0]
+            for col in columns:
+                v = _to_float(row.get(col))
+                if v is not None:
+                    kpis.append({"value": _fmt_num(v), "label": col})
+        # Otherwise treat as label/value pairs, top rows as KPIs.
+        if not kpis:
+            label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
+            if label_col and value_col:
+                for r in rows[:6]:
+                    v = _to_float(r.get(value_col))
+                    if v is not None:
+                        kpis.append(
+                            {"value": _fmt_num(v), "label": str(r.get(label_col))}
+                        )
+        if not kpis:
+            return None
+        return {"type": "kpi_grid", "title": title, "data": {"kpis": kpis[:6]}}
+
+    # bar / line share the {label, value} series shape.
+    label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
+    if not label_col or not value_col:
+        return None
+    series: list[dict[str, Any]] = []
+    for r in rows[:12]:
+        v = _to_float(r.get(value_col))
+        if v is None:
+            continue
+        series.append({"label": str(r.get(label_col)), "value": round(v, 2)})
+    if not series:
+        return None
+    ct = "line" if chart_type == "line" else "bar"
+    return {"type": ct, "title": title, "data": {"series": series}}
+
+
+def _fmt_num(v: float) -> str:
+    if abs(v) >= 1_000_000:
+        return f"{v / 1_000_000:.1f}M"
+    if abs(v) >= 1_000:
+        return f"{v / 1_000:.1f}K"
+    if v == int(v):
+        return str(int(v))
+    return f"{v:.2f}"
+
+
+async def run_ai_intelligence(
+    project: Project,
+    ctx: ProjectContext,
+    runner: QueryRunner,
+    *,
+    tenant_id: int,
+    user_id: int,
+    max_analyses: int = 6,
+) -> list[dict[str, Any]] | None:
+    """LLM-driven analyst loop. Returns cards, or ``None`` to signal fallback.
+
+    1. Ask the AI to plan high-value analyses from the real schema + documents.
+    2. Execute each generated SQL against the project's real data.
+    3. Ask the AI to interpret the actual results into executive findings.
+
+    Returns ``None`` when the AI server is unavailable or proposes nothing
+    usable, so the caller can fall back to the deterministic suite.
+    """
+    from app.services import ai_intelligence_client as ai
+
+    if not ai.is_enabled():
+        return None
+
+    allowed_tables = [t.view_name for t in ctx.tables]
+    documents = [
+        {
+            "title": d.title,
+            "summary": d.ai_summary or "",
+            "tags": [
+                str(t) for t in (d.ai_metadata.get("tags") or [])
+                if isinstance(t, str | int | float)
+            ],
+        }
+        for d in ctx.documents
+    ]
+
+    analyses = await ai.plan(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        project_id=project.id,
+        allowed_tables=allowed_tables,
+        documents=documents,
+        max_analyses=max_analyses,
+    )
+    if analyses is None:
+        return None  # AI unreachable -> fall back
+    if not analyses:
+        return []  # AI reachable but found nothing worth surfacing
+
+    doc_by_title = {d.title: d for d in ctx.documents}
+
+    # Execute each analysis against real data; gather interpret inputs.
+    executed: list[dict[str, Any]] = []
+    interpret_inputs: list[dict[str, Any]] = []
+    for a in analyses:
+        sql = (a.get("sql") or "").strip()
+        if sql:
+            result = await _safe_query(runner, sql)
+            if not result or not result.get("rows"):
+                continue  # no data -> skip, never fabricate
+            executed.append({"analysis": a, "result": result})
+            interpret_inputs.append(
+                {
+                    "id": a["id"],
+                    "category": a.get("category", "trend"),
+                    "title": a.get("title", ""),
+                    "rationale": a.get("rationale", ""),
+                    "chart_type": a.get("chart_type", "bar"),
+                    "columns": result.get("columns", []),
+                    "rows": result.get("rows", [])[:20],
+                    "row_count": len(result.get("rows", [])),
+                }
+            )
+        else:
+            # Document-grounded finding — supply the doc text for interpretation.
+            titles = a.get("source_documents") or []
+            doc_ctx_parts: list[str] = []
+            for title in titles:
+                d = doc_by_title.get(title)
+                if d and d.ai_summary:
+                    doc_ctx_parts.append(f"{d.title}: {d.ai_summary}")
+            if not doc_ctx_parts:
+                continue
+            executed.append({"analysis": a, "result": None})
+            interpret_inputs.append(
+                {
+                    "id": a["id"],
+                    "category": a.get("category", "trend"),
+                    "title": a.get("title", ""),
+                    "rationale": a.get("rationale", ""),
+                    "chart_type": "none",
+                    "document_context": "\n".join(doc_ctx_parts)[:3000],
+                }
+            )
+
+    if not executed:
+        return []
+
+    interpreted = await ai.interpret(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        project_id=project.id,
+        analyses=interpret_inputs,
+    )
+    interpreted = interpreted or {}
+
+    cards: list[dict[str, Any]] = []
+    for item in executed:
+        a = item["analysis"]
+        result = item["result"]
+        ins = interpreted.get(a["id"], {})
+
+        category = a.get("category", "trend")
+        if category not in ("risk", "trend", "opportunity"):
+            category = "trend"
+        severity = ins.get("severity") or a.get("severity_hint") or "info"
+        if severity not in ("critical", "urgent", "watch", "opportunity", "info"):
+            severity = "info"
+        title = ins.get("title") or a.get("title") or "Insight"
+        summary = ins.get("summary") or a.get("rationale") or ""
+        if not summary:
+            continue  # nothing meaningful to show
+
+        callout = None
+        if ins.get("callout_text"):
+            ctype = ins.get("callout_type") or (
+                "opportunity" if category == "opportunity" else "risk"
+            )
+            callout = {"type": ctype, "text": ins["callout_text"]}
+        elif ins.get("recommendation"):
+            callout = {
+                "type": "opportunity" if category == "opportunity" else "risk",
+                "text": ins["recommendation"],
+            }
+
+        chart = None
+        tables: list[str] = []
+        documents_used: list[str] = []
+        if result is not None:
+            chart = _build_chart(
+                a.get("chart_type", "bar"),
+                a.get("title", ""),
+                result,
+                a.get("label_column", ""),
+                a.get("value_column", ""),
+            )
+            tables = _tables_in_sql(a.get("sql", ""), ctx.tables)
+        else:
+            documents_used = list(a.get("source_documents") or [])
+
+        cards.append(
+            _card(
+                project,
+                f"{category}_{a['id']}",
+                severity,
+                title,
+                summary,
+                chart=chart,
+                callout=callout,
+                tables=tables,
+                documents=documents_used,
+            )
+        )
+
     return cards
 
 

@@ -150,6 +150,150 @@ async def test_synthesise_detects_shared_entity() -> None:
     assert set(result["projectIds"]) == {"1", "2"}
 
 
+# ──────────────────────── AI-driven analyst loop ────────────────────────────
+
+def test_build_chart_bar_from_results() -> None:
+    result = {
+        "columns": ["supplier", "spend"],
+        "rows": [
+            {"supplier": "Acme", "spend": "1200"},
+            {"supplier": "Globex", "spend": "800"},
+        ],
+    }
+    chart = hi._build_chart("bar", "Spend by supplier", result, "supplier", "spend")
+    assert chart is not None
+    assert chart["type"] == "bar"
+    assert chart["data"]["series"] == [
+        {"label": "Acme", "value": 1200.0},
+        {"label": "Globex", "value": 800.0},
+    ]
+
+
+def test_build_chart_kpi_grid_single_row() -> None:
+    result = {
+        "columns": ["total_spend", "order_count"],
+        "rows": [{"total_spend": "2500000", "order_count": "1300"}],
+    }
+    chart = hi._build_chart("kpi_grid", "Headline", result, "", "")
+    assert chart is not None
+    assert chart["type"] == "kpi_grid"
+    labels = {k["label"] for k in chart["data"]["kpis"]}
+    assert labels == {"total_spend", "order_count"}
+
+
+def test_build_chart_skips_when_no_numeric() -> None:
+    result = {"columns": ["name"], "rows": [{"name": "abc"}]}
+    assert hi._build_chart("bar", "t", result, "", "") is None
+
+
+def test_tables_in_sql_detects_referenced_views() -> None:
+    tables = [_table("shipments", ["a"]), _table("orders", ["b"])]
+    sql = 'SELECT a FROM "shipments" GROUP BY a'
+    assert hi._tables_in_sql(sql, tables) == ["shipments"]
+
+
+async def test_run_ai_intelligence_executes_and_interprets(monkeypatch) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**kwargs):
+        return [
+            {
+                "id": "a1",
+                "category": "trend",
+                "title": "Spend by supplier",
+                "rationale": "Concentration risk.",
+                "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend '
+                'FROM "spend" GROUP BY "supplier"',
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "spend",
+                "severity_hint": "watch",
+            }
+        ]
+
+    async def fake_interpret(**kwargs):
+        return {
+            "a1": {
+                "id": "a1",
+                "title": "Spend concentrated in top vendor",
+                "summary": "**Acme** accounts for the majority of spend.",
+                "severity": "urgent",
+                "callout_type": "risk",
+                "callout_text": "Diversify suppliers.",
+                "recommendation": "Add a second source.",
+            }
+        }
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    runner = _runner(
+        {"GROUP BY": [{"supplier": "Acme", "spend": 1200.0},
+                      {"supplier": "Globex", "spend": 200.0}]}
+    )
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, tenant_id=1, user_id=1
+    )
+    assert cards is not None and len(cards) == 1
+    card = cards[0]
+    assert card["insightType"] == "trend_a1"
+    assert card["severity"] == "urgent"
+    assert card["chart"]["type"] == "bar"
+    assert card["callout"]["type"] == "risk"
+    assert "spend" in card["sources"]["tables"]
+
+
+async def test_run_ai_intelligence_returns_none_when_disabled(monkeypatch) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: False)
+    ctx = hi.ProjectContext(tables=[], documents=[])
+    result = await hi.run_ai_intelligence(
+        _project(), ctx, None, tenant_id=1, user_id=1
+    )
+    assert result is None
+
+
+async def test_run_ai_intelligence_skips_empty_results(monkeypatch) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**kwargs):
+        return [
+            {
+                "id": "a1",
+                "category": "risk",
+                "title": "Empty",
+                "sql": 'SELECT x FROM "spend"',
+                "chart_type": "bar",
+            }
+        ]
+
+    interpret_called = {"v": False}
+
+    async def fake_interpret(**kwargs):
+        interpret_called["v"] = True
+        return {}
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    ctx = hi.ProjectContext(tables=[_table("spend", ["x"])], documents=[])
+    runner = _runner({})  # returns no rows
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, tenant_id=1, user_id=1
+    )
+    assert cards == []
+    assert interpret_called["v"] is False  # nothing to interpret
+
+
 # ─────────────────────────── endpoints (via client) ─────────────────────────
 
 def _editor_headers(tenant_id: int, user_id: int) -> dict:

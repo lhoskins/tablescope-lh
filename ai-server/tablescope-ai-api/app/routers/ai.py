@@ -35,8 +35,14 @@ from app.models.schemas import (
     GenerateSQLRequest,
     GenerateSQLResponse,
     IndexDocumentRequest,
+    IntelligenceInterpretRequest,
+    IntelligenceInterpretResponse,
+    IntelligencePlanRequest,
+    IntelligencePlanResponse,
+    InterpretedInsight,
     MatchQueryRequest,
     MatchQueryResponse,
+    PlannedAnalysis,
     RelationshipSuggestion,
     ScopeSuggestion,
     SuggestDashboardRequest,
@@ -545,6 +551,242 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
 
     return SuggestDashboardResponse(
         suggestions=suggestions,
+        request_id=request_id,
+        model_used=settings.reasoning_model,
+    )
+
+
+_INTEL_SYSTEM_PROMPT = (
+    "You are Tablescope AI acting as a senior business analyst and management "
+    "consultant. You are handed the real schema and documents for ONE project. "
+    "Your job is to decide, on your own, what analyses a well-run company would "
+    "run on this data to surface risks, trends, and opportunities that drive "
+    "business decisions. Do not rely on any predefined metric list — reason from "
+    "the actual tables, columns, and documents in front of you and apply best "
+    "practices from how top-performing companies manage this kind of data.\n"
+    "Use ONLY the provided context. Never invent tables, columns, or facts."
+)
+
+
+@router.post("/intelligence/plan", response_model=IntelligencePlanResponse)
+async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanResponse:
+    """Propose high-value diagnostic analyses for a project (SQL written in memory).
+
+    The LLM reasons over the project's real schema + documents and returns a set
+    of analyses, each with a category (risk/trend/opportunity), a business
+    rationale, and either a read-only SQL query or a document-based finding.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+
+    try:
+        ctx = await context_builder.build_context(
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            project_id=req.project_id,
+            scope="project",
+            question="",
+            feature="intelligence_plan",
+        )
+    except ContextBuildError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied: {e.reason}",
+        )
+
+    context_text = context_builder.context_to_prompt_text(ctx)
+
+    allowed_tables = req.allowed_tables
+    if not allowed_tables:
+        allowed_tables = [
+            ds.get("view_name", ds.get("name", ""))
+            for ds in ctx.allowed_context.get("metadata", [])
+            if ds.get("view_name") or ds.get("name")
+        ]
+
+    doc_lines = ""
+    if req.documents:
+        doc_lines = "\nProject documents (title — summary — tags):\n" + "\n".join(
+            f"  - {d.get('title', 'document')}: {(d.get('summary') or '')[:300]}"
+            + (f"  [tags: {', '.join(d.get('tags', []))}]" if d.get("tags") else "")
+            for d in req.documents[:25]
+        )
+
+    teiid_rules = (
+        "This database uses Teiid (not MySQL/PostgreSQL). CSV columns are strings.\n"
+        "- For SUM/AVG/MIN/MAX or arithmetic, CAST columns: CAST(col AS double).\n"
+        "- Do NOT use DATE_FORMAT/MONTH()/YEAR(). Use FORMATDATE, EXTRACT, DATE_TRUNC.\n"
+        "- Monthly grouping: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM').\n"
+        "- Alias columns with safe identifiers (no reserved words). GROUP BY must "
+        "match the SELECT expression exactly. Never use SELECT *.\n"
+    )
+
+    prompt = (
+        f"{context_text}\n{doc_lines}\n\n"
+        f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
+        f"{teiid_rules}\n"
+        f"Propose up to {req.max_analyses} of the MOST valuable analyses for this "
+        "project. Cover a mix of risks, trends, and opportunities where the data "
+        "supports it. Each analysis must be answerable from the allowed tables OR "
+        "grounded in a listed document.\n\n"
+        "For data analyses, write a single read-only SQL query that returns a small "
+        "result suitable for a chart or KPI (aggregate/group — not raw dumps). "
+        "Choose the chart type that best fits: 'bar' (compare categories), 'line' "
+        "(trend over time), 'kpi_grid' (a few headline numbers).\n"
+        "For document-based findings, leave sql empty, set chart_type to 'none', and "
+        "list the relevant document titles in source_documents.\n\n"
+        "Return ONLY a JSON object: {\"analyses\": [ {\n"
+        "  \"id\": \"a1\",\n"
+        "  \"category\": \"risk|trend|opportunity\",\n"
+        "  \"title\": \"short headline\",\n"
+        "  \"rationale\": \"why this matters for the business (1 sentence)\",\n"
+        "  \"sql\": \"SELECT ... (empty for document findings)\",\n"
+        "  \"chart_type\": \"bar|line|kpi_grid|none\",\n"
+        "  \"label_column\": \"alias used for the category/x axis\",\n"
+        "  \"value_column\": \"alias used for the numeric value\",\n"
+        "  \"severity_hint\": \"critical|urgent|watch|opportunity|info\",\n"
+        "  \"source_documents\": [\"doc title\"]\n"
+        "} ] }"
+    )
+
+    raw = await llm_client.generate(
+        prompt=prompt,
+        system_prompt=_INTEL_SYSTEM_PROMPT,
+        model=settings.reasoning_model,
+        temperature=0.3,
+    )
+
+    parsed = _parse_json_response(raw)
+    analyses: list[PlannedAnalysis] = []
+    if parsed and isinstance(parsed.get("analyses"), list):
+        for i, a in enumerate(parsed["analyses"][: req.max_analyses]):
+            if not isinstance(a, dict):
+                continue
+            sql = _clean_sql(a.get("sql", "") or "")
+            if sql:
+                try:
+                    validate_sql(sql, allowed_tables)
+                except SQLValidationError as e:
+                    logger.warning("Dropping analysis %s: %s", a.get("title"), e.reason)
+                    continue
+            category = str(a.get("category", "trend")).lower()
+            if category not in ("risk", "trend", "opportunity"):
+                category = "trend"
+            chart_type = str(a.get("chart_type", "bar")).lower()
+            if chart_type not in ("bar", "line", "kpi_grid", "none"):
+                chart_type = "bar"
+            # An analysis must have either runnable SQL or document grounding.
+            if not sql and not a.get("source_documents"):
+                continue
+            analyses.append(
+                PlannedAnalysis(
+                    id=str(a.get("id") or f"a{i + 1}"),
+                    category=category,
+                    title=str(a.get("title", "")),
+                    rationale=str(a.get("rationale", "")),
+                    sql=sql,
+                    chart_type=chart_type,
+                    label_column=str(a.get("label_column", "")),
+                    value_column=str(a.get("value_column", "")),
+                    severity_hint=str(a.get("severity_hint", "watch")),
+                    source_documents=[
+                        str(d) for d in a.get("source_documents", []) if d
+                    ],
+                )
+            )
+    else:
+        logger.warning("Failed to parse intelligence plan: %s", raw[:200])
+
+    update_activity(req.user_id, req.tenant_id, req.project_id)
+    return IntelligencePlanResponse(
+        analyses=analyses,
+        request_id=request_id,
+        model_used=settings.reasoning_model,
+    )
+
+
+@router.post("/intelligence/interpret", response_model=IntelligenceInterpretResponse)
+async def intelligence_interpret(
+    req: IntelligenceInterpretRequest,
+) -> IntelligenceInterpretResponse:
+    """Turn executed query results (or document context) into business prose.
+
+    Receives, per analysis, the columns + a sample of result rows (already run
+    against real data) and returns an executive-style finding: summary, severity,
+    an optional callout, and a recommended action.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+
+    blocks: list[str] = []
+    for a in req.analyses:
+        lines = [
+            f"Analysis id: {a.id}",
+            f"Category: {a.category}",
+            f"Title: {a.title}",
+            f"Why it matters: {a.rationale}",
+        ]
+        if a.document_context:
+            lines.append(f"Document context:\n{a.document_context[:1500]}")
+        else:
+            lines.append(f"Result columns: {', '.join(a.columns)}")
+            lines.append(f"Row count: {a.row_count}")
+            sample = a.rows[:20]
+            lines.append(f"Result sample (JSON): {json.dumps(sample, default=str)[:2000]}")
+        blocks.append("\n".join(lines))
+
+    prompt = (
+        "For each analysis below, you are given the REAL result of a query that was "
+        "already executed against the project's data (or the relevant document "
+        "text). Write a sharp, executive-level finding grounded ONLY in those "
+        "numbers/text — never invent values. Quantify the insight using the actual "
+        "figures, name the trend/risk/opportunity, and give one concrete "
+        "recommendation a decision-maker can act on. Use **bold** for the key "
+        "figure or entity.\n\n"
+        + "\n\n---\n\n".join(blocks)
+        + "\n\nReturn ONLY a JSON object: {\"insights\": [ {\n"
+        "  \"id\": \"<matching analysis id>\",\n"
+        "  \"title\": \"refined headline\",\n"
+        "  \"summary\": \"2-3 sentence executive finding with the real figures\",\n"
+        "  \"severity\": \"critical|urgent|watch|opportunity|info\",\n"
+        "  \"callout_type\": \"risk|opportunity|info\",\n"
+        "  \"callout_text\": \"one-line callout (or empty)\",\n"
+        "  \"recommendation\": \"one concrete action\"\n"
+        "} ] }"
+    )
+
+    raw = await llm_client.generate(
+        prompt=prompt,
+        system_prompt=_INTEL_SYSTEM_PROMPT,
+        model=settings.reasoning_model,
+        temperature=0.2,
+    )
+
+    parsed = _parse_json_response(raw)
+    insights: list[InterpretedInsight] = []
+    if parsed and isinstance(parsed.get("insights"), list):
+        for ins in parsed["insights"]:
+            if not isinstance(ins, dict) or not ins.get("id"):
+                continue
+            severity = str(ins.get("severity", "info")).lower()
+            if severity not in ("critical", "urgent", "watch", "opportunity", "info"):
+                severity = "info"
+            insights.append(
+                InterpretedInsight(
+                    id=str(ins["id"]),
+                    title=str(ins.get("title", "")),
+                    summary=str(ins.get("summary", "")),
+                    severity=severity,
+                    callout_type=str(ins.get("callout_type", "")),
+                    callout_text=str(ins.get("callout_text", "")),
+                    recommendation=str(ins.get("recommendation", "")),
+                )
+            )
+    else:
+        logger.warning("Failed to parse intelligence interpretation: %s", raw[:200])
+
+    return IntelligenceInterpretResponse(
+        insights=insights,
         request_id=request_id,
         model_used=settings.reasoning_model,
     )

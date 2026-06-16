@@ -5,6 +5,8 @@ import {
   Bar,
   BarChart,
   Cell,
+  Line,
+  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   XAxis,
@@ -117,6 +119,40 @@ function BarChartView({
   );
 }
 
+function LineChartView({
+  series,
+  color,
+}: {
+  series: { label: string; value: number }[];
+  color: string;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={160}>
+      <LineChart data={series} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+        <XAxis
+          dataKey="label"
+          tick={{ fontSize: 11, fill: "var(--text-tertiary)" }}
+          axisLine={false}
+          tickLine={false}
+        />
+        <YAxis
+          tick={{ fontSize: 11, fill: "var(--text-tertiary)" }}
+          axisLine={false}
+          tickLine={false}
+          width={28}
+        />
+        <Line
+          type="monotone"
+          dataKey="value"
+          stroke={color}
+          strokeWidth={2}
+          dot={{ r: 2, fill: color }}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
 function KpiGridView({
   kpis,
 }: {
@@ -197,6 +233,12 @@ export function IntelligenceCard({
             <BarChartView
               series={card.chart.data.series}
               threshold={card.chart.data.threshold}
+              color={card.projectColor}
+            />
+          )}
+          {card.chart.type === "line" && card.chart.data.series && (
+            <LineChartView
+              series={card.chart.data.series}
               color={card.projectColor}
             />
           )}

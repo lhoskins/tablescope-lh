@@ -143,6 +143,70 @@ class DocumentProfileResponse(BaseModel):
     model_used: str = ""
 
 
+class IntelligencePlanRequest(AIBaseRequest):
+    """Ask the LLM to propose high-value diagnostic analyses for a project.
+
+    The model acts as a senior analyst: given only the project's real schema
+    and document summaries, it proposes the analyses a well-run company would
+    run, writing the SQL in memory. No metric is hard-coded by the caller.
+    """
+    allowed_tables: list[str] = Field(default_factory=list)
+    documents: list[dict] = Field(default_factory=list)  # [{title, summary, tags}]
+    max_analyses: int = 6
+
+
+class PlannedAnalysis(BaseModel):
+    id: str
+    category: str = "trend"  # risk | trend | opportunity
+    title: str = ""
+    rationale: str = ""
+    sql: str = ""
+    chart_type: str = "bar"  # bar | line | kpi_grid | none
+    label_column: str = ""
+    value_column: str = ""
+    severity_hint: str = "watch"
+    source_documents: list[str] = Field(default_factory=list)
+
+
+class IntelligencePlanResponse(BaseModel):
+    analyses: list[PlannedAnalysis] = Field(default_factory=list)
+    request_id: str = ""
+    model_used: str = ""
+
+
+class InterpretAnalysisInput(BaseModel):
+    id: str
+    category: str = "trend"
+    title: str = ""
+    rationale: str = ""
+    chart_type: str = "bar"
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict] = Field(default_factory=list)  # small sample of result rows
+    row_count: int = 0
+    document_context: str = ""  # for document-driven analyses
+
+
+class IntelligenceInterpretRequest(AIBaseRequest):
+    """Turn executed query results (or document context) into business prose."""
+    analyses: list[InterpretAnalysisInput] = Field(default_factory=list)
+
+
+class InterpretedInsight(BaseModel):
+    id: str
+    title: str = ""
+    summary: str = ""
+    severity: str = "info"  # critical | urgent | watch | opportunity | info
+    callout_type: str = ""  # risk | opportunity | info | ""
+    callout_text: str = ""
+    recommendation: str = ""
+
+
+class IntelligenceInterpretResponse(BaseModel):
+    insights: list[InterpretedInsight] = Field(default_factory=list)
+    request_id: str = ""
+    model_used: str = ""
+
+
 class FamilySummarizeRequest(AIBaseRequest):
     """Summarize a document family from its active members."""
     family_name: str
