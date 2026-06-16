@@ -704,6 +704,13 @@ async def run_ai_intelligence(
         return None
 
     allowed_tables = [t.view_name for t in ctx.tables]
+    table_schema = [
+        {
+            "table": t.view_name,
+            "columns": [{"name": n, "type": ty} for (n, ty) in t.columns],
+        }
+        for t in ctx.tables
+    ]
     documents = [
         {
             "title": d.title,
@@ -722,6 +729,7 @@ async def run_ai_intelligence(
         project_id=project.id,
         allowed_tables=allowed_tables,
         documents=documents,
+        table_schema=table_schema,
         max_analyses=max_analyses,
         granularity=granularity,
     )
@@ -752,6 +760,7 @@ async def run_ai_intelligence(
                     "columns": result.get("columns", []),
                     "rows": result.get("rows", [])[:20],
                     "row_count": len(result.get("rows", [])),
+                    "document_context": "",
                 }
             )
         else:
@@ -772,6 +781,9 @@ async def run_ai_intelligence(
                     "title": a.get("title", ""),
                     "rationale": a.get("rationale", ""),
                     "chart_type": "none",
+                    "columns": [],
+                    "rows": [],
+                    "row_count": 0,
                     "document_context": "\n".join(doc_ctx_parts)[:3000],
                 }
             )

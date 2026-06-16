@@ -612,13 +612,39 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             for d in req.documents[:25]
         )
 
+    # Exact column list per table so the LLM never invents column names.
+    schema_lines = ""
+    if req.table_schema:
+        parts: list[str] = []
+        for t in req.table_schema:
+            tname = t.get("table") or t.get("view_name") or ""
+            cols = t.get("columns") or []
+            col_str = ", ".join(
+                f'"{c.get("name")}" ({c.get("type", "string")})'
+                for c in cols
+                if c.get("name")
+            )
+            if tname and col_str:
+                parts.append(f'  - "{tname}": {col_str}')
+        if parts:
+            schema_lines = (
+                "\nExact schema — use ONLY these table and column names, spelled "
+                "exactly as shown (they are case-sensitive). Do NOT invent or guess "
+                "any column that is not listed here:\n" + "\n".join(parts)
+            )
+
     teiid_rules = (
         "This database uses Teiid (not MySQL/PostgreSQL). CSV columns are strings.\n"
-        "- For SUM/AVG/MIN/MAX or arithmetic, CAST columns: CAST(col AS double).\n"
+        "- Reference ONLY columns listed in the schema above; never invent columns.\n"
+        "- Quote every table and column name with double quotes: \"ColName\".\n"
+        "- For SUM/AVG/MIN/MAX or arithmetic, CAST columns: CAST(\"col\" AS double).\n"
         "- Do NOT use DATE_FORMAT/MONTH()/YEAR(). Use FORMATDATE, EXTRACT, DATE_TRUNC.\n"
         "- Monthly grouping: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM').\n"
-        "- Alias columns with safe identifiers (no reserved words). GROUP BY must "
-        "match the SELECT expression exactly. Never use SELECT *.\n"
+        "- Alias columns with a plain identifier or double quotes (e.g. AS Month or "
+        "AS \"Month\") — NEVER single quotes (AS 'Month' is a syntax error).\n"
+        "- Do NOT use CTEs (WITH), subqueries in FROM, or derived tables. Query the "
+        "allowed tables directly with WHERE/GROUP BY/aggregations only.\n"
+        "- GROUP BY must match the SELECT expression exactly. Never use SELECT *.\n"
     )
 
     # Granularity (1 executive .. 5 granular) steers count + depth + how
@@ -646,7 +672,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         )
 
     prompt = (
-        f"{context_text}\n{doc_lines}\n\n"
+        f"{context_text}\n{doc_lines}\n{schema_lines}\n\n"
         f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
         f"{teiid_rules}\n"
         f"{depth_guidance}\n\n"

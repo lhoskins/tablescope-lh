@@ -151,6 +151,9 @@ class IntelligencePlanRequest(AIBaseRequest):
     run, writing the SQL in memory. No metric is hard-coded by the caller.
     """
     allowed_tables: list[str] = Field(default_factory=list)
+    # Exact schema so the LLM never invents columns:
+    # [{"table": <view>, "columns": [{"name": <col>, "type": <type>}]}]
+    table_schema: list[dict] = Field(default_factory=list)
     documents: list[dict] = Field(default_factory=list)  # [{title, summary, tags}]
     max_analyses: int = 6
     # 1 = executive/high-level (few, most leveraging) .. 5 = granular (many, detailed)

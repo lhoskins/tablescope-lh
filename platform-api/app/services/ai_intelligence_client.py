@@ -64,6 +64,7 @@ async def plan(
     project_id: int,
     allowed_tables: list[str],
     documents: list[dict[str, Any]],
+    table_schema: list[dict[str, Any]] | None = None,
     max_analyses: int = 6,
     granularity: int = 3,
 ) -> list[dict[str, Any]] | None:
@@ -75,6 +76,7 @@ async def plan(
             "user_id": user_id,
             "project_id": project_id,
             "allowed_tables": allowed_tables,
+            "table_schema": table_schema or [],
             "documents": documents,
             "max_analyses": max_analyses,
             "granularity": granularity,
