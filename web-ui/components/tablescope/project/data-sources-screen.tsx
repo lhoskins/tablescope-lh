@@ -116,17 +116,6 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
         />
       ) : (
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile label="Total sources" value={rows.length} />
-          <StatTile label="Database sources" value={dbCount} />
-          <StatTile label="File sources" value={fileCount} />
-          <StatTile
-            label="Columns mapped"
-            value={totalColumns}
-            hint="across all sources"
-          />
-        </div>
-
         <Card className="p-4">
           <div className="mb-3">
             <h3 className="text-h3 text-ink-primary">AI-assisted upload</h3>
@@ -144,6 +133,17 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
             }
           />
         </Card>
+
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatTile label="Total sources" value={rows.length} />
+          <StatTile label="Database sources" value={dbCount} />
+          <StatTile label="File sources" value={fileCount} />
+          <StatTile
+            label="Columns mapped"
+            value={totalColumns}
+            hint="across all sources"
+          />
+        </div>
 
         {isLoading ? (
           <div className="py-16 text-center text-small text-ink-tertiary">
