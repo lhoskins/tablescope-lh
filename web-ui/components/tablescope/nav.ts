@@ -11,6 +11,7 @@ import {
   IconSettings,
   IconLayoutGrid,
   IconDatabase,
+  IconDatabasePlus,
   IconCode,
   IconBook2,
   type Icon,
@@ -65,6 +66,12 @@ export function homeNavGroups(): NavGroup[] {
           label: "Data Sources",
           href: "/data-sources",
           icon: IconDatabase,
+        },
+        {
+          key: "data-source-builder",
+          label: "Data Source Builder",
+          href: "/data-source-builder",
+          icon: IconDatabasePlus,
         },
         {
           key: "documents",

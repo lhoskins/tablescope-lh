@@ -9,9 +9,15 @@ import { apiClient } from "@/lib/api-client";
 export function NewProjectDialog({
   open,
   onClose,
+  redirect = true,
+  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Navigate to the new project after creation (default true). */
+  redirect?: boolean;
+  /** Called with the new project id after a successful create. */
+  onCreated?: (id: number) => void;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -33,7 +39,8 @@ export function NewProjectDialog({
       setIsShared(false);
       setError(null);
       onClose();
-      router.push(`/projects/${created.id}`);
+      onCreated?.(created.id);
+      if (redirect) router.push(`/projects/${created.id}`);
     },
     onError: (err: Error) => setError(err.message),
   });
