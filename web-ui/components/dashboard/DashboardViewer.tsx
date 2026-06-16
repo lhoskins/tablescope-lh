@@ -60,6 +60,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     onSuccess: (newStatus: string) => {
       setDashboardStatus(newStatus);
       queryClient.invalidateQueries({ queryKey: ["dashboards", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project", String(projectId), "dashboards"] });
     },
   });
   const [editingWidget, setEditingWidget] = useState<WidgetConfig | null>(null);
@@ -148,6 +149,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
       apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project", String(projectId), "dashboards"] });
     },
   });
 

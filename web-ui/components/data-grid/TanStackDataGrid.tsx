@@ -554,7 +554,7 @@ export function TanStackDataGrid({
       </div>
 
       {/* Table */}
-      <div style={{ height: height - 50, width: "100%" }} className="overflow-auto rounded-md border border-slate-200">
+      <div style={{ height: height - 50, width: "100%" }} className="relative overflow-auto rounded-md border border-slate-200">
         {(loading || drilling) && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60">
             <span className="text-sm text-slate-400">Loading...</span>

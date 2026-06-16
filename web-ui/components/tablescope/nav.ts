@@ -3,7 +3,6 @@ import {
   IconFolders,
   IconSparkles,
   IconActivity,
-  IconPlugConnected,
   IconFileText,
   IconLayoutDashboard,
   IconTopologyStar3,
@@ -62,12 +61,6 @@ export function homeNavGroups(): NavGroup[] {
       heading: "Tools",
       items: [
         {
-          key: "data-connections",
-          label: "Data Connections",
-          href: "/data-connections",
-          icon: IconPlugConnected,
-        },
-        {
           key: "documents",
           label: "Documents",
           href: "/documents",
@@ -78,12 +71,6 @@ export function homeNavGroups(): NavGroup[] {
           label: "Dashboards",
           href: "/dashboards",
           icon: IconLayoutDashboard,
-        },
-        {
-          key: "relationship-map",
-          label: "Relationship Map",
-          href: "/relationship-map",
-          icon: IconTopologyStar3,
         },
       ],
     },

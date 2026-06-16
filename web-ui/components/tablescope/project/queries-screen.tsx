@@ -1,17 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { IconSparkles, IconPlus, IconSearch } from "@tabler/icons-react";
+import { useCallback, useMemo, useState } from "react";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { IconSparkles, IconPlus, IconSearch, IconTable } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import {
   ContextPanel,
   ContextSection,
 } from "@/components/tablescope/context-panel";
+import { ScopesTab } from "@/components/scopes/ScopesTab";
+import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
+import { apiClient } from "@/lib/api-client";
 import { timeAgo } from "@/lib/ui/format";
 import {
   useProjectQueries,
@@ -21,7 +29,10 @@ import {
 import {
   QueryResultView,
   QueryBuilderEdit,
+  QueryBuilderCreate,
 } from "@/components/tablescope/project/detail-views";
+
+type ProjectScoping = { scoping_enabled?: boolean };
 
 type Filter = "all" | "ai" | "manual" | "shared" | "private";
 
@@ -50,6 +61,7 @@ function tablesFor(q: SavedQuery): string {
 }
 
 export function QueriesScreen({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
   const { data, isLoading } = useProjectQueries(projectId);
   const { data: dataSources } = useProjectDataSources(projectId);
   const rows = useMemo(() => data ?? [], [data]);
@@ -58,6 +70,65 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [tab, setTab] = useState<"queries" | "scopes">("queries");
+  const [showAddTable, setShowAddTable] = useState(false);
+
+  // ── AI "Generate Query with AI" prompt ──────────────────────────────
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSuccess, setAiSuccess] = useState<string | null>(null);
+
+  const handleGenerateQuery = useCallback(async () => {
+    const prompt = aiPrompt.trim();
+    if (!prompt || aiLoading) return;
+    setAiLoading(true);
+    setAiError(null);
+    setAiSuccess(null);
+    try {
+      const result = await apiClient.post<{ name: string; status: string }>(
+        "/api/ai/actions/generate-and-save-query",
+        { project_id: Number(projectId), prompt },
+      );
+      const verb = result.status === "updated" ? "updated" : "saved";
+      setAiSuccess(`Query ${verb}: ${result.name}`);
+      setAiPrompt("");
+      queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "queries"],
+      });
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "AI query generation failed");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [aiPrompt, aiLoading, projectId, queryClient]);
+
+  // ── Scope toggle (project scoping) ──────────────────────────────────
+  const { data: projectInfo } = useQuery<ProjectScoping>({
+    queryKey: ["project", projectId, "info"],
+    queryFn: () => apiClient.get<ProjectScoping>(`/api/projects/${projectId}`),
+  });
+  const scopingEnabled = projectInfo?.scoping_enabled ?? false;
+  const toggleScoping = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const result = await apiClient.put(`/api/projects/${projectId}`, {
+        scoping_enabled: enabled,
+      });
+      if (enabled) {
+        try {
+          await apiClient.post(`/api/ai/project/scope-map/auto-create`, {
+            project_id: Number(projectId),
+          });
+        } catch {
+          /* scoping enabled even if auto-create finds nothing */
+        }
+      }
+      return result;
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["project", projectId, "info"] }),
+  });
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -86,11 +157,42 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       breadcrumbLabel="Queries"
       actions={
         <>
-          <Button variant="secondary">
-            <IconSparkles size={14} />
-            Generate with AI
+          <button
+            type="button"
+            onClick={() => toggleScoping.mutate(!scopingEnabled)}
+            disabled={toggleScoping.isPending}
+            className="flex items-center gap-2 rounded-md border border-line-secondary px-2.5 py-1.5 text-[12px] font-medium text-ink-secondary hover:bg-bg-secondary disabled:opacity-50"
+            title={scopingEnabled ? "Click to disable scoping" : "Click to enable scoping"}
+          >
+            <span
+              className={cn(
+                "relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
+                scopingEnabled ? "bg-brand-500" : "bg-line-secondary",
+              )}
+            >
+              <span
+                className="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
+                style={{ transform: scopingEnabled ? "translateX(14px)" : "translateX(2px)" }}
+              />
+            </span>
+            {toggleScoping.isPending
+              ? "Updating…"
+              : scopingEnabled
+                ? "Scopes On"
+                : "Scopes Off"}
+          </button>
+          <Button variant="secondary" onClick={() => setShowAddTable(true)}>
+            <IconTable size={14} />
+            New Table
           </Button>
-          <Button variant="primary">
+          <Button
+            variant="primary"
+            onClick={() => {
+              setDetailId(null);
+              setEditing(false);
+              setCreating(true);
+            }}
+          >
             <IconPlus size={14} />
             New query
           </Button>
@@ -98,7 +200,26 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       }
       contextPanel={<QueryPreviewPanel query={detailQuery ?? selected} />}
     >
-      {detailQuery && editing ? (
+      {showAddTable && (
+        <AddDatasourceModal
+          projectId={Number(projectId)}
+          onClose={() => setShowAddTable(false)}
+          onAdded={() =>
+            queryClient.invalidateQueries({
+              queryKey: ["project", projectId, "datasources"],
+            })
+          }
+        />
+      )}
+      {creating ? (
+        <QueryBuilderCreate
+          projectId={projectId}
+          datasources={dataSources ?? []}
+          backLabel="Queries"
+          onBack={() => setCreating(false)}
+          onSaved={() => setCreating(false)}
+        />
+      ) : detailQuery && editing ? (
         <QueryBuilderEdit
           projectId={projectId}
           query={detailQuery}
@@ -117,6 +238,37 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         />
       ) : (
       <div className="space-y-4">
+        <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex flex-1 items-center gap-2 rounded-md border border-line-secondary bg-bg-primary px-2.5">
+              <IconSparkles size={15} className="shrink-0 text-brand-500" />
+              <input
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleGenerateQuery();
+                }}
+                placeholder="Describe the query you want to generate…"
+                className="h-9 w-full bg-transparent text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none"
+              />
+            </div>
+            <Button
+              variant="primary"
+              onClick={handleGenerateQuery}
+              disabled={!aiPrompt.trim() || aiLoading}
+            >
+              <IconSparkles size={14} />
+              {aiLoading ? "Generating…" : "Generate Query with AI"}
+            </Button>
+          </div>
+          {aiError && (
+            <p className="mt-2 text-[12px] text-danger">{aiError}</p>
+          )}
+          {aiSuccess && (
+            <p className="mt-2 text-[12px] text-success">{aiSuccess}</p>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Total queries" value={rows.length} />
           <StatTile
@@ -132,6 +284,31 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           <StatTile label="Avg run time" value={avgRuntime(rows)} />
         </div>
 
+        <div className="flex items-center gap-1 border-b border-line-tertiary">
+          {([
+            { key: "queries", label: "All Queries" },
+            { key: "scopes", label: "Scopes" },
+          ] as const).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={cn(
+                "-mb-px border-b-2 px-3 py-2 text-[13px] font-medium",
+                tab === t.key
+                  ? "border-brand-500 text-brand-700"
+                  : "border-transparent text-ink-secondary hover:text-ink-primary",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "scopes" ? (
+          <ScopesTab projectId={Number(projectId)} />
+        ) : (
+        <>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
             <IconSearch
@@ -251,6 +428,8 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             )}
           </div>
         </Card>
+        </>
+        )}
       </div>
       )}
     </ProjectShell>

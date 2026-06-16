@@ -6,6 +6,10 @@ from app.models.ai_asset_metadata import (
     AIAssetTag,
     AIAssetTagSuggestion,
 )
+from app.models.ai_conversation import (
+    AiConversation,
+    AiConversationMessage,
+)
 from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.models.ai_reference_catalog import (
     AIReferenceCatalog,
@@ -51,6 +55,8 @@ from app.models.user_vdb import UserVDB
 __all__ = [
     "AIProjectGraphEdge",
     "AIProjectGraphNode",
+    "AiConversation",
+    "AiConversationMessage",
     "AIAssetKPI",
     "AIAssetKPISuggestion",
     "AIAssetTag",

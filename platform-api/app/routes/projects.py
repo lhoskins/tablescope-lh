@@ -194,6 +194,81 @@ async def list_project_summaries(
     return summaries
 
 
+def _visible_projects_subquery(context: RequestContext):
+    """Select ids of projects the caller can see in the current tenant."""
+    member_sub = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == context.user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    return select(Project.id, Project.name).where(
+        Project.tenant_id == context.tenant_id,
+        or_(
+            Project.owner_id == context.user_id,
+            Project.id.in_(member_sub),
+        ),
+    )
+
+
+@router.get("/dashboards-all")
+async def list_all_dashboards(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[dict]:
+    """All dashboards across the caller's visible projects (Home view)."""
+    proj_rows = (await session.execute(_visible_projects_subquery(context))).all()
+    names = {pid: name for pid, name in proj_rows}
+    if not names:
+        return []
+    rows = list(
+        await session.scalars(
+            select(Dashboard)
+            .where(Dashboard.project_id.in_(list(names.keys())))
+            .order_by(Dashboard.created_at.desc())
+        )
+    )
+    return [
+        {
+            "id": d.id,
+            "name": d.name,
+            "projectId": d.project_id,
+            "projectName": names.get(d.project_id, "—"),
+            "status": d.status,
+            "createdAt": d.created_at.isoformat() if d.created_at else None,
+        }
+        for d in rows
+    ]
+
+
+@router.get("/documents-all")
+async def list_all_documents(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[dict]:
+    """All documents across the caller's visible projects (Home view)."""
+    proj_rows = (await session.execute(_visible_projects_subquery(context))).all()
+    names = {pid: name for pid, name in proj_rows}
+    if not names:
+        return []
+    rows = list(
+        await session.scalars(
+            select(ProjectAsset)
+            .where(ProjectAsset.project_id.in_(list(names.keys())))
+            .order_by(ProjectAsset.created_at.desc())
+        )
+    )
+    return [
+        {
+            "id": a.id,
+            "name": a.title or a.original_filename or a.filename,
+            "projectId": a.project_id,
+            "projectName": names.get(a.project_id, "—"),
+            "aiStatus": a.ai_status,
+            "createdAt": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in rows
+    ]
+
+
 @router.post(
     "",
     response_model=ProjectRead,

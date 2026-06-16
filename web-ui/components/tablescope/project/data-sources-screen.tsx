@@ -163,7 +163,10 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
               return (
                 <Card
                   key={key}
-                  onClick={() => setSelectedKey(key)}
+                  onClick={() => {
+                    setSelectedKey(key);
+                    setDetailKey(key);
+                  }}
                   className={cn(
                     "cursor-pointer",
                     active && "ring-1 ring-brand-500",
