@@ -19,6 +19,7 @@ from app.models.ai_reference_catalog import (
     TenantCustomTag,
     TenantReferenceCatalog,
 )
+from app.models.audit_event import AuditEvent
 from app.models.base import Base
 from app.models.billing import (
     BillingCustomer,
@@ -43,6 +44,7 @@ from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_asset import ProjectAsset
 from app.models.query_scope import QueryScope
+from app.models.report import Report
 from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.saved_query import SavedQuery
 from app.models.shared_vdb import SharedVDB
@@ -57,6 +59,8 @@ __all__ = [
     "AIProjectGraphNode",
     "AiConversation",
     "AiConversationMessage",
+    "AuditEvent",
+    "Report",
     "AIAssetKPI",
     "AIAssetKPISuggestion",
     "AIAssetTag",

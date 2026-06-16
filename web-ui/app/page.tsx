@@ -12,6 +12,7 @@ import {
   type QuickActionKey,
 } from "@/components/tablescope/home/quick-actions";
 import { RecentProjectsTable } from "@/components/tablescope/home/recent-projects";
+import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { getUserMeta } from "@/lib/auth";
 import { greeting } from "@/lib/ui/format";
@@ -64,7 +65,6 @@ export default function HomePage() {
       tenant={tenant}
       user={user}
       counts={{ projects: allProjects?.length }}
-      centered
       topBarLeft={
         <span className="text-[15px] text-ink-secondary">
           {user.name ? greeting(user.name) : "Welcome"}
@@ -85,11 +85,16 @@ export default function HomePage() {
       }
     >
       <div className="space-y-10 py-6">
-        <HeroSearch />
-        <QuickActionGrid onAction={handleQuickAction} />
-        <RecentProjectsTable
-          projects={isLoading ? [] : (projects ?? [])}
-        />
+        <div className="mx-auto w-full max-w-content space-y-10">
+          <HeroSearch />
+          <QuickActionGrid onAction={handleQuickAction} />
+        </div>
+        <IntelligenceFeed />
+        <div className="mx-auto w-full max-w-content">
+          <RecentProjectsTable
+            projects={isLoading ? [] : (projects ?? [])}
+          />
+        </div>
       </div>
       <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
     </AppShell>

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, ForeignKey, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+
+_JSON = JSONB().with_variant(JSON(), "sqlite")
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -38,6 +41,10 @@ class User(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Per-user preferences (e.g. home intelligence settings).
+    preferences: Mapped[dict] = mapped_column(
+        _JSON, nullable=False, default=dict, server_default="{}"
+    )
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")  # type: ignore[name-defined]  # noqa: F821
     owned_projects: Mapped[list[Project]] = relationship(  # type: ignore[name-defined]  # noqa: F821

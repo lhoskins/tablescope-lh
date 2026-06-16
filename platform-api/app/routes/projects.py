@@ -19,6 +19,7 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.audit_event import AuditEvent
 from app.models.dashboard import Dashboard
 from app.models.data_source_ai_profile import (
     DataSourceAIProfile,
@@ -1611,6 +1612,33 @@ async def get_project_activity(
                 "detail": "AI indexing complete",
                 "actor": "System",
             })
+
+    audit_events = (
+        await session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.project_id == project_id)
+            .order_by(AuditEvent.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    for ev in audit_events:
+        src_bits: list[str] = []
+        if ev.tables_queried:
+            src_bits.append(", ".join(str(t) for t in ev.tables_queried))
+        if ev.documents_read:
+            src_bits.append(", ".join(str(d) for d in ev.documents_read))
+        detail = " · ".join(src_bits) if src_bits else None
+        if ev.duration_ms is not None:
+            detail = f"{detail} · {ev.duration_ms}ms" if detail else f"{ev.duration_ms}ms"
+        events.append({
+            "id": f"audit-{ev.id}",
+            "ts": ev.created_at.isoformat() if ev.created_at else None,
+            "category": "ai",
+            "label": "AI Action",
+            "title": ev.title or f"AI intelligence: {ev.prompt_type or ev.event_type}",
+            "detail": detail,
+            "actor": actor_name(ev.user_id),
+        })
 
     events = [e for e in events if e["ts"] is not None]
     events.sort(key=lambda e: e["ts"], reverse=True)

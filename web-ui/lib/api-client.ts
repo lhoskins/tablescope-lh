@@ -130,8 +130,32 @@ async function uploadFile<T>(
   return (await response.json()) as T;
 }
 
+/**
+ * Open a streaming request (e.g. Server-Sent Events) with the bearer token
+ * attached. Returns the raw Response so callers can read `response.body` via a
+ * ReadableStream reader — `EventSource` can't set Authorization headers, so we
+ * consume SSE over `fetch` instead.
+ */
+async function streamRequest(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set("Accept", "text/event-stream");
+  const token = readToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return fetch(`${getApiUrl()}${path}`, {
+    ...init,
+    headers,
+    cache: "no-store",
+  });
+}
+
 export const apiClient = {
   get: <T>(path: string) => request<T>(path),
+  stream: (path: string, init?: RequestInit) => streamRequest(path, init),
   post: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "POST", body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown) =>

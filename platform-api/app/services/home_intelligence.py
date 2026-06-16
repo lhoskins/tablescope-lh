@@ -1,0 +1,627 @@
+"""Home AI Intelligence — diagnostic prompt suite over real project data.
+
+For each accessible project, a fixed suite of diagnostic prompts runs against the
+project's real data sources and documents and returns ``InsightCard`` dicts. The
+analysis is deterministic and defensive: when a project lacks the data a prompt
+needs (e.g. no financial table), that prompt is *skipped* rather than fabricated.
+A lightweight cross-project synthesis runs over the prose summaries only — never
+raw data — so project isolation is never breached.
+
+The four built-in prompt types:
+- ``risk_sla``            delivery lead-time vs SLA threshold  (bar chart)
+- ``risk_expiry``         contracts expiring within 90 days    (document list)
+- ``trend_spend``         actual vs budget / prior-period spend (kpi grid)
+- ``opportunity_supplier`` top supplier performance / savings   (prose + callout)
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models.database_data_source import DatabaseDataSource
+from app.models.file_source_meta import FileSourceMeta
+from app.models.project import Project
+from app.models.project_asset import ProjectAsset
+
+logger = logging.getLogger(__name__)
+
+ALL_PROMPT_TYPES = ["risk_sla", "risk_expiry", "trend_spend", "opportunity_supplier"]
+
+_PROJECT_COLORS = [
+    "#185FA5", "#0F6E56", "#7A4FB5", "#B5642F", "#2F7DB5", "#9A2F5E",
+]
+
+
+def project_color(project_id: int) -> str:
+    return _PROJECT_COLORS[project_id % len(_PROJECT_COLORS)]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Project context
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class TableInfo:
+    view_name: str
+    columns: list[tuple[str, str]] = field(default_factory=list)  # (name, type)
+    kind: str = "file"  # "file" | "db"
+
+    @property
+    def column_names(self) -> list[str]:
+        return [c[0] for c in self.columns]
+
+
+@dataclass
+class DocInfo:
+    title: str
+    ai_summary: str | None
+    ai_metadata: dict[str, Any]
+
+
+@dataclass
+class ProjectContext:
+    tables: list[TableInfo]
+    documents: list[DocInfo]
+
+
+async def gather_project_context(
+    session: AsyncSession, project: Project
+) -> ProjectContext:
+    """Collect a project's real tables (with columns) and documents."""
+    tables: list[TableInfo] = []
+
+    files = (
+        await session.scalars(
+            select(FileSourceMeta).where(
+                FileSourceMeta.project_id == project.id,
+                FileSourceMeta.archived.is_(False),
+            )
+        )
+    ).all()
+    for f in files:
+        cols: list[tuple[str, str]] = []
+        for c in f.column_types or []:
+            name = c.get("name") or c.get("column") or c.get("field_name")
+            if name:
+                cols.append((str(name), str(c.get("type", "string"))))
+        tables.append(TableInfo(view_name=f.view_name, columns=cols, kind="file"))
+
+    db_sources = (
+        await session.scalars(
+            select(DatabaseDataSource)
+            .where(
+                DatabaseDataSource.project_id == project.id,
+                DatabaseDataSource.archived.is_(False),
+            )
+            .options(selectinload(DatabaseDataSource.columns))
+        )
+    ).all()
+    for ds in db_sources:
+        cols = [
+            (c.column_name, str(c.teiid_type_override or c.data_type or "string"))
+            for c in ds.columns
+        ]
+        tables.append(
+            TableInfo(view_name=ds.teiid_view_name, columns=cols, kind="db")
+        )
+
+    assets = (
+        await session.scalars(
+            select(ProjectAsset).where(ProjectAsset.project_id == project.id)
+        )
+    ).all()
+    documents = [
+        DocInfo(
+            title=a.title or a.original_filename or a.filename,
+            ai_summary=a.ai_summary,
+            ai_metadata=a.ai_metadata or {},
+        )
+        for a in assets
+    ]
+
+    return ProjectContext(tables=tables, documents=documents)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Column / table detection helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+def _match_col(columns: list[str], keywords: list[str]) -> str | None:
+    """Return the first column whose name contains any keyword."""
+    for col in columns:
+        n = _norm(col)
+        for kw in keywords:
+            if _norm(kw) in n:
+                return col
+    return None
+
+
+def _find_table(
+    tables: list[TableInfo], required: list[list[str]]
+) -> tuple[TableInfo, dict[int, str]] | None:
+    """Find the first table that has a column matching every required group.
+
+    ``required`` is a list of keyword-groups; a table qualifies only if each
+    group matches at least one of its columns. Returns the table plus the
+    resolved column per group index.
+    """
+    for t in tables:
+        resolved: dict[int, str] = {}
+        ok = True
+        for i, group in enumerate(required):
+            col = _match_col(t.column_names, group)
+            if col is None:
+                ok = False
+                break
+            resolved[i] = col
+        if ok:
+            return t, resolved
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Date parsing for expiry scan
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DATE_PATTERNS = [
+    "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%B %d, %Y", "%b %d, %Y",
+    "%d %B %Y", "%d %b %Y", "%Y/%m/%d", "%m-%d-%Y",
+]
+_DATE_RE = re.compile(
+    r"\b(\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{4}|"
+    r"[A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+[A-Z][a-z]{2,8}\s+\d{4})\b"
+)
+_EXPIRY_KEYS = [
+    "expiry_date", "expiration_date", "expiration", "expires", "expiry",
+    "end_date", "renewal_date", "valid_until", "termination_date",
+]
+
+
+def _parse_date(value: str) -> date | None:
+    value = value.strip().rstrip(".")
+    for fmt in _DATE_PATTERNS:
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_expiry(doc: DocInfo) -> date | None:
+    """Best-effort extraction of a contract expiry date from a document."""
+    meta = doc.ai_metadata or {}
+    for key in _EXPIRY_KEYS:
+        val = meta.get(key)
+        if isinstance(val, str):
+            d = _parse_date(val)
+            if d:
+                return d
+    # Scan the AI summary for a date near expiry/renewal language.
+    text = doc.ai_summary or ""
+    if text and re.search(r"expir|renew|terminat|valid until|end date", text, re.I):
+        for m in _DATE_RE.finditer(text):
+            d = _parse_date(m.group(1))
+            if d:
+                return d
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Insight card construction
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _card(
+    project: Project,
+    insight_type: str,
+    severity: str,
+    title: str,
+    summary: str,
+    *,
+    chart: dict | None = None,
+    callout: dict | None = None,
+    tables: list[str] | None = None,
+    documents: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
+        "projectId": str(project.id),
+        "projectName": project.name,
+        "projectColor": project_color(project.id),
+        "insightType": insight_type,
+        "severity": severity,
+        "title": title,
+        "summary": summary,
+        "chart": chart,
+        "callout": callout,
+        "sources": {"tables": tables or [], "documents": documents or []},
+        "executedAt": _now_iso(),
+    }
+
+
+# Type signature for the Teiid query runner injected by the route layer.
+QueryRunner = Any  # async (view_name, sql) -> {"columns": [...], "rows": [...]}
+
+
+async def _safe_query(runner: QueryRunner, sql: str) -> dict[str, Any] | None:
+    if runner is None:
+        return None
+    try:
+        return await runner(sql)
+    except Exception as exc:
+        logger.info("home-intelligence query skipped: %s", exc)
+        return None
+
+
+def _to_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(str(value).replace(",", "").replace("$", "").strip())
+    except (ValueError, TypeError):
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt implementations
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _risk_sla(
+    project: Project, ctx: ProjectContext, runner: QueryRunner
+) -> dict | None:
+    found = _find_table(
+        ctx.tables,
+        [
+            ["lead_time", "leadtime", "delivery_days", "transit", "days_to_deliver",
+             "lead time", "ship_days"],
+        ],
+    )
+    if not found:
+        return None
+    table, cols = found
+    lead_col = cols[0]
+    period_col = _match_col(
+        table.column_names, ["month", "period", "date", "week", "quarter"]
+    )
+    supplier_col = _match_col(table.column_names, ["supplier", "vendor", "carrier"])
+
+    chart_data: list[dict] = []
+    avg_recent: float | None = None
+    if runner is not None and period_col:
+        sql = (
+            f'SELECT "{period_col}" AS period, '
+            f'AVG(CAST("{lead_col}" AS double)) AS avg_lead '
+            f'FROM "{table.view_name}" GROUP BY "{period_col}" '
+            f'ORDER BY "{period_col}"'
+        )
+        res = await _safe_query(runner, sql)
+        if res and res["rows"]:
+            for r in res["rows"][-6:]:
+                v = _to_float(r.get("avg_lead"))
+                if v is not None:
+                    chart_data.append({"label": str(r.get("period")), "value": round(v, 1)})
+            if chart_data:
+                avg_recent = chart_data[-1]["value"]
+
+    if avg_recent is None and runner is not None:
+        res = await _safe_query(
+            runner, f'SELECT AVG(CAST("{lead_col}" AS double)) AS a FROM "{table.view_name}"'
+        )
+        if res and res["rows"]:
+            avg_recent = _to_float(res["rows"][0].get("a"))
+
+    if avg_recent is None:
+        return None
+
+    # SLA threshold default of 14 days (common contractual term).
+    threshold = 14.0
+    breach = avg_recent > threshold
+    severity = "critical" if avg_recent > threshold * 1.5 else (
+        "urgent" if breach else "watch"
+    )
+    sup_label = f" for {supplier_col}" if supplier_col else ""
+    title = (
+        "Delivery lead time exceeds SLA threshold"
+        if breach
+        else "Delivery lead time within SLA"
+    )
+    summary = (
+        f"Average delivery lead time is **{avg_recent:.1f} days**"
+        f"{sup_label} — the typical SLA threshold is **{threshold:.0f} days**. "
+        + ("This is over the limit." if breach else "This is within the limit.")
+    )
+    chart = (
+        {
+            "type": "bar",
+            "title": "Lead time trend (days)",
+            "data": {
+                "series": chart_data,
+                "threshold": threshold,
+            },
+        }
+        if chart_data
+        else None
+    )
+    callout = (
+        {
+            "type": "risk",
+            "text": f"Average **{avg_recent:.1f} days** exceeds the **{threshold:.0f}-day** SLA threshold.",
+        }
+        if breach
+        else None
+    )
+    return _card(
+        project, "risk_sla", severity, title, summary,
+        chart=chart, callout=callout, tables=[table.view_name],
+    )
+
+
+async def _risk_expiry(
+    project: Project, ctx: ProjectContext, runner: QueryRunner
+) -> dict | None:
+    today = date.today()
+    expiring: list[tuple[str, date]] = []
+    for doc in ctx.documents:
+        d = _extract_expiry(doc)
+        if d is not None and 0 <= (d - today).days <= 90:
+            expiring.append((doc.title, d))
+    if not expiring:
+        return None
+    expiring.sort(key=lambda x: x[1])
+    soonest = expiring[0][1]
+    days = (soonest - today).days
+    severity = "urgent" if days <= 30 else "watch"
+    n = len(expiring)
+    title = f"{n} contract{'s' if n != 1 else ''} expire within 90 days"
+    listed = ", ".join(f"**{name}** ({d.isoformat()})" for name, d in expiring[:4])
+    summary = (
+        f"{n} document{'s' if n != 1 else ''} with upcoming expiry dates. "
+        f"Soonest in **{days} day{'s' if days != 1 else ''}**: {listed}."
+    )
+    return _card(
+        project, "risk_expiry", severity, title, summary,
+        documents=[name for name, _ in expiring],
+    )
+
+
+async def _trend_spend(
+    project: Project, ctx: ProjectContext, runner: QueryRunner
+) -> dict | None:
+    found = _find_table(
+        ctx.tables,
+        [
+            ["amount", "spend", "cost", "total", "revenue", "price", "value",
+             "budget", "expense"],
+        ],
+    )
+    if not found or runner is None:
+        return None
+    table, cols = found
+    amount_col = cols[0]
+    budget_col = _match_col(table.column_names, ["budget", "forecast", "target", "plan"])
+    period_col = _match_col(
+        table.column_names, ["month", "period", "date", "quarter", "week"]
+    )
+
+    res = await _safe_query(
+        runner,
+        f'SELECT SUM(CAST("{amount_col}" AS double)) AS total FROM "{table.view_name}"',
+    )
+    if not res or not res["rows"]:
+        return None
+    actual = _to_float(res["rows"][0].get("total"))
+    if actual is None or actual == 0:
+        return None
+
+    budget: float | None = None
+    if budget_col and budget_col != amount_col:
+        bres = await _safe_query(
+            runner,
+            f'SELECT SUM(CAST("{budget_col}" AS double)) AS b FROM "{table.view_name}"',
+        )
+        if bres and bres["rows"]:
+            budget = _to_float(bres["rows"][0].get("b"))
+
+    def fmt_money(v: float) -> str:
+        if abs(v) >= 1_000_000:
+            return f"${v / 1_000_000:.2f}M"
+        if abs(v) >= 1_000:
+            return f"${v / 1_000:.0f}K"
+        return f"${v:,.0f}"
+
+    kpis: list[dict] = [{"value": fmt_money(actual), "label": "Actual spend"}]
+    severity = "watch"
+    summary: str
+    if budget and budget > 0:
+        variance = actual - budget
+        pct = variance / budget * 100
+        kpis.append({"value": fmt_money(budget), "label": "Budget"})
+        kpis.append({
+            "value": fmt_money(abs(variance)),
+            "label": "Over budget" if variance > 0 else "Under budget",
+            "delta": f"{'▲' if variance > 0 else '▼'} {abs(pct):.0f}%",
+        })
+        severity = "urgent" if pct > 10 else "watch"
+        summary = (
+            f"Total spend is **{fmt_money(actual)}** against a budget of "
+            f"**{fmt_money(budget)}** — **{abs(pct):.0f}% "
+            f"{'over' if variance > 0 else 'under'}** budget."
+        )
+    else:
+        summary = f"Total spend is **{fmt_money(actual)}** across {table.view_name}."
+        if period_col:
+            pres = await _safe_query(
+                runner,
+                f'SELECT "{period_col}" AS period, '
+                f'SUM(CAST("{amount_col}" AS double)) AS s '
+                f'FROM "{table.view_name}" GROUP BY "{period_col}" '
+                f'ORDER BY "{period_col}"',
+            )
+            if pres and len(pres["rows"]) >= 2:
+                last = _to_float(pres["rows"][-1].get("s"))
+                prev = _to_float(pres["rows"][-2].get("s"))
+                if last is not None and prev and prev != 0:
+                    pct = (last - prev) / prev * 100
+                    kpis.append({"value": fmt_money(prev), "label": "Prior period"})
+                    kpis.append({
+                        "value": f"{abs(pct):.0f}%",
+                        "label": "Change",
+                        "delta": f"{'▲' if pct > 0 else '▼'}",
+                    })
+                    severity = "urgent" if abs(pct) > 15 else "watch"
+                    summary = (
+                        f"Latest-period spend is **{fmt_money(last)}**, "
+                        f"**{abs(pct):.0f}% {'up' if pct > 0 else 'down'}** vs the prior period."
+                    )
+
+    title = "Spend tracking over budget" if severity == "urgent" else "Spend overview"
+    chart = {"type": "kpi_grid", "title": "Spend", "data": {"kpis": kpis}}
+    return _card(
+        project, "trend_spend", severity, title, summary,
+        chart=chart, tables=[table.view_name],
+    )
+
+
+async def _opportunity_supplier(
+    project: Project, ctx: ProjectContext, runner: QueryRunner
+) -> dict | None:
+    found = _find_table(
+        ctx.tables,
+        [
+            ["supplier", "vendor", "carrier"],
+            ["on_time", "ontime", "delivery", "score", "rating", "performance",
+             "fulfillment"],
+        ],
+    )
+    if not found or runner is None:
+        return None
+    table, cols = found
+    supplier_col, metric_col = cols[0], cols[1]
+    res = await _safe_query(
+        runner,
+        f'SELECT "{supplier_col}" AS supplier, '
+        f'AVG(CAST("{metric_col}" AS double)) AS metric '
+        f'FROM "{table.view_name}" GROUP BY "{supplier_col}" '
+        f'ORDER BY metric DESC',
+    )
+    if not res or not res["rows"]:
+        return None
+    top = [
+        (str(r.get("supplier")), _to_float(r.get("metric")))
+        for r in res["rows"][:3]
+        if _to_float(r.get("metric")) is not None
+    ]
+    if not top:
+        return None
+    names = ", ".join(f"**{n}** ({v:.0f})" for n, v in top)
+    summary = (
+        f"Top performers on {metric_col}: {names}. "
+        "Consolidating volume with the strongest suppliers could reduce costs."
+    )
+    best_name = top[0][0]
+    callout = {
+        "type": "opportunity",
+        "text": f"Consider negotiating volume tiers with **{best_name}** — your top performer on {metric_col}.",
+    }
+    return _card(
+        project, "opportunity_supplier", "opportunity",
+        f"{len(top)} top-performing suppliers identified", summary,
+        callout=callout, tables=[table.view_name],
+    )
+
+
+_PROMPT_FUNCS = {
+    "risk_sla": _risk_sla,
+    "risk_expiry": _risk_expiry,
+    "trend_spend": _trend_spend,
+    "opportunity_supplier": _opportunity_supplier,
+}
+
+
+async def run_intelligence_suite(
+    project: Project,
+    ctx: ProjectContext,
+    prompt_types: list[str],
+    runner: QueryRunner = None,
+) -> list[dict[str, Any]]:
+    """Run the requested prompt types against a project's real data."""
+    cards: list[dict[str, Any]] = []
+    for pt in prompt_types:
+        fn = _PROMPT_FUNCS.get(pt)
+        if fn is None:
+            continue
+        try:
+            card = await fn(project, ctx, runner)
+        except Exception as exc:
+            logger.warning("prompt %s failed for project %s: %s", pt, project.id, exc)
+            card = None
+        if card is not None:
+            cards.append(card)
+    return cards
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cross-project synthesis (prose summaries only — never raw data)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def synthesise_cross_project(
+    summaries: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Synthesize a headline across projects from prose summaries only.
+
+    ``summaries`` is ``[{projectId, projectName, insightSummaries: [str, ...]}]``.
+    Returns ``{headline, body, projectIds}`` or ``None`` if too little to say.
+    """
+    active = [s for s in summaries if s.get("insightSummaries")]
+    if len(active) < 1:
+        return None
+    project_ids = [str(s["projectId"]) for s in active]
+    n_projects = len(active)
+    n_insights = sum(len(s["insightSummaries"]) for s in active)
+
+    # Look for a vendor/supplier name appearing in multiple projects' summaries.
+    shared_note = ""
+    name_re = re.compile(r"\*\*([A-Z][A-Za-z0-9 .&'-]{2,40})\*\*")
+    by_name: dict[str, set[str]] = {}
+    for s in active:
+        names: set[str] = set()
+        for text in s["insightSummaries"]:
+            for m in name_re.finditer(text):
+                names.add(m.group(1).strip())
+        for nm in names:
+            by_name.setdefault(nm.lower(), set()).add(str(s["projectId"]))
+    cross = [nm for nm, pids in by_name.items() if len(pids) > 1]
+    if cross:
+        shared_note = (
+            f" The same entity appears across multiple projects "
+            f"({', '.join(sorted(set(c.title() for c in cross))[:3])}), "
+            "which may warrant a consolidated review."
+        )
+
+    headline = (
+        f"AI analyzed {n_projects} active project"
+        f"{'s' if n_projects != 1 else ''} and surfaced {n_insights} "
+        f"insight{'s' if n_insights != 1 else ''} requiring attention"
+    )
+    body = (
+        "Real-time diagnostic queries ran across "
+        + ", ".join(f"{s['projectName']}" for s in active)
+        + ". Each project's data remains isolated — results are surfaced to you "
+        "as the authorized user." + shared_note
+    )
+    return {"headline": headline, "body": body, "projectIds": project_ids}
