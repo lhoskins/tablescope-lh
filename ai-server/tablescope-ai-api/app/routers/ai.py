@@ -625,21 +625,39 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
                 if c.get("name")
             )
             if tname and col_str:
-                parts.append(f'  - "{tname}": {col_str}')
+                # Flag text-backed (CSV/file) tables so the LLM always casts.
+                tag = " [text-backed: CAST every column for math/date]" if (
+                    t.get("storage") == "text"
+                ) else ""
+                parts.append(f'  - "{tname}"{tag}: {col_str}')
         if parts:
             schema_lines = (
                 "\nExact schema — use ONLY these table and column names, spelled "
                 "exactly as shown (they are case-sensitive). Do NOT invent or guess "
-                "any column that is not listed here:\n" + "\n".join(parts)
+                "any column that is not listed here. Each column belongs to exactly "
+                "ONE table; never reference a column under a table that does not "
+                "list it:\n" + "\n".join(parts)
             )
 
     teiid_rules = (
-        "This database uses Teiid (not MySQL/PostgreSQL). CSV columns are strings.\n"
-        "- Reference ONLY columns listed in the schema above; never invent columns.\n"
+        "This database uses Teiid (not MySQL/PostgreSQL). Text-backed (CSV/file) "
+        "columns are stored as STRINGS no matter what logical type is shown.\n"
+        "- Query a SINGLE table per analysis. Do NOT write JOINs. (Many tables "
+        "share column names like \"SupplierID\" — joining causes ambiguity errors. "
+        "One table per query avoids this entirely.)\n"
+        "- Reference ONLY columns listed under the table you select FROM; never "
+        "invent columns and never borrow a column from another table.\n"
         "- Quote every table and column name with double quotes: \"ColName\".\n"
-        "- For SUM/AVG/MIN/MAX or arithmetic, CAST columns: CAST(\"col\" AS double).\n"
+        "- For ANY arithmetic (+ - * /), comparison (>, <), SUM/AVG/MIN/MAX, or "
+        "numeric sort on a text-backed column, you MUST CAST it: "
+        "CAST(\"col\" AS double). Example: SUM(CAST(\"DefectQty\" AS double)) / "
+        "SUM(CAST(\"ReceivedQty\" AS double)).\n"
+        "- For date operations on a text-backed column, CAST to date first: "
+        "CAST(\"OrderDate\" AS date).\n"
         "- Do NOT use DATE_FORMAT/MONTH()/YEAR(). Use FORMATDATE, EXTRACT, DATE_TRUNC.\n"
         "- Monthly grouping: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM').\n"
+        "- Guard division by zero: only divide when the denominator is non-zero, "
+        "e.g. wrap with NULLIF(CAST(\"ReceivedQty\" AS double), 0).\n"
         "- Alias columns with a plain identifier or double quotes (e.g. AS Month or "
         "AS \"Month\") — NEVER single quotes (AS 'Month' is a syntax error).\n"
         "- Do NOT use CTEs (WITH), subqueries in FROM, or derived tables. Query the "

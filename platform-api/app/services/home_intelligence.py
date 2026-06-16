@@ -708,6 +708,9 @@ async def run_ai_intelligence(
     table_schema = [
         {
             "table": t.view_name,
+            # File/CSV columns are imported by Teiid as TEXT regardless of the
+            # logical type shown, so the LLM must CAST them for any math/date op.
+            "storage": "text" if t.kind == "file" else "native",
             "columns": [{"name": n, "type": ty} for (n, ty) in t.columns],
         }
         for t in ctx.tables
