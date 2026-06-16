@@ -92,6 +92,7 @@ export interface HomeDashboardRow {
   projectId: number;
   projectName: string;
   status: string;
+  sharedBy: string;
   createdAt: string | null;
 }
 
@@ -101,6 +102,18 @@ export interface HomeDocumentRow {
   projectId: number;
   projectName: string;
   aiStatus: string;
+  sharedBy: string;
+  createdAt: string | null;
+}
+
+export interface HomeDataSourceRow {
+  id: number;
+  name: string;
+  viewName: string;
+  kind: "file" | "database";
+  projectId: number;
+  projectName: string;
+  sharedBy: string;
   createdAt: string | null;
 }
 
@@ -117,6 +130,14 @@ export function useAllDocuments() {
     queryKey: ["home", "documents-all"],
     queryFn: () =>
       apiClient.get<HomeDocumentRow[]>("/api/projects/documents-all"),
+  });
+}
+
+export function useAllDataSources() {
+  return useQuery({
+    queryKey: ["home", "datasources-all"],
+    queryFn: () =>
+      apiClient.get<HomeDataSourceRow[]>("/api/projects/datasources-all"),
   });
 }
 

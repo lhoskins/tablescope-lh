@@ -11,7 +11,6 @@ import {
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import {
-  QueryResultView,
   DataSourceResultView,
 } from "@/components/tablescope/project/detail-views";
 import {
@@ -65,7 +64,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const { data: members } = useProjectMembers(projectId);
   const { data: activity } = useProjectActivity(projectId);
   const { data: graph } = useProjectGraph(projectId);
-  const [scope, setScope] = useState("all");
+
   const [ask, setAsk] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [detail, setDetail] = useState<
@@ -102,10 +101,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   ).length;
   const memberCount = (members ?? []).filter((m) => m.is_active).length;
 
-  const detailQuery =
-    detail?.kind === "query"
-      ? (queryRows.find((q) => q.id === detail.id) ?? null)
-      : null;
+
   const detailSource =
     detail?.kind === "source"
       ? (sourceRows.find((s) => (s.viewName || s.fileName) === detail.name) ??
@@ -119,7 +115,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
     )
     .slice(0, 4);
 
-  const scopeChips = ["all", ...sourceRows.slice(0, 3).map((s) => s.viewName)];
+
 
   const goAsk = (prompt: string) => {
     const q = prompt.trim();
@@ -246,14 +242,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         </ContextPanel>
       }
     >
-      {detailQuery ? (
-        <QueryResultView
-          projectId={projectId}
-          query={detailQuery}
-          backLabel="Overview"
-          onBack={() => setDetail(null)}
-        />
-      ) : detailSource ? (
+      {detailSource ? (
         <DataSourceResultView
           projectId={projectId}
           source={detailSource}
@@ -282,27 +271,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           </div>
         </header>
 
-        <Card className="flex flex-wrap items-center gap-2 px-3 py-2.5">
-          <span className="text-caption uppercase tracking-wide text-ink-tertiary">
-            Scope
-          </span>
-          {scopeChips.map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setScope(key)}
-              className={cn(
-                "h-7 rounded-full border px-3 text-[12px] font-medium",
-                scope === key
-                  ? "border-brand-500 bg-brand text-brand-fg"
-                  : "border-line-secondary bg-bg-primary text-ink-secondary hover:bg-bg-secondary",
-              )}
-            >
-              {key === "all" ? "All tables" : key}
-            </button>
-          ))}
-          <span className="text-[12px] text-ink-tertiary">+ Add scope</span>
-        </Card>
+
 
         <Card className="space-y-3 p-4">
           <div className="flex items-center gap-2 rounded-lg border border-line-secondary bg-bg-primary px-3 py-2.5">
@@ -402,7 +371,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
                   <QueryRow
                     key={q.id}
                     q={q}
-                    onClick={() => setDetail({ kind: "query", id: q.id })}
+                    onClick={() => router.push(`/projects/${projectId}/queries?q=${q.id}`)}
                   />
                 ))}
               </tbody>

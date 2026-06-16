@@ -24,6 +24,7 @@ export type NavKey =
   | "ai-assistant"
   | "activity"
   | "data-connections"
+  | "data-sources"
   | "documents"
   | "dashboards"
   | "relationship-map"

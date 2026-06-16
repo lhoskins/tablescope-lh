@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { IconSearch } from "@tabler/icons-react";
+import { IconSearch, IconUpload, IconSparkles } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { SharedByBadge } from "@/components/tablescope/shared-by-badge";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,7 @@ import { getUserMeta } from "@/lib/auth";
 import {
   useCurrentUser,
   useProjectSummaries,
-  useAllDashboards,
+  useAllDataSources,
 } from "@/lib/ui/use-shell-data";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 
@@ -39,12 +39,13 @@ function formatDate(iso: string | null): string {
   });
 }
 
-export default function HomeDashboardsPage() {
+export default function HomeDataSourcesPage() {
   const router = useRouter();
   const { data: identity } = useCurrentUser();
   const { data: projects } = useProjectSummaries();
-  const { data, isLoading } = useAllDashboards();
+  const { data, isLoading } = useAllDataSources();
   const [search, setSearch] = useState("");
+  const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
     if (!getUserMeta()) router.replace("/login");
@@ -68,14 +69,53 @@ export default function HomeDashboardsPage() {
   return (
     <AppShell
       mode="home"
-      activeNav="dashboards"
+      activeNav="data-sources"
       tenant={tenant}
       user={user}
       counts={{ projects: projects?.length }}
       centered
-      topBarLeft={<span className="text-h2 text-ink-primary">Dashboards</span>}
+      topBarLeft={
+        <span className="text-h2 text-ink-primary">Data Sources</span>
+      }
     >
       <div className="space-y-4">
+        {/* AI-assisted file upload dropzone */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragActive(true);
+          }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragActive(false);
+            // TODO: wire to AIFileUploadWizard once project selection is added
+          }}
+          className={`flex items-center gap-4 rounded-lg border-2 border-dashed p-5 transition-colors ${
+            dragActive
+              ? "border-brand-500 bg-brand-50/40"
+              : "border-line-tertiary bg-bg-secondary/50"
+          }`}
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-500">
+            <IconSparkles size={20} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-medium text-ink-primary">
+              AI-Assisted File Upload
+            </p>
+            <p className="text-small text-ink-tertiary">
+              Drag &amp; drop files here to upload with AI-powered column
+              detection and profiling.
+            </p>
+          </div>
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-line-secondary bg-bg-primary px-3 py-2 text-[12px] font-medium text-ink-secondary hover:bg-bg-secondary">
+            <IconUpload size={14} />
+            Browse
+            <input type="file" className="hidden" multiple />
+          </label>
+        </div>
+
         <div className="relative max-w-sm">
           <IconSearch
             size={15}
@@ -84,7 +124,7 @@ export default function HomeDashboardsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search dashboards…"
+            placeholder="Search data sources…"
             className="h-9 w-full rounded-md border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
           />
         </div>
@@ -96,6 +136,7 @@ export default function HomeDashboardsPage() {
                 <th className="px-4 py-2.5 font-medium">Name</th>
                 <th className="px-4 py-2.5 font-medium">Project Assigned</th>
                 <th className="px-4 py-2.5 font-medium">Shared by</th>
+                <th className="px-4 py-2.5 font-medium">Type</th>
                 <th className="px-4 py-2.5 font-medium">Date Created</th>
               </tr>
             </thead>
@@ -103,51 +144,54 @@ export default function HomeDashboardsPage() {
               {!isLoading && rows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="px-4 py-10 text-center text-ink-tertiary"
                   >
                     {search
-                      ? "No dashboards match your search."
-                      : "No dashboards yet."}
+                      ? "No data sources match your search."
+                      : "No data sources yet."}
                   </td>
                 </tr>
               )}
               {isLoading && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="px-4 py-10 text-center text-ink-tertiary"
                   >
-                    Loading dashboards…
+                    Loading data sources…
                   </td>
                 </tr>
               )}
               {rows.map((d) => (
                 <tr
-                  key={d.id}
-                  className="border-b border-line-tertiary last:border-0 hover:bg-bg-tertiary"
+                  key={`${d.kind}-${d.id}`}
+                  className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-tertiary"
+                  onClick={() =>
+                    router.push(`/projects/${d.projectId}/data-sources`)
+                  }
                 >
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/projects/${d.projectId}/dashboards`}
-                      className="flex items-center gap-2 font-medium text-ink-primary hover:text-brand-700"
-                    >
+                    <span className="font-medium text-ink-primary">
                       {d.name}
-                      {d.status?.toLowerCase() === "published" && (
-                        <Badge tone="success">Published</Badge>
-                      )}
-                    </Link>
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <Link
                       href={`/projects/${d.projectId}`}
                       className="text-ink-secondary hover:text-brand-700"
+                      onClick={(e) => e.stopPropagation()}
                     >
                       {d.projectName}
                     </Link>
                   </td>
                   <td className="px-4 py-3">
                     <SharedByBadge value={d.sharedBy} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge tone={d.kind === "database" ? "success" : "neutral"}>
+                      {d.kind === "database" ? "Connected" : "File"}
+                    </Badge>
                   </td>
                   <td className="px-4 py-3 text-ink-tertiary">
                     {formatDate(d.createdAt)}

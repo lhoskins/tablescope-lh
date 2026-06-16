@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -229,6 +230,28 @@ def _detect_datasource(sql: str, allowed_tables: list[str]) -> str | None:
         if table.upper() in sql_upper or f'"{table}"'.upper() in sql_upper:
             return table
     return allowed_tables[0] if len(allowed_tables) == 1 else None
+
+
+def _heuristic_sql(prompt: str, allowed_tables: list[str]) -> str:
+    """Build a baseline SELECT when the AI server is unavailable.
+
+    Picks the table whose name best matches words in the prompt (falling back
+    to the first available table) and returns a simple preview query. The user
+    can refine it in the query builder.
+    """
+    if not allowed_tables:
+        return ""
+    prompt_lower = prompt.lower()
+    best = allowed_tables[0]
+    best_score = -1
+    for table in allowed_tables:
+        # Score by how many of the table's word-parts appear in the prompt.
+        parts = [p for p in re.split(r"[_\s]+", table.lower()) if p]
+        score = sum(1 for p in parts if p in prompt_lower)
+        if score > best_score:
+            best_score = score
+            best = table
+    return f'SELECT * FROM "{best}" LIMIT 100'
 
 
 # ---------------------------------------------------------------------------
@@ -1357,13 +1380,34 @@ async def ai_generate_and_save_query(
         "prompt": prompt_text,
         "allowed_tables": allowed_tables,
     }
-    ai_result = await _forward_to_ai("/ai/query/generate", payload)
-    generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
+    ai_result: dict[str, Any] = {}
+    try:
+        ai_result = await _forward_to_ai("/ai/query/generate", payload)
+        generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
+    except HTTPException as exc:
+        # The local AI server is optional/may be offline. Rather than failing
+        # the action outright, fall back to a deterministic query built from
+        # the prompt + the project's available tables.
+        if exc.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
+            raise
+        generated_sql = _heuristic_sql(req.prompt, allowed_tables)
+        ai_result = {
+            "explanation": (
+                "Generated without the AI server (offline) — a baseline query "
+                "from your prompt and available tables. Edit it as needed."
+            ),
+            "model_used": "heuristic-fallback",
+        }
 
+    if not generated_sql:
+        generated_sql = _heuristic_sql(req.prompt, allowed_tables)
     if not generated_sql:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="AI could not generate SQL for this prompt",
+            detail=(
+                "Could not generate SQL — connect a data source to this "
+                "project first."
+            ),
         )
 
     # Detect which datasource the SQL references
@@ -1938,6 +1982,19 @@ async def add_conversation_message(
     )
     session.add(assistant_msg)
     await session.commit()
+
+    # Vectorize the Q+A pair for future learning/retrieval.
+    try:
+        await _forward_to_ai("/ai/index/conversation", {
+            "tenant_id": context.tenant_id,
+            "user_id": context.user_id,
+            "project_id": project_id,
+            "conversation_id": convo.id,
+            "question": question,
+            "answer": answer,
+        })
+    except Exception:
+        pass  # best-effort — don't block the response
 
     refreshed = await _get_owned_conversation(
         session, context, conversation_id, with_messages=True

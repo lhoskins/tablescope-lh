@@ -10,6 +10,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { DataGrid } from "@/components/data-grid/DataGrid";
+import { TanStackDataGrid } from "@/components/data-grid/TanStackDataGrid";
 import { DashboardViewer } from "@/components/dashboard/DashboardViewer";
 import { QueryBuilder } from "@/components/query-builder/QueryBuilder";
 import type { Dashboard as ViewerDashboard } from "@/components/dashboard/types";
@@ -20,11 +21,14 @@ import { apiClient } from "@/lib/api-client";
 import { timeAgo } from "@/lib/ui/format";
 import {
   columnLabel,
+  useProjectQueries,
   type SavedQuery,
   type DataSource,
   type Dashboard,
   type ProjectAsset,
 } from "@/lib/ui/use-project-data";
+
+type ProjectScoping = { scoping_enabled?: boolean };
 
 type QueryResult = {
   columns: string[];
@@ -82,6 +86,18 @@ export function QueryResultView({
     retry: false,
   });
 
+  const { data: allQueries } = useProjectQueries(projectId);
+  const { data: scoping } = useQuery<ProjectScoping>({
+    queryKey: ["project", projectId, "info"],
+    queryFn: () => apiClient.get<ProjectScoping>(`/api/projects/${projectId}`),
+  });
+  const availableQueries = (allQueries ?? []).map((q) => ({
+    id: q.id,
+    name: q.name,
+    sql: q.sql_text,
+    leftDatasource: q.left_datasource,
+  }));
+
   return (
     <div className="space-y-4">
       <DetailBackBar label={backLabel} onBack={onBack} />
@@ -123,11 +139,17 @@ export function QueryResultView({
             {(error as Error).message || "Failed to run query."}
           </div>
         ) : (
-          <DataGrid
+          <TanStackDataGrid
             columns={data?.columns ?? []}
             rows={data?.rows ?? []}
             loading={isLoading}
             height={520}
+            queryId={query.id}
+            queryName={query.name}
+            projectId={Number(projectId)}
+            availableQueries={availableQueries}
+            canEditScopes
+            scopeEnabled={scoping?.scoping_enabled ?? false}
           />
         )}
       </Card>

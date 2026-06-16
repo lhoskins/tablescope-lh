@@ -61,6 +61,12 @@ export function homeNavGroups(): NavGroup[] {
       heading: "Tools",
       items: [
         {
+          key: "data-sources",
+          label: "Data Sources",
+          href: "/data-sources",
+          icon: IconDatabase,
+        },
+        {
           key: "documents",
           label: "Documents",
           href: "/documents",

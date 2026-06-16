@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   useQuery,
   useMutation,
@@ -73,6 +73,19 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const [creating, setCreating] = useState(false);
   const [tab, setTab] = useState<"queries" | "scopes">("queries");
   const [showAddTable, setShowAddTable] = useState(false);
+
+  // ── Deep-link: open a specific query via ?q=<id> ────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
+    if (q) {
+      const id = Number(q);
+      if (!Number.isNaN(id)) {
+        setDetailId(id);
+        setSelectedId(id);
+      }
+    }
+  }, []);
 
   // ── AI "Generate Query with AI" prompt ──────────────────────────────
   const [aiPrompt, setAiPrompt] = useState("");

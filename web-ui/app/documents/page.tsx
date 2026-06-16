@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { IconSearch } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
+import { SharedByBadge } from "@/components/tablescope/shared-by-badge";
 import { getUserMeta } from "@/lib/auth";
 import {
   useCurrentUser,
@@ -93,6 +94,7 @@ export default function HomeDocumentsPage() {
               <tr className="border-b border-line-tertiary bg-bg-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
                 <th className="px-4 py-2.5 font-medium">Name</th>
                 <th className="px-4 py-2.5 font-medium">Project Assigned</th>
+                <th className="px-4 py-2.5 font-medium">Shared by</th>
                 <th className="px-4 py-2.5 font-medium">Date Created</th>
               </tr>
             </thead>
@@ -100,7 +102,7 @@ export default function HomeDocumentsPage() {
               {!isLoading && rows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={4}
                     className="px-4 py-10 text-center text-ink-tertiary"
                   >
                     {search
@@ -112,7 +114,7 @@ export default function HomeDocumentsPage() {
               {isLoading && (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={4}
                     className="px-4 py-10 text-center text-ink-tertiary"
                   >
                     Loading documents…
@@ -139,6 +141,9 @@ export default function HomeDocumentsPage() {
                     >
                       {d.projectName}
                     </Link>
+                  </td>
+                  <td className="px-4 py-3">
+                    <SharedByBadge value={d.sharedBy} />
                   </td>
                   <td className="px-4 py-3 text-ink-tertiary">
                     {formatDate(d.createdAt)}

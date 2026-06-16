@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   IconRefresh,
@@ -10,7 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
-import { AIFileUploadWizard } from "@/components/upload/AIFileUploadWizard";
+
 import {
   ContextPanel,
   ContextSection,
@@ -19,7 +19,9 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/cn";
+import { apiClient } from "@/lib/api-client";
 import {
   useProjectDataSources,
   columnLabel,
@@ -71,6 +73,45 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detailKey, setDetailKey] = useState<string | null>(null);
 
+  // ── Drag-to-replace ────────────────────────────────────────────────
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [pendingReplace, setPendingReplace] = useState<{
+    source: DataSource;
+    file: File;
+  } | null>(null);
+  const [replaceMsg, setReplaceMsg] = useState<string | null>(null);
+
+  const handleDrop = useCallback(
+    (source: DataSource, files: FileList | null) => {
+      setDragOverKey(null);
+      if (!files || files.length === 0) return;
+      setPendingReplace({ source, file: files[0] });
+    },
+    [],
+  );
+
+  const confirmReplace = useCallback(async () => {
+    if (!pendingReplace) return;
+    const { source, file } = pendingReplace;
+    setPendingReplace(null);
+    setReplaceMsg(null);
+    try {
+      const res = await apiClient.upload<{ addedColumns?: string[] }>(
+        `/api/upload/datasources/${encodeURIComponent(source.viewName)}/replace`,
+        file,
+      );
+      const added = res.addedColumns ?? [];
+      setReplaceMsg(
+        `Replaced "${source.fileName}"${added.length ? ` (added column(s): ${added.join(", ")})` : ""}.`,
+      );
+      queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "datasources"],
+      });
+    } catch (err) {
+      setReplaceMsg(`Error: ${(err as Error).message}`);
+    }
+  }, [pendingReplace, projectId, queryClient]);
+
   const keyFor = (s: DataSource) => s.viewName || s.fileName;
   const selected =
     rows.find((s) => keyFor(s) === selectedKey) ?? rows[0] ?? null;
@@ -116,24 +157,6 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
         />
       ) : (
       <div className="space-y-4">
-        <Card className="p-4">
-          <div className="mb-3">
-            <h3 className="text-h3 text-ink-primary">AI-assisted upload</h3>
-            <p className="text-small text-ink-tertiary">
-              Drop a CSV or Excel file to profile it with AI and add it as a
-              data source.
-            </p>
-          </div>
-          <AIFileUploadWizard
-            projectId={Number(projectId)}
-            onComplete={() =>
-              queryClient.invalidateQueries({
-                queryKey: ["project", projectId, "datasources"],
-              })
-            }
-          />
-        </Card>
-
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Total sources" value={rows.length} />
           <StatTile label="Database sources" value={dbCount} />
@@ -179,6 +202,7 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
                     const key = keyFor(s);
                     const active = selected && keyFor(selected) === key;
                     const cols = s.columnTypes ?? [];
+                    const isFile = !isDatabase(s) && !isSaas(s);
                     return (
                       <tr
                         key={key}
@@ -186,9 +210,32 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
                           setSelectedKey(key);
                           setDetailKey(key);
                         }}
+                        onDragOver={
+                          isFile
+                            ? (e) => {
+                                e.preventDefault();
+                                setDragOverKey(key);
+                              }
+                            : undefined
+                        }
+                        onDragLeave={
+                          isFile ? () => setDragOverKey(null) : undefined
+                        }
+                        onDrop={
+                          isFile
+                            ? (e) => {
+                                e.preventDefault();
+                                handleDrop(s, e.dataTransfer.files);
+                              }
+                            : undefined
+                        }
                         className={cn(
                           "cursor-pointer border-b border-line-tertiary last:border-0",
-                          active ? "bg-brand-50/60" : "hover:bg-bg-secondary",
+                          dragOverKey === key
+                            ? "border-brand border-dashed bg-brand-50/30 ring-2 ring-brand/30"
+                            : active
+                              ? "bg-brand-50/60"
+                              : "hover:bg-bg-secondary",
                         )}
                       >
                         <td className="px-4 py-2.5">
@@ -229,6 +276,33 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
             </div>
           </Card>
         )}
+
+        {replaceMsg && (
+          <p className="text-[12px] text-ink-secondary">{replaceMsg}</p>
+        )}
+
+        <ConfirmDialog
+          open={pendingReplace !== null}
+          title="Overwrite datasource?"
+          message={
+            pendingReplace ? (
+              <>
+                Are you sure you want to overwrite{" "}
+                <span className="font-medium text-ink-primary">
+                  &quot;{pendingReplace.source.fileName}&quot;
+                </span>{" "}
+                with{" "}
+                <span className="font-medium text-ink-primary">
+                  &quot;{pendingReplace.file.name}&quot;
+                </span>
+                ? This replaces the existing data.
+              </>
+            ) : null
+          }
+          confirmLabel="Replace"
+          onConfirm={confirmReplace}
+          onCancel={() => setPendingReplace(null)}
+        />
       </div>
       )}
     </ProjectShell>
