@@ -155,90 +155,79 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
             started.
           </Card>
         ) : (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {rows.map((s) => {
-              const key = keyFor(s);
-              const active = selected && keyFor(selected) === key;
-              const cols = s.columnTypes ?? [];
-              return (
-                <Card
-                  key={key}
-                  onClick={() => {
-                    setSelectedKey(key);
-                    setDetailKey(key);
-                  }}
-                  className={cn(
-                    "cursor-pointer",
-                    active && "ring-1 ring-brand-500",
-                  )}
-                >
-                  <div className="flex items-start gap-3 p-4">
-                    <SourceIcon source={s} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-h3 text-ink-primary">
-                          {s.fileName}
-                        </span>
-                        <Badge tone={isDatabase(s) ? "success" : "neutral"}>
-                          {isDatabase(s) ? "Connected" : "File"}
-                        </Badge>
-                      </div>
-                      <div className="text-small text-ink-tertiary">
-                        {sourceTypeLabel(s)}
-                        {humanSize(s.size) ? ` · ${humanSize(s.size)}` : ""}
-                        {cols.length ? ` · ${cols.length} columns` : ""}
-                      </div>
-                    </div>
-                  </div>
-                  {cols.length > 0 && (
-                    <div className="border-t border-line-tertiary px-4 py-2.5">
-                      <table className="w-full text-[12px]">
-                        <thead>
-                          <tr className="text-left text-caption uppercase tracking-wide text-ink-tertiary">
-                            <th className="py-1 font-medium">Column</th>
-                            <th className="py-1 font-medium">Type</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {cols.slice(0, 4).map((c, i) => {
-                            const { name, type } = columnLabel(c);
-                            return (
-                              <tr key={`${name}-${i}`}>
-                                <td className="py-1 text-ink-primary">{name}</td>
-                                <td className="py-1 text-ink-tertiary">
-                                  {type || "—"}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                      {cols.length > 4 && (
-                        <div className="pt-1 text-small text-ink-tertiary">
-                          {cols.length - 4} more columns
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between border-t border-line-tertiary px-4 py-2.5">
-                    <span className="truncate text-small text-ink-tertiary">
-                      {s.viewName}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDetailKey(key);
-                      }}
-                      className="text-[12px] font-medium text-brand-700 hover:underline"
-                    >
-                      View data
-                    </button>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
+          <Card>
+            <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
+              <span className="text-h3 text-ink-primary">Data Sources</span>
+              <span className="text-small text-ink-tertiary">
+                {rows.length} total
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-line-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
+                    <th className="px-4 py-2 font-medium">Name</th>
+                    <th className="px-4 py-2 font-medium">Source</th>
+                    <th className="px-4 py-2 font-medium">Type</th>
+                    <th className="px-4 py-2 font-medium">Visibility</th>
+                    <th className="px-4 py-2 font-medium">Columns</th>
+                    <th className="px-4 py-2 font-medium">Size</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((s) => {
+                    const key = keyFor(s);
+                    const active = selected && keyFor(selected) === key;
+                    const cols = s.columnTypes ?? [];
+                    return (
+                      <tr
+                        key={key}
+                        onClick={() => {
+                          setSelectedKey(key);
+                          setDetailKey(key);
+                        }}
+                        className={cn(
+                          "cursor-pointer border-b border-line-tertiary last:border-0",
+                          active ? "bg-brand-50/60" : "hover:bg-bg-secondary",
+                        )}
+                      >
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <SourceIcon source={s} />
+                            <span
+                              className={cn(
+                                "font-medium",
+                                active ? "text-brand-700" : "text-ink-primary",
+                              )}
+                            >
+                              {s.fileName}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-ink-secondary">
+                          {s.viewName || "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-ink-secondary">
+                          {sourceTypeLabel(s)}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <Badge tone={isDatabase(s) ? "success" : "neutral"}>
+                            {isDatabase(s) ? "Connected" : "File"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-2.5 text-ink-secondary">
+                          {cols.length || "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-ink-tertiary">
+                          {humanSize(s.size) || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         )}
       </div>
       )}
