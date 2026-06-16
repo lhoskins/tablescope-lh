@@ -65,6 +65,7 @@ async def plan(
     allowed_tables: list[str],
     documents: list[dict[str, Any]],
     max_analyses: int = 6,
+    granularity: int = 3,
 ) -> list[dict[str, Any]] | None:
     """Ask the LLM to propose diagnostic analyses. Returns ``analyses`` or None."""
     result = await _post(
@@ -76,6 +77,7 @@ async def plan(
             "allowed_tables": allowed_tables,
             "documents": documents,
             "max_analyses": max_analyses,
+            "granularity": granularity,
         },
     )
     if result is None:

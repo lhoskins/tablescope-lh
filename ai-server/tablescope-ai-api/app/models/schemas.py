@@ -153,6 +153,8 @@ class IntelligencePlanRequest(AIBaseRequest):
     allowed_tables: list[str] = Field(default_factory=list)
     documents: list[dict] = Field(default_factory=list)  # [{title, summary, tags}]
     max_analyses: int = 6
+    # 1 = executive/high-level (few, most leveraging) .. 5 = granular (many, detailed)
+    granularity: int = 3
 
 
 class PlannedAnalysis(BaseModel):

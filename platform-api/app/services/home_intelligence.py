@@ -686,7 +686,8 @@ async def run_ai_intelligence(
     *,
     tenant_id: int,
     user_id: int,
-    max_analyses: int = 6,
+    max_analyses: int = 15,
+    granularity: int = 3,
 ) -> list[dict[str, Any]] | None:
     """LLM-driven analyst loop. Returns cards, or ``None`` to signal fallback.
 
@@ -722,6 +723,7 @@ async def run_ai_intelligence(
         allowed_tables=allowed_tables,
         documents=documents,
         max_analyses=max_analyses,
+        granularity=granularity,
     )
     if analyses is None:
         return None  # AI unreachable -> fall back

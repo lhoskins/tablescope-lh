@@ -91,6 +91,7 @@ async def _run_for_project(
     prompt_types: list[str],
     *,
     write_audit: bool = True,
+    granularity: int = 3,
 ) -> list[dict[str, Any]]:
     started = datetime.now(UTC)
     ctx = await hi.gather_project_context(session, project)
@@ -106,6 +107,7 @@ async def _run_for_project(
             runner,
             tenant_id=context.tenant_id,
             user_id=context.user_id,
+            granularity=granularity,
         )
     except Exception as exc:
         logger.warning("AI intelligence failed for project %s: %s", project.id, exc)
@@ -143,6 +145,7 @@ async def _run_for_project(
 class RunSuiteRequest(BaseModel):
     project_id: int
     prompt_types: list[str] | None = None
+    granularity: int = 3
 
 
 @router.post("/run-intelligence-suite")
@@ -161,7 +164,9 @@ async def run_intelligence_suite(
         return {"projectId": str(req.project_id), "insights": [], "error": "no_access"}
 
     prompts = req.prompt_types or hi.ALL_PROMPT_TYPES
-    cards = await _run_for_project(session, context, project, prompts)
+    cards = await _run_for_project(
+        session, context, project, prompts, granularity=req.granularity
+    )
     return {
         "projectId": str(project.id),
         "projectName": project.name,
@@ -196,6 +201,7 @@ def _sse(event: dict[str, Any]) -> str:
 @router.get("/home-intelligence/stream")
 async def home_intelligence_stream(
     cross_project: bool = True,
+    granularity: int = 3,
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> StreamingResponse:
     """Stream per-project intelligence as Server-Sent Events.
@@ -232,7 +238,8 @@ async def home_intelligence_stream(
         async def work(project: Project) -> dict[str, Any]:
             async with SessionLocal() as session:
                 cards = await _run_for_project(
-                    session, context, project, hi.ALL_PROMPT_TYPES
+                    session, context, project, hi.ALL_PROMPT_TYPES,
+                    granularity=granularity,
                 )
             return {
                 "projectId": str(project.id),

@@ -48,6 +48,24 @@ describe("streamHomeIntelligence", () => {
     ]);
   });
 
+  it("passes granularity through to the stream URL", async () => {
+    streamMock.mockResolvedValueOnce(
+      responseFromFrames(['data: {"type":"done","projectCount":0}\n\n']),
+    );
+    await new Promise<void>((resolve) => {
+      streamHomeIntelligence(
+        (e) => {
+          if (e.type === "done") resolve();
+        },
+        { granularity: 5 },
+      );
+    });
+    expect(streamMock).toHaveBeenCalledWith(
+      expect.stringContaining("granularity=5"),
+      expect.anything(),
+    );
+  });
+
   it("handles a frame split across multiple chunks", async () => {
     streamMock.mockResolvedValueOnce(
       responseFromFrames([

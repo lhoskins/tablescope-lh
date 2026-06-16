@@ -621,14 +621,39 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "match the SELECT expression exactly. Never use SELECT *.\n"
     )
 
+    # Granularity (1 executive .. 5 granular) steers count + depth + how
+    # aggressively to surface smaller, lower-severity signals.
+    granularity = max(1, min(5, req.granularity))
+    target_count = max(1, min(req.max_analyses, {1: 3, 2: 5, 3: 8, 4: 11, 5: 15}[granularity]))
+    if granularity <= 2:
+        depth_guidance = (
+            "Operate at an EXECUTIVE level. Surface ONLY the few most material, "
+            "highest-leverage findings — the ones a CEO would act on. Aggregate "
+            "broadly; ignore minor or niche signals. Prefer high-severity items."
+        )
+    elif granularity >= 4:
+        depth_guidance = (
+            "Operate at a GRANULAR, analyst level. Drill into specific segments, "
+            "categories, suppliers, time periods, or line items. Surface detailed "
+            "and smaller signals too, including lower-severity 'watch' items and "
+            "early-stage opportunities — even when the dataset is small. Slice the "
+            "data multiple ways to find detail-level risks and opportunities."
+        )
+    else:
+        depth_guidance = (
+            "Operate at a BALANCED level — a mix of strategic headline findings "
+            "and a few more specific, detailed insights."
+        )
+
     prompt = (
         f"{context_text}\n{doc_lines}\n\n"
         f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
         f"{teiid_rules}\n"
-        f"Propose up to {req.max_analyses} of the MOST valuable analyses for this "
-        "project. Cover a mix of risks, trends, and opportunities where the data "
-        "supports it. Each analysis must be answerable from the allowed tables OR "
-        "grounded in a listed document.\n\n"
+        f"{depth_guidance}\n\n"
+        f"Propose up to {target_count} of the most valuable analyses for this "
+        "project at this level of detail. Cover a mix of risks, trends, and "
+        "opportunities where the data supports it. Each analysis must be "
+        "answerable from the allowed tables OR grounded in a listed document.\n\n"
         "For data analyses, write a single read-only SQL query that returns a small "
         "result suitable for a chart or KPI (aggregate/group — not raw dumps). "
         "Choose the chart type that best fits: 'bar' (compare categories), 'line' "
@@ -659,7 +684,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
     parsed = _parse_json_response(raw)
     analyses: list[PlannedAnalysis] = []
     if parsed and isinstance(parsed.get("analyses"), list):
-        for i, a in enumerate(parsed["analyses"][: req.max_analyses]):
+        for i, a in enumerate(parsed["analyses"][:target_count]):
             if not isinstance(a, dict):
                 continue
             sql = _clean_sql(a.get("sql", "") or "")

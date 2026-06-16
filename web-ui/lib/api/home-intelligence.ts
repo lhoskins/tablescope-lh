@@ -75,16 +75,17 @@ export type IntelligenceEvent =
  */
 export function streamHomeIntelligence(
   onEvent: (event: IntelligenceEvent) => void,
-  options: { crossProject?: boolean } = {},
+  options: { crossProject?: boolean; granularity?: number } = {},
 ): AbortController {
   const controller = new AbortController();
   const cross = options.crossProject ?? true;
+  const granularity = options.granularity ?? 3;
 
   (async () => {
     let response: Response;
     try {
       response = await apiClient.stream(
-        `/api/ai/home-intelligence/stream?cross_project=${cross}`,
+        `/api/ai/home-intelligence/stream?cross_project=${cross}&granularity=${granularity}`,
         { signal: controller.signal },
       );
     } catch (err) {
@@ -145,10 +146,12 @@ export function streamHomeIntelligence(
 export function runIntelligenceSuite(
   projectId: number,
   promptTypes?: string[],
+  granularity = 3,
 ): Promise<ProjectResult & { error?: string }> {
   return apiClient.post("/api/ai/run-intelligence-suite", {
     project_id: projectId,
     prompt_types: promptTypes,
+    granularity,
   });
 }
 
@@ -158,6 +161,8 @@ export interface IntelligenceSettings {
   run_on_load: boolean;
   cross_project: boolean;
   email_digest: boolean;
+  /** 1 = executive/high-level .. 5 = granular/detailed. */
+  granularity: number;
 }
 
 export interface UserPreferences {

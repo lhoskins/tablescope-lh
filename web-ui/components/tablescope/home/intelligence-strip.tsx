@@ -19,12 +19,22 @@ function severityDot(severity: string): string {
   }
 }
 
+const GRANULARITY_LABELS: Record<number, string> = {
+  1: "Executive",
+  2: "Strategic",
+  3: "Balanced",
+  4: "Detailed",
+  5: "Granular",
+};
+
 export interface IntelligenceStripProps {
   projectCount: number;
   insights: InsightCard[];
   running: boolean;
   lastUpdatedLabel: string | null;
   onRefresh: () => void;
+  granularity: number;
+  onGranularityChange: (value: number) => void;
 }
 
 export function IntelligenceStrip({
@@ -33,6 +43,8 @@ export function IntelligenceStrip({
   running,
   lastUpdatedLabel,
   onRefresh,
+  granularity,
+  onGranularityChange,
 }: IntelligenceStripProps) {
   return (
     <div className="flex items-center gap-4 rounded-lg bg-brand px-4 py-2.5 text-brand-fg">
@@ -67,6 +79,28 @@ export function IntelligenceStrip({
             <span className="text-brand-fg/60">· {card.projectName}</span>
           </span>
         ))}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2 text-small text-brand-fg/90">
+        <label
+          className="flex items-center gap-2"
+          title="Slide from high-level executive insights to fine-grained, detailed analyses"
+        >
+          <span className="hidden sm:inline text-brand-fg/70">Depth</span>
+          <input
+            type="range"
+            min={1}
+            max={5}
+            step={1}
+            value={granularity}
+            onChange={(e) => onGranularityChange(Number(e.target.value))}
+            aria-label="Insight granularity"
+            className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/30 accent-white"
+          />
+          <span className="w-16 text-brand-fg">
+            {GRANULARITY_LABELS[granularity] ?? "Balanced"}
+          </span>
+        </label>
       </div>
 
       <div className="flex shrink-0 items-center gap-3 text-small text-brand-fg/80">

@@ -107,7 +107,7 @@ export function IntelligenceFeed() {
   }, []);
 
   const startStream = useCallback(
-    (crossProject: boolean) => {
+    (crossProject: boolean, granularity: number) => {
       controllerRef.current?.abort();
       setStatus("streaming");
       setProjects([]);
@@ -117,6 +117,7 @@ export function IntelligenceFeed() {
       setErrorMsg(null);
       controllerRef.current = streamHomeIntelligence(handleEvent, {
         crossProject,
+        granularity,
       });
     },
     [handleEvent],
@@ -130,7 +131,10 @@ export function IntelligenceFeed() {
         if (cancelled) return;
         setSettings(prefs.intelligence);
         if (prefs.intelligence.run_on_load) {
-          startStream(prefs.intelligence.cross_project);
+          startStream(
+            prefs.intelligence.cross_project,
+            prefs.intelligence.granularity ?? 3,
+          );
         }
       })
       .catch(() => {
@@ -140,8 +144,9 @@ export function IntelligenceFeed() {
             run_on_load: true,
             cross_project: true,
             email_digest: false,
+            granularity: 3,
           });
-          startStream(true);
+          startStream(true, 3);
         }
       });
     return () => {
@@ -188,6 +193,16 @@ export function IntelligenceFeed() {
     });
   };
 
+  const granularity = settings?.granularity ?? 3;
+
+  const handleGranularity = (value: number) => {
+    setSettings((prev) => (prev ? { ...prev, granularity: value } : prev));
+    updatePreferences({ granularity: value }).catch(() => {
+      /* keep optimistic value; will reconcile on next load */
+    });
+    startStream(settings?.cross_project ?? true, value);
+  };
+
   const empty =
     status === "complete" && allInsights.length === 0 && projects.length === 0;
 
@@ -198,7 +213,9 @@ export function IntelligenceFeed() {
         insights={allInsights}
         running={running}
         lastUpdatedLabel={timeAgoLabel(lastUpdated)}
-        onRefresh={() => startStream(settings?.cross_project ?? true)}
+        onRefresh={() => startStream(settings?.cross_project ?? true, granularity)}
+        granularity={granularity}
+        onGranularityChange={handleGranularity}
       />
 
       <div className="flex gap-5">
@@ -223,7 +240,9 @@ export function IntelligenceFeed() {
               </div>
               <button
                 type="button"
-                onClick={() => startStream(settings?.cross_project ?? true)}
+                onClick={() =>
+                  startStream(settings?.cross_project ?? true, granularity)
+                }
                 className="rounded-md border border-danger/40 px-2.5 py-1 text-small font-medium text-danger hover:bg-danger/10"
               >
                 Retry

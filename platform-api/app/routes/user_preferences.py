@@ -19,6 +19,7 @@ _DEFAULT_INTELLIGENCE = {
     "run_on_load": True,
     "cross_project": True,
     "email_digest": False,
+    "granularity": 3,
 }
 
 
