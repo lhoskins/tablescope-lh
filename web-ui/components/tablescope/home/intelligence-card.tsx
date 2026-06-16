@@ -2,17 +2,6 @@
 
 import { Fragment, type ReactNode } from "react";
 import {
-  Bar,
-  BarChart,
-  Cell,
-  Line,
-  LineChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  XAxis,
-  YAxis,
-} from "recharts";
-import {
   IconAlertTriangle,
   IconBulb,
   IconChevronRight,
@@ -20,8 +9,11 @@ import {
   IconPlus,
   IconTable,
 } from "@tabler/icons-react";
+import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
+import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import type {
   InsightCard as InsightCardData,
+  InsightChart,
   InsightSeverity,
 } from "@/lib/api/home-intelligence";
 
@@ -71,85 +63,37 @@ const SEVERITY: Record<
   },
 };
 
-function BarChartView({
-  series,
-  threshold,
-  color,
-}: {
-  series: { label: string; value: number }[];
-  threshold?: number;
-  color: string;
-}) {
-  return (
-    <ResponsiveContainer width="100%" height={160}>
-      <BarChart data={series} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-        <XAxis
-          dataKey="label"
-          tick={{ fontSize: 11, fill: "var(--text-tertiary)" }}
-          axisLine={false}
-          tickLine={false}
-        />
-        <YAxis
-          tick={{ fontSize: 11, fill: "var(--text-tertiary)" }}
-          axisLine={false}
-          tickLine={false}
-          width={28}
-        />
-        {threshold != null && (
-          <ReferenceLine
-            y={threshold}
-            stroke="var(--color-danger)"
-            strokeDasharray="4 4"
-          />
-        )}
-        <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-          {series.map((s, i) => (
-            <Cell
-              key={i}
-              fill={
-                threshold != null && s.value > threshold
-                  ? "var(--color-danger)"
-                  : color
-              }
-            />
-          ))}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
+/**
+ * Render a chart through the same `WidgetRenderer` the dashboard uses, so
+ * Intelligence cards share the dashboard's full chart catalog and styling.
+ * The backend emits a `{label, value}` series plus a dashboard chart
+ * `type`/`subtype`; we adapt that into a minimal `WidgetConfig` + rows.
+ */
+function InsightChartView({ chart }: { chart: InsightChart }) {
+  const series = chart.data.series ?? [];
+  if (series.length === 0) return null;
 
-function LineChartView({
-  series,
-  color,
-}: {
-  series: { label: string; value: number }[];
-  color: string;
-}) {
+  const rows = series.map((s) => ({ label: s.label, value: s.value }));
+  const widget: WidgetConfig = {
+    id: "insight-chart",
+    type: chart.type as WidgetType,
+    chartSubtype: (chart.subtype || undefined) as WidgetConfig["chartSubtype"],
+    title: "",
+    dataSource: { kind: "custom_sql" },
+    xColumn: "label",
+    xColumnType: "string",
+    yColumn: "value",
+    aggregation: "sum",
+    sortBy: "x_asc",
+    filters: [],
+    visualizationOptions: { showLegend: false, showGrid: false },
+    colSpan: 1,
+    position: 0,
+  };
   return (
-    <ResponsiveContainer width="100%" height={160}>
-      <LineChart data={series} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-        <XAxis
-          dataKey="label"
-          tick={{ fontSize: 11, fill: "var(--text-tertiary)" }}
-          axisLine={false}
-          tickLine={false}
-        />
-        <YAxis
-          tick={{ fontSize: 11, fill: "var(--text-tertiary)" }}
-          axisLine={false}
-          tickLine={false}
-          width={28}
-        />
-        <Line
-          type="monotone"
-          dataKey="value"
-          stroke={color}
-          strokeWidth={2}
-          dot={{ r: 2, fill: color }}
-        />
-      </LineChart>
-    </ResponsiveContainer>
+    <div className="h-[180px] w-full">
+      <WidgetRenderer widget={widget} data={rows} />
+    </div>
   );
 }
 
@@ -229,21 +173,10 @@ export function IntelligenceCard({
               {card.chart.title}
             </div>
           )}
-          {card.chart.type === "bar" && card.chart.data.series && (
-            <BarChartView
-              series={card.chart.data.series}
-              threshold={card.chart.data.threshold}
-              color={card.projectColor}
-            />
-          )}
-          {card.chart.type === "line" && card.chart.data.series && (
-            <LineChartView
-              series={card.chart.data.series}
-              color={card.projectColor}
-            />
-          )}
-          {card.chart.type === "kpi_grid" && card.chart.data.kpis && (
+          {card.chart.type === "kpi_grid" && card.chart.data.kpis ? (
             <KpiGridView kpis={card.chart.data.kpis} />
+          ) : (
+            <InsightChartView chart={card.chart} />
           )}
         </div>
       )}

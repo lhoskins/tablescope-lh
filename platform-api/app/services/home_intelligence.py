@@ -632,6 +632,81 @@ def _pick_columns(
     return label_col, value_col
 
 
+_PERIOD_RE = re.compile(
+    r"^\s*("
+    r"\d{4}([-/]\d{1,2}([-/]\d{1,2})?)?"  # 2024, 2024-01, 2024-01-31
+    r"|q[1-4][\s-]?\d{2,4}"  # Q1 2024
+    r"|\d{4}[\s-]?q[1-4]"  # 2024-Q1
+    r"|w(eek)?[\s-]?\d{1,2}"  # week 5 / w5
+    r"|(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"  # month names
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_period_label(values: list[str]) -> bool:
+    """Heuristic: do most labels look like ordered time periods (-> line chart)?"""
+    if len(values) < 3:
+        return False
+    hits = sum(1 for v in values if _PERIOD_RE.match(str(v)))
+    return hits >= max(3, int(len(values) * 0.6))
+
+
+def _looks_like_share(label_col: str, series: list[dict[str, Any]]) -> bool:
+    """Heuristic: is this a parts-of-a-whole breakdown (-> donut chart)?
+
+    True when there are a handful of distinct positive categories whose label
+    column reads like a dimension (category/type/status/segment/region/...).
+    """
+    if not (3 <= len(series) <= 8):
+        return False
+    if any(s["value"] < 0 for s in series):
+        return False
+    keys = (
+        "categor", "type", "status", "segment", "region", "channel", "class",
+        "group", "tier", "rating", "priority", "department", "mode", "method",
+        "reason", "country", "state", "industry",
+    )
+    return any(k in label_col.lower() for k in keys)
+
+
+# Chart families the Home can render — these map 1:1 onto the dashboard's
+# WidgetRenderer catalog, so Intelligence cards use the exact same charts as
+# dashboards. ``kpi_grid`` keeps its lightweight tile renderer; ``none`` yields
+# a text-only executive card. Each entry maps a planner hint -> (type, subtype).
+_CHART_ALIASES: dict[str, tuple[str, str]] = {
+    "bar": ("bar", ""),
+    "column": ("bar", "column"),
+    "horizontal_bar": ("bar", "horizontal_bar"),
+    "stacked_bar": ("bar", "stacked_bar"),
+    "waterfall": ("bar", "waterfall"),
+    "line": ("line", ""),
+    "smooth_line": ("line", "smooth_line"),
+    "step_line": ("line", "step_line"),
+    "area": ("area", ""),
+    "pie": ("pie", ""),
+    "donut": ("pie", "donut"),
+    "gauge": ("pie", "gauge"),
+    "radar": ("radar", ""),
+    "radial_bar": ("radial_bar", ""),
+    "treemap": ("treemap", ""),
+    "funnel": ("funnel", ""),
+}
+
+
+def _chart(
+    chart_type: str, title: str, series: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Wrap a {label,value} series as a dashboard-compatible chart dict."""
+    wtype, subtype = _CHART_ALIASES.get(chart_type, ("bar", ""))
+    return {
+        "type": wtype,
+        "subtype": subtype,
+        "title": title,
+        "data": {"series": series},
+    }
+
+
 def _build_chart(
     chart_type: str,
     title: str,
@@ -639,36 +714,39 @@ def _build_chart(
     label_hint: str,
     value_hint: str,
 ) -> dict[str, Any] | None:
-    """Build a chart dict from a real query result (never fabricated)."""
+    """Pick the best visual for a real query result (shape-aware, never faked).
+
+    The planner's ``chart_type`` is treated as a hint chosen from the dashboard
+    chart catalog; the actual result shape validates/overrides it so insights
+    aren't all rendered as bars:
+      - single row / few headline numbers -> KPI tiles
+      - ordered time-period labels         -> line (trend)
+      - parts-of-a-whole categories        -> donut/pie (mix)
+      - everything else with categories    -> the planner's pick, else bar
+    ``chart_type == "none"`` (or no usable numeric data) -> text-only card.
+    """
     columns = result.get("columns", [])
     rows = result.get("rows", [])
     if not rows or not columns:
         return None
 
-    if chart_type == "kpi_grid":
-        kpis: list[dict[str, str]] = []
-        # Single-row result with several numeric columns -> one KPI per column.
-        if len(rows) == 1:
-            row = rows[0]
-            for col in columns:
-                v = _to_float(row.get(col))
-                if v is not None:
-                    kpis.append({"value": _fmt_num(v), "label": col})
-        # Otherwise treat as label/value pairs, top rows as KPIs.
-        if not kpis:
-            label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
-            if label_col and value_col:
-                for r in rows[:6]:
-                    v = _to_float(r.get(value_col))
-                    if v is not None:
-                        kpis.append(
-                            {"value": _fmt_num(v), "label": str(r.get(label_col))}
-                        )
-        if not kpis:
-            return None
-        return {"type": "kpi_grid", "title": title, "data": {"kpis": kpis[:6]}}
+    # Planner explicitly wants a narrative (text + highlights) card.
+    if chart_type in ("none", "text", "callout"):
+        return None
 
-    # bar / line share the {label, value} series shape.
+    # Single-row result with one or more numeric columns -> KPI tiles. This also
+    # covers a single headline number, which reads better as a tile than a bar.
+    if len(rows) == 1:
+        row = rows[0]
+        kpis = [
+            {"value": _fmt_num(v), "label": col}
+            for col in columns
+            if (v := _to_float(row.get(col))) is not None
+        ]
+        if kpis:
+            return {"type": "kpi_grid", "title": title, "data": {"kpis": kpis[:6]}}
+        return None
+
     label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
     if not label_col or not value_col:
         return None
@@ -680,8 +758,24 @@ def _build_chart(
         series.append({"label": str(r.get(label_col)), "value": round(v, 2)})
     if not series:
         return None
-    ct = "line" if chart_type == "line" else "bar"
-    return {"type": ct, "title": title, "data": {"series": series}}
+
+    labels = [s["label"] for s in series]
+
+    if chart_type == "kpi_grid":
+        kpis = [
+            {"value": _fmt_num(s["value"]), "label": s["label"]} for s in series[:6]
+        ]
+        return {"type": "kpi_grid", "title": title, "data": {"kpis": kpis}}
+    # Time series almost always reads best as a trend line.
+    if _is_period_label(labels):
+        return _chart("line", title, series)
+    # Honour an explicit, valid planner pick from the catalog.
+    if chart_type in _CHART_ALIASES:
+        return _chart(chart_type, title, series)
+    # Otherwise infer: parts-of-a-whole -> donut, else comparison bar.
+    if _looks_like_share(label_col, series):
+        return _chart("donut", title, series)
+    return _chart("bar", title, series)
 
 
 def _fmt_num(v: float) -> str:

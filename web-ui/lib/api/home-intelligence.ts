@@ -12,7 +12,23 @@ export type InsightSeverity =
   | "info";
 
 export interface InsightChart {
-  type: "bar" | "line" | "kpi_grid";
+  /**
+   * Chart family. ``kpi_grid`` uses the lightweight tile renderer; every other
+   * value maps onto the dashboard's WidgetRenderer catalog so Intelligence
+   * cards render with the exact same charts as dashboards.
+   */
+  type:
+    | "kpi_grid"
+    | "bar"
+    | "line"
+    | "area"
+    | "pie"
+    | "radar"
+    | "radial_bar"
+    | "treemap"
+    | "funnel";
+  /** Dashboard chart subtype (e.g. "donut", "smooth_line", "waterfall"). */
+  subtype?: string;
   title?: string;
   data: {
     series?: { label: string; value: number }[];

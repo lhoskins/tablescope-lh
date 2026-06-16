@@ -98,8 +98,10 @@ async def _run_for_project(
     ctx = await hi.gather_project_context(session, project)
     runner = _make_runner(session, context, project.id)
 
-    # Primary path: AI-driven analyst loop (plan -> execute real SQL -> interpret).
-    # Falls back to the deterministic suite only if the AI server is unavailable.
+    # Only the AI-driven analyst loop (plan -> execute real SQL -> interpret).
+    # No deterministic/hard-coded fallback: if the AI server is unavailable or
+    # finds nothing worth surfacing, we return no cards (the last saved snapshot
+    # still shows) rather than fabricating built-in metrics.
     cards: list[dict[str, Any]] | None = None
     try:
         cards = await hi.run_ai_intelligence(
@@ -114,7 +116,7 @@ async def _run_for_project(
         logger.warning("AI intelligence failed for project %s: %s", project.id, exc)
         cards = None
     if cards is None:
-        cards = await hi.run_intelligence_suite(project, ctx, prompt_types, runner)
+        cards = []
 
     if write_audit and cards:
         duration_ms = int(

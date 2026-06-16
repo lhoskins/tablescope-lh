@@ -630,6 +630,25 @@ _TEIID_SQL_RULES = (
     "references in GROUP BY). Never use SELECT *.\n"
 )
 
+# Chart families the planner may request. These map onto the dashboard's chart
+# catalog downstream (platform-api ``_build_chart``); the result shape can still
+# override the pick (e.g. a single-row aggregate always renders as KPI tiles).
+_ALLOWED_PLAN_CHART_TYPES = frozenset(
+    {
+        "kpi_grid",
+        "line",
+        "area",
+        "bar",
+        "horizontal_bar",
+        "donut",
+        "pie",
+        "treemap",
+        "funnel",
+        "radar",
+        "none",
+    }
+)
+
 
 @router.post("/intelligence/plan", response_model=IntelligencePlanResponse)
 async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanResponse:
@@ -713,8 +732,16 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "answerable from the allowed tables OR grounded in a listed document.\n\n"
         "For data analyses, write a single read-only SQL query that returns a small "
         "result suitable for a chart or KPI (aggregate/group — not raw dumps). "
-        "Choose the chart type that best fits: 'bar' (compare categories), 'line' "
-        "(trend over time), 'kpi_grid' (a few headline numbers).\n"
+        "Pick the chart type that BEST represents each result — do NOT default "
+        "everything to bar. This is an executive report, so vary the visuals:\n"
+        "- 'kpi_grid': one or a few headline numbers (a single-row aggregate).\n"
+        "- 'line' (or 'area'): a trend over time / ordered periods.\n"
+        "- 'bar' (or 'horizontal_bar'): compare a metric across categories / top-N.\n"
+        "- 'donut' (or 'pie'): parts-of-a-whole / share/mix of a total.\n"
+        "- 'treemap': many categories' relative sizes; 'funnel': stage drop-off; "
+        "'radar': multi-metric comparison of a few items.\n"
+        "- 'none': a narrative finding best told as prose with bolded figures "
+        "(no chart). Use this for at least one insight when it reads better as text.\n"
         "For document-based findings, leave sql empty, set chart_type to 'none', and "
         "list the relevant document titles in source_documents.\n\n"
         "Return ONLY a JSON object: {\"analyses\": [ {\n"
@@ -723,7 +750,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "  \"title\": \"short headline\",\n"
         "  \"rationale\": \"why this matters for the business (1 sentence)\",\n"
         "  \"sql\": \"SELECT ... (empty for document findings)\",\n"
-        "  \"chart_type\": \"bar|line|kpi_grid|none\",\n"
+        "  \"chart_type\": \"kpi_grid|line|area|bar|horizontal_bar|donut|pie|treemap|funnel|radar|none\",\n"
         "  \"label_column\": \"alias used for the category/x axis\",\n"
         "  \"value_column\": \"alias used for the numeric value\",\n"
         "  \"severity_hint\": \"critical|urgent|watch|opportunity|info\",\n"
@@ -756,7 +783,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             if category not in ("risk", "trend", "opportunity"):
                 category = "trend"
             chart_type = str(a.get("chart_type", "bar")).lower()
-            if chart_type not in ("bar", "line", "kpi_grid", "none"):
+            if chart_type not in _ALLOWED_PLAN_CHART_TYPES:
                 chart_type = "bar"
             # An analysis must have either runnable SQL or document grounding.
             if not sql and not a.get("source_documents"):
