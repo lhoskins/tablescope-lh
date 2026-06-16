@@ -141,6 +141,23 @@ export function streamHomeIntelligence(
   return controller;
 }
 
+// ── Saved snapshot (latest completed run) ────────────────────────────────────
+
+export interface IntelligenceSnapshot {
+  granularity: number;
+  updatedAt: string | null;
+  generatedAt?: string;
+  projects: StreamProject[];
+  results: ProjectResult[];
+  synthesis: CrossProjectSynthesis | null;
+}
+
+export function getIntelligenceSnapshot(): Promise<{
+  snapshot: IntelligenceSnapshot | null;
+}> {
+  return apiClient.get("/api/ai/home-intelligence/snapshot");
+}
+
 // ── Single-project re-run (report viewer) ────────────────────────────────────
 
 export function runIntelligenceSuite(

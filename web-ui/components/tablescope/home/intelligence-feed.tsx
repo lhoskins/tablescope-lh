@@ -8,6 +8,7 @@ import {
   IconTrendingUp,
 } from "@tabler/icons-react";
 import {
+  getIntelligenceSnapshot,
   getPreferences,
   streamHomeIntelligence,
   updatePreferences,
@@ -76,30 +77,60 @@ export function IntelligenceFeed() {
   const [, forceTick] = useState(0);
 
   const controllerRef = useRef<AbortController | null>(null);
+  // Background re-run accumulates into these buffers and commits at "done" so
+  // the visible (saved-snapshot) cards never flicker mid-refresh.
+  const backgroundRef = useRef(false);
+  const bufProjectsRef = useRef<StreamProject[]>([]);
+  const bufResultsRef = useRef<Record<string, ProjectResult>>({});
+  const bufSynthesisRef = useRef<CrossProjectSynthesis | null>(null);
   const { openPanel, addInsightCard, sections } = useReportBuilder();
 
   const handleEvent = useCallback((event: IntelligenceEvent) => {
+    const bg = backgroundRef.current;
     switch (event.type) {
       case "start":
-        setProjects(event.projects);
+        bufProjectsRef.current = event.projects;
+        bufResultsRef.current = {};
+        bufSynthesisRef.current = null;
+        if (!bg) {
+          setProjects(event.projects);
+          setResults({});
+          setCompleted(new Set());
+          setSynthesis(null);
+        }
         break;
       case "project_complete": {
         const { projectId, projectName, projectColor, insights } = event;
-        setResults((prev) => ({
-          ...prev,
-          [projectId]: { projectId, projectName, projectColor, insights },
-        }));
-        setCompleted((prev) => new Set(prev).add(projectId));
-        setLastUpdated(new Date());
+        bufResultsRef.current[projectId] = {
+          projectId,
+          projectName,
+          projectColor,
+          insights,
+        };
+        if (!bg) {
+          setResults((prev) => ({
+            ...prev,
+            [projectId]: { projectId, projectName, projectColor, insights },
+          }));
+          setCompleted((prev) => new Set(prev).add(projectId));
+          setLastUpdated(new Date());
+        }
         break;
       }
       case "project_error":
         setErrorMsg(event.error);
         break;
       case "synthesis_complete":
-        setSynthesis(event.synthesis);
+        bufSynthesisRef.current = event.synthesis;
+        if (!bg) setSynthesis(event.synthesis);
         break;
       case "done":
+        if (bg) {
+          setProjects(bufProjectsRef.current);
+          setResults(bufResultsRef.current);
+          setCompleted(new Set(Object.keys(bufResultsRef.current)));
+          setSynthesis(bufSynthesisRef.current);
+        }
         setStatus("complete");
         setLastUpdated(new Date());
         break;
@@ -107,14 +138,17 @@ export function IntelligenceFeed() {
   }, []);
 
   const startStream = useCallback(
-    (crossProject: boolean, granularity: number) => {
+    (crossProject: boolean, granularity: number, background = false) => {
       controllerRef.current?.abort();
+      backgroundRef.current = background;
       setStatus("streaming");
-      setProjects([]);
-      setResults({});
-      setCompleted(new Set());
-      setSynthesis(null);
       setErrorMsg(null);
+      if (!background) {
+        setProjects([]);
+        setResults({});
+        setCompleted(new Set());
+        setSynthesis(null);
+      }
       controllerRef.current = streamHomeIntelligence(handleEvent, {
         crossProject,
         granularity,
@@ -123,32 +157,41 @@ export function IntelligenceFeed() {
     [handleEvent],
   );
 
-  // Load settings, then auto-run if enabled.
+  // Hydrate from the saved snapshot, then auto re-run in the background.
   useEffect(() => {
     let cancelled = false;
-    getPreferences()
-      .then((prefs) => {
-        if (cancelled) return;
-        setSettings(prefs.intelligence);
-        if (prefs.intelligence.run_on_load) {
-          startStream(
-            prefs.intelligence.cross_project,
-            prefs.intelligence.granularity ?? 3,
-          );
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          // Fall back to running with defaults if prefs can't load.
-          setSettings({
-            run_on_load: true,
-            cross_project: true,
-            email_digest: false,
-            granularity: 3,
-          });
-          startStream(true, 3);
-        }
-      });
+    Promise.all([
+      getPreferences().catch(() => null),
+      getIntelligenceSnapshot().catch(() => null),
+    ]).then(([prefs, snapRes]) => {
+      if (cancelled) return;
+      const intel: IntelligenceSettings = prefs?.intelligence ?? {
+        run_on_load: true,
+        cross_project: true,
+        email_digest: false,
+        granularity: 3,
+      };
+      setSettings(intel);
+
+      const snap = snapRes?.snapshot ?? null;
+      let hydrated = false;
+      if (snap && snap.results.length > 0) {
+        setProjects(snap.projects);
+        const map: Record<string, ProjectResult> = {};
+        for (const r of snap.results) map[r.projectId] = r;
+        setResults(map);
+        setCompleted(new Set(Object.keys(map)));
+        setSynthesis(snap.synthesis);
+        setLastUpdated(snap.updatedAt ? new Date(snap.updatedAt) : new Date());
+        setStatus("complete");
+        hydrated = true;
+      }
+
+      if (intel.run_on_load) {
+        // If we showed a saved snapshot, refresh quietly in the background.
+        startStream(intel.cross_project, intel.granularity ?? 3, hydrated);
+      }
+    });
     return () => {
       cancelled = true;
       controllerRef.current?.abort();
@@ -194,13 +237,19 @@ export function IntelligenceFeed() {
   };
 
   const granularity = settings?.granularity ?? 3;
+  const hasCards = allInsights.length > 0;
 
   const handleGranularity = (value: number) => {
     setSettings((prev) => (prev ? { ...prev, granularity: value } : prev));
     updatePreferences({ granularity: value }).catch(() => {
       /* keep optimistic value; will reconcile on next load */
     });
-    startStream(settings?.cross_project ?? true, value);
+    // Keep the current cards visible until the new run finishes.
+    startStream(settings?.cross_project ?? true, value, hasCards);
+  };
+
+  const handleRefresh = () => {
+    startStream(settings?.cross_project ?? true, granularity, hasCards);
   };
 
   const empty =
@@ -213,7 +262,7 @@ export function IntelligenceFeed() {
         insights={allInsights}
         running={running}
         lastUpdatedLabel={timeAgoLabel(lastUpdated)}
-        onRefresh={() => startStream(settings?.cross_project ?? true, granularity)}
+        onRefresh={handleRefresh}
         granularity={granularity}
         onGranularityChange={handleGranularity}
       />
@@ -240,9 +289,7 @@ export function IntelligenceFeed() {
               </div>
               <button
                 type="button"
-                onClick={() =>
-                  startStream(settings?.cross_project ?? true, granularity)
-                }
+                onClick={handleRefresh}
                 className="rounded-md border border-danger/40 px-2.5 py-1 text-small font-medium text-danger hover:bg-danger/10"
               >
                 Retry

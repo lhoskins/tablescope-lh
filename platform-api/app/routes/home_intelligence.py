@@ -28,6 +28,7 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import SessionLocal, get_db
 from app.models.audit_event import AuditEvent
+from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.project import Project, ProjectMember
 from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
 from app.services import home_intelligence as hi
@@ -234,6 +235,8 @@ async def home_intelligence_stream(
         )
 
         summaries: list[dict[str, Any]] = []
+        project_results: list[dict[str, Any]] = []
+        synthesis: dict[str, Any] | None = None
 
         async def work(project: Project) -> dict[str, Any]:
             async with SessionLocal() as session:
@@ -261,6 +264,7 @@ async def home_intelligence_stream(
                         ],
                     }
                 )
+                project_results.append(result)
                 yield _sse({"type": "project_complete", **result})
             except Exception as exc:
                 logger.warning("project intelligence failed: %s", exc)
@@ -272,6 +276,27 @@ async def home_intelligence_stream(
             synthesis = hi.synthesise_cross_project(summaries)
             if synthesis is not None:
                 yield _sse({"type": "synthesis_complete", "synthesis": synthesis})
+
+        # Persist this completed run as the user's latest snapshot (overwrites
+        # any prior one) so the Home can hydrate instantly on next open.
+        try:
+            generated_at = datetime.now(UTC).isoformat()
+            payload = {
+                "projects": [
+                    {
+                        "id": str(p.id),
+                        "name": p.name,
+                        "color": hi.project_color(p.id),
+                    }
+                    for p in projects
+                ],
+                "results": project_results,
+                "synthesis": synthesis,
+                "generatedAt": generated_at,
+            }
+            await _save_snapshot(context, granularity, payload)
+        except Exception as exc:
+            logger.warning("failed to persist intelligence snapshot: %s", exc)
 
         yield _sse({"type": "done", "projectCount": len(projects)})
 
@@ -285,3 +310,51 @@ async def home_intelligence_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Snapshot — persist the latest completed run; hydrate instantly on open
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _save_snapshot(
+    context: RequestContext, granularity: int, payload: dict[str, Any]
+) -> None:
+    """Upsert the caller's single latest intelligence snapshot."""
+    async with SessionLocal() as session:
+        snap = await session.scalar(
+            select(IntelligenceSnapshot).where(
+                IntelligenceSnapshot.user_id == context.user_id
+            )
+        )
+        if snap is None:
+            snap = IntelligenceSnapshot(
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+            )
+            session.add(snap)
+        snap.tenant_id = context.tenant_id
+        snap.granularity = granularity
+        snap.payload = payload
+        await session.commit()
+
+
+@router.get("/home-intelligence/snapshot")
+async def get_intelligence_snapshot(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Return the caller's latest persisted run (or ``snapshot: null``)."""
+    snap = await session.scalar(
+        select(IntelligenceSnapshot).where(
+            IntelligenceSnapshot.user_id == context.user_id
+        )
+    )
+    if snap is None:
+        return {"snapshot": None}
+    return {
+        "snapshot": {
+            "granularity": snap.granularity,
+            "updatedAt": snap.updated_at.isoformat() if snap.updated_at else None,
+            **snap.payload,
+        }
+    }
