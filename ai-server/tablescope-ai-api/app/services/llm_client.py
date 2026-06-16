@@ -17,7 +17,7 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+TIMEOUT = httpx.Timeout(180.0, connect=10.0)
 
 
 async def generate(
@@ -26,6 +26,7 @@ async def generate(
     model: str | None = None,
     temperature: float = 0.1,
     max_tokens: int | None = None,
+    num_ctx: int | None = None,
 ) -> str:
     """Generate text completion from Ollama."""
     model = model or settings.reasoning_model
@@ -33,6 +34,8 @@ async def generate(
     options: dict[str, Any] = {"temperature": temperature}
     if max_tokens is not None:
         options["num_predict"] = max_tokens
+    if num_ctx is not None:
+        options["num_ctx"] = num_ctx
 
     payload: dict[str, Any] = {
         "model": model,

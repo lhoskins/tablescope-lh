@@ -705,6 +705,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         system_prompt=_INTEL_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.3,
+        num_ctx=8192,
     )
 
     parsed = _parse_json_response(raw)
@@ -811,6 +812,7 @@ async def intelligence_interpret(
         system_prompt=_INTEL_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.2,
+        num_ctx=8192,
     )
 
     parsed = _parse_json_response(raw)

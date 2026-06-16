@@ -16,6 +16,7 @@ The four built-in prompt types:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -791,13 +792,29 @@ async def run_ai_intelligence(
     if not executed:
         return []
 
-    interpreted = await ai.interpret(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        project_id=project.id,
-        analyses=interpret_inputs,
+    # Interpret in small concurrent chunks so each LLM call stays fast and fits
+    # the model context window (large single calls at Granular were the main
+    # source of latency / empty results). Ollama now serves these in parallel.
+    chunk_size = 4
+    chunks = [
+        interpret_inputs[i : i + chunk_size]
+        for i in range(0, len(interpret_inputs), chunk_size)
+    ]
+    chunk_results = await asyncio.gather(
+        *(
+            ai.interpret(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                project_id=project.id,
+                analyses=chunk,
+            )
+            for chunk in chunks
+        )
     )
-    interpreted = interpreted or {}
+    interpreted: dict[str, dict[str, Any]] = {}
+    for res in chunk_results:
+        if res:
+            interpreted.update(res)
 
     cards: list[dict[str, Any]] = []
     for item in executed:
