@@ -578,15 +578,22 @@ def _build_schema_lines(table_schema: list[dict]) -> str:
     """Exact per-table column list so the LLM never invents column names."""
     if not table_schema:
         return ""
+    def _col_str(c: dict) -> str:
+        name = c.get("name")
+        desc = f'"{name}" ({c.get("type", "string")}'
+        sample = c.get("sample")
+        if sample not in (None, ""):
+            # A real example value lets the LLM see the actual format (e.g.
+            # "1/19/2026" vs "2026-01-19") and whether the text is numeric, so
+            # it can CAST/parse correctly instead of guessing.
+            desc += f', e.g. {sample!r}'
+        return desc + ")"
+
     parts: list[str] = []
     for t in table_schema:
         tname = t.get("table") or t.get("view_name") or ""
         cols = t.get("columns") or []
-        col_str = ", ".join(
-            f'"{c.get("name")}" ({c.get("type", "string")})'
-            for c in cols
-            if c.get("name")
-        )
+        col_str = ", ".join(_col_str(c) for c in cols if c.get("name"))
         if tname and col_str:
             # Flag text-backed (CSV/file) tables so the LLM always casts.
             tag = (
@@ -602,7 +609,14 @@ def _build_schema_lines(table_schema: list[dict]) -> str:
         "exactly as shown (they are case-sensitive). Do NOT invent or guess "
         "any column that is not listed here. Each column belongs to exactly "
         "ONE table; never reference a column under a table that does not "
-        "list it:\n" + "\n".join(parts)
+        "list it. Where an example value is shown, use it to judge the column's "
+        "real format: only CAST/aggregate columns whose example is numeric, and "
+        "when grouping by a date stored as text, parse it with the matching mask "
+        "via PARSETIMESTAMP (e.g. a value like '1/19/2026' -> "
+        "EXTRACT(YEAR FROM PARSETIMESTAMP(\"col\", 'M/d/yyyy')); a value like "
+        "'2026-01-19' -> EXTRACT(YEAR FROM CAST(\"col\" AS date))). Never CAST a "
+        "text date straight to date unless its example is already ISO "
+        "yyyy-MM-dd:\n" + "\n".join(parts)
     )
 
 
@@ -769,7 +783,75 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "bubble size, if relevant).\n"
         "Only propose a relationship analysis when at least 3 time periods of data "
         "are available for both variables — a 2-point comparison cannot show a "
-        "changing relationship.\n\n"
+        "changing relationship.\n"
+        "MANDATORY SQL SHAPE for every dual_line / scatter / time-based "
+        "relationship — get this exactly right or the chart cannot be drawn:\n"
+        "0. Pick ONE table from the schema that itself lists BOTH metric columns "
+        "you want (and a date column when plotting over time). Every column you "
+        "reference — both metrics, the date, anything in WHERE/GROUP BY — MUST "
+        "appear under that exact table in the schema above. NEVER borrow a "
+        "column from another table (e.g. do not use a Suppliers column while "
+        "selecting FROM the Inspections table); single-table queries only, so a "
+        "column that is not listed under your FROM table does not exist for this "
+        "query. The Inspections-style table that holds two numeric quantities "
+        "(e.g. a received quantity and a defect quantity) is usually the best "
+        "single source for a real two-metric relationship.\n"
+        "1. The period/time column MUST appear in the SELECT list as the FIRST "
+        "column, not only in GROUP BY. A query like 'SELECT metric_a, metric_b "
+        "... GROUP BY period' is WRONG because the result then has no time axis. "
+        "Write 'SELECT period_expr AS Period, agg_a AS metric_a, agg_b AS "
+        "metric_b ... GROUP BY period_expr ORDER BY period_expr'.\n"
+        "2. Derive the period from the date column using the parse that matches "
+        "its EXAMPLE value (see schema): a slash date like '1/19/2026' MUST use "
+        "EXTRACT(YEAR FROM PARSETIMESTAMP(\"DateCol\", 'M/d/yyyy')) — never "
+        "CAST a slash date straight to date, it fails. An ISO value like "
+        "'2026-01-19' uses EXTRACT(YEAR FROM CAST(\"DateCol\" AS date)). "
+        "Use YEAR+MONTH when one year holds too few rows to show a trend. "
+        "Repeat the full expression in GROUP BY (no alias references).\n"
+        "3. Set label_column to the period alias (e.g. \"Period\"), value_column "
+        "to the first metric alias, and value_column_2 to the second metric "
+        "alias. All three MUST be aliases that actually appear in your SELECT.\n"
+        "4. CAST any text-backed column used in a comparison or CASE, not just in "
+        "arithmetic — e.g. CASE WHEN CAST(\"DefectQty\" AS double) > 0 THEN 1 "
+        "ELSE 0 END. An uncast text column in '> 0' will be rejected.\n"
+        "5. Never use DATEDIFF (it is not a Teiid function). For a day count "
+        "between two dates use TIMESTAMPDIFF(SQL_TSI_DAY, CAST(\"d1\" AS "
+        "timestamp), CAST(\"d2\" AS timestamp)).\n"
+        "Example (two metrics over time, date column whose example is a slash "
+        "date like '1/19/2026'):\n"
+        "SELECT EXTRACT(YEAR FROM PARSETIMESTAMP(\"date_col\", 'M/d/yyyy')) "
+        "AS Period, AVG(CAST(\"metric_a\" AS double)) AS MetricA, "
+        "AVG(CAST(\"metric_b\" AS double)) AS MetricB "
+        "FROM \"some_table\" "
+        "GROUP BY EXTRACT(YEAR FROM PARSETIMESTAMP(\"date_col\", 'M/d/yyyy')) "
+        "ORDER BY Period — with label_column=Period, value_column=MetricA, "
+        "value_column_2=MetricB, chart_type=dual_line.\n\n"
+        "DOCUMENT-GROUNDED RELATIONSHIPS:\n"
+        "Relationships are NOT limited to two table columns — also look for how "
+        "the project's DATA relates to its DOCUMENTS, and how documents relate to "
+        "each other:\n"
+        "- DATA vs DOCUMENT TARGET: when a listed document states a concrete "
+        "threshold, target, limit, or SLA that applies to a table metric (e.g. a "
+        "policy requiring on-time delivery >= 98%, a defect rate < 2%, or a "
+        "single-supplier spend cap of 30%), propose an analysis that trends the "
+        "ACTUAL metric over time AND carries the document's stated value as a "
+        "constant second series, so the reader sees the data tracking against the "
+        "policy line. Compute the constant directly in SQL as its own column, "
+        "e.g. SELECT period_expr AS Period, AVG(CAST(\"OnTimeFlag=1\" ...)) AS "
+        "ActualOnTime, 98.0 AS PolicyTarget ... GROUP BY period_expr. Set "
+        "chart_type=dual_line (or line), value_column=ActualOnTime, "
+        "value_column_2=PolicyTarget, and ALWAYS list the source document title "
+        "in source_documents. Phrase the title/rationale around whether the data "
+        "meets, is converging toward, or is diverging from the documented "
+        "requirement.\n"
+        "- DOCUMENT-ONLY relationships: when two documents (or two requirements "
+        "within one document) interact, conflict, or reinforce each other and no "
+        "single table proves it, propose a narrative finding: leave sql empty, "
+        "set chart_type=none, category=relationship, and list every relevant "
+        "document in source_documents.\n"
+        "Only assert a data-vs-document relationship when the metric the document "
+        "describes can actually be computed from an allowed table; otherwise make "
+        "it a document-only narrative finding.\n\n"
         "For data analyses, write a single read-only SQL query that returns a small "
         "result suitable for a chart or KPI (aggregate/group — not raw dumps), "
         "querying exactly one allowed table with no joins or subqueries. Pick the "
@@ -847,7 +929,10 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         system_prompt=_INTEL_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.2,
-        num_ctx=8192,
+        # Larger window so the prompt (schema + documents + relationship rules)
+        # plus the full JSON array of analyses fits without the response being
+        # truncated into invalid JSON.
+        num_ctx=16384,
         response_format="json",
     )
 
@@ -923,7 +1008,14 @@ async def intelligence_fix_sql(
         "repeat the SELECT expression in GROUP BY, drop an unsupported function, "
         "use a column that actually exists in the queried table). If the query "
         "cannot be made to work against the allowed tables, return an empty "
-        "string.\n\n"
+        "string.\n"
+        "If the error says an element/column is 'not defined by any relevant "
+        "group', that column does NOT exist on the table in your FROM clause. Do "
+        "NOT switch tables and do NOT add a JOIN — instead replace it with a "
+        "real column listed under that SAME table in the schema below (pick "
+        "another numeric column with a similar meaning), or drop that term. For "
+        "a text date stored like '1/19/2026', use "
+        "PARSETIMESTAMP(\"col\", 'M/d/yyyy'), never CAST(\"col\" AS date).\n\n"
         f"Allowed tables (use ONLY these): {', '.join(req.allowed_tables)}\n"
         f"{schema_lines}\n\n"
         f"{_TEIID_SQL_RULES}\n"

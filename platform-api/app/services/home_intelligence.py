@@ -269,6 +269,64 @@ async def _safe_query(runner: QueryRunner, sql: str) -> dict[str, Any] | None:
         return None
 
 
+async def _sample_values(runner: QueryRunner, view_name: str) -> dict[str, str]:
+    """Return one real example value per column for a table.
+
+    The planner uses these to detect each column's true format (e.g. a date
+    stored as ``"1/19/2026"`` vs ISO, or whether text is numeric) so it can
+    CAST/parse correctly. Best-effort: returns ``{}`` if the probe query fails.
+    """
+    result = await _safe_query(runner, f'SELECT * FROM "{view_name}"')
+    if not result:
+        return {}
+    samples: dict[str, str] = {}
+    for row in result.get("rows", [])[:25]:
+        for col, val in row.items():
+            if col in samples:
+                continue
+            if val is None:
+                continue
+            text = str(val).strip()
+            if text:
+                samples[col] = text[:40]
+    return samples
+
+
+_SLASH_DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/(\d{4}|\d{2})$")
+
+
+def _date_masks_from_samples(
+    samples_per_table: list[dict[str, str]]
+) -> dict[str, str]:
+    """Map each date column (by name) to a Teiid PARSETIMESTAMP mask.
+
+    Only columns whose example value is a slash date (e.g. ``"1/19/2026"``)
+    need a mask — ISO dates cast cleanly and are left alone.
+    """
+    masks: dict[str, str] = {}
+    for samples in samples_per_table:
+        for col, val in samples.items():
+            if col in masks:
+                continue
+            if _SLASH_DATE_RE.match(val):
+                year = val.rsplit("/", 1)[-1]
+                masks[col] = "M/d/yyyy" if len(year) == 4 else "M/d/yy"
+    return masks
+
+
+def _normalize_date_casts(sql: str, date_masks: dict[str, str]) -> str:
+    """Rewrite ``CAST("col" AS date|timestamp)`` to ``PARSETIMESTAMP("col",
+    'mask')`` for slash-date columns, so time-bucketed SQL runs on Teiid even
+    when the model casts a non-ISO text date (which Teiid rejects)."""
+    for col, mask in date_masks.items():
+        pat = re.compile(
+            r'CAST\(\s*"' + re.escape(col) + r'"\s+AS\s+(?:date|timestamp)\s*\)',
+            re.IGNORECASE,
+        )
+        sql = pat.sub(f"PARSETIMESTAMP(\"{col}\", '{mask}')", sql)
+    return sql
+
+
 async def _query_with_error(
     runner: QueryRunner, sql: str
 ) -> tuple[dict[str, Any] | None, str | None]:
@@ -911,16 +969,27 @@ async def run_ai_intelligence(
         return None
 
     allowed_tables = [t.view_name for t in ctx.tables]
+    # Pull a real example value per column so the planner can see each column's
+    # actual format (date masks, numeric-vs-text) and generate valid SQL.
+    samples_per_table = await asyncio.gather(
+        *(_sample_values(runner, t.view_name) for t in ctx.tables)
+    )
     table_schema = [
         {
             "table": t.view_name,
             # File/CSV columns are imported by Teiid as TEXT regardless of the
             # logical type shown, so the LLM must CAST them for any math/date op.
             "storage": "text" if t.kind == "file" else "native",
-            "columns": [{"name": n, "type": ty} for (n, ty) in t.columns],
+            "columns": [
+                {"name": n, "type": ty, "sample": samples.get(n, "")}
+                for (n, ty) in t.columns
+            ],
         }
-        for t in ctx.tables
+        for t, samples in zip(ctx.tables, samples_per_table, strict=False)
     ]
+    # Deterministic safety net: even if the model casts a non-ISO text date
+    # (which Teiid rejects), rewrite it to PARSETIMESTAMP before executing.
+    date_masks = _date_masks_from_samples(samples_per_table)
     documents = [
         {
             "title": d.title,
@@ -975,6 +1044,7 @@ async def run_ai_intelligence(
     for a in analyses:
         sql = (a.get("sql") or "").strip()
         if sql:
+            sql = _normalize_date_casts(sql, date_masks)
             result, err = await _query_with_error(runner, sql)
             if result and result.get("rows"):
                 _record_data_analysis(a, result)
@@ -1028,6 +1098,7 @@ async def run_ai_intelligence(
         for (a, orig_sql, _err), fixed in zip(to_repair, fixes, strict=True):
             if not fixed or fixed.strip() == orig_sql.strip():
                 continue
+            fixed = _normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
                 _record_data_analysis({**a, "sql": fixed}, result)
