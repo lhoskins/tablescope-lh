@@ -4,10 +4,10 @@ Shared by manual single uploads and the bulk URL importer. Runs:
 
 1. Text extraction (PDF / DOCX / PPTX / TXT / MD / HTML)
 2. AI summary generation (via the signed AI server endpoint)
-3. Indexing for citation — the extracted text is persisted and the AI summary is
-   stored on the document; in-scope reference summaries are injected into AI
-   grounding context at query time (see the citation integration in the
-   suggestion/citation layer), which is how this stack grounds all documents.
+3. Indexing for citation — the extracted text is persisted, the AI summary is
+   stored on the document, and the full text is embedded into the shared,
+   tier-scoped reference vector store so the AI assistant can retrieve passages
+   and the Home planner can ground analyses in it.
 4. Status update — ``active`` on success, ``draft`` with an error on failure so a
    manual summary can be entered as a fallback.
 
@@ -189,10 +189,84 @@ async def process_reference_document(document_id: int) -> None:
         if summary:
             doc.ai_summary = summary
 
-        # ── Step 3/4: mark active ──
+        # ── Step 3: embed into the shared reference vector store ──
+        indexed = False
+        try:
+            indexed = await ai_client.index_reference_document(
+                tier=doc.tier,
+                tenant_id=doc.tenant_id,
+                project_id=doc.project_id,
+                user_id=doc.uploaded_by,
+                document_id=doc.id,
+                title=doc.title,
+                extracted_text=doc_text,
+            )
+        except Exception:
+            logger.exception("Vector indexing failed for reference doc %s", document_id)
+
+        # ── Step 4: mark active ──
         doc.status = "active"
         await session.commit()
-        logger.info("Reference document %s processed (summary=%s)", document_id, bool(summary))
+        logger.info(
+            "Reference document %s processed (summary=%s, indexed=%s)",
+            document_id, bool(summary), indexed,
+        )
+
+
+async def reindex_reference_documents() -> dict[str, int]:
+    """Backfill the reference vector store from already-processed docs.
+
+    One-off/maintenance helper: embeds every reference doc that has a file but
+    was processed before vector indexing existed. Returns a small status tally.
+    """
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.models.reference_library import ReferenceDocument
+
+    tally = {"indexed": 0, "skipped": 0, "failed": 0}
+    async with SessionLocal() as session:
+        docs = (
+            await session.scalars(
+                select(ReferenceDocument).where(ReferenceDocument.file_path.isnot(None))
+            )
+        ).all()
+
+        for doc in docs:
+            text = ""
+            if doc.extracted_text_path and Path(doc.extracted_text_path).exists():
+                text = Path(doc.extracted_text_path).read_text(
+                    encoding="utf-8", errors="ignore"
+                )
+            elif doc.file_path:
+                try:
+                    text = _extract_reference_text(
+                        doc.file_path, Path(doc.file_path).suffix
+                    )
+                except Exception:
+                    logger.warning("Backfill: extraction failed for doc %s", doc.id)
+
+            if not text.strip():
+                tally["skipped"] += 1
+                continue
+
+            try:
+                ok = await ai_client.index_reference_document(
+                    tier=doc.tier,
+                    tenant_id=doc.tenant_id,
+                    project_id=doc.project_id,
+                    user_id=doc.uploaded_by,
+                    document_id=doc.id,
+                    title=doc.title,
+                    extracted_text=text,
+                )
+                tally["indexed" if ok else "failed"] += 1
+            except Exception:
+                logger.exception("Backfill: indexing failed for doc %s", doc.id)
+                tally["failed"] += 1
+
+    logger.info("Reference reindex backfill complete: %s", tally)
+    return tally
 
 
 def new_storage_id() -> str:

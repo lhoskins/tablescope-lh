@@ -35,6 +35,7 @@ from app.models.schemas import (
     GenerateSQLRequest,
     GenerateSQLResponse,
     IndexDocumentRequest,
+    IndexReferenceRequest,
     IntelligenceFixSQLRequest,
     IntelligenceFixSQLResponse,
     IntelligenceInterpretRequest,
@@ -272,6 +273,71 @@ async def index_document(req: IndexDocumentRequest) -> dict:
     logger.info(
         "Indexed document %d: %d chunks | tenant=%d project=%d",
         req.document_id, len(chunks), req.tenant_id, req.project_id,
+    )
+
+    return {
+        "status": "indexed",
+        "document_id": req.document_id,
+        "chunks_indexed": len(chunks),
+        "vector_ids": point_ids,
+        "request_id": request_id,
+    }
+
+
+@router.post("/index/reference")
+async def index_reference(req: IndexReferenceRequest) -> dict:
+    """Index a reference-library document into the shared, tier-scoped store.
+
+    Reference docs are governed knowledge (industry/company/project tier) made
+    available to the AI assistant and Home planner across projects. Re-indexing
+    is idempotent: existing chunks for the document are dropped first.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+
+    await vector_store.delete_reference_document(req.document_id)
+
+    content = req.content
+    if not content.strip():
+        return {"status": "no_content", "request_id": request_id}
+
+    # Simple chunking (512 char chunks with 50 char overlap) — mirrors documents.
+    chunk_size = 512
+    overlap = 50
+    chunks: list[str] = []
+    for i in range(0, len(content), chunk_size - overlap):
+        chunk = content[i:i + chunk_size]
+        if chunk.strip():
+            chunks.append(chunk)
+
+    if not chunks:
+        return {"status": "no_chunks", "request_id": request_id}
+
+    embeddings = await llm_client.generate_embeddings(chunks)
+
+    payloads = []
+    for idx, chunk in enumerate(chunks):
+        payloads.append({
+            "tier": req.tier,
+            "tenant_id": req.tenant_id,
+            "project_id": req.project_id,
+            "document_id": req.document_id,
+            "title": req.title,
+            "chunk_id": f"chunk_{idx:04d}",
+            "chunk_index": idx,
+            "chunk_text": chunk,
+            "source_type": "reference_library",
+            "embedding_model": settings.embedding_model,
+        })
+
+    point_ids = await vector_store.upsert_reference_vectors(
+        vectors=embeddings,
+        payloads=payloads,
+    )
+
+    logger.info(
+        "Indexed reference document %d (%s): %d chunks",
+        req.document_id, req.tier, len(chunks),
     )
 
     return {

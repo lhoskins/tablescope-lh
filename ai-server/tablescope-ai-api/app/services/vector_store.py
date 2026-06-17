@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 768  # nomic-embed-text dimension
 
+# Reference Library docs are governed, cross-project knowledge (industry /
+# company / project tier), so they live in one shared collection rather than a
+# per-tenant one. Tier-based payload filters enforce who may retrieve each doc.
+REFERENCE_COLLECTION = "tablescope_reference_library"
+
 
 def _collection_name(tenant_id: int) -> str:
     """Derive collection name server-side from authenticated tenant.
@@ -155,3 +160,100 @@ async def delete_project_vectors(tenant_id: int, project_id: int) -> None:
         ),
     )
     logger.info("Deleted project %d vectors from %s", project_id, name)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reference Library (shared, tier-scoped knowledge)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def ensure_reference_collection() -> None:
+    """Create the shared reference-library collection if it doesn't exist."""
+    client = get_client()
+    collections = [c.name for c in client.get_collections().collections]
+    if REFERENCE_COLLECTION not in collections:
+        client.create_collection(
+            collection_name=REFERENCE_COLLECTION,
+            vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
+        )
+        logger.info("Created Qdrant collection: %s", REFERENCE_COLLECTION)
+
+
+async def delete_reference_document(document_id: int) -> None:
+    """Remove all chunks for a reference document (so re-indexing is idempotent)."""
+    client = get_client()
+    await ensure_reference_collection()
+    client.delete(
+        collection_name=REFERENCE_COLLECTION,
+        points_selector=Filter(
+            must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]
+        ),
+    )
+
+
+async def upsert_reference_vectors(
+    vectors: list[list[float]],
+    payloads: list[dict[str, Any]],
+) -> list[str]:
+    """Upsert reference-doc chunk vectors into the shared collection."""
+    client = get_client()
+    await ensure_reference_collection()
+
+    point_ids: list[str] = []
+    points = []
+    for vec, payload in zip(vectors, payloads):
+        pid = str(uuid.uuid4())
+        point_ids.append(pid)
+        payload["vector_id"] = pid
+        points.append(PointStruct(id=pid, vector=vec, payload=payload))
+
+    client.upsert(collection_name=REFERENCE_COLLECTION, points=points)
+    logger.info("Upserted %d reference vectors", len(points))
+    return point_ids
+
+
+async def search_reference_vectors(
+    tenant_id: int,
+    project_id: int,
+    query_vector: list[float],
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Search reference docs visible to this tenant/project.
+
+    Tier scoping: industry docs are global; company docs match the tenant;
+    project docs match the project. Enforced here (the LLM never chooses scope).
+    """
+    client = get_client()
+    scope_filter = Filter(
+        should=[
+            Filter(must=[FieldCondition(key="tier", match=MatchValue(value="industry"))]),
+            Filter(
+                must=[
+                    FieldCondition(key="tier", match=MatchValue(value="company")),
+                    FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id)),
+                ]
+            ),
+            Filter(
+                must=[
+                    FieldCondition(key="tier", match=MatchValue(value="project")),
+                    FieldCondition(key="project_id", match=MatchValue(value=project_id)),
+                ]
+            ),
+        ]
+    )
+    try:
+        results = client.search(
+            collection_name=REFERENCE_COLLECTION,
+            query_vector=query_vector,
+            query_filter=scope_filter,
+            limit=limit,
+        )
+    except Exception as e:
+        # Collection may not exist yet (nothing indexed) — degrade to no results.
+        logger.warning("Reference vector search failed: %s", e)
+        return []
+
+    return [
+        {"id": r.id, "score": r.score, "payload": r.payload}
+        for r in results
+    ]

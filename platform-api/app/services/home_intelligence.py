@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,6 +31,12 @@ from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
 from app.models.project_asset import ProjectAsset
+from app.models.reference_library import (
+    TIER_COMPANY,
+    TIER_INDUSTRY,
+    TIER_PROJECT,
+    ReferenceDocument,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +133,44 @@ async def gather_project_context(
         )
         for a in assets
     ]
+
+    # Reference Library docs in scope (industry = global, company = this tenant,
+    # project = this project) so Home analyses can ground in governed standards
+    # and policies, not just the project's own uploads.
+    ref_docs = (
+        await session.scalars(
+            select(ReferenceDocument)
+            .where(
+                ReferenceDocument.status == "active",
+                ReferenceDocument.ai_summary.isnot(None),
+                or_(
+                    ReferenceDocument.tier == TIER_INDUSTRY,
+                    and_(
+                        ReferenceDocument.tier == TIER_COMPANY,
+                        ReferenceDocument.tenant_id == project.tenant_id,
+                    ),
+                    and_(
+                        ReferenceDocument.tier == TIER_PROJECT,
+                        ReferenceDocument.project_id == project.id,
+                    ),
+                ),
+            )
+            .order_by(ReferenceDocument.updated_at.desc())
+            .limit(40)
+        )
+    ).all()
+    for r in ref_docs:
+        documents.append(
+            DocInfo(
+                title=r.title,
+                ai_summary=r.ai_summary,
+                ai_metadata={
+                    "reference_tier": r.tier,
+                    "issuing_body": r.issuing_body or "",
+                    "domain_tag": r.domain_tag or "",
+                },
+            )
+        )
 
     return ProjectContext(tables=tables, documents=documents)
 

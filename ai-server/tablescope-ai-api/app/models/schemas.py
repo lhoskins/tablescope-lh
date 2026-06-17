@@ -35,6 +35,23 @@ class IndexDocumentRequest(AIBaseRequest):
     visibility: str = "shared_project"
 
 
+class IndexReferenceRequest(BaseModel):
+    """Index a reference-library document into the shared reference vector store.
+
+    Not an :class:`AIBaseRequest`: industry-tier docs have no tenant/project, so
+    those fields are optional and scope is carried by ``tier``.
+    """
+    tier: str
+    tenant_id: int | None = None
+    project_id: int | None = None
+    user_id: int = 0
+    document_id: int
+    title: str = ""
+    content: str = ""
+    timestamp: float = 0.0
+    signature: str = ""
+
+
 class GenerateRelationshipsRequest(AIBaseRequest):
     pass
 
