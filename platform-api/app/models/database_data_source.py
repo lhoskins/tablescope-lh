@@ -141,6 +141,11 @@ class DataSourceColumn(Base):
     column_name: Mapped[str] = mapped_column(String(255), nullable=False)
     ordinal_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     data_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # User-chosen Teiid runtime type that overrides the introspected data_type
+    # when the VDB model is (re)registered (e.g. "integer", "date").
+    teiid_type_override: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )
     nullable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     primary_key: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -154,7 +159,9 @@ class DataSourceColumn(Base):
         return {
             "name": self.column_name,
             "ordinal_position": self.ordinal_position,
-            "type": self.data_type,
+            "type": self.teiid_type_override or self.data_type,
+            "data_type": self.data_type,
+            "teiid_type_override": self.teiid_type_override,
             "nullable": self.nullable,
             "primary_key": self.primary_key,
         }

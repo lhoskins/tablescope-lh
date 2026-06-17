@@ -41,7 +41,7 @@ function LoginForm() {
           user_id: result.user_id,
           tenant_slug: result.tenant_slug,
         });
-        router.replace("/dashboard");
+        router.replace("/");
       })
       .catch((err) => {
         setError((err as Error).message);
@@ -70,7 +70,7 @@ function LoginForm() {
         user_id: result.user_id,
         tenant_slug: result.tenant_slug,
       });
-      router.replace("/dashboard");
+      router.replace("/");
     } catch (err) {
       setError((err as Error).message);
     } finally {

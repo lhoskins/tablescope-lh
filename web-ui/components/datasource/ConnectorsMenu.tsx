@@ -47,9 +47,11 @@ const CONNECTORS: { key: string; label: string; wizard: ActiveWizard }[] = [
 export function ConnectorsMenu({
   projectId,
   onCreated,
+  label = "+ Connectors",
 }: {
   projectId?: number;
   onCreated: () => void;
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState<ActiveWizard>(null);
@@ -96,7 +98,7 @@ export function ConnectorsMenu({
         onClick={() => setOpen((o) => !o)}
         className="inline-flex items-center gap-1 rounded-md border border-brand bg-brand/5 px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10"
       >
-        + Connectors
+        {label}
         <span className="text-xs">▾</span>
       </button>
 

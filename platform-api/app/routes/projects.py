@@ -13,11 +13,13 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.audit_event import AuditEvent
 from app.models.dashboard import Dashboard
 from app.models.data_source_ai_profile import (
     DataSourceAIProfile,
@@ -41,6 +43,9 @@ from app.schemas.project import (
     SavedQueryUpdate,
 )
 from app.services.customer_folders import CustomerFolderService
+from app.services.database_introspection_service import (
+    map_to_teiid_type as _map_teiid_type,
+)
 from app.services.file_sources import display_source
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
@@ -188,6 +193,244 @@ async def list_project_summaries(
             )
         )
     return summaries
+
+
+def _visible_projects_subquery(context: RequestContext):
+    """Select ids of projects the caller can see in the current tenant."""
+    member_sub = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == context.user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    return select(Project.id, Project.name).where(
+        Project.tenant_id == context.tenant_id,
+        or_(
+            Project.owner_id == context.user_id,
+            Project.id.in_(member_sub),
+        ),
+    )
+
+
+def _user_label(user: User) -> str:
+    """A human-friendly name for a user (display name > full name > email)."""
+    if user.display_name:
+        return user.display_name
+    full = " ".join(p for p in [user.first_name, user.last_name] if p)
+    return full or user.email
+
+
+class _ProjectMeta:
+    __slots__ = ("name", "owner_id", "is_shared")
+
+    def __init__(self, name: str, owner_id: int | None, is_shared: bool) -> None:
+        self.name = name
+        self.owner_id = owner_id
+        self.is_shared = is_shared
+
+
+async def _home_context(
+    session: AsyncSession, context: RequestContext
+) -> tuple[dict[int, _ProjectMeta], dict[int, str]]:
+    """Visible-project metadata + a user-id→name map for "Shared by" labels."""
+    member_sub = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == context.user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    rows = (
+        await session.execute(
+            select(
+                Project.id,
+                Project.name,
+                Project.owner_id,
+                Project.is_shared,
+            ).where(
+                Project.tenant_id == context.tenant_id,
+                or_(
+                    Project.owner_id == context.user_id,
+                    Project.id.in_(member_sub),
+                ),
+            )
+        )
+    ).all()
+    projects = {
+        pid: _ProjectMeta(name, owner_id, is_shared)
+        for pid, name, owner_id, is_shared in rows
+    }
+    users = list(
+        await session.scalars(
+            select(User).where(User.tenant_id == context.tenant_id)
+        )
+    )
+    names = {u.id: _user_label(u) for u in users}
+    return projects, names
+
+
+def _shared_by(
+    project: _ProjectMeta | None,
+    item_owner_id: int | None,
+    user_names: dict[int, str],
+    *,
+    item_shared: bool | None = None,
+) -> str:
+    """Resolve the "Shared by" label.
+
+    - "Private" when the item (or its project) is not shared.
+    - "Shared" when shared by the project owner.
+    - the owner's name when shared by someone other than the project owner.
+    """
+    if project is None:
+        return "Private"
+    is_shared = project.is_shared if item_shared is None else item_shared
+    if not is_shared:
+        return "Private"
+    if item_owner_id is None or item_owner_id == project.owner_id:
+        return "Shared"
+    return user_names.get(item_owner_id, "Shared")
+
+
+@router.get("/dashboards-all")
+async def list_all_dashboards(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[dict]:
+    """All dashboards across the caller's visible projects (Home view)."""
+    projects, user_names = await _home_context(session, context)
+    if not projects:
+        return []
+    rows = list(
+        await session.scalars(
+            select(Dashboard)
+            .where(Dashboard.project_id.in_(list(projects.keys())))
+            .order_by(Dashboard.created_at.desc())
+        )
+    )
+    return [
+        {
+            "id": d.id,
+            "name": d.name,
+            "projectId": d.project_id,
+            "projectName": (
+                projects[d.project_id].name if d.project_id in projects else "—"
+            ),
+            "status": d.status,
+            "sharedBy": _shared_by(
+                projects.get(d.project_id), d.owner_id, user_names
+            ),
+            "createdAt": d.created_at.isoformat() if d.created_at else None,
+        }
+        for d in rows
+    ]
+
+
+@router.get("/datasources-all")
+async def list_all_datasources(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[dict]:
+    """All data sources (file + database) across visible projects (Home view)."""
+    projects, user_names = await _home_context(session, context)
+    if not projects:
+        return []
+    pids = list(projects.keys())
+
+    file_rows = list(
+        await session.scalars(
+            select(FileSourceMeta)
+            .where(
+                FileSourceMeta.project_id.in_(pids),
+                FileSourceMeta.archived.is_(False),
+            )
+            .order_by(FileSourceMeta.created_at.desc())
+        )
+    )
+    db_rows = list(
+        await session.scalars(
+            select(DatabaseDataSource)
+            .where(
+                DatabaseDataSource.project_id.in_(pids),
+                DatabaseDataSource.archived.is_(False),
+            )
+            .order_by(DatabaseDataSource.created_at.desc())
+        )
+    )
+
+    out: list[dict] = []
+    for f in file_rows:
+        out.append(
+            {
+                "id": f.id,
+                "name": f.file_name,
+                "viewName": f.view_name,
+                "kind": "file",
+                "projectId": f.project_id,
+                "projectName": (
+                    projects[f.project_id].name
+                    if f.project_id in projects
+                    else "—"
+                ),
+                "sharedBy": _shared_by(
+                    projects.get(f.project_id) if f.project_id is not None else None,
+                    f.owner_id,
+                    user_names,
+                ),
+                "createdAt": f.created_at.isoformat() if f.created_at else None,
+            }
+        )
+    for d in db_rows:
+        out.append(
+            {
+                "id": d.id,
+                "name": d.display_name,
+                "viewName": d.teiid_view_name,
+                "kind": "database",
+                "projectId": d.project_id,
+                "projectName": (
+                    projects[d.project_id].name
+                    if d.project_id in projects
+                    else "—"
+                ),
+                "sharedBy": _shared_by(
+                    projects.get(d.project_id) if d.project_id is not None else None,
+                    d.created_by,
+                    user_names,
+                ),
+                "createdAt": d.created_at.isoformat() if d.created_at else None,
+            }
+        )
+    out.sort(key=lambda r: r["createdAt"] or "", reverse=True)
+    return out
+
+
+@router.get("/documents-all")
+async def list_all_documents(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[dict]:
+    """All documents across the caller's visible projects (Home view)."""
+    projects, user_names = await _home_context(session, context)
+    names = {pid: meta.name for pid, meta in projects.items()}
+    if not names:
+        return []
+    rows = list(
+        await session.scalars(
+            select(ProjectAsset)
+            .where(ProjectAsset.project_id.in_(list(names.keys())))
+            .order_by(ProjectAsset.created_at.desc())
+        )
+    )
+    return [
+        {
+            "id": a.id,
+            "name": a.title or a.original_filename or a.filename,
+            "projectId": a.project_id,
+            "projectName": names.get(a.project_id, "—"),
+            "aiStatus": a.ai_status,
+            "sharedBy": _shared_by(
+                projects.get(a.project_id), a.owner_user_id, user_names
+            ),
+            "createdAt": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in rows
+    ]
 
 
 @router.post(
@@ -384,20 +627,28 @@ async def list_project_datasources(
                     "projectId": meta.project_id if meta else None,
                     "ownerId": owner_id,
                     "columnTypes": (meta.column_types or []) if meta else [],
+                    "aiMetadata": (meta.ai_metadata or {}) if meta else {},
                     "archived": is_archived,
                 })
 
     # Append database-backed data sources registered against this project.
-    db_stmt = select(DatabaseDataSource).where(
-        DatabaseDataSource.tenant_id == context.tenant_id,
-        DatabaseDataSource.project_id == project_id,
-        DatabaseDataSource.status == "active",
+    db_stmt = (
+        select(DatabaseDataSource)
+        .where(
+            DatabaseDataSource.tenant_id == context.tenant_id,
+            DatabaseDataSource.project_id == project_id,
+            DatabaseDataSource.status == "active",
+        )
+        .options(selectinload(DatabaseDataSource.columns))
     )
     if not include_archived:
         db_stmt = db_stmt.where(DatabaseDataSource.archived.is_(False))
     db_sources = (await session.scalars(db_stmt)).all()
     for ds in db_sources:
         is_saas = ds.source_type == "saas_object"
+        cols = sorted(
+            ds.columns, key=lambda c: (c.ordinal_position or 0, c.column_name)
+        )
         datasources.append({
             "fileName": ds.display_name,
             "viewName": ds.teiid_view_name,
@@ -407,6 +658,14 @@ async def list_project_datasources(
             "connectorType": ds.connector_type,
             "id": ds.id,
             "ownerId": ds.created_by,
+            "columnTypes": [
+                {
+                    "name": c.column_name,
+                    "type": c.teiid_type_override
+                    or _map_teiid_type(c.data_type or ""),
+                }
+                for c in cols
+            ],
             "archived": ds.archived,
         })
 
@@ -569,6 +828,166 @@ async def add_datasources_to_project(
 
     await session.commit()
     return {"status": "ok", "added": added}
+
+
+# Standard Teiid runtime types offered in the column-type editor (item 5).
+STANDARD_TEIID_TYPES: tuple[str, ...] = (
+    "string",
+    "integer",
+    "long",
+    "short",
+    "double",
+    "float",
+    "bigdecimal",
+    "boolean",
+    "date",
+    "time",
+    "timestamp",
+    "varbinary",
+)
+
+
+@router.get("/{project_id}/datasources/column-types")
+async def list_standard_column_types(
+    project_id: int,
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> list[str]:
+    """Standard Teiid runtime types selectable in the column-type editor."""
+    return list(STANDARD_TEIID_TYPES)
+
+
+@router.put("/{project_id}/datasources/columns")
+async def update_datasource_columns(
+    project_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Update a datasource's column types and redeploy its VDB (item 5).
+
+    Body for a database table::
+
+        {"kind": "db", "id": 123,
+         "columns": [{"name": "Amount", "type": "double"}]}
+
+    Body for an uploaded file::
+
+        {"kind": "file", "viewName": "Sales_CSV",
+         "columns": [{"name": "Amount", "type": "double"}]}
+    """
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    columns = body.get("columns") or []
+    if not isinstance(columns, list) or not columns:
+        raise HTTPException(status_code=400, detail="columns must be a non-empty list")
+
+    type_by_name: dict[str, str] = {}
+    for col in columns:
+        name = (col or {}).get("name")
+        ctype = (col or {}).get("type")
+        if not name or not ctype:
+            continue
+        if ctype not in STANDARD_TEIID_TYPES:
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported column type: {ctype}"
+            )
+        type_by_name[str(name)] = str(ctype)
+
+    if not type_by_name:
+        raise HTTPException(status_code=400, detail="No valid columns provided")
+
+    kind = body.get("kind")
+
+    if kind == "db":
+        from app.models.database_data_source import DataSourceColumn
+        from app.services.teiid_registration_service import (
+            reconcile_database_sources,
+        )
+
+        ds_id = body.get("id")
+        if ds_id is None:
+            raise HTTPException(status_code=400, detail="id is required for db sources")
+        ds = await session.get(DatabaseDataSource, int(ds_id))
+        if ds is None or ds.tenant_id != context.tenant_id:
+            raise HTTPException(status_code=404, detail="Datasource not found")
+        if (
+            ds.created_by != context.user_id
+            and not await _is_project_admin(session, project, context)
+        ):
+            raise HTTPException(status_code=403, detail="Not allowed")
+
+        cols = (
+            await session.scalars(
+                select(DataSourceColumn).where(
+                    DataSourceColumn.data_source_id == ds.id
+                )
+            )
+        ).all()
+        for c in cols:
+            if c.column_name in type_by_name:
+                c.teiid_type_override = type_by_name[c.column_name]
+        await session.commit()
+
+        result = await reconcile_database_sources(session, only_id=ds.id)
+        if result.get("failed"):
+            raise HTTPException(
+                status_code=502,
+                detail="Column types saved but VDB redeploy failed. Try again.",
+            )
+        return {"status": "ok", "redeployed": True, "kind": "db"}
+
+    if kind == "file":
+        from app.models.user_vdb import UserVDB
+        from app.services.vdb_management import VDBManagementService
+
+        view_name = body.get("viewName")
+        if not view_name:
+            raise HTTPException(
+                status_code=400, detail="viewName is required for file sources"
+            )
+        meta = await session.scalar(
+            select(FileSourceMeta).where(
+                FileSourceMeta.tenant_id == context.tenant_id,
+                FileSourceMeta.owner_id == context.user_id,
+                FileSourceMeta.view_name == view_name,
+            )
+        )
+        if meta is None:
+            raise HTTPException(status_code=404, detail="Datasource not found")
+
+        existing = {
+            (c or {}).get("name"): dict(c)
+            for c in (meta.column_types or [])
+            if isinstance(c, dict)
+        }
+        for name, ctype in type_by_name.items():
+            entry = existing.get(name, {"name": name})
+            entry["type"] = ctype
+            existing[name] = entry
+        meta.column_types = list(existing.values())
+        await session.commit()
+
+        user_vdb = await session.scalar(
+            select(UserVDB).where(
+                UserVDB.tenant_id == context.tenant_id,
+                UserVDB.user_id == meta.owner_id,
+            )
+        )
+        if user_vdb is not None:
+            svc = VDBManagementService()
+            try:
+                await svc.redeploy_vdb(user_vdb.vdb_id)
+            except Exception as exc:  # pragma: no cover - servlet failure
+                logger.warning("File VDB redeploy failed for %s: %s", view_name, exc)
+            finally:
+                aclose = getattr(svc, "aclose", None)
+                if aclose is not None:
+                    await aclose()
+        return {"status": "ok", "redeployed": user_vdb is not None, "kind": "file"}
+
+    raise HTTPException(status_code=400, detail="kind must be 'db' or 'file'")
 
 
 async def _is_project_admin(
@@ -1193,6 +1612,33 @@ async def get_project_activity(
                 "detail": "AI indexing complete",
                 "actor": "System",
             })
+
+    audit_events = (
+        await session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.project_id == project_id)
+            .order_by(AuditEvent.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    for ev in audit_events:
+        src_bits: list[str] = []
+        if ev.tables_queried:
+            src_bits.append(", ".join(str(t) for t in ev.tables_queried))
+        if ev.documents_read:
+            src_bits.append(", ".join(str(d) for d in ev.documents_read))
+        detail = " · ".join(src_bits) if src_bits else None
+        if ev.duration_ms is not None:
+            detail = f"{detail} · {ev.duration_ms}ms" if detail else f"{ev.duration_ms}ms"
+        events.append({
+            "id": f"audit-{ev.id}",
+            "ts": ev.created_at.isoformat() if ev.created_at else None,
+            "category": "ai",
+            "label": "AI Action",
+            "title": ev.title or f"AI intelligence: {ev.prompt_type or ev.event_type}",
+            "detail": detail,
+            "actor": actor_name(ev.user_id),
+        })
 
     events = [e for e in events if e["ts"] is not None]
     events.sort(key=lambda e: e["ts"], reverse=True)

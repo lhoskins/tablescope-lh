@@ -184,6 +184,7 @@ export interface DataSource {
   fileMetaId?: number | null;
   ownerId?: number | null;
   columnTypes?: unknown[];
+  aiMetadata?: Record<string, unknown> | null;
   archived?: boolean;
 }
 
@@ -215,6 +216,26 @@ export function useProjectDataSources(projectId: string) {
     queryKey: ["project", projectId, "datasources"],
     queryFn: () =>
       apiClient.get<DataSource[]>(`/api/projects/${projectId}/datasources`),
+    enabled: Boolean(projectId),
+  });
+}
+
+// ── Members ──────────────────────────────────────────────────────────
+
+export interface ProjectMember {
+  project_id: number;
+  user_id: number;
+  role: string;
+  is_active: boolean;
+  email: string;
+  display_name: string | null;
+}
+
+export function useProjectMembers(projectId: string) {
+  return useQuery({
+    queryKey: ["project", projectId, "members"],
+    queryFn: () =>
+      apiClient.get<ProjectMember[]>(`/api/projects/${projectId}/members`),
     enabled: Boolean(projectId),
   });
 }

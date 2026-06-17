@@ -25,6 +25,13 @@ services:
     image: ollama/ollama:latest
     volumes:
       - /mnt/tablescope-ai/ollama:/root/.ollama
+    environment:
+      # Serve several requests at once and keep the model resident so
+      # concurrent project analyses don't queue behind a single slot or pay
+      # repeated model-load latency.
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_MAX_LOADED_MODELS=2
+      - OLLAMA_KEEP_ALIVE=30m
     deploy:
       resources:
         reservations:

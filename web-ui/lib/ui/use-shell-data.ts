@@ -86,6 +86,114 @@ export function mapProjectSummary(p: ProjectSummaryResponse): ProjectSummary {
   };
 }
 
+export interface HomeDashboardRow {
+  id: number;
+  name: string;
+  projectId: number;
+  projectName: string;
+  status: string;
+  sharedBy: string;
+  createdAt: string | null;
+}
+
+export interface HomeDocumentRow {
+  id: number;
+  name: string;
+  projectId: number;
+  projectName: string;
+  aiStatus: string;
+  sharedBy: string;
+  createdAt: string | null;
+}
+
+export interface HomeDataSourceRow {
+  id: number;
+  name: string;
+  viewName: string;
+  kind: "file" | "database";
+  projectId: number;
+  projectName: string;
+  sharedBy: string;
+  createdAt: string | null;
+}
+
+export function useAllDashboards() {
+  return useQuery({
+    queryKey: ["home", "dashboards-all"],
+    queryFn: () =>
+      apiClient.get<HomeDashboardRow[]>("/api/projects/dashboards-all"),
+  });
+}
+
+export function useAllDocuments() {
+  return useQuery({
+    queryKey: ["home", "documents-all"],
+    queryFn: () =>
+      apiClient.get<HomeDocumentRow[]>("/api/projects/documents-all"),
+  });
+}
+
+export function useAllDataSources() {
+  return useQuery({
+    queryKey: ["home", "datasources-all"],
+    queryFn: () =>
+      apiClient.get<HomeDataSourceRow[]>("/api/projects/datasources-all"),
+  });
+}
+
+export interface AiChatMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string | null;
+}
+
+export interface AiConversation {
+  id: number;
+  title: string;
+  projectId: number | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  messages?: AiChatMessage[];
+}
+
+export function useConversations() {
+  return useQuery({
+    queryKey: ["ai", "conversations"],
+    queryFn: () => apiClient.get<AiConversation[]>("/api/ai/conversations"),
+  });
+}
+
+export function useConversation(id: number | null) {
+  return useQuery({
+    queryKey: ["ai", "conversation", id],
+    queryFn: () =>
+      apiClient.get<AiConversation>(`/api/ai/conversations/${id}`),
+    enabled: id != null,
+  });
+}
+
+export function createConversation(
+  body: { title?: string; project_id?: number | null } = {},
+): Promise<AiConversation> {
+  return apiClient.post<AiConversation>("/api/ai/conversations", body);
+}
+
+export function sendConversationMessage(
+  conversationId: number,
+  question: string,
+  projectId?: number | null,
+): Promise<AiConversation> {
+  return apiClient.post<AiConversation>(
+    `/api/ai/conversations/${conversationId}/messages`,
+    { question, project_id: projectId ?? null },
+  );
+}
+
+export function deleteConversation(conversationId: number): Promise<void> {
+  return apiClient.delete<void>(`/api/ai/conversations/${conversationId}`);
+}
+
 export function useProjectSummaries(opts?: { recent?: boolean; limit?: number }) {
   const params = new URLSearchParams();
   if (opts?.recent) params.set("recent", "true");

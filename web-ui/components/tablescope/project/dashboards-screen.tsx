@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
-import { IconSparkles, IconPlus, IconLayoutDashboard } from "@tabler/icons-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { IconSparkles, IconPlus, IconLayoutDashboard, IconTrash } from "@tabler/icons-react";
+import { apiClient } from "@/lib/api-client";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
@@ -12,9 +14,12 @@ import { timeAgo } from "@/lib/ui/format";
 import { accentFor } from "@/lib/ui/color";
 import {
   useProjectDashboards,
+  useProjectQueries,
+  useProjectDataSources,
   widgetCount,
   type Dashboard,
 } from "@/lib/ui/use-project-data";
+import { DashboardDetailView } from "@/components/tablescope/project/detail-views";
 
 function isPublished(d: Dashboard): boolean {
   return d.status.toLowerCase() === "published";
@@ -41,7 +46,89 @@ function Thumb({ dashboard }: { dashboard: Dashboard }) {
 
 export function DashboardsScreen({ projectId }: { projectId: string }) {
   const { data, isLoading } = useProjectDashboards(projectId);
+  const { data: queries } = useProjectQueries(projectId);
+  const { data: sources } = useProjectDataSources(projectId);
+  const queryClient = useQueryClient();
   const rows = useMemo(() => data ?? [], [data]);
+  const [viewingId, setViewingId] = useState<number | null>(null);
+  const viewing = rows.find((d) => d.id === viewingId) ?? null;
+
+  // Id of a freshly-created dashboard that has NOT yet been explicitly saved.
+  // While set, the dashboard is an ephemeral draft: closing the editor without
+  // saving (or navigating away/closing the tab) deletes it. A successful save
+  // (`onPersisted`) clears this so the dashboard is kept.
+  const draftIdRef = useRef<number | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiClient.delete(`/api/projects/${projectId}/dashboards/${id}`),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "dashboards"],
+      }),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      apiClient.post<Dashboard>(`/api/projects/${projectId}/dashboards`, {
+        name: `Dashboard ${rows.length + 1}`,
+        description: "",
+        config: { widgets: [], globalFilters: [] },
+      }),
+    onSuccess: async (newDash) => {
+      draftIdRef.current = newDash.id;
+      await queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "dashboards"],
+      });
+      setViewingId(newDash.id);
+    },
+  });
+
+  // A draft becomes "kept" the moment the user persists any change in the editor.
+  const handlePersisted = useCallback(() => {
+    draftIdRef.current = null;
+  }, []);
+
+  // Close the editor. If the open dashboard is still an untouched draft, delete it.
+  const handleCloseViewer = useCallback(() => {
+    const id = viewingId;
+    setViewingId(null);
+    if (id != null && draftIdRef.current === id) {
+      draftIdRef.current = null;
+      deleteMutation.mutate(id);
+    }
+  }, [viewingId, deleteMutation]);
+
+  const handleDeleteDashboard = useCallback(
+    (d: Dashboard) => {
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(`Delete dashboard "${d.name}"? This cannot be undone.`)
+      ) {
+        return;
+      }
+      if (draftIdRef.current === d.id) draftIdRef.current = null;
+      deleteMutation.mutate(d.id);
+    },
+    [deleteMutation],
+  );
+
+  // Auto-delete a pristine draft on tab close / refresh / navigating away.
+  useEffect(() => {
+    const flush = () => {
+      if (draftIdRef.current != null) {
+        apiClient.deleteBeacon(
+          `/api/projects/${projectId}/dashboards/${draftIdRef.current}`,
+        );
+        draftIdRef.current = null;
+      }
+    };
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      flush();
+    };
+  }, [projectId]);
 
   const published = rows.filter(isPublished).length;
   const aiCount = rows.filter((d) => d.ai_generated).length;
@@ -59,13 +146,27 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
             <IconSparkles size={14} />
             Generate with AI
           </Button>
-          <Button variant="primary">
+          <Button
+            variant="primary"
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending}
+          >
             <IconPlus size={14} />
-            New dashboard
+            {createMutation.isPending ? "Creating…" : "New dashboard"}
           </Button>
         </>
       }
     >
+      {viewing ? (
+        <DashboardDetailView
+          projectId={projectId}
+          dashboard={viewing}
+          savedQueries={queries ?? []}
+          datasources={sources ?? []}
+          onBack={handleCloseViewer}
+          onPersisted={handlePersisted}
+        />
+      ) : (
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile
@@ -95,7 +196,11 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
             {rows.map((d) => {
               const pub = isPublished(d);
               return (
-                <Card key={d.id} className="flex flex-col overflow-hidden">
+                <Card
+                  key={d.id}
+                  onClick={() => setViewingId(d.id)}
+                  className="flex cursor-pointer flex-col overflow-hidden transition-colors hover:border-line-secondary"
+                >
                   <div className="p-3">
                     <Thumb dashboard={d} />
                   </div>
@@ -121,11 +226,37 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
                       Updated {timeAgo(d.updated_at)}
                     </span>
                     <div className="flex items-center gap-3 text-[12px] font-medium text-brand-700">
-                      <button type="button" className="hover:underline">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewingId(d.id);
+                        }}
+                        className="hover:underline"
+                      >
                         {pub ? "Share" : "Publish"}
                       </button>
-                      <button type="button" className="hover:underline">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewingId(d.id);
+                        }}
+                        className="hover:underline"
+                      >
                         Edit
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete dashboard"
+                        aria-label={`Delete dashboard ${d.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDashboard(d);
+                        }}
+                        className="text-ink-tertiary hover:text-red-600"
+                      >
+                        <IconTrash size={15} />
                       </button>
                     </div>
                   </div>
@@ -135,12 +266,16 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
 
             <button
               type="button"
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending}
               className={cn(
-                "flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line-secondary bg-bg-primary text-center hover:border-brand-500 hover:bg-brand-50/40",
+                "flex min-h-[220px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line-secondary bg-bg-primary text-center hover:border-brand-500 hover:bg-brand-50/40 disabled:opacity-60",
               )}
             >
               <IconLayoutDashboard size={22} className="text-ink-tertiary" />
-              <span className="text-h3 text-ink-secondary">New dashboard</span>
+              <span className="text-h3 text-ink-secondary">
+                {createMutation.isPending ? "Creating…" : "New dashboard"}
+              </span>
               <span className="max-w-[200px] text-small text-ink-tertiary">
                 Build manually or let AI generate from your queries
               </span>
@@ -148,6 +283,7 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
           </div>
         )}
       </div>
+      )}
     </ProjectShell>
   );
 }

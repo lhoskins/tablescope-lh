@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconHelpCircle, IconPlus } from "@tabler/icons-react";
+import { IconHelpCircle } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
 import { HeroSearch } from "@/components/tablescope/home/hero-search";
-import { QuickActionGrid } from "@/components/tablescope/home/quick-actions";
+import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { RecentProjectsTable } from "@/components/tablescope/home/recent-projects";
+import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
+import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { getUserMeta } from "@/lib/auth";
 import { greeting } from "@/lib/ui/format";
 import {
@@ -38,6 +40,7 @@ export default function HomePage() {
     limit: 5,
   });
   const { data: allProjects } = useProjectSummaries();
+  const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
     if (!getUserMeta()) router.replace("/login");
@@ -53,7 +56,6 @@ export default function HomePage() {
       tenant={tenant}
       user={user}
       counts={{ projects: allProjects?.length }}
-      centered
       topBarLeft={
         <span className="text-[15px] text-ink-secondary">
           {user.name ? greeting(user.name) : "Welcome"}
@@ -70,24 +72,22 @@ export default function HomePage() {
             <IconHelpCircle size={15} />
             Help
           </Button>
-          <Button
-            variant="primary"
-            size="md"
-            onClick={() => router.push("/projects/new")}
-          >
-            <IconPlus size={15} />
-            New project
-          </Button>
         </>
       }
     >
       <div className="space-y-10 py-6">
-        <HeroSearch />
-        <QuickActionGrid />
-        <RecentProjectsTable
-          projects={isLoading ? [] : (projects ?? [])}
-        />
+        <div className="mx-auto w-full max-w-content space-y-6">
+          <HeroSearch />
+          <HomeAiSuggestions />
+        </div>
+        <IntelligenceFeed />
+        <div className="mx-auto w-full max-w-content">
+          <RecentProjectsTable
+            projects={isLoading ? [] : (projects ?? [])}
+          />
+        </div>
       </div>
+      <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
     </AppShell>
   );
 }

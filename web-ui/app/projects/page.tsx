@@ -1,225 +1,160 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiClient } from "@/lib/api-client";
+import Link from "next/link";
+import { IconPlus, IconSearch } from "@tabler/icons-react";
+import { AppShell } from "@/components/tablescope/app-shell";
+import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { getUserMeta } from "@/lib/auth";
+import { aiStatusLabel, aiStatusTone, timeAgo } from "@/lib/ui/format";
+import { accentFor } from "@/lib/ui/color";
+import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
+import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 
-type Project = {
-  id: number;
-  name: string;
-  description: string | null;
-  type: string | null;
-  is_shared: boolean;
-  owner_id: number | null;
-  created_at: string;
+const FALLBACK_USER: CurrentUser = {
+  name: "",
+  email: "",
+  role: "",
+  tenantName: "",
+  initials: "··",
+};
+const FALLBACK_TENANT: TenantSummary = {
+  name: "Tablescope",
+  slug: "",
+  initials: "TS",
 };
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const { data: identity } = useCurrentUser();
+  const { data: projects } = useProjectSummaries();
+
+  const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [isShared, setIsShared] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const meta = getUserMeta();
-  const currentUserId = meta?.user_id ?? null;
 
-  const { data, isLoading, error: fetchError } = useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: () => apiClient.get<Project[]>("/api/projects"),
-  });
+  useEffect(() => {
+    if (!getUserMeta()) {
+      router.replace("/login");
+      return;
+    }
+    if (new URLSearchParams(window.location.search).get("new") != null) {
+      setShowCreate(true);
+    }
+  }, [router]);
 
-  const createMutation = useMutation({
-    mutationFn: (payload: { name: string; description: string; is_shared: boolean }) =>
-      apiClient.post<Project>("/api/projects", payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-      setShowCreate(false);
-      setName("");
-      setDescription("");
-      setIsShared(false);
-      setError(null);
-    },
-    onError: (err: Error) => setError(err.message),
-  });
+  const rows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const all = projects ?? [];
+    return term ? all.filter((p) => p.name.toLowerCase().includes(term)) : all;
+  }, [projects, search]);
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => apiClient.delete(`/api/projects/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
-  });
-
-  const { privateProjects, sharedProjects } = useMemo(() => {
-    if (!data) return { privateProjects: [], sharedProjects: [] };
-    return {
-      privateProjects: data.filter((p) => !p.is_shared && p.owner_id === currentUserId),
-      sharedProjects: data.filter((p) => p.is_shared || (p.owner_id !== currentUserId)),
-    };
-  }, [data, currentUserId]);
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    createMutation.mutate({ name, description, is_shared: isShared });
-  }
-
-  function ProjectCard({ project }: { project: Project }) {
-    const isOwner = project.owner_id === currentUserId;
-    return (
-      <li
-        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
-        onClick={() => router.push(`/projects/${project.id}`)}
-      >
-        <div>
-          <p className="font-medium text-slate-900">{project.name}</p>
-          <p className="text-sm text-slate-500">
-            {project.description ?? "No description"}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {project.is_shared ? (
-            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
-              shared
-            </span>
-          ) : (
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-              private
-            </span>
-          )}
-          {isOwner && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm("Delete this project?")) {
-                  deleteMutation.mutate(project.id);
-                }
-              }}
-              className="text-xs text-red-500 hover:text-red-700"
-            >
-              Delete
-            </button>
-          )}
-        </div>
-      </li>
-    );
-  }
+  const user = identity?.user ?? FALLBACK_USER;
+  const tenant = identity?.tenant ?? FALLBACK_TENANT;
 
   return (
-    <section>
-      <header className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Projects</h1>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90"
-        >
-          {showCreate ? "Cancel" : "Create Project"}
-        </button>
-      </header>
-
-      {showCreate && (
-        <form
-          onSubmit={handleSubmit}
-          className="mb-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
-        >
-          <h2 className="mb-4 text-lg font-medium text-slate-900">
-            New Project
-          </h2>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700">
-                Project Name
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                placeholder="My Project"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700">
-                Description
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={2}
-                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                placeholder="Optional description"
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <label className="relative inline-flex cursor-pointer items-center">
-                <input
-                  type="checkbox"
-                  checked={isShared}
-                  onChange={(e) => setIsShared(e.target.checked)}
-                  className="peer sr-only"
-                />
-                <div className="h-5 w-9 rounded-full bg-slate-200 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-brand peer-checked:after:translate-x-full" />
-              </label>
-              <span className="text-sm text-slate-700">
-                {isShared ? "Shared project" : "Private project"}
-              </span>
-            </div>
-            {error && (
-              <p className="text-sm text-red-600">{error}</p>
-            )}
-            <button
-              type="submit"
-              disabled={createMutation.isPending || !name.trim()}
-              className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
-            >
-              {createMutation.isPending ? "Creating..." : "Create"}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {isLoading && <p>Loading projects...</p>}
-      {fetchError && (
-        <p className="text-red-600">{(fetchError as Error).message}</p>
-      )}
-      {data && data.length === 0 && !showCreate && (
-        <div className="rounded-lg border-2 border-dashed border-slate-200 p-12 text-center">
-          <p className="text-slate-500">No projects yet.</p>
-          <p className="mt-1 text-sm text-slate-400">
-            Click &quot;Create Project&quot; to get started.
-          </p>
+    <AppShell
+      mode="home"
+      activeNav="projects"
+      tenant={tenant}
+      user={user}
+      counts={{ projects: projects?.length }}
+      centered
+      topBarLeft={<span className="text-h2 text-ink-primary">Projects</span>}
+      topBarRight={
+        <Button variant="primary" size="md" onClick={() => setShowCreate(true)}>
+          <IconPlus size={15} />
+          New project
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        <div className="relative max-w-sm">
+          <IconSearch
+            size={15}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+          />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search projects…"
+            className="h-9 w-full rounded-md border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+          />
         </div>
-      )}
 
-      {/* Private Projects */}
-      {privateProjects.length > 0 && (
-        <div className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
-            Private
-          </h2>
-          <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
-            {privateProjects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
-          </ul>
+        <div className="overflow-hidden rounded-lg border border-line-tertiary bg-bg-primary">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-line-tertiary bg-bg-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
+                <th className="px-4 py-2.5 font-medium">Project</th>
+                <th className="px-4 py-2.5 text-right font-medium">Documents</th>
+                <th className="px-4 py-2.5 text-right font-medium">Queries</th>
+                <th className="px-4 py-2.5 text-right font-medium">Dashboards</th>
+                <th className="px-4 py-2.5 font-medium">AI Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-4 py-10 text-center text-ink-tertiary"
+                  >
+                    {search
+                      ? "No projects match your search."
+                      : "No projects yet. Create your first one."}
+                  </td>
+                </tr>
+              )}
+              {rows.map((p) => (
+                <tr
+                  key={p.id}
+                  className="border-b border-line-tertiary last:border-0 hover:bg-bg-tertiary"
+                >
+                  <td className="px-4 py-3">
+                    <Link
+                      href={`/projects/${p.id}`}
+                      className="flex items-center gap-2.5"
+                    >
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ background: p.accent ?? accentFor(p.id) }}
+                      />
+                      <span>
+                        <span className="block font-medium text-ink-primary">
+                          {p.name}
+                        </span>
+                        <span className="block text-small text-ink-tertiary">
+                          Updated {timeAgo(p.updatedLabel)} ·{" "}
+                          {p.visibility === "shared" ? "Shared" : "Private"}
+                        </span>
+                      </span>
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-ink-secondary">
+                    {p.documentCount}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-ink-secondary">
+                    {p.queryCount}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-ink-secondary">
+                    {p.dashboardCount}
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge tone={aiStatusTone(p.aiStatus)}>
+                      {aiStatusLabel(p.aiStatus)}
+                    </Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
 
-      {/* Shared Projects */}
-      {sharedProjects.length > 0 && (
-        <div>
-          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-400">
-            Shared
-          </h2>
-          <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 bg-white">
-            {sharedProjects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
-          </ul>
-        </div>
-      )}
-    </section>
+      <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
+    </AppShell>
   );
 }

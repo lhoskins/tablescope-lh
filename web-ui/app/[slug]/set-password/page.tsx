@@ -67,7 +67,7 @@ export default function SetPasswordPage() {
         user_id: result.user_id,
         tenant_slug: result.tenant_slug,
       });
-      router.replace("/dashboard");
+      router.replace("/");
     } catch (err) {
       setError((err as Error).message);
       setLoading(false);

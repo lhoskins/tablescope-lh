@@ -29,12 +29,14 @@ from app.routes import document_families as document_families_routes
 from app.routes import file_analysis as file_analysis_routes
 from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
+from app.routes import home_intelligence as home_intelligence_routes
 from app.routes import project_assets as project_assets_routes
 from app.routes import project_graph as project_graph_routes
 from app.routes import projects as projects_routes
 from app.routes import provisioning as provisioning_routes
 from app.routes import query as query_routes
 from app.routes import query_scopes as query_scopes_routes
+from app.routes import reports as reports_routes
 from app.routes import saas_sources as saas_sources_routes
 from app.routes import scopes as scopes_routes
 from app.routes import sharing as sharing_routes
@@ -42,6 +44,7 @@ from app.routes import storage as storage_routes
 from app.routes import tenant_data_planes as tenant_data_planes_routes
 from app.routes import tenants as tenants_routes
 from app.routes import upload as upload_routes
+from app.routes import user_preferences as user_preferences_routes
 from app.services.connection_pool import pool_manager
 
 logger = logging.getLogger(__name__)
@@ -162,6 +165,9 @@ def create_app() -> FastAPI:
     app.include_router(billing_routes.router, prefix=api_prefix)
     app.include_router(billing_admin_routes.router, prefix=api_prefix)
     app.include_router(provisioning_routes.router, prefix=api_prefix)
+    app.include_router(home_intelligence_routes.router, prefix=api_prefix)
+    app.include_router(reports_routes.router, prefix=api_prefix)
+    app.include_router(user_preferences_routes.router, prefix=api_prefix)
 
     return app
 

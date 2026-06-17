@@ -103,10 +103,13 @@ export function Sidebar({
 
   return (
     <aside className="flex w-sidebar shrink-0 flex-col border-r border-line-tertiary bg-bg-primary">
-      <div className="flex items-center gap-2 px-4 py-3.5">
+      <Link
+        href="/"
+        className="flex items-center gap-2 px-4 py-3.5 transition-opacity hover:opacity-80"
+      >
         <BrandMark />
         <span className="text-h2 text-ink-primary">Tablescope</span>
-      </div>
+      </Link>
 
       {/* Selector pill */}
       <div className="px-3 pb-2">
@@ -163,7 +166,7 @@ export function Sidebar({
               </Link>
             ))}
             <Link
-              href="/projects/new"
+              href="/projects?new=1"
               className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
             >
               <IconPlus size={15} stroke={1.8} />

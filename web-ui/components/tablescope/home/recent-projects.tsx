@@ -41,7 +41,7 @@ export function RecentProjectsTable({
                 >
                   No projects yet.{" "}
                   <Link
-                    href="/projects/new"
+                    href="/projects?new=1"
                     className="text-brand-500 hover:text-brand-700"
                   >
                     Create your first project

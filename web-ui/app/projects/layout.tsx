@@ -1,15 +1,8 @@
 import { ReactNode } from "react";
-import { Header } from "@/components/layout/Header";
-import { Sidebar } from "@/components/layout/Sidebar";
 
+// The Concept A screens (projects list + per-project workspace) render their
+// own full-screen shell (AppShell / ProjectShell), so this layout is a simple
+// pass-through.
 export default function ProjectsLayout({ children }: { children: ReactNode }) {
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <Header />
-      <div className="mx-auto flex max-w-7xl gap-6 px-6 py-6">
-        <Sidebar />
-        <main className="flex-1">{children}</main>
-      </div>
-    </div>
-  );
+  return <>{children}</>;
 }

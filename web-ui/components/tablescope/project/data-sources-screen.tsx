@@ -1,14 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   IconRefresh,
-  IconPlus,
   IconDatabase,
   IconFileSpreadsheet,
   IconApi,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
+import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
+
 import {
   ContextPanel,
   ContextSection,
@@ -17,12 +19,16 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/cn";
+import { apiClient } from "@/lib/api-client";
 import {
   useProjectDataSources,
   columnLabel,
   type DataSource,
 } from "@/lib/ui/use-project-data";
+import { metaList } from "@/lib/ui/ai-meta";
+import { DataSourceResultView } from "@/components/tablescope/project/detail-views";
 
 function isDatabase(s: DataSource): boolean {
   return s.sourceType === "database_table";
@@ -59,15 +65,57 @@ function humanSize(bytes: number | null): string {
 
 export function DataSourcesScreen({ projectId }: { projectId: string }) {
   const { data, isLoading } = useProjectDataSources(projectId);
+  const queryClient = useQueryClient();
   const rows = useMemo(
     () => (data ?? []).filter((s) => !s.archived),
     [data],
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [detailKey, setDetailKey] = useState<string | null>(null);
+
+  // ── Drag-to-replace ────────────────────────────────────────────────
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [pendingReplace, setPendingReplace] = useState<{
+    source: DataSource;
+    file: File;
+  } | null>(null);
+  const [replaceMsg, setReplaceMsg] = useState<string | null>(null);
+
+  const handleDrop = useCallback(
+    (source: DataSource, files: FileList | null) => {
+      setDragOverKey(null);
+      if (!files || files.length === 0) return;
+      setPendingReplace({ source, file: files[0] });
+    },
+    [],
+  );
+
+  const confirmReplace = useCallback(async () => {
+    if (!pendingReplace) return;
+    const { source, file } = pendingReplace;
+    setPendingReplace(null);
+    setReplaceMsg(null);
+    try {
+      const res = await apiClient.upload<{ addedColumns?: string[] }>(
+        `/api/upload/datasources/${encodeURIComponent(source.viewName)}/replace`,
+        file,
+      );
+      const added = res.addedColumns ?? [];
+      setReplaceMsg(
+        `Replaced "${source.fileName}"${added.length ? ` (added column(s): ${added.join(", ")})` : ""}.`,
+      );
+      queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "datasources"],
+      });
+    } catch (err) {
+      setReplaceMsg(`Error: ${(err as Error).message}`);
+    }
+  }, [pendingReplace, projectId, queryClient]);
 
   const keyFor = (s: DataSource) => s.viewName || s.fileName;
   const selected =
     rows.find((s) => keyFor(s) === selectedKey) ?? rows[0] ?? null;
+  const detail = rows.find((s) => keyFor(s) === detailKey) ?? null;
 
   const dbCount = rows.filter(isDatabase).length;
   const fileCount = rows.filter((s) => !isDatabase(s) && !isSaas(s)).length;
@@ -87,14 +135,27 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
             <IconRefresh size={14} />
             Sync all
           </Button>
-          <Button variant="primary">
-            <IconPlus size={14} />
-            Connect source
-          </Button>
+          <ConnectorsMenu
+            projectId={Number(projectId)}
+            label="+ Connect Database"
+            onCreated={() =>
+              queryClient.invalidateQueries({
+                queryKey: ["project", projectId, "datasources"],
+              })
+            }
+          />
         </>
       }
-      contextPanel={<SourceDetailPanel source={selected} />}
+      contextPanel={<SourceDetailPanel source={detail ?? selected} />}
     >
+      {detail ? (
+        <DataSourceResultView
+          projectId={projectId}
+          source={detail}
+          backLabel="Data Sources"
+          onBack={() => setDetailKey(null)}
+        />
+      ) : (
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Total sources" value={rows.length} />
@@ -117,85 +178,133 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
             started.
           </Card>
         ) : (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {rows.map((s) => {
-              const key = keyFor(s);
-              const active = selected && keyFor(selected) === key;
-              const cols = s.columnTypes ?? [];
-              return (
-                <Card
-                  key={key}
-                  onClick={() => setSelectedKey(key)}
-                  className={cn(
-                    "cursor-pointer",
-                    active && "ring-1 ring-brand-500",
-                  )}
-                >
-                  <div className="flex items-start gap-3 p-4">
-                    <SourceIcon source={s} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-h3 text-ink-primary">
-                          {s.fileName}
-                        </span>
-                        <Badge tone={isDatabase(s) ? "success" : "neutral"}>
-                          {isDatabase(s) ? "Connected" : "File"}
-                        </Badge>
-                      </div>
-                      <div className="text-small text-ink-tertiary">
-                        {sourceTypeLabel(s)}
-                        {humanSize(s.size) ? ` · ${humanSize(s.size)}` : ""}
-                        {cols.length ? ` · ${cols.length} columns` : ""}
-                      </div>
-                    </div>
-                  </div>
-                  {cols.length > 0 && (
-                    <div className="border-t border-line-tertiary px-4 py-2.5">
-                      <table className="w-full text-[12px]">
-                        <thead>
-                          <tr className="text-left text-caption uppercase tracking-wide text-ink-tertiary">
-                            <th className="py-1 font-medium">Column</th>
-                            <th className="py-1 font-medium">Type</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {cols.slice(0, 4).map((c, i) => {
-                            const { name, type } = columnLabel(c);
-                            return (
-                              <tr key={`${name}-${i}`}>
-                                <td className="py-1 text-ink-primary">{name}</td>
-                                <td className="py-1 text-ink-tertiary">
-                                  {type || "—"}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                      {cols.length > 4 && (
-                        <div className="pt-1 text-small text-ink-tertiary">
-                          {cols.length - 4} more columns
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between border-t border-line-tertiary px-4 py-2.5">
-                    <span className="truncate text-small text-ink-tertiary">
-                      {s.viewName}
-                    </span>
-                    <button
-                      type="button"
-                      className="text-[12px] font-medium text-brand-700 hover:underline"
-                    >
-                      Sync now
-                    </button>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
+          <Card>
+            <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
+              <span className="text-h3 text-ink-primary">Data Sources</span>
+              <span className="text-small text-ink-tertiary">
+                {rows.length} total
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-line-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
+                    <th className="px-4 py-2 font-medium">Name</th>
+                    <th className="px-4 py-2 font-medium">Source</th>
+                    <th className="px-4 py-2 font-medium">Type</th>
+                    <th className="px-4 py-2 font-medium">Visibility</th>
+                    <th className="px-4 py-2 font-medium">Columns</th>
+                    <th className="px-4 py-2 font-medium">Size</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((s) => {
+                    const key = keyFor(s);
+                    const active = selected && keyFor(selected) === key;
+                    const cols = s.columnTypes ?? [];
+                    const isFile = !isDatabase(s) && !isSaas(s);
+                    return (
+                      <tr
+                        key={key}
+                        onClick={() => {
+                          setSelectedKey(key);
+                          setDetailKey(key);
+                        }}
+                        onDragOver={
+                          isFile
+                            ? (e) => {
+                                e.preventDefault();
+                                setDragOverKey(key);
+                              }
+                            : undefined
+                        }
+                        onDragLeave={
+                          isFile ? () => setDragOverKey(null) : undefined
+                        }
+                        onDrop={
+                          isFile
+                            ? (e) => {
+                                e.preventDefault();
+                                handleDrop(s, e.dataTransfer.files);
+                              }
+                            : undefined
+                        }
+                        className={cn(
+                          "cursor-pointer border-b border-line-tertiary last:border-0",
+                          dragOverKey === key
+                            ? "border-brand border-dashed bg-brand-50/30 ring-2 ring-brand/30"
+                            : active
+                              ? "bg-brand-50/60"
+                              : "hover:bg-bg-secondary",
+                        )}
+                      >
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <SourceIcon source={s} />
+                            <span
+                              className={cn(
+                                "font-medium",
+                                active ? "text-brand-700" : "text-ink-primary",
+                              )}
+                            >
+                              {s.fileName}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-ink-secondary">
+                          {s.viewName || "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-ink-secondary">
+                          {sourceTypeLabel(s)}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <Badge tone={isDatabase(s) ? "success" : "neutral"}>
+                            {isDatabase(s) ? "Connected" : "File"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-2.5 text-ink-secondary">
+                          {cols.length || "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-ink-tertiary">
+                          {humanSize(s.size) || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         )}
+
+        {replaceMsg && (
+          <p className="text-[12px] text-ink-secondary">{replaceMsg}</p>
+        )}
+
+        <ConfirmDialog
+          open={pendingReplace !== null}
+          title="Overwrite datasource?"
+          message={
+            pendingReplace ? (
+              <>
+                Are you sure you want to overwrite{" "}
+                <span className="font-medium text-ink-primary">
+                  &quot;{pendingReplace.source.fileName}&quot;
+                </span>{" "}
+                with{" "}
+                <span className="font-medium text-ink-primary">
+                  &quot;{pendingReplace.file.name}&quot;
+                </span>
+                ? This replaces the existing data.
+              </>
+            ) : null
+          }
+          confirmLabel="Replace"
+          onConfirm={confirmReplace}
+          onCancel={() => setPendingReplace(null)}
+        />
       </div>
+      )}
     </ProjectShell>
   );
 }
@@ -211,8 +320,44 @@ function SourceDetailPanel({ source }: { source: DataSource | null }) {
     );
   }
   const cols = source.columnTypes ?? [];
+  const meta = source.aiMetadata ?? null;
+  const tags = metaList(meta, ["suggested_tags", "tags"]);
+  const kpis = metaList(meta, ["suggested_kpis", "recommended_kpis", "kpis"]);
+  const summary =
+    meta && typeof meta.summary === "string" ? meta.summary : null;
   return (
     <ContextPanel title="Source Detail" askPlaceholder="Ask about this source…">
+      {summary && (
+        <div className="rounded-lg border border-brand-100 bg-brand-50/60 p-3 text-[13px] leading-relaxed text-ink-primary">
+          {summary}
+        </div>
+      )}
+
+      {kpis.length > 0 && (
+        <ContextSection title="Recommended KPIs">
+          <ul className="space-y-1 text-[13px]">
+            {kpis.slice(0, 8).map((k, i) => (
+              <li key={`${k}-${i}`} className="flex items-start gap-1.5">
+                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand-500" />
+                <span className="text-ink-primary">{k}</span>
+              </li>
+            ))}
+          </ul>
+        </ContextSection>
+      )}
+
+      {tags.length > 0 && (
+        <ContextSection title="Tags">
+          <div className="flex flex-wrap gap-1.5">
+            {tags.slice(0, 12).map((t, i) => (
+              <Badge key={`${t}-${i}`} tone="brand">
+                {t}
+              </Badge>
+            ))}
+          </div>
+        </ContextSection>
+      )}
+
       <ContextSection title="Source">
         <dl className="space-y-1 text-[13px]">
           <Row label="Name" value={source.fileName} />

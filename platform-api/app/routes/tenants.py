@@ -423,7 +423,7 @@ async def create_user(
     # local password is ever stored. If Supabase is unavailable, the user is NOT
     # created (no local fallback).
     settings = get_settings()
-    login_url = f"{settings.app_base_url}/{tenant.slug}/login"
+    login_url = f"{settings.app_base_url}/{tenant.slug}"
     setup_url = f"{settings.app_base_url}/{tenant.slug}/set-password"
     supa = SupabaseAuthService()
     try:

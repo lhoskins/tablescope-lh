@@ -17,19 +17,22 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.ai_conversation import AiConversation, AiConversationMessage
 from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
@@ -227,6 +230,28 @@ def _detect_datasource(sql: str, allowed_tables: list[str]) -> str | None:
         if table.upper() in sql_upper or f'"{table}"'.upper() in sql_upper:
             return table
     return allowed_tables[0] if len(allowed_tables) == 1 else None
+
+
+def _heuristic_sql(prompt: str, allowed_tables: list[str]) -> str:
+    """Build a baseline SELECT when the AI server is unavailable.
+
+    Picks the table whose name best matches words in the prompt (falling back
+    to the first available table) and returns a simple preview query. The user
+    can refine it in the query builder.
+    """
+    if not allowed_tables:
+        return ""
+    prompt_lower = prompt.lower()
+    best = allowed_tables[0]
+    best_score = -1
+    for table in allowed_tables:
+        # Score by how many of the table's word-parts appear in the prompt.
+        parts = [p for p in re.split(r"[_\s]+", table.lower()) if p]
+        score = sum(1 for p in parts if p in prompt_lower)
+        if score > best_score:
+            best_score = score
+            best = table
+    return f'SELECT * FROM "{best}" LIMIT 100'
 
 
 # ---------------------------------------------------------------------------
@@ -1355,13 +1380,34 @@ async def ai_generate_and_save_query(
         "prompt": prompt_text,
         "allowed_tables": allowed_tables,
     }
-    ai_result = await _forward_to_ai("/ai/query/generate", payload)
-    generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
+    ai_result: dict[str, Any] = {}
+    try:
+        ai_result = await _forward_to_ai("/ai/query/generate", payload)
+        generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
+    except HTTPException as exc:
+        # The local AI server is optional/may be offline. Rather than failing
+        # the action outright, fall back to a deterministic query built from
+        # the prompt + the project's available tables.
+        if exc.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
+            raise
+        generated_sql = _heuristic_sql(req.prompt, allowed_tables)
+        ai_result = {
+            "explanation": (
+                "Generated without the AI server (offline) — a baseline query "
+                "from your prompt and available tables. Edit it as needed."
+            ),
+            "model_used": "heuristic-fallback",
+        }
 
+    if not generated_sql:
+        generated_sql = _heuristic_sql(req.prompt, allowed_tables)
     if not generated_sql:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="AI could not generate SQL for this prompt",
+            detail=(
+                "Could not generate SQL — connect a data source to this "
+                "project first."
+            ),
         )
 
     # Detect which datasource the SQL references
@@ -1703,3 +1749,254 @@ def _map_chart_subtype(ai_type: str) -> str:
         "scatter": "straight",
     }
     return mapping.get(ai_type.lower(), "column")
+
+
+# ---------------------------------------------------------------------------
+# Saved AI conversations (Home AI Assistant)
+# ---------------------------------------------------------------------------
+
+
+class ConversationCreate(BaseModel):
+    title: str | None = None
+    project_id: int | None = None
+
+
+class ConversationRename(BaseModel):
+    title: str
+
+
+class ConversationMessageCreate(BaseModel):
+    question: str
+    project_id: int | None = None
+
+
+def _message_dict(m: AiConversationMessage) -> dict[str, Any]:
+    return {
+        "id": m.id,
+        "role": m.role,
+        "content": m.content,
+        "createdAt": m.created_at.isoformat() if m.created_at else None,
+    }
+
+
+def _conversation_dict(
+    c: AiConversation, *, include_messages: bool = False
+) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": c.id,
+        "title": c.title,
+        "projectId": c.project_id,
+        "createdAt": c.created_at.isoformat() if c.created_at else None,
+        "updatedAt": c.updated_at.isoformat() if c.updated_at else None,
+    }
+    if include_messages:
+        data["messages"] = [_message_dict(m) for m in c.messages]
+    return data
+
+
+async def _get_owned_conversation(
+    session: AsyncSession,
+    context: RequestContext,
+    conversation_id: int,
+    *,
+    with_messages: bool = False,
+) -> AiConversation:
+    stmt = select(AiConversation).where(
+        AiConversation.id == conversation_id,
+        AiConversation.tenant_id == context.tenant_id,
+        AiConversation.user_id == context.user_id,
+    )
+    if with_messages:
+        stmt = stmt.options(selectinload(AiConversation.messages))
+    convo = (await session.execute(stmt)).scalar_one_or_none()
+    if convo is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return convo
+
+
+async def _default_project_id(
+    session: AsyncSession, context: RequestContext
+) -> int | None:
+    member_sub = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == context.user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    return await session.scalar(
+        select(Project.id)
+        .where(
+            Project.tenant_id == context.tenant_id,
+            or_(
+                Project.owner_id == context.user_id,
+                Project.id.in_(member_sub),
+            ),
+        )
+        .order_by(Project.updated_at.desc())
+        .limit(1)
+    )
+
+
+@router.get("/conversations")
+async def list_conversations(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[dict[str, Any]]:
+    """List the caller's saved AI conversations (most recent first)."""
+    rows = list(
+        await session.scalars(
+            select(AiConversation)
+            .where(
+                AiConversation.tenant_id == context.tenant_id,
+                AiConversation.user_id == context.user_id,
+            )
+            .order_by(AiConversation.updated_at.desc())
+        )
+    )
+    return [_conversation_dict(c) for c in rows]
+
+
+@router.post("/conversations")
+async def create_conversation(
+    req: ConversationCreate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Create a new (empty) conversation."""
+    project_id = req.project_id
+    if project_id is not None:
+        await _check_project_access(session, context, project_id)
+    convo = AiConversation(
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+        title=(req.title or "New conversation")[:255],
+    )
+    session.add(convo)
+    await session.commit()
+    await session.refresh(convo)
+    data = _conversation_dict(convo)
+    data["messages"] = []
+    return data
+
+
+@router.get("/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Fetch a conversation with its full message history."""
+    convo = await _get_owned_conversation(
+        session, context, conversation_id, with_messages=True
+    )
+    return _conversation_dict(convo, include_messages=True)
+
+
+@router.put("/conversations/{conversation_id}")
+async def rename_conversation(
+    conversation_id: int,
+    req: ConversationRename,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Rename a conversation."""
+    convo = await _get_owned_conversation(session, context, conversation_id)
+    convo.title = req.title.strip()[:255] or convo.title
+    await session.commit()
+    await session.refresh(convo)
+    return _conversation_dict(convo)
+
+
+@router.delete("/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(
+    conversation_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> Response:
+    """Delete a conversation and its messages."""
+    convo = await _get_owned_conversation(session, context, conversation_id)
+    await session.delete(convo)
+    await session.commit()
+    return Response(status_code=204)
+
+
+@router.post("/conversations/{conversation_id}/messages")
+async def add_conversation_message(
+    conversation_id: int,
+    req: ConversationMessageCreate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Append a user message, get an AI answer, and persist both."""
+    question = req.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question is required")
+
+    convo = await _get_owned_conversation(
+        session, context, conversation_id, with_messages=True
+    )
+
+    # Resolve the project used to scope the AI answer.
+    project_id = req.project_id or convo.project_id
+    if project_id is not None:
+        await _check_project_access(session, context, project_id)
+    else:
+        project_id = await _default_project_id(session, context)
+    if project_id is not None and convo.project_id != project_id:
+        convo.project_id = project_id
+
+    # First user message becomes the conversation title.
+    if not convo.messages:
+        convo.title = question[:120]
+
+    user_msg = AiConversationMessage(
+        conversation_id=convo.id, role="user", content=question
+    )
+    session.add(user_msg)
+
+    answer: str
+    if project_id is None:
+        answer = (
+            "I couldn't find a project to ground my answer. Create a project "
+            "with data first, then ask again."
+        )
+    else:
+        try:
+            payload = {
+                "tenant_id": context.tenant_id,
+                "user_id": context.user_id,
+                "project_id": project_id,
+                "question": question,
+                "scope": "project",
+                "include_query_history": True,
+                "include_dashboard_context": True,
+            }
+            result = await _forward_to_ai("/ai/ask", payload)
+            answer = str(result.get("answer") or "").strip() or (
+                "The AI returned an empty response."
+            )
+        except HTTPException as e:
+            answer = f"Sorry — I couldn't answer that. {e.detail}"
+
+    assistant_msg = AiConversationMessage(
+        conversation_id=convo.id, role="assistant", content=answer
+    )
+    session.add(assistant_msg)
+    await session.commit()
+
+    # Vectorize the Q+A pair for future learning/retrieval.
+    try:
+        await _forward_to_ai("/ai/index/conversation", {
+            "tenant_id": context.tenant_id,
+            "user_id": context.user_id,
+            "project_id": project_id,
+            "conversation_id": convo.id,
+            "question": question,
+            "answer": answer,
+        })
+    except Exception:
+        pass  # best-effort — don't block the response
+
+    refreshed = await _get_owned_conversation(
+        session, context, conversation_id, with_messages=True
+    )
+    return _conversation_dict(refreshed, include_messages=True)

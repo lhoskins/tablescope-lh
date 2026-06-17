@@ -107,6 +107,15 @@ services:
     image: tablescope-platform-api:latest
     restart: unless-stopped
     command: arq app.tasks.workflows.WorkerSettings
+    # The shared API image's HEALTHCHECK curls an HTTP port the worker doesn't
+    # serve. Override it with arq's own health check (reads the worker's
+    # heartbeat key from Redis) so the worker reports healthy correctly.
+    healthcheck:
+      test: ["CMD", "arq", "--check", "app.tasks.workflows.WorkerSettings"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
     environment:
       DATABASE_URL: postgresql+asyncpg://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope
       REDIS_URL: redis://redis:6379/0
