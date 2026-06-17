@@ -691,7 +691,94 @@ _CHART_ALIASES: dict[str, tuple[str, str]] = {
     "radial_bar": ("radial_bar", ""),
     "treemap": ("treemap", ""),
     "funnel": ("funnel", ""),
+    # New planner types with no dedicated renderer yet — degrade to the nearest
+    # existing visual so a card always renders rather than breaking.
+    "bullet": ("pie", "gauge"),  # single metric vs target ~ gauge
+    "heatmap": ("bar", ""),  # magnitude across categories (color dim dropped)
+    "sparkline_table": ("line", ""),  # per-entity trend ~ a trend line
 }
+
+# Planner chart types that compare two metrics; handled specially because they
+# need a second numeric column rather than the default {label, value} series.
+_TWO_VALUE_TYPES = frozenset({"dual_line", "scatter", "bubble"})
+
+
+def _pick_second_value(
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    used: tuple[str | None, ...],
+    value_hint_2: str,
+) -> str | None:
+    """Resolve a second numeric column distinct from the already-used ones."""
+    if value_hint_2 and value_hint_2 in columns and value_hint_2 not in used:
+        return value_hint_2
+    for col in columns:
+        if col in used:
+            continue
+        numeric = [r for r in rows if _to_float(r.get(col)) is not None]
+        if rows and len(numeric) >= max(1, len(rows) // 2):
+            return col
+    return None
+
+
+def _two_value_chart(
+    chart_type: str,
+    title: str,
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    label_hint: str,
+    value_hint: str,
+    value_hint_2: str,
+) -> dict[str, Any] | None:
+    """Build a two-metric chart (dual_line / scatter / bubble).
+
+    Returns ``None`` when a second numeric column can't be resolved, so the
+    caller can fall back to a single-value chart instead of dropping the card.
+    """
+    label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
+    if not value_col:
+        return None
+    value2_col = _pick_second_value(
+        columns, rows, (value_col, label_col), value_hint_2
+    )
+    if not value2_col:
+        return None
+    series: list[dict[str, Any]] = []
+    for r in rows[:24]:
+        v = _to_float(r.get(value_col))
+        v2 = _to_float(r.get(value2_col))
+        if v is None or v2 is None:
+            continue
+        series.append(
+            {
+                "label": str(r.get(label_col)) if label_col else "",
+                "value": round(v, 2),
+                "value2": round(v2, 2),
+            }
+        )
+    if not series:
+        return None
+    series_labels = {"value": value_col, "value2": value2_col}
+    if chart_type == "dual_line":
+        # Two metrics over a shared (time) axis -> combo (bar + overlay line).
+        return {
+            "type": "combo",
+            "subtype": "bar_line",
+            "title": title,
+            "data": {"series": series},
+            "roles": {"x": "label", "y": "value", "y2": "value2"},
+            "seriesLabels": series_labels,
+        }
+    # scatter / bubble -> two variables as x/y (bubble degrades to scatter when
+    # no third size metric is available).
+    return {
+        "type": "scatter",
+        "subtype": "bubble" if chart_type == "bubble" else "",
+        "title": title,
+        "data": {"series": series},
+        "roles": {"x": "value", "y": "value2"},
+        "seriesLabels": series_labels,
+    }
 
 
 def _chart(
@@ -713,6 +800,7 @@ def _build_chart(
     result: dict[str, Any],
     label_hint: str,
     value_hint: str,
+    value_hint_2: str = "",
 ) -> dict[str, Any] | None:
     """Pick the best visual for a real query result (shape-aware, never faked).
 
@@ -746,6 +834,16 @@ def _build_chart(
         if kpis:
             return {"type": "kpi_grid", "title": title, "data": {"kpis": kpis[:6]}}
         return None
+
+    # Two-metric charts (dual_line / scatter / bubble) need a second numeric
+    # column; build that shape when one is available, else fall through to the
+    # single-value handling below so the card still renders.
+    if chart_type in _TWO_VALUE_TYPES:
+        two = _two_value_chart(
+            chart_type, title, columns, rows, label_hint, value_hint, value_hint_2
+        )
+        if two is not None:
+            return two
 
     label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
     if not label_col or not value_col:
@@ -968,7 +1066,7 @@ async def run_ai_intelligence(
         ins = interpreted.get(a["id"], {})
 
         category = a.get("category", "trend")
-        if category not in ("risk", "trend", "opportunity"):
+        if category not in ("risk", "trend", "opportunity", "relationship"):
             category = "trend"
         severity = ins.get("severity") or a.get("severity_hint") or "info"
         if severity not in ("critical", "urgent", "watch", "opportunity", "info"):
@@ -1000,6 +1098,7 @@ async def run_ai_intelligence(
                 result,
                 a.get("label_column", ""),
                 a.get("value_column", ""),
+                a.get("value_column_2", ""),
             )
             tables = _tables_in_sql(a.get("sql", ""), ctx.tables)
         else:

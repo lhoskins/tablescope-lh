@@ -23,6 +23,8 @@ export interface InsightChart {
     | "line"
     | "area"
     | "pie"
+    | "combo"
+    | "scatter"
     | "radar"
     | "radial_bar"
     | "treemap"
@@ -31,10 +33,22 @@ export interface InsightChart {
   subtype?: string;
   title?: string;
   data: {
-    series?: { label: string; value: number }[];
+    /**
+     * Each point carries a `value`; two-metric charts (combo/scatter/bubble)
+     * also carry `value2` for the second axis/size.
+     */
+    series?: { label: string; value: number; value2?: number }[];
     threshold?: number;
     kpis?: { value: string; label: string; delta?: string }[];
   };
+  /**
+   * Axis roles for two-metric charts. Tells the renderer which field maps to
+   * each axis (e.g. scatter x=value, y=value2; combo x=label, y=value,
+   * y2=value2). Absent for ordinary single-value charts.
+   */
+  roles?: { x?: string; y?: string; y2?: string; z?: string };
+  /** Human-readable column names per series field, for axis/legend labels. */
+  seriesLabels?: { value?: string; value2?: string };
 }
 
 export interface InsightCallout {

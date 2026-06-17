@@ -642,13 +642,22 @@ _ALLOWED_PLAN_CHART_TYPES = frozenset(
         "kpi_grid",
         "line",
         "area",
+        "dual_line",
+        "scatter",
+        "bubble",
         "bar",
         "horizontal_bar",
+        "stacked_bar",
+        "waterfall",
         "donut",
         "pie",
         "treemap",
         "funnel",
         "radar",
+        "heatmap",
+        "gauge",
+        "bullet",
+        "sparkline_table",
         "none",
     }
 )
@@ -731,32 +740,100 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         f"{teiid_rules}\n"
         f"{depth_guidance}\n\n"
         f"Propose up to {target_count} of the most valuable analyses for this "
-        "project at this level of detail. Cover a mix of risks, trends, and "
-        "opportunities where the data supports it. Each analysis must be "
-        "answerable from the allowed tables OR grounded in a listed document.\n\n"
+        "project at this level of detail. Cover a mix of risks, trends, "
+        "opportunities, and relationships where the data supports it. Each "
+        "analysis must be answerable from the allowed tables OR grounded in a "
+        "listed document.\n\n"
+        "RELATIONSHIP ANALYSES (category \"relationship\"):\n"
+        "In addition to single-metric risks/trends/opportunities, actively look "
+        "for pairs of columns within ONE allowed table whose relationship to each "
+        "other changes over time — not just two values that both move, but a "
+        "connection that strengthens, weakens, decouples, inverts, or diverges. "
+        "Examples of what counts: a cost metric and a quality metric that used to "
+        "track together but no longer do; one category's share of a total "
+        "shrinking while another grows; a rate (e.g. defects per unit) drifting "
+        "away from its historical band. The two variables MUST be columns on the "
+        "same table — never propose a relationship across two tables, since "
+        "cross-table JOINs are not permitted.\n"
+        "For each relationship analysis, decide which shape best reveals the "
+        "change and choose accordingly:\n"
+        "- If both variables are naturally plotted on a shared timeline → use "
+        "'dual_line' (two series, one time axis).\n"
+        "- If the relationship is better expressed as a single derived value per "
+        "period (a gap, ratio, or delta between the two variables) → use 'line' "
+        "and compute that derived value in the SQL itself (e.g. SELECT period, "
+        "(metric_a - metric_b) AS variance).\n"
+        "- If the relationship is best seen as a small number of snapshots in time "
+        "rather than a continuous trend → use 'scatter' or 'bubble', with one "
+        "point per period and the two variables as x/y (and a third metric as "
+        "bubble size, if relevant).\n"
+        "Only propose a relationship analysis when at least 3 time periods of data "
+        "are available for both variables — a 2-point comparison cannot show a "
+        "changing relationship.\n\n"
         "For data analyses, write a single read-only SQL query that returns a small "
-        "result suitable for a chart or KPI (aggregate/group — not raw dumps). "
-        "Pick the chart type that BEST represents each result — do NOT default "
-        "everything to bar. This is an executive report, so vary the visuals:\n"
+        "result suitable for a chart or KPI (aggregate/group — not raw dumps), "
+        "querying exactly one allowed table with no joins or subqueries. Pick the "
+        "chart type that BEST represents each result — do NOT default everything "
+        "to bar. This is an executive report, so vary the visuals across the full "
+        "range below:\n"
         "- 'kpi_grid': one or a few headline numbers (a single-row aggregate).\n"
         "- 'line' (or 'area'): a trend over time / ordered periods.\n"
+        "- 'dual_line': two related metrics plotted over the same time axis to show "
+        "how their relationship shifts.\n"
+        "- 'scatter': two variables compared across periods or entities, to show a "
+        "changing or underlying relationship.\n"
+        "- 'bubble': scatter with a third dimension encoded as point size (e.g. "
+        "magnitude or volume).\n"
         "- 'bar' (or 'horizontal_bar'): compare a metric across categories / top-N.\n"
+        "- 'stacked_bar': a metric across categories, broken into sub-components.\n"
+        "- 'waterfall': a running total with sequential positive/negative "
+        "contributions (e.g. bridge from budget to actual).\n"
         "- 'donut' (or 'pie'): parts-of-a-whole / share/mix of a total.\n"
-        "- 'treemap': many categories' relative sizes; 'funnel': stage drop-off; "
-        "'radar': multi-metric comparison of a few items.\n"
+        "- 'treemap': many categories' relative sizes.\n"
+        "- 'funnel': stage-by-stage drop-off.\n"
+        "- 'radar': multi-metric comparison of a few items.\n"
+        "- 'heatmap': a metric across two categorical dimensions (e.g. category x "
+        "time period), where magnitude is shown by color intensity.\n"
+        "- 'gauge': a single metric against a target or threshold range.\n"
+        "- 'bullet': a single metric vs. target with qualitative ranges "
+        "(good/watch/poor).\n"
+        "- 'sparkline_table': a small table of entities/rows, each with an inline "
+        "trend sparkline and a current value — good for comparing many items' "
+        "trajectories at once.\n"
         "- 'none': a narrative finding best told as prose with bolded figures "
         "(no chart). Use this for at least one insight when it reads better as text.\n"
         "For document-based findings, leave sql empty, set chart_type to 'none', and "
         "list the relevant document titles in source_documents.\n\n"
+        "Before finalizing each analysis, sanity-check that it will actually return "
+        "data:\n"
+        "- Don't filter, group, or join on a specific value (a status, category, "
+        "ID, or date range) unless the schema or sample context gives you a "
+        "concrete reason to believe that value exists in the data. Prefer "
+        "aggregations that span the full table (no risky WHERE clause) over a "
+        "narrow filter you're guessing at.\n"
+        "- Don't propose a time-based trend, dual_line, scatter, or relationship "
+        "analysis unless the table clearly has enough distinct time periods to "
+        "support it (see the minimum-periods rule above). If you're not confident "
+        "the date range has enough spread, propose a non-time-based analysis on "
+        "that table instead.\n"
+        "- If, after this check, you're not confident a proposed analysis will "
+        "return at least one meaningful row, drop it and propose a different "
+        "analysis in its place — do not include an analysis you expect to come "
+        "back empty, and do not fill a gap with placeholder, sample, or invented "
+        "figures.\n"
+        f"- Aim to deliver the full {target_count} analyses this way; if the data "
+        "genuinely can't support that many non-empty analyses, return fewer rather "
+        "than padding with weak or empty ones.\n\n"
         "Return ONLY a JSON object: {\"analyses\": [ {\n"
         "  \"id\": \"a1\",\n"
-        "  \"category\": \"risk|trend|opportunity\",\n"
+        "  \"category\": \"risk|trend|opportunity|relationship\",\n"
         "  \"title\": \"short headline\",\n"
         "  \"rationale\": \"why this matters for the business (1 sentence)\",\n"
         "  \"sql\": \"SELECT ... (empty for document findings)\",\n"
-        "  \"chart_type\": \"kpi_grid|line|area|bar|horizontal_bar|donut|pie|treemap|funnel|radar|none\",\n"
+        "  \"chart_type\": \"kpi_grid|line|area|dual_line|scatter|bubble|bar|horizontal_bar|stacked_bar|waterfall|donut|pie|treemap|funnel|radar|heatmap|gauge|bullet|sparkline_table|none\",\n"
         "  \"label_column\": \"alias used for the category/x axis\",\n"
-        "  \"value_column\": \"alias used for the numeric value\",\n"
+        "  \"value_column\": \"alias used for the numeric value (primary metric, or size for bubble)\",\n"
+        "  \"value_column_2\": \"alias for a second metric — used by dual_line, scatter, bubble, heatmap (color value), gauge/bullet (target). Omit/empty otherwise.\",\n"
         "  \"severity_hint\": \"critical|urgent|watch|opportunity|info\",\n"
         "  \"source_documents\": [\"doc title\"]\n"
         "} ] }"
@@ -784,7 +861,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
                     logger.warning("Dropping analysis %s: %s", a.get("title"), e.reason)
                     continue
             category = str(a.get("category", "trend")).lower()
-            if category not in ("risk", "trend", "opportunity"):
+            if category not in ("risk", "trend", "opportunity", "relationship"):
                 category = "trend"
             chart_type = str(a.get("chart_type", "bar")).lower()
             if chart_type not in _ALLOWED_PLAN_CHART_TYPES:
@@ -802,6 +879,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
                     chart_type=chart_type,
                     label_column=str(a.get("label_column", "")),
                     value_column=str(a.get("value_column", "")),
+                    value_column_2=str(a.get("value_column_2", "")),
                     severity_hint=str(a.get("severity_hint", "watch")),
                     source_documents=[
                         str(d) for d in a.get("source_documents", []) if d

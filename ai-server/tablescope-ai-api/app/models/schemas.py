@@ -162,13 +162,16 @@ class IntelligencePlanRequest(AIBaseRequest):
 
 class PlannedAnalysis(BaseModel):
     id: str
-    category: str = "trend"  # risk | trend | opportunity
+    category: str = "trend"  # risk | trend | opportunity | relationship
     title: str = ""
     rationale: str = ""
     sql: str = ""
-    chart_type: str = "bar"  # bar | line | kpi_grid | none
+    chart_type: str = "bar"  # see _ALLOWED_PLAN_CHART_TYPES in routers/ai.py
     label_column: str = ""
     value_column: str = ""
+    # Second metric used by dual_line/scatter/bubble/heatmap (color) and as the
+    # target for gauge/bullet. Empty for single-metric charts.
+    value_column_2: str = ""
     severity_hint: str = "watch"
     source_documents: list[str] = Field(default_factory=list)
 
