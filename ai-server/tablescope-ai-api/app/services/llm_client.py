@@ -27,8 +27,15 @@ async def generate(
     temperature: float = 0.1,
     max_tokens: int | None = None,
     num_ctx: int | None = None,
+    response_format: str | None = None,
 ) -> str:
-    """Generate text completion from Ollama."""
+    """Generate text completion from Ollama.
+
+    ``response_format="json"`` forces Ollama's constrained JSON decoding so the
+    model can only emit a syntactically valid JSON value — use it for any call
+    whose response is parsed as JSON, to stop the model from wrapping output in
+    prose/markdown.
+    """
     model = model or settings.reasoning_model
 
     options: dict[str, Any] = {"temperature": temperature}
@@ -43,6 +50,8 @@ async def generate(
         "stream": False,
         "options": options,
     }
+    if response_format == "json":
+        payload["format"] = "json"
     if system_prompt:
         payload["system"] = system_prompt
 

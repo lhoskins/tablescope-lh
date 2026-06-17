@@ -836,15 +836,19 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "  \"value_column_2\": \"alias for a second metric — used by dual_line, scatter, bubble, heatmap (color value), gauge/bullet (target). Omit/empty otherwise.\",\n"
         "  \"severity_hint\": \"critical|urgent|watch|opportunity|info\",\n"
         "  \"source_documents\": [\"doc title\"]\n"
-        "} ] }"
+        "} ] }\n\n"
+        "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
+        "prose, no markdown, no headings, no numbered list, no code fences. "
+        "Begin your response with { and end it with }."
     )
 
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_INTEL_SYSTEM_PROMPT,
         model=settings.reasoning_model,
-        temperature=0.3,
+        temperature=0.2,
         num_ctx=8192,
+        response_format="json",
     )
 
     parsed = _parse_json_response(raw)
