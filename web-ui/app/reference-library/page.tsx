@@ -64,9 +64,9 @@ export default function IndustryLibraryPage() {
 
   const canWrite = meta?.permissions.industryWrite ?? false;
   const stats = useMemo(() => {
-    const withFile = docs.filter((d) => d.hasFile).length;
-    const active = docs.filter((d) => d.status === "active").length;
-    return { total: docs.length, withFile, active };
+    const processed = docs.filter((d) => d.hasFile && d.status === "active").length;
+    const needsDocument = docs.filter((d) => !d.hasFile).length;
+    return { total: docs.length, processed, needsDocument };
   }, [docs]);
 
   const user = identity?.user ?? FALLBACK_USER;
@@ -102,8 +102,8 @@ export default function IndustryLibraryPage() {
 
         <div className="grid grid-cols-3 gap-3">
           <StatTile label="References" value={stats.total} />
-          <StatTile label="With document" value={stats.withFile} />
-          <StatTile label="Active" value={stats.active} />
+          <StatTile label="Processed" value={stats.processed} />
+          <StatTile label="Needs document" value={stats.needsDocument} />
         </div>
 
         <div className="flex gap-2">

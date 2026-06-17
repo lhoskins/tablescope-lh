@@ -3,11 +3,17 @@
 import { Badge } from "@/components/ui/badge";
 import type { ReferenceDocument } from "@/lib/api/reference-library";
 
-function statusTone(status: string): "success" | "warning" | "neutral" | "ai" {
-  if (status === "active") return "success";
-  if (status === "processing") return "ai";
-  if (status === "draft") return "warning";
-  return "neutral";
+type StatusTone = "success" | "warning" | "neutral" | "ai";
+
+function displayStatus(d: ReferenceDocument): { label: string; tone: StatusTone } {
+  // Metadata-only catalog entries have no attached file yet.
+  if (!d.hasFile) return { label: "Needs document", tone: "neutral" };
+  if (d.status === "processing") return { label: "Processing", tone: "ai" };
+  if (d.status === "active") return { label: "Processed", tone: "success" };
+  if (d.status === "draft") {
+    return { label: d.aiErrorMessage ? "Error" : "Draft", tone: "warning" };
+  }
+  return { label: d.status, tone: "neutral" };
 }
 
 export function DocumentTable({
@@ -76,7 +82,10 @@ export function DocumentTable({
                 )}
               </td>
               <td className="px-4 py-3">
-                <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+                {(() => {
+                  const s = displayStatus(d);
+                  return <Badge tone={s.tone}>{s.label}</Badge>;
+                })()}
                 {d.tierBadge && (
                   <Badge tone="brand" className="ml-1">{d.tierBadge}</Badge>
                 )}

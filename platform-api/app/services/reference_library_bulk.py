@@ -365,7 +365,8 @@ async def run_batch(batch_id: int, *, retry_only: bool = False) -> None:
             batch.status = (
                 "complete_with_errors" if batch.failed_count else "complete"
             )
-            batch.completed_at = datetime.now(UTC)
+            # Column is TIMESTAMP WITHOUT TIME ZONE; store a naive UTC datetime.
+            batch.completed_at = datetime.now(UTC).replace(tzinfo=None)
             await session.commit()
             logger.info(
                 "bulk batch %s done in %.1fs: ok=%s failed=%s skipped=%s",
