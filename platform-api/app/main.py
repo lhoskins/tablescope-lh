@@ -36,6 +36,8 @@ from app.routes import projects as projects_routes
 from app.routes import provisioning as provisioning_routes
 from app.routes import query as query_routes
 from app.routes import query_scopes as query_scopes_routes
+from app.routes import reference_library as reference_library_routes
+from app.routes import reference_library_bulk as reference_library_bulk_routes
 from app.routes import reports as reports_routes
 from app.routes import saas_sources as saas_sources_routes
 from app.routes import scopes as scopes_routes
@@ -84,6 +86,12 @@ async def _seed_reference_catalogs() -> None:
         logger.info("AI reference catalog seed: %s", stats)
     except Exception as exc:
         logger.warning("AI reference catalog seed failed: %s", exc)
+    try:
+        from scripts.seed_reference_library import seed_reference_library
+        ref_stats = await seed_reference_library()
+        logger.info("Reference library starter catalog seed: %s", ref_stats)
+    except Exception as exc:
+        logger.warning("Reference library seed failed: %s", exc)
 
 
 @asynccontextmanager
@@ -166,6 +174,8 @@ def create_app() -> FastAPI:
     app.include_router(billing_admin_routes.router, prefix=api_prefix)
     app.include_router(provisioning_routes.router, prefix=api_prefix)
     app.include_router(home_intelligence_routes.router, prefix=api_prefix)
+    app.include_router(reference_library_routes.router, prefix=api_prefix)
+    app.include_router(reference_library_bulk_routes.router, prefix=api_prefix)
     app.include_router(reports_routes.router, prefix=api_prefix)
     app.include_router(user_preferences_routes.router, prefix=api_prefix)
 

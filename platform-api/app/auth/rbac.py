@@ -35,6 +35,15 @@ def _at_least(actual: str, required: Role) -> bool:
     return _ROLE_ORDER[actual_role] >= _ROLE_ORDER[required]
 
 
+def has_role(actual: str, required: Role) -> bool:
+    """Public predicate: does ``actual`` meet or exceed ``required``?
+
+    Use this for imperative permission checks inside service/route code (the
+    FastAPI dependency :func:`require_role` is for declarative route gating).
+    """
+    return _at_least(actual, required)
+
+
 def require_role(required: Role) -> Callable[[RequestContext], RequestContext]:
     """FastAPI dependency factory enforcing minimum role."""
 

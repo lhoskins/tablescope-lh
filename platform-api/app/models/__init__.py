@@ -45,6 +45,13 @@ from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_asset import ProjectAsset
 from app.models.query_scope import QueryScope
+from app.models.reference_library import (
+    ReferenceAdditionRequest,
+    ReferenceDocument,
+    ReferenceDocumentAssignment,
+    ReferenceLibraryImportBatch,
+    ReferenceLibraryImportRow,
+)
 from app.models.report import Report
 from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.saved_query import SavedQuery
@@ -95,6 +102,11 @@ __all__ = [
     "ProjectAsset",
     "ProjectMember",
     "QueryScope",
+    "ReferenceAdditionRequest",
+    "ReferenceDocument",
+    "ReferenceDocumentAssignment",
+    "ReferenceLibraryImportBatch",
+    "ReferenceLibraryImportRow",
     "SaasObjectDataSource",
     "SavedQuery",
     "SharedVDB",

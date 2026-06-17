@@ -29,6 +29,8 @@ export type NavKey =
   | "documents"
   | "dashboards"
   | "relationship-map"
+  | "reference-library"
+  | "company-reference-library"
   | "integrations"
   | "audit-log"
   | "settings"
@@ -41,6 +43,7 @@ export type NavKey =
   | "project-ai-assistant"
   | "project-relationship-map"
   | "project-metadata-catalog"
+  | "project-reference-library"
   | "project-audit-log";
 
 export interface TenantSummary {

@@ -14,6 +14,8 @@ import {
   IconDatabasePlus,
   IconCode,
   IconBook2,
+  IconLibrary,
+  IconBuildingBank,
   type Icon,
 } from "@tabler/icons-react";
 import type { NavKey } from "@/lib/ui/types";
@@ -84,6 +86,18 @@ export function homeNavGroups(): NavGroup[] {
           label: "Dashboards",
           href: "/dashboards",
           icon: IconLayoutDashboard,
+        },
+        {
+          key: "reference-library",
+          label: "Reference Library",
+          href: "/reference-library",
+          icon: IconLibrary,
+        },
+        {
+          key: "company-reference-library",
+          label: "Company Library",
+          href: "/reference-library/company",
+          icon: IconBuildingBank,
         },
       ],
     },
@@ -173,6 +187,12 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           label: "Metadata Catalog",
           href: `${base}/metadata-catalog`,
           icon: IconBook2,
+        },
+        {
+          key: "project-reference-library",
+          label: "Reference Library",
+          href: `${base}/reference-library`,
+          icon: IconLibrary,
         },
         {
           key: "project-audit-log",
