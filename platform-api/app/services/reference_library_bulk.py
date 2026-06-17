@@ -237,7 +237,13 @@ async def run_batch(batch_id: int, *, retry_only: bool = False) -> None:
         headers={"User-Agent": BROWSER_UA},
     ) as client:
 
-        async def handle(row_id: int, url: str, title: str, domain: str) -> None:
+        async def handle(
+            row_id: int,
+            url: str,
+            title: str,
+            domain: str,
+            existing_id: int | None,
+        ) -> None:
             domain_host = urlparse(url).netloc
             async with semaphore:
                 await limiter.wait(domain_host)
@@ -266,20 +272,36 @@ async def run_batch(batch_id: int, *, retry_only: bool = False) -> None:
                     row = await s.get(ReferenceLibraryImportRow, row_id)
                     if row is None:
                         return
-                    doc = ReferenceDocument(
-                        tier="industry",
-                        tenant_id=None,
-                        project_id=None,
-                        title=title,
-                        issuing_body=row.issuing_body,
-                        domain_tag=domain,
-                        applicability_tag=row.applicability_tag,
-                        source_url=url,
-                        version_label=row.version_label,
-                        status="processing",
-                        uploaded_by=uploaded_by,
-                    )
-                    s.add(doc)
+                    # Fill a matching metadata-only stub in place when one was
+                    # detected at validation, otherwise create a new document.
+                    doc = None
+                    if existing_id is not None:
+                        candidate = await s.get(ReferenceDocument, existing_id)
+                        if candidate is not None and not candidate.file_path:
+                            doc = candidate
+                            doc.issuing_body = doc.issuing_body or row.issuing_body
+                            doc.domain_tag = domain
+                            doc.applicability_tag = (
+                                doc.applicability_tag or row.applicability_tag
+                            )
+                            doc.source_url = url
+                            doc.version_label = doc.version_label or row.version_label
+                            doc.status = "processing"
+                    if doc is None:
+                        doc = ReferenceDocument(
+                            tier="industry",
+                            tenant_id=None,
+                            project_id=None,
+                            title=title,
+                            issuing_body=row.issuing_body,
+                            domain_tag=domain,
+                            applicability_tag=row.applicability_tag,
+                            source_url=url,
+                            version_label=row.version_label,
+                            status="processing",
+                            uploaded_by=uploaded_by,
+                        )
+                        s.add(doc)
                     await s.flush()
                     path = store_reference_file(
                         tier="industry",
@@ -315,7 +337,13 @@ async def run_batch(batch_id: int, *, retry_only: bool = False) -> None:
 
         await asyncio.gather(
             *[
-                handle(r.id, r.source_url, r.title, r.domain_tag or "Other")
+                handle(
+                    r.id,
+                    r.source_url,
+                    r.title,
+                    r.domain_tag or "Other",
+                    r.will_update_existing_id,
+                )
                 for r in eligible
             ]
         )
