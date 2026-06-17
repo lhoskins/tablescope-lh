@@ -192,4 +192,31 @@ export const apiClient = {
     file: File,
     fields?: Record<string, string | number | undefined | null>,
   ) => uploadFile<T>(path, file, fields),
+  postForm: <T>(path: string, form: FormData) => {
+    const headers = new Headers();
+    const token = readToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(`${getApiUrl()}${path}`, {
+      method: "POST",
+      body: form,
+      headers,
+    }).then(async (response) => {
+      if (!response.ok) {
+        let detail = `Request failed: ${response.status}`;
+        try {
+          const payload = await response.json();
+          if (payload?.detail) {
+            detail =
+              typeof payload.detail === "string"
+                ? payload.detail
+                : JSON.stringify(payload.detail);
+          }
+        } catch {
+          /* ignore */
+        }
+        throw new Error(detail);
+      }
+      return (await response.json()) as T;
+    });
+  },
 };

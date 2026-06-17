@@ -1,0 +1,200 @@
+"""Reference Library document processing pipeline.
+
+Shared by manual single uploads and the bulk URL importer. Runs:
+
+1. Text extraction (PDF / DOCX / PPTX / TXT / MD / HTML)
+2. AI summary generation (via the signed AI server endpoint)
+3. Indexing for citation — the extracted text is persisted and the AI summary is
+   stored on the document; in-scope reference summaries are injected into AI
+   grounding context at query time (see the citation integration in the
+   suggestion/citation layer), which is how this stack grounds all documents.
+4. Status update — ``active`` on success, ``draft`` with an error on failure so a
+   manual summary can be entered as a fallback.
+
+The pipeline is identical regardless of tier — only the storage path and
+visibility scope differ, and those are set at upload time.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import uuid
+from html.parser import HTMLParser
+from pathlib import Path
+
+from app.services import reference_library_ai_client as ai_client
+from app.services.document_extraction_service import extract_text
+from app.services.reference_library_service import domain_storage_key
+
+logger = logging.getLogger(__name__)
+
+LOCAL_STORAGE_BASE = os.environ.get("ASSET_STORAGE_PATH", "/opt/wildfly/teiidfiles/customers")
+
+# Extensions whose text we can extract natively.
+EXTRACTABLE_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".md", ".html", ".htm"}
+
+EXT_TO_FILE_TYPE = {
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".doc": "doc",
+    ".pptx": "pptx",
+    ".txt": "txt",
+    ".md": "md",
+    ".html": "html",
+    ".htm": "html",
+}
+
+
+class _HTMLTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+        self._skip = False
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag in ("script", "style"):
+            self._skip = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style"):
+            self._skip = False
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip and data.strip():
+            self._parts.append(data.strip())
+
+    def text(self) -> str:
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(self._parts))
+
+
+def reference_storage_dir(
+    tier: str, domain_tag: str | None, tenant_id: int | None, project_id: int | None
+) -> Path:
+    """Storage directory following the path convention from the spec.
+
+    industry/{domain}/...  ·  company/{tenant_id}/...  ·  project/{project_id}/...
+    """
+    base = Path(LOCAL_STORAGE_BASE) / "reference_library"
+    if tier == "industry":
+        return base / "industry" / domain_storage_key(domain_tag)
+    if tier == "company":
+        return base / "company" / str(tenant_id or 0)
+    return base / "project" / str(project_id or 0)
+
+
+def store_reference_file(
+    *,
+    tier: str,
+    domain_tag: str | None,
+    tenant_id: int | None,
+    project_id: int | None,
+    document_id: int,
+    ext: str,
+    data: bytes,
+) -> str:
+    """Persist file bytes to reference-library storage; return the absolute path."""
+    dir_path = reference_storage_dir(tier, domain_tag, tenant_id, project_id)
+    dir_path.mkdir(parents=True, exist_ok=True)
+    clean_ext = ext if ext.startswith(".") else f".{ext}"
+    file_path = dir_path / f"{document_id}{clean_ext}"
+    file_path.write_bytes(data)
+    return str(file_path)
+
+
+def _extract_reference_text(file_path: str, ext: str) -> str:
+    """Extract plain text from a reference file. Raises on unsupported/failed."""
+    ext = ext.lower()
+    if ext in (".html", ".htm"):
+        raw = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+        parser = _HTMLTextExtractor()
+        parser.feed(raw)
+        return parser.text()
+    if ext == ".doc":
+        # Legacy binary .doc is not natively extractable here.
+        raise ValueError("Legacy .doc format is not supported — convert to .docx or .pdf")
+    extraction = extract_text(file_path, ext)
+    return str(extraction.get("document_text", ""))
+
+
+async def process_reference_document(document_id: int) -> None:
+    """Run extraction → summary → status for a single reference document.
+
+    Loads its own session so it can run as a background task. Safe to call after
+    a manual upload or a bulk-import fetch.
+    """
+    from app.database import SessionLocal
+    from app.models.reference_library import ReferenceDocument
+
+    async with SessionLocal() as session:
+        doc = await session.get(ReferenceDocument, document_id)
+        if doc is None:
+            logger.warning("process_reference_document: doc %s not found", document_id)
+            return
+        if not doc.file_path:
+            logger.warning("process_reference_document: doc %s has no file", document_id)
+            return
+
+        doc.status = "processing"
+        doc.ai_error_message = None
+        await session.commit()
+
+        ext = Path(doc.file_path).suffix.lower()
+
+        # ── Step 1: text extraction ──
+        try:
+            doc_text = _extract_reference_text(doc.file_path, ext)
+        except Exception as exc:
+            logger.warning("Reference extraction failed for doc %s: %s", document_id, exc)
+            doc.status = "draft"
+            doc.ai_error_message = (
+                f"Could not extract text ({exc}). Try re-uploading or enter a manual summary."
+            )
+            await session.commit()
+            return
+
+        if not doc_text.strip():
+            doc.status = "draft"
+            doc.ai_error_message = (
+                "Could not extract text (empty or scanned-image document). "
+                "Enter a manual summary as a fallback."
+            )
+            await session.commit()
+            return
+
+        # Persist extracted text alongside the source file for citation lookups.
+        try:
+            text_path = str(Path(doc.file_path).with_suffix(".extracted.txt"))
+            Path(text_path).write_text(doc_text, encoding="utf-8")
+            doc.extracted_text_path = text_path
+        except Exception:
+            logger.exception("Failed to persist extracted text for doc %s", document_id)
+
+        # ── Step 2: AI summary ──
+        summary: str | None = None
+        try:
+            summary = await ai_client.summarize_reference_document(
+                tenant_id=doc.tenant_id or 0,
+                user_id=doc.uploaded_by or 0,
+                document_id=doc.id,
+                title=doc.title,
+                issuing_body=doc.issuing_body or "",
+                domain_tag=doc.domain_tag or "",
+                extracted_text=doc_text,
+            )
+        except Exception:
+            logger.exception("AI summary call failed for doc %s", document_id)
+
+        if summary:
+            doc.ai_summary = summary
+
+        # ── Step 3/4: mark active ──
+        doc.status = "active"
+        await session.commit()
+        logger.info("Reference document %s processed (summary=%s)", document_id, bool(summary))
+
+
+def new_storage_id() -> str:
+    """Short opaque id for storage filenames when a DB id is not yet available."""
+    return uuid.uuid4().hex[:12]
