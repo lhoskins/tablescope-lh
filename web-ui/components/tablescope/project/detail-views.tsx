@@ -527,12 +527,14 @@ export function DashboardDetailView({
   savedQueries,
   datasources,
   onBack,
+  onPersisted,
 }: {
   projectId: string;
   dashboard: Dashboard;
   savedQueries: SavedQuery[];
   datasources: DataSource[];
   onBack: () => void;
+  onPersisted?: () => void;
 }) {
   return (
     <DashboardViewer
@@ -548,6 +550,7 @@ export function DashboardDetailView({
         fileName: d.fileName,
       }))}
       onBack={onBack}
+      onPersisted={onPersisted}
     />
   );
 }

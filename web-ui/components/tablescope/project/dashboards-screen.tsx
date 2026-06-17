@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { IconSparkles, IconPlus, IconLayoutDashboard } from "@tabler/icons-react";
+import { IconSparkles, IconPlus, IconLayoutDashboard, IconTrash } from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -53,6 +53,21 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
   const [viewingId, setViewingId] = useState<number | null>(null);
   const viewing = rows.find((d) => d.id === viewingId) ?? null;
 
+  // Id of a freshly-created dashboard that has NOT yet been explicitly saved.
+  // While set, the dashboard is an ephemeral draft: closing the editor without
+  // saving (or navigating away/closing the tab) deletes it. A successful save
+  // (`onPersisted`) clears this so the dashboard is kept.
+  const draftIdRef = useRef<number | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiClient.delete(`/api/projects/${projectId}/dashboards/${id}`),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "dashboards"],
+      }),
+  });
+
   const createMutation = useMutation({
     mutationFn: () =>
       apiClient.post<Dashboard>(`/api/projects/${projectId}/dashboards`, {
@@ -61,12 +76,59 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
         config: { widgets: [], globalFilters: [] },
       }),
     onSuccess: async (newDash) => {
+      draftIdRef.current = newDash.id;
       await queryClient.invalidateQueries({
         queryKey: ["project", projectId, "dashboards"],
       });
       setViewingId(newDash.id);
     },
   });
+
+  // A draft becomes "kept" the moment the user persists any change in the editor.
+  const handlePersisted = useCallback(() => {
+    draftIdRef.current = null;
+  }, []);
+
+  // Close the editor. If the open dashboard is still an untouched draft, delete it.
+  const handleCloseViewer = useCallback(() => {
+    const id = viewingId;
+    setViewingId(null);
+    if (id != null && draftIdRef.current === id) {
+      draftIdRef.current = null;
+      deleteMutation.mutate(id);
+    }
+  }, [viewingId, deleteMutation]);
+
+  const handleDeleteDashboard = useCallback(
+    (d: Dashboard) => {
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(`Delete dashboard "${d.name}"? This cannot be undone.`)
+      ) {
+        return;
+      }
+      if (draftIdRef.current === d.id) draftIdRef.current = null;
+      deleteMutation.mutate(d.id);
+    },
+    [deleteMutation],
+  );
+
+  // Auto-delete a pristine draft on tab close / refresh / navigating away.
+  useEffect(() => {
+    const flush = () => {
+      if (draftIdRef.current != null) {
+        apiClient.deleteBeacon(
+          `/api/projects/${projectId}/dashboards/${draftIdRef.current}`,
+        );
+        draftIdRef.current = null;
+      }
+    };
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      flush();
+    };
+  }, [projectId]);
 
   const published = rows.filter(isPublished).length;
   const aiCount = rows.filter((d) => d.ai_generated).length;
@@ -101,7 +163,8 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
           dashboard={viewing}
           savedQueries={queries ?? []}
           datasources={sources ?? []}
-          onBack={() => setViewingId(null)}
+          onBack={handleCloseViewer}
+          onPersisted={handlePersisted}
         />
       ) : (
       <div className="space-y-4">
@@ -182,6 +245,18 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
                         className="hover:underline"
                       >
                         Edit
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete dashboard"
+                        aria-label={`Delete dashboard ${d.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDashboard(d);
+                        }}
+                        className="text-ink-tertiary hover:text-red-600"
+                      >
+                        <IconTrash size={15} />
                       </button>
                     </div>
                   </div>

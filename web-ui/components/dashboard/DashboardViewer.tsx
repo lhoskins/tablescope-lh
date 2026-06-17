@@ -34,9 +34,12 @@ type Props = {
   savedQueries: SavedQuery[];
   datasources: Datasource[];
   onBack: () => void;
+  /** Called after any change is persisted (widget/filter/status save). Used to
+   *  mark a freshly-created draft dashboard as kept (no longer ephemeral). */
+  onPersisted?: () => void;
 };
 
-export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack }: Props) {
+export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack, onPersisted }: Props) {
   const queryClient = useQueryClient();
   const widgets = useMemo(() => dashboard.config?.widgets ?? [], [dashboard.config?.widgets]);
   const globalFilters = useMemo(() => dashboard.config?.globalFilters ?? [], [dashboard.config?.globalFilters]);
@@ -59,6 +62,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     },
     onSuccess: (newStatus: string) => {
       setDashboardStatus(newStatus);
+      onPersisted?.();
       queryClient.invalidateQueries({ queryKey: ["dashboards", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project", String(projectId), "dashboards"] });
     },
@@ -148,6 +152,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     mutationFn: (body: { config: DashboardConfig }) =>
       apiClient.put(`/api/projects/${projectId}/dashboards/${dashboard.id}`, body),
     onSuccess: () => {
+      onPersisted?.();
       queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project", String(projectId), "dashboards"] });
     },

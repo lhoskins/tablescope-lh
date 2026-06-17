@@ -7,10 +7,7 @@ import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
 import { HeroSearch } from "@/components/tablescope/home/hero-search";
-import {
-  QuickActionGrid,
-  type QuickActionKey,
-} from "@/components/tablescope/home/quick-actions";
+import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { RecentProjectsTable } from "@/components/tablescope/home/recent-projects";
 import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
@@ -52,12 +49,6 @@ export default function HomePage() {
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
 
-  const handleQuickAction = (key: QuickActionKey) => {
-    if (key === "new-project") {
-      setShowCreate(true);
-    }
-  };
-
   return (
     <AppShell
       mode="home"
@@ -85,9 +76,9 @@ export default function HomePage() {
       }
     >
       <div className="space-y-10 py-6">
-        <div className="mx-auto w-full max-w-content space-y-10">
+        <div className="mx-auto w-full max-w-content space-y-6">
           <HeroSearch />
-          <QuickActionGrid onAction={handleQuickAction} />
+          <HomeAiSuggestions />
         </div>
         <IntelligenceFeed />
         <div className="mx-auto w-full max-w-content">

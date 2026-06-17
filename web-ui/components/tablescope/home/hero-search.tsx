@@ -5,13 +5,6 @@ import { useRouter } from "next/navigation";
 import { IconArrowUp, IconSparkles } from "@tabler/icons-react";
 import { apiClient } from "@/lib/api-client";
 
-const QUICK_PROMPTS = [
-  "Supplier performance trends",
-  "Find contracts",
-  "Create a revenue dashboard",
-  "Compare KPIs by region",
-];
-
 interface RoutePromptResponse {
   route: string;
   prefilled: string;
@@ -82,19 +75,6 @@ export function HeroSearch() {
           </button>
         </div>
         {error && <p className="mt-2 text-center text-small text-danger">{error}</p>}
-      </div>
-
-      <div className="mt-4 flex flex-wrap justify-center gap-2">
-        {QUICK_PROMPTS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => void submit(p)}
-            className="rounded-full border border-line-secondary bg-bg-primary px-3 py-1.5 text-[12px] text-ink-secondary hover:border-brand-100 hover:text-brand-700"
-          >
-            {p}
-          </button>
-        ))}
       </div>
     </div>
   );

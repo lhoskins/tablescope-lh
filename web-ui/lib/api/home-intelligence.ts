@@ -254,3 +254,89 @@ export function getReport(shareToken: string): Promise<ReportRecord> {
 export function listReports(): Promise<ReportRecord[]> {
   return apiClient.get("/api/reports");
 }
+
+// ── Home AI suggestions — the three hero pills ───────────────────────────────
+
+export interface QuerySuggestion {
+  title: string;
+  description: string;
+  sql: string;
+}
+
+export interface QuerySuggestionsProject {
+  projectId: string;
+  projectName: string;
+  projectColor: string;
+  suggestions: QuerySuggestion[];
+}
+
+export function suggestQueries(
+  granularity = 3,
+): Promise<{ projects: QuerySuggestionsProject[] }> {
+  return apiClient.post("/api/ai/home/query-suggestions", {
+    granularity,
+    max_per_project: 5,
+  });
+}
+
+export interface DashboardWidgetSuggestion {
+  title: string;
+  chartType: string;
+  chart: InsightChart;
+  sql: string;
+  labelColumn: string;
+  valueColumn: string;
+}
+
+export interface DashboardSuggestion {
+  title: string;
+  widgets: DashboardWidgetSuggestion[];
+}
+
+export interface DashboardSuggestionsProject {
+  projectId: string;
+  projectName: string;
+  projectColor: string;
+  dashboard: DashboardSuggestion | null;
+}
+
+export function suggestDashboards(
+  granularity = 3,
+): Promise<{ projects: DashboardSuggestionsProject[] }> {
+  return apiClient.post("/api/ai/home/dashboard-suggestions", {
+    granularity,
+    max_per_project: 6,
+  });
+}
+
+export function suggestInsights(
+  granularity = 3,
+): Promise<{ projects: ProjectResult[] }> {
+  return apiClient.post("/api/ai/home/insights", {
+    granularity,
+    max_per_project: 5,
+  });
+}
+
+export function saveQuerySuggestion(body: {
+  project_id: number;
+  name: string;
+  description?: string;
+  sql_text: string;
+}): Promise<{ name: string; status: string }> {
+  return apiClient.post("/api/ai/actions/save-query", body);
+}
+
+export function saveDashboardSuggestion(body: {
+  project_id: number;
+  title: string;
+  widgets: {
+    title: string;
+    sql: string;
+    chartType: string;
+    labelColumn?: string;
+    valueColumn?: string;
+  }[];
+}): Promise<{ status: string; dashboard_id: number; name: string }> {
+  return apiClient.post("/api/ai/home/save-dashboard", body);
+}

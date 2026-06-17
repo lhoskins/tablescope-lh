@@ -124,6 +124,25 @@ function KpiGridView({
   );
 }
 
+/**
+ * Render an {@link InsightChart} (kpi grid or any dashboard chart) standalone.
+ * Shared by the Intelligence feed and the Home dashboard-suggestion previews.
+ */
+export function InsightChartBlock({ chart }: { chart: InsightChart }) {
+  return (
+    <>
+      {chart.title && (
+        <div className="mb-1 text-small text-ink-tertiary">{chart.title}</div>
+      )}
+      {chart.type === "kpi_grid" && chart.data.kpis ? (
+        <KpiGridView kpis={chart.data.kpis} />
+      ) : (
+        <InsightChartView chart={chart} />
+      )}
+    </>
+  );
+}
+
 export interface IntelligenceCardProps {
   card: InsightCardData;
   /** Hide the "Add to report" action (e.g. inside the report viewer). */

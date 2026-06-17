@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { IconSearch } from "@tabler/icons-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { IconSearch, IconTrash } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { SharedByBadge } from "@/components/tablescope/shared-by-badge";
 import { Badge } from "@/components/ui/badge";
+import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
 import {
   useCurrentUser,
@@ -45,6 +47,14 @@ export default function HomeDashboardsPage() {
   const { data: projects } = useProjectSummaries();
   const { data, isLoading } = useAllDashboards();
   const [search, setSearch] = useState("");
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: (d: { projectId: number; id: number }) =>
+      apiClient.delete(`/api/projects/${d.projectId}/dashboards/${d.id}`),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["home", "dashboards-all"] }),
+  });
 
   useEffect(() => {
     if (!getUserMeta()) router.replace("/login");
@@ -97,13 +107,14 @@ export default function HomeDashboardsPage() {
                 <th className="px-4 py-2.5 font-medium">Project Assigned</th>
                 <th className="px-4 py-2.5 font-medium">Shared by</th>
                 <th className="px-4 py-2.5 font-medium">Date Created</th>
+                <th className="w-10 px-4 py-2.5 font-medium"></th>
               </tr>
             </thead>
             <tbody>
               {!isLoading && rows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="px-4 py-10 text-center text-ink-tertiary"
                   >
                     {search
@@ -115,7 +126,7 @@ export default function HomeDashboardsPage() {
               {isLoading && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="px-4 py-10 text-center text-ink-tertiary"
                   >
                     Loading dashboards…
@@ -151,6 +162,29 @@ export default function HomeDashboardsPage() {
                   </td>
                   <td className="px-4 py-3 text-ink-tertiary">
                     {formatDate(d.createdAt)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      title="Delete dashboard"
+                      aria-label={`Delete dashboard ${d.name}`}
+                      disabled={deleteMutation.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Delete dashboard "${d.name}"? This cannot be undone.`,
+                          )
+                        ) {
+                          deleteMutation.mutate({
+                            projectId: d.projectId,
+                            id: d.id,
+                          });
+                        }
+                      }}
+                      className="text-ink-tertiary hover:text-red-600 disabled:opacity-50"
+                    >
+                      <IconTrash size={15} />
+                    </button>
                   </td>
                 </tr>
               ))}

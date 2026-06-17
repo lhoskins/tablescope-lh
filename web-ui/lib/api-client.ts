@@ -164,6 +164,29 @@ export const apiClient = {
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T = void>(path: string) =>
     request<T>(path, { method: "DELETE" }),
+  /**
+   * Best-effort DELETE that survives page unload (tab close / refresh /
+   * navigation). Uses `fetch(..., { keepalive: true })` so the request is
+   * dispatched even as the document is being torn down. Fire-and-forget.
+   */
+  deleteBeacon: (path: string): void => {
+    const headers = new Headers();
+    headers.set("Accept", "application/json");
+    const token = readToken();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    try {
+      void fetch(`${getApiUrl()}${path}`, {
+        method: "DELETE",
+        headers,
+        keepalive: true,
+        cache: "no-store",
+      });
+    } catch {
+      /* ignore — best effort */
+    }
+  },
   upload: <T>(
     path: string,
     file: File,

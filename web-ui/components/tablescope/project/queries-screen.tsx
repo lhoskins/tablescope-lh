@@ -6,7 +6,7 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import { IconSparkles, IconPlus, IconSearch, IconTable } from "@tabler/icons-react";
+import { IconSparkles, IconPlus, IconSearch, IconTable, IconTrash } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import {
   ContextPanel,
@@ -73,6 +73,37 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const [creating, setCreating] = useState(false);
   const [tab, setTab] = useState<"queries" | "scopes">("queries");
   const [showAddTable, setShowAddTable] = useState(false);
+  // Multi-select delete mode for the queries list.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  const toggleSelected = useCallback((id: number) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }, []);
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds([]);
+  }, []);
+
+  const deleteQueriesMutation = useMutation({
+    mutationFn: async (ids: number[]) => {
+      await Promise.all(
+        ids.map((id) =>
+          apiClient.delete(`/api/projects/${projectId}/queries/${id}`),
+        ),
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["project", projectId, "queries"],
+      });
+      setSelectedIds([]);
+      setSelectMode(false);
+    },
+  });
 
   // ── Deep-link: open a specific query via ?q=<id> ────────────────────
   useEffect(() => {
@@ -350,6 +381,49 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
               {f.label}
             </button>
           ))}
+          <div className="ml-auto flex items-center gap-2">
+            {!selectMode ? (
+              <Button
+                variant="secondary"
+                onClick={() => setSelectMode(true)}
+                disabled={rows.length === 0}
+              >
+                <IconTrash size={14} />
+                Delete
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    if (selectedIds.length === 0) return;
+                    if (
+                      typeof window !== "undefined" &&
+                      !window.confirm(
+                        `Delete ${selectedIds.length} quer${
+                          selectedIds.length === 1 ? "y" : "ies"
+                        }? This cannot be undone.`,
+                      )
+                    ) {
+                      return;
+                    }
+                    deleteQueriesMutation.mutate(selectedIds);
+                  }}
+                  disabled={
+                    selectedIds.length === 0 || deleteQueriesMutation.isPending
+                  }
+                >
+                  <IconTrash size={14} />
+                  {deleteQueriesMutation.isPending
+                    ? "Deleting…"
+                    : `Delete selected (${selectedIds.length})`}
+                </Button>
+                <Button variant="secondary" onClick={exitSelectMode}>
+                  Cancel
+                </Button>
+              </>
+            )}
+          </div>
         </div>
 
         <Card>
@@ -363,6 +437,25 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b border-line-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
+                  {selectMode && (
+                    <th className="w-10 px-4 py-2 font-medium">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all queries"
+                        checked={
+                          filtered.length > 0 &&
+                          filtered.every((q) => selectedIds.includes(q.id))
+                        }
+                        onChange={(e) =>
+                          setSelectedIds(
+                            e.target.checked
+                              ? filtered.map((q) => q.id)
+                              : [],
+                          )
+                        }
+                      />
+                    </th>
+                  )}
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-4 py-2 font-medium">Source</th>
                   <th className="px-4 py-2 font-medium">Origin</th>
@@ -375,21 +468,41 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
               <tbody>
                 {filtered.map((q) => {
                   const active = selected?.id === q.id;
+                  const checked = selectedIds.includes(q.id);
                   return (
                     <tr
                       key={q.id}
                       onClick={() => {
+                        if (selectMode) {
+                          toggleSelected(q.id);
+                          return;
+                        }
                         setSelectedId(q.id);
                         setDetailId(q.id);
                         setEditing(false);
                       }}
                       className={cn(
                         "cursor-pointer border-b border-line-tertiary last:border-0",
-                        active
+                        selectMode && checked
+                          ? "bg-brand-50/60"
+                          : active && !selectMode
                           ? "bg-brand-50/60"
                           : "hover:bg-bg-secondary",
                       )}
                     >
+                      {selectMode && (
+                        <td
+                          className="px-4 py-2.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`Select query ${q.name}`}
+                            checked={checked}
+                            onChange={() => toggleSelected(q.id)}
+                          />
+                        </td>
+                      )}
                       <td className="px-4 py-2.5">
                         <span
                           className={cn(
