@@ -122,12 +122,13 @@ async def search_vectors(
             FieldCondition(key="visibility", match=MatchValue(value="shared_project"))
         )
 
-    results = client.search(
+    results = client.query_points(
         collection_name=name,
-        query_vector=query_vector,
+        query=query_vector,
         query_filter=Filter(must=must_conditions),
         limit=limit,
-    )
+        with_payload=True,
+    ).points
 
     return [
         {"id": r.id, "score": r.score, "payload": r.payload}
@@ -207,7 +208,14 @@ async def upsert_reference_vectors(
         payload["vector_id"] = pid
         points.append(PointStruct(id=pid, vector=vec, payload=payload))
 
-    client.upsert(collection_name=REFERENCE_COLLECTION, points=points)
+    # Upsert in batches: a single request for a large document can exceed
+    # Qdrant's 32 MB JSON payload limit and fail with a 400.
+    batch_size = 256
+    for start in range(0, len(points), batch_size):
+        client.upsert(
+            collection_name=REFERENCE_COLLECTION,
+            points=points[start : start + batch_size],
+        )
     logger.info("Upserted %d reference vectors", len(points))
     return point_ids
 
@@ -242,12 +250,13 @@ async def search_reference_vectors(
         ]
     )
     try:
-        results = client.search(
+        results = client.query_points(
             collection_name=REFERENCE_COLLECTION,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=scope_filter,
             limit=limit,
-        )
+            with_payload=True,
+        ).points
     except Exception as e:
         # Collection may not exist yet (nothing indexed) — degrade to no results.
         logger.warning("Reference vector search failed: %s", e)
