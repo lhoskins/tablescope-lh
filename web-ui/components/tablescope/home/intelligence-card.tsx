@@ -73,8 +73,16 @@ function InsightChartView({ chart }: { chart: InsightChart }) {
   const series = chart.data.series ?? [];
   if (series.length === 0) return null;
 
-  const rows = series.map((s) => ({ label: s.label, value: s.value }));
-  const widget: WidgetConfig = {
+  // Two-metric charts (combo/scatter/bubble) carry a second value; expose both
+  // columns so the renderer can map them onto the right axes.
+  const hasValue2 = series.some((s) => typeof s.value2 === "number");
+  const rows = series.map((s) =>
+    hasValue2
+      ? { label: s.label, value: s.value, value2: s.value2 ?? 0 }
+      : { label: s.label, value: s.value },
+  );
+
+  const base: WidgetConfig = {
     id: "insight-chart",
     type: chart.type as WidgetType,
     chartSubtype: (chart.subtype || undefined) as WidgetConfig["chartSubtype"],
@@ -90,6 +98,22 @@ function InsightChartView({ chart }: { chart: InsightChart }) {
     colSpan: 1,
     position: 0,
   };
+
+  let widget: WidgetConfig = base;
+  if (chart.type === "combo" && hasValue2) {
+    // dual_line -> bars (value) + overlay line (value2) on a shared x axis.
+    widget = { ...base, y2Column: "value2", y2Aggregation: "sum" };
+  } else if (chart.type === "scatter") {
+    // x/y scatter of two metrics; bubble degrades to scatter without a size col.
+    widget = {
+      ...base,
+      xColumn: "value",
+      xColumnType: "number",
+      yColumn: "value2",
+      sortBy: "x_asc",
+    };
+  }
+
   return (
     <div className="h-[180px] w-full">
       <WidgetRenderer widget={widget} data={rows} />

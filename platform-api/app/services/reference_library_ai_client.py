@@ -12,7 +12,12 @@ from app.services.ai_intelligence_client import _post, is_enabled
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["is_enabled", "summarize_reference_document", "suggest_references"]
+__all__ = [
+    "is_enabled",
+    "summarize_reference_document",
+    "suggest_references",
+    "index_reference_document",
+]
 
 
 async def summarize_reference_document(
@@ -43,6 +48,34 @@ async def summarize_reference_document(
         return None
     summary = result.get("summary")
     return summary if isinstance(summary, str) and summary.strip() else None
+
+
+async def index_reference_document(
+    *,
+    tier: str,
+    tenant_id: int | None,
+    project_id: int | None,
+    user_id: int | None,
+    document_id: int,
+    title: str,
+    extracted_text: str,
+) -> bool:
+    """Embed a reference doc into the shared vector store. Returns success."""
+    if not extracted_text.strip():
+        return False
+    result = await _post(
+        "/ai/index/reference",
+        {
+            "tier": tier,
+            "tenant_id": tenant_id,
+            "project_id": project_id,
+            "user_id": user_id or 0,
+            "document_id": document_id,
+            "title": title,
+            "content": extracted_text,
+        },
+    )
+    return result is not None and result.get("status") == "indexed"
 
 
 async def suggest_references(

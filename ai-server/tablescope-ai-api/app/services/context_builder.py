@@ -173,19 +173,40 @@ async def build_context(
     # 2. Vector search (if question provided)
     documents: list[dict[str, Any]] = []
     if question:
+        query_embedding: list[float] | None = None
         try:
             query_embedding = await llm_client.generate_embedding(question)
-            documents = await vector_store.search_vectors(
-                tenant_id=tenant_id,
-                project_id=project_id,
-                user_id=user_id,
-                query_vector=query_embedding,
-                scope=scope,
-                is_project_member=perms.get("is_member", False),
-                limit=10,
-            )
         except Exception as e:
-            logger.warning("Vector search failed: %s", e)
+            logger.warning("Embedding generation failed: %s", e)
+
+        if query_embedding is not None:
+            try:
+                documents = await vector_store.search_vectors(
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    user_id=user_id,
+                    query_vector=query_embedding,
+                    scope=scope,
+                    is_project_member=perms.get("is_member", False),
+                    limit=10,
+                )
+            except Exception as e:
+                logger.warning("Vector search failed: %s", e)
+
+            # Reference Library docs (industry/company/project tier) live in a
+            # shared, tier-scoped collection so governed knowledge is available
+            # across projects. Merge any matches into the document context.
+            try:
+                reference_docs = await vector_store.search_reference_vectors(
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    query_vector=query_embedding,
+                    limit=5,
+                )
+                if reference_docs:
+                    documents = documents + reference_docs
+            except Exception as e:
+                logger.warning("Reference vector search failed: %s", e)
 
     # 3. Saved queries, dashboards, and query scopes from permissions context
     queries = perms.get("saved_queries", [])
@@ -267,7 +288,14 @@ def context_to_prompt_text(context: ContextPackage) -> str:
         for doc in context.allowed_context["documents"]:
             payload = doc.get("payload", {})
             text = payload.get("chunk_text", payload.get("content", ""))
-            if text:
+            if not text:
+                continue
+            title = payload.get("title")
+            if payload.get("source_type") == "reference_library" and title:
+                tier = payload.get("tier", "")
+                label = f"reference: {title}" + (f" ({tier})" if tier else "")
+                parts.append(f"  - [{label}] {text[:500]}")
+            else:
                 parts.append(f"  - {text[:500]}")
 
     # Saved queries

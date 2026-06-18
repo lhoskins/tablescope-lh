@@ -35,6 +35,23 @@ class IndexDocumentRequest(AIBaseRequest):
     visibility: str = "shared_project"
 
 
+class IndexReferenceRequest(BaseModel):
+    """Index a reference-library document into the shared reference vector store.
+
+    Not an :class:`AIBaseRequest`: industry-tier docs have no tenant/project, so
+    those fields are optional and scope is carried by ``tier``.
+    """
+    tier: str
+    tenant_id: int | None = None
+    project_id: int | None = None
+    user_id: int = 0
+    document_id: int
+    title: str = ""
+    content: str = ""
+    timestamp: float = 0.0
+    signature: str = ""
+
+
 class GenerateRelationshipsRequest(AIBaseRequest):
     pass
 
@@ -162,13 +179,16 @@ class IntelligencePlanRequest(AIBaseRequest):
 
 class PlannedAnalysis(BaseModel):
     id: str
-    category: str = "trend"  # risk | trend | opportunity
+    category: str = "trend"  # risk | trend | opportunity | relationship
     title: str = ""
     rationale: str = ""
     sql: str = ""
-    chart_type: str = "bar"  # bar | line | kpi_grid | none
+    chart_type: str = "bar"  # see _ALLOWED_PLAN_CHART_TYPES in routers/ai.py
     label_column: str = ""
     value_column: str = ""
+    # Second metric used by dual_line/scatter/bubble/heatmap (color) and as the
+    # target for gauge/bullet. Empty for single-metric charts.
+    value_column_2: str = ""
     severity_hint: str = "watch"
     source_documents: list[str] = Field(default_factory=list)
 

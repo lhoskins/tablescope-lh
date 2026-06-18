@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,6 +31,12 @@ from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
 from app.models.project_asset import ProjectAsset
+from app.models.reference_library import (
+    TIER_COMPANY,
+    TIER_INDUSTRY,
+    TIER_PROJECT,
+    ReferenceDocument,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +133,44 @@ async def gather_project_context(
         )
         for a in assets
     ]
+
+    # Reference Library docs in scope (industry = global, company = this tenant,
+    # project = this project) so Home analyses can ground in governed standards
+    # and policies, not just the project's own uploads.
+    ref_docs = (
+        await session.scalars(
+            select(ReferenceDocument)
+            .where(
+                ReferenceDocument.status == "active",
+                ReferenceDocument.ai_summary.isnot(None),
+                or_(
+                    ReferenceDocument.tier == TIER_INDUSTRY,
+                    and_(
+                        ReferenceDocument.tier == TIER_COMPANY,
+                        ReferenceDocument.tenant_id == project.tenant_id,
+                    ),
+                    and_(
+                        ReferenceDocument.tier == TIER_PROJECT,
+                        ReferenceDocument.project_id == project.id,
+                    ),
+                ),
+            )
+            .order_by(ReferenceDocument.updated_at.desc())
+            .limit(40)
+        )
+    ).all()
+    for r in ref_docs:
+        documents.append(
+            DocInfo(
+                title=r.title,
+                ai_summary=r.ai_summary,
+                ai_metadata={
+                    "reference_tier": r.tier,
+                    "issuing_body": r.issuing_body or "",
+                    "domain_tag": r.domain_tag or "",
+                },
+            )
+        )
 
     return ProjectContext(tables=tables, documents=documents)
 
@@ -267,6 +311,64 @@ async def _safe_query(runner: QueryRunner, sql: str) -> dict[str, Any] | None:
     except Exception as exc:
         logger.info("home-intelligence query skipped: %s", exc)
         return None
+
+
+async def _sample_values(runner: QueryRunner, view_name: str) -> dict[str, str]:
+    """Return one real example value per column for a table.
+
+    The planner uses these to detect each column's true format (e.g. a date
+    stored as ``"1/19/2026"`` vs ISO, or whether text is numeric) so it can
+    CAST/parse correctly. Best-effort: returns ``{}`` if the probe query fails.
+    """
+    result = await _safe_query(runner, f'SELECT * FROM "{view_name}"')
+    if not result:
+        return {}
+    samples: dict[str, str] = {}
+    for row in result.get("rows", [])[:25]:
+        for col, val in row.items():
+            if col in samples:
+                continue
+            if val is None:
+                continue
+            text = str(val).strip()
+            if text:
+                samples[col] = text[:40]
+    return samples
+
+
+_SLASH_DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/(\d{4}|\d{2})$")
+
+
+def _date_masks_from_samples(
+    samples_per_table: list[dict[str, str]]
+) -> dict[str, str]:
+    """Map each date column (by name) to a Teiid PARSETIMESTAMP mask.
+
+    Only columns whose example value is a slash date (e.g. ``"1/19/2026"``)
+    need a mask — ISO dates cast cleanly and are left alone.
+    """
+    masks: dict[str, str] = {}
+    for samples in samples_per_table:
+        for col, val in samples.items():
+            if col in masks:
+                continue
+            if _SLASH_DATE_RE.match(val):
+                year = val.rsplit("/", 1)[-1]
+                masks[col] = "M/d/yyyy" if len(year) == 4 else "M/d/yy"
+    return masks
+
+
+def _normalize_date_casts(sql: str, date_masks: dict[str, str]) -> str:
+    """Rewrite ``CAST("col" AS date|timestamp)`` to ``PARSETIMESTAMP("col",
+    'mask')`` for slash-date columns, so time-bucketed SQL runs on Teiid even
+    when the model casts a non-ISO text date (which Teiid rejects)."""
+    for col, mask in date_masks.items():
+        pat = re.compile(
+            r'CAST\(\s*"' + re.escape(col) + r'"\s+AS\s+(?:date|timestamp)\s*\)',
+            re.IGNORECASE,
+        )
+        sql = pat.sub(f"PARSETIMESTAMP(\"{col}\", '{mask}')", sql)
+    return sql
 
 
 async def _query_with_error(
@@ -691,7 +793,94 @@ _CHART_ALIASES: dict[str, tuple[str, str]] = {
     "radial_bar": ("radial_bar", ""),
     "treemap": ("treemap", ""),
     "funnel": ("funnel", ""),
+    # New planner types with no dedicated renderer yet — degrade to the nearest
+    # existing visual so a card always renders rather than breaking.
+    "bullet": ("pie", "gauge"),  # single metric vs target ~ gauge
+    "heatmap": ("bar", ""),  # magnitude across categories (color dim dropped)
+    "sparkline_table": ("line", ""),  # per-entity trend ~ a trend line
 }
+
+# Planner chart types that compare two metrics; handled specially because they
+# need a second numeric column rather than the default {label, value} series.
+_TWO_VALUE_TYPES = frozenset({"dual_line", "scatter", "bubble"})
+
+
+def _pick_second_value(
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    used: tuple[str | None, ...],
+    value_hint_2: str,
+) -> str | None:
+    """Resolve a second numeric column distinct from the already-used ones."""
+    if value_hint_2 and value_hint_2 in columns and value_hint_2 not in used:
+        return value_hint_2
+    for col in columns:
+        if col in used:
+            continue
+        numeric = [r for r in rows if _to_float(r.get(col)) is not None]
+        if rows and len(numeric) >= max(1, len(rows) // 2):
+            return col
+    return None
+
+
+def _two_value_chart(
+    chart_type: str,
+    title: str,
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    label_hint: str,
+    value_hint: str,
+    value_hint_2: str,
+) -> dict[str, Any] | None:
+    """Build a two-metric chart (dual_line / scatter / bubble).
+
+    Returns ``None`` when a second numeric column can't be resolved, so the
+    caller can fall back to a single-value chart instead of dropping the card.
+    """
+    label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
+    if not value_col:
+        return None
+    value2_col = _pick_second_value(
+        columns, rows, (value_col, label_col), value_hint_2
+    )
+    if not value2_col:
+        return None
+    series: list[dict[str, Any]] = []
+    for r in rows[:24]:
+        v = _to_float(r.get(value_col))
+        v2 = _to_float(r.get(value2_col))
+        if v is None or v2 is None:
+            continue
+        series.append(
+            {
+                "label": str(r.get(label_col)) if label_col else "",
+                "value": round(v, 2),
+                "value2": round(v2, 2),
+            }
+        )
+    if not series:
+        return None
+    series_labels = {"value": value_col, "value2": value2_col}
+    if chart_type == "dual_line":
+        # Two metrics over a shared (time) axis -> combo (bar + overlay line).
+        return {
+            "type": "combo",
+            "subtype": "bar_line",
+            "title": title,
+            "data": {"series": series},
+            "roles": {"x": "label", "y": "value", "y2": "value2"},
+            "seriesLabels": series_labels,
+        }
+    # scatter / bubble -> two variables as x/y (bubble degrades to scatter when
+    # no third size metric is available).
+    return {
+        "type": "scatter",
+        "subtype": "bubble" if chart_type == "bubble" else "",
+        "title": title,
+        "data": {"series": series},
+        "roles": {"x": "value", "y": "value2"},
+        "seriesLabels": series_labels,
+    }
 
 
 def _chart(
@@ -713,6 +902,7 @@ def _build_chart(
     result: dict[str, Any],
     label_hint: str,
     value_hint: str,
+    value_hint_2: str = "",
 ) -> dict[str, Any] | None:
     """Pick the best visual for a real query result (shape-aware, never faked).
 
@@ -746,6 +936,16 @@ def _build_chart(
         if kpis:
             return {"type": "kpi_grid", "title": title, "data": {"kpis": kpis[:6]}}
         return None
+
+    # Two-metric charts (dual_line / scatter / bubble) need a second numeric
+    # column; build that shape when one is available, else fall through to the
+    # single-value handling below so the card still renders.
+    if chart_type in _TWO_VALUE_TYPES:
+        two = _two_value_chart(
+            chart_type, title, columns, rows, label_hint, value_hint, value_hint_2
+        )
+        if two is not None:
+            return two
 
     label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
     if not label_col or not value_col:
@@ -813,16 +1013,27 @@ async def run_ai_intelligence(
         return None
 
     allowed_tables = [t.view_name for t in ctx.tables]
+    # Pull a real example value per column so the planner can see each column's
+    # actual format (date masks, numeric-vs-text) and generate valid SQL.
+    samples_per_table = await asyncio.gather(
+        *(_sample_values(runner, t.view_name) for t in ctx.tables)
+    )
     table_schema = [
         {
             "table": t.view_name,
             # File/CSV columns are imported by Teiid as TEXT regardless of the
             # logical type shown, so the LLM must CAST them for any math/date op.
             "storage": "text" if t.kind == "file" else "native",
-            "columns": [{"name": n, "type": ty} for (n, ty) in t.columns],
+            "columns": [
+                {"name": n, "type": ty, "sample": samples.get(n, "")}
+                for (n, ty) in t.columns
+            ],
         }
-        for t in ctx.tables
+        for t, samples in zip(ctx.tables, samples_per_table, strict=False)
     ]
+    # Deterministic safety net: even if the model casts a non-ISO text date
+    # (which Teiid rejects), rewrite it to PARSETIMESTAMP before executing.
+    date_masks = _date_masks_from_samples(samples_per_table)
     documents = [
         {
             "title": d.title,
@@ -877,6 +1088,7 @@ async def run_ai_intelligence(
     for a in analyses:
         sql = (a.get("sql") or "").strip()
         if sql:
+            sql = _normalize_date_casts(sql, date_masks)
             result, err = await _query_with_error(runner, sql)
             if result and result.get("rows"):
                 _record_data_analysis(a, result)
@@ -930,6 +1142,7 @@ async def run_ai_intelligence(
         for (a, orig_sql, _err), fixed in zip(to_repair, fixes, strict=True):
             if not fixed or fixed.strip() == orig_sql.strip():
                 continue
+            fixed = _normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
                 _record_data_analysis({**a, "sql": fixed}, result)
@@ -968,7 +1181,7 @@ async def run_ai_intelligence(
         ins = interpreted.get(a["id"], {})
 
         category = a.get("category", "trend")
-        if category not in ("risk", "trend", "opportunity"):
+        if category not in ("risk", "trend", "opportunity", "relationship"):
             category = "trend"
         severity = ins.get("severity") or a.get("severity_hint") or "info"
         if severity not in ("critical", "urgent", "watch", "opportunity", "info"):
@@ -1000,6 +1213,7 @@ async def run_ai_intelligence(
                 result,
                 a.get("label_column", ""),
                 a.get("value_column", ""),
+                a.get("value_column_2", ""),
             )
             tables = _tables_in_sql(a.get("sql", ""), ctx.tables)
         else:

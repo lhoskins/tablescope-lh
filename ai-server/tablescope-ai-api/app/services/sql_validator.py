@@ -56,9 +56,12 @@ def validate_sql(
     if allowed_tables:
         # Normalize table names for comparison
         allowed_upper = {t.upper() for t in allowed_tables}
-        # Extract table references from FROM and JOIN clauses
+        # Extract table references from FROM and JOIN clauses. The negative
+        # lookahead skips identifiers that are actually function calls, so the
+        # "FROM" inside EXTRACT(YEAR FROM CAST("col" AS date)) is not mistaken
+        # for a table reference named CAST.
         table_pattern = re.compile(
-            r"(?:FROM|JOIN)\s+\"?(\w+)\"?", re.IGNORECASE
+            r"(?:FROM|JOIN)\s+\"?(\w+)\"?(?![\w(])", re.IGNORECASE
         )
         referenced = table_pattern.findall(sql)
         for table in referenced:
