@@ -33,6 +33,7 @@ from app.models.saved_query import SavedQuery
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.project import (
+    AddableUserRead,
     ProjectCreate,
     ProjectMemberRead,
     ProjectRead,
@@ -1099,6 +1100,54 @@ async def list_members(
     return result
 
 
+@router.get("/{project_id}/addable-users", response_model=list[AddableUserRead])
+async def list_addable_users(
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[AddableUserRead]:
+    """Active tenant users who can be added to the project.
+
+    Excludes users who are already active members and the project owner.
+    Restricted to project managers (owner / project-admin / tenant admin) so the
+    member picker isn't exposed to plain viewers.
+    """
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not await _is_project_admin(session, project, context):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a project owner or admin can manage members",
+        )
+
+    existing = await session.scalars(
+        select(ProjectMember.user_id).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.is_active.is_(True),
+        )
+    )
+    member_ids = set(existing.all())
+    if project.owner_id:
+        member_ids.add(project.owner_id)
+
+    rows = await session.scalars(
+        select(User)
+        .where(User.tenant_id == context.tenant_id, User.is_active.is_(True))
+        .order_by(User.email)
+    )
+    return [
+        AddableUserRead(
+            user_id=u.id,
+            email=u.email,
+            display_name=u.display_name,
+            role=u.role,
+        )
+        for u in rows
+        if u.id not in member_ids
+    ]
+
+
 @router.post("/{project_id}/members", response_model=ProjectMemberRead,
              status_code=status.HTTP_201_CREATED)
 async def add_member(
@@ -1124,9 +1173,14 @@ async def add_member(
         raise HTTPException(status_code=403, detail="Only project owner/admin can add members")
 
     user_id = payload.get("user_id")
-    role = payload.get("role", "member")
+    role = payload.get("role", "viewer")
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
+    if role not in ("viewer", "editor", "admin"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid role. Must be viewer, editor, or admin",
+        )
 
     user = await session.get(User, user_id)
     if user is None or user.tenant_id != context.tenant_id:

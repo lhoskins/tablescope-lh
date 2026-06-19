@@ -63,6 +63,15 @@ class ProjectMemberRead(BaseModel):
     display_name: str | None = None
 
 
+class AddableUserRead(BaseModel):
+    """A tenant user eligible to be added to a project (member picker)."""
+
+    user_id: int
+    email: str
+    display_name: str | None = None
+    role: str = "viewer"
+
+
 # ── Saved Query schemas ──────────────────────────────────────────────
 
 

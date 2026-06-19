@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useCurrentUser, useProjectSummaries } from "./use-shell-data";
 import type {
@@ -237,6 +237,79 @@ export function useProjectMembers(projectId: string) {
     queryFn: () =>
       apiClient.get<ProjectMember[]>(`/api/projects/${projectId}/members`),
     enabled: Boolean(projectId),
+  });
+}
+
+export interface AddableUser {
+  user_id: number;
+  email: string;
+  display_name: string | null;
+  role: string;
+}
+
+/**
+ * Tenant users eligible to be added to the project. The endpoint is restricted
+ * to project managers, so a successful fetch doubles as the signal that the
+ * current user is allowed to manage members.
+ */
+export function useAddableUsers(projectId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["project", projectId, "addable-users"],
+    queryFn: () =>
+      apiClient.get<AddableUser[]>(
+        `/api/projects/${projectId}/addable-users`,
+      ),
+    enabled: Boolean(projectId) && enabled,
+    retry: false,
+  });
+}
+
+export function useAddProjectMember(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { userId: number; role: string }) =>
+      apiClient.post<ProjectMember>(`/api/projects/${projectId}/members`, {
+        user_id: vars.userId,
+        role: vars.role,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project", projectId, "members"] });
+      qc.invalidateQueries({
+        queryKey: ["project", projectId, "addable-users"],
+      });
+    },
+  });
+}
+
+export function useUpdateProjectMemberRole(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { userId: number; role: string }) =>
+      apiClient.put<ProjectMember>(
+        `/api/projects/${projectId}/members/${vars.userId}/role`,
+        { role: vars.role },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["project", projectId, "members"] }),
+  });
+}
+
+export function useRemoveProjectMember(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    // "Remove" deactivates the member (the backend keeps a permanent-delete step
+    // for inactive members so contributed datasources can be moved back first).
+    mutationFn: (userId: number) =>
+      apiClient.put(
+        `/api/projects/${projectId}/members/${userId}/deactivate`,
+        {},
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project", projectId, "members"] });
+      qc.invalidateQueries({
+        queryKey: ["project", projectId, "addable-users"],
+      });
+    },
   });
 }
 

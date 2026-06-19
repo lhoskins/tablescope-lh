@@ -1,7 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { IconChevronDown, IconPlus } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconPlus,
+  IconUsers,
+  IconBuildingBank,
+} from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import { accentFor } from "@/lib/ui/color";
 import type {
@@ -101,6 +106,10 @@ export function Sidebar({
       ? projectNavGroups(project.id)
       : homeNavGroups();
 
+  const canManageUsers =
+    Boolean(user.isSuperAdmin) ||
+    ["tenant_admin", "admin", "root_admin"].includes(user.rawRole ?? "");
+
   return (
     <aside className="flex w-sidebar shrink-0 flex-col border-r border-line-tertiary bg-bg-primary">
       <Link
@@ -146,6 +155,32 @@ export function Sidebar({
             counts={counts}
           />
         ))}
+
+        {mode === "home" && canManageUsers && (
+          <div className="space-y-0.5">
+            <div className="px-2.5 pb-1 pt-3 text-caption uppercase tracking-wide text-ink-tertiary">
+              Administration
+            </div>
+            <Link
+              href="/admin/users"
+              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary"
+            >
+              <IconUsers size={15} stroke={1.8} className="shrink-0" />
+              <span className="flex-1 truncate">Users</span>
+            </Link>
+            <Link
+              href="/admin/tenants"
+              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary"
+            >
+              <IconBuildingBank size={15} stroke={1.8} className="shrink-0" />
+              <span className="flex-1 truncate">
+                {user.rawRole === "root_admin" || user.isSuperAdmin
+                  ? "Tenants"
+                  : "My Tenant"}
+              </span>
+            </Link>
+          </div>
+        )}
 
         {mode === "project" && otherProjects.length > 0 && (
           <div className="space-y-0.5">
