@@ -57,6 +57,8 @@ export function useCurrentUser() {
           name,
           email: me.email,
           role: ROLE_LABEL[me.role] ?? me.role,
+          rawRole: me.role,
+          isSuperAdmin: me.is_super_admin,
           tenantName: me.tenant_name,
           initials: initials(name),
         },

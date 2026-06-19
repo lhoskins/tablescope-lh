@@ -7,9 +7,11 @@ import {
   IconSparkles,
   IconArrowUp,
   IconPlus,
+  IconUsers,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
+import { MembersDialog } from "@/components/tablescope/project/members-dialog";
 import {
   DataSourceResultView,
 } from "@/components/tablescope/project/detail-views";
@@ -67,6 +69,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
   const [ask, setAsk] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const [detail, setDetail] = useState<
     { kind: "query"; id: number } | { kind: "source"; name: string } | null
   >(null);
@@ -134,6 +137,10 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           <Button variant="secondary" onClick={() => setShowCreate(true)}>
             <IconPlus size={14} />
             New project
+          </Button>
+          <Button variant="secondary" onClick={() => setShowMembers(true)}>
+            <IconUsers size={14} />
+            Members
           </Button>
           <Button variant="secondary">
             <IconShare size={14} />
@@ -439,6 +446,11 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
       </div>
       )}
       <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
+      <MembersDialog
+        open={showMembers}
+        projectId={projectId}
+        onClose={() => setShowMembers(false)}
+      />
     </ProjectShell>
   );
 }

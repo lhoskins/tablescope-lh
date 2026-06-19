@@ -34,6 +34,9 @@ export type NavKey =
   | "integrations"
   | "audit-log"
   | "settings"
+  | "admin-users"
+  | "admin-tenants"
+  | "admin-data-planes"
   // Project-mode nav
   | "overview"
   | "project-data-sources"
@@ -55,7 +58,11 @@ export interface TenantSummary {
 export interface CurrentUser {
   name: string;
   email: string;
+  /** Display label for the role (e.g. "Admin", "Editor"). */
   role: string;
+  /** Raw role identifier from the API (e.g. "tenant_admin", "editor"). */
+  rawRole?: string;
+  isSuperAdmin?: boolean;
   tenantName: string;
   initials: string;
 }

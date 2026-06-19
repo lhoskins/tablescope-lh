@@ -1,7 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { IconChevronDown, IconPlus } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconPlus,
+  IconUsers,
+  IconBuildingBank,
+} from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import { accentFor } from "@/lib/ui/color";
 import type {
@@ -101,6 +106,29 @@ export function Sidebar({
       ? projectNavGroups(project.id)
       : homeNavGroups();
 
+  const canManageUsers =
+    Boolean(user.isSuperAdmin) ||
+    ["tenant_admin", "admin", "root_admin"].includes(user.rawRole ?? "");
+  const isPlatformAdmin =
+    Boolean(user.isSuperAdmin) || user.rawRole === "root_admin";
+
+  const adminItems: NavItem[] = canManageUsers
+    ? [
+        {
+          key: "admin-users",
+          label: "Users",
+          href: "/admin/users",
+          icon: IconUsers,
+        },
+        {
+          key: "admin-tenants",
+          label: isPlatformAdmin ? "Tenants" : "My Tenant",
+          href: "/admin/tenants",
+          icon: IconBuildingBank,
+        },
+      ]
+    : [];
+
   return (
     <aside className="flex w-sidebar shrink-0 flex-col border-r border-line-tertiary bg-bg-primary">
       <Link
@@ -146,6 +174,13 @@ export function Sidebar({
             counts={counts}
           />
         ))}
+
+        {mode === "home" && adminItems.length > 0 && (
+          <NavGroupBlock
+            group={{ heading: "Administration", items: adminItems }}
+            activeNav={activeNav}
+          />
+        )}
 
         {mode === "project" && otherProjects.length > 0 && (
           <div className="space-y-0.5">
