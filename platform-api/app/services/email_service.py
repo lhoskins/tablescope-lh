@@ -35,18 +35,20 @@ def render_root_admin_invite(
     *, company_name: str, tier_display: str, invite_link: str | None, login_url: str
 ) -> EmailMessageSpec:
     cta = (
-        f"Accept your invite and set up access:\n{invite_link}\n"
+        f"Set up access and create your password:\n{invite_link}\n"
         if invite_link
         else f"Sign in to get started:\n{login_url}\n"
     )
     body = (
-        f"Welcome to Tablescope, and thanks for choosing the {tier_display} plan "
-        f"for {company_name}.\n\n"
+        f"Your Tablescope workspace for {company_name} is ready "
+        f"(on the {tier_display} plan).\n\n"
         f"You've been added as the root administrator of your new workspace.\n\n"
         f"{cta}"
         f"{_footer()}"
     )
-    return EmailMessageSpec(to="", subject="You're invited to Tablescope", body=body)
+    return EmailMessageSpec(
+        to="", subject="Your Tablescope workspace is ready", body=body
+    )
 
 
 def render_user_invite(

@@ -33,7 +33,6 @@ from app.services import billing_audit as audit
 from app.services.email_service import (
     EmailService,
     render_root_admin_invite,
-    render_tenant_ready,
     render_vpn_info_required,
 )
 from app.services.supabase_auth_service import SupabaseAuthService
@@ -144,12 +143,14 @@ class TenantOnboardingService:
     ) -> tuple[str | None, User]:
         from app.config import get_settings
 
-        login_url = f"{get_settings().app_base_url}/{tenant.slug}"
+        # The invite link must land on the set-password page so the new root
+        # admin is prompted to choose a password (not the bare sign-in page).
+        setup_url = f"{get_settings().app_base_url}/{tenant.slug}/set-password"
         supa = await self._supabase.create_or_invite_user(
             req.tenant_admin_email,
             first_name=req.tenant_admin_first_name,
             last_name=req.tenant_admin_last_name,
-            redirect_to=login_url,
+            redirect_to=setup_url,
         )
         if supa.created:
             req.root_admin_status = "supabase_user_created"
@@ -412,6 +413,9 @@ class TenantOnboardingService:
                 recipient=req.tenant_admin_email,
             )
 
+        # The root-admin invite above is the single onboarding email (it doubles
+        # as the "workspace ready" + set-password message). Only isolated tiers
+        # that still need network details get a second, action-required email.
         if req.vpn_status == "awaiting_customer_network_details":
             onboarding_url = f"{settings.app_base_url}/onboarding/vpn?request={req.id}"
             vpn_email = render_vpn_info_required(
@@ -420,12 +424,4 @@ class TenantOnboardingService:
             )
             await self._email.send(
                 vpn_email, to=req.tenant_admin_email, template="vpn_info_required"
-            )
-        else:
-            ready = render_tenant_ready(
-                company_name=req.company_name or req.tenant_slug,
-                login_url=login_url,
-            )
-            await self._email.send(
-                ready, to=req.tenant_admin_email, template="tenant_ready"
             )

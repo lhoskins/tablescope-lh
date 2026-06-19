@@ -109,6 +109,25 @@ export function Sidebar({
   const canManageUsers =
     Boolean(user.isSuperAdmin) ||
     ["tenant_admin", "admin", "root_admin"].includes(user.rawRole ?? "");
+  const isPlatformAdmin =
+    Boolean(user.isSuperAdmin) || user.rawRole === "root_admin";
+
+  const adminItems: NavItem[] = canManageUsers
+    ? [
+        {
+          key: "admin-users",
+          label: "Users",
+          href: "/admin/users",
+          icon: IconUsers,
+        },
+        {
+          key: "admin-tenants",
+          label: isPlatformAdmin ? "Tenants" : "My Tenant",
+          href: "/admin/tenants",
+          icon: IconBuildingBank,
+        },
+      ]
+    : [];
 
   return (
     <aside className="flex w-sidebar shrink-0 flex-col border-r border-line-tertiary bg-bg-primary">
@@ -156,30 +175,11 @@ export function Sidebar({
           />
         ))}
 
-        {mode === "home" && canManageUsers && (
-          <div className="space-y-0.5">
-            <div className="px-2.5 pb-1 pt-3 text-caption uppercase tracking-wide text-ink-tertiary">
-              Administration
-            </div>
-            <Link
-              href="/admin/users"
-              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary"
-            >
-              <IconUsers size={15} stroke={1.8} className="shrink-0" />
-              <span className="flex-1 truncate">Users</span>
-            </Link>
-            <Link
-              href="/admin/tenants"
-              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary"
-            >
-              <IconBuildingBank size={15} stroke={1.8} className="shrink-0" />
-              <span className="flex-1 truncate">
-                {user.rawRole === "root_admin" || user.isSuperAdmin
-                  ? "Tenants"
-                  : "My Tenant"}
-              </span>
-            </Link>
-          </div>
+        {mode === "home" && adminItems.length > 0 && (
+          <NavGroupBlock
+            group={{ heading: "Administration", items: adminItems }}
+            activeNav={activeNav}
+          />
         )}
 
         {mode === "project" && otherProjects.length > 0 && (

@@ -34,6 +34,9 @@ export type NavKey =
   | "integrations"
   | "audit-log"
   | "settings"
+  | "admin-users"
+  | "admin-tenants"
+  | "admin-data-planes"
   // Project-mode nav
   | "overview"
   | "project-data-sources"
