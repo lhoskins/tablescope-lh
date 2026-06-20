@@ -11,6 +11,7 @@ how scopes are grouped, positioned, and toggled.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -42,7 +43,67 @@ from app.services.auto_scope import extract_select_columns
 
 router = APIRouter(tags=["scope-sets"])
 
+logger = logging.getLogger(__name__)
+
 _FIELD_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$. ]*$")
+_STAR_RE = re.compile(r"\bSELECT\s+(.*?)\s+FROM\s+", re.IGNORECASE | re.DOTALL)
+
+
+def _select_has_star(sql: str) -> bool:
+    """True when the SELECT clause uses ``*`` (so static parsing is incomplete)."""
+    m = _STAR_RE.search(sql or "")
+    if m is None:
+        return False
+    return "*" in m.group(1)
+
+
+async def _resolve_query_fields(
+    session: AsyncSession,
+    *,
+    context: RequestContext,
+    project_id: int,
+    query_sql: str | None,
+) -> list[str]:
+    """Return a query's output columns.
+
+    Static parsing of the SELECT clause works for explicit column lists.  For
+    ``SELECT *`` (and ``t.*``) the column names are not in the SQL text, so we
+    execute the query through Teiid (1-row probe) and read the result columns.
+    """
+    sql = (query_sql or "").strip()
+    if not sql:
+        return []
+    cols = extract_select_columns(sql)
+    if cols and not _select_has_star(sql):
+        return cols
+    # Star query (or unparseable) — resolve actual columns from Teiid.
+    try:
+        from app.routes.query import _resolve_vdb_database, _run_sql
+        from app.services.tenant_teiid_resolver import TenantTeiidResolver
+
+        database = await _resolve_vdb_database(
+            session=session, context=context, project_id=project_id
+        )
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(
+            context.tenant_id
+        )
+        probe = f"SELECT * FROM ({sql.rstrip(';')}) AS __scope_cols LIMIT 1"
+        result = await _run_sql(
+            database=database,
+            sql=probe,
+            teiid_host=endpoint.pg_host,
+            teiid_port=endpoint.pg_port,
+        )
+        resolved = list(result.get("columns") or [])
+        if resolved:
+            return resolved
+    except Exception as exc:  # degrade gracefully to static columns
+        logger.warning(
+            "Could not resolve columns for star query in project %d: %s",
+            project_id,
+            exc,
+        )
+    return cols
 
 
 async def _get_project(
@@ -157,7 +218,12 @@ async def list_scope_builder_tables(
     ).all()
     tables: list[ScopeBuilderTable] = []
     for q in queries:
-        fields = extract_select_columns(q.sql_text or "")
+        fields = await _resolve_query_fields(
+            session,
+            context=context,
+            project_id=project_id,
+            query_sql=q.sql_text,
+        )
         tables.append(
             ScopeBuilderTable(
                 table_key=f"query:{q.id}",
@@ -373,7 +439,14 @@ async def save_scope_map(
         await session.delete(sc)
     await session.flush()
 
+    seen_rel: set[tuple[int, str, int, str]] = set()
     for rel in payload.relationships:
+        # Dedupe identical mappings within the payload (the per-set unique
+        # constraint would otherwise reject the second one).
+        rel_key = (rel.query_id, rel.source_field, rel.target_query_id, rel.target_field)
+        if rel_key in seen_rel:
+            continue
+        seen_rel.add(rel_key)
         if not _FIELD_RE.match(rel.source_field):
             raise HTTPException(
                 status_code=400, detail=f"Invalid source field: {rel.source_field}"
@@ -452,9 +525,13 @@ async def ai_suggest_scopes(
     name_by_q: dict[int, str] = {}
     for q in queries:
         name_by_q[q.id] = q.name
-        cols_by_q[q.id] = {
-            c.lower(): c for c in extract_select_columns(q.sql_text or "")
-        }
+        fields = await _resolve_query_fields(
+            session,
+            context=context,
+            project_id=scope_set.project_id,
+            query_sql=q.sql_text,
+        )
+        cols_by_q[q.id] = {c.lower(): c for c in fields}
 
     suggestions: list[ScopeAISuggestion] = []
     seen: set[tuple[int, str, int, str]] = set()

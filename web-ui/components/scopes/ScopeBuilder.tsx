@@ -449,6 +449,17 @@ export function ScopeBuilder({
   const selectedLinks = selectedGroup ? groups.get(selectedGroup) ?? [] : [];
   const selectedHead = selectedLinks[0];
 
+  // Selecting a relationship drives the source/target pair (and role badges +
+  // field-match grid) now that the top dropdowns are gone.
+  const selSrc = selectedHead?.sourceQueryId;
+  const selTgt = selectedHead?.targetQueryId;
+  useEffect(() => {
+    if (selSrc != null && selTgt != null) {
+      setSourceQueryId(selSrc);
+      setTargetQueryId(selTgt);
+    }
+  }, [selSrc, selTgt]);
+
   const updateGroup = (gid: string, patch: Partial<Link>) => {
     setLinks((prev) =>
       prev.map((l) => (l.matchGroupId === gid ? { ...l, ...patch } : l)),
@@ -836,7 +847,7 @@ export function ScopeBuilder({
           </button>
         </div>
 
-        <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="mt-2 grid grid-cols-1 gap-3">
           <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-ink-tertiary">
             Scope Name
             <input
@@ -846,52 +857,25 @@ export function ScopeBuilder({
               placeholder="e.g. Customer → Orders"
             />
           </label>
-          <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-ink-tertiary">
-            Source Query
-            <select
-              value={sourceQueryId ?? ""}
-              onChange={(e) =>
-                setSourceQueryId(e.target.value ? Number(e.target.value) : null)
-              }
-              className="h-9 rounded-md border border-line-secondary bg-bg-primary px-2 text-[13px] normal-case text-ink-primary focus:border-brand-500 focus:outline-none"
-            >
-              <option value="">Select source query…</option>
-              {available
-                .filter((b) => b.query_id != null && b.query_id !== targetQueryId)
-                .map((b) => (
-                  <option key={b.table_key} value={b.query_id as number}>
-                    {b.table_name}
-                  </option>
-                ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-ink-tertiary">
-            Target Query
-            <select
-              value={targetQueryId ?? ""}
-              onChange={(e) =>
-                setTargetQueryId(e.target.value ? Number(e.target.value) : null)
-              }
-              className="h-9 rounded-md border border-line-secondary bg-bg-primary px-2 text-[13px] normal-case text-ink-primary focus:border-brand-500 focus:outline-none"
-            >
-              <option value="">Select target query…</option>
-              {available
-                .filter((b) => b.query_id != null && b.query_id !== sourceQueryId)
-                .map((b) => (
-                  <option key={b.table_key} value={b.query_id as number}>
-                    {b.table_name}
-                  </option>
-                ))}
-            </select>
-          </label>
+          <p className="text-[12px] normal-case tracking-normal text-ink-tertiary">
+            Drag queries from the left onto the canvas, then connect a source
+            field (right edge) to a target field (left edge) to build a
+            relationship. Select a relationship to edit its field matches below.
+          </p>
         </div>
 
-        {/* Field Match grid */}
-        {sourceQueryId != null && targetQueryId != null && (
+        {/* Field Match grid for the selected relationship */}
+        {sourceQueryId != null && targetQueryId != null && selectedGroup && (
           <div className="mt-3">
             <div className="mb-1 flex items-center justify-between">
               <h3 className="text-[12px] font-semibold text-ink-secondary">
                 Field Matches
+                {selectedHead && (
+                  <span className="ml-1.5 font-normal text-ink-tertiary">
+                    · {selectedHead.sourceTable ?? "Source"} →{" "}
+                    {selectedHead.targetTable ?? "Target"}
+                  </span>
+                )}
               </h3>
               <label className="flex items-center gap-2 text-[12px] text-ink-secondary">
                 Match Mode
