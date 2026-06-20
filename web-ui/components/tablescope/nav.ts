@@ -13,6 +13,7 @@ import {
   IconDatabase,
   IconDatabasePlus,
   IconCode,
+  IconBinaryTree,
   IconBook2,
   IconLibrary,
   IconBuildingBank,
@@ -151,6 +152,12 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           href: `${base}/queries`,
           icon: IconCode,
           countKey: "queries",
+        },
+        {
+          key: "project-scopes",
+          label: "Scopes",
+          href: `${base}/scopes`,
+          icon: IconBinaryTree,
         },
         {
           key: "project-dashboards",

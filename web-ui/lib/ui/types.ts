@@ -41,6 +41,7 @@ export type NavKey =
   | "overview"
   | "project-data-sources"
   | "project-queries"
+  | "project-scopes"
   | "project-dashboards"
   | "project-documents"
   | "project-ai-assistant"

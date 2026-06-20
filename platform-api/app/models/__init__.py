@@ -55,6 +55,8 @@ from app.models.reference_library import (
 from app.models.report import Report
 from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.saved_query import SavedQuery
+from app.models.scope_canvas_layout import ScopeCanvasLayout
+from app.models.scope_set import ScopeSet
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
@@ -69,6 +71,8 @@ __all__ = [
     "AiConversationMessage",
     "AuditEvent",
     "Report",
+    "ScopeCanvasLayout",
+    "ScopeSet",
     "AIAssetKPI",
     "AIAssetKPISuggestion",
     "AIAssetTag",

@@ -40,6 +40,7 @@ from app.routes import reference_library as reference_library_routes
 from app.routes import reference_library_bulk as reference_library_bulk_routes
 from app.routes import reports as reports_routes
 from app.routes import saas_sources as saas_sources_routes
+from app.routes import scope_sets as scope_sets_routes
 from app.routes import scopes as scopes_routes
 from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
@@ -156,6 +157,7 @@ def create_app() -> FastAPI:
     app.include_router(scopes_routes.router, prefix=api_prefix)
     app.include_router(query_routes.router, prefix=api_prefix)
     app.include_router(query_scopes_routes.router, prefix=api_prefix)
+    app.include_router(scope_sets_routes.router, prefix=api_prefix)
     app.include_router(sharing_routes.router, prefix=api_prefix)
     app.include_router(storage_routes.router, prefix=api_prefix)
     app.include_router(database_sources_routes.router, prefix=api_prefix)

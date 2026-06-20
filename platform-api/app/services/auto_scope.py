@@ -15,8 +15,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
+from app.models.scope_set import ScopeSet
 
 logger = logging.getLogger(__name__)
+
+AI_SCOPE_SET_NAME = "AI Generated Scopes"
+
+
+async def _get_or_create_ai_scope_set(
+    session: AsyncSession, *, tenant_id: int, project_id: int, user_id: int
+) -> ScopeSet:
+    """Return the project's AI Generated Scopes set, creating it if absent."""
+    existing = await session.scalar(
+        select(ScopeSet).where(
+            ScopeSet.tenant_id == tenant_id,
+            ScopeSet.project_id == project_id,
+            ScopeSet.type == "ai_generated",
+        )
+    )
+    if existing is not None:
+        return existing
+    scope_set = ScopeSet(
+        tenant_id=tenant_id,
+        project_id=project_id,
+        name=AI_SCOPE_SET_NAME,
+        description="Drill-down relationships suggested automatically by Tablescope.",
+        type="ai_generated",
+        enabled=True,
+        created_by=user_id,
+    )
+    session.add(scope_set)
+    await session.flush()
+    return scope_set
 
 
 def extract_select_columns(sql: str) -> list[str]:
@@ -104,6 +134,7 @@ async def auto_create_scopes_for_query(
 
     scopes_created = 0
     new_cols_lower = {c.lower(): c for c in new_cols}
+    ai_set: ScopeSet | None = None
 
     for other_q in others:
         if not other_q.sql_text:
@@ -117,31 +148,53 @@ async def auto_create_scopes_for_query(
             src_field = new_cols_lower[field_lower]
             tgt_field = other_cols_lower[field_lower]
 
-            # new query → other query
+            # new query -> other query
             key_fwd = (query.id, src_field, other_q.id, tgt_field)
             if key_fwd not in existing_keys:
+                if ai_set is None:
+                    ai_set = await _get_or_create_ai_scope_set(
+                        session,
+                        tenant_id=tenant_id,
+                        project_id=query.project_id,
+                        user_id=user_id,
+                    )
                 session.add(QueryScope(
                     tenant_id=tenant_id,
                     project_id=query.project_id,
+                    scope_set_id=ai_set.id,
                     query_id=query.id,
                     source_field=src_field,
+                    source_table=query.name,
                     target_query_id=other_q.id,
                     target_field=tgt_field,
+                    target_table=other_q.name,
+                    created_by_ai=True,
                     created_by=user_id,
                 ))
                 existing_keys.add(key_fwd)
                 scopes_created += 1
 
-            # other query → new query
+            # other query -> new query
             key_rev = (other_q.id, tgt_field, query.id, src_field)
             if key_rev not in existing_keys:
+                if ai_set is None:
+                    ai_set = await _get_or_create_ai_scope_set(
+                        session,
+                        tenant_id=tenant_id,
+                        project_id=query.project_id,
+                        user_id=user_id,
+                    )
                 session.add(QueryScope(
                     tenant_id=tenant_id,
                     project_id=query.project_id,
+                    scope_set_id=ai_set.id,
                     query_id=other_q.id,
                     source_field=tgt_field,
+                    source_table=other_q.name,
                     target_query_id=query.id,
                     target_field=src_field,
+                    target_table=query.name,
+                    created_by_ai=True,
                     created_by=user_id,
                 ))
                 existing_keys.add(key_rev)

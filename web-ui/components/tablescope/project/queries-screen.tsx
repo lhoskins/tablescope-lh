@@ -12,7 +12,7 @@ import {
   ContextPanel,
   ContextSection,
 } from "@/components/tablescope/context-panel";
-import { ScopesTab } from "@/components/scopes/ScopesTab";
+import { ScopeNavigation } from "@/components/scopes/ScopeNavigation";
 import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
@@ -350,7 +350,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         </div>
 
         {tab === "scopes" ? (
-          <ScopesTab projectId={Number(projectId)} />
+          <ScopeNavigation projectId={Number(projectId)} />
         ) : (
         <>
         <div className="flex flex-wrap items-center gap-2">
