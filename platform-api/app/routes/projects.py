@@ -814,6 +814,19 @@ async def add_datasources_to_project(
                 )
                 session.add(meta)
             meta.project_id = project_id
+            await session.flush()
+            await _auto_create_query(
+                session,
+                project_id=project_id,
+                owner_id=context.user_id,
+                display_name=meta.file_name or view_name,
+                view_name=view_name,
+                columns=[
+                    c["name"]
+                    for c in (meta.column_types or [])
+                    if isinstance(c, dict) and c.get("name")
+                ],
+            )
             added += 1
         elif kind == "db":
             ds_id = item.get("id")
@@ -825,10 +838,46 @@ async def add_datasources_to_project(
             if ds.created_by != context.user_id and context.role != "admin":
                 continue
             ds.project_id = project_id
+            await session.flush()
+            await _auto_create_query(
+                session,
+                project_id=project_id,
+                owner_id=context.user_id,
+                display_name=ds.display_name or ds.teiid_view_name,
+                view_name=ds.teiid_view_name,
+                columns=None,
+            )
             added += 1
 
     await session.commit()
     return {"status": "ok", "added": added}
+
+
+async def _auto_create_query(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    owner_id: int | None,
+    display_name: str,
+    view_name: str,
+    columns: list[str] | None,
+) -> None:
+    """Best-effort auto-create of a saved query for a data source."""
+    try:
+        from app.services.auto_query import ensure_datasource_query
+
+        await ensure_datasource_query(
+            session,
+            project_id=project_id,
+            owner_id=owner_id,
+            display_name=display_name,
+            view_name=view_name,
+            columns=columns,
+        )
+    except Exception as exc:  # non-fatal
+        logger.warning(
+            "Auto-create query for %s failed (non-fatal): %s", view_name, exc
+        )
 
 
 # Standard Teiid runtime types offered in the column-type editor (item 5).

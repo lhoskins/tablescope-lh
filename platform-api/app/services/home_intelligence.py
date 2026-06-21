@@ -1042,6 +1042,16 @@ async def run_ai_intelligence(
                 str(t) for t in (d.ai_metadata.get("tags") or [])
                 if isinstance(t, str | int | float)
             ],
+            # Distinguish governed Reference Library standards from the
+            # project's own uploaded assets so the planner can ground risk
+            # and compliance findings in them and cite them explicitly.
+            "source": (
+                "reference_library"
+                if d.ai_metadata.get("reference_tier")
+                else "project"
+            ),
+            "tier": str(d.ai_metadata.get("reference_tier") or ""),
+            "issuing_body": str(d.ai_metadata.get("issuing_body") or ""),
         }
         for d in ctx.documents
     ]

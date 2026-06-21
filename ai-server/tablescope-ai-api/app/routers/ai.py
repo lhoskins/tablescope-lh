@@ -781,11 +781,57 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
 
     doc_lines = ""
     if req.documents:
-        doc_lines = "\nProject documents (title — summary — tags):\n" + "\n".join(
-            f"  - {d.get('title', 'document')}: {(d.get('summary') or '')[:300]}"
-            + (f"  [tags: {', '.join(d.get('tags', []))}]" if d.get("tags") else "")
-            for d in req.documents[:25]
-        )
+        project_docs = [
+            d for d in req.documents if d.get("source") != "reference_library"
+        ]
+        reference_docs = [
+            d for d in req.documents if d.get("source") == "reference_library"
+        ]
+        sections: list[str] = []
+        if project_docs:
+            sections.append(
+                "\nProject documents (title — summary — tags):\n"
+                + "\n".join(
+                    f"  - {d.get('title', 'document')}: "
+                    f"{(d.get('summary') or '')[:300]}"
+                    + (
+                        f"  [tags: {', '.join(d.get('tags', []))}]"
+                        if d.get("tags")
+                        else ""
+                    )
+                    for d in project_docs[:20]
+                )
+            )
+        if reference_docs:
+            sections.append(
+                "\nReference Library — authoritative standards, regulations, "
+                "and governance policies that apply to this project. Treat "
+                "these as the source of truth for compliance requirements, "
+                "thresholds, and best practices. When the project's data can "
+                "be assessed against one of these, propose a finding that "
+                "grounds the risk/opportunity in the standard and ALWAYS put "
+                "the document's exact title in source_documents:\n"
+                + "\n".join(
+                    f"  - {d.get('title', 'document')}"
+                    + (
+                        " ["
+                        + ", ".join(
+                            p
+                            for p in (
+                                d.get("issuing_body") or "",
+                                d.get("tier") or "",
+                            )
+                            if p
+                        )
+                        + "]"
+                        if (d.get("issuing_body") or d.get("tier"))
+                        else ""
+                    )
+                    + f": {(d.get('summary') or '')[:300]}"
+                    for d in reference_docs[:25]
+                )
+            )
+        doc_lines = "".join(sections)
 
     schema_lines = _build_schema_lines(req.table_schema)
     teiid_rules = _TEIID_SQL_RULES
