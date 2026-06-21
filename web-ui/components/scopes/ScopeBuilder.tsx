@@ -126,6 +126,8 @@ export function ScopeBuilder({
   const [sourceQueryId, setSourceQueryId] = useState<number | null>(null);
   const [targetQueryId, setTargetQueryId] = useState<number | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [panning, setPanning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fieldsFor = useCallback(
     (queryId: number, builderTables: ScopeBuilderTable[]): string[] => {
@@ -343,6 +345,50 @@ export function ScopeBuilder({
       window.removeEventListener("mouseup", onUp);
     };
   }, [zoom]);
+
+  // ── Canvas panning (grab empty space to move the viewport) ──────────────
+  const panRef = useRef<{
+    x: number;
+    y: number;
+    sl: number;
+    st: number;
+  } | null>(null);
+
+  const onCanvasMouseDown = (e: React.MouseEvent) => {
+    // Only pan when grabbing empty canvas background, not a card/dot/label.
+    if (e.target !== e.currentTarget) return;
+    const vp = viewportRef.current;
+    if (!vp) return;
+    panRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      sl: vp.scrollLeft,
+      st: vp.scrollTop,
+    };
+    setPanning(true);
+  };
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const p = panRef.current;
+      const vp = viewportRef.current;
+      if (!p || !vp) return;
+      vp.scrollLeft = p.sl - (e.clientX - p.x);
+      vp.scrollTop = p.st - (e.clientY - p.y);
+    };
+    const onUp = () => {
+      if (panRef.current) {
+        panRef.current = null;
+        setPanning(false);
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
 
   // ── Field connecting ───────────────────────────────────────────────────
   const groupFor = useCallback(
@@ -686,6 +732,29 @@ export function ScopeBuilder({
     }
   };
 
+  // ── Delete the whole scope set ─────────────────────────────────────────
+  const deleteScope = async () => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Delete this scope map? This will remove the scope set and all field " +
+          "relationships inside it. Existing queries and data sources will not " +
+          "be deleted.",
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      await scopesApi.deleteScopeSet(scopeSetId);
+      router.push(`/projects/${projectId}/scopes`);
+    } catch (e) {
+      setError((e as Error).message);
+      setDeleting(false);
+    }
+  };
+
   // ── Canvas sizing + zoom controls ──────────────────────────────────────
   const contentWidth = Math.max(
     900,
@@ -803,6 +872,15 @@ export function ScopeBuilder({
           <Button variant="primary" onClick={save} disabled={saving}>
             <IconDeviceFloppy size={14} />
             {saving ? "Saving…" : "Save Scope"}
+          </Button>
+          <Button
+            variant="danger"
+            onClick={deleteScope}
+            disabled={deleting}
+            title="Delete this scope map"
+          >
+            <IconTrash size={14} />
+            {deleting ? "Deleting…" : "Delete Scope"}
           </Button>
         </div>
       </div>
@@ -994,7 +1072,7 @@ export function ScopeBuilder({
         <aside className="flex w-[320px] shrink-0 flex-col overflow-hidden rounded-lg border border-line-tertiary bg-bg-secondary/30">
           <div className="border-b border-line-tertiary p-3">
             <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-ink-tertiary">
-              Add Queries to Canvas
+              Drag Queries to Canvas
             </h3>
             <div className="flex items-center gap-2 rounded-md border border-line-secondary bg-bg-primary px-2.5">
               <IconSearch size={14} className="shrink-0 text-ink-tertiary" />
@@ -1050,19 +1128,10 @@ export function ScopeBuilder({
                         >
                           {b.table_name}
                         </span>
-                        {on ? (
+                        {on && (
                           <span className="mt-0.5 shrink-0 text-[11px] font-medium text-ink-tertiary">
                             added
                           </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => placeTable(b)}
-                            className="mt-0.5 shrink-0 rounded p-0.5 text-brand-600 hover:bg-brand-100"
-                            title="Add to canvas"
-                          >
-                            <IconPlus size={15} />
-                          </button>
                         )}
                       </div>
                     </li>
@@ -1135,12 +1204,16 @@ export function ScopeBuilder({
             >
               <div
                 ref={canvasRef}
-                className="relative origin-top-left"
+                className={cn(
+                  "relative origin-top-left",
+                  panning ? "cursor-grabbing" : "cursor-grab",
+                )}
                 style={{
                   width: contentWidth,
                   height: contentHeight,
                   transform: `scale(${zoom})`,
                 }}
+                onMouseDown={onCanvasMouseDown}
                 onClick={(e) => {
                   if (e.target === e.currentTarget) {
                     setSelectedGroup(null);
@@ -1359,9 +1432,9 @@ export function ScopeBuilder({
                 {tables.length === 0 && (
                   <div className="absolute inset-0 flex items-center justify-center p-8">
                     <p className="max-w-md text-center text-[13px] text-ink-tertiary">
-                      Start by selecting a Source Query and Target Query above,
-                      or add queries from the left panel. AI can suggest matching
-                      fields automatically.
+                      Drag queries from the left panel onto the canvas, then
+                      connect a source field (right edge) to a target field (left
+                      edge). AI can suggest matching fields automatically.
                     </p>
                   </div>
                 )}

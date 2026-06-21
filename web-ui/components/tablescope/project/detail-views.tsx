@@ -112,26 +112,13 @@ export function QueryResultView({
             </span>
           </p>
         </div>
-      </header>
-
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-caption uppercase tracking-wide text-ink-tertiary">
-            SQL
-          </span>
-          {onEdit && (
-            <Button variant="secondary" size="sm" onClick={onEdit}>
-              <IconPencil size={14} />
-              Edit
-            </Button>
-          )}
-        </div>
-        {query.sql_text && (
-          <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-[#1e1b2e] p-3 font-code text-[12px] leading-relaxed text-[#d6d3e8]">
-            {query.sql_text}
-          </pre>
+        {onEdit && (
+          <Button variant="secondary" size="sm" onClick={onEdit}>
+            <IconPencil size={14} />
+            Edit
+          </Button>
         )}
-      </div>
+      </header>
 
       <Card className="overflow-hidden p-0">
         {error ? (

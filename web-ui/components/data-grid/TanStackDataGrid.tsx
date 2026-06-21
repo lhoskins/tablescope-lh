@@ -492,30 +492,6 @@ export function TanStackDataGrid({
 
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
-      {/* Scope trace */}
-      {scopeActive && scopes.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs text-slate-700">
-          <span className="font-semibold uppercase tracking-wide text-blue-700">Scopes:</span>
-          {scopes.map((s) => {
-            const tq = availableQueries.find((q) => q.id === s.target_query_id);
-            return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => openScopeDialog(s.source_field)}
-                title="Edit scope"
-                className="flex items-center gap-1 rounded-full border border-blue-200 bg-white px-2 py-0.5 hover:border-blue-400 hover:bg-blue-100"
-              >
-                <span className="text-blue-600">&#128279;</span>
-                <span className="font-medium">{s.source_field}</span>
-                <span className="text-slate-400">&rarr;</span>
-                <span>{tq ? tq.name : `query #${s.target_query_id}`}.{s.target_field}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       {/* Toolbar */}
       <div className="mb-2 flex items-center gap-2">
         <input

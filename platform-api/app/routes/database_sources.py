@@ -423,6 +423,30 @@ async def create_database_source(
     await session.commit()
     await session.refresh(ds)
 
+    # Auto-create a saved query named after this data source (when attached to a
+    # project). Best-effort: never fail source creation if query creation errors.
+    if ds.project_id is not None:
+        try:
+            from app.services.auto_query import ensure_datasource_query
+
+            col_names = [c["name"] for c in columns if c.get("name")]
+            await ensure_datasource_query(
+                session,
+                project_id=ds.project_id,
+                owner_id=context.user_id,
+                display_name=ds.display_name,
+                view_name=view_name,
+                columns=col_names,
+            )
+            await session.commit()
+        except Exception as exc:  # non-fatal
+            logger.warning(
+                "Auto-create query for %s failed (non-fatal): %s",
+                view_name,
+                exc,
+            )
+            await session.rollback()
+
     return ds.to_dict()
 
 
