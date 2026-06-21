@@ -9,6 +9,7 @@ import {
   IconDeviceFloppy,
   IconGripVertical,
   IconMaximize,
+  IconPencil,
   IconPlus,
   IconSearch,
   IconSparkles,
@@ -113,6 +114,9 @@ export function ScopeBuilder({
     table: string | null;
   } | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [popup, setPopup] = useState<{ gid: string; x: number; y: number } | null>(
+    null,
+  );
   const [suggestions, setSuggestions] = useState<ScopeAISuggestion[]>([]);
   const [ignored, setIgnored] = useState<ScopeAISuggestion[]>([]);
   const [showIgnored, setShowIgnored] = useState(false);
@@ -515,7 +519,25 @@ export function ScopeBuilder({
   const deleteGroup = (gid: string) => {
     setLinks((prev) => prev.filter((l) => l.matchGroupId !== gid));
     setSelectedGroup(null);
+    setPopup((p) => (p?.gid === gid ? null : p));
   };
+
+  // Open the relationship details popup near the clicked line/label.
+  const openRelationshipPopup = (gid: string, e: { clientX: number; clientY: number }) => {
+    setSelectedGroup(gid);
+    setPopup({ gid, x: e.clientX, y: e.clientY });
+  };
+
+  const queryDisplayName = useCallback(
+    (queryId: number, fallbackTable: string | null): string => {
+      const placed = tables.find((t) => t.queryId === queryId);
+      if (placed) return placed.name;
+      const avail = available.find((a) => a.query_id === queryId);
+      if (avail) return avail.table_name;
+      return fallbackTable ?? `Query ${queryId}`;
+    },
+    [tables, available],
+  );
 
   const reverseGroup = (gid: string) => {
     setLinks((prev) =>
@@ -534,6 +556,16 @@ export function ScopeBuilder({
       ),
     );
   };
+
+  // Close the relationship popup on Escape.
+  useEffect(() => {
+    if (!popup) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPopup(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [popup]);
 
   // ── Guided field-match grid (for the chosen source/target pair) ─────────
   const pairLinks = useMemo(
@@ -1217,6 +1249,7 @@ export function ScopeBuilder({
                 onClick={(e) => {
                   if (e.target === e.currentTarget) {
                     setSelectedGroup(null);
+                    setPopup(null);
                     setPending(null);
                   }
                 }}
@@ -1266,22 +1299,34 @@ export function ScopeBuilder({
                     const y2 = fieldY(tgt, l.targetField);
                     const mx = (x1 + x2) / 2;
                     const selected = l.matchGroupId === selectedGroup;
+                    const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
                     return (
-                      <path
-                        key={l.localId}
-                        d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
-                        fill="none"
-                        stroke={
-                          selected
-                            ? "var(--color-brand-700, #1d4ed8)"
-                            : "var(--color-brand-500, #2563eb)"
-                        }
-                        strokeWidth={selected ? 3 : 1.8}
-                        opacity={l.enabled ? 1 : 0.35}
-                        markerEnd="url(#scope-arrow)"
-                        style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                        onClick={() => setSelectedGroup(l.matchGroupId)}
-                      />
+                      <g key={l.localId}>
+                        {/* Wide invisible hit area for easier clicking. */}
+                        <path
+                          d={d}
+                          fill="none"
+                          stroke="transparent"
+                          strokeWidth={16}
+                          style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                          onClick={(e) =>
+                            openRelationshipPopup(l.matchGroupId, e)
+                          }
+                        />
+                        <path
+                          d={d}
+                          fill="none"
+                          stroke={
+                            selected
+                              ? "var(--color-brand-700, #1d4ed8)"
+                              : "var(--color-brand-500, #2563eb)"
+                          }
+                          strokeWidth={selected ? 3 : 1.8}
+                          opacity={l.enabled ? 1 : 0.35}
+                          markerEnd="url(#scope-arrow)"
+                          style={{ pointerEvents: "none" }}
+                        />
+                      </g>
                     );
                   })}
 
@@ -1316,7 +1361,7 @@ export function ScopeBuilder({
                   <button
                     key={g.gid}
                     type="button"
-                    onClick={() => setSelectedGroup(g.gid)}
+                    onClick={(e) => openRelationshipPopup(g.gid, e)}
                     className={cn(
                       "absolute -translate-x-1/2 -translate-y-1/2 rounded-md border px-1.5 py-0.5 text-[10.5px] shadow-sm",
                       g.gid === selectedGroup
@@ -1711,6 +1756,148 @@ export function ScopeBuilder({
           Back to Scopes
         </Button>
       </div>
+
+      {popup &&
+        (() => {
+          const popupLinks = groups.get(popup.gid) ?? [];
+          const head = popupLinks[0];
+          if (!head) return null;
+          const conf = confidenceLabel(head.confidence);
+          const sourceName = queryDisplayName(
+            head.sourceQueryId,
+            head.sourceTable,
+          );
+          const targetName = queryDisplayName(
+            head.targetQueryId,
+            head.targetTable,
+          );
+          return (
+            <>
+              {/* Outside-click backdrop (closes popup, then releases pointer). */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setPopup(null)}
+                onMouseDown={() => setPopup(null)}
+              />
+              <div
+                role="dialog"
+                aria-label="Relationship details"
+                className="fixed z-50 w-80 rounded-lg border border-line-secondary bg-bg-primary p-3 shadow-lg"
+                style={{
+                  left: Math.min(popup.x + 8, window.innerWidth - 340),
+                  top: Math.min(popup.y + 8, window.innerHeight - 320),
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <h3 className="text-[13px] font-semibold text-ink-primary">
+                    Relationship
+                    {popupLinks.length > 1 && (
+                      <Badge tone="brand" className="ml-1.5">
+                        {popupLinks.length} fields
+                      </Badge>
+                    )}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setPopup(null)}
+                    className="text-ink-tertiary hover:text-ink-primary"
+                    aria-label="Close"
+                  >
+                    <IconX size={15} />
+                  </button>
+                </div>
+
+                <div className="space-y-2 text-[12px]">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                    <Field label="Source">{sourceName}</Field>
+                    <Field label="Target">{targetName}</Field>
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-ink-tertiary">
+                      Field mappings
+                    </div>
+                    <ul className="mt-0.5 space-y-0.5">
+                      {popupLinks.map((l) => (
+                        <li
+                          key={l.localId}
+                          className="flex items-center gap-1 text-ink-primary"
+                        >
+                          <span className="truncate font-medium">
+                            {l.sourceField}
+                          </span>
+                          <IconArrowNarrowRight
+                            size={13}
+                            className="shrink-0 text-ink-tertiary"
+                          />
+                          <span className="truncate font-medium">
+                            {l.targetField}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                    <Field label="Match Mode">
+                      {head.matchMode === "all"
+                        ? "All fields must match"
+                        : "Any field can match"}
+                    </Field>
+                    <Field label="Direction">
+                      <span className="inline-flex items-center gap-1">
+                        Source <IconArrowNarrowRight size={13} /> Target
+                      </span>
+                    </Field>
+                    <Field label="Status">
+                      {head.enabled ? "Enabled" : "Disabled"}
+                    </Field>
+                    <Field label="Origin">
+                      <span className="inline-flex items-center gap-1.5">
+                        {head.createdByAi ? "AI-generated" : "Manual"}
+                        {head.createdByAi && (
+                          <Badge tone={conf.tone}>{conf.text}</Badge>
+                        )}
+                      </span>
+                    </Field>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedGroup(popup.gid);
+                      setPopup(null);
+                    }}
+                  >
+                    <IconPencil size={13} />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => reverseGroup(popup.gid)}
+                  >
+                    <IconArrowsExchange size={13} />
+                    Reverse Direction
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => deleteGroup(popup.gid)}
+                  >
+                    <IconTrash size={13} />
+                    Delete Relationship
+                  </Button>
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
       {loading && (
         <div className="mt-2 text-[12px] text-ink-tertiary">Loading map…</div>

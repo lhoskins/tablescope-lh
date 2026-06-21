@@ -94,12 +94,11 @@ public class TxtFileProcessor {
                     System.out.println("[TxtFileProcessor] Column " + i + " starts with digit, renamed '" + originalName + "' to '" + columnName + "'");
                 }
                 
-                // Further transform if it's a reserved keyword
+                // Preserve the original logical column name. Reserved words
+                // (Date, Order, Group, Select, ...) are handled by quoting in
+                // the generated DDL/SQL via quoteIfNeeded, not by renaming.
                 String transformedName = columnName;
-                if (columnName.equalsIgnoreCase("Date")) {
-                    transformedName = columnName + "_";
-                }
-                
+
                 // Fix: Handle duplicate column names by appending suffix
                 String baseTransformedName = transformedName;
                 int suffix = 1;

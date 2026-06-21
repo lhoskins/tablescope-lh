@@ -244,6 +244,92 @@ async def test_checkout_rejects_taken_slug(db_session):
         )
 
 
+@pytest.mark.asyncio
+async def test_checkout_allows_slug_of_inactive_tenant(db_session):
+    """A deactivated tenant frees its slug for reuse."""
+    await _seed_tier(db_session)
+    db_session.add(Tenant(slug="acme", name="Acme", is_active=False))
+    await db_session.flush()
+    svc = CheckoutService(db_session, stripe=FakeStripe())
+    url, _ = await svc.create_checkout_session(
+        CheckoutSessionRequest(
+            tier_key="basic_cloud", company_name="A", tenant_name="A",
+            tenant_slug="acme", tenant_admin_email="a@b.com",
+        )
+    )
+    assert url.startswith("https://checkout")
+
+
+@pytest.mark.asyncio
+async def test_checkout_rejects_slug_with_provisioned_request(db_session):
+    """A live provisioning request still reserves the slug."""
+    await _seed_tier(db_session)
+    db_session.add(
+        TenantProvisioningRequest(
+            tier_key="basic_cloud",
+            deployment_mode="shared_cloud",
+            tenant_slug="acme",
+            tenant_admin_email="a@b.com",
+            status="provisioned",
+        )
+    )
+    await db_session.flush()
+    svc = CheckoutService(db_session, stripe=FakeStripe())
+    with pytest.raises(SlugTakenError):
+        await svc.create_checkout_session(
+            CheckoutSessionRequest(
+                tier_key="basic_cloud", company_name="A", tenant_name="A",
+                tenant_slug="acme", tenant_admin_email="a@b.com",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_deleting_tenant_frees_slug_for_reuse(db_session):
+    """Deleting a tenant terminalizes its provisioning request so the slug is
+    reusable for a fresh checkout."""
+    from app.services.tenant_deletion_service import purge_app_tenant
+
+    await _seed_tier(db_session)
+    tenant = Tenant(slug="acme", name="Acme")
+    db_session.add(tenant)
+    await db_session.flush()
+    db_session.add(
+        TenantProvisioningRequest(
+            tenant_id=tenant.id,
+            tier_key="basic_cloud",
+            deployment_mode="shared_cloud",
+            tenant_slug="acme",
+            tenant_admin_email="a@b.com",
+            status="provisioned",
+        )
+    )
+    await db_session.flush()
+
+    await purge_app_tenant(db_session, tenant.id)
+    await db_session.flush()
+
+    # Old request is now terminal (deprovisioned), tenant row gone.
+    req = (
+        await db_session.scalars(
+            select(TenantProvisioningRequest).where(
+                TenantProvisioningRequest.tenant_slug == "acme"
+            )
+        )
+    ).first()
+    assert req.status == "deprovisioned"
+    assert (await db_session.get(Tenant, tenant.id)) is None
+
+    svc = CheckoutService(db_session, stripe=FakeStripe())
+    url, _ = await svc.create_checkout_session(
+        CheckoutSessionRequest(
+            tier_key="basic_cloud", company_name="A", tenant_name="A",
+            tenant_slug="acme", tenant_admin_email="a@b.com",
+        )
+    )
+    assert url.startswith("https://checkout")
+
+
 # --------------------------------------------------------------------------- #
 # Provisioning transitions per tier
 # --------------------------------------------------------------------------- #

@@ -6,19 +6,6 @@ import {
 } from "@tabler/icons-react";
 import type { InsightCard } from "@/lib/api/home-intelligence";
 
-function severityDot(severity: string): string {
-  switch (severity) {
-    case "critical":
-      return "var(--color-danger)";
-    case "urgent":
-      return "var(--color-warning)";
-    case "opportunity":
-      return "var(--color-success)";
-    default:
-      return "var(--text-tertiary)";
-  }
-}
-
 const GRANULARITY_LABELS: Record<number, string> = {
   1: "Executive",
   2: "Strategic",
@@ -59,26 +46,12 @@ export function IntelligenceStrip({
         </span>
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto scrollbar-none">
+      <div className="min-w-0 flex-1">
         {insights.length === 0 && running && (
           <span className="text-small text-brand-fg/70">
             Gathering insights…
           </span>
         )}
-        {insights.map((card, i) => (
-          <span
-            key={card.id}
-            className="inline-flex shrink-0 animate-[fadeIn_300ms_ease-out_both] items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-small"
-            style={{ animationDelay: `${Math.min(i, 12) * 120}ms` }}
-          >
-            <span
-              className="h-1.5 w-1.5 rounded-full"
-              style={{ backgroundColor: severityDot(card.severity) }}
-            />
-            <span className="max-w-[220px] truncate">{card.title}</span>
-            <span className="text-brand-fg/60">· {card.projectName}</span>
-          </span>
-        ))}
       </div>
 
       <div className="flex shrink-0 items-center gap-2 text-small text-brand-fg/90">

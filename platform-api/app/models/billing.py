@@ -41,6 +41,7 @@ PROVISIONING_STATUSES = (
     "failed",
     "manual_review",
     "cancelled",
+    "deprovisioned",
 )
 DATA_PLANE_STATUSES = (
     "not_required",

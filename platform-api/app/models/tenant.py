@@ -7,7 +7,7 @@ query.
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -16,8 +16,21 @@ from app.models.base import Base, TimestampMixin
 class Tenant(TimestampMixin, Base):
     __tablename__ = "tenants"
 
+    # A slug is only reserved while its tenant is active. Deleting (hard delete)
+    # or deactivating a tenant frees the slug for reuse, enforced by a partial
+    # unique index rather than a plain unique constraint.
+    __table_args__ = (
+        Index(
+            "uq_tenants_slug_active",
+            "slug",
+            unique=True,
+            postgresql_where=text("is_active"),
+            sqlite_where=text("is_active"),
+        ),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True)
-    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     external_id: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True, index=True

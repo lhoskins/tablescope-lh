@@ -61,10 +61,14 @@ class CheckoutService:
                 f"tier {payload.tier_key!r} has no {payload.billing_interval} price configured"
             )
 
-        # Slug uniqueness: reject if a tenant already owns it, or a non-terminal
-        # provisioning request is already using it.
+        # Slug uniqueness: reject only if an ACTIVE tenant already owns it, or a
+        # non-terminal provisioning request is already using it. A deleted or
+        # deactivated tenant frees its slug for reuse.
         existing_tenant = await self._session.scalar(
-            select(Tenant).where(Tenant.slug == payload.tenant_slug)
+            select(Tenant).where(
+                Tenant.slug == payload.tenant_slug,
+                Tenant.is_active.is_(True),
+            )
         )
         if existing_tenant is not None:
             raise SlugTakenError(f"tenant slug {payload.tenant_slug!r} is taken")
