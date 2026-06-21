@@ -150,7 +150,11 @@ public class TxtFileProcessor {
         for (String columnName : columnNames) {
             // Use the original column name for NAMEINSOURCE
             String sourceColumnName = columnNameMapping.getOrDefault(columnName, columnName);
-            viewDefinition.append(columnName).append(" string(4000) OPTIONS(NAMEINSOURCE '").append(sourceColumnName).append("', UPDATABLE 'FALSE'),\n");
+            // Quote the view column identifier when it is a reserved word or
+            // contains special characters, matching the SELECT/TEXTTABLE clauses
+            // below. Without this an unquoted reserved word (e.g. "Month") fails
+            // DDL parsing and the entire VDB is marked FAILED.
+            viewDefinition.append(quoteIfNeeded(columnName)).append(" string(4000) OPTIONS(NAMEINSOURCE '").append(sourceColumnName).append("', UPDATABLE 'FALSE'),\n");
         }
         viewDefinition.deleteCharAt(viewDefinition.length() - 2); // Remove the last comma
         viewDefinition.append(") AS\n");
