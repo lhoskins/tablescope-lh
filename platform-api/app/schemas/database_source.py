@@ -37,6 +37,17 @@ class ColumnRequest(ConnectionBase):
     table_name: str
 
 
+class PreviewRequest(ConnectionBase):
+    schema_name: str | None = None
+    table_name: str
+    limit: int = 20
+
+
+class PreviewResponse(BaseModel):
+    columns: list[str]
+    rows: list[list[object]]
+
+
 class CreateDatabaseSourceRequest(ConnectionBase):
     display_name: str
     schema_name: str | None = None

@@ -33,6 +33,8 @@ from app.schemas.database_source import (
     ColumnRequest,
     ColumnsResponse,
     CreateDatabaseSourceRequest,
+    PreviewRequest,
+    PreviewResponse,
     SaveConnectionRequest,
     SavedConnectionRead,
     SchemaRequest,
@@ -164,6 +166,27 @@ async def list_columns(
     except DatabaseIntrospectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ColumnsResponse(columns=columns)
+
+
+@router.post("/preview", response_model=PreviewResponse)
+async def preview_table(
+    body: PreviewRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> PreviewResponse:
+    """Return a small sample of rows so the user can review a table's data."""
+    params = await _resolve_params(body, session, context)
+    try:
+        result = await run_in_threadpool(
+            intro.sample_rows,
+            params,
+            body.schema_name,
+            body.table_name,
+            body.limit,
+        )
+    except DatabaseIntrospectionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PreviewResponse(columns=result["columns"], rows=result["rows"])
 
 
 # ── Saved connection profiles (item 5) ──────────────────────────────

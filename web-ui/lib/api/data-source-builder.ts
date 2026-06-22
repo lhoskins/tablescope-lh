@@ -117,6 +117,24 @@ export async function listDbSchemas(
   return res.schemas;
 }
 
+export interface TablePreviewResult {
+  columns: string[];
+  rows: unknown[][];
+}
+
+export function previewDbTable(
+  body: ConnectionParams & {
+    schema_name?: string;
+    table_name: string;
+    limit?: number;
+  },
+): Promise<TablePreviewResult> {
+  return apiClient.post<TablePreviewResult>(
+    "/api/database-sources/preview",
+    body,
+  );
+}
+
 export function listSavedConnections(): Promise<SavedConnection[]> {
   return apiClient.get<SavedConnection[]>(
     "/api/database-sources/connections",

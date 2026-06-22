@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { IconX } from "@tabler/icons-react";
 import { Badge } from "@/components/ui/badge";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { flattenCreated, type FlatItem } from "./flatten";
+import { DataReviewModal } from "./data-review-modal";
 
 function VisibilityBadge({ item }: { item: FlatItem }) {
   return (
@@ -19,6 +21,8 @@ export function ActiveSourcesTable() {
   const removeSource = useBuilderStore((s) => s.removeSource);
   const updateTableState = useBuilderStore((s) => s.updateTableState);
   const unmarkCreated = useBuilderStore((s) => s.unmarkCreated);
+
+  const [reviewItem, setReviewItem] = useState<FlatItem | null>(null);
 
   const items = flattenCreated(sources, createdKeys);
 
@@ -65,9 +69,10 @@ export function ActiveSourcesTable() {
               {items.map((item) => (
                 <tr
                   key={item.key}
-                  className="group border-b border-line-tertiary last:border-0 hover:bg-bg-secondary/40"
+                  onClick={() => setReviewItem(item)}
+                  className="group cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-secondary/40"
                 >
-                  <td className="px-4 py-2.5 font-medium text-ink-primary">
+                  <td className="px-4 py-2.5 font-medium text-brand-700 hover:underline">
                     {item.name}
                   </td>
                   <td className="px-4 py-2.5 text-ink-secondary">
@@ -89,7 +94,10 @@ export function ActiveSourcesTable() {
                     <button
                       type="button"
                       aria-label={`Remove ${item.name}`}
-                      onClick={() => remove(item)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        remove(item);
+                      }}
                       className="flex h-6 w-6 items-center justify-center rounded text-ink-tertiary opacity-0 transition-opacity hover:bg-bg-tertiary hover:text-danger group-hover:opacity-100"
                     >
                       <IconX size={14} />
@@ -100,6 +108,13 @@ export function ActiveSourcesTable() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {reviewItem && (
+        <DataReviewModal
+          item={reviewItem}
+          onClose={() => setReviewItem(null)}
+        />
       )}
     </div>
   );
