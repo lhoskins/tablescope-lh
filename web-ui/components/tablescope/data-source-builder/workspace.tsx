@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconArrowLeft,
@@ -79,6 +79,9 @@ export function DataSourceBuilderWorkspace({
   const createdKeys = useBuilderStore((s) => s.createdKeys);
   const getPendingChanges = useBuilderStore((s) => s.getPendingChanges);
   const sources = useBuilderStore((s) => s.sources);
+  // Subscribe to projects so the summary + Apply button recompute when a
+  // project is toggled or a new project is created.
+  const projects = useBuilderStore((s) => s.projects);
 
   const [step, setStep] = useState<Step>(1);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -107,7 +110,14 @@ export function DataSourceBuilderWorkspace({
       ? "Step 1 of 2: Create data sources from files or connected databases."
       : "Step 2 of 2: Assign selected data sources to project(s).";
 
-  const pending = getPendingChanges();
+  // Recompute whenever sources or projects change (toggles/new project).
+  // getPendingChanges reads store state internally, so the linter can't see
+  // that sources/projects are real dependencies.
+  const pending = useMemo(
+    () => getPendingChanges(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [getPendingChanges, sources, projects],
+  );
   const projectsAddingTo = new Set(pending.adding.map((a) => a.projectId)).size;
   const sourcesAdding = pending.adding.reduce(
     (acc, a) => acc + a.tableNames.length,

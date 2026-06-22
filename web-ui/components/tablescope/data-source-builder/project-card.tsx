@@ -46,9 +46,9 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
   const [confirmToggleOff, setConfirmToggleOff] = useState(false);
 
   const createdKeys = useBuilderStore((s) => s.createdKeys);
-  const selectedItems = useMemo(() => {
-    // Exclude sources already assigned to this project so they don't show as
-    // pending adds (which would create duplicates).
+  // Split the selected sources into net-new adds vs. ones already assigned to
+  // this project (the latter are surfaced as a notice and skipped on apply).
+  const { selectedItems, duplicateItems } = useMemo(() => {
     const alreadyInProject = new Set(
       project.existingSources.map((e) => e.sourceKey),
     );
@@ -60,9 +60,13 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
         })
         .map((s) => s.id),
     );
-    return flattenCreated(sources, createdKeys).filter(
-      (i) => i.selected && !dupSourceIds.has(i.sourceId),
+    const selected = flattenCreated(sources, createdKeys).filter(
+      (i) => i.selected,
     );
+    return {
+      selectedItems: selected.filter((i) => !dupSourceIds.has(i.sourceId)),
+      duplicateItems: selected.filter((i) => dupSourceIds.has(i.sourceId)),
+    };
   }, [sources, createdKeys, project.existingSources]);
   const hasPendingAdds = selectedItems.length > 0;
   const expanded = project.isToggled;
@@ -181,6 +185,35 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
                         {item.typeLabel}
                       </span>
                       <Badge tone="brand">Pending</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SELECTED BUT ALREADY ASSIGNED — notify, don't duplicate */}
+          {duplicateItems.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1 text-caption font-semibold uppercase tracking-wide text-warning">
+                <IconAlertTriangle size={13} />
+                Already in this project
+              </p>
+              <div className="space-y-1.5">
+                {duplicateItems.map((item) => {
+                  const Icon = connectorIcon(item.sourceType);
+                  return (
+                    <div
+                      key={item.key}
+                      className="flex items-center gap-2.5 rounded-md border border-warning/40 bg-warning-bg/40 px-3 py-2"
+                    >
+                      <Icon size={15} className="shrink-0 text-warning" />
+                      <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-ink-secondary">
+                        {item.name}
+                      </span>
+                      <span className="text-caption text-ink-tertiary">
+                        Skipped — won&apos;t be duplicated
+                      </span>
                     </div>
                   );
                 })}
