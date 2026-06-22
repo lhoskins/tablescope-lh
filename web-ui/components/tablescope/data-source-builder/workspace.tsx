@@ -13,13 +13,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
+import { ActiveSourcesTable } from "./active-sources-table";
+import { AiUploadDropzone } from "./ai-upload-dropzone";
+import { AvailableSources } from "./available-sources";
 import { ConfirmationModal } from "./confirmation-modal";
 import { ConnectedDatabases } from "./connected-databases";
-import { LeftPanel } from "./left-panel";
-import { RightPanel } from "./right-panel";
-import { SourceTray } from "./source-tray";
-import { SourceTypePickerModal } from "./source-type-picker-modal";
-import type { SourceCategory } from "./util";
+import { ProjectsColumn } from "./projects-column";
 
 type Step = 1 | 2;
 
@@ -74,13 +73,11 @@ export function DataSourceBuilderWorkspace({
 }) {
   const queryClient = useQueryClient();
   const reset = useBuilderStore((s) => s.reset);
+  const createdKeys = useBuilderStore((s) => s.createdKeys);
+  const getPendingChanges = useBuilderStore((s) => s.getPendingChanges);
   const sources = useBuilderStore((s) => s.sources);
 
   const [step, setStep] = useState<Step>(1);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerCategory, setPickerCategory] = useState<
-    SourceCategory | undefined
-  >(undefined);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
@@ -102,71 +99,91 @@ export function DataSourceBuilderWorkspace({
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
-  const openPicker = (category?: SourceCategory) => {
-    setPickerCategory(category);
-    setPickerOpen(true);
-  };
-
   const stepHint =
     step === 1
       ? "Step 1 of 2: Create data sources from files or connected databases."
       : "Step 2 of 2: Assign selected data sources to project(s).";
 
+  const pending = getPendingChanges();
+  const projectsAddingTo = new Set(pending.adding.map((a) => a.projectId)).size;
+  const sourcesAdding = pending.adding.reduce(
+    (acc, a) => acc + a.tableNames.length,
+    0,
+  );
+  const projectsRemovingFrom = new Set(
+    pending.removing.map((r) => r.projectId),
+  ).size;
+  const canApply = pending.adding.length > 0 || pending.removing.length > 0;
+
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col gap-3">
+    <div className="flex h-[calc(100vh-7rem)] flex-col">
       {/* Stepper header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <Stepper step={step} />
-          <p className="mt-1.5 text-small text-ink-tertiary">{stepHint}</p>
-        </div>
-        {step === 1 ? (
-          <Button
-            variant="primary"
-            disabled={sources.length === 0}
-            onClick={() => setStep(2)}
-          >
-            Next <IconArrowRight size={15} />
-          </Button>
-        ) : (
-          <Button variant="secondary" onClick={() => setStep(1)}>
-            <IconArrowLeft size={15} /> Back
-          </Button>
-        )}
+      <div className="shrink-0 border-b border-line-tertiary pb-3">
+        <Stepper step={step} />
+        <p className="mt-1.5 text-small text-ink-tertiary">{stepHint}</p>
       </div>
 
       {step === 1 ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-line-tertiary bg-bg-primary">
-          <SourceTray onAddSource={openPicker} />
+        <>
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-4">
+            <AiUploadDropzone />
 
-          {/* Connected databases cards */}
-          <div className="border-b border-line-tertiary px-4 py-3">
-            <h3 className="mb-2 text-h3 text-ink-primary">
-              Connected Databases
-            </h3>
-            <ConnectedDatabases />
+            <div>
+              <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
+                Connected Databases
+              </h3>
+              <ConnectedDatabases />
+            </div>
+
+            <ActiveSourcesTable />
           </div>
 
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <LeftPanel className="h-full overflow-hidden" onAddSource={openPicker} />
+          <div className="flex shrink-0 items-center justify-end border-t border-line-tertiary pt-3">
+            <Button
+              variant="primary"
+              disabled={createdKeys.length === 0}
+              onClick={() => setStep(2)}
+            >
+              Next <IconArrowRight size={15} />
+            </Button>
           </div>
-        </div>
+        </>
       ) : (
-        <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line-tertiary bg-bg-primary">
-          <RightPanel
-            className="min-w-0 flex-1 overflow-hidden"
-            tenantName={tenantName}
-            onReview={() => setConfirmOpen(true)}
-            onNewProject={() => setNewProjectOpen(true)}
-          />
-        </div>
-      )}
+        <>
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-hidden py-4 lg:grid-cols-2">
+            <div className="min-h-0 overflow-hidden border-line-tertiary lg:border-r lg:pr-6">
+              <AvailableSources />
+            </div>
+            <ProjectsColumn onNewProject={() => setNewProjectOpen(true)} />
+          </div>
 
-      <SourceTypePickerModal
-        open={pickerOpen}
-        initialCategory={pickerCategory}
-        onClose={() => setPickerOpen(false)}
-      />
+          {/* Summary strip */}
+          <div className="shrink-0 border-t border-line-tertiary py-2 text-caption text-ink-secondary">
+            <span className="font-medium text-brand-700">
+              {sourcesAdding} data sources adding to {projectsAddingTo} projects
+            </span>{" "}
+            ·{" "}
+            <span className="font-medium text-danger">
+              {pending.removing.length} sources removing from{" "}
+              {projectsRemovingFrom} projects
+            </span>{" "}
+            · Tenant: {tenantName}
+          </div>
+
+          <div className="flex shrink-0 items-center justify-between border-t border-line-tertiary pt-3">
+            <Button variant="secondary" onClick={() => setStep(1)}>
+              <IconArrowLeft size={15} /> Back
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!canApply || sources.length === 0}
+              onClick={() => setConfirmOpen(true)}
+            >
+              Apply changes
+            </Button>
+          </div>
+        </>
+      )}
 
       <ConfirmationModal
         open={confirmOpen}

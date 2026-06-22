@@ -18,6 +18,7 @@ import {
   type InstalledConnector,
 } from "@/lib/api/connectors";
 import { connectorSpec } from "./connector-fields";
+import { BrandLogo, connectorChip } from "./brand-logo";
 import { ConnectionModal } from "./connection-modal";
 
 const INSTALLED_QK = ["connectors", "installed"];
@@ -30,16 +31,15 @@ function ConnectorTile({
   connector: InstalledConnector;
   onCreate: () => void;
 }) {
-  const spec = connectorSpec(connector.key);
   return (
     <div className="flex flex-col rounded-xl border border-line-tertiary bg-bg-primary p-4">
       <div className="mb-3 flex items-center gap-3">
         <span
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[12px] font-bold ${
-            spec?.chip ?? "bg-bg-secondary text-ink-secondary"
-          }`}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${connectorChip(
+            connector.key,
+          )}`}
         >
-          {spec?.initials ?? connector.name.slice(0, 2).toUpperCase()}
+          <BrandLogo connector={connector.key} size={22} />
         </span>
         <div className="min-w-0">
           <div className="truncate text-[15px] font-semibold text-ink-primary">
@@ -208,8 +208,19 @@ export function DatabaseConnectorsWorkspace() {
                     key={id}
                     className="border-b border-line-tertiary last:border-0"
                   >
-                    <td className="px-4 py-3 font-medium text-ink-primary">
-                      {c.friendlyName}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${connectorChip(
+                            c.connectorKey,
+                          )}`}
+                        >
+                          <BrandLogo connector={c.connectorKey} size={16} />
+                        </span>
+                        <span className="font-medium text-ink-primary">
+                          {c.friendlyName}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-ink-secondary">
                       {c.connectorName}

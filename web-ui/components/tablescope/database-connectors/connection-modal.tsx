@@ -13,6 +13,7 @@ import {
   type CreatedConnection,
 } from "@/lib/api/connectors";
 import { type ConnectorSpec } from "./connector-fields";
+import { BrandLogo, connectorChip } from "./brand-logo";
 
 export interface EditTarget {
   connection: CreatedConnection;
@@ -155,9 +156,11 @@ export function ConnectionModal({
         <div className="mb-4 flex items-start justify-between">
           <div className="flex items-center gap-3">
             <span
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[12px] font-bold ${spec.chip}`}
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${connectorChip(
+                spec.key,
+              )}`}
             >
-              {spec.initials}
+              <BrandLogo connector={spec.key} size={22} />
             </span>
             <div>
               <h2 className="text-h2 text-ink-primary">

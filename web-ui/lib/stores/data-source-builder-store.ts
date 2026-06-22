@@ -112,12 +112,21 @@ interface BuilderState {
   sources: SessionSource[];
   activeSourceId: string | null;
   projects: ProjectAssignment[];
+  /**
+   * Keys of data-source items that the user has explicitly created in Step 1.
+   * A key is `sourceId` for a file source or `sourceId::tableName` for a
+   * connected-database table. Items stay listed even when deselected for
+   * assignment in Step 2, so this set is distinct from the per-table state.
+   */
+  createdKeys: string[];
 
   // ── source actions ──
   addSource: (source: SessionSource) => void;
   removeSource: (sourceId: string) => void;
   setActiveSource: (sourceId: string | null) => void;
   hasSource: (predicate: (s: SessionSource) => boolean) => boolean;
+  markCreated: (keys: string[]) => void;
+  unmarkCreated: (key: string) => void;
 
   // ── table actions ──
   updateTableState: (
@@ -157,11 +166,22 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
   sources: [],
   activeSourceId: null,
   projects: [],
+  createdKeys: [],
 
   addSource: (source) =>
     set((state) => ({
       sources: [...state.sources, source],
       activeSourceId: source.id,
+    })),
+
+  markCreated: (keys) =>
+    set((state) => ({
+      createdKeys: Array.from(new Set([...state.createdKeys, ...keys])),
+    })),
+
+  unmarkCreated: (key) =>
+    set((state) => ({
+      createdKeys: state.createdKeys.filter((k) => k !== key),
     })),
 
   removeSource: (sourceId) =>
@@ -176,7 +196,10 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
         ...p,
         sourcesToRemove: p.sourcesToRemove,
       }));
-      return { sources, activeSourceId, projects };
+      const createdKeys = state.createdKeys.filter(
+        (k) => k !== sourceId && !k.startsWith(`${sourceId}::`),
+      );
+      return { sources, activeSourceId, projects, createdKeys };
     }),
 
   setActiveSource: (sourceId) => set({ activeSourceId: sourceId }),
@@ -300,9 +323,7 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
     for (const project of projects) {
       if (project.isToggled) {
         for (const source of sources) {
-          const tableNames = source.isFileUpload
-            ? source.tables.map((t) => t.tableName)
-            : selectedTableNames(source);
+          const tableNames = selectedTableNames(source);
           if (tableNames.length > 0) {
             adding.push({
               source,
@@ -330,5 +351,6 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
     return { adding, removing };
   },
 
-  reset: () => set({ sources: [], activeSourceId: null, projects: [] }),
+  reset: () =>
+    set({ sources: [], activeSourceId: null, projects: [], createdKeys: [] }),
 }));

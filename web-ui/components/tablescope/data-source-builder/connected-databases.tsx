@@ -16,7 +16,8 @@ import {
   type SessionSource,
   type SourceType,
 } from "@/lib/stores/data-source-builder-store";
-import { connectorSpec } from "../database-connectors/connector-fields";
+import { BrandLogo, connectorChip } from "../database-connectors/brand-logo";
+import { TableSelectModal } from "./table-select-modal";
 
 const SOURCE_TYPES = new Set<SourceType>([
   "postgresql",
@@ -38,17 +39,17 @@ export function ConnectedDatabases() {
   });
   const addSource = useBuilderStore((s) => s.addSource);
   const sources = useBuilderStore((s) => s.sources);
-  const setActiveSource = useBuilderStore((s) => s.setActiveSource);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [modalSourceId, setModalSourceId] = useState<string | null>(null);
 
   const handleCreate = async (conn: SavedConnection) => {
-    // If this connection already has a session source, just focus it.
+    // If this connection already has a session source, just open it.
     const existing = sources.find(
       (s) => s.connectionConfig.connection_id === String(conn.id),
     );
     if (existing) {
-      setActiveSource(existing.id);
+      setModalSourceId(existing.id);
       return;
     }
     setBusyId(conn.id);
@@ -78,6 +79,7 @@ export function ConnectedDatabases() {
         })),
       };
       addSource(source);
+      setModalSourceId(source.id);
     } catch (err) {
       setError(
         err instanceof Error
@@ -117,7 +119,6 @@ export function ConnectedDatabases() {
     <div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {connections.map((conn) => {
-          const spec = connectorSpec(conn.db_type);
           const added = sources.some(
             (s) => s.connectionConfig.connection_id === String(conn.id),
           );
@@ -128,18 +129,21 @@ export function ConnectedDatabases() {
             >
               <div className="mb-3 flex items-center gap-2.5">
                 <span
-                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${
-                    spec?.chip ?? "bg-bg-secondary text-ink-secondary"
-                  }`}
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${connectorChip(
+                    conn.db_type,
+                  )}`}
                 >
-                  {spec?.initials ?? conn.db_type.slice(0, 2).toUpperCase()}
+                  <BrandLogo connector={conn.db_type} size={20} />
                 </span>
                 <div className="min-w-0">
                   <div className="truncate text-[14px] font-semibold text-ink-primary">
                     {conn.name}
                   </div>
                   <div className="truncate text-caption text-ink-tertiary">
-                    {connectorDisplayName(conn.db_type)} · {conn.host}
+                    {connectorDisplayName(conn.db_type)}
+                  </div>
+                  <div className="truncate text-caption text-ink-tertiary">
+                    {conn.host}
                   </div>
                 </div>
               </div>
@@ -161,8 +165,12 @@ export function ConnectedDatabases() {
           );
         })}
       </div>
-      {error && (
-        <p className="mt-2 text-caption text-danger">{error}</p>
+      {error && <p className="mt-2 text-caption text-danger">{error}</p>}
+      {modalSourceId && (
+        <TableSelectModal
+          sourceId={modalSourceId}
+          onClose={() => setModalSourceId(null)}
+        />
       )}
     </div>
   );

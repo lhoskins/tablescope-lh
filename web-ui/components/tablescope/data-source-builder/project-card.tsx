@@ -22,6 +22,7 @@ import {
   type ProjectDataSourceRow,
 } from "@/lib/api/data-source-builder";
 import { connectorIcon } from "./util";
+import { flattenCreated } from "./flatten";
 
 function rowToExisting(row: ProjectDataSourceRow): ExistingProjectSource {
   const isDb = row.id != null && row.dbType != null;
@@ -59,9 +60,14 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
   const [addingScope, setAddingScope] = useState(false);
   const [scopeName, setScopeName] = useState("");
 
+  const createdKeys = useBuilderStore((s) => s.createdKeys);
   const adding = useMemo(() => sessionAddRows(sources), [sources]);
   const hasPendingAdds = adding.length > 0;
   const expanded = project.isToggled;
+  const selectedCount = useMemo(
+    () => flattenCreated(sources, createdKeys).filter((i) => i.selected).length,
+    [sources, createdKeys],
+  );
 
   const { data: existingRows } = useQuery({
     queryKey: ["builder", "project-datasources", project.projectId],
@@ -122,6 +128,16 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
             </span>
           </span>
         </button>
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+            project.isToggled
+              ? "bg-brand-100 text-brand-700"
+              : "bg-bg-tertiary text-ink-tertiary",
+          )}
+        >
+          {project.isToggled ? selectedCount : 0} selected
+        </span>
         <button
           type="button"
           role="switch"
