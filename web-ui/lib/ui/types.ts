@@ -25,6 +25,7 @@ export type NavKey =
   | "activity"
   | "data-connections"
   | "data-sources"
+  | "database-connectors"
   | "data-source-builder"
   | "documents"
   | "dashboards"

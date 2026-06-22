@@ -52,6 +52,17 @@ class SaveConnectionRequest(ConnectionBase):
     name: str
 
 
+class UpdateConnectionRequest(ConnectionBase):
+    """Edit a saved connection profile.
+
+    ``name`` and any connection field may be updated. When a new password is
+    supplied it replaces the stored one; otherwise the existing password is
+    retained. The connection is re-tested before the changes are persisted.
+    """
+
+    name: str | None = None
+
+
 class SavedConnectionRead(BaseModel):
     id: int
     name: str
@@ -62,6 +73,9 @@ class SavedConnectionRead(BaseModel):
     username: str
     has_password: bool
     ssl_mode: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    last_tested_at: str | None = None
 
 
 class TestConnectionResponse(BaseModel):

@@ -13,6 +13,12 @@ class CreateCredentialRequest(BaseModel):
     config: dict
 
 
+class UpdateCredentialRequest(BaseModel):
+    display_name: str | None = None
+    # When provided, replaces the stored auth config (re-encrypted).
+    config: dict | None = None
+
+
 class TestCredentialRequest(BaseModel):
     # Either reference a stored credential...
     credential_id: int | None = None

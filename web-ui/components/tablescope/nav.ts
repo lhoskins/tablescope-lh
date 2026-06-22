@@ -65,16 +65,16 @@ export function homeNavGroups(): NavGroup[] {
       heading: "Tools",
       items: [
         {
-          key: "data-sources",
-          label: "Data Sources",
-          href: "/data-sources",
-          icon: IconDatabase,
-        },
-        {
           key: "data-source-builder",
           label: "Data Source Builder",
           href: "/data-source-builder",
           icon: IconDatabasePlus,
+        },
+        {
+          key: "database-connectors",
+          label: "Database Connectors",
+          href: "/database-connectors",
+          icon: IconDatabase,
         },
         {
           key: "documents",

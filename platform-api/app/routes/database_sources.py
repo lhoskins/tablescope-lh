@@ -40,6 +40,7 @@ from app.schemas.database_source import (
     TableRequest,
     TablesResponse,
     TestConnectionResponse,
+    UpdateConnectionRequest,
 )
 from app.services import database_introspection_service as intro
 from app.services.crypto import decrypt_secret, encrypt_secret
@@ -208,11 +209,89 @@ async def create_saved_connection(
         username=params.username,
         password_encrypted=encrypt_secret(params.password) if params.password else None,
         ssl_mode=params.ssl_mode,
+        last_tested_at=datetime.now(UTC),
     )
     session.add(conn)
     await session.commit()
     await session.refresh(conn)
     return SavedConnectionRead(**conn.to_dict())
+
+
+@router.patch("/connections/{connection_id}", response_model=SavedConnectionRead)
+async def update_saved_connection(
+    connection_id: int,
+    body: UpdateConnectionRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> SavedConnectionRead:
+    conn = await session.get(DatabaseConnection, connection_id)
+    if conn is None or conn.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Saved connection not found")
+
+    # Build effective params: body overrides, falling back to stored values.
+    params = ConnectionParams(
+        db_type=body.db_type or conn.db_type,
+        host=body.host or conn.host,
+        port=body.port or conn.port,
+        database_name=body.database_name or conn.database_name,
+        username=body.username or conn.username,
+        password=(
+            body.password
+            or (decrypt_secret(conn.password_encrypted) if conn.password_encrypted else "")
+        ),
+        ssl_mode=body.ssl_mode if body.ssl_mode is not None else conn.ssl_mode,
+    )
+    try:
+        intro.get_db_type_config(params.db_type)
+        await run_in_threadpool(intro.test_connection, params)
+    except DatabaseIntrospectionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if body.name:
+        conn.name = body.name
+    conn.db_type = params.db_type
+    conn.host = params.host
+    conn.port = params.resolved_port
+    conn.database_name = params.database_name
+    conn.username = params.username
+    if body.password:
+        conn.password_encrypted = encrypt_secret(body.password)
+    conn.ssl_mode = params.ssl_mode
+    conn.last_tested_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(conn)
+    return SavedConnectionRead(**conn.to_dict())
+
+
+@router.post(
+    "/connections/{connection_id}/test", response_model=TestConnectionResponse
+)
+async def test_saved_connection(
+    connection_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> TestConnectionResponse:
+    conn = await session.get(DatabaseConnection, connection_id)
+    if conn is None or conn.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Saved connection not found")
+    params = ConnectionParams(
+        db_type=conn.db_type,
+        host=conn.host,
+        port=conn.port,
+        database_name=conn.database_name,
+        username=conn.username,
+        password=(
+            decrypt_secret(conn.password_encrypted) if conn.password_encrypted else ""
+        ),
+        ssl_mode=conn.ssl_mode,
+    )
+    try:
+        await run_in_threadpool(intro.test_connection, params)
+    except DatabaseIntrospectionError as exc:
+        return TestConnectionResponse(success=False, message=str(exc))
+    conn.last_tested_at = datetime.now(UTC)
+    await session.commit()
+    return TestConnectionResponse(success=True, message="Connection successful")
 
 
 @router.delete("/connections/{connection_id}")

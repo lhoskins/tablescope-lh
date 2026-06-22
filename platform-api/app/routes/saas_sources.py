@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -34,6 +35,7 @@ from app.schemas.saas_source import (
     PreviewRequest,
     SyncRequest,
     TestCredentialRequest,
+    UpdateCredentialRequest,
 )
 from app.services.crypto import encrypt_secret
 from app.services.saas_source_service import (
@@ -73,8 +75,29 @@ async def create_credential(
         connector_type=body.connector_type,
         display_name=body.display_name,
         secret_encrypted=encrypt_secret(json.dumps(body.config or {})),
+        last_tested_at=datetime.now(UTC),
     )
     session.add(cred)
+    await session.commit()
+    await session.refresh(cred)
+    return cred.to_dict()
+
+
+@router.patch("/credentials/{credential_id}")
+async def update_credential(
+    credential_id: int,
+    body: UpdateCredentialRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    cred = await session.get(ConnectorCredential, credential_id)
+    if cred is None or cred.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Credential not found")
+    if body.display_name:
+        cred.display_name = body.display_name
+    if body.config is not None:
+        cred.secret_encrypted = encrypt_secret(json.dumps(body.config))
+        cred.last_tested_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(cred)
     return cred.to_dict()
@@ -152,6 +175,11 @@ async def test_connection(
         info = await connector.test_connection(config)
     except SaasConnectorError as exc:
         return {"success": False, "message": str(exc)}
+    if body.credential_id is not None:
+        cred = await session.get(ConnectorCredential, body.credential_id)
+        if cred is not None and cred.tenant_id == context.tenant_id:
+            cred.last_tested_at = datetime.now(UTC)
+            await session.commit()
     return {"success": True, "message": "Connection successful", "info": info}
 
 
