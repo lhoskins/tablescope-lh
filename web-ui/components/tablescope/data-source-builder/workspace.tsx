@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconArrowLeft,
   IconArrowRight,
@@ -12,8 +12,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
+import { listMyDataSources } from "@/lib/api/data-source-builder";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { ActiveSourcesTable } from "./active-sources-table";
+import { buildExistingSources } from "./existing-sources";
 import { AiUploadDropzone } from "./ai-upload-dropzone";
 import { AvailableSources } from "./available-sources";
 import { ConfirmationModal } from "./confirmation-modal";
@@ -73,6 +75,7 @@ export function DataSourceBuilderWorkspace({
 }) {
   const queryClient = useQueryClient();
   const ensureTenant = useBuilderStore((s) => s.ensureTenant);
+  const syncExisting = useBuilderStore((s) => s.syncExisting);
   const createdKeys = useBuilderStore((s) => s.createdKeys);
   const getPendingChanges = useBuilderStore((s) => s.getPendingChanges);
   const sources = useBuilderStore((s) => s.sources);
@@ -87,6 +90,17 @@ export function DataSourceBuilderWorkspace({
     void useBuilderStore.persist.rehydrate();
     ensureTenant(tenantName);
   }, [ensureTenant, tenantName]);
+
+  // Load every data source the caller has already created (irrespective of
+  // project) so they show in the Active list after a refresh.
+  const { data: myDataSources } = useQuery({
+    queryKey: ["builder", "my-datasources"],
+    queryFn: listMyDataSources,
+  });
+
+  useEffect(() => {
+    if (myDataSources) syncExisting(buildExistingSources(myDataSources));
+  }, [myDataSources, syncExisting]);
 
   const stepHint =
     step === 1

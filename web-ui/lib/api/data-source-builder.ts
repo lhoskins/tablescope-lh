@@ -122,6 +122,39 @@ export interface TablePreviewResult {
   rows: unknown[][];
 }
 
+/** A data source the caller has already created (file or database table). */
+export interface MyDataSource {
+  id: number;
+  kind: "file" | "database";
+  name: string;
+  viewName: string;
+  projectId: number | null;
+  projectName: string | null;
+  columns: number;
+  sourceFormat?: string | null;
+  dbType?: string | null;
+  schemaName?: string | null;
+  tableName?: string | null;
+  createdAt: string | null;
+}
+
+export function listMyDataSources(): Promise<MyDataSource[]> {
+  return apiClient.get<MyDataSource[]>("/api/projects/my-datasources");
+}
+
+/** Preview an already-created source by querying its Teiid view. */
+export function previewCreatedSource(body: {
+  tableName: string;
+  project_id?: number;
+  limit?: number;
+}): Promise<{ columns: string[]; rows: Record<string, unknown>[] }> {
+  return apiClient.post("/api/query/datasource", {
+    tableName: body.tableName,
+    project_id: body.project_id,
+    limit: body.limit ?? 20,
+  });
+}
+
 export function previewDbTable(
   body: ConnectionParams & {
     schema_name?: string;
@@ -307,6 +340,14 @@ async function applyFileAddition(
 ): Promise<void> {
   const label = `Add ${source.displayName} to ${projectName}`;
   try {
+    // Already-created file: just associate it with the project.
+    if (source.existing && source.viewName) {
+      await addDataSourcesToProject(projectId, [
+        { kind: "file", viewName: source.viewName },
+      ]);
+      results.push({ label, kind: "add", ok: true });
+      return;
+    }
     const already = finalized.get(source.id);
     if (!already) {
       const sessionId = source.fileMetadata?.uploadSessionId;
@@ -343,6 +384,24 @@ async function applyDbAddition(
   multiProject: boolean,
   results: ApplyOpResult[],
 ): Promise<void> {
+  // Already-created DB source: associate the existing record with the project.
+  if (source.existing && source.backendId != null) {
+    const label = `Add ${source.displayName} to ${projectName}`;
+    try {
+      await addDataSourcesToProject(projectId, [
+        { kind: "db", id: source.backendId },
+      ]);
+      results.push({ label, kind: "add", ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/already exists|already in/i.test(message)) {
+        results.push({ label, kind: "add", ok: true });
+      } else {
+        results.push({ label, kind: "add", ok: false, error: message });
+      }
+    }
+    return;
+  }
   for (const tableName of tableNames) {
     const displayName = multiProject
       ? `${tableName} · ${projectName}`

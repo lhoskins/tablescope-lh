@@ -247,7 +247,7 @@ async def query_datasource(
     if payload.sql:
         sql = _auto_cast_aggregates(payload.sql).rstrip().rstrip(";")
     else:
-        sql = f'SELECT * FROM "{payload.tableName}"'
+        sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
 
     return await _run_sql(
         database=database,

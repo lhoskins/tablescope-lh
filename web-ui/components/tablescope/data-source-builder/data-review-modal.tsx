@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { IconLoader2, IconX } from "@tabler/icons-react";
 import {
+  previewCreatedSource,
   previewDbTable,
   type TablePreviewResult,
 } from "@/lib/api/data-source-builder";
@@ -38,21 +39,57 @@ export function DataReviewModal({
   const source = useBuilderStore((s) =>
     s.sources.find((src) => src.id === item.sourceId),
   );
+  const isExisting = Boolean(source?.existing);
+  // Files created in this session preview locally; everything else fetches.
   const [data, setData] = useState<TablePreviewResult | null>(null);
-  const [loading, setLoading] = useState(!item.isFile);
+  const [loading, setLoading] = useState(!(item.isFile && !isExisting));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    if (item.isFile) {
+
+    // New file upload in this session: use the locally detected fields.
+    if (item.isFile && !source?.existing) {
       setData(filePreview(source?.previewFields ?? []));
       setLoading(false);
       return;
     }
     if (!source) return;
-    const tableName = item.key.slice(item.sourceId.length + 2);
+
     setLoading(true);
     setError(null);
+
+    const onError = (err: unknown) => {
+      if (!cancelled)
+        setError(err instanceof Error ? err.message : "Could not load data");
+    };
+    const onDone = () => {
+      if (!cancelled) setLoading(false);
+    };
+
+    // Already-created source (file or DB): query its registered Teiid view.
+    if (source.existing && source.viewName) {
+      previewCreatedSource({
+        tableName: source.viewName,
+        project_id: source.projectId ?? undefined,
+        limit: 20,
+      })
+        .then((res) => {
+          if (cancelled) return;
+          setData({
+            columns: res.columns,
+            rows: res.rows.map((r) => res.columns.map((c) => r[c])),
+          });
+        })
+        .catch(onError)
+        .finally(onDone);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // New connected-DB table in this session: sample directly from the source.
+    const tableName = item.key.slice(item.sourceId.length + 2);
     previewDbTable({
       connection_id: source.connectionConfig.connection_id
         ? Number(source.connectionConfig.connection_id)
@@ -65,13 +102,8 @@ export function DataReviewModal({
       .then((res) => {
         if (!cancelled) setData(res);
       })
-      .catch((err: unknown) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : "Could not load data");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      .catch(onError)
+      .finally(onDone);
     return () => {
       cancelled = true;
     };

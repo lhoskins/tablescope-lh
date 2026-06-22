@@ -401,6 +401,85 @@ async def list_all_datasources(
     return out
 
 
+@router.get("/my-datasources")
+async def list_my_datasources(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[dict]:
+    """All data sources the caller has created, irrespective of project.
+
+    Powers the Data Source Builder's "Active Data Sources" list so previously
+    created sources (files + database tables) show up after a refresh and can
+    be reviewed / reassigned. Scoped to the caller's own sources.
+    """
+    projects, _ = await _home_context(session, context)
+
+    file_rows = list(
+        await session.scalars(
+            select(FileSourceMeta)
+            .where(
+                FileSourceMeta.tenant_id == context.tenant_id,
+                FileSourceMeta.owner_id == context.user_id,
+                FileSourceMeta.archived.is_(False),
+            )
+            .order_by(FileSourceMeta.created_at.desc())
+        )
+    )
+    db_rows = list(
+        await session.scalars(
+            select(DatabaseDataSource)
+            .where(
+                DatabaseDataSource.tenant_id == context.tenant_id,
+                DatabaseDataSource.created_by == context.user_id,
+                DatabaseDataSource.status == "active",
+                DatabaseDataSource.archived.is_(False),
+            )
+            .options(selectinload(DatabaseDataSource.columns))
+            .order_by(DatabaseDataSource.created_at.desc())
+        )
+    )
+
+    def _project_name(pid: int | None) -> str | None:
+        if pid is None:
+            return None
+        meta = projects.get(pid)
+        return meta.name if meta else None
+
+    out: list[dict] = []
+    for f in file_rows:
+        out.append(
+            {
+                "id": f.id,
+                "kind": "file",
+                "name": f.file_name,
+                "viewName": f.view_name,
+                "projectId": f.project_id,
+                "projectName": _project_name(f.project_id),
+                "columns": len(f.column_types or []),
+                "sourceFormat": f.source_format,
+                "createdAt": f.created_at.isoformat() if f.created_at else None,
+            }
+        )
+    for d in db_rows:
+        out.append(
+            {
+                "id": d.id,
+                "kind": "database",
+                "name": d.display_name,
+                "viewName": d.teiid_view_name,
+                "projectId": d.project_id,
+                "projectName": _project_name(d.project_id),
+                "columns": len(d.columns or []),
+                "dbType": d.db_type,
+                "schemaName": d.schema_name,
+                "tableName": d.table_name,
+                "createdAt": d.created_at.isoformat() if d.created_at else None,
+            }
+        )
+    out.sort(key=lambda r: r["createdAt"] or "", reverse=True)
+    return out
+
+
 @router.get("/documents-all")
 async def list_all_documents(
     session: AsyncSession = Depends(get_db),

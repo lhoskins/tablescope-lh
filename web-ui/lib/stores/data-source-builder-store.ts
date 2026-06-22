@@ -63,6 +63,15 @@ export interface SessionSource {
   backendId?: number;
   /** Sanitized view name used by file sources (the "table"). */
   viewName?: string;
+  /**
+   * True when this source was loaded from the backend (already created in a
+   * previous session). Existing sources are assigned to projects via the
+   * association endpoint rather than re-created, and are previewed through
+   * their Teiid view.
+   */
+  existing?: boolean;
+  /** Project the existing source currently belongs to (for Teiid routing). */
+  projectId?: number | null;
 }
 
 export interface ExistingProjectSource {
@@ -136,6 +145,13 @@ interface BuilderState {
   hasSource: (predicate: (s: SessionSource) => boolean) => boolean;
   markCreated: (keys: string[]) => void;
   unmarkCreated: (key: string) => void;
+  /**
+   * Replace the set of backend-loaded ("existing") sources with `incoming`,
+   * preserving per-table selection for ones already present and leaving
+   * session-created (non-existing) sources untouched. Existing sources are
+   * marked as created so they appear in the Active list.
+   */
+  syncExisting: (incoming: SessionSource[]) => void;
 
   // ── table actions ──
   updateTableState: (
@@ -169,6 +185,13 @@ function selectedTableNames(source: SessionSource): string[] {
   return source.tables
     .filter((t) => t.state === "adding")
     .map((t) => t.tableName);
+}
+
+/** createdKeys entry for a source's single created item. */
+function createdKeyOf(source: SessionSource): string {
+  return source.isFileUpload
+    ? source.id
+    : `${source.id}::${source.tables[0]?.tableName ?? ""}`;
 }
 
 export const useBuilderStore = create<BuilderState>()(
@@ -208,6 +231,29 @@ export const useBuilderStore = create<BuilderState>()(
     set((state) => ({
       createdKeys: state.createdKeys.filter((k) => k !== key),
     })),
+
+  syncExisting: (incoming) =>
+    set((state) => {
+      const prevExisting = new Map(
+        state.sources.filter((s) => s.existing).map((s) => [s.id, s]),
+      );
+      // Preserve the user's per-table selection across refetches.
+      const merged = incoming.map((s) => {
+        const prev = prevExisting.get(s.id);
+        return prev ? { ...s, tables: prev.tables } : s;
+      });
+      const sources = [
+        ...state.sources.filter((s) => !s.existing),
+        ...merged,
+      ];
+      const keptKeys = state.createdKeys.filter(
+        (k) => !k.startsWith("existing-"),
+      );
+      const createdKeys = Array.from(
+        new Set([...keptKeys, ...merged.map(createdKeyOf)]),
+      );
+      return { sources, createdKeys };
+    }),
 
   removeSource: (sourceId) =>
     set((state) => {
