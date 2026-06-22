@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/cn";
 import {
+  sourceExistingKey,
   useBuilderStore,
   type ExistingProjectSource,
   type ProjectAssignment,
@@ -45,10 +46,24 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
   const [confirmToggleOff, setConfirmToggleOff] = useState(false);
 
   const createdKeys = useBuilderStore((s) => s.createdKeys);
-  const selectedItems = useMemo(
-    () => flattenCreated(sources, createdKeys).filter((i) => i.selected),
-    [sources, createdKeys],
-  );
+  const selectedItems = useMemo(() => {
+    // Exclude sources already assigned to this project so they don't show as
+    // pending adds (which would create duplicates).
+    const alreadyInProject = new Set(
+      project.existingSources.map((e) => e.sourceKey),
+    );
+    const dupSourceIds = new Set(
+      sources
+        .filter((s) => {
+          const key = sourceExistingKey(s);
+          return key !== null && alreadyInProject.has(key);
+        })
+        .map((s) => s.id),
+    );
+    return flattenCreated(sources, createdKeys).filter(
+      (i) => i.selected && !dupSourceIds.has(i.sourceId),
+    );
+  }, [sources, createdKeys, project.existingSources]);
   const hasPendingAdds = selectedItems.length > 0;
   const expanded = project.isToggled;
   const selectedCount = selectedItems.length;

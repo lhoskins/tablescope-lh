@@ -231,6 +231,35 @@ describe("data-source-builder-store", () => {
     expect(s2.createdKeys).not.toContain("existing-file-3");
   });
 
+  it("getPendingChanges skips sources already assigned to the project", () => {
+    const store = useBuilderStore.getState();
+    // An existing file already in the project + a new file not in it.
+    store.addSource(
+      fileSource({ id: "existing-file-3", existing: true, viewName: "sales_csv" }),
+    );
+    store.addSource(fileSource()); // forecast_csv, not in project
+    store.markCreated(["existing-file-3", "file-1"]);
+    store.setProjects([
+      project({
+        isToggled: true,
+        existingSources: [
+          {
+            sourceKey: "file:sales_csv",
+            kind: "file",
+            viewName: "sales_csv",
+            name: "sales.csv",
+            tableCount: 1,
+            aiOn: true,
+          },
+        ],
+      }),
+    ]);
+    const { adding } = useBuilderStore.getState().getPendingChanges();
+    // Only the new file is queued; the already-assigned one is skipped.
+    expect(adding).toHaveLength(1);
+    expect(adding[0].source.id).toBe("file-1");
+  });
+
   it("reset clears everything", () => {
     const store = useBuilderStore.getState();
     store.addSource(dbSource());

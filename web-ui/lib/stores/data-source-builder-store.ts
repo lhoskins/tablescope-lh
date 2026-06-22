@@ -194,6 +194,19 @@ function createdKeyOf(source: SessionSource): string {
     : `${source.id}::${source.tables[0]?.tableName ?? ""}`;
 }
 
+/**
+ * The `ExistingProjectSource.sourceKey` this session source would map to once
+ * assigned (`file:<viewName>` / `db:<backendId>`), or null if it can't yet be
+ * matched (e.g. a brand-new connected-DB table not created in the backend).
+ * Used to skip re-adding a source that already exists in the target project.
+ */
+export function sourceExistingKey(source: SessionSource): string | null {
+  if (source.isFileUpload) {
+    return source.viewName ? `file:${source.viewName}` : null;
+  }
+  return source.backendId != null ? `db:${source.backendId}` : null;
+}
+
 export const useBuilderStore = create<BuilderState>()(
   persist(
     (set, get) => ({
@@ -393,7 +406,13 @@ export const useBuilderStore = create<BuilderState>()(
 
     for (const project of projects) {
       if (project.isToggled) {
+        const alreadyInProject = new Set(
+          project.existingSources.map((e) => e.sourceKey),
+        );
         for (const source of sources) {
+          // Skip sources already assigned to this project (no duplicates).
+          const existingKey = sourceExistingKey(source);
+          if (existingKey && alreadyInProject.has(existingKey)) continue;
           const tableNames = selectedTableNames(source);
           if (tableNames.length > 0) {
             adding.push({
