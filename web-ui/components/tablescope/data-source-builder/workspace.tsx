@@ -72,7 +72,7 @@ export function DataSourceBuilderWorkspace({
   tenantName: string;
 }) {
   const queryClient = useQueryClient();
-  const reset = useBuilderStore((s) => s.reset);
+  const ensureTenant = useBuilderStore((s) => s.ensureTenant);
   const createdKeys = useBuilderStore((s) => s.createdKeys);
   const getPendingChanges = useBuilderStore((s) => s.getPendingChanges);
   const sources = useBuilderStore((s) => s.sources);
@@ -81,23 +81,12 @@ export function DataSourceBuilderWorkspace({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
-  // Reset the session when the user leaves the builder.
+  // The session persists across refreshes (localStorage); rehydrate after mount
+  // (storage is skipped during SSR) then drop it only when the tenant changes.
   useEffect(() => {
-    return () => reset();
-  }, [reset]);
-
-  // Warn before a full page unload (refresh/close) when changes are pending.
-  useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      const { adding, removing } = useBuilderStore.getState().getPendingChanges();
-      if (adding.length > 0 || removing.length > 0) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, []);
+    void useBuilderStore.persist.rehydrate();
+    ensureTenant(tenantName);
+  }, [ensureTenant, tenantName]);
 
   const stepHint =
     step === 1

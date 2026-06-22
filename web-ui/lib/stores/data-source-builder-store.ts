@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 /** Connector categories supported by the Data Source Builder. */
 export type SourceType =
@@ -113,6 +114,14 @@ interface BuilderState {
   activeSourceId: string | null;
   projects: ProjectAssignment[];
   /**
+   * Identifier of the tenant the persisted session belongs to. Used to drop a
+   * stale session when the user switches tenants (localStorage is shared
+   * across tenants on the same origin).
+   */
+  tenantKey: string | null;
+  /** Reset the session if it belongs to a different tenant than `key`. */
+  ensureTenant: (key: string) => void;
+  /**
    * Keys of data-source items that the user has explicitly created in Step 1.
    * A key is `sourceId` for a file source or `sourceId::tableName` for a
    * connected-database table. Items stay listed even when deselected for
@@ -162,11 +171,27 @@ function selectedTableNames(source: SessionSource): string[] {
     .map((t) => t.tableName);
 }
 
-export const useBuilderStore = create<BuilderState>((set, get) => ({
-  sources: [],
-  activeSourceId: null,
-  projects: [],
-  createdKeys: [],
+export const useBuilderStore = create<BuilderState>()(
+  persist(
+    (set, get) => ({
+      sources: [],
+      activeSourceId: null,
+      projects: [],
+      createdKeys: [],
+      tenantKey: null,
+
+  ensureTenant: (key) =>
+    set((state) =>
+      state.tenantKey === key
+        ? {}
+        : {
+            tenantKey: key,
+            sources: [],
+            activeSourceId: null,
+            projects: [],
+            createdKeys: [],
+          },
+    ),
 
   addSource: (source) =>
     set((state) => ({
@@ -353,4 +378,23 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
 
   reset: () =>
     set({ sources: [], activeSourceId: null, projects: [], createdKeys: [] }),
-}));
+    }),
+    {
+      name: "tablescope-data-source-builder",
+      storage: createJSONStorage(() =>
+        typeof window !== "undefined"
+          ? window.localStorage
+          : (undefined as unknown as Storage),
+      ),
+      // Hydrate manually after mount to avoid SSR/client markup mismatches.
+      skipHydration: true,
+      partialize: (state) => ({
+        sources: state.sources,
+        activeSourceId: state.activeSourceId,
+        projects: state.projects,
+        createdKeys: state.createdKeys,
+        tenantKey: state.tenantKey,
+      }),
+    },
+  ),
+);
