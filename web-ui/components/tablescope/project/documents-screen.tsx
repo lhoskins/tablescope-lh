@@ -21,7 +21,13 @@ const PENDING = new Set([
   "profiling",
 ]);
 
-export function DocumentsScreen({ projectId }: { projectId: string }) {
+export function DocumentsScreen({
+  projectId,
+  documentId,
+}: {
+  projectId: string;
+  documentId?: string;
+}) {
   const { data } = useProjectDocuments(projectId);
   const rows = useMemo(() => data ?? [], [data]);
   const canEdit = (getUserMeta()?.role ?? "viewer") !== "viewer";
@@ -57,7 +63,11 @@ export function DocumentsScreen({ projectId }: { projectId: string }) {
           />
         </div>
 
-        <DocumentsTab projectId={Number(projectId)} canEdit={canEdit} />
+        <DocumentsTab
+          projectId={Number(projectId)}
+          canEdit={canEdit}
+          initialExpandedId={documentId ? Number(documentId) : undefined}
+        />
       </div>
     </ProjectShell>
   );

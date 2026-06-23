@@ -87,6 +87,9 @@ type SaveResult = {
   name?: string;
   sql_text?: string;
   model_used?: string;
+  message?: string;
+  suggested_sources?: string[];
+  selected_sources?: { name: string; reason?: string }[];
 };
 
 type Props = {
@@ -627,8 +630,35 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
         </div>
       )}
 
+      {/* Needs clarification — friendly message + suggested sources */}
+      {saveResult && saveResult.status === "needs_clarification" && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+          <p className="text-sm font-medium text-amber-800">
+            {saveResult.message ??
+              "I could not match part of your request to an authorized source."}
+          </p>
+          {(saveResult.suggested_sources?.length ?? 0) > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-amber-700">
+              <span>Try one of these sources:</span>
+              {saveResult.suggested_sources!.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() =>
+                    setQuestion((q) => `${q} using ${s}`.trim())
+                  }
+                  className="rounded-full border border-amber-300 bg-white px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-100"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Save success */}
-      {saveResult && (
+      {saveResult && saveResult.status !== "needs_clarification" && (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
           <div className="flex items-center gap-2 text-sm font-medium text-emerald-800">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -646,6 +676,11 @@ export function AIPanel({ projectId, onQuerySaved, onDashboardSaved }: Props) {
               </span>
             )}
           </div>
+          {(saveResult.selected_sources?.length ?? 0) > 0 && (
+            <p className="mt-1 text-xs text-emerald-700">
+              AI selected {saveResult.selected_sources!.map((s) => s.name).join(", ")}.
+            </p>
+          )}
           <p className="mt-1 text-xs text-emerald-600">
             {saveResult.query_id && "View in the Queries tab."}
             {saveResult.dashboard_id && "View in the Dashboards tab."}

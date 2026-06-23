@@ -128,7 +128,7 @@ export default function HomeDocumentsPage() {
                 >
                   <td className="px-4 py-3">
                     <Link
-                      href={`/projects/${d.projectId}/documents`}
+                      href={`/projects/${d.projectId}/documents/${d.id}`}
                       className="font-medium text-ink-primary hover:text-brand-700"
                     >
                       {d.name}

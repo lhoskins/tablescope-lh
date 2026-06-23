@@ -64,43 +64,138 @@ async def generate(
         return resp.json()["response"]
 
 
+_TEIID_RULES = (
+    "IMPORTANT: This database uses Teiid (not MySQL, not PostgreSQL).\n"
+    "Teiid imports CSV columns as strings.\n"
+    "Rules for Teiid SQL:\n"
+    "1. For ANY arithmetic (*, /, +, -) or aggregation (SUM, AVG, MIN, MAX) "
+    "on numeric columns, CAST each column: CAST(col AS double).\n"
+    "   Example: SUM(CAST(\"UnitPrice\" AS double) * CAST(\"Quantity\" AS double))\n"
+    "2. COUNT does not need CAST.\n"
+    "3. Do NOT use DATE_FORMAT, MONTH(), YEAR(), DAY() — these are MySQL functions.\n"
+    "4. For date formatting use FORMATDATE(date_col, 'yyyy-MM') or "
+    "CAST date columns: CAST(col AS date).\n"
+    "5. For date extraction use EXTRACT(YEAR FROM col), EXTRACT(MONTH FROM col).\n"
+    "6. For date truncation use DATE_TRUNC('MONTH', col) or DATE_TRUNC('YEAR', col).\n"
+    "7. For grouping by month, use: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM')\n"
+    "8. Alias columns using valid identifiers (letters/digits/underscore only, "
+    "no reserved words like Month). Use SalesMonth, OrderYear, etc.\n"
+    "9. The GROUP BY clause must match the SELECT expression exactly.\n"
+)
+
+_SEMANTIC_RULES = (
+    "SOURCE DISCOVERY — read carefully:\n"
+    "- The user describes the analysis in plain English. They will NOT give you "
+    "exact table or column names.\n"
+    "- NEVER treat words from the user's request as table names. For example, "
+    "in 'monthly ticket ratio for network', 'ticket' and 'network' are concepts, "
+    "NOT tables.\n"
+    "- You may ONLY reference tables from the 'Available sources' catalog below. "
+    "Semantically map the user's intent to the closest matching source name(s) "
+    "and their real columns.\n"
+    "- Use ONLY column names that the chosen source actually exposes (listed in "
+    "the catalog). Do not invent columns.\n"
+    "- If no available source reasonably matches the request, return exactly "
+    "'NEED_CLARIFICATION' (and nothing else) instead of guessing.\n"
+)
+
+
+def _catalog_text(
+    allowed_tables: list[str],
+    source_catalog: list[Any] | None,
+) -> str:
+    """Render the available-source catalog (name + columns + description)."""
+    if source_catalog:
+        lines: list[str] = []
+        for entry in source_catalog:
+            name = getattr(entry, "name", None) or (
+                entry.get("name") if isinstance(entry, dict) else None
+            )
+            if not name:
+                continue
+            columns = getattr(entry, "columns", None)
+            description = getattr(entry, "description", None)
+            kind = getattr(entry, "kind", None)
+            if isinstance(entry, dict):
+                columns = entry.get("columns")
+                description = entry.get("description")
+                kind = entry.get("kind")
+            col_str = ", ".join(columns or []) or "(columns unknown)"
+            label = "saved query" if kind == "query" else "data source"
+            desc = f" — {description}" if description else ""
+            lines.append(f'- "{name}" [{label}]{desc}\n    columns: {col_str}')
+        if lines:
+            return "Available sources (use ONLY these):\n" + "\n".join(lines)
+    return "Available sources (use ONLY these table names): " + ", ".join(
+        allowed_tables
+    )
+
+
 async def generate_sql(
     prompt: str,
     context: str,
     allowed_tables: list[str],
+    source_catalog: list[Any] | None = None,
 ) -> str:
-    """Generate SQL using the code-specialized model."""
+    """Generate SQL using the code-specialized model with semantic discovery."""
+    catalog = _catalog_text(allowed_tables, source_catalog)
     system_prompt = (
         "You are Tablescope AI.\n"
         "You may only answer using the provided context package.\n"
         "Do not request or infer access to data outside the provided context.\n"
-        "If context is insufficient, say what additional project data would be needed.\n"
-        "Generate SQL only using the allowed tables and columns listed below.\n"
+        "Generate SQL only using the allowed sources and columns listed below.\n"
         "Do not use SELECT *.\n"
         "Do not generate INSERT, UPDATE, DELETE, DROP, or any write operations.\n"
         "Return only the SQL query, no explanation.\n\n"
-        "IMPORTANT: This database uses Teiid (not MySQL, not PostgreSQL).\n"
-        "Teiid imports CSV columns as strings.\n"
-        "Rules for Teiid SQL:\n"
-        "1. For ANY arithmetic (*, /, +, -) or aggregation (SUM, AVG, MIN, MAX) "
-        "on numeric columns, CAST each column: CAST(col AS double).\n"
-        "   Example: SUM(CAST(\"UnitPrice\" AS double) * CAST(\"Quantity\" AS double))\n"
-        "2. COUNT does not need CAST.\n"
-        "3. Do NOT use DATE_FORMAT, MONTH(), YEAR(), DAY() — these are MySQL functions.\n"
-        "4. For date formatting use FORMATDATE(date_col, 'yyyy-MM') or "
-        "CAST date columns: CAST(col AS date).\n"
-        "5. For date extraction use EXTRACT(YEAR FROM col), EXTRACT(MONTH FROM col).\n"
-        "6. For date truncation use DATE_TRUNC('MONTH', col) or DATE_TRUNC('YEAR', col).\n"
-        "7. For grouping by month, use: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM')\n"
-        "8. Alias columns using valid identifiers (letters/digits/underscore only, "
-        "no reserved words like Month). Use SalesMonth, OrderYear, etc.\n"
-        "9. The GROUP BY clause must match the SELECT expression exactly.\n\n"
-        f"Allowed tables: {', '.join(allowed_tables)}\n\n"
+        f"{_SEMANTIC_RULES}\n"
+        f"{_TEIID_RULES}\n"
+        f"{catalog}\n\n"
         f"Context:\n{context}"
     )
 
     return await generate(
         prompt=prompt,
+        system_prompt=system_prompt,
+        model=settings.sql_model,
+        temperature=0.0,
+    )
+
+
+async def repair_sql(
+    prompt: str,
+    context: str,
+    allowed_tables: list[str],
+    failed_sql: str,
+    validation_error: str,
+    source_catalog: list[Any] | None = None,
+) -> str:
+    """Ask the model to fix SQL that failed validation, preserving intent."""
+    catalog = _catalog_text(allowed_tables, source_catalog)
+    system_prompt = (
+        "You are Tablescope AI repairing a SQL query that failed validation.\n"
+        "Fix the SQL so it passes, while preserving the user's analytical intent.\n"
+        "- Do NOT invent table names.\n"
+        "- Replace any unauthorized table reference with the closest matching "
+        "authorized source from the catalog.\n"
+        "- Words from the user's request (e.g. 'your', 'tickets') are concepts, "
+        "NOT tables — map them to real sources.\n"
+        "- Use only known source names and their real columns.\n"
+        "- Do not use SELECT *. Read-only queries only.\n"
+        "- If no authorized source can satisfy the request, return exactly "
+        "'NEED_CLARIFICATION'.\n"
+        "Return ONLY the corrected SQL, no explanation.\n\n"
+        f"{_TEIID_RULES}\n"
+        f"{catalog}\n\n"
+        f"Context:\n{context}"
+    )
+    repair_prompt = (
+        f"User request: {prompt}\n\n"
+        f"The following SQL was rejected:\n{failed_sql}\n\n"
+        f"Validation error: {validation_error}\n\n"
+        "Return the corrected SQL."
+    )
+    return await generate(
+        prompt=repair_prompt,
         system_prompt=system_prompt,
         model=settings.sql_model,
         temperature=0.0,

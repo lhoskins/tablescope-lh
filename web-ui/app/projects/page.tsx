@@ -6,8 +6,10 @@ import Link from "next/link";
 import { IconPlus, IconSearch } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
+import { ProjectRowActions } from "@/components/tablescope/project/project-row-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { getUserMeta } from "@/lib/auth";
 import { aiStatusLabel, aiStatusTone, timeAgo } from "@/lib/ui/format";
 import { accentFor } from "@/lib/ui/color";
@@ -34,6 +36,7 @@ export default function ProjectsPage() {
 
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const { toasts, push, dismiss } = useToasts();
 
   useEffect(() => {
     if (!getUserMeta()) {
@@ -93,13 +96,14 @@ export default function ProjectsPage() {
                 <th className="px-4 py-2.5 text-right font-medium">Queries</th>
                 <th className="px-4 py-2.5 text-right font-medium">Dashboards</th>
                 <th className="px-4 py-2.5 font-medium">AI Status</th>
+                <th className="w-12 px-4 py-2.5 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-4 py-10 text-center text-ink-tertiary"
                   >
                     {search
@@ -147,6 +151,12 @@ export default function ProjectsPage() {
                       {aiStatusLabel(p.aiStatus)}
                     </Badge>
                   </td>
+                  <td className="px-4 py-3">
+                    <ProjectRowActions
+                      project={{ id: p.id, name: p.name }}
+                      onToast={push}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -155,6 +165,7 @@ export default function ProjectsPage() {
       </div>
 
       <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </AppShell>
   );
 }

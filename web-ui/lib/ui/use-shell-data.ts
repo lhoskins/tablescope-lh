@@ -196,6 +196,17 @@ export function deleteConversation(conversationId: number): Promise<void> {
   return apiClient.delete<void>(`/api/ai/conversations/${conversationId}`);
 }
 
+export function deleteProject(projectId: number | string): Promise<void> {
+  return apiClient.delete<void>(`/api/projects/${projectId}`);
+}
+
+export function updateProject(
+  projectId: number | string,
+  payload: { name?: string; is_shared?: boolean },
+): Promise<unknown> {
+  return apiClient.put(`/api/projects/${projectId}`, payload);
+}
+
 export function useProjectSummaries(opts?: { recent?: boolean; limit?: number }) {
   const params = new URLSearchParams();
   if (opts?.recent) params.set("recent", "true");

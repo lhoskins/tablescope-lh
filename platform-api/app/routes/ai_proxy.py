@@ -36,7 +36,9 @@ from app.models.ai_conversation import AiConversation, AiConversationMessage
 from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
+from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
+from app.services.auto_scope import _get_or_create_ai_scope_set
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -230,6 +232,118 @@ def _detect_datasource(sql: str, allowed_tables: list[str]) -> str | None:
         if table.upper() in sql_upper or f'"{table}"'.upper() in sql_upper:
             return table
     return allowed_tables[0] if len(allowed_tables) == 1 else None
+
+
+async def _build_source_catalog(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int,
+) -> list[dict[str, Any]]:
+    """Build the AI source catalog (data sources + saved queries) for a project.
+
+    Each entry carries the source name, its known columns, and a short
+    description so the AI server can semantically match the user's request to
+    real project sources instead of inventing table names from the prompt.
+    """
+    catalog: list[dict[str, Any]] = []
+
+    ds_rows = (
+        await session.scalars(
+            select(FileSourceMeta).where(
+                FileSourceMeta.project_id == project_id,
+                FileSourceMeta.tenant_id == tenant_id,
+                FileSourceMeta.archived.is_(False),
+            )
+        )
+    ).all()
+    for ds in ds_rows:
+        columns = [
+            str(c.get("name"))
+            for c in (ds.column_types or [])
+            if isinstance(c, dict) and c.get("name")
+        ]
+        description = ""
+        if isinstance(ds.ai_metadata, dict):
+            description = str(ds.ai_metadata.get("summary") or "")
+        catalog.append(
+            {
+                "name": ds.view_name,
+                "columns": columns,
+                "description": description or None,
+                "kind": "table",
+            }
+        )
+
+    query_rows = (
+        await session.scalars(
+            select(SavedQuery).where(SavedQuery.project_id == project_id)
+        )
+    ).all()
+    for q in query_rows:
+        catalog.append(
+            {
+                "name": q.name,
+                "columns": [],
+                "description": (q.description or "")[:200] or None,
+                "kind": "query",
+            }
+        )
+
+    return catalog
+
+
+def _clarification_response(
+    prompt: str,
+    detail: Any,
+    allowed_tables: list[str],
+) -> dict[str, Any]:
+    """Turn a 422 from the AI server into a friendly, structured response.
+
+    The frontend renders ``message`` + ``suggested_sources`` instead of a raw
+    validation stack trace. The detailed reason stays in server logs.
+    """
+    suggested: list[str] = []
+    reason = ""
+    if isinstance(detail, dict):
+        suggested = list(detail.get("suggested_sources") or [])
+        reason = str(detail.get("reason") or detail.get("message") or "")
+    else:
+        reason = str(detail or "")
+    if not suggested:
+        suggested = _heuristic_rank_sources(prompt, allowed_tables)
+
+    logger.info(
+        "AI query generation needs clarification | reason=%s | suggested=%s",
+        reason, suggested,
+    )
+    message = (
+        "I could not find an authorized table that matches part of your "
+        "request."
+    )
+    if suggested:
+        message += " Try choosing one of these related sources."
+    return {
+        "action": "generate_and_save_query",
+        "status": "needs_clarification",
+        "message": message,
+        "suggested_sources": suggested,
+    }
+
+
+def _heuristic_rank_sources(prompt: str, allowed_tables: list[str]) -> list[str]:
+    """Rank authorized sources by token overlap with the prompt (top 5)."""
+    tokens = {t for t in re.split(r"[^a-z0-9]+", prompt.lower()) if len(t) > 2}
+    scored: list[tuple[int, str]] = []
+    for table in allowed_tables:
+        parts = {p for p in re.split(r"[^a-z0-9]+", table.lower()) if len(p) > 2}
+        overlap = sum(
+            1 for p in parts if any(p in tok or tok in p for tok in tokens)
+        )
+        scored.append((overlap, table))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    ranked = [t for score, t in scored if score > 0]
+    return (ranked or allowed_tables)[:5]
 
 
 def _heuristic_sql(prompt: str, allowed_tables: list[str]) -> str:
@@ -603,7 +717,6 @@ async def _ai_analyze_and_create_scopes(
     """
     import asyncio
 
-    from app.models.query_scope import QueryScope
     from app.routes.query import _resolve_vdb_database
     from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
@@ -873,6 +986,7 @@ async def _ai_analyze_and_create_scopes(
 
     relationships: list[dict[str, Any]] = []
     scopes_created = 0
+    ai_set = None
     for s in validated_scopes:
         key = (s["source_query_id"], s["source_field"],
                s["target_query_id"], s["target_field"])
@@ -893,13 +1007,28 @@ async def _ai_analyze_and_create_scopes(
             relationships.append(rel)
             continue
 
+        # Group AI-discovered scopes under the project's "AI Generated Scopes"
+        # set so they surface (with a count + toggle) in the new Scopes UI.
+        if ai_set is None:
+            ai_set = await _get_or_create_ai_scope_set(
+                session,
+                tenant_id=context.tenant_id,
+                project_id=project_id,
+                user_id=context.user_id,
+            )
         scope = QueryScope(
             tenant_id=context.tenant_id,
             project_id=project_id,
+            scope_set_id=ai_set.id,
             query_id=s["source_query_id"],
             source_field=s["source_field"],
+            source_table=s["source_query_name"],
             target_query_id=s["target_query_id"],
             target_field=s["target_field"],
+            target_table=s["target_query_name"],
+            confidence_score=s.get("confidence"),
+            created_by_ai=True,
+            enabled=ai_set.enabled,
             created_by=context.user_id,
         )
         session.add(scope)
@@ -1373,18 +1502,28 @@ async def ai_generate_and_save_query(
             f"Return ONLY the modified SQL."
         )
 
+    source_catalog = await _build_source_catalog(
+        session, tenant_id=context.tenant_id, project_id=req.project_id
+    )
+
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
         "prompt": prompt_text,
         "allowed_tables": allowed_tables,
+        "source_catalog": source_catalog,
     }
     ai_result: dict[str, Any] = {}
     try:
         ai_result = await _forward_to_ai("/ai/query/generate", payload)
         generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
     except HTTPException as exc:
+        # A 422 means the AI generated SQL that could not be validated/repaired
+        # (e.g. it could not map the request to an authorized source). Surface a
+        # friendly, structured clarification instead of a raw validation error.
+        if exc.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY:
+            return _clarification_response(req.prompt, exc.detail, allowed_tables)
         # The local AI server is optional/may be offline. Rather than failing
         # the action outright, fall back to a deterministic query built from
         # the prompt + the project's available tables.
@@ -1461,6 +1600,8 @@ async def ai_generate_and_save_query(
         "sql_text": generated_sql,
         "explanation": ai_result.get("explanation", ""),
         "model_used": ai_result.get("model_used", ""),
+        "selected_sources": ai_result.get("selected_sources", []),
+        "repaired": ai_result.get("repaired", False),
     }
 
 

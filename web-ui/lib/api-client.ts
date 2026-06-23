@@ -27,6 +27,16 @@ function getApiUrl(): string {
   return getApiBaseUrl();
 }
 
+/** Error carrying the HTTP status so callers can branch on 403/404/etc. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 const TOKEN_KEY = "tablescope.token";
 
 function readToken(): string | null {
@@ -83,7 +93,7 @@ async function request<T>(
     } catch {
       /* ignore */
     }
-    throw new Error(detail);
+    throw new ApiError(detail, response.status);
   }
 
   if (response.status === 204) {

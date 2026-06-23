@@ -56,9 +56,18 @@ class GenerateRelationshipsRequest(AIBaseRequest):
     pass
 
 
+class SourceCatalogEntry(BaseModel):
+    """A project source the AI may use, with its columns + description."""
+    name: str
+    columns: list[str] = Field(default_factory=list)
+    description: str | None = None
+    kind: str = "table"  # "table" (data source view) or "query" (saved query)
+
+
 class GenerateSQLRequest(AIBaseRequest):
     prompt: str
     allowed_tables: list[str] = Field(default_factory=list)
+    source_catalog: list[SourceCatalogEntry] = Field(default_factory=list)
 
 
 class SuggestDashboardRequest(AIBaseRequest):
@@ -338,12 +347,27 @@ class GenerateRelationshipsResponse(BaseModel):
     model_used: str
 
 
+class SelectedSource(BaseModel):
+    """A project source the AI chose, plus why it matched the request."""
+    name: str
+    reason: str = ""
+
+
+class SelectedField(BaseModel):
+    source: str
+    field: str
+    reason: str = ""
+
+
 class GenerateSQLResponse(BaseModel):
     sql: str
     explanation: str
     allowed_tables_used: list[str]
     request_id: str
     model_used: str
+    selected_sources: list[SelectedSource] = Field(default_factory=list)
+    selected_fields: list[SelectedField] = Field(default_factory=list)
+    repaired: bool = False
 
 
 class DashboardWidgetSuggestion(BaseModel):

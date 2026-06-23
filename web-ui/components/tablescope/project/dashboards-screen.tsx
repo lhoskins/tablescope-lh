@@ -44,13 +44,21 @@ function Thumb({ dashboard }: { dashboard: Dashboard }) {
   );
 }
 
-export function DashboardsScreen({ projectId }: { projectId: string }) {
+export function DashboardsScreen({
+  projectId,
+  dashboardId,
+}: {
+  projectId: string;
+  dashboardId?: string;
+}) {
   const { data, isLoading } = useProjectDashboards(projectId);
   const { data: queries } = useProjectQueries(projectId);
   const { data: sources } = useProjectDataSources(projectId);
   const queryClient = useQueryClient();
   const rows = useMemo(() => data ?? [], [data]);
-  const [viewingId, setViewingId] = useState<number | null>(null);
+  const [viewingId, setViewingId] = useState<number | null>(
+    dashboardId ? Number(dashboardId) : null,
+  );
   const viewing = rows.find((d) => d.id === viewingId) ?? null;
 
   // Id of a freshly-created dashboard that has NOT yet been explicitly saved.

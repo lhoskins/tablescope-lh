@@ -52,6 +52,7 @@ from app.models.schemas import (
     ReferenceSummarizeResponse,
     RelationshipSuggestion,
     ScopeSuggestion,
+    SelectedSource,
     SuggestDashboardRequest,
     SuggestDashboardResponse,
 )
@@ -414,9 +415,67 @@ async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateR
     )
 
 
+def _needs_clarification(sql: str) -> bool:
+    return "NEED_CLARIFICATION" in (sql or "").upper()
+
+
+def _referenced_tables(sql: str) -> list[str]:
+    """Table identifiers referenced in FROM/JOIN clauses of the SQL."""
+    return re.findall(r"(?:FROM|JOIN)\s+\"?(\w+)\"?(?![\w(])", sql or "", re.IGNORECASE)
+
+
+def _suggest_sources(prompt: str, allowed_tables: list[str], limit: int = 5) -> list[str]:
+    """Rank authorized sources by token overlap with the user's prompt."""
+    tokens = {t for t in re.split(r"[^a-z0-9]+", prompt.lower()) if len(t) > 2}
+    scored: list[tuple[int, str]] = []
+    for table in allowed_tables:
+        parts = {p for p in re.split(r"[^a-z0-9]+", table.lower()) if len(p) > 2}
+        overlap = sum(
+            1
+            for p in parts
+            if any(p in tok or tok in p for tok in tokens)
+        )
+        scored.append((overlap, table))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    ranked = [t for score, t in scored if score > 0]
+    return (ranked or allowed_tables)[:limit]
+
+
+def _selected_sources(
+    prompt: str, sql: str, allowed_tables: list[str]
+) -> list[SelectedSource]:
+    """Sources the generated SQL actually uses, with a short match reason."""
+    allowed_by_upper = {t.upper(): t for t in allowed_tables}
+    seen: set[str] = set()
+    out: list[SelectedSource] = []
+    prompt_tokens = {t for t in re.split(r"[^a-z0-9]+", prompt.lower()) if len(t) > 2}
+    for ref in _referenced_tables(sql):
+        canonical = allowed_by_upper.get(ref.upper())
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        parts = {p for p in re.split(r"[^a-z0-9]+", canonical.lower()) if len(p) > 2}
+        matched = sorted(
+            p for p in parts if any(p in tok or tok in p for tok in prompt_tokens)
+        )
+        reason = (
+            f"Matched '{', '.join(matched)}' in your request"
+            if matched
+            else "Authorized project source"
+        )
+        out.append(SelectedSource(name=canonical, reason=reason))
+    return out
+
+
 @router.post("/query/generate", response_model=GenerateSQLResponse)
 async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
-    """Generate SQL from a natural language prompt."""
+    """Generate SQL from a natural language prompt.
+
+    Pipeline: semantic source discovery → generate → validate → repair (up to
+    2 attempts) → return SQL + the sources the AI selected. If the model cannot
+    map the request to an authorized source it raises 422 with suggested
+    sources so the app can show a friendly clarification.
+    """
     request_id = str(uuid.uuid4())
     verify_signature(req.model_dump(exclude={"signature"}), req.signature)
 
@@ -446,42 +505,77 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
             if ds.get("view_name") or ds.get("name")
         ]
 
-    # Generate SQL
-    sql = await llm_client.generate_sql(
-        prompt=req.prompt,
-        context=context_text,
-        allowed_tables=allowed_tables,
-    )
+    catalog = req.source_catalog or None
 
-    # Clean SQL (remove markdown code blocks, fix Teiid GROUP BY aliases)
-    sql = _clean_sql(sql)
+    def _clarify(reason: str) -> HTTPException:
+        suggestions = _suggest_sources(req.prompt, allowed_tables)
+        logger.warning(
+            "SQL generation needs clarification | tenant=%d project=%d | %s | "
+            "suggested=%s",
+            req.tenant_id, req.project_id, reason, suggestions,
+        )
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "needs_clarification",
+                "message": (
+                    "Could not match part of your request to an authorized "
+                    "project source."
+                ),
+                "reason": reason,
+                "suggested_sources": suggestions,
+            },
+        )
 
-    # Validate generated SQL
-    try:
-        validate_sql(sql, allowed_tables)
-    except SQLValidationError as e:
-        # Re-prompt once with validation feedback
-        sql = await llm_client.generate_sql(
-            prompt=(
-                f"{req.prompt}\n\n"
-                f"IMPORTANT: Your previous SQL was rejected: {e.reason}\n"
-                f"Fix these issues and try again."
-            ),
+    # Initial generation.
+    sql = _clean_sql(
+        await llm_client.generate_sql(
+            prompt=req.prompt,
             context=context_text,
             allowed_tables=allowed_tables,
+            source_catalog=catalog,
         )
-        sql = _clean_sql(sql)
+    )
+    if _needs_clarification(sql):
+        raise _clarify("Model could not find a matching authorized source.")
 
-        # Validate again — if it still fails, return the error
+    repaired = False
+    last_error = ""
+    # Validate, then repair up to 2 times.
+    for attempt in range(3):
         try:
             validate_sql(sql, allowed_tables)
-        except SQLValidationError as e2:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Generated SQL failed validation: {e2.reason}",
+            break
+        except SQLValidationError as e:
+            last_error = e.reason
+            if attempt >= 2:
+                raise _clarify(e.reason)
+            logger.info(
+                "Repairing generated SQL (attempt %d) | error=%s",
+                attempt + 1, e.reason,
             )
+            sql = _clean_sql(
+                await llm_client.repair_sql(
+                    prompt=req.prompt,
+                    context=context_text,
+                    allowed_tables=allowed_tables,
+                    failed_sql=sql,
+                    validation_error=e.reason,
+                    source_catalog=catalog,
+                )
+            )
+            repaired = True
+            if _needs_clarification(sql):
+                raise _clarify(last_error)
+
+    selected = _selected_sources(req.prompt, sql, allowed_tables)
 
     update_activity(req.user_id, req.tenant_id, req.project_id)
+
+    logger.info(
+        "SQL generated | tenant=%d project=%d repaired=%s sources=%s",
+        req.tenant_id, req.project_id, repaired, [s.name for s in selected],
+    )
 
     return GenerateSQLResponse(
         sql=sql,
@@ -489,6 +583,8 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         allowed_tables_used=allowed_tables,
         request_id=request_id,
         model_used=settings.sql_model,
+        selected_sources=selected,
+        repaired=repaired,
     )
 
 

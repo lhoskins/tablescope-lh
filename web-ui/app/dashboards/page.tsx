@@ -140,7 +140,7 @@ export default function HomeDashboardsPage() {
                 >
                   <td className="px-4 py-3">
                     <Link
-                      href={`/projects/${d.projectId}/dashboards`}
+                      href={`/projects/${d.projectId}/dashboards/${d.id}`}
                       className="flex items-center gap-2 font-medium text-ink-primary hover:text-brand-700"
                     >
                       {d.name}

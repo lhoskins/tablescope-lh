@@ -6,7 +6,7 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import { IconSparkles, IconPlus, IconSearch, IconTable, IconTrash } from "@tabler/icons-react";
+import { IconSparkles, IconSearch, IconTable } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import {
   ContextPanel,
@@ -73,37 +73,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const [creating, setCreating] = useState(false);
   const [tab, setTab] = useState<"queries" | "scopes">("queries");
   const [showAddTable, setShowAddTable] = useState(false);
-  // Multi-select delete mode for the queries list.
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
-
-  const toggleSelected = useCallback((id: number) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  }, []);
-
-  const exitSelectMode = useCallback(() => {
-    setSelectMode(false);
-    setSelectedIds([]);
-  }, []);
-
-  const deleteQueriesMutation = useMutation({
-    mutationFn: async (ids: number[]) => {
-      await Promise.all(
-        ids.map((id) =>
-          apiClient.delete(`/api/projects/${projectId}/queries/${id}`),
-        ),
-      );
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["project", projectId, "queries"],
-      });
-      setSelectedIds([]);
-      setSelectMode(false);
-    },
-  });
 
   // ── Deep-link: open a specific query via ?q=<id> ────────────────────
   useEffect(() => {
@@ -123,6 +92,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSuccess, setAiSuccess] = useState<string | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
 
   const handleGenerateQuery = useCallback(async () => {
     const prompt = aiPrompt.trim();
@@ -130,13 +100,37 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
     setAiLoading(true);
     setAiError(null);
     setAiSuccess(null);
+    setAiSuggestions([]);
     try {
-      const result = await apiClient.post<{ name: string; status: string }>(
-        "/api/ai/actions/generate-and-save-query",
-        { project_id: Number(projectId), prompt },
-      );
+      const result = await apiClient.post<{
+        name?: string;
+        status: string;
+        message?: string;
+        suggested_sources?: string[];
+        selected_sources?: { name: string; reason?: string }[];
+        repaired?: boolean;
+      }>("/api/ai/actions/generate-and-save-query", {
+        project_id: Number(projectId),
+        prompt,
+      });
+      if (result.status === "needs_clarification") {
+        // Friendly clarification — no raw validation error shown to the user.
+        setAiError(
+          result.message ??
+            "I could not match part of your request to an authorized source.",
+        );
+        setAiSuggestions(result.suggested_sources ?? []);
+        return;
+      }
       const verb = result.status === "updated" ? "updated" : "saved";
-      setAiSuccess(`Query ${verb}: ${result.name}`);
+      const sources = result.selected_sources ?? [];
+      let note = `Query ${verb}: ${result.name ?? prompt}`;
+      if (sources.length > 0) {
+        note += ` — AI selected ${sources
+          .map((s) => s.name)
+          .join(", ")}`;
+      }
+      setAiSuccess(note);
       setAiPrompt("");
       queryClient.invalidateQueries({
         queryKey: ["project", projectId, "queries"],
@@ -194,53 +188,43 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const sharedCount = rows.filter((q) => q.is_shared).length;
   const aiPct = rows.length ? Math.round((aiCount / rows.length) * 100) : 0;
 
+  const scopeToggle = (
+    <button
+      type="button"
+      onClick={() => toggleScoping.mutate(!scopingEnabled)}
+      disabled={toggleScoping.isPending}
+      className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-line-secondary px-2.5 text-[12px] font-medium text-ink-secondary hover:bg-bg-secondary disabled:opacity-50"
+      title={scopingEnabled ? "Click to disable scoping" : "Click to enable scoping"}
+    >
+      <span
+        className={cn(
+          "relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
+          scopingEnabled ? "bg-brand-500" : "bg-line-secondary",
+        )}
+      >
+        <span
+          className="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
+          style={{ transform: scopingEnabled ? "translateX(14px)" : "translateX(2px)" }}
+        />
+      </span>
+      {toggleScoping.isPending
+        ? "Updating…"
+        : scopingEnabled
+          ? "Scopes On"
+          : "Scopes Off"}
+    </button>
+  );
+
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-queries"
-      breadcrumbLabel="Queries"
+      breadcrumbLabel="Tables"
       actions={
-        <>
-          <button
-            type="button"
-            onClick={() => toggleScoping.mutate(!scopingEnabled)}
-            disabled={toggleScoping.isPending}
-            className="flex items-center gap-2 rounded-md border border-line-secondary px-2.5 py-1.5 text-[12px] font-medium text-ink-secondary hover:bg-bg-secondary disabled:opacity-50"
-            title={scopingEnabled ? "Click to disable scoping" : "Click to enable scoping"}
-          >
-            <span
-              className={cn(
-                "relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
-                scopingEnabled ? "bg-brand-500" : "bg-line-secondary",
-              )}
-            >
-              <span
-                className="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
-                style={{ transform: scopingEnabled ? "translateX(14px)" : "translateX(2px)" }}
-              />
-            </span>
-            {toggleScoping.isPending
-              ? "Updating…"
-              : scopingEnabled
-                ? "Scopes On"
-                : "Scopes Off"}
-          </button>
-          <Button variant="secondary" onClick={() => setShowAddTable(true)}>
-            <IconTable size={14} />
-            New Table
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              setDetailId(null);
-              setEditing(false);
-              setCreating(true);
-            }}
-          >
-            <IconPlus size={14} />
-            New query
-          </Button>
-        </>
+        <Button variant="secondary" onClick={() => setShowAddTable(true)}>
+          <IconTable size={14} />
+          New Table
+        </Button>
       }
       contextPanel={<QueryPreviewPanel query={detailQuery ?? selected} />}
     >
@@ -259,7 +243,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         <QueryBuilderCreate
           projectId={projectId}
           datasources={dataSources ?? []}
-          backLabel="Queries"
+          backLabel="Tables"
           onBack={() => setCreating(false)}
           onSaved={() => setCreating(false)}
         />
@@ -276,7 +260,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         <QueryResultView
           projectId={projectId}
           query={detailQuery}
-          backLabel="Queries"
+          backLabel="Tables"
           onBack={() => setDetailId(null)}
           onEdit={() => setEditing(true)}
         />
@@ -308,13 +292,28 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           {aiError && (
             <p className="mt-2 text-[12px] text-danger">{aiError}</p>
           )}
+          {aiSuggestions.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-secondary">
+              <span>Related sources:</span>
+              {aiSuggestions.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setAiPrompt((p) => `${p} using ${s}`.trim())}
+                  className="rounded-full border border-line-secondary px-2 py-0.5 font-medium text-ink-primary hover:bg-bg-secondary"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
           {aiSuccess && (
             <p className="mt-2 text-[12px] text-success">{aiSuccess}</p>
           )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile label="Total queries" value={rows.length} />
+          <StatTile label="Total tables" value={rows.length} />
           <StatTile
             label="AI-generated"
             value={aiCount}
@@ -330,7 +329,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
 
         <div className="flex items-center gap-1 border-b border-line-tertiary">
           {([
-            { key: "queries", label: "All Queries" },
+            { key: "queries", label: "All Tables" },
             { key: "scopes", label: "Scopes" },
           ] as const).map((t) => (
             <button
@@ -362,7 +361,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search queries…"
+              placeholder="Search tables…"
               className="h-8 w-full rounded-md border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
             />
           </div>
@@ -381,81 +380,20 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
               {f.label}
             </button>
           ))}
-          <div className="ml-auto flex items-center gap-2">
-            {!selectMode ? (
-              <Button
-                variant="secondary"
-                onClick={() => setSelectMode(true)}
-                disabled={rows.length === 0}
-              >
-                <IconTrash size={14} />
-                Delete
-              </Button>
-            ) : (
-              <>
-                <Button
-                  variant="danger"
-                  onClick={() => {
-                    if (selectedIds.length === 0) return;
-                    if (
-                      typeof window !== "undefined" &&
-                      !window.confirm(
-                        `Delete ${selectedIds.length} quer${
-                          selectedIds.length === 1 ? "y" : "ies"
-                        }? This cannot be undone.`,
-                      )
-                    ) {
-                      return;
-                    }
-                    deleteQueriesMutation.mutate(selectedIds);
-                  }}
-                  disabled={
-                    selectedIds.length === 0 || deleteQueriesMutation.isPending
-                  }
-                >
-                  <IconTrash size={14} />
-                  {deleteQueriesMutation.isPending
-                    ? "Deleting…"
-                    : `Delete selected (${selectedIds.length})`}
-                </Button>
-                <Button variant="secondary" onClick={exitSelectMode}>
-                  Cancel
-                </Button>
-              </>
-            )}
-          </div>
+          <div className="ml-auto flex items-center gap-2">{scopeToggle}</div>
         </div>
 
         <Card>
           <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-            <span className="text-h3 text-ink-primary">All Queries</span>
+            <span className="text-h3 text-ink-primary">All Tables</span>
             <span className="text-small text-ink-tertiary">
-              {filtered.length} total
+              {filtered.length} total tables
             </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b border-line-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
-                  {selectMode && (
-                    <th className="w-10 px-4 py-2 font-medium">
-                      <input
-                        type="checkbox"
-                        aria-label="Select all queries"
-                        checked={
-                          filtered.length > 0 &&
-                          filtered.every((q) => selectedIds.includes(q.id))
-                        }
-                        onChange={(e) =>
-                          setSelectedIds(
-                            e.target.checked
-                              ? filtered.map((q) => q.id)
-                              : [],
-                          )
-                        }
-                      />
-                    </th>
-                  )}
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-4 py-2 font-medium">Source</th>
                   <th className="px-4 py-2 font-medium">Origin</th>
@@ -468,41 +406,21 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
               <tbody>
                 {filtered.map((q) => {
                   const active = selected?.id === q.id;
-                  const checked = selectedIds.includes(q.id);
                   return (
                     <tr
                       key={q.id}
                       onClick={() => {
-                        if (selectMode) {
-                          toggleSelected(q.id);
-                          return;
-                        }
                         setSelectedId(q.id);
                         setDetailId(q.id);
                         setEditing(false);
                       }}
                       className={cn(
                         "cursor-pointer border-b border-line-tertiary last:border-0",
-                        selectMode && checked
-                          ? "bg-brand-50/60"
-                          : active && !selectMode
+                        active
                           ? "bg-brand-50/60"
                           : "hover:bg-bg-secondary",
                       )}
                     >
-                      {selectMode && (
-                        <td
-                          className="px-4 py-2.5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            aria-label={`Select query ${q.name}`}
-                            checked={checked}
-                            onChange={() => toggleSelected(q.id)}
-                          />
-                        </td>
-                      )}
                       <td className="px-4 py-2.5">
                         <span
                           className={cn(
@@ -543,13 +461,13 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             {!isLoading && filtered.length === 0 && (
               <div className="px-4 py-12 text-center text-small text-ink-tertiary">
                 {rows.length === 0
-                  ? "No queries yet. Create your first query or generate one with AI."
-                  : "No queries match your filters."}
+                  ? "No tables yet. Create your first table or generate one with AI."
+                  : "No tables match your filters."}
               </div>
             )}
             {isLoading && (
               <div className="px-4 py-12 text-center text-small text-ink-tertiary">
-                Loading queries…
+                Loading tables…
               </div>
             )}
           </div>

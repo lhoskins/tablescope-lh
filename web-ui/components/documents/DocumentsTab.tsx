@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, lazy, Suspense } from "react";
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 
@@ -108,12 +108,22 @@ function fileIcon(ext: string | null | undefined) {
 
 // ── Component ──────────────────────────────────────────────────────
 
-export function DocumentsTab({ projectId, canEdit }: { projectId: number; canEdit: boolean }) {
+export function DocumentsTab({
+  projectId,
+  canEdit,
+  initialExpandedId,
+}: {
+  projectId: number;
+  canEdit: boolean;
+  initialExpandedId?: number;
+}) {
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [subTab, setSubTab] = useState<"documents" | "graph">("documents");
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(
+    initialExpandedId ?? null,
+  );
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [openFamilyId, setOpenFamilyId] = useState<number | null>(null);
@@ -140,6 +150,21 @@ export function DocumentsTab({ projectId, canEdit }: { projectId: number; canEdi
   });
 
   const docs = docsQuery.data ?? [];
+
+  // When deep-linked to a specific document, expand it and scroll into view
+  // once the list has loaded.
+  const scrolledRef = useRef(false);
+  useEffect(() => {
+    if (initialExpandedId == null || scrolledRef.current) return;
+    if (!docs.some((d) => d.id === initialExpandedId)) return;
+    setExpandedId(initialExpandedId);
+    scrolledRef.current = true;
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`doc-${initialExpandedId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [initialExpandedId, docs]);
 
   // ── Upload ─────────────────────────────────────────────────────
   const handleUpload = useCallback(async (files: FileList | null) => {
@@ -302,6 +327,7 @@ export function DocumentsTab({ projectId, canEdit }: { projectId: number; canEdi
             return (
               <div
                 key={doc.id}
+                id={`doc-${doc.id}`}
                 className="rounded-lg border border-slate-200 bg-white overflow-hidden"
               >
                 {/* Row header */}

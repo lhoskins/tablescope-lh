@@ -48,6 +48,18 @@ export function homeNavGroups(): NavGroup[] {
           countKey: "projects",
         },
         {
+          key: "documents",
+          label: "Documents",
+          href: "/documents",
+          icon: IconFileText,
+        },
+        {
+          key: "dashboards",
+          label: "Dashboards",
+          href: "/dashboards",
+          icon: IconLayoutDashboard,
+        },
+        {
           key: "ai-assistant",
           label: "AI Assistant",
           href: "/ai",
@@ -75,18 +87,6 @@ export function homeNavGroups(): NavGroup[] {
           label: "Database Connectors",
           href: "/database-connectors",
           icon: IconDatabase,
-        },
-        {
-          key: "documents",
-          label: "Documents",
-          href: "/documents",
-          icon: IconFileText,
-        },
-        {
-          key: "dashboards",
-          label: "Dashboards",
-          href: "/dashboards",
-          icon: IconLayoutDashboard,
         },
         {
           key: "reference-library",
@@ -148,7 +148,7 @@ export function projectNavGroups(projectId: string): NavGroup[] {
         },
         {
           key: "project-queries",
-          label: "Queries",
+          label: "Tables",
           href: `${base}/queries`,
           icon: IconCode,
           countKey: "queries",
