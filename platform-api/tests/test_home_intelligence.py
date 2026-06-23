@@ -186,6 +186,26 @@ def test_build_chart_skips_when_no_numeric() -> None:
     assert hi._build_chart("bar", "t", result, "", "") is None
 
 
+def test_build_chart_single_row_excludes_period_dimension() -> None:
+    # A trend that collapsed to one period (single year) must not render the
+    # grouped year as a "2.0K" KPI tile — only the real metric is a headline.
+    result = {
+        "columns": ["Period", "DefectRate"],
+        "rows": [{"Period": "2026", "DefectRate": "0.34"}],
+    }
+    chart = hi._build_chart("line", "Defect rate trend", result, "Period", "DefectRate")
+    assert chart is not None
+    assert chart["type"] == "kpi_grid"
+    labels = {k["label"] for k in chart["data"]["kpis"]}
+    assert labels == {"DefectRate"}
+
+
+def test_dimension_columns_detects_time_labels() -> None:
+    cols = ["Period", "Month", "OnTimeRate", "SupplierID"]
+    skip = hi._dimension_columns(cols, "SupplierID")
+    assert skip == {"Period", "Month", "SupplierID"}
+
+
 def test_tables_in_sql_detects_referenced_views() -> None:
     tables = [_table("shipments", ["a"]), _table("orders", ["b"])]
     sql = 'SELECT a FROM "shipments" GROUP BY a'

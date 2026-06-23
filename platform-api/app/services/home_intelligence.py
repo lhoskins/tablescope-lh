@@ -754,6 +754,29 @@ def _is_period_label(values: list[str]) -> bool:
     return hits >= max(3, int(len(values) * 0.6))
 
 
+_DIMENSION_COL_RE = re.compile(
+    r"(?i)\b(period|month|year|quarter|week|date|day|fiscal)\b"
+)
+
+
+def _dimension_columns(columns: list[str], label_hint: str) -> set[str]:
+    """Columns that are axis/dimension labels, not headline metrics.
+
+    Keeps a grouped period/category column (e.g. a "Period" holding a year) out
+    of single-row KPI tiles, where a bare year like 2026 would misleadingly
+    format as "2.0K". Excludes the planner's stated label column plus any column
+    whose name reads like a time dimension.
+    """
+    skip: set[str] = set()
+    hint = (label_hint or "").strip().lower()
+    for c in columns:
+        if hint and c.lower() == hint:
+            skip.add(c)
+        elif _DIMENSION_COL_RE.search(c):
+            skip.add(c)
+    return skip
+
+
 def _looks_like_share(label_col: str, series: list[dict[str, Any]]) -> bool:
     """Heuristic: is this a parts-of-a-whole breakdown (-> donut chart)?
 
@@ -926,12 +949,16 @@ def _build_chart(
 
     # Single-row result with one or more numeric columns -> KPI tiles. This also
     # covers a single headline number, which reads better as a tile than a bar.
+    # Exclude the grouped dimension/period column (e.g. a "Period" year) so it is
+    # never shown as a headline number — a bare year like 2026 would otherwise
+    # format as a meaningless "2.0K" tile.
     if len(rows) == 1:
         row = rows[0]
+        skip = _dimension_columns(columns, label_hint)
         kpis = [
             {"value": _fmt_num(v), "label": col}
             for col in columns
-            if (v := _to_float(row.get(col))) is not None
+            if col not in skip and (v := _to_float(row.get(col))) is not None
         ]
         if kpis:
             return {"type": "kpi_grid", "title": title, "data": {"kpis": kpis[:6]}}
