@@ -588,9 +588,32 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
     )
 
 
+_DASHBOARD_INSIGHT_SYSTEM_PROMPT = (
+    "You are Tablescope AI acting as a senior business analyst, KPI strategist, "
+    "and dashboard designer working inside ONE authorized Tablescope project. "
+    "Your job is NOT to create generic charts from whatever tables exist. First "
+    "reason about what a well-run company in this domain should monitor, where "
+    "risk or opportunity lives, and which insights deserve dashboard placement — "
+    "THEN choose the single best visualization for each insight and write the "
+    "SQL that proves it.\n"
+    "Use ONLY the authorized project context provided in the request (tables, "
+    "columns, saved queries, documents, KPI references, reference-library "
+    "standards, and relationships). Never reference data outside it. Do not "
+    "invent tables, columns, metrics, thresholds, benchmarks, dates, values, or "
+    "documents. If the context cannot support a proposed insight, leave it out. "
+    "Prefer fewer strong, non-empty, decision-grade widgets over many weak ones."
+)
+
+
 @router.post("/dashboard/suggest", response_model=SuggestDashboardResponse)
 async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardResponse:
-    """Suggest dashboard widgets based on project data."""
+    """Suggest dashboard widgets based on project data (insight-first).
+
+    Reasons like a senior analyst over the project's real schema, documents, KPI
+    references, and reference library, then emits chart-ready widget specs with
+    validation expectations and priority/confidence scores. The platform-api
+    judge stage executes each widget's SQL and drops empty/weak ones before save.
+    """
     request_id = str(uuid.uuid4())
     verify_signature(req.model_dump(exclude={"signature"}), req.signature)
 
@@ -624,80 +647,128 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     if req.prompt:
         user_instruction = f"\nUser request: {req.prompt}\n"
 
-    teiid_rules = (
-        "IMPORTANT: This database uses Teiid (not MySQL, not PostgreSQL).\n"
-        "All CSV columns are imported as strings.\n"
-        "- For SUM/AVG/MIN/MAX or arithmetic (*, /, +, -), CAST columns: CAST(col AS double)\n"
-        "- Do NOT use DATE_FORMAT, MONTH(), YEAR() (MySQL). Use FORMATDATE, EXTRACT, DATE_TRUNC.\n"
-        "- For monthly grouping: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM')\n"
-        "- Alias columns with safe identifiers (no reserved words like Month).\n"
-        "- GROUP BY must match SELECT expression exactly.\n"
+    chart_catalog = (
+        "Supported chart types — pick the SINGLE best one per insight; never "
+        "default everything to bar:\n"
+        "- kpi / kpi_grid: one or a few executive headline numbers (single-row aggregate).\n"
+        "- bar (vertical): compact category comparisons or period buckets.\n"
+        "- horizontal_bar: ranked categories with long labels — suppliers, customers, products, regions, top-N.\n"
+        "- stacked_bar: category composition over another category or period.\n"
+        "- grouped_bar: side-by-side comparison of 2+ metrics across categories.\n"
+        "- line: trends over time.\n"
+        "- dual_line: two related metrics over the same time axis.\n"
+        "- area: cumulative or volume-over-time.\n"
+        "- pie / donut: true part-to-whole share with 2-8 slices only.\n"
+        "- table / pivot_table: operational detail users can act on.\n"
+        "- heatmap: a metric across two categorical dimensions (intensity).\n"
+        "- scatter / bubble: relationship/correlation between two (or three) metrics.\n"
+        "- treemap: many categories' relative sizes.\n"
+        "- waterfall: bridge analysis / variance decomposition / contribution to change.\n"
+        "- funnel: stage conversion / drop-off.\n"
+        "- gauge / bullet: a metric vs an explicit target, threshold, SLA, or benchmark.\n"
+        "- radar: multi-metric comparison of a few items.\n"
+        "- sparkline_table: many entities each with an inline trend + current value.\n"
+        "- narrative_insight: a document-driven finding better told as prose (no SQL).\n"
     )
 
     prompt = (
         f"{context_text}\n\n"
-        f"Allowed tables: {', '.join(allowed_tables)}\n\n"
-        "CRITICAL: Use ONLY the tables listed in 'Allowed tables' above. Do NOT "
-        "invent or assume any other tables (e.g. Sales, Product, Customers) — "
-        "every widget's SQL must reference only those exact table names.\n\n"
-        f"{teiid_rules}\n"
-        f"{user_instruction}"
-        "Based on the available tables and their columns, suggest a dashboard "
-        "with useful widgets. Analyze the data carefully and choose the BEST "
-        "chart type for each metric — do NOT default everything to bar charts.\n\n"
-        "Guidelines for chart type selection:\n"
-        "- kpi: single-number metrics (totals, counts, averages) — use gridW=3 or 4, gridH=2\n"
-        "- bar: comparisons across categories — use gridW=6, gridH=4\n"
-        "- line: trends over time — use gridW=6 or 8, gridH=4\n"
-        "- pie: proportions/shares of a whole (limit to 5-8 slices) — use gridW=4 or 6, gridH=4\n"
-        "- area: cumulative trends or stacked comparisons — use gridW=6, gridH=4\n"
-        "- table: detailed data listings — use gridW=12, gridH=5\n\n"
-        "For each widget provide:\n"
-        "- type: one of kpi, bar, line, pie, area, table\n"
-        "- title: descriptive title\n"
-        "- sql: valid SQL using ONLY the allowed tables with proper CAST for numeric ops\n"
-        "- x_column: the column for the X axis or category\n"
-        "- y_column: the column for the Y axis or value\n"
-        "- aggregation: count, sum, avg, min, max\n"
-        "- gridX: X position on a 12-column grid (0-11)\n"
-        "- gridY: Y position in grid rows\n"
-        "- gridW: width in grid columns (1-12)\n"
-        "- gridH: height in grid rows (2 for kpi, 4-5 for charts)\n\n"
-        "Layout rules:\n"
-        "- Grid is 12 columns wide. Place KPI widgets across the top row.\n"
-        "- Vary the layout — mix sizes, use full-width charts where appropriate.\n"
-        "- Don't place all widgets in the same size or same column arrangement.\n"
-        "- Create a visually balanced dashboard with 4-8 widgets.\n\n"
-        "Return a JSON object with: title (dashboard name) and widgets (array).\n"
-        "Return ONLY the JSON."
+        f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
+        "CRITICAL: every widget's SQL must reference ONLY the allowed tables "
+        "above. Never invent or assume any other table (e.g. Sales, Product, "
+        "Customers).\n\n"
+        f"{_TEIID_SQL_RULES}\n"
+        f"{user_instruction}\n"
+        "Think like a senior business analyst and KPI strategist. Do NOT start "
+        "by making charts. First decide what a well-run company in this domain "
+        "should monitor, where the risk or opportunity is, and which insights "
+        "deserve dashboard placement. THEN, for each insight, choose the single "
+        "chart type that best communicates it and write the SQL that proves it.\n\n"
+        "Grounding rules:\n"
+        "- Use the project's real tables/columns, saved queries, documents, KPI "
+        "references, and reference-library standards shown above as evidence.\n"
+        "- Do NOT invent tables, columns, metrics, thresholds, dates, or values. "
+        "If the context cannot support an insight, leave it out.\n"
+        "- Prefer business impact over chart quantity; prefer fewer strong "
+        "widgets over many weak ones.\n"
+        "- Use reference-library thresholds/SLAs/benchmarks as target lines ONLY "
+        "when the value is explicit in the provided content, and cite the "
+        "document in reference_lines[].source_document.\n"
+        "- Do NOT create a time-series chart unless a real date/period column "
+        "exists with enough periods (>= 3) to show a trend.\n"
+        "- Do NOT create a pie/donut unless it is a true part-to-whole with 2-8 "
+        "slices. Do NOT create a KPI unless it is an executive-level number.\n"
+        "- Avoid WHERE filters on guessed values; only filter on values proven "
+        "by the schema/sample context or explicitly requested by the user.\n"
+        "- Do NOT include a widget you expect to return no rows.\n\n"
+        f"{chart_catalog}\n"
+        "SQL rules: read-only, never SELECT *, give every selected expression a "
+        "stable alias, and make label_column / value_column / value_column_2 / "
+        "series_column / target_column EXACTLY match aliases in the SELECT list. "
+        "Query a single allowed table per widget (no JOINs).\n\n"
+        "Layout: 12-column grid. Put the highest-priority executive KPIs in the "
+        "top row, place related charts near each other, give trend/table/heatmap/"
+        "waterfall charts more width (gridW 8-12), and create a clear top-left to "
+        "bottom-right reading path. Aim for 4-8 strong widgets.\n\n"
+        "Return ONLY a JSON object:\n"
+        "{\n"
+        '  "title": "dashboard name",\n'
+        '  "description": "one-line description",\n'
+        '  "business_domain": "",\n'
+        '  "intended_audience": "executive|manager|analyst|operational",\n'
+        '  "executive_summary": "2-3 sentences on what this dashboard answers",\n'
+        '  "widgets": [ {\n'
+        '    "type": "<one chart type from the catalog>",\n'
+        '    "title": "short widget title",\n'
+        '    "subtitle": "",\n'
+        '    "business_question": "the executive question this answers",\n'
+        '    "sql": "SELECT ... (empty for narrative_insight)",\n'
+        '    "label_column": "alias for the category/x axis",\n'
+        '    "value_column": "alias for the primary numeric value",\n'
+        '    "value_column_2": "alias for a 2nd metric (dual_line/scatter/bubble/target) or empty",\n'
+        '    "series_column": "alias that splits series (stacked/grouped) or empty",\n'
+        '    "target_column": "alias holding a target/threshold (gauge/bullet) or empty",\n'
+        '    "x_column": "alias for x (scatter/bubble) or empty",\n'
+        '    "y_column": "alias for y (scatter/bubble) or empty",\n'
+        '    "aggregation": "count|sum|avg|min|max",\n'
+        '    "reference_lines": [ {"label": "", "value": null, "source_document": ""} ],\n'
+        '    "drilldown_fields": [],\n'
+        '    "validation_expectations": {\n'
+        '      "minimum_rows": 1, "required_columns": [], "non_null_columns": [],\n'
+        '      "chart_requires_multiple_rows": false, "empty_result_action": "drop_widget"\n'
+        "    },\n"
+        '    "priority_score": 0,\n'
+        '    "confidence_score": 0.0,\n'
+        '    "gridX": 0, "gridY": 0, "gridW": 6, "gridH": 4\n'
+        "  } ]\n"
+        "}\n\n"
+        "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
+        "prose, no markdown, no code fences. Begin with { and end with }."
     )
 
     raw = await llm_client.generate(
         prompt=prompt,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
         model=settings.sql_model,
         temperature=0.3,
+        num_ctx=16384,
+        response_format="json",
     )
 
-    suggestions = []
-    try:
-        json_str = raw.strip()
-        if json_str.startswith("```"):
-            json_str = json_str.split("```")[1]
-            if json_str.startswith("json"):
-                json_str = json_str[4:]
-        parsed = json.loads(json_str)
-        if isinstance(parsed, dict):
-            suggestions = [parsed]
-        elif isinstance(parsed, list):
-            suggestions = parsed
-    except (json.JSONDecodeError, KeyError):
+    suggestions: list[dict] = []
+    parsed = _parse_json_response(raw)
+    if isinstance(parsed, dict):
+        suggestions = [parsed]
+    elif isinstance(parsed, list):
+        suggestions = [s for s in parsed if isinstance(s, dict)]
+    else:
         logger.warning("Failed to parse dashboard suggestions: %s", raw[:200])
 
     # Post-process: fix Teiid GROUP BY aliases in each widget's SQL, then drop
     # any widget whose SQL references a table outside the project's allowed set.
     # The LLM occasionally hallucinates generic tables (e.g. "Sales", "Product")
     # that do not belong to this tenant/project; those must never reach the user.
+    # Widgets with no SQL (narrative_insight) are kept — they are document-driven.
     for s in suggestions:
         kept_widgets = []
         for w in s.get("widgets", []):
@@ -713,6 +784,10 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
                     )
                     continue
             kept_widgets.append(w)
+        # Highest-priority widgets first so the executive reading path is sound.
+        kept_widgets.sort(
+            key=lambda w: float(w.get("priority_score") or 0), reverse=True
+        )
         s["widgets"] = kept_widgets
 
     update_activity(req.user_id, req.tenant_id, req.project_id)
@@ -720,7 +795,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     return SuggestDashboardResponse(
         suggestions=suggestions,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=settings.sql_model,
     )
 
 

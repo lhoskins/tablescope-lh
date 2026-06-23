@@ -1631,27 +1631,12 @@ async def ai_generate_and_save_dashboard(
     ds_result = await session.execute(ds_stmt)
     allowed_tables = [ds.view_name for ds in ds_result.scalars()]
 
-    # Step 1: Call AI server for dashboard suggestion
-    # Inject layout instructions into the prompt so the AI server includes
-    # them even if the AI server itself hasn't been updated with the latest prompt.
-    layout_instructions = (
-        "\n\nIMPORTANT: For each widget, also include layout fields: "
-        "gridX (0-11), gridY (row position), gridW (width 1-12), gridH (height). "
-        "Choose chart type carefully based on the data: "
-        "kpi (gridW=3,gridH=2) for single metrics, "
-        "bar (gridW=6,gridH=4) for category comparisons, "
-        "line (gridW=6-8,gridH=4) for time trends, "
-        "pie (gridW=4-6,gridH=4) for proportions, "
-        "table (gridW=12,gridH=5) for detailed data. "
-        "Place KPIs across the top row. Create a varied, balanced layout with 4-8 widgets. "
-        "Do NOT use the same chart type for every widget."
-    )
-    effective_prompt = (req.prompt or "") + layout_instructions
+    # Step 1 — Plan: ask the AI server for an insight-first dashboard plan.
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
-        "prompt": effective_prompt,
+        "prompt": req.prompt or "",
         "allowed_tables": allowed_tables,
     }
     ai_result = await _forward_to_ai("/ai/dashboard/suggest", payload)
@@ -1663,7 +1648,6 @@ async def ai_generate_and_save_dashboard(
             detail="AI could not generate dashboard suggestions",
         )
 
-    # Take the first suggestion (or the one matching the prompt best)
     suggestion = suggestions[0]
     if req.name:
         dashboard_title = req.name
@@ -1671,32 +1655,111 @@ async def ai_generate_and_save_dashboard(
         dashboard_title = _shorten_ai_name(req.prompt)
     else:
         dashboard_title = suggestion.get("title", "AI - Dashboard")
-    widget_defs = suggestion.get("widgets", [])
 
-    # Step 2 & 3: For each widget, reuse or create a SavedQuery and build widget config
+    widget_defs = list(suggestion.get("widgets", []))
+    # Highest-priority widgets first (executive reading path top-left → bottom-right).
+    widget_defs.sort(key=lambda w: float(w.get("priority_score") or 0), reverse=True)
+
+    # Step 2 — Judge: execute each widget's SQL and keep only the strong ones.
+    from app.routes.query import (
+        _auto_cast_aggregates,
+        _resolve_vdb_database,
+        _run_sql,
+    )
+    from app.services.tenant_teiid_resolver import TenantTeiidResolver
+
+    judge_available = True
+    teiid_host: str | None = None
+    teiid_port: int | None = None
+    vdb_database: str | None = None
+    try:
+        vdb_database = await _resolve_vdb_database(
+            session=session, context=context, project_id=req.project_id
+        )
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+        teiid_host, teiid_port = endpoint.pg_host, endpoint.pg_port
+    except Exception as exc:
+        # No live VDB (data not materialised yet, or Teiid unavailable): skip the
+        # execution-based judge rather than blocking dashboard creation.
+        judge_available = False
+        logger.warning("Dashboard judge skipped (no VDB): %s", exc)
+
+    kept_defs: list[dict[str, Any]] = []
+    dropped_widgets: list[dict[str, str]] = []
+
+    for w in widget_defs:
+        title = str(w.get("title", "untitled"))
+        wtype = str(w.get("type", "bar")).lower()
+        widget_sql = (w.get("sql", "") or "").strip().rstrip(";")
+
+        # Narrative / no-SQL findings cannot be rendered as a dashboard chart.
+        if not widget_sql or wtype in _NARRATIVE_TYPES:
+            dropped_widgets.append(
+                {"title": title, "reason": "narrative finding (no chart)"}
+            )
+            continue
+
+        if judge_available and vdb_database:
+            try:
+                result = await _run_sql(
+                    database=vdb_database,
+                    sql=_auto_cast_aggregates(widget_sql),
+                    teiid_host=teiid_host,
+                    teiid_port=teiid_port,
+                )
+            except Exception as exc:
+                logger.warning("Widget %r dropped (SQL failed): %s", title, exc)
+                dropped_widgets.append(
+                    {"title": title, "reason": "query failed to execute"}
+                )
+                continue
+            cols = result.get("columns", [])
+            rows = result.get("rows", [])
+            keep, reason = _judge_widget(w, cols, rows)
+            if not keep:
+                dropped_widgets.append({"title": title, "reason": reason})
+                continue
+            _correct_widget_chart(w, cols, rows)
+
+        kept_defs.append(w)
+
+    # Minimum-save rule: a dashboard needs at least 2 strong widgets.
+    if len(kept_defs) < 2:
+        detail = (
+            "Not enough strong widgets survived validation to build a dashboard "
+            f"(needed 2, got {len(kept_defs)})."
+        )
+        if dropped_widgets:
+            detail += " Dropped: " + "; ".join(
+                f"{d['title']} ({d['reason']})" for d in dropped_widgets[:6]
+            )
+        detail += (
+            " Try a more specific request, or add data sources that support the "
+            "metrics you want to see."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail
+        )
+
+    # Step 3 — Build: for each surviving widget, reuse or create a SavedQuery.
     widgets_config: list[dict[str, Any]] = []
     created_queries: list[int] = []
     reused_queries: list[int] = []
 
-    # Pre-fetch all existing saved queries for this project to check for duplicates
     existing_queries_result = await session.scalars(
         select(SavedQuery).where(SavedQuery.project_id == project.id)
     )
     existing_queries = list(existing_queries_result)
 
-    import re as _re
-
     def _normalize_sql(sql: str) -> str:
         """Normalize SQL for comparison — collapse whitespace and lowercase."""
-        return _re.sub(r"\s+", " ", sql.strip().rstrip(";").lower())
+        return re.sub(r"\s+", " ", sql.strip().rstrip(";").lower())
 
-    # Build lookup: normalized_sql → SavedQuery
     sql_to_query: dict[str, SavedQuery] = {}
     for eq in existing_queries:
         if eq.sql_text:
             sql_to_query[_normalize_sql(eq.sql_text)] = eq
 
-    # Existing queries with SQL, sent to the dedicated query-match endpoint.
     existing_with_sql = [eq for eq in existing_queries if eq.sql_text]
 
     async def _find_matching_query(widget_sql: str, widget_title: str) -> SavedQuery | None:
@@ -1728,102 +1791,100 @@ async def ai_generate_and_save_dashboard(
             logger.warning("AI query matching failed, will create new query")
         return None
 
-    for idx, w in enumerate(widget_defs):
-        widget_sql = (w.get("sql", "") or "").rstrip().rstrip(";")
-        widget_title = w.get("title", f"Widget {idx + 1}")
-        widget_type = w.get("type", "bar")
-        x_col = w.get("x_column") or ""
-        y_col = w.get("y_column") or ""
-        aggregation = w.get("aggregation") or "count"
+    for idx, w in enumerate(kept_defs):
+        widget_sql = (w.get("sql", "") or "").strip().rstrip(";")
+        widget_title = str(w.get("title", f"Widget {idx + 1}"))
+        widget_type = str(w.get("type", "bar"))
+        aggregation = (w.get("aggregation") or "count").lower()
+        x_col = w.get("label_column") or w.get("x_column") or ""
+        y_col = w.get("value_column") or w.get("y_column") or ""
+        y2_col = w.get("value_column_2") or ""
 
-        data_source: dict[str, Any] = {"kind": "custom_sql", "customSql": ""}
-        if widget_sql:
-            # Tier 1: exact normalized SQL match (instant)
-            norm_sql = _normalize_sql(widget_sql)
-            existing = sql_to_query.get(norm_sql)
+        # Tier 1: exact normalized SQL match.
+        norm_sql = _normalize_sql(widget_sql)
+        existing = sql_to_query.get(norm_sql)
+        # Tier 2: AI semantic equivalence match.
+        if not existing:
+            existing = await _find_matching_query(widget_sql, widget_title)
+        # Tier 3: name-based match.
+        if not existing:
+            candidate_name = f"AI - {widget_title}".lower().strip()
+            for eq in existing_queries:
+                if eq.name and eq.name.lower().strip() == candidate_name:
+                    existing = eq
+                    break
 
-            # Tier 2: AI semantic match (checks if purpose/result is the same)
-            if not existing:
-                existing = await _find_matching_query(widget_sql, widget_title)
+        if existing:
+            reused_queries.append(existing.id)
+            data_source: dict[str, Any] = {"kind": "query", "queryId": existing.id}
+        else:
+            left_ds = _detect_datasource(widget_sql, allowed_tables)
+            query = SavedQuery(
+                project_id=project.id,
+                owner_id=context.user_id,
+                name=f"AI - {widget_title}",
+                description=str(w.get("business_question") or ""),
+                sql_text=widget_sql,
+                left_datasource=left_ds,
+            )
+            session.add(query)
+            await session.flush()
+            created_queries.append(query.id)
+            data_source = {"kind": "query", "queryId": query.id}
+            sql_to_query[norm_sql] = query
+            existing_queries.append(query)
 
-            # Tier 3: name-based match — if a query with the same name exists,
-            # reuse it to avoid duplicate-named queries in the project
-            if not existing:
-                candidate_name = f"AI - {widget_title}".lower().strip()
-                for eq in existing_queries:
-                    if eq.name and eq.name.lower().strip() == candidate_name:
-                        existing = eq
-                        logger.info(
-                            "Name-match: reusing query %d (%s) for widget: %s",
-                            eq.id, eq.name, widget_title,
-                        )
-                        break
+        base_type, subtype = _map_widget_visual(widget_type)
+        default_w = {"kpi": 3, "table": 12, "pie": 5}.get(base_type, 6)
+        default_h = {"kpi": 2, "table": 5}.get(base_type, 4)
+        grid_w = int(w.get("gridW") or w.get("grid_w") or default_w)
+        grid_h = int(w.get("gridH") or w.get("grid_h") or default_h)
 
-            if existing:
-                reused_queries.append(existing.id)
-                data_source = {"kind": "query", "queryId": existing.id}
-                logger.info(
-                    "Reusing existing query %d (%s) for dashboard widget: %s",
-                    existing.id, existing.name, widget_title,
-                )
-            else:
-                # No match — create a new SavedQuery
-                left_ds = _detect_datasource(widget_sql, allowed_tables)
-                query = SavedQuery(
-                    project_id=project.id,
-                    owner_id=context.user_id,
-                    name=f"AI - {widget_title}",
-                    description="",
-                    sql_text=widget_sql,
-                    left_datasource=left_ds,
-                )
-                session.add(query)
-                await session.flush()
-                created_queries.append(query.id)
-                data_source = {"kind": "query", "queryId": query.id}
-                sql_to_query[norm_sql] = query
-                # Also add to existing_queries so AI can match subsequent widgets
-                existing_queries.append(query)
-
-        mapped_type = _map_chart_type(widget_type)
-
-        # Use AI-suggested layout or fall back to sensible defaults
-        ai_grid_w = w.get("gridW") or w.get("grid_w")
-        ai_grid_h = w.get("gridH") or w.get("grid_h")
-        ai_grid_x = w.get("gridX") or w.get("grid_x")
-        ai_grid_y = w.get("gridY") or w.get("grid_y")
-
-        # Default sizing by chart type if AI didn't specify
-        default_w = {"kpi": 3, "table": 12, "pie": 4}.get(mapped_type, 6)
-        default_h = {"kpi": 2, "table": 5}.get(mapped_type, 4)
-        grid_w = int(ai_grid_w) if ai_grid_w is not None else default_w
-        grid_h = int(ai_grid_h) if ai_grid_h is not None else default_h
-        grid_x = int(ai_grid_x) if ai_grid_x is not None else (idx % 2) * 6
-        grid_y = int(ai_grid_y) if ai_grid_y is not None else (idx // 2) * 4
-
-        # Clamp to valid grid bounds
-        grid_w = max(2, min(12, grid_w))
-        grid_h = max(1, min(8, grid_h))
-        grid_x = max(0, min(11, grid_x))
-
-        widgets_config.append({
+        widget_conf: dict[str, Any] = {
             "id": f"ai_widget_{idx}",
             "title": widget_title,
-            "type": mapped_type,
-            "chartSubtype": _map_chart_subtype(widget_type),
+            "type": base_type,
+            "chartSubtype": subtype,
             "dataSource": data_source,
             "xColumn": x_col,
             "yColumn": y_col,
-            "aggregation": aggregation.lower() if aggregation else "count",
+            "aggregation": (
+                aggregation
+                if aggregation in ("sum", "avg", "count", "min", "max")
+                else "count"
+            ),
             "sortBy": "x_asc",
             "filters": [],
-            "colSpan": grid_w,
             "position": idx,
-            "gridX": grid_x,
-            "gridY": grid_y,
             "gridW": grid_w,
             "gridH": grid_h,
-        })
+        }
+        if y2_col:
+            widget_conf["y2Column"] = y2_col
+
+        # Carry reference lines (thresholds/SLAs) the planner grounded in docs.
+        ref_lines: list[dict[str, Any]] = []
+        for rl in (w.get("reference_lines") or []):
+            value = rl.get("value") if isinstance(rl, dict) else None
+            if value is None:
+                continue
+            try:
+                ref_lines.append(
+                    {
+                        "axis": "y",
+                        "value": float(value),
+                        "label": (rl.get("label") or rl.get("source_document") or ""),
+                    }
+                )
+            except (TypeError, ValueError):
+                continue
+        if ref_lines:
+            widget_conf["visualizationOptions"] = {"referenceLines": ref_lines}
+
+        widgets_config.append(widget_conf)
+
+    # Lay widgets out on the 12-column grid in priority order.
+    _pack_grid(widgets_config)
 
     # Step 4: Create the Dashboard
     dashboard = Dashboard(
@@ -1831,13 +1892,21 @@ async def ai_generate_and_save_dashboard(
         owner_id=context.user_id,
         tenant_id=context.tenant_id,
         name=dashboard_title,
-        description=req.description or req.prompt or "",
+        description=(
+            req.description
+            or suggestion.get("executive_summary")
+            or req.prompt
+            or ""
+        ),
         status="draft",
         config={
             "widgets": widgets_config,
             "filters": [],
             "layout": "grid",
             "ai_generated": True,
+            "business_domain": suggestion.get("business_domain", ""),
+            "intended_audience": suggestion.get("intended_audience", ""),
+            "executive_summary": suggestion.get("executive_summary", ""),
         },
     )
     session.add(dashboard)
@@ -1846,9 +1915,10 @@ async def ai_generate_and_save_dashboard(
 
     logger.info(
         "AI action: generate_and_save_dashboard | dashboard_id=%d widgets=%d "
-        "queries_created=%d queries_reused=%d project=%d tenant=%d user=%d",
-        dashboard.id, len(widgets_config), len(created_queries),
-        len(reused_queries), project.id, context.tenant_id, context.user_id,
+        "dropped=%d queries_created=%d queries_reused=%d project=%d tenant=%d user=%d",
+        dashboard.id, len(widgets_config), len(dropped_widgets),
+        len(created_queries), len(reused_queries), project.id,
+        context.tenant_id, context.user_id,
     )
     return {
         "action": "generate_and_save_dashboard",
@@ -1856,40 +1926,152 @@ async def ai_generate_and_save_dashboard(
         "dashboard_id": dashboard.id,
         "dashboard_name": dashboard_title,
         "widgets_created": len(widgets_config),
+        "widgets_dropped": dropped_widgets,
         "queries_created": created_queries,
         "queries_reused": reused_queries,
         "model_used": ai_result.get("model_used", ""),
     }
 
 
+# Insight-first chart catalog → (dashboard WidgetType, ChartSubtype).
+# The planner may request a rich type (horizontal_bar, dual_line, waterfall,
+# bubble, …); the dashboard renderer expresses these as a base type plus a
+# subtype, so map every planner type down to a supported pair.
+_CHART_TYPE_MAP: dict[str, tuple[str, str]] = {
+    "kpi": ("kpi", "kpi"),
+    "kpi_grid": ("kpi", "kpi"),
+    "bar": ("bar", "column"),
+    "vertical_bar": ("bar", "column"),
+    "horizontal_bar": ("bar", "horizontal_bar"),
+    "stacked_bar": ("bar", "stacked_bar"),
+    "grouped_bar": ("bar", "grouped_bar"),
+    "waterfall": ("bar", "waterfall"),
+    "bullet": ("bar", "horizontal_bar"),
+    "line": ("line", ""),
+    "dual_line": ("line", "biaxial_line"),
+    "area": ("area", ""),
+    "pie": ("pie", ""),
+    "donut": ("pie", "donut"),
+    "gauge": ("pie", "gauge"),
+    "table": ("table", ""),
+    "pivot_table": ("table", ""),
+    "sparkline_table": ("table", ""),
+    "heatmap": ("table", ""),
+    "scatter": ("scatter", ""),
+    "bubble": ("scatter", "bubble"),
+    "treemap": ("treemap", ""),
+    "funnel": ("funnel", ""),
+    "radar": ("radar", ""),
+}
+
+
+def _map_widget_visual(ai_type: str) -> tuple[str, str]:
+    """Map a planner chart type to a (WidgetType, ChartSubtype) pair."""
+    return _CHART_TYPE_MAP.get((ai_type or "").lower(), ("bar", "column"))
+
+
 def _map_chart_type(ai_type: str) -> str:
-    """Map AI-suggested chart types to the dashboard widget chart type."""
-    mapping = {
-        "kpi": "kpi",
-        "bar": "bar",
-        "line": "line",
-        "pie": "pie",
-        "area": "area",
-        "table": "table",
-        "donut": "pie",
-        "scatter": "line",
-    }
-    return mapping.get(ai_type.lower(), "bar")
+    """Map an AI-suggested chart type to the dashboard widget chart type."""
+    return _map_widget_visual(ai_type)[0]
 
 
 def _map_chart_subtype(ai_type: str) -> str:
-    """Map AI-suggested type to a chart subtype."""
-    mapping = {
-        "kpi": "kpi",
-        "bar": "column",
-        "line": "straight",
-        "pie": "pie",
-        "donut": "donut",
-        "area": "area",
-        "table": "table",
-        "scatter": "straight",
-    }
-    return mapping.get(ai_type.lower(), "column")
+    """Map an AI-suggested type to a chart subtype."""
+    return _map_widget_visual(ai_type)[1]
+
+
+# ---------------------------------------------------------------------------
+# Dashboard widget judge (executes each widget's SQL, drops empty/weak ones)
+# ---------------------------------------------------------------------------
+
+_TIME_SERIES_TYPES = frozenset({"line", "area", "dual_line"})
+_PART_TO_WHOLE_TYPES = frozenset({"pie", "donut"})
+_NARRATIVE_TYPES = frozenset({"narrative_insight", "none", "narrative"})
+
+
+def _norm_col(name: str) -> str:
+    return (name or "").strip().strip('"').lower()
+
+
+def _judge_widget(
+    widget: dict[str, Any], columns: list[str], rows: list[dict[str, Any]]
+) -> tuple[bool, str]:
+    """Decide whether an executed widget should be kept.
+
+    Returns ``(keep, reason)``; ``reason`` explains the drop when ``keep`` is
+    False. Mirrors the doc's judge rules: drop empty results, drop when the
+    configured value column is missing/all-null, and drop time-series widgets
+    with fewer than 3 periods.
+    """
+    wtype = str(widget.get("type", "bar")).lower()
+
+    if not rows:
+        return False, "returned no rows"
+
+    vcol = widget.get("value_column") or widget.get("y_column") or ""
+    if vcol:
+        col_map = {_norm_col(c): c for c in columns}
+        actual = col_map.get(_norm_col(vcol))
+        if actual is None:
+            return False, f"value column '{vcol}' missing from result"
+        if all(r.get(actual) is None for r in rows):
+            return False, f"value column '{vcol}' is entirely null"
+
+    if wtype in _TIME_SERIES_TYPES and len(rows) < 3:
+        return False, f"time-series needs >= 3 periods (got {len(rows)})"
+
+    return True, ""
+
+
+def _correct_widget_chart(
+    widget: dict[str, Any], columns: list[str], rows: list[dict[str, Any]]
+) -> None:
+    """Apply safe in-place chart-type corrections after execution.
+
+    - pie/donut with > 8 slices → horizontal_bar (ranking, not part-to-whole).
+    - vertical bar with long category labels (or many bars) → horizontal_bar.
+    """
+    wtype = str(widget.get("type", "bar")).lower()
+
+    if wtype in _PART_TO_WHOLE_TYPES and len(rows) > 8:
+        widget["type"] = "horizontal_bar"
+        return
+
+    if wtype in ("bar", "vertical_bar"):
+        lcol = widget.get("label_column") or widget.get("x_column") or ""
+        col_map = {_norm_col(c): c for c in columns}
+        actual = col_map.get(_norm_col(lcol))
+        if actual:
+            labels = [str(r.get(actual, "")) for r in rows[:20]]
+            if labels:
+                avg_len = sum(len(x) for x in labels) / len(labels)
+                if avg_len > 16 or len(rows) > 8:
+                    widget["type"] = "horizontal_bar"
+
+
+def _pack_grid(widgets_config: list[dict[str, Any]]) -> None:
+    """Lay widgets out left-to-right on a 12-column grid in priority order.
+
+    KPI tiles are placed first across the top row; remaining widgets flow in a
+    simple row-packing reading path. Mutates each widget's gridX/gridY/colSpan.
+    """
+    cursor_x = 0
+    cursor_y = 0
+    row_h = 0
+    for w in widgets_config:
+        gw = max(2, min(12, int(w.get("gridW") or 6)))
+        gh = max(1, min(8, int(w.get("gridH") or 4)))
+        if cursor_x + gw > 12:
+            cursor_x = 0
+            cursor_y += row_h
+            row_h = 0
+        w["gridX"] = cursor_x
+        w["gridY"] = cursor_y
+        w["gridW"] = gw
+        w["gridH"] = gh
+        w["colSpan"] = gw
+        cursor_x += gw
+        row_h = max(row_h, gh)
 
 
 # ---------------------------------------------------------------------------

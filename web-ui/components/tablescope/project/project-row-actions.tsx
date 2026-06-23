@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { IconDotsVertical, IconExternalLink, IconPencil, IconTrash } from "@tabler/icons-react";
@@ -24,18 +25,49 @@ export function ProjectRowActions({
   const [open, setOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuPortalRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(
+    null,
+  );
+
+  const updateMenuPosition = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const menuWidth = 176;
+    const estimatedMenuHeight = 120;
+    const margin = 8;
+    let top = rect.bottom + 6;
+    if (top + estimatedMenuHeight > window.innerHeight - margin) {
+      top = rect.top - estimatedMenuHeight - 6;
+    }
+    let left = rect.right - menuWidth;
+    left = Math.max(margin, Math.min(left, window.innerWidth - menuWidth - margin));
+    setMenuPosition({ top, left });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpen(false);
+      const target = e.target as Node;
+      if (
+        buttonRef.current?.contains(target) ||
+        menuPortalRef.current?.contains(target)
+      ) {
+        return;
       }
+      setOpen(false);
     };
+    const onReposition = () => updateMenuPosition();
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+    window.addEventListener("scroll", onReposition, true);
+    window.addEventListener("resize", onReposition);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("scroll", onReposition, true);
+      window.removeEventListener("resize", onReposition);
+    };
+  }, [open, updateMenuPosition]);
 
   const refetchProjects = () =>
     queryClient.invalidateQueries({ queryKey: ["projects", "summaries"] });
@@ -63,48 +95,62 @@ export function ProjectRowActions({
 
   return (
     <>
-      <div ref={menuRef} className="relative flex justify-end">
+      <div className="flex justify-end">
         <button
+          ref={buttonRef}
           type="button"
           aria-label={`Actions for ${project.name}`}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            setOpen((v) => !v);
+            setOpen((current) => {
+              const next = !current;
+              if (!current) {
+                requestAnimationFrame(updateMenuPosition);
+              }
+              return next;
+            });
           }}
           className="flex h-7 w-7 items-center justify-center rounded-md text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
         >
           <IconDotsVertical size={16} />
         </button>
-        {open && (
-          <div className="absolute right-0 top-8 z-20 w-44 overflow-hidden rounded-md border border-line-secondary bg-bg-primary py-1 shadow-lg">
-            <MenuItem
-              icon={<IconExternalLink size={15} />}
-              label="Open"
-              onClick={() => {
-                setOpen(false);
-                router.push(`/projects/${project.id}`);
-              }}
-            />
-            <MenuItem
-              icon={<IconPencil size={15} />}
-              label="Rename"
-              onClick={() => {
-                setOpen(false);
-                setRenaming(true);
-              }}
-            />
-            <MenuItem
-              icon={<IconTrash size={15} />}
-              label="Delete project"
-              danger
-              onClick={() => {
-                setOpen(false);
-                setConfirmDelete(true);
-              }}
-            />
-          </div>
-        )}
+        {open &&
+          menuPosition &&
+          createPortal(
+            <div
+              ref={menuPortalRef}
+              className="fixed z-[100] w-44 overflow-hidden rounded-md border border-line-secondary bg-bg-primary py-1 shadow-lg"
+              style={{ top: menuPosition.top, left: menuPosition.left }}
+            >
+              <MenuItem
+                icon={<IconExternalLink size={15} />}
+                label="Open"
+                onClick={() => {
+                  setOpen(false);
+                  router.push(`/projects/${project.id}`);
+                }}
+              />
+              <MenuItem
+                icon={<IconPencil size={15} />}
+                label="Rename"
+                onClick={() => {
+                  setOpen(false);
+                  setRenaming(true);
+                }}
+              />
+              <MenuItem
+                icon={<IconTrash size={15} />}
+                label="Delete project"
+                danger
+                onClick={() => {
+                  setOpen(false);
+                  setConfirmDelete(true);
+                }}
+              />
+            </div>,
+            document.body,
+          )}
       </div>
 
       {confirmDelete && (

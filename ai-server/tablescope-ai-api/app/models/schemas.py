@@ -370,17 +370,60 @@ class GenerateSQLResponse(BaseModel):
     repaired: bool = False
 
 
+class WidgetValidationExpectations(BaseModel):
+    """What a widget's executed result must satisfy to be saved (judge stage)."""
+    minimum_rows: int = 1
+    required_columns: list[str] = Field(default_factory=list)
+    non_null_columns: list[str] = Field(default_factory=list)
+    chart_requires_multiple_rows: bool = False
+    empty_result_action: str = "drop_widget"
+
+
+class WidgetReferenceLine(BaseModel):
+    label: str = ""
+    value: float | None = None
+    source_document: str = ""
+
+
 class DashboardWidgetSuggestion(BaseModel):
-    type: str  # kpi | bar | line | pie | area | table
+    # Insight-first chart catalog: kpi/kpi_grid | bar | horizontal_bar |
+    # stacked_bar | grouped_bar | line | area | dual_line | pie | donut |
+    # table | pivot_table | heatmap | scatter | bubble | treemap | waterfall |
+    # funnel | gauge | bullet | radar | sparkline_table | narrative_insight
+    type: str
     title: str
+    subtitle: str = ""
+    business_question: str = ""
     sql: str = ""
+    chart_subtype: str = ""
     x_column: str | None = ""
     y_column: str | None = ""
+    label_column: str | None = ""
+    value_column: str | None = ""
+    value_column_2: str | None = ""
+    series_column: str | None = ""
+    target_column: str | None = ""
     aggregation: str | None = ""
+    reference_lines: list[WidgetReferenceLine] = Field(default_factory=list)
+    drilldown_fields: list[str] = Field(default_factory=list)
+    validation_expectations: WidgetValidationExpectations = Field(
+        default_factory=WidgetValidationExpectations
+    )
+    priority_score: int = 0
+    confidence_score: float = 0.0
+    # Optional layout hints from the planner.
+    gridX: int | None = None
+    gridY: int | None = None
+    gridW: int | None = None
+    gridH: int | None = None
 
 
 class DashboardSuggestion(BaseModel):
     title: str
+    description: str = ""
+    business_domain: str = ""
+    intended_audience: str = ""
+    executive_summary: str = ""
     widgets: list[DashboardWidgetSuggestion]
 
 
