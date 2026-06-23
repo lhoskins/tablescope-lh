@@ -13,6 +13,11 @@ export interface ScopeSet {
   type: ScopeSetType;
   enabled: boolean;
   created_by: number | null;
+  creator_name: string | null;
+  creator_email: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  can_delete: boolean;
   scope_count: number;
 }
 

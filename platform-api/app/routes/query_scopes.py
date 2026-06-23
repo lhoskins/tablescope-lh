@@ -54,27 +54,22 @@ async def list_query_scopes(
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[QueryScopeRead]:
     """List scopes. Filter by query_id (source query) and/or project_id."""
+    # Only enabled scopes drive drill-down. Disabling a scope set disables its
+    # mappings, so they disappear from the grid immediately — there is no
+    # separate project-wide scoping toggle.
+    base = select(QueryScope).where(
+        QueryScope.tenant_id == context.tenant_id,
+        QueryScope.enabled.is_(True),
+    )
     if query_id is not None:
         await _get_project_for_query(session, query_id=query_id, tenant_id=context.tenant_id)
-        rows = await session.scalars(
-            select(QueryScope).where(
-                QueryScope.tenant_id == context.tenant_id,
-                QueryScope.query_id == query_id,
-            )
-        )
+        rows = await session.scalars(base.where(QueryScope.query_id == query_id))
     elif project_id is not None:
         rows = await session.scalars(
-            select(QueryScope).where(
-                QueryScope.tenant_id == context.tenant_id,
-                QueryScope.project_id == project_id,
-            )
+            base.where(QueryScope.project_id == project_id)
         )
     else:
-        rows = await session.scalars(
-            select(QueryScope).where(
-                QueryScope.tenant_id == context.tenant_id,
-            )
-        )
+        rows = await session.scalars(base)
     return [QueryScopeRead.model_validate(s.to_dict()) for s in rows]
 
 
@@ -261,6 +256,8 @@ async def filter_by_scope(
     scope = await session.get(QueryScope, payload.scope_id)
     if scope is None or scope.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Scope not found")
+    if not scope.enabled:
+        raise HTTPException(status_code=409, detail="Scope is disabled")
 
     target_query, project = await _get_project_for_query(
         session, query_id=scope.target_query_id, tenant_id=context.tenant_id

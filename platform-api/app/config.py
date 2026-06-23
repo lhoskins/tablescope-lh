@@ -110,9 +110,26 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_use_tls: bool = True
-    email_from: str = "Tablescope <no-reply@tablescope.cloud>"
-    app_base_url: str = "https://app.tablescope.cloud"
-    support_email: str = "support@tablescope.cloud"
+    email_from: str = Field(
+        default="Tablescope <no-reply@tablescope.cloud>",
+        validation_alias=AliasChoices("EMAIL_FROM", "TABLESCOPE_EMAIL_FROM"),
+    )
+    email_reply_to: str = Field(
+        default="",
+        validation_alias=AliasChoices("EMAIL_REPLY_TO", "TABLESCOPE_EMAIL_REPLY_TO"),
+    )
+    email_logo_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("EMAIL_LOGO_URL", "TABLESCOPE_EMAIL_LOGO_URL"),
+    )
+    app_base_url: str = Field(
+        default="https://app.tablescope.cloud",
+        validation_alias=AliasChoices("APP_BASE_URL", "TABLESCOPE_APP_URL"),
+    )
+    support_email: str = Field(
+        default="support@tablescope.cloud",
+        validation_alias=AliasChoices("SUPPORT_EMAIL", "TABLESCOPE_SUPPORT_EMAIL"),
+    )
 
     @property
     def email_configured(self) -> bool:

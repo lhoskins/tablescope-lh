@@ -31,7 +31,7 @@ from app.schemas.tenant import (
     UserUpdate,
 )
 from app.services.customer_folders import CustomerFolderError, CustomerFolderService
-from app.services.email_service import EmailService, render_user_invite
+from app.services.email_service import EmailService
 from app.services.supabase_auth_service import (
     SupabaseAdminError,
     SupabaseAuthService,
@@ -423,7 +423,6 @@ async def create_user(
     # local password is ever stored. If Supabase is unavailable, the user is NOT
     # created (no local fallback).
     settings = get_settings()
-    login_url = f"{settings.app_base_url}/{tenant.slug}"
     setup_url = f"{settings.app_base_url}/{tenant.slug}/set-password"
     supa = SupabaseAuthService()
     try:
@@ -504,14 +503,17 @@ async def create_user(
     # Send the branded magic-link invite (best-effort; never fails user creation).
     if invite_link is not None:
         try:
-            spec = render_user_invite(
-                company_name=tenant.name,
-                role=payload.role,
-                invite_link=invite_link,
-                login_url=login_url,
-            )
-            await EmailService().send(
-                spec, to=payload.email, template="user_invite"
+            await EmailService().send_transactional_email(
+                to=payload.email,
+                template="user_invitation",
+                variables={
+                    "first_name": payload.display_name or "",
+                    "inviter_name": "A Tablescope administrator",
+                    "workspace_name": tenant.name,
+                    "role_name": payload.role.replace("_", " ").title(),
+                    "invitation_link": invite_link,
+                    "expiration_date": "in 24 hours",
+                },
             )
         except Exception as exc:  # delivery is best-effort
             logger.warning("Failed to send invite email to %s: %s", payload.email, exc)

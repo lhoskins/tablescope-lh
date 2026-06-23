@@ -57,9 +57,15 @@ class FakeSupabase(SupabaseAuthService):
 class FakeEmail:
     def __init__(self) -> None:
         self.sent: list[tuple[str, str]] = []
+        self.calls: list[dict] = []
 
-    async def send(self, spec, *, to, template) -> bool:
+    async def send_transactional_email(
+        self, *, to, template, variables, subject=None, reply_to=None
+    ) -> bool:
         self.sent.append((to, template))
+        self.calls.append(
+            {"to": to, "template": template, "variables": variables}
+        )
         return True
 
 
@@ -372,7 +378,18 @@ async def test_provision_basic_cloud(db_session):
     assert membership.role == "tenant_admin"
     binding = await db_session.scalar(select(TenantAuthBinding))
     assert binding.supabase_user_id == "supa-root@acme.com"
-    assert ("root@acme.com", "root_admin_invite") in email.sent
+    assert (
+        "root@acme.com",
+        "workspace_ready_with_password_setup",
+    ) in email.sent
+    # Exactly one onboarding email (no separate workspace-ready + password email).
+    onboarding = [
+        t
+        for _, t in email.sent
+        if t
+        in ("workspace_ready_with_password_setup", "workspace_ready")
+    ]
+    assert len(onboarding) == 1
 
 
 @pytest.mark.asyncio
@@ -406,7 +423,9 @@ async def test_provision_isolated_vpn_awaits_details(db_session):
     assert out.status == "provisioned"
     assert out.data_plane_status == "provisioned"
     assert out.vpn_status == "awaiting_customer_network_details"
-    assert any(t == "vpn_info_required" for _, t in email.sent)
+    assert any(
+        t == "vpn_setup_information_required" for _, t in email.sent
+    )
 
 
 @pytest.mark.asyncio

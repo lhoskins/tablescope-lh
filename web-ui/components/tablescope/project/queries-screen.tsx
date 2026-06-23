@@ -1,18 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconSparkles, IconSearch, IconTable } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import {
   ContextPanel,
   ContextSection,
 } from "@/components/tablescope/context-panel";
-import { ScopeNavigation } from "@/components/scopes/ScopeNavigation";
 import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +27,6 @@ import {
   QueryBuilderCreate,
 } from "@/components/tablescope/project/detail-views";
 
-type ProjectScoping = { scoping_enabled?: boolean };
 
 type Filter = "all" | "ai" | "manual" | "shared" | "private";
 
@@ -71,7 +65,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [tab, setTab] = useState<"queries" | "scopes">("queries");
   const [showAddTable, setShowAddTable] = useState(false);
 
   // ── Deep-link: open a specific query via ?q=<id> ────────────────────
@@ -142,32 +135,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
     }
   }, [aiPrompt, aiLoading, projectId, queryClient]);
 
-  // ── Scope toggle (project scoping) ──────────────────────────────────
-  const { data: projectInfo } = useQuery<ProjectScoping>({
-    queryKey: ["project", projectId, "info"],
-    queryFn: () => apiClient.get<ProjectScoping>(`/api/projects/${projectId}`),
-  });
-  const scopingEnabled = projectInfo?.scoping_enabled ?? false;
-  const toggleScoping = useMutation({
-    mutationFn: async (enabled: boolean) => {
-      const result = await apiClient.put(`/api/projects/${projectId}`, {
-        scoping_enabled: enabled,
-      });
-      if (enabled) {
-        try {
-          await apiClient.post(`/api/ai/project/scope-map/auto-create`, {
-            project_id: Number(projectId),
-          });
-        } catch {
-          /* scoping enabled even if auto-create finds nothing */
-        }
-      }
-      return result;
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["project", projectId, "info"] }),
-  });
-
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return rows.filter((q) => {
@@ -187,33 +154,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const aiCount = rows.filter((q) => q.ai_generated).length;
   const sharedCount = rows.filter((q) => q.is_shared).length;
   const aiPct = rows.length ? Math.round((aiCount / rows.length) * 100) : 0;
-
-  const scopeToggle = (
-    <button
-      type="button"
-      onClick={() => toggleScoping.mutate(!scopingEnabled)}
-      disabled={toggleScoping.isPending}
-      className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-line-secondary px-2.5 text-[12px] font-medium text-ink-secondary hover:bg-bg-secondary disabled:opacity-50"
-      title={scopingEnabled ? "Click to disable scoping" : "Click to enable scoping"}
-    >
-      <span
-        className={cn(
-          "relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
-          scopingEnabled ? "bg-brand-500" : "bg-line-secondary",
-        )}
-      >
-        <span
-          className="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
-          style={{ transform: scopingEnabled ? "translateX(14px)" : "translateX(2px)" }}
-        />
-      </span>
-      {toggleScoping.isPending
-        ? "Updating…"
-        : scopingEnabled
-          ? "Scopes On"
-          : "Scopes Off"}
-    </button>
-  );
 
   return (
     <ProjectShell
@@ -327,31 +267,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           <StatTile label="Avg run time" value={avgRuntime(rows)} />
         </div>
 
-        <div className="flex items-center gap-1 border-b border-line-tertiary">
-          {([
-            { key: "queries", label: "All Tables" },
-            { key: "scopes", label: "Scopes" },
-          ] as const).map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-[13px] font-medium",
-                tab === t.key
-                  ? "border-brand-500 text-brand-700"
-                  : "border-transparent text-ink-secondary hover:text-ink-primary",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {tab === "scopes" ? (
-          <ScopeNavigation projectId={Number(projectId)} />
-        ) : (
-        <>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
             <IconSearch
@@ -380,7 +295,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
               {f.label}
             </button>
           ))}
-          <div className="ml-auto flex items-center gap-2">{scopeToggle}</div>
         </div>
 
         <Card>
@@ -472,8 +386,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             )}
           </div>
         </Card>
-        </>
-        )}
       </div>
       )}
     </ProjectShell>

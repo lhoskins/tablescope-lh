@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -26,6 +28,11 @@ class ScopeSetRead(BaseModel):
     type: str
     enabled: bool
     created_by: int | None = None
+    creator_name: str | None = None
+    creator_email: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    can_delete: bool = False
     scope_count: int = 0
 
 

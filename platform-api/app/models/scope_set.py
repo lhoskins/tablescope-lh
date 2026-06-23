@@ -45,8 +45,15 @@ class ScopeSet(TimestampMixin, Base):
         nullable=True,
     )
 
-    def to_dict(self, scope_count: int | None = None) -> dict:
-        data = {
+    def to_dict(
+        self,
+        scope_count: int | None = None,
+        *,
+        creator_name: str | None = None,
+        creator_email: str | None = None,
+        can_delete: bool | None = None,
+    ) -> dict:
+        data: dict = {
             "id": self.id,
             "tenant_id": self.tenant_id,
             "project_id": self.project_id,
@@ -55,9 +62,15 @@ class ScopeSet(TimestampMixin, Base):
             "type": self.type,
             "enabled": self.enabled,
             "created_by": self.created_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "creator_name": creator_name,
+            "creator_email": creator_email,
         }
         if scope_count is not None:
             data["scope_count"] = scope_count
+        if can_delete is not None:
+            data["can_delete"] = can_delete
         return data
 
     def __repr__(self) -> str:

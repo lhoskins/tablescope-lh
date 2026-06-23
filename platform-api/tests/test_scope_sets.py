@@ -24,7 +24,7 @@ class _FakeSupabase(SupabaseAuthService):
 
 
 class _FakeEmail:
-    async def send(self, spec, *, to, template) -> bool:
+    async def send_transactional_email(self, *, to, template, variables, subject=None, reply_to=None) -> bool:
         return True
 
 
@@ -253,6 +253,79 @@ async def test_delete_scope_set(client, service_headers) -> None:
 
     r = await client.get(f"/api/scope_sets/{set_id}", headers=owner_headers)
     assert r.status_code == 404
+
+
+async def test_scope_set_exposes_creator_metadata(client, service_headers) -> None:
+    _tenant, owner_headers, project, _queries = await _setup(
+        client, service_headers
+    )
+    pid = project["id"]
+    r = await client.post(
+        f"/api/projects/{pid}/scope_sets",
+        json={"name": "Meta"},
+        headers=owner_headers,
+    )
+    assert r.status_code == 201, r.text
+    created = r.json()
+    assert created["creator_email"] == "owner@test.com"
+    assert created["created_at"] is not None
+    # Project owner can delete.
+    assert created["can_delete"] is True
+
+    r = await client.get(
+        f"/api/projects/{pid}/scope_sets", headers=owner_headers
+    )
+    row = r.json()[0]
+    assert row["creator_email"] == "owner@test.com"
+    assert row["created_at"] is not None
+    assert row["can_delete"] is True
+
+
+async def test_non_creator_non_admin_cannot_delete(client, service_headers) -> None:
+    tenant, owner_headers, project, _queries = await _setup(
+        client, service_headers
+    )
+    pid = project["id"]
+    # Owner creates the scope set.
+    r = await client.post(
+        f"/api/projects/{pid}/scope_sets",
+        json={"name": "OwnerScope"},
+        headers=owner_headers,
+    )
+    set_id = r.json()["id"]
+
+    # A different editor (not creator, not project admin) is forbidden.
+    r = await client.post(
+        f"/api/tenants/{tenant['id']}/users",
+        json={
+            "email": "other@test.com",
+            "display_name": "other",
+            "role": "editor",
+            "external_id": "ext-other",
+        },
+        headers=service_headers,
+    )
+    assert r.status_code == 201, r.text
+    other = r.json()
+    other_headers = _headers(tenant["id"], other["id"], "editor")
+
+    r = await client.get(
+        f"/api/projects/{pid}/scope_sets", headers=other_headers
+    )
+    assert r.status_code == 200
+    assert r.json()[0]["can_delete"] is False
+
+    r = await client.delete(
+        f"/api/scope_sets/{set_id}", headers=other_headers
+    )
+    assert r.status_code == 403
+
+    # Tenant admin can delete.
+    admin_headers = _headers(tenant["id"], other["id"], "admin")
+    r = await client.delete(
+        f"/api/scope_sets/{set_id}", headers=admin_headers
+    )
+    assert r.status_code == 204
 
 
 async def test_viewer_cannot_create_scope_set(client, service_headers) -> None:

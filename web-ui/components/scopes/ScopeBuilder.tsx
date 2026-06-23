@@ -117,6 +117,10 @@ export function ScopeBuilder({
   const [popup, setPopup] = useState<{ gid: string; x: number; y: number } | null>(
     null,
   );
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [popupPos, setPopupPos] = useState<{ left: number; top: number } | null>(
+    null,
+  );
   const [suggestions, setSuggestions] = useState<ScopeAISuggestion[]>([]);
   const [ignored, setIgnored] = useState<ScopeAISuggestion[]>([]);
   const [showIgnored, setShowIgnored] = useState(false);
@@ -565,6 +569,38 @@ export function ScopeBuilder({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [popup]);
+
+  // Viewport-aware popup placement: measure the rendered popup and clamp it so
+  // it never overflows the viewport (keeps a 16px margin from every edge),
+  // flipping to the other side of the click point when there isn't room.
+  useEffect(() => {
+    if (!popup) {
+      setPopupPos(null);
+      return;
+    }
+    const place = () => {
+      const el = popupRef.current;
+      if (!el) return;
+      const margin = 16;
+      const gap = 8;
+      const { width: w, height: h } = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      let left = popup.x + gap;
+      if (left + w + margin > vw) left = popup.x - gap - w; // flip left
+      left = Math.min(Math.max(left, margin), Math.max(margin, vw - w - margin));
+
+      let top = popup.y + gap;
+      if (top + h + margin > vh) top = popup.y - gap - h; // flip above
+      top = Math.min(Math.max(top, margin), Math.max(margin, vh - h - margin));
+
+      setPopupPos({ left, top });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
   }, [popup]);
 
   // ── Guided field-match grid (for the chosen source/target pair) ─────────
@@ -1780,12 +1816,18 @@ export function ScopeBuilder({
                 onMouseDown={() => setPopup(null)}
               />
               <div
+                ref={popupRef}
                 role="dialog"
                 aria-label="Relationship details"
-                className="fixed z-50 w-80 rounded-lg border border-line-secondary bg-bg-primary p-3 shadow-lg"
+                className="fixed z-50 rounded-lg border border-line-secondary bg-bg-primary p-3 shadow-lg"
                 style={{
-                  left: Math.min(popup.x + 8, window.innerWidth - 340),
-                  top: Math.min(popup.y + 8, window.innerHeight - 320),
+                  left: popupPos?.left ?? popup.x + 8,
+                  top: popupPos?.top ?? popup.y + 8,
+                  visibility: popupPos ? "visible" : "hidden",
+                  minWidth: 360,
+                  maxWidth: "min(720px, calc(100vw - 48px))",
+                  maxHeight: "calc(100vh - 32px)",
+                  overflowY: "auto",
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -1825,14 +1867,14 @@ export function ScopeBuilder({
                           key={l.localId}
                           className="flex items-center gap-1 text-ink-primary"
                         >
-                          <span className="truncate font-medium">
+                          <span className="min-w-0 break-words font-medium [overflow-wrap:anywhere]">
                             {l.sourceField}
                           </span>
                           <IconArrowNarrowRight
                             size={13}
                             className="shrink-0 text-ink-tertiary"
                           />
-                          <span className="truncate font-medium">
+                          <span className="min-w-0 break-words font-medium [overflow-wrap:anywhere]">
                             {l.targetField}
                           </span>
                         </li>
@@ -1918,7 +1960,9 @@ function Field({
       <div className="text-[11px] uppercase tracking-wide text-ink-tertiary">
         {label}
       </div>
-      <div className="truncate text-ink-primary">{children ?? "—"}</div>
+      <div className="whitespace-normal break-words text-ink-primary [overflow-wrap:anywhere]">
+        {children ?? "—"}
+      </div>
     </div>
   );
 }

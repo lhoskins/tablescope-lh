@@ -19,13 +19,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
-from app.auth.rbac import Role, require_role
+from app.auth.rbac import Role, has_role, require_role
 from app.database import get_db
-from app.models.project import Project
+from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
 from app.models.scope_canvas_layout import ScopeCanvasLayout
 from app.models.scope_set import ScopeSet
+from app.models.user import User
 from app.schemas.scope_set import (
     ScopeAISuggestion,
     ScopeAISuggestRequest,
@@ -135,6 +136,75 @@ async def _scope_count(session: AsyncSession, scope_set_id: int) -> int:
     )
 
 
+async def _is_project_admin(
+    session: AsyncSession, *, project_id: int, context: RequestContext
+) -> bool:
+    """True when the user is a tenant admin, project owner, or project-admin member."""
+    if context.is_service or has_role(context.role, Role.ADMIN):
+        return True
+    project = await session.get(Project, project_id)
+    if project is not None and project.owner_id == context.user_id:
+        return True
+    member = await session.get(
+        ProjectMember, {"project_id": project_id, "user_id": context.user_id}
+    )
+    return bool(
+        member is not None
+        and member.is_active
+        and member.role in ("admin", "owner")
+    )
+
+
+async def _can_delete_scope_set(
+    session: AsyncSession, *, scope_set: ScopeSet, context: RequestContext
+) -> bool:
+    """A scope set can be deleted by its creator or a project admin."""
+    if scope_set.created_by is not None and scope_set.created_by == context.user_id:
+        return True
+    return await _is_project_admin(
+        session, project_id=scope_set.project_id, context=context
+    )
+
+
+async def _scope_set_dict(
+    session: AsyncSession,
+    scope_set: ScopeSet,
+    scope_count: int,
+    context: RequestContext,
+) -> dict:
+    """Build a ScopeSetRead dict for a single set incl. creator + permission."""
+    creators = await _creator_info(session, [scope_set])
+    name, email = creators.get(scope_set.created_by or -1, (None, None))
+    can_delete = await _can_delete_scope_set(
+        session, scope_set=scope_set, context=context
+    )
+    return scope_set.to_dict(
+        scope_count=scope_count,
+        creator_name=name,
+        creator_email=email,
+        can_delete=can_delete,
+    )
+
+
+async def _creator_info(
+    session: AsyncSession, scope_sets: list[ScopeSet]
+) -> dict[int, tuple[str | None, str | None]]:
+    """Map user id -> (display name, email) for the given scope sets' creators."""
+    ids = {s.created_by for s in scope_sets if s.created_by is not None}
+    if not ids:
+        return {}
+    users = (
+        await session.scalars(select(User).where(User.id.in_(ids)))
+    ).all()
+    out: dict[int, tuple[str | None, str | None]] = {}
+    for u in users:
+        name = u.display_name or " ".join(
+            p for p in (u.first_name, u.last_name) if p
+        ).strip()
+        out[u.id] = (name or None, u.email)
+    return out
+
+
 # ── Scope Navigation: list / create ──────────────────────────────────────
 
 
@@ -157,10 +227,27 @@ async def list_scope_sets(
             .order_by(ScopeSet.created_at.asc())
         )
     ).all()
+    creators = await _creator_info(session, list(sets))
+    project_admin = await _is_project_admin(
+        session, project_id=project_id, context=context
+    )
     out: list[ScopeSetRead] = []
     for s in sets:
         count = await _scope_count(session, s.id)
-        out.append(ScopeSetRead.model_validate(s.to_dict(scope_count=count)))
+        name, email = creators.get(s.created_by or -1, (None, None))
+        can_delete = project_admin or (
+            s.created_by is not None and s.created_by == context.user_id
+        )
+        out.append(
+            ScopeSetRead.model_validate(
+                s.to_dict(
+                    scope_count=count,
+                    creator_name=name,
+                    creator_email=email,
+                    can_delete=can_delete,
+                )
+            )
+        )
     return out
 
 
@@ -192,7 +279,9 @@ async def create_scope_set(
     session.add(scope_set)
     await session.commit()
     await session.refresh(scope_set)
-    return ScopeSetRead.model_validate(scope_set.to_dict(scope_count=0))
+    return ScopeSetRead.model_validate(
+        await _scope_set_dict(session, scope_set, 0, context)
+    )
 
 
 # ── Scope Builder: available tables ──────────────────────────────────────
@@ -248,7 +337,9 @@ async def get_scope_set(
         session, scope_set_id=scope_set_id, tenant_id=context.tenant_id
     )
     count = await _scope_count(session, scope_set.id)
-    return ScopeSetRead.model_validate(scope_set.to_dict(scope_count=count))
+    return ScopeSetRead.model_validate(
+        await _scope_set_dict(session, scope_set, count, context)
+    )
 
 
 @router.patch("/scope_sets/{scope_set_id}", response_model=ScopeSetRead)
@@ -279,7 +370,9 @@ async def update_scope_set(
     await session.commit()
     await session.refresh(scope_set)
     count = await _scope_count(session, scope_set.id)
-    return ScopeSetRead.model_validate(scope_set.to_dict(scope_count=count))
+    return ScopeSetRead.model_validate(
+        await _scope_set_dict(session, scope_set, count, context)
+    )
 
 
 @router.delete(
@@ -295,6 +388,13 @@ async def delete_scope_set(
     scope_set = await _get_scope_set(
         session, scope_set_id=scope_set_id, tenant_id=context.tenant_id
     )
+    if not await _can_delete_scope_set(
+        session, scope_set=scope_set, context=context
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the scope creator or a project admin can delete this scope.",
+        )
     # Explicitly remove children (SQLite test DB does not enforce FK cascade).
     for layout in await session.scalars(
         select(ScopeCanvasLayout).where(

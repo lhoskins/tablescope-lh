@@ -94,7 +94,7 @@ def _mock_supabase(monkeypatch):
             )
 
     class _FakeEmail:
-        async def send(self, spec, *, to, template) -> bool:
+        async def send_transactional_email(self, *, to, template, variables, subject=None, reply_to=None) -> bool:
             return True
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
