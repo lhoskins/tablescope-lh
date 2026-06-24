@@ -94,17 +94,66 @@ def _build_ai_request(
     return center_payload, neighbors, documents, kpis
 
 
+_EVIDENCE_FIELDS = (
+    "evidenceKeys", "sourceDocuments", "sourceTables", "sourceQueries",
+    "sourceDashboards", "supportedKpis", "linkedNodes", "evidencePath",
+)
+
+
+def _resolve_evidence_keys(
+    raw: dict[str, Any],
+    nodes_by_key: dict[str, dict[str, Any]],
+    nodes: list[dict[str, Any]],
+) -> list[str]:
+    """Resolve an AI card's evidence references to real graph keys.
+
+    The AI may return graph keys, but also plain labels or source document /
+    query / dashboard / KPI names. Match (in priority order) on: exact graph
+    key, case-insensitive graph key, exact node label, case-insensitive node
+    label. Only references that map to a real graph node are accepted — evidence
+    that can't be grounded is dropped (never fabricated).
+    """
+    key_ci = {k.lower(): k for k in nodes_by_key}
+    label_exact: dict[str, str] = {}
+    label_ci: dict[str, str] = {}
+    for n in nodes:
+        label = str(n.get("label") or "").strip()
+        if label:
+            label_exact.setdefault(label, n["graphKey"])
+            label_ci.setdefault(label.lower(), n["graphKey"])
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for field in _EVIDENCE_FIELDS:
+        for raw_val in raw.get(field, []) or []:
+            val = str(raw_val).strip()
+            if not val:
+                continue
+            gk = (
+                val if val in nodes_by_key
+                else key_ci.get(val.lower())
+                or label_exact.get(val)
+                or label_ci.get(val.lower())
+            )
+            if gk and gk not in seen:
+                seen.add(gk)
+                resolved.append(gk)
+    return resolved
+
+
 def _map_card(
     raw: dict[str, Any],
     *,
     index: int,
     center: dict[str, Any],
     nodes_by_key: dict[str, dict[str, Any]],
+    nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Map an AI card onto the platform card shape, grounding it in real nodes."""
-    evidence_keys = [k for k in raw.get("evidenceKeys", []) if k in nodes_by_key]
+    evidence_keys = _resolve_evidence_keys(raw, nodes_by_key, nodes)
     if not evidence_keys:
+        logger.info("KG AI card rejected: no matching evidenceKeys (%s)", raw.get("title"))
         return None
 
     evidence_nodes = [nodes_by_key[k] for k in evidence_keys]
@@ -204,19 +253,28 @@ async def enrich_payload_with_ai(
     if not raw_cards:
         return payload
 
+    existing_cards = payload.get("insightCards") or []
     nodes_by_key = {n["graphKey"]: n for n in payload["nodes"]}
+    nodes = payload["nodes"]
     edges = payload["edges"]
     cards: list[dict[str, Any]] = []
     for i, raw in enumerate(raw_cards):
         if not isinstance(raw, dict):
             continue
         card = _map_card(
-            raw, index=i, center=center, nodes_by_key=nodes_by_key, edges=edges,
+            raw, index=i, center=center, nodes_by_key=nodes_by_key,
+            nodes=nodes, edges=edges,
         )
         if card:
             cards.append(card)
 
     if not cards:
+        # AI returned cards but none were grounded in the current graph — keep
+        # the deterministic cards rather than blanking the right panel.
+        logger.info(
+            "KG AI enrichment returned cards but none were grounded in current graph nodes"
+        )
+        payload["insightCards"] = existing_cards
         return payload
 
     payload["insightCards"] = cards

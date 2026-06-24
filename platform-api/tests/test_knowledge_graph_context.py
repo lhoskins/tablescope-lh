@@ -157,13 +157,20 @@ async def test_structural_merge_into_payload_groups_reference_library(
     extra_nodes, extra_edges, _hub = await collect_structural_graph(
         db_session, tenant_id=tenant_id, project_id=project_id
     )
-    merged_nodes, merged_edges = merge_graph_sources([], [], extra_nodes, extra_edges)
+    # A process exists (the canvas centers on it, never the hidden project hub);
+    # the reference radiates from it via the re-rooted structural edge.
+    stored = [{
+        "id": 9001, "node_type": "process", "name": "Supplier Qualification",
+        "source_type": None, "source_id": None, "properties": {"confidence": 0.9},
+    }]
+    merged_nodes, merged_edges = merge_graph_sources(stored, [], extra_nodes, extra_edges)
     payload = build_graph_payload(merged_nodes, merged_edges)
 
     groups = {n["label"]: n["displayGroup"] for n in payload["nodes"]}
     assert groups.get("ISO 9001") == "Authoritative Reference Library"
-    # The project hub is the default center; reference radiates from it.
-    assert payload["centerNode"]["type"] == "project"
+    # The project is never the center and never drawn on the canvas.
+    assert payload["centerNode"]["type"] == "process"
+    assert all(n["type"] != "project" for n in payload["nodes"])
 
 
 async def test_company_library_reaches_ai_server_request(db_session) -> None:
@@ -184,13 +191,17 @@ async def test_company_library_reaches_ai_server_request(db_session) -> None:
     extra_nodes, extra_edges, _hub = await collect_structural_graph(
         db_session, tenant_id=tenant_id, project_id=project_id
     )
-    merged_nodes, merged_edges = merge_graph_sources([], [], extra_nodes, extra_edges)
+    stored = [{
+        "id": 9001, "node_type": "process", "name": "Supplier Qualification",
+        "source_type": None, "source_id": None, "properties": {"confidence": 0.9},
+    }]
+    merged_nodes, merged_edges = merge_graph_sources(stored, [], extra_nodes, extra_edges)
     payload = build_graph_payload(merged_nodes, merged_edges)
 
     _center, neighbors, documents, _kpis = _build_ai_request(payload)
 
     # The company reference is sent to the AI server both as a document and as a
-    # directional neighbor of the project hub.
+    # directional neighbor of the (non-project) center.
     assert "Acme Supplier Code of Conduct" in {d["title"] for d in documents}
     company = next(
         n for n in neighbors if n["label"] == "Acme Supplier Code of Conduct"

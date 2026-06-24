@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from app.auth.jwt import create_access_token
+from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.services.knowledge_graph_builder import (
     PIPELINE_VERSION,
     _json_safe,
@@ -126,11 +127,24 @@ def test_center_by_id():
     assert payload["centerNode"]["id"] == 8
 
 
-def test_default_center_is_the_project_hub():
-    # The project hub radiates to every related source (docs, reference library,
-    # data sources, queries, dashboards), so it is the default first view.
+def test_default_center_is_never_the_project():
+    # The project is the data boundary but is never drawn or chosen as center;
+    # the graph centers on the highest-signal process instead.
     payload = build_graph_payload(_nodes(), _edges())
-    assert payload["centerNode"]["type"] == "project"
+    assert payload["centerNode"]["type"] != "project"
+    assert payload["centerNode"]["type"] == "process"
+
+
+def test_project_node_and_edges_excluded_from_canvas():
+    payload = build_graph_payload(_nodes(), _edges())
+    types = {n["type"] for n in payload["nodes"]}
+    assert "project" not in types
+    node_ids = {n["id"] for n in payload["nodes"]}
+    # No returned edge references the hidden project node.
+    project_ids = {n["id"] for n in _nodes() if n["node_type"] == "project"}
+    for e in payload["edges"]:
+        assert e["source"] in node_ids and e["target"] in node_ids
+        assert e["source"] not in project_ids and e["target"] not in project_ids
 
 
 def test_default_center_falls_back_to_process_without_project():
@@ -263,6 +277,31 @@ async def _make_project(client, service_headers, slug: str):
     return tenant, user, r.json(), headers
 
 
+async def _seed_graph(db_session, *, tenant_id: int, project_id: int, user_id: int):
+    """Insert a small process→document graph so the project has a visible center."""
+    proc = AIProjectGraphNode(
+        tenant_id=tenant_id, project_id=project_id, node_type="process",
+        name="Supplier Qualification", properties={"confidence": 0.95},
+        created_by=user_id, is_active=True,
+    )
+    doc = AIProjectGraphNode(
+        tenant_id=tenant_id, project_id=project_id, node_type="document",
+        name="Supplier Manual", properties={"summary": "Governs qualification."},
+        created_by=user_id, is_active=True,
+    )
+    db_session.add_all([proc, doc])
+    await db_session.flush()
+    db_session.add(
+        AIProjectGraphEdge(
+            tenant_id=tenant_id, project_id=project_id,
+            from_node_id=doc.id, to_node_id=proc.id,
+            relationship_type="governs", confidence=0.95, created_by=user_id,
+            is_active=True,
+        )
+    )
+    await db_session.commit()
+
+
 @pytest.mark.asyncio
 async def test_endpoint_backward_compatible_without_params(client, service_headers):
     _tenant, _user, project, headers = await _make_project(client, service_headers, "kgbc")
@@ -384,12 +423,15 @@ async def test_graph_response_includes_cache_metadata(client, service_headers):
 
 
 @pytest.mark.asyncio
-async def test_node_click_reads_cache_without_rebuild(client, service_headers):
-    _t, _u, project, headers = await _make_project(client, service_headers, "kgclick")
+async def test_node_click_reads_cache_without_rebuild(client, service_headers, db_session):
+    t, u, project, headers = await _make_project(client, service_headers, "kgclick")
     pid = project["id"]
+    await _seed_graph(db_session, tenant_id=t["id"], project_id=pid, user_id=u["id"])
     first = (await client.get(
         f"/api/projects/{pid}/graph?lens=insight-first", headers=headers
     )).json()
+    assert first["centerNode"] is not None
+    assert first["centerNode"]["type"] != "project"
     # A node click (center_node) reads the cached snapshot: same timestamp, cached.
     second = (await client.get(
         f"/api/projects/{pid}/graph?lens=insight-first&center_node={first['centerNode']['graphKey']}",
@@ -397,6 +439,21 @@ async def test_node_click_reads_cache_without_rebuild(client, service_headers):
     )).json()
     assert second["lastUpdated"] == first["lastUpdated"]
     assert second["isCached"] is True
+
+
+@pytest.mark.asyncio
+async def test_graph_populates_business_insight_cards(client, service_headers, db_session):
+    # A center with connected evidence must never return an empty panel: the
+    # deterministic overview card is emitted at minimum.
+    t, u, project, headers = await _make_project(client, service_headers, "kgcards")
+    pid = project["id"]
+    await _seed_graph(db_session, tenant_id=t["id"], project_id=pid, user_id=u["id"])
+    body = (await client.get(
+        f"/api/projects/{pid}/graph?lens=insight-first", headers=headers
+    )).json()
+    assert "insightCards" in body
+    assert len(body["insightCards"]) >= 1
+    assert any(c["category"] == "business_insight" for c in body["insightCards"])
 
 
 @pytest.mark.asyncio

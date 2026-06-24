@@ -72,14 +72,31 @@ const PILL_GAP = 8;
 const GROUP_LABEL_H = 22;
 const GROUP_GAP = 26;
 const OVERFLOW_H = 16;
-const CENTER_R = 60;
+const CENTER_R = 68;
 const CENTER_GAP = 320; // horizontal space reserved for the center circle + labels
 const PAD = 28;
 const COL_W = PILL_W;
-// Pull edge endpoints slightly off the pill/circle border so arrowheads sit in
-// the gap and never overlap pill text or run through the center circle.
-const ARROW_INSET = 8;
-const CENTER_ARROW_INSET = 6;
+// Nudge the line endpoint just inside the target pill/circle so the arrowhead
+// visually touches the boundary without overshooting through the text.
+const MARKER_TOUCH_OFFSET = 2;
+
+// Relationship labels are intentionally not drawn on the lines (too cluttered);
+// relationship details surface in the right panel / trace-to-evidence instead.
+const SHOW_EDGE_LABELS = false;
+
+/** Shorten a long center label with a middle ellipsis (keeps head + tail). */
+export function centerLabel(label: string): string {
+  if (!label) return "";
+  const clean = label.replace(/\.(docx|pdf|pptx|xlsx|csv|txt)$/i, "");
+  if (clean.length <= 34) return clean;
+  return `${clean.slice(0, 16)}\u2026${clean.slice(-14)}`;
+}
+
+/** Human-friendly node-type subtitle for the center circle. */
+function humanizeType(type: string | undefined): string {
+  if (!type) return "";
+  return type.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+}
 
 function humanizeRel(type: string | undefined): string {
   if (!type) return "";
@@ -113,6 +130,11 @@ export function insetPoint(from: Point, to: Point, amount: number): Point {
   const dy = to.y - from.y;
   const len = Math.hypot(dx, dy) || 1;
   return { x: from.x + (dx / len) * amount, y: from.y + (dy / len) * amount };
+}
+
+/** Move `from` toward `to` by `amount` px. */
+export function moveToward(from: Point, to: Point, amount: number): Point {
+  return insetPoint(from, to, amount);
 }
 
 /** Smooth cubic edge that bows horizontally away from the center column. */
@@ -363,7 +385,9 @@ export function KnowledgeGraphCanvas({
 
   const tracingActive = tracedNodeIds !== null;
 
-  // Pre-compute drawable edges (both endpoints positioned + inset).
+  // Pre-compute drawable edges. The start point sits just off the source
+  // boundary; the end point is nudged slightly inside the target so the
+  // arrowhead visually touches the pill/circle edge (no gap, no overshoot).
   const drawn = edges
     .map((e) => {
       const sc = centerOf(e.source);
@@ -372,10 +396,8 @@ export function KnowledgeGraphCanvas({
       const rawP1 = attach(e.source, tc);
       const rawP2 = attach(e.target, sc);
       if (!rawP1 || !rawP2) return null;
-      const inset1 = e.source === centerNode.id ? CENTER_ARROW_INSET : ARROW_INSET;
-      const inset2 = e.target === centerNode.id ? CENTER_ARROW_INSET : ARROW_INSET;
-      const p1 = insetPoint(rawP1, rawP2, inset1);
-      const p2 = insetPoint(rawP2, rawP1, inset2);
+      const p1 = moveToward(rawP1, tc, 1);
+      const p2 = moveToward(rawP2, tc, MARKER_TOUCH_OFFSET);
       const traced =
         tracedNodeIds === null ||
         (tracedNodeIds.has(e.source) && tracedNodeIds.has(e.target));
@@ -410,10 +432,10 @@ export function KnowledgeGraphCanvas({
             <marker
               id="kg-arrow"
               viewBox="0 0 10 10"
-              refX="6"
+              refX="9"
               refY="5"
-              markerWidth="6"
-              markerHeight="6"
+              markerWidth="5"
+              markerHeight="5"
               orient="auto-start-reverse"
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
@@ -421,10 +443,10 @@ export function KnowledgeGraphCanvas({
             <marker
               id="kg-arrow-dim"
               viewBox="0 0 10 10"
-              refX="6"
+              refX="9"
               refY="5"
-              markerWidth="6"
-              markerHeight="6"
+              markerWidth="5"
+              markerHeight="5"
               orient="auto-start-reverse"
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#e2e8f0" />
@@ -443,9 +465,9 @@ export function KnowledgeGraphCanvas({
           ))}
         </svg>
 
-        {/* Edge relationship labels + confidence at the curve midpoint.
-            Hidden for low-confidence non-center edges to cut clutter. */}
-        {drawn.map(({ e, p1, p2, traced, showLabel }) => {
+        {/* Edge relationship labels are disabled by default (too cluttered);
+            relationship details live in the right panel / trace-to-evidence. */}
+        {SHOW_EDGE_LABELS && drawn.map(({ e, p1, p2, traced, showLabel }) => {
           if (!showLabel) return null;
           const label = humanizeRel(e.type);
           if (!label && !e.confidence) return null;
@@ -476,7 +498,8 @@ export function KnowledgeGraphCanvas({
           type="button"
           data-testid="kg-center-node"
           onClick={() => onNodeClick(centerNode)}
-          className="absolute z-10 flex flex-col items-center justify-center rounded-full px-3 text-center text-white shadow-[0_12px_28px_rgba(15,23,42,0.28)]"
+          title={centerNode.label}
+          className="absolute z-10 flex flex-col items-center justify-center rounded-full px-2 text-center text-white shadow-[0_12px_28px_rgba(15,23,42,0.28)]"
           style={{
             left: layout.center.x - CENTER_R,
             top: layout.center.y - CENTER_R,
@@ -498,8 +521,11 @@ export function KnowledgeGraphCanvas({
               </span>
             );
           })()}
-          <span className="line-clamp-2 text-[12px] font-semibold leading-tight text-white">
-            {centerNode.label}
+          <span className="line-clamp-3 max-w-[100px] break-words text-[12px] font-semibold leading-tight text-white">
+            {centerLabel(centerNode.label)}
+          </span>
+          <span className="mt-0.5 text-[10px] text-white/75">
+            {humanizeType(centerNode.type)}
           </span>
           {typeof centerNode.confidence === "number" &&
             centerNode.confidence > 0 && (

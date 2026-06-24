@@ -126,6 +126,10 @@ async def collect_structural_graph(
                 "project_id": project_id,
                 "graph_key": hub_key,
                 "summary": (project.description or "")[:400],
+                # The project stays the security/data boundary but is never
+                # drawn on the canvas (Knowledge Graph centers on a real node).
+                "hidden_on_canvas": True,
+                "structural_hub": True,
             },
         )
     ]

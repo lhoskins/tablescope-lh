@@ -174,8 +174,8 @@ export function KnowledgeGraphInsightPanel({
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {cards.length === 0 && (
           <p className="text-small text-ink-tertiary">
-            No evidence-backed insights for this node yet. Upload and process
-            documents, or select a node with more connections.
+            No business insights available for this node yet. Click Refresh to
+            rebuild the Knowledge Graph or lower the confidence filter.
           </p>
         )}
         {CATEGORY_SECTIONS.map(({ category, heading }) => {

@@ -3,8 +3,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { GraphNode } from "@/lib/ui/use-project-data";
 import {
   KnowledgeGraphCanvas,
+  centerLabel,
   edgePath,
   insetPoint,
+  moveToward,
 } from "./knowledge-graph-canvas";
 
 function node(over: Partial<GraphNode> & { id: number | string }): GraphNode {
@@ -32,6 +34,24 @@ describe("knowledge graph canvas geometry helpers", () => {
     const d = edgePath({ x: 0, y: 0 }, { x: 100, y: 40 });
     expect(d.startsWith("M 0 0")).toBe(true);
     expect(d).toContain(" C ");
+  });
+
+  it("moveToward nudges the endpoint toward the target shape", () => {
+    const p = moveToward({ x: 0, y: 0 }, { x: 0, y: 10 }, 2);
+    expect(p.x).toBeCloseTo(0);
+    expect(p.y).toBeCloseTo(2);
+  });
+
+  it("centerLabel keeps short labels and drops file extensions", () => {
+    expect(centerLabel("Supplier Qualification")).toBe("Supplier Qualification");
+    expect(centerLabel("Quality_Manual.docx")).toBe("Quality_Manual");
+  });
+
+  it("centerLabel middle-ellipsizes long labels (head + tail)", () => {
+    const out = centerLabel("SUP_Supplier_Quality_Manual_2026_Edition_Final");
+    expect(out).toContain("\u2026");
+    expect(out.startsWith("SUP_Supplier_Qua")).toBe(true);
+    expect(out.endsWith("_Edition_Final")).toBe(true);
   });
 });
 
@@ -76,8 +96,8 @@ describe("KnowledgeGraphCanvas", () => {
     expect(onNodeClick).toHaveBeenCalledOnce();
   });
 
-  it("hides labels for low-confidence non-center edges to cut clutter", () => {
-    render(
+  it("does not render edge relationship labels on the lines by default", () => {
+    const { container } = render(
       <KnowledgeGraphCanvas
         centerNode={center}
         nodes={[
@@ -86,9 +106,7 @@ describe("KnowledgeGraphCanvas", () => {
           node({ id: 3, label: "Doc B" }),
         ]}
         edges={[
-          // center edge -> labelled
-          { id: 10, source: 1, target: 2, confidence: 0.6, type: "governs" },
-          // low-confidence source-to-source -> label hidden
+          { id: 10, source: 1, target: 2, confidence: 0.95, type: "governs" },
           { id: 11, source: 2, target: 3, confidence: 0.6, type: "related_to" },
         ]}
         selectedNodeKey={null}
@@ -96,7 +114,32 @@ describe("KnowledgeGraphCanvas", () => {
         onNodeClick={() => {}}
       />,
     );
-    expect(screen.getByText("governs")).toBeTruthy();
+    // No midpoint relationship labels are drawn, but the nodes + arrows are.
+    expect(screen.queryByText("governs")).toBeNull();
     expect(screen.queryByText("related to")).toBeNull();
+    expect(screen.getByText("Doc A")).toBeTruthy();
+    expect(container.querySelectorAll("path").length).toBeGreaterThan(0);
+  });
+
+  it("shortens a long center label and exposes the full label as a tooltip", () => {
+    const longCenter = node({
+      id: 1,
+      type: "document",
+      label: "SUP_Supplier_Quality_Manual_2026_Edition.docx",
+      graphKey: "document:1",
+    });
+    render(
+      <KnowledgeGraphCanvas
+        centerNode={longCenter}
+        nodes={[longCenter, node({ id: 2, label: "Doc A" })]}
+        edges={[{ id: 10, source: 1, target: 2, confidence: 0.9, type: "governs" }]}
+        selectedNodeKey={null}
+        tracedNodeIds={null}
+        onNodeClick={() => {}}
+      />,
+    );
+    const el = screen.getByTestId("kg-center-node");
+    expect(el.getAttribute("title")).toBe("SUP_Supplier_Quality_Manual_2026_Edition.docx");
+    expect(el.textContent).toContain("\u2026");
   });
 });

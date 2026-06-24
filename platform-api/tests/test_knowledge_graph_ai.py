@@ -83,7 +83,7 @@ def test_map_card_grounds_in_real_nodes_and_buckets_sources():
         "evidenceKeys": ["policy:3", "kpi:on_time_closure", "datasource:capa_table"],
         "recommendedAction": "Review overdue CAPAs weekly.",
     }
-    card = kg_ai._map_card(raw, index=0, center=center, nodes_by_key=nodes_by_key, edges=payload["edges"])
+    card = kg_ai._map_card(raw, index=0, center=center, nodes_by_key=nodes_by_key, nodes=payload["nodes"], edges=payload["edges"])
     assert card is not None
     assert card["category"] == "risk"
     assert card["sourceDocuments"] == ["Quality Manual"]
@@ -99,7 +99,31 @@ def test_map_card_rejects_fabricated_evidence():
     center = payload["centerNode"]
     nodes_by_key = {n["graphKey"]: n for n in payload["nodes"]}
     raw = {"id": "c2", "title": "Invented", "evidenceKeys": ["kpi:does_not_exist"]}
-    assert kg_ai._map_card(raw, index=0, center=center, nodes_by_key=nodes_by_key, edges=payload["edges"]) is None
+    assert kg_ai._map_card(raw, index=0, center=center, nodes_by_key=nodes_by_key, nodes=payload["nodes"], edges=payload["edges"]) is None
+
+
+def test_map_card_resolves_evidence_by_source_name():
+    # The AI returns source document / KPI *names* (not graph keys); they must
+    # still map onto the real nodes via label matching.
+    payload = _payload()
+    center = payload["centerNode"]
+    nodes_by_key = {n["graphKey"]: n for n in payload["nodes"]}
+    raw = {
+        "id": "c3",
+        "category": "business_insight",
+        "title": "Closure trend",
+        "summary": "On-time closure is governed by the Quality Manual.",
+        "confidence": 0.8,
+        "sourceDocuments": ["Quality Manual"],
+        "supportedKpis": ["On-time Closure"],
+    }
+    card = kg_ai._map_card(
+        raw, index=0, center=center, nodes_by_key=nodes_by_key,
+        nodes=payload["nodes"], edges=payload["edges"],
+    )
+    assert card is not None
+    assert "policy:3" in card["evidencePath"]
+    assert "kpi:on_time_closure" in card["evidencePath"]
 
 
 # ── End-to-end enrichment ────────────────────────────────────────────
@@ -145,6 +169,23 @@ async def test_enrich_falls_back_when_ai_unavailable(monkeypatch):
     out = await kg_ai.enrich_payload_with_ai(payload, tenant_id=1, user_id=2, project_id=7)
     assert out["insightCards"] == before
     assert "aiGenerated" not in out or out.get("aiGenerated") is not True
+
+
+@pytest.mark.asyncio
+async def test_enrich_keeps_deterministic_cards_when_ai_cards_ungrounded(monkeypatch):
+    # AI returns cards, but none ground to real nodes — keep the deterministic
+    # cards rather than blanking the right panel.
+    monkeypatch.setattr(kg_ai.ai, "is_enabled", lambda: True)
+
+    async def _ungrounded(**kwargs):
+        return [{"id": "x", "title": "Floating", "evidenceKeys": ["kpi:nope"]}]
+
+    monkeypatch.setattr(kg_ai.ai, "knowledge_graph_cards", _ungrounded)
+    payload = _payload()
+    before = list(payload["insightCards"])
+    out = await kg_ai.enrich_payload_with_ai(payload, tenant_id=1, user_id=2, project_id=7)
+    assert out["insightCards"] == before
+    assert not any(c["title"] == "Floating" for c in out["insightCards"])
 
 
 @pytest.mark.asyncio

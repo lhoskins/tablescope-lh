@@ -337,12 +337,27 @@ def _evidence_summary(edge: dict[str, Any]) -> str:
 
 # ── Neighborhood selection ───────────────────────────────────────────
 
+def _is_canvas_hidden(node: dict[str, Any]) -> bool:
+    """The project hub stays the security/data boundary but is never drawn.
+
+    Accepts both raw rows (``node_type``/``properties`` may be JSON) and enriched
+    nodes (``type``/``properties`` dict).
+    """
+    ntype = node.get("type") or node.get("node_type")
+    props = _as_dict(node.get("properties"))
+    return ntype == "project" or props.get("hidden_on_canvas") is True
+
+
 def _pick_center(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
     center_node: str | None,
 ) -> dict[str, Any] | None:
-    """Resolve the center node from a graph key / id, with sensible defaults."""
+    """Resolve the center node from a graph key / id, with sensible defaults.
+
+    The project node is never chosen as the center — the graph centers on the
+    selected (or highest-signal) process / document family / document / entity.
+    """
     if not nodes:
         return None
     by_key = {n["graphKey"]: n for n in nodes}
@@ -354,18 +369,23 @@ def _pick_center(
         if center_node in by_id:
             return by_id[center_node]
 
-    # Default 1: the project hub — its overview radiates to every related
-    # source (documents, reference library, data sources, queries, dashboards),
-    # so the first view shows the full neighbourhood with directional edges.
-    projects = [n for n in nodes if n["type"] == "project"]
-    if projects:
-        return _highest_degree(projects, edges)
-    # Default 2: a process node (the mockup centers on a process).
-    processes = [n for n in nodes if n["type"] == "process"]
+    pool = [n for n in nodes if not _is_canvas_hidden(n)] or nodes
+
+    # Prefer a process (the mockup centers on a process), then a document
+    # family, then a document, then the highest-degree remaining node.
+    processes = [n for n in pool if n["type"] == "process"]
     if processes:
         return _highest_degree(processes, edges)
-    # Default 3: the highest-degree node overall.
-    return _highest_degree(nodes, edges)
+    families = [n for n in pool if n["type"] == "document_family"]
+    if families:
+        return _highest_degree(families, edges)
+    documents = [
+        n for n in pool
+        if n["type"] in ("document", "reference_document", "policy", "procedure", "standard")
+    ]
+    if documents:
+        return _highest_degree(documents, edges)
+    return _highest_degree(pool, edges)
 
 
 def _highest_degree(
@@ -633,13 +653,25 @@ def build_graph_payload(
     Backward compatible: the returned ``nodes``/``edges`` keep the existing
     shape (with extra optional fields) so old callers keep working.
     """
-    enriched = [enrich_node(n) for n in raw_nodes]
+    enriched_all = [enrich_node(n) for n in raw_nodes]
+    # The project hub stays the data boundary but is never drawn: drop it from
+    # the visible node set so it can't be a center or appear on the canvas.
+    hidden_ids = {n["id"] for n in enriched_all if _is_canvas_hidden(n)}
+    enriched = [n for n in enriched_all if n["id"] not in hidden_ids]
     nodes_by_id = {n["id"]: n for n in enriched}
 
     floor = INFERRED_FLOOR if include_inferred else min_confidence
     norm_edges: list[dict[str, Any]] = []
+    hub_edges: list[dict[str, Any]] = []
     for e in raw_edges:
-        if e["from_node_id"] not in nodes_by_id or e["to_node_id"] not in nodes_by_id:
+        f, t = e["from_node_id"], e["to_node_id"]
+        f_hidden, t_hidden = f in hidden_ids, t in hidden_ids
+        if f_hidden and t_hidden:
+            continue  # hub-to-hub edge, never relevant
+        if f_hidden or t_hidden:
+            hub_edges.append(e)  # re-rooted onto the center below
+            continue
+        if f not in nodes_by_id or t not in nodes_by_id:
             continue
         conf = _edge_confidence(e)
         # Family/structural edges with no confidence are always kept.
@@ -661,6 +693,28 @@ def build_graph_payload(
             "generated_at": datetime.now(UTC).isoformat(),
             "pipeline_version": PIPELINE_VERSION,
         }
+
+    # Re-root the hidden project hub's structural edges onto the center so the
+    # project's documents, reference library, data sources, queries and
+    # dashboards stay visible and radiate from the focal node (not the project).
+    if hub_edges:
+        existing_pairs: set[tuple[Any, Any]] = set()
+        for e in norm_edges:
+            existing_pairs.add((e["from_node_id"], e["to_node_id"]))
+            existing_pairs.add((e["to_node_id"], e["from_node_id"]))
+        for e in hub_edges:
+            asset_id = e["to_node_id"] if e["from_node_id"] in hidden_ids else e["from_node_id"]
+            if asset_id not in nodes_by_id or asset_id == center["id"]:
+                continue
+            if (center["id"], asset_id) in existing_pairs:
+                continue
+            existing_pairs.add((center["id"], asset_id))
+            existing_pairs.add((asset_id, center["id"]))
+            norm_edges.append({
+                **e,
+                "from_node_id": center["id"],
+                "to_node_id": asset_id,
+            })
 
     kept_ids, kept_edges = _neighborhood(center, nodes_by_id, norm_edges)
     kept_nodes = [n for n in enriched if n["id"] in kept_ids]

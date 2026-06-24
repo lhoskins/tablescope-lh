@@ -81,7 +81,7 @@ describe("KnowledgeGraphInsightPanel", () => {
         onTrace={() => {}}
       />,
     );
-    expect(screen.getByText(/no evidence-backed insights/i)).toBeTruthy();
+    expect(screen.getByText(/no business insights available for this node yet/i)).toBeTruthy();
   });
 });
 
