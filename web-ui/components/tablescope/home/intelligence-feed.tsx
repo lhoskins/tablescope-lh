@@ -204,7 +204,8 @@ export function IntelligenceFeed() {
     (c) =>
       c.insightType.startsWith("risk_") ||
       c.severity === "critical" ||
-      c.severity === "urgent",
+      c.severity === "urgent" ||
+      c.severity === "warning",
   );
   const trends = allInsights.filter(
     (c) => c.insightType.startsWith("trend_") && !risks.includes(c),

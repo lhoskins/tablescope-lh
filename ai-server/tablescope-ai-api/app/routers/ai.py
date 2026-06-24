@@ -875,6 +875,53 @@ def _build_schema_lines(table_schema: list[dict]) -> str:
     )
 
 
+def _build_relationship_hint_lines(hints: list[dict]) -> str:
+    """Render verified join candidates the platform discovered.
+
+    Only relationships supplied here (from scope metadata or exact matching
+    keys) may be joined; everything else stays single-table. Returns "" when
+    there is no relationship evidence, which leaves single-table behaviour
+    completely unchanged.
+    """
+    rows: list[str] = []
+    for h in hints:
+        left = h.get("left_table") or ""
+        right = h.get("right_table") or ""
+        lkey = h.get("left_join_key") or ""
+        rkey = h.get("right_join_key") or ""
+        if not (left and right and lkey and rkey):
+            continue
+        rel = h.get("relationship_type") or "unknown"
+        conf = h.get("join_confidence")
+        reason = h.get("confidence_reason") or ""
+        risk = h.get("row_multiplication_risk") or "unknown"
+        conf_str = f"{conf:.2f}" if isinstance(conf, int | float) else "n/a"
+        rows.append(
+            f'  - "{left}"."{lkey}" = "{right}"."{rkey}" '
+            f"(relationship={rel}, confidence={conf_str}, "
+            f"row_multiplication_risk={risk}{f'; {reason}' if reason else ''})"
+        )
+    if not rows:
+        return ""
+    return (
+        "\nRELATIONSHIP EVIDENCE — verified joins you MAY use (exception to the "
+        "single-table rule below):\n" + "\n".join(rows) + "\n"
+        "Multi-table join rules:\n"
+        "- You may JOIN a pair of tables ONLY when the exact pair and keys "
+        "appear in the list above. Never invent a join or join on matching "
+        "names that are not listed here.\n"
+        "- Default to at most TWO tables per analysis. Aggregate the detail/fact "
+        "table to one row per key in a derived step expressed as a single "
+        "GROUP BY before relating it to the master/entity table, so a "
+        "one-to-many join cannot multiply rows.\n"
+        "- Prefer a join only when it produces a genuinely cross-table insight "
+        "(e.g. high-spend suppliers with elevated defect rates, single-source "
+        "dependency, concentration risk). Otherwise stay single-table.\n"
+        "- Skip any join whose row_multiplication_risk is high unless you "
+        "aggregate first.\n"
+    )
+
+
 _TEIID_SQL_RULES = (
     "This database uses Teiid (not MySQL/PostgreSQL). Text-backed (CSV/file) "
     "columns are stored as STRINGS no matter what logical type is shown.\n"
@@ -1028,6 +1075,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         doc_lines = "".join(sections)
 
     schema_lines = _build_schema_lines(req.table_schema)
+    relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
     teiid_rules = _TEIID_SQL_RULES
 
     # Granularity (1 executive .. 5 granular) steers count + depth + how
@@ -1055,7 +1103,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         )
 
     prompt = (
-        f"{context_text}\n{doc_lines}\n{schema_lines}\n\n"
+        f"{context_text}\n{doc_lines}\n{schema_lines}\n{relationship_lines}\n"
         f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
         f"{teiid_rules}\n"
         f"{depth_guidance}\n\n"
@@ -1072,9 +1120,10 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "Examples of what counts: a cost metric and a quality metric that used to "
         "track together but no longer do; one category's share of a total "
         "shrinking while another grows; a rate (e.g. defects per unit) drifting "
-        "away from its historical band. The two variables MUST be columns on the "
-        "same table — never propose a relationship across two tables, since "
-        "cross-table JOINs are not permitted.\n"
+        "away from its historical band. By default the two variables should be "
+        "columns on the SAME table. Only relate columns across two tables when "
+        "that exact table pair and join keys appear in the RELATIONSHIP EVIDENCE "
+        "list above — never join on matching names that are not listed there.\n"
         "For each relationship analysis, decide which shape best reveals the "
         "change and choose accordingly:\n"
         "- If both variables are naturally plotted on a shared timeline → use "
@@ -1173,7 +1222,8 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "it a document-only narrative finding.\n\n"
         "For data analyses, write a single read-only SQL query that returns a small "
         "result suitable for a chart or KPI (aggregate/group — not raw dumps), "
-        "querying exactly one allowed table with no joins or subqueries. Pick the "
+        "querying a single allowed table (or a verified two-table join from the "
+        "RELATIONSHIP EVIDENCE list) with no other joins or subqueries. Pick the "
         "chart type that BEST represents each result — do NOT default everything "
         "to bar. This is an executive report, so vary the visuals across the full "
         "range below:\n"

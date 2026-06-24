@@ -37,10 +37,21 @@ from app.models.reference_library import (
     TIER_PROJECT,
     ReferenceDocument,
 )
+from app.services.prompt_loader import load_prompt_reference
 
 logger = logging.getLogger(__name__)
 
 ALL_PROMPT_TYPES = ["risk_sla", "risk_expiry", "trend_spend", "opportunity_supplier"]
+
+# Authoritative methodology for richer Home cards (insight-first, KPI-aware,
+# evidence-gated joins). Loaded once and used to ground generation.
+HOME_BEST_PRACTICES_FILE = "home_insight_best_practices.md"
+
+
+def home_best_practices() -> str:
+    """Return the Home Insight best-practices reference text (cached)."""
+    return load_prompt_reference(HOME_BEST_PRACTICES_FILE)
+
 
 _PROJECT_COLORS = [
     "#185FA5", "#0F6E56", "#7A4FB5", "#B5642F", "#2F7DB5", "#9A2F5E",
@@ -217,6 +228,156 @@ def _find_table(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Entity & relationship discovery (insight-first methodology)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Business entities a Home insight may reason about (per the Home Insight
+# best-practices reference). Used to recognise which columns name an entity.
+_ENTITY_KEYWORDS = [
+    "supplier", "vendor", "customer", "client", "product", "order", "invoice",
+    "facility", "location", "region", "employee", "asset", "ticket", "part",
+    "material", "contract", "department", "project", "item", "sku", "account",
+    "warehouse", "carrier", "plant", "site",
+]
+
+# Suffixes that mark a column as a join/identity key rather than a measure.
+_KEY_SUFFIXES = ["id", "code", "number", "no", "key", "sku"]
+
+
+def _is_join_key(col: str) -> bool:
+    """A column whose name looks like an identity/foreign key.
+
+    Used as join evidence: an exact key-name shared by two tables is a strong
+    relationship signal (best-practices §Multi-Table Relationship Policy).
+    """
+    n = _norm(col)
+    if not n or n in {"id", "no"}:
+        # Bare "id"/"no" are too generic to match across unrelated tables.
+        return any(kw in n for kw in _ENTITY_KEYWORDS) and len(n) > 2
+    if any(n.endswith(s) for s in _KEY_SUFFIXES):
+        return True
+    return any(kw in n for kw in _ENTITY_KEYWORDS) and any(
+        s in n for s in _KEY_SUFFIXES
+    )
+
+
+def detect_entities(tables: list[TableInfo]) -> dict[str, list[str]]:
+    """Map each table view to the candidate entity columns it contains."""
+    out: dict[str, list[str]] = {}
+    for t in tables:
+        ents = [
+            c
+            for c in t.column_names
+            if any(kw in _norm(c) for kw in _ENTITY_KEYWORDS)
+        ]
+        if ents:
+            out[t.view_name] = ents
+    return out
+
+
+def find_relationship_candidates(tables: list[TableInfo]) -> list[dict[str, Any]]:
+    """Discover evidence-backed join candidates between table pairs.
+
+    Evidence today is an exact key-name match (e.g. both tables expose a
+    ``SupplierID`` column). Each candidate carries the relationship metadata the
+    planner and card config expect. Name-only matches with no key shape are
+    deliberately excluded so unrelated tables are never joined.
+    """
+    by_key: dict[str, list[tuple[TableInfo, str]]] = {}
+    for t in tables:
+        for c in t.column_names:
+            if _is_join_key(c):
+                by_key.setdefault(_norm(c), []).append((t, c))
+
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
+    for occ in by_key.values():
+        for i in range(len(occ)):
+            for j in range(i + 1, len(occ)):
+                (lt, lc), (rt, rc) = occ[i], occ[j]
+                if lt.view_name == rt.view_name:
+                    continue
+                pair = (*sorted([lt.view_name, rt.view_name]), _norm(lc))
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                candidates.append(
+                    {
+                        "left_table": lt.view_name,
+                        "right_table": rt.view_name,
+                        "left_join_key": lc,
+                        "right_join_key": rc,
+                        "relationship_type": "unknown",
+                        "join_confidence": 0.6,
+                        "confidence_reason": f"exact key-name match on '{lc}'",
+                        "row_multiplication_risk": "medium",
+                    }
+                )
+    return candidates
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Severity calibration, ranking & dedup
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Severity values the Home UI renders (an unknown value falls back to "info"
+# client-side, but we normalise here so cards stay calibrated).
+_ALLOWED_SEVERITIES = (
+    "critical", "urgent", "warning", "watch", "opportunity", "info",
+)
+_SEVERITY_RANK = {
+    "critical": 6, "urgent": 5, "warning": 4, "watch": 3,
+    "opportunity": 3, "info": 1,
+}
+
+
+def _normalize_severity(value: Any) -> str:
+    v = str(value or "").strip().lower()
+    return v if v in _ALLOWED_SEVERITIES else "info"
+
+
+def _card_priority(card: dict[str, Any]) -> float:
+    """Score a card for ranking: severity first, then evidence strength."""
+    score = _SEVERITY_RANK.get(card.get("severity", "info"), 1) * 10.0
+    conf = card.get("confidenceScore")
+    score += (float(conf) if isinstance(conf, int | float) else 0.5) * 3.0
+    if card.get("chart"):
+        score += 1.0
+    if card.get("kpiReferences") or card.get("referenceDocuments"):
+        score += 2.0
+    if card.get("relationshipMetadata"):
+        score += 1.0
+    pri = card.get("priorityScore")
+    if isinstance(pri, int | float) and pri > 0:
+        return float(pri)
+    return score
+
+
+def _dedupe_key(card: dict[str, Any]) -> tuple[Any, ...]:
+    itype = str(card.get("insightType", "")).split("_", 1)[0]
+    tables = tuple(sorted(card.get("sources", {}).get("tables", [])))
+    title = _norm(str(card.get("title", "")))[:40]
+    return (card.get("projectId"), itype, tables, title)
+
+
+def rank_and_dedupe_cards(
+    cards: list[dict[str, Any]], *, max_cards: int = 8
+) -> list[dict[str, Any]]:
+    """Return the strongest, de-duplicated cards (best-practices §Insight
+    Selection / §Card Ranking). Duplicates that share project + insight type +
+    source tables + title are collapsed to the highest-scoring one."""
+    seen: set[tuple[Any, ...]] = set()
+    unique: list[dict[str, Any]] = []
+    for c in sorted(cards, key=_card_priority, reverse=True):
+        key = _dedupe_key(c)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(c)
+    return unique[:max_cards]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Date parsing for expiry scan
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -282,8 +443,9 @@ def _card(
     callout: dict | None = None,
     tables: list[str] | None = None,
     documents: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
         "projectId": str(project.id),
         "projectName": project.name,
@@ -297,6 +459,14 @@ def _card(
         "sources": {"tables": tables or [], "documents": documents or []},
         "executedAt": _now_iso(),
     }
+    # Backward-compatible optional metadata (confidenceScore, priorityScore,
+    # insightMethod, validation, relationshipMetadata, ...). The frontend
+    # ignores unknown keys, so this never affects the existing card layout.
+    if metadata:
+        for key, value in metadata.items():
+            if value not in (None, "", [], {}):
+                card[key] = value
+    return card
 
 
 # Type signature for the Teiid query runner injected by the route layer.
@@ -1083,6 +1253,11 @@ async def run_ai_intelligence(
         for d in ctx.documents
     ]
 
+    # Evidence-backed join candidates (best-practices §Multi-Table
+    # Relationship Policy). When present, the planner is allowed to propose
+    # validated two-table insights; otherwise it stays single-table.
+    relationship_hints = find_relationship_candidates(ctx.tables)
+
     analyses = await ai.plan(
         tenant_id=tenant_id,
         user_id=user_id,
@@ -1090,6 +1265,7 @@ async def run_ai_intelligence(
         allowed_tables=allowed_tables,
         documents=documents,
         table_schema=table_schema,
+        relationship_hints=relationship_hints,
         max_analyses=max_analyses,
         granularity=granularity,
     )
@@ -1099,6 +1275,12 @@ async def run_ai_intelligence(
         return []  # AI reachable but found nothing worth surfacing
 
     doc_by_title = {d.title: d for d in ctx.documents}
+    # Index relationship hints by the table pair so multi-table cards can carry
+    # the join metadata that backs them.
+    hint_by_pair: dict[frozenset[str], dict[str, Any]] = {
+        frozenset({h["left_table"], h["right_table"]}): h
+        for h in relationship_hints
+    }
 
     # Execute each analysis against real data; gather interpret inputs.
     executed: list[dict[str, Any]] = []
@@ -1220,9 +1402,9 @@ async def run_ai_intelligence(
         category = a.get("category", "trend")
         if category not in ("risk", "trend", "opportunity", "relationship"):
             category = "trend"
-        severity = ins.get("severity") or a.get("severity_hint") or "info"
-        if severity not in ("critical", "urgent", "watch", "opportunity", "info"):
-            severity = "info"
+        severity = _normalize_severity(
+            ins.get("severity") or a.get("severity_hint") or "info"
+        )
         title = ins.get("title") or a.get("title") or "Insight"
         summary = ins.get("summary") or a.get("rationale") or ""
         if not summary:
@@ -1243,6 +1425,7 @@ async def run_ai_intelligence(
         chart = None
         tables: list[str] = []
         documents_used: list[str] = []
+        validation: dict[str, Any] = {}
         if result is not None:
             chart = _build_chart(
                 a.get("chart_type", "bar"),
@@ -1253,8 +1436,73 @@ async def run_ai_intelligence(
                 a.get("value_column_2", ""),
             )
             tables = _tables_in_sql(a.get("sql", ""), ctx.tables)
+            rows = result.get("rows", [])
+            value_col = a.get("value_column", "")
+            non_null = (
+                sum(1 for r in rows if _to_float(r.get(value_col)) is not None)
+                if value_col
+                else 0
+            )
+            validation = {
+                "executionStatus": "success",
+                "rowCount": len(rows),
+                "columnsReturned": list(result.get("columns", [])),
+                "nonNullMetricCount": non_null,
+            }
         else:
             documents_used = list(a.get("source_documents") or [])
+
+        # Optional, backward-compatible metadata grounded in how the card was
+        # produced (best-practices §Feedback / §Card Rendering).
+        is_multi_table = len(tables) >= 2
+        uses_reference = bool(documents_used) and any(
+            d.ai_metadata.get("reference_tier")
+            for d in ctx.documents
+            if d.title in documents_used
+        )
+        if is_multi_table:
+            method = "relationship"
+        elif uses_reference:
+            method = "reference_backed"
+        elif result is None:
+            method = "reference_backed" if documents_used else "llm_planned"
+        else:
+            method = "llm_planned"
+
+        relationship_meta = None
+        if is_multi_table:
+            relationship_meta = hint_by_pair.get(frozenset(tables[:2]))
+
+        confidence = ins.get("confidence")
+        if not isinstance(confidence, int | float):
+            # Derive a coarse confidence from evidence: data-backed with several
+            # rows is more trustworthy than a thin or document-only finding.
+            confidence = 0.5
+            if validation.get("rowCount", 0) >= 3:
+                confidence = 0.75
+            if relationship_meta:
+                confidence = min(confidence, relationship_meta["join_confidence"])
+
+        metadata: dict[str, Any] = {
+            "insightMethod": method,
+            "confidenceScore": round(float(confidence), 2),
+            "validation": validation,
+            "referenceDocuments": documents_used if uses_reference else [],
+            "relationshipMetadata": {
+                "leftTable": relationship_meta["left_table"],
+                "rightTable": relationship_meta["right_table"],
+                "leftJoinKey": relationship_meta["left_join_key"],
+                "rightJoinKey": relationship_meta["right_join_key"],
+                "relationshipType": relationship_meta["relationship_type"],
+                "joinConfidence": relationship_meta["join_confidence"],
+                "confidenceReason": relationship_meta["confidence_reason"],
+                "rowMultiplicationRisk": relationship_meta[
+                    "row_multiplication_risk"
+                ],
+            }
+            if relationship_meta
+            else {},
+        }
 
         cards.append(
             _card(
@@ -1267,10 +1515,13 @@ async def run_ai_intelligence(
                 callout=callout,
                 tables=tables,
                 documents=documents_used,
+                metadata=metadata,
             )
         )
 
-    return cards
+    # Rank by severity + evidence strength and drop duplicates, returning the
+    # strongest few (best-practices §Insight Selection / §Card Ranking).
+    return rank_and_dedupe_cards(cards)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -181,6 +181,12 @@ class IntelligencePlanRequest(AIBaseRequest):
     # [{"table": <view>, "columns": [{"name": <col>, "type": <type>}]}]
     table_schema: list[dict] = Field(default_factory=list)
     documents: list[dict] = Field(default_factory=list)  # [{title, summary, tags}]
+    # Evidence-backed join candidates the platform discovered from scope
+    # metadata / matching keys. Each: {left_table, right_table, left_join_key,
+    # right_join_key, relationship_type, join_confidence, confidence_reason,
+    # row_multiplication_risk}. The planner may only propose multi-table
+    # analyses that are supported by one of these hints.
+    relationship_hints: list[dict] = Field(default_factory=list)
     max_analyses: int = 6
     # 1 = executive/high-level (few, most leveraging) .. 5 = granular (many, detailed)
     granularity: int = 3

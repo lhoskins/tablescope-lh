@@ -314,6 +314,228 @@ async def test_run_ai_intelligence_skips_empty_results(monkeypatch) -> None:
     assert interpret_called["v"] is False  # nothing to interpret
 
 
+# ───────────── insight-first methodology: helpers & metadata ─────────────────
+
+def test_home_best_practices_reference_loads() -> None:
+    text = hi.home_best_practices()
+    assert text  # the markdown reference must be present and non-empty
+    assert "insight" in text.lower()
+
+
+def test_detect_entities_finds_entity_columns() -> None:
+    tables = [
+        _table("suppliers", ["SupplierID", "SupplierName", "Country"]),
+        _table("metrics", ["month", "value"]),
+    ]
+    entities = hi.detect_entities(tables)
+    assert "suppliers" in entities
+    assert "SupplierID" in entities["suppliers"]
+    # A table with no entity-named column is not listed.
+    assert "metrics" not in entities
+
+
+def test_find_relationship_candidates_requires_key_match() -> None:
+    tables = [
+        _table("suppliers", ["SupplierID", "SupplierName"]),
+        _table("inspections", ["SupplierID", "DefectQty", "InspectionDate"]),
+    ]
+    cands = hi.find_relationship_candidates(tables)
+    assert len(cands) == 1
+    c = cands[0]
+    assert {c["left_table"], c["right_table"]} == {"suppliers", "inspections"}
+    assert c["left_join_key"] == "SupplierID"
+    assert "exact key-name match" in c["confidence_reason"]
+
+
+def test_find_relationship_candidates_rejects_weak_join() -> None:
+    # Two tables share a plain non-key column name ("region") — that is not
+    # join evidence, so no relationship should be inferred.
+    tables = [
+        _table("sales", ["region", "amount"]),
+        _table("returns", ["region", "qty"]),
+    ]
+    assert hi.find_relationship_candidates(tables) == []
+
+
+def test_normalize_severity_rejects_unknown_and_allows_warning() -> None:
+    assert hi._normalize_severity("warning") == "warning"
+    assert hi._normalize_severity("critical") == "critical"
+    # An invented / inflated severity falls back to info, never up-leveled.
+    assert hi._normalize_severity("catastrophic") == "info"
+    assert hi._normalize_severity("") == "info"
+
+
+def test_rank_and_dedupe_removes_duplicates() -> None:
+    proj = _project()
+    base = dict(
+        projectId="1",
+        insightType="risk_a",
+        title="Supplier risk",
+        sources={"tables": ["suppliers"], "documents": []},
+        severity="urgent",
+        chart=None,
+    )
+    cards = [dict(base), dict(base)]
+    ranked = hi.rank_and_dedupe_cards(cards)
+    assert len(ranked) == 1
+    assert proj.id == 1  # sanity
+
+
+def test_rank_and_dedupe_orders_by_severity() -> None:
+    low = {
+        "projectId": "1", "insightType": "trend_a", "title": "Minor",
+        "severity": "info", "sources": {"tables": ["t1"], "documents": []},
+    }
+    high = {
+        "projectId": "1", "insightType": "risk_b", "title": "Severe",
+        "severity": "critical", "sources": {"tables": ["t2"], "documents": []},
+    }
+    ranked = hi.rank_and_dedupe_cards([low, high])
+    assert [c["title"] for c in ranked] == ["Severe", "Minor"]
+
+
+def test_rank_and_dedupe_caps_to_max() -> None:
+    cards = [
+        {
+            "projectId": "1",
+            "insightType": f"trend_{i}",
+            "title": f"Insight {i}",
+            "severity": "info",
+            "sources": {"tables": [f"t{i}"], "documents": []},
+        }
+        for i in range(20)
+    ]
+    assert len(hi.rank_and_dedupe_cards(cards)) == 8
+
+
+async def test_run_ai_intelligence_attaches_metadata(monkeypatch) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**kwargs):
+        return [
+            {
+                "id": "a1",
+                "category": "trend",
+                "title": "Spend by supplier",
+                "rationale": "Concentration risk.",
+                "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend '
+                'FROM "spend" GROUP BY "supplier"',
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "spend",
+                "severity_hint": "watch",
+            }
+        ]
+
+    async def fake_interpret(**kwargs):
+        return {
+            "a1": {
+                "id": "a1",
+                "title": "Spend concentrated",
+                "summary": "**Acme** dominates spend.",
+                "severity": "watch",
+            }
+        }
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+    runner = _runner(
+        {
+            "GROUP BY": [
+                {"supplier": "Acme", "spend": 1200.0},
+                {"supplier": "Globex", "spend": 800.0},
+                {"supplier": "Initech", "spend": 200.0},
+            ]
+        }
+    )
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, tenant_id=1, user_id=1
+    )
+    assert cards is not None and len(cards) == 1
+    card = cards[0]
+    assert card["insightMethod"] == "llm_planned"
+    assert card["confidenceScore"] == 0.75  # >=3 rows
+    assert card["validation"]["rowCount"] == 3
+    assert card["validation"]["nonNullMetricCount"] == 3
+    # relationshipMetadata is omitted for a single-table card.
+    assert "relationshipMetadata" not in card
+
+
+async def test_run_ai_intelligence_multi_table_relationship(monkeypatch) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    captured: dict = {}
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "id": "a1",
+                "category": "relationship",
+                "title": "High-spend suppliers with defects",
+                "rationale": "Concentration + quality risk.",
+                "sql": 'SELECT s."SupplierName", SUM(CAST(i."DefectQty" AS double)) '
+                'AS defects FROM "suppliers" s JOIN "inspections" i '
+                'ON s."SupplierID" = i."SupplierID" GROUP BY s."SupplierName"',
+                "chart_type": "bar",
+                "label_column": "SupplierName",
+                "value_column": "defects",
+                "severity_hint": "warning",
+            }
+        ]
+
+    async def fake_interpret(**kwargs):
+        return {
+            "a1": {
+                "id": "a1",
+                "title": "Defects concentrated in top supplier",
+                "summary": "**Acme** has the most defects.",
+                "severity": "warning",
+            }
+        }
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    ctx = hi.ProjectContext(
+        tables=[
+            _table("suppliers", ["SupplierID", "SupplierName"]),
+            _table("inspections", ["SupplierID", "DefectQty"]),
+        ],
+        documents=[],
+    )
+    runner = _runner(
+        {"JOIN": [{"SupplierName": "Acme", "defects": 40.0},
+                  {"SupplierName": "Globex", "defects": 5.0}]}
+    )
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, tenant_id=1, user_id=1
+    )
+    # The planner received the evidence-backed relationship hints.
+    assert captured["relationship_hints"]
+    assert cards is not None and len(cards) == 1
+    card = cards[0]
+    assert card["severity"] == "warning"
+    assert card["insightMethod"] == "relationship"
+    rel = card["relationshipMetadata"]
+    assert {rel["leftTable"], rel["rightTable"]} == {"suppliers", "inspections"}
+    assert rel["leftJoinKey"] == "SupplierID"
+    # Card keeps the existing required shape (frontend compatibility).
+    for key in (
+        "id", "projectId", "projectName", "projectColor", "insightType",
+        "severity", "title", "summary", "chart", "callout", "sources",
+        "executedAt",
+    ):
+        assert key in card
+
+
 # ─────────────────────────── endpoints (via client) ─────────────────────────
 
 def _editor_headers(tenant_id: int, user_id: int) -> dict:
