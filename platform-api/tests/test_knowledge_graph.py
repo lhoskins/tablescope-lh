@@ -289,16 +289,27 @@ async def _seed_graph(db_session, *, tenant_id: int, project_id: int, user_id: i
         name="Supplier Manual", properties={"summary": "Governs qualification."},
         created_by=user_id, is_active=True,
     )
-    db_session.add_all([proc, doc])
+    ds = AIProjectGraphNode(
+        tenant_id=tenant_id, project_id=project_id, node_type="data_source",
+        name="Supplier Master Table", properties={"summary": "Supplier records."},
+        created_by=user_id, is_active=True,
+    )
+    db_session.add_all([proc, doc, ds])
     await db_session.flush()
-    db_session.add(
+    db_session.add_all([
         AIProjectGraphEdge(
             tenant_id=tenant_id, project_id=project_id,
             from_node_id=doc.id, to_node_id=proc.id,
             relationship_type="governs", confidence=0.95, created_by=user_id,
             is_active=True,
-        )
-    )
+        ),
+        AIProjectGraphEdge(
+            tenant_id=tenant_id, project_id=project_id,
+            from_node_id=doc.id, to_node_id=ds.id,
+            relationship_type="references", confidence=0.9, created_by=user_id,
+            is_active=True,
+        ),
+    ])
     await db_session.commit()
 
 
@@ -364,8 +375,7 @@ def _full_snapshot(**overrides) -> dict:
         "id": 1,
         "fullGraph": {"nodes": _nodes(), "edges": _edges()},
         "generatedAt": "2026-01-01T00:00:00+00:00",
-        "aiCenterKey": None,
-        "aiCards": None,
+        "aiCardsByCenter": {},
     }
     snap.update(overrides)
     return snap
@@ -389,23 +399,53 @@ def test_from_snapshot_overlays_cached_ai_cards_for_matching_center():
         "tracePaths": [],
         "aiGenerated": True,
     }
-    snap = _full_snapshot(aiCenterKey=center_key, aiCards=cards)
+    snap = _full_snapshot(aiCardsByCenter={center_key: cards})
     payload = build_node_centric_graph_from_snapshot(snap)
     assert payload["insightCards"] == cards["insightCards"]
     assert payload["aiGenerated"] is True
 
 
-def test_from_snapshot_skips_cached_cards_for_other_center():
+def test_from_snapshot_overlays_cards_per_center():
+    # Each centre keeps its own cached card bundle; clicking a node still shows
+    # that node's cached insight cards.
+    default = build_graph_payload(_nodes(), _edges())
+    default_key = default["centerNode"]["graphKey"]
+    other_key = "process:corrective_action_process"
+    default_cards = {"insightCards": [{"id": "d", "category": "risk"}], "gaps": [],
+                     "recommendedActions": [], "tracePaths": [], "aiGenerated": True}
+    other_cards = {"insightCards": [{"id": "o", "category": "opportunity"}], "gaps": [],
+                   "recommendedActions": [], "tracePaths": [], "aiGenerated": True}
+    snap = _full_snapshot(aiCardsByCenter={default_key: default_cards, other_key: other_cards})
+    payload = build_node_centric_graph_from_snapshot(snap, center_node=other_key)
+    assert payload["centerNode"]["graphKey"] == other_key
+    assert payload["insightCards"] == other_cards["insightCards"]
+
+
+def test_from_snapshot_skips_cached_cards_for_uncached_center():
     cards = {
         "insightCards": [{"id": "ai-1", "category": "risk", "title": "AI risk"}],
         "gaps": [], "recommendedActions": [], "tracePaths": [], "aiGenerated": True,
     }
-    snap = _full_snapshot(aiCenterKey="project:proj", aiCards=cards)
+    snap = _full_snapshot(aiCardsByCenter={"project:proj": cards})
     payload = build_node_centric_graph_from_snapshot(
         snap, center_node="process:corrective_action_process",
     )
-    # Deterministic cards for the process center, not the cached project cards.
+    # Deterministic cards for the process center, not another center's cached cards.
     assert payload["insightCards"] != cards["insightCards"]
+
+
+def test_get_snapshot_normalizes_legacy_single_center_cache():
+    from app.services.knowledge_graph_builder import build_node_centric_graph_from_snapshot
+    default = build_graph_payload(_nodes(), _edges())
+    center_key = default["centerNode"]["graphKey"]
+    cards = {"insightCards": [{"id": "legacy", "category": "risk"}], "gaps": [],
+             "recommendedActions": [], "tracePaths": [], "aiGenerated": True}
+    # Simulate the normalization done by get_project_graph_snapshot for an older
+    # snapshot that stored a single aiCenterKey/aiCards pair.
+    legacy = {"fullGraph": {"nodes": _nodes(), "edges": _edges()},
+              "aiCardsByCenter": {center_key: cards}}
+    payload = build_node_centric_graph_from_snapshot(legacy)
+    assert payload["insightCards"] == cards["insightCards"]
 
 
 @pytest.mark.asyncio
@@ -454,6 +494,37 @@ async def test_graph_populates_business_insight_cards(client, service_headers, d
     assert "insightCards" in body
     assert len(body["insightCards"]) >= 1
     assert any(c["category"] == "business_insight" for c in body["insightCards"])
+
+
+@pytest.mark.asyncio
+async def test_insight_cards_persist_when_clicking_into_a_node(client, service_headers, db_session):
+    # Regression: clicking into a cached node must not blank the insight panel.
+    # Each centre's cards are cached, so a non-default centre still has cards.
+    t, u, project, headers = await _make_project(client, service_headers, "kgpersist")
+    pid = project["id"]
+    await _seed_graph(db_session, tenant_id=t["id"], project_id=pid, user_id=u["id"])
+    # Default load (centers on the process) populates + caches its cards.
+    default = (await client.get(
+        f"/api/projects/{pid}/graph?lens=insight-first", headers=headers
+    )).json()
+    assert default["insightCards"]
+    # Click the document node — it must return its own insight cards, not empty.
+    doc_key = next(
+        n["graphKey"] for n in default["nodes"] if n["type"] == "document"
+    )
+    clicked = (await client.get(
+        f"/api/projects/{pid}/graph?lens=insight-first&center_node={doc_key}",
+        headers=headers,
+    )).json()
+    assert clicked["centerNode"]["graphKey"] == doc_key
+    assert clicked["insightCards"], "insight cards should not disappear on node click"
+    # A second click reads the now-cached bundle without rebuilding.
+    again = (await client.get(
+        f"/api/projects/{pid}/graph?lens=insight-first&center_node={doc_key}",
+        headers=headers,
+    )).json()
+    assert again["lastUpdated"] == clicked["lastUpdated"]
+    assert again["insightCards"]
 
 
 @pytest.mark.asyncio

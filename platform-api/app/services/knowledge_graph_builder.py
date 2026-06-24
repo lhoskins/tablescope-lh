@@ -1022,8 +1022,9 @@ async def rebuild_project_graph_snapshot(
 
     # Default-centre payload (project hub) — used to cache AI-enriched cards.
     default_payload = build_graph_payload(raw_nodes, raw_edges)
-    ai_center_key: str | None = None
-    ai_cards: dict[str, Any] | None = None
+    # Insight cards are cached per centre (keyed by graphKey) so a node click
+    # reads the same business-insight cards from cache instead of an empty panel.
+    ai_cards_by_center: dict[str, Any] = {}
     if enrich_with_ai and user_id is not None and default_payload.get("centerNode"):
         from app.services.knowledge_graph_ai import enrich_payload_with_ai
 
@@ -1032,21 +1033,15 @@ async def rebuild_project_graph_snapshot(
             project_id=project_id,
         )
         center = enriched.get("centerNode") or {}
-        ai_center_key = center.get("graphKey")
-        ai_cards = {
-            "insightCards": enriched.get("insightCards", []),
-            "gaps": enriched.get("gaps", []),
-            "recommendedActions": enriched.get("recommendedActions", []),
-            "tracePaths": enriched.get("tracePaths", []),
-            "aiGenerated": enriched.get("aiGenerated", False),
-        }
+        center_key = center.get("graphKey")
+        if center_key:
+            ai_cards_by_center[center_key] = _card_bundle(enriched)
 
     generated_at = datetime.now(UTC).isoformat()
     payload = _json_safe({
         "fullGraph": {"nodes": raw_nodes, "edges": raw_edges},
         "sourceCounts": _snapshot_source_counts(raw_nodes),
-        "aiCenterKey": ai_center_key,
-        "aiCards": ai_cards,
+        "aiCardsByCenter": ai_cards_by_center,
         "pipelineVersion": SNAPSHOT_PIPELINE_VERSION,
         "generatedAt": generated_at,
     })
@@ -1088,6 +1083,29 @@ async def rebuild_project_graph_snapshot(
     return {"id": snapshot_id, **payload}
 
 
+def _card_bundle(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extract the cacheable insight-card bundle from an enriched payload."""
+    return {
+        "insightCards": payload.get("insightCards", []),
+        "gaps": payload.get("gaps", []),
+        "recommendedActions": payload.get("recommendedActions", []),
+        "tracePaths": payload.get("tracePaths", []),
+        "aiGenerated": payload.get("aiGenerated", False),
+    }
+
+
+def _overlay_card_bundle(payload: dict[str, Any], bundle: dict[str, Any]) -> None:
+    """Overlay a cached insight-card bundle onto a freshly-built payload."""
+    payload["insightCards"] = bundle.get("insightCards", payload["insightCards"])
+    payload["gaps"] = bundle.get("gaps", payload["gaps"])
+    payload["recommendedActions"] = bundle.get(
+        "recommendedActions", payload["recommendedActions"]
+    )
+    payload["tracePaths"] = bundle.get("tracePaths", payload["tracePaths"])
+    if bundle.get("aiGenerated"):
+        payload["aiGenerated"] = True
+
+
 def _snapshot_source_counts(raw_nodes: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for n in raw_nodes:
@@ -1116,6 +1134,14 @@ async def get_project_graph_snapshot(
         return None
     payload = dict(row.payload or {})
     payload.setdefault("fullGraph", {"nodes": [], "edges": []})
+    # Normalize legacy single-centre cache (aiCenterKey/aiCards) into the
+    # per-centre map so node clicks can look up cards by graph key.
+    if "aiCardsByCenter" not in payload:
+        legacy_key = payload.get("aiCenterKey")
+        legacy_cards = payload.get("aiCards")
+        payload["aiCardsByCenter"] = (
+            {legacy_key: legacy_cards} if legacy_key and legacy_cards else {}
+        )
     generated_at = payload.get("generatedAt") or (
         row.generated_at.isoformat() if row.generated_at else ""
     )
@@ -1134,8 +1160,8 @@ def build_node_centric_graph_from_snapshot(
     """Build a node-centric payload from a cached snapshot's full graph.
 
     Does not re-collect the structural graph and does not call the AI server.
-    Cached AI cards are overlaid only when the effective centre matches the
-    centre the cards were generated for (the default project hub).
+    Cached AI insight cards are overlaid whenever the effective centre has a
+    cached bundle (keyed by graph key), so node clicks keep their cards.
     """
     full = snapshot.get("fullGraph") or {"nodes": [], "edges": []}
     payload = build_graph_payload(
@@ -1148,17 +1174,10 @@ def build_node_centric_graph_from_snapshot(
         severity=severity,
     )
     center = payload.get("centerNode")
-    ai_cards = snapshot.get("aiCards")
-    ai_center_key = snapshot.get("aiCenterKey")
-    if center and ai_cards and ai_center_key and center.get("graphKey") == ai_center_key:
-        payload["insightCards"] = ai_cards.get("insightCards", payload["insightCards"])
-        payload["gaps"] = ai_cards.get("gaps", payload["gaps"])
-        payload["recommendedActions"] = ai_cards.get(
-            "recommendedActions", payload["recommendedActions"]
-        )
-        payload["tracePaths"] = ai_cards.get("tracePaths", payload["tracePaths"])
-        if ai_cards.get("aiGenerated"):
-            payload["aiGenerated"] = True
+    by_center = snapshot.get("aiCardsByCenter") or {}
+    bundle = by_center.get(center.get("graphKey")) if center else None
+    if bundle:
+        _overlay_card_bundle(payload, bundle)
     return payload
 
 
@@ -1179,10 +1198,11 @@ async def build_node_centric_graph(
 ) -> dict[str, Any]:
     """Return the node-centric Knowledge Graph payload from the cached snapshot.
 
-    Default load and node clicks read the persisted full-graph snapshot and only
-    recenter/filter from its cached nodes/edges (no structural collection, no AI
-    call). ``refresh=True`` rebuilds and re-persists the snapshot. A missing
-    snapshot triggers a single rebuild.
+    Default load and node clicks read the persisted full-graph snapshot and
+    recenter/filter from its cached nodes/edges. Insight cards are cached per
+    centre: the first visit to a centre lazily runs AI enrichment and persists
+    the cards into the snapshot, so subsequent clicks read them from cache.
+    ``refresh=True`` rebuilds and re-persists the snapshot.
     """
     snapshot: dict[str, Any] | None = None
     if not refresh:
@@ -1202,7 +1222,69 @@ async def build_node_centric_graph(
         include_inferred=include_inferred,
         severity=severity,
     )
+
+    # Lazily enrich + cache this centre's insight cards if they aren't cached
+    # yet, so node clicks keep their business-insight cards on the next read.
+    center = payload.get("centerNode")
+    by_center = snapshot.get("aiCardsByCenter") or {}
+    if (
+        center
+        and user_id is not None
+        and center.get("graphKey") not in by_center
+        and payload.get("nodes")
+    ):
+        await _enrich_and_cache_center(
+            session, snapshot, payload,
+            tenant_id=tenant_id, project_id=project_id, user_id=user_id,
+        )
+
     payload["lastUpdated"] = snapshot.get("generatedAt", "")
     payload["snapshotId"] = snapshot.get("id")
     payload["isCached"] = not refresh
     return payload
+
+
+async def _enrich_and_cache_center(
+    session: AsyncSession,
+    snapshot: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    tenant_id: int,
+    project_id: int,
+    user_id: int,
+) -> None:
+    """Run AI enrichment for the payload's centre and persist its card bundle.
+
+    Mutates ``payload`` in place with the enriched cards and stores the bundle
+    in the snapshot's ``aiCardsByCenter`` map (best-effort; never fatal).
+    """
+    center = payload.get("centerNode") or {}
+    center_key = center.get("graphKey")
+    if not center_key:
+        return
+    from app.services.knowledge_graph_ai import enrich_payload_with_ai
+
+    await enrich_payload_with_ai(
+        payload, tenant_id=tenant_id, user_id=user_id, project_id=project_id,
+    )
+    bundle = _json_safe(_card_bundle(payload))
+    snapshot.setdefault("aiCardsByCenter", {})[center_key] = bundle
+
+    snapshot_id = snapshot.get("id")
+    if snapshot_id is None:
+        return
+    from app.models.knowledge_graph_snapshot import AIProjectGraphSnapshot
+
+    try:
+        row = await session.get(AIProjectGraphSnapshot, snapshot_id)
+        if row is not None:
+            stored = dict(row.payload or {})
+            by_center = dict(stored.get("aiCardsByCenter") or {})
+            by_center[center_key] = bundle
+            stored["aiCardsByCenter"] = by_center
+            row.payload = stored
+            await session.flush()
+            await session.commit()
+    except Exception:
+        logger.exception("Failed to cache per-centre KG insight cards")
+        await session.rollback()
