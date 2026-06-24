@@ -823,13 +823,21 @@ async def build_node_centric_graph(
     *,
     tenant_id: int,
     project_id: int,
+    user_id: int | None = None,
     center_node: str | None = None,
     lens: str = "insight-first",
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
     include_inferred: bool = False,
     severity: str = "all",
+    enrich_with_ai: bool = True,
 ) -> dict[str, Any]:
-    """Load the tenant/project-scoped graph and build the node-centric payload."""
+    """Load the tenant/project-scoped graph and build the node-centric payload.
+
+    Deterministic-first: builds the graph and evidence-gated cards from the
+    stored nodes/edges, then (when ``enrich_with_ai`` and a user is known) asks
+    the AI server for AI-Home-style insight cards, falling back silently to the
+    deterministic cards if the AI server is unavailable.
+    """
     node_rows = await session.execute(
         text(
             """
@@ -867,7 +875,7 @@ async def build_node_centric_graph(
         for r in edge_rows.fetchall()
     ]
 
-    return build_graph_payload(
+    payload = build_graph_payload(
         raw_nodes,
         raw_edges,
         center_node=center_node,
@@ -876,3 +884,15 @@ async def build_node_centric_graph(
         include_inferred=include_inferred,
         severity=severity,
     )
+
+    if enrich_with_ai and user_id is not None and payload.get("centerNode"):
+        from app.services.knowledge_graph_ai import enrich_payload_with_ai
+
+        payload = await enrich_payload_with_ai(
+            payload,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            project_id=project_id,
+        )
+
+    return payload

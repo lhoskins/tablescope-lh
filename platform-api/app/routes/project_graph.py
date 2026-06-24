@@ -112,6 +112,7 @@ async def get_project_graph(
             session,
             tenant_id=context.tenant_id,
             project_id=project_id,
+            user_id=context.user_id,
             center_node=center_node,
             lens=lens or "insight-first",
             min_confidence=min_confidence,

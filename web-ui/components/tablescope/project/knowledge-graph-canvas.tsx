@@ -19,17 +19,17 @@ import { alertSignFor, paletteFor } from "./knowledge-graph-style";
 
 /** Where each display group is anchored around the centered node. */
 const REGION_STYLE: Record<string, React.CSSProperties> = {
-  "Supporting & Governing Documents": { left: 0, top: "6%" },
+  "Supporting & Governing Documents": { left: 0, top: "2%" },
   "Governing Policies / SOPs": { left: "50%", top: 0, transform: "translateX(-50%)" },
-  "KPIs & Metrics": { right: 0, top: "4%" },
+  "KPIs & Metrics": { right: 0, top: "2%" },
   Queries: { right: 0, top: "42%" },
-  Dashboards: { right: 0, bottom: "4%" },
+  Dashboards: { right: 0, bottom: "2%" },
   "Linked Data Sources": { left: "50%", bottom: 0, transform: "translateX(-50%)" },
   "Related Entities": { left: 0, top: "42%" },
-  "Related Processes": { left: 0, bottom: "4%" },
-  "Insights / Findings": { left: "32%", bottom: "16%" },
-  Recommendations: { left: "56%", bottom: "16%" },
-  Project: { left: "50%", top: "4%", transform: "translateX(-50%)" },
+  "Related Processes": { left: 0, bottom: "2%" },
+  "Insights / Findings": { left: "30%", bottom: "20%" },
+  Recommendations: { left: "55%", bottom: "20%" },
+  Project: { left: "50%", top: "2%", transform: "translateX(-50%)" },
 };
 
 const REGION_ORDER = [
@@ -58,13 +58,41 @@ interface Layout {
   byId: Record<number, Point>;
 }
 
+interface CanvasEdge {
+  id: number;
+  source: number;
+  target: number;
+  confidence: number;
+  type?: string;
+}
+
 interface CanvasProps {
   centerNode: GraphNode;
   nodes: GraphNode[];
-  edges: { id: number; source: number; target: number; confidence: number }[];
+  edges: CanvasEdge[];
   selectedNodeKey: string | null;
   tracedNodeIds: Set<number> | null;
   onNodeClick: (node: GraphNode) => void;
+}
+
+/** Max nodes rendered per display group so clusters stay readable. */
+const MAX_PER_GROUP = 6;
+
+/** Pull a line endpoint back toward the other end so the arrow clears the node. */
+function trim(
+  from: Point,
+  to: Point,
+  pad: number,
+): Point {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: to.x - (dx / len) * pad, y: to.y - (dy / len) * pad };
+}
+
+function humanizeRel(type: string | undefined): string {
+  if (!type) return "";
+  return type.replace(/[_-]+/g, " ").trim();
 }
 
 function AlertSign({ type }: { type: string }) {
@@ -233,37 +261,107 @@ export function KnowledgeGraphCanvas({
   return (
     <div
       ref={containerRef}
-      className="relative min-h-[640px] w-full overflow-auto rounded-lg border border-line-tertiary bg-[radial-gradient(circle,#eef2f7_1px,transparent_1px)] [background-size:22px_22px]"
+      className="relative min-h-[720px] w-full overflow-auto rounded-lg border border-line-tertiary bg-[radial-gradient(circle,#eef2f7_1px,transparent_1px)] [background-size:22px_22px]"
     >
-      {/* Connector overlay (behind node cards) */}
+      {/* Connector overlay (behind node cards): directional arrows from each
+          related source toward / away from the center, per the edge direction. */}
       <svg
         className="pointer-events-none absolute left-0 top-0"
         width={layout.width || "100%"}
         height={layout.height || "100%"}
       >
+        <defs>
+          <marker
+            id="kg-arrow"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+          </marker>
+          <marker
+            id="kg-arrow-dim"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="6"
+            markerHeight="6"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#e2e8f0" />
+          </marker>
+        </defs>
         {layout.center &&
           edges.map((e) => {
-            const a = layout.byId[e.source === centerNode.id ? e.target : e.source];
             const isCenterEdge =
               e.source === centerNode.id || e.target === centerNode.id;
-            if (!isCenterEdge || !a || !layout.center) return null;
+            if (!isCenterEdge || !layout.center) return null;
+            const srcPt =
+              e.source === centerNode.id ? layout.center : layout.byId[e.source];
+            const tgtPt =
+              e.target === centerNode.id ? layout.center : layout.byId[e.target];
+            if (!srcPt || !tgtPt) return null;
+            // Trim endpoints so the arrowhead clears the center circle / node chip.
+            const p1 = trim(tgtPt, srcPt, e.source === centerNode.id ? 64 : 16);
+            const p2 = trim(srcPt, tgtPt, e.target === centerNode.id ? 64 : 16);
             const traced =
               tracedNodeIds === null ||
               (tracedNodeIds.has(e.source) && tracedNodeIds.has(e.target));
             return (
               <line
                 key={e.id}
-                x1={layout.center.x}
-                y1={layout.center.y}
-                x2={a.x}
-                y2={a.y}
+                x1={p1.x}
+                y1={p1.y}
+                x2={p2.x}
+                y2={p2.y}
                 stroke={traced ? "#94a3b8" : "#e2e8f0"}
                 strokeWidth={traced ? 1.5 : 1}
                 strokeDasharray={traced ? undefined : "4 4"}
+                markerEnd={`url(#${traced ? "kg-arrow" : "kg-arrow-dim"})`}
               />
             );
           })}
       </svg>
+
+      {/* Edge relationship labels + confidence (above the connectors) */}
+      {layout.center &&
+        edges.map((e) => {
+          const isCenterEdge =
+            e.source === centerNode.id || e.target === centerNode.id;
+          if (!isCenterEdge || !layout.center) return null;
+          const srcPt =
+            e.source === centerNode.id ? layout.center : layout.byId[e.source];
+          const tgtPt =
+            e.target === centerNode.id ? layout.center : layout.byId[e.target];
+          if (!srcPt || !tgtPt) return null;
+          const label = humanizeRel(e.type);
+          if (!label && !e.confidence) return null;
+          const traced =
+            tracedNodeIds === null ||
+            (tracedNodeIds.has(e.source) && tracedNodeIds.has(e.target));
+          const mx = (srcPt.x + tgtPt.x) / 2;
+          const my = (srcPt.y + tgtPt.y) / 2;
+          return (
+            <div
+              key={`lbl-${e.id}`}
+              className={cn(
+                "pointer-events-none absolute z-[6] flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap rounded border border-line-tertiary bg-white px-1.5 py-0.5 text-[9px] font-medium shadow-sm",
+                traced ? "text-ink-tertiary" : "text-line-secondary opacity-60",
+              )}
+              style={{ left: mx, top: my }}
+            >
+              {label && <span>{label}</span>}
+              {typeof e.confidence === "number" && e.confidence > 0 && (
+                <span className="rounded bg-slate-100 px-1 font-semibold text-slate-500">
+                  {e.confidence.toFixed(2)}
+                </span>
+              )}
+            </div>
+          );
+        })}
 
       {/* Center node */}
       <button
@@ -296,7 +394,7 @@ export function KnowledgeGraphCanvas({
             <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">
               {group}
             </div>
-            {groupNodes.map((n) => (
+            {groupNodes.slice(0, MAX_PER_GROUP).map((n) => (
               <NodeChip
                 key={n.id}
                 node={n}
@@ -309,6 +407,11 @@ export function KnowledgeGraphCanvas({
                 }}
               />
             ))}
+            {groupNodes.length > MAX_PER_GROUP && (
+              <span className="pl-1 text-[10px] font-medium text-ink-tertiary">
+                +{groupNodes.length - MAX_PER_GROUP} more
+              </span>
+            )}
           </div>
         );
       })}

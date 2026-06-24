@@ -90,6 +90,43 @@ async def plan(
     return analyses if isinstance(analyses, list) else []
 
 
+async def knowledge_graph_cards(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    lens: str,
+    center: dict[str, Any],
+    neighbors: list[dict[str, Any]],
+    documents: list[dict[str, Any]],
+    kpis: list[str],
+    max_cards: int = 8,
+) -> list[dict[str, Any]] | None:
+    """Ask the LLM for Knowledge-Graph insight cards for the selected node.
+
+    Returns the raw card dicts, or ``None`` when the AI server is unavailable so
+    the caller can fall back to the deterministic cards.
+    """
+    result = await _post(
+        "/ai/intelligence/knowledge-graph",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "lens": lens,
+            "center": center,
+            "neighbors": neighbors,
+            "documents": documents,
+            "kpis": kpis,
+            "max_cards": max_cards,
+        },
+    )
+    if result is None:
+        return None
+    cards = result.get("cards")
+    return cards if isinstance(cards, list) else []
+
+
 async def fix_sql(
     *,
     tenant_id: int,
