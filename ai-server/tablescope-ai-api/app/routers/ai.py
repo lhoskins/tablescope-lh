@@ -58,6 +58,7 @@ from app.models.schemas import (
 )
 from app.services import context_builder, llm_client, vector_store
 from app.services.context_builder import ContextBuildError
+from app.services.prompt_loader import load_prompt_reference
 from app.services.sql_validator import SQLValidationError, validate_sql
 
 logger = logging.getLogger(__name__)
@@ -671,8 +672,16 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         "- narrative_insight: a document-driven finding better told as prose (no SQL).\n"
     )
 
+    best_practices = load_prompt_reference("dashboard_best_practices.md")
+    best_practices_block = (
+        f"Dashboard Best Practices (authoritative policy):\n{best_practices}\n\n"
+        if best_practices
+        else ""
+    )
+
     prompt = (
         f"{context_text}\n\n"
+        f"{best_practices_block}"
         f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
         "CRITICAL: every widget's SQL must reference ONLY the allowed tables "
         "above. Never invent or assume any other table (e.g. Sales, Product, "
@@ -758,7 +767,9 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
         model=settings.sql_model,
         temperature=0.3,
-        num_ctx=16384,
+        # Larger window so the injected dashboard_best_practices reference fits
+        # alongside the project context without truncation.
+        num_ctx=24576,
         response_format="json",
     )
 

@@ -1686,6 +1686,7 @@ async def ai_generate_and_save_dashboard(
 
     kept_defs: list[dict[str, Any]] = []
     dropped_widgets: list[dict[str, str]] = []
+    repair_count = 0
 
     for w in widget_defs:
         title = str(w.get("title", "untitled"))
@@ -1699,6 +1700,19 @@ async def ai_generate_and_save_dashboard(
             )
             continue
 
+        validation: dict[str, Any] = {
+            "execution_status": "skipped",
+            "row_count": 0,
+            "columns_returned": [],
+            "non_null_metric_count": 0,
+            "chart_type_original": wtype,
+            "chart_type_final": wtype,
+            "sql_original": widget_sql,
+            "sql_final": widget_sql,
+            "warnings": [],
+            "drop_reason": "",
+        }
+
         if judge_available and vdb_database:
             try:
                 result = await _run_sql(
@@ -1708,7 +1722,11 @@ async def ai_generate_and_save_dashboard(
                     teiid_port=teiid_port,
                 )
             except Exception as exc:
-                logger.warning("Widget %r dropped (SQL failed): %s", title, exc)
+                logger.warning(
+                    "AI dashboard widget dropped | title=%s reason=%s sql=%s",
+                    title, "query failed to execute", widget_sql,
+                )
+                logger.debug("Widget %r SQL error: %s", title, exc)
                 dropped_widgets.append(
                     {"title": title, "reason": "query failed to execute"}
                 )
@@ -1717,10 +1735,35 @@ async def ai_generate_and_save_dashboard(
             rows = result.get("rows", [])
             keep, reason = _judge_widget(w, cols, rows)
             if not keep:
+                logger.info(
+                    "AI dashboard widget dropped | title=%s reason=%s "
+                    "row_count=%d columns=%s",
+                    title, reason, len(rows), cols,
+                )
                 dropped_widgets.append({"title": title, "reason": reason})
                 continue
             _correct_widget_chart(w, cols, rows)
+            final_type = str(w.get("type", wtype)).lower()
+            if final_type != wtype:
+                repair_count += 1
+            vcol = w.get("value_column") or w.get("y_column") or ""
+            non_null = 0
+            if vcol:
+                col_map = {_norm_col(c): c for c in cols}
+                actual = col_map.get(_norm_col(vcol))
+                if actual:
+                    non_null = sum(1 for r in rows if r.get(actual) is not None)
+            validation.update(
+                {
+                    "execution_status": "success",
+                    "row_count": len(rows),
+                    "columns_returned": cols,
+                    "non_null_metric_count": non_null,
+                    "chart_type_final": final_type,
+                }
+            )
 
+        w["_validation"] = validation
         kept_defs.append(w)
 
     # Minimum-save rule: a dashboard needs at least 2 strong widgets.
@@ -1845,6 +1888,9 @@ async def ai_generate_and_save_dashboard(
             "title": widget_title,
             "type": base_type,
             "chartSubtype": subtype,
+            # Preserve the planner's richer chart type so the UI can render it
+            # natively later even though it maps to a base type for now.
+            "aiChartType": widget_type,
             "dataSource": data_source,
             "xColumn": x_col,
             "yColumn": y_col,
@@ -1861,6 +1907,16 @@ async def ai_generate_and_save_dashboard(
         }
         if y2_col:
             widget_conf["y2Column"] = y2_col
+
+        # Per-widget execution validation metadata captured by the judge.
+        validation_meta = w.get("_validation")
+        if isinstance(validation_meta, dict):
+            widget_conf["validation"] = validation_meta
+
+        # Join-quality metadata when the widget uses a multi-table join.
+        join_meta = _build_join_metadata(w)
+        if join_meta is not None:
+            widget_conf["joinMetadata"] = join_meta
 
         # Carry reference lines (thresholds/SLAs) the planner grounded in docs.
         ref_lines: list[dict[str, Any]] = []
@@ -1886,6 +1942,27 @@ async def ai_generate_and_save_dashboard(
     # Lay widgets out on the 12-column grid in priority order.
     _pack_grid(widgets_config)
 
+    # Dashboard-level validation summary (doc §11). A simple quality score:
+    # fraction of generated widgets that survived validation.
+    approved_count = len(widgets_config)
+    dropped_count = len(dropped_widgets)
+    total_generated = approved_count + dropped_count
+    quality_score = (
+        round(approved_count / total_generated, 2) if total_generated else 0.0
+    )
+    validation_summary = (
+        f"approved={approved_count} dropped={dropped_count} "
+        f"repaired={repair_count} quality={quality_score}"
+    )
+    rejected_insights = list(suggestion.get("rejected_insights", []))
+
+    logger.info(
+        "AI dashboard validation | dashboard=%s approved=%d dropped=%d "
+        "repaired=%d quality=%s",
+        dashboard_title, approved_count, dropped_count, repair_count,
+        quality_score,
+    )
+
     # Step 4: Create the Dashboard
     dashboard = Dashboard(
         project_id=project.id,
@@ -1904,9 +1981,16 @@ async def ai_generate_and_save_dashboard(
             "filters": [],
             "layout": "grid",
             "ai_generated": True,
+            "generation_pipeline_version": "insight_first_v1",
             "business_domain": suggestion.get("business_domain", ""),
             "intended_audience": suggestion.get("intended_audience", ""),
             "executive_summary": suggestion.get("executive_summary", ""),
+            "dashboard_quality_score": quality_score,
+            "approved_widget_count": approved_count,
+            "dropped_widget_count": dropped_count,
+            "repair_count": repair_count,
+            "rejected_insights": rejected_insights,
+            "validation_summary": validation_summary,
         },
     )
     session.add(dashboard)
@@ -1978,6 +2062,57 @@ def _map_chart_type(ai_type: str) -> str:
 def _map_chart_subtype(ai_type: str) -> str:
     """Map an AI-suggested type to a chart subtype."""
     return _map_widget_visual(ai_type)[1]
+
+
+def _build_join_metadata(widget: dict[str, Any]) -> dict[str, Any] | None:
+    """Build join-quality metadata for a widget when it uses a join.
+
+    Prefers the planner's ``relationship_plan``. If that is absent but the SQL
+    contains a JOIN, emit best-effort metadata and flag it so the gap is
+    visible. Returns None when the widget is single-table.
+    """
+    plan = widget.get("relationship_plan")
+    sql = (widget.get("sql", "") or "")
+    has_join = re.search(r"\bjoin\b", sql, re.IGNORECASE) is not None
+
+    if isinstance(plan, dict) and (plan.get("requires_join") or has_join):
+        return {
+            "requiresJoin": bool(plan.get("requires_join") or has_join),
+            "leftTable": str(plan.get("left_table") or ""),
+            "rightTable": str(plan.get("right_table") or ""),
+            "leftJoinKey": str(plan.get("left_join_key") or ""),
+            "rightJoinKey": str(plan.get("right_join_key") or ""),
+            "relationshipType": str(plan.get("relationship_type") or "unknown"),
+            "joinConfidence": plan.get("join_confidence"),
+            "confidenceReason": str(plan.get("confidence_reason") or ""),
+            "rowMultiplicationRisk": str(plan.get("row_multiplication_risk") or ""),
+            "validated": False,
+            "matchRate": None,
+            "rowMultiplicationRatio": None,
+        }
+
+    if has_join:
+        logger.warning(
+            "AI dashboard widget %r uses a JOIN with no relationship_plan; "
+            "emitting best-effort join metadata",
+            widget.get("title", "untitled"),
+        )
+        return {
+            "requiresJoin": True,
+            "leftTable": "",
+            "rightTable": "",
+            "leftJoinKey": "",
+            "rightJoinKey": "",
+            "relationshipType": "unknown",
+            "joinConfidence": None,
+            "confidenceReason": "inferred from SQL JOIN (no planner metadata)",
+            "rowMultiplicationRisk": "unknown",
+            "validated": False,
+            "matchRate": None,
+            "rowMultiplicationRatio": None,
+        }
+
+    return None
 
 
 # ---------------------------------------------------------------------------
