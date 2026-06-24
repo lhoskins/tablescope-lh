@@ -12,6 +12,7 @@ import pytest
 from app.auth.jwt import create_access_token
 from app.services.knowledge_graph_builder import (
     PIPELINE_VERSION,
+    _json_safe,
     build_graph_payload,
     build_node_centric_graph_from_snapshot,
     enrich_node,
@@ -295,6 +296,26 @@ async def test_endpoint_enforces_tenant_scope(client, service_headers):
         f"/api/projects/{project['id']}/graph?lens=insight-first", headers=other_headers
     )
     assert r.status_code in (403, 404)
+
+
+# ── Snapshot payload sanitization (JSONB) ────────────────────────────
+
+def test_json_safe_coerces_decimal_and_datetime():
+    import datetime as dt
+    from decimal import Decimal
+
+    raw = {
+        "edges": [{"confidence": Decimal("0.85"), "ts": dt.datetime(2026, 1, 1)}],
+        "vals": (Decimal("1.5"), 2),
+    }
+    safe = _json_safe(raw)
+    import json
+
+    # Must be JSON-serializable (this is what the JSONB column requires).
+    json.dumps(safe)
+    assert safe["edges"][0]["confidence"] == 0.85
+    assert isinstance(safe["edges"][0]["confidence"], float)
+    assert safe["vals"] == [1.5, 2]
 
 
 # ── Snapshot cache (from-snapshot rebuild) ───────────────────────────

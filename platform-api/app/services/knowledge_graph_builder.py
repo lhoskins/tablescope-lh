@@ -19,12 +19,16 @@ and calls them.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 PIPELINE_VERSION = "knowledge_graph_node_centric_v2"
 # Cached full-graph snapshot pipeline version.
@@ -920,6 +924,24 @@ async def _load_stored_graph(
     return merge_graph_sources(raw_nodes, raw_edges, extra_nodes, extra_edges)
 
 
+def _json_safe(obj: Any) -> Any:
+    """Recursively coerce a value into JSON-serializable primitives.
+
+    Postgres ``NUMERIC`` columns (e.g. edge confidence) come back as ``Decimal``
+    and datetimes as ``datetime`` — neither is JSON-serializable for the JSONB
+    snapshot payload, so convert them to ``float`` / ISO strings.
+    """
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list | tuple):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    return obj
+
+
 async def rebuild_project_graph_snapshot(
     session: AsyncSession,
     *,
@@ -966,42 +988,50 @@ async def rebuild_project_graph_snapshot(
         }
 
     generated_at = datetime.now(UTC).isoformat()
-    payload = {
+    payload = _json_safe({
         "fullGraph": {"nodes": raw_nodes, "edges": raw_edges},
         "sourceCounts": _snapshot_source_counts(raw_nodes),
         "aiCenterKey": ai_center_key,
         "aiCards": ai_cards,
         "pipelineVersion": SNAPSHOT_PIPELINE_VERSION,
         "generatedAt": generated_at,
-    }
+    })
 
-    row = await session.scalar(
-        select(AIProjectGraphSnapshot).where(
-            AIProjectGraphSnapshot.tenant_id == tenant_id,
-            AIProjectGraphSnapshot.project_id == project_id,
-            AIProjectGraphSnapshot.snapshot_key == SNAPSHOT_KEY_FULL,
-        )
-    )
     gen_dt = datetime.now(UTC)
-    if row is None:
-        row = AIProjectGraphSnapshot(
-            tenant_id=tenant_id,
-            project_id=project_id,
-            snapshot_key=SNAPSHOT_KEY_FULL,
-            payload=payload,
-            pipeline_version=SNAPSHOT_PIPELINE_VERSION,
-            generated_at=gen_dt,
-            created_by=user_id,
+    try:
+        row = await session.scalar(
+            select(AIProjectGraphSnapshot).where(
+                AIProjectGraphSnapshot.tenant_id == tenant_id,
+                AIProjectGraphSnapshot.project_id == project_id,
+                AIProjectGraphSnapshot.snapshot_key == SNAPSHOT_KEY_FULL,
+            )
         )
-        session.add(row)
-    else:
-        row.payload = payload
-        row.pipeline_version = SNAPSHOT_PIPELINE_VERSION
-        row.generated_at = gen_dt
-    await session.flush()
-    await session.commit()
+        if row is None:
+            row = AIProjectGraphSnapshot(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                snapshot_key=SNAPSHOT_KEY_FULL,
+                payload=payload,
+                pipeline_version=SNAPSHOT_PIPELINE_VERSION,
+                generated_at=gen_dt,
+                created_by=user_id,
+            )
+            session.add(row)
+        else:
+            row.payload = payload
+            row.pipeline_version = SNAPSHOT_PIPELINE_VERSION
+            row.generated_at = gen_dt
+        await session.flush()
+        await session.commit()
+        snapshot_id: int | None = row.id
+    except Exception:
+        # Never let a persistence failure break the graph: roll back and serve
+        # the freshly-computed payload from memory (uncached).
+        logger.exception("Failed to persist Knowledge Graph snapshot")
+        await session.rollback()
+        snapshot_id = None
 
-    return {"id": row.id, **payload}
+    return {"id": snapshot_id, **payload}
 
 
 def _snapshot_source_counts(raw_nodes: list[dict[str, Any]]) -> dict[str, int]:
