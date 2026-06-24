@@ -185,7 +185,7 @@ export function projectNavGroups(projectId: string): NavGroup[] {
         },
         {
           key: "project-relationship-map",
-          label: "Relationship Map",
+          label: "Knowledge Graph",
           href: `${base}/relationship-map`,
           icon: IconTopologyStar3,
         },

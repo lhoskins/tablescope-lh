@@ -322,6 +322,17 @@ export interface GraphNode {
   source_type: string | null;
   source_id: number | null;
   properties: Record<string, unknown>;
+  // Node-centric Knowledge Graph metadata (optional; absent on legacy responses).
+  graphKey?: string;
+  layer?: string;
+  displayGroup?: string;
+  severity?: KnowledgeGraphSeverity;
+  summary?: string;
+  businessValue?: string;
+  businessQuestion?: string;
+  confidence?: number | null;
+  isCenterEligible?: boolean;
+  recommendedLens?: string;
 }
 
 export interface GraphEdge {
@@ -331,6 +342,7 @@ export interface GraphEdge {
   type: string;
   confidence: number;
   evidence: string;
+  validationStatus?: string;
 }
 
 export interface GraphResponse {
@@ -338,11 +350,143 @@ export interface GraphResponse {
   edges: GraphEdge[];
 }
 
+export type KnowledgeGraphSeverity =
+  | "critical"
+  | "urgent"
+  | "warning"
+  | "watch"
+  | "opportunity"
+  | "info";
+
+export type KnowledgeGraphCardCategory =
+  | "business_insight"
+  | "opportunity"
+  | "risk"
+  | "warning"
+  | "gap"
+  | "recommendation";
+
+export interface KnowledgeGraphInsightCard {
+  id: string;
+  nodeKey: string;
+  category: KnowledgeGraphCardCategory;
+  severity: KnowledgeGraphSeverity;
+  title: string;
+  summary: string;
+  businessQuestion?: string;
+  businessImpact?: string;
+  confidence: number;
+  evidencePath: string[];
+  sourceDocuments: string[];
+  sourceTables: string[];
+  sourceQueries: string[];
+  sourceDashboards: string[];
+  supportedKpis: string[];
+  recommendedAction?: string;
+  traceToEvidence: {
+    nodeIds: number[];
+    edgeIds: number[];
+    nodeKeys?: string[];
+  };
+}
+
+export interface KnowledgeGraphGap {
+  id: string;
+  nodeKey: string;
+  gapType: string;
+  title: string;
+  severity: KnowledgeGraphSeverity;
+  whyItMatters: string;
+  authoritativeSource: string;
+  expectedEvidence: string;
+  missingOrWeakComponent: string;
+  affectedProcesses: string[];
+  affectedKpis: string[];
+  recommendedAction: string;
+  confidence: number;
+}
+
+export interface KnowledgeGraphRecommendation {
+  id: string;
+  nodeKey: string;
+  title: string;
+  summary: string;
+  severity: KnowledgeGraphSeverity;
+  confidence: number;
+}
+
+export interface KnowledgeGraphStats {
+  nodeCount: number;
+  edgeCount: number;
+  cardCount: number;
+  gapCount: number;
+  byDisplayGroup: Record<string, number>;
+}
+
+export interface KnowledgeGraphResponse {
+  centerNode: GraphNode | null;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  insightCards: KnowledgeGraphInsightCard[];
+  gaps: KnowledgeGraphGap[];
+  recommendedActions: KnowledgeGraphRecommendation[];
+  tracePaths: {
+    id: string;
+    fromNodeKey: string;
+    nodeIds: number[];
+    edgeIds: number[];
+  }[];
+  stats: KnowledgeGraphStats;
+  lens?: string;
+  minConfidence?: number;
+  includeInferred?: boolean;
+  pipeline_version?: string;
+  generated_at?: string;
+}
+
+export interface KnowledgeGraphParams {
+  lens?: string;
+  centerNode?: string | null;
+  minConfidence?: number;
+  includeInferred?: boolean;
+  severity?: string;
+  refresh?: boolean;
+}
+
 export function useProjectGraph(projectId: string) {
   return useQuery({
     queryKey: ["project", projectId, "graph"],
     queryFn: () =>
       apiClient.get<GraphResponse>(`/api/projects/${projectId}/graph`),
+    enabled: Boolean(projectId),
+  });
+}
+
+/**
+ * Node-centric Insight-First Knowledge Graph. Passing a `lens` (always set by
+ * the Knowledge Graph screen) makes the backend return the enriched payload
+ * with insight cards, gaps, recommendations and trace paths.
+ */
+export function useKnowledgeGraph(
+  projectId: string,
+  params: KnowledgeGraphParams,
+) {
+  const query: Record<string, string> = {
+    lens: params.lens ?? "insight-first",
+    min_confidence: String(params.minConfidence ?? 0.7),
+    include_inferred: String(params.includeInferred ?? false),
+    severity: params.severity ?? "all",
+  };
+  if (params.centerNode) query.center_node = params.centerNode;
+  if (params.refresh) query.refresh = "true";
+  const qs = new URLSearchParams(query).toString();
+
+  return useQuery({
+    queryKey: ["project", projectId, "knowledge-graph", query],
+    queryFn: () =>
+      apiClient.get<KnowledgeGraphResponse>(
+        `/api/projects/${projectId}/graph?${qs}`,
+      ),
     enabled: Boolean(projectId),
   });
 }

@@ -4,8 +4,10 @@ import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 
-const KnowledgeGraph = lazy(() =>
-  import("./KnowledgeGraph").then((m) => ({ default: m.KnowledgeGraph }))
+const KnowledgeGraphScreen = lazy(() =>
+  import("@/components/tablescope/project/knowledge-graph-screen").then((m) => ({
+    default: m.KnowledgeGraphScreen,
+  }))
 );
 
 const FamilyDetailDrawer = lazy(() =>
@@ -265,7 +267,7 @@ export function DocumentsTab({
       {/* Knowledge Graph view */}
       {subTab === "graph" && (
         <Suspense fallback={<div className="text-sm text-slate-400 py-4">Loading graph...</div>}>
-          <KnowledgeGraph projectId={projectId} />
+          <KnowledgeGraphScreen projectId={projectId} />
         </Suspense>
       )}
 

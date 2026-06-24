@@ -1,9 +1,14 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { RelationshipMapScreen } from "@/components/tablescope/project/relationship-map-screen";
+import { KnowledgeGraphScreen } from "@/components/tablescope/project/knowledge-graph-screen";
 
 export default function ProjectRelationshipMapPage() {
   const params = useParams<{ id: string }>();
-  return <RelationshipMapScreen projectId={params.id} />;
+  return (
+    <KnowledgeGraphScreen
+      projectId={Number(params.id)}
+      breadcrumb={["Intelligence", "Knowledge Graph"]}
+    />
+  );
 }
