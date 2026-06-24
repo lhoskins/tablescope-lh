@@ -1,13 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IconDownload, IconMaximize, IconShare, IconTopologyStar3 } from "@tabler/icons-react";
+import {
+  IconDownload,
+  IconMaximize,
+  IconRefresh,
+  IconShare,
+  IconTopologyStar3,
+} from "@tabler/icons-react";
 import {
   useKnowledgeGraph,
+  useRefreshKnowledgeGraph,
   type GraphId,
   type GraphNode,
   type KnowledgeGraphInsightCard,
 } from "@/lib/ui/use-project-data";
+import { formatLastUpdated } from "@/lib/format-datetime";
+import { cn } from "@/lib/cn";
 import { KnowledgeGraphControls } from "./knowledge-graph-controls";
 import { KnowledgeGraphCanvas } from "./knowledge-graph-canvas";
 import { KnowledgeGraphInsightPanel } from "./knowledge-graph-insight-panel";
@@ -46,6 +55,20 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
     includeInferred,
   });
   const data = query.data;
+  const refreshGraph = useRefreshKnowledgeGraph(String(projectId));
+
+  const handleRefresh = useCallback(async () => {
+    try {
+      await refreshGraph.mutateAsync();
+      await query.refetch();
+    } catch {
+      // Surfaced via refreshGraph.isError; keep the cached graph on screen.
+    }
+  }, [refreshGraph, query]);
+
+  const lastUpdatedLabel = formatLastUpdated(
+    data?.lastUpdated ?? data?.generated_at,
+  );
 
   const handleNodeClick = useCallback((node: GraphNode) => {
     if (!node.graphKey) return;
@@ -174,8 +197,29 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
                 nodes · {data?.stats.edgeCount ?? 0} edges
               </p>
             )}
+            <div className="mt-0.5 flex items-center gap-2 text-small text-ink-tertiary">
+              {lastUpdatedLabel && <span>{lastUpdatedLabel}</span>}
+              {data?.isCached && (
+                <span className="rounded bg-bg-tertiary px-1.5 py-0.5 text-ink-tertiary">
+                  Cached
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5 text-ink-tertiary">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshGraph.isPending}
+              className="flex items-center gap-1.5 rounded-md border border-line-tertiary px-2 py-1.5 text-small hover:bg-bg-tertiary disabled:opacity-60"
+              title="Rebuild the knowledge graph"
+            >
+              <IconRefresh
+                size={16}
+                className={cn(refreshGraph.isPending && "animate-spin")}
+              />
+              {refreshGraph.isPending ? "Refreshing…" : "Refresh"}
+            </button>
             <button type="button" className="rounded-md border border-line-tertiary p-1.5 hover:bg-bg-tertiary" title="Export">
               <IconDownload size={16} />
             </button>

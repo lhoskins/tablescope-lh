@@ -41,6 +41,7 @@ from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.file_source_meta import FileSourceMeta
 from app.models.grid_preference import GridPreference
 from app.models.intelligence_snapshot import IntelligenceSnapshot
+from app.models.knowledge_graph_snapshot import AIProjectGraphSnapshot
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_asset import ProjectAsset
@@ -101,6 +102,7 @@ __all__ = [
     "FileSourceMeta",
     "GridPreference",
     "IntelligenceSnapshot",
+    "AIProjectGraphSnapshot",
     "OrganizationVDB",
     "Project",
     "ProjectAsset",

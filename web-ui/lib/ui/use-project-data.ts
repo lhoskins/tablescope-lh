@@ -444,6 +444,19 @@ export interface KnowledgeGraphResponse {
   includeInferred?: boolean;
   pipeline_version?: string;
   generated_at?: string;
+  /** ISO timestamp of the cached snapshot the payload was built from. */
+  lastUpdated?: string;
+  snapshotId?: number;
+  /** True when served from the cached snapshot (false right after a refresh). */
+  isCached?: boolean;
+}
+
+export interface KnowledgeGraphRefreshResult {
+  lastUpdated: string;
+  snapshotId: number | null;
+  nodeCount: number;
+  edgeCount: number;
+  pipelineVersion: string;
 }
 
 export interface KnowledgeGraphParams {
@@ -490,6 +503,27 @@ export function useKnowledgeGraph(
         `/api/projects/${projectId}/graph?${qs}`,
       ),
     enabled: Boolean(projectId),
+  });
+}
+
+/**
+ * Manually rebuild the project's Knowledge Graph snapshot, then invalidate the
+ * cached graph query so the canvas re-reads the fresh snapshot. Mirrors the AI
+ * Home refresh: node clicks read the cached snapshot; only this rebuilds it.
+ */
+export function useRefreshKnowledgeGraph(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiClient.post<KnowledgeGraphRefreshResult>(
+        `/api/projects/${projectId}/graph/refresh`,
+        {},
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({
+        queryKey: ["project", projectId, "knowledge-graph"],
+      });
+    },
   });
 }
 

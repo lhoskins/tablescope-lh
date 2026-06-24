@@ -13,6 +13,7 @@ from app.auth.jwt import create_access_token
 from app.services.knowledge_graph_builder import (
     PIPELINE_VERSION,
     build_graph_payload,
+    build_node_centric_graph_from_snapshot,
     enrich_node,
     graph_key_for,
 )
@@ -294,3 +295,118 @@ async def test_endpoint_enforces_tenant_scope(client, service_headers):
         f"/api/projects/{project['id']}/graph?lens=insight-first", headers=other_headers
     )
     assert r.status_code in (403, 404)
+
+
+# ── Snapshot cache (from-snapshot rebuild) ───────────────────────────
+
+def _full_snapshot(**overrides) -> dict:
+    snap = {
+        "id": 1,
+        "fullGraph": {"nodes": _nodes(), "edges": _edges()},
+        "generatedAt": "2026-01-01T00:00:00+00:00",
+        "aiCenterKey": None,
+        "aiCards": None,
+    }
+    snap.update(overrides)
+    return snap
+
+
+def test_from_snapshot_recenters_without_rebuild():
+    payload = build_node_centric_graph_from_snapshot(
+        _full_snapshot(), center_node="process:corrective_action_process",
+    )
+    assert payload["centerNode"]["graphKey"] == "process:corrective_action_process"
+    assert payload["nodes"]
+
+
+def test_from_snapshot_overlays_cached_ai_cards_for_matching_center():
+    default = build_graph_payload(_nodes(), _edges())
+    center_key = default["centerNode"]["graphKey"]
+    cards = {
+        "insightCards": [{"id": "ai-1", "category": "risk", "title": "AI risk"}],
+        "gaps": [],
+        "recommendedActions": [],
+        "tracePaths": [],
+        "aiGenerated": True,
+    }
+    snap = _full_snapshot(aiCenterKey=center_key, aiCards=cards)
+    payload = build_node_centric_graph_from_snapshot(snap)
+    assert payload["insightCards"] == cards["insightCards"]
+    assert payload["aiGenerated"] is True
+
+
+def test_from_snapshot_skips_cached_cards_for_other_center():
+    cards = {
+        "insightCards": [{"id": "ai-1", "category": "risk", "title": "AI risk"}],
+        "gaps": [], "recommendedActions": [], "tracePaths": [], "aiGenerated": True,
+    }
+    snap = _full_snapshot(aiCenterKey="project:proj", aiCards=cards)
+    payload = build_node_centric_graph_from_snapshot(
+        snap, center_node="process:corrective_action_process",
+    )
+    # Deterministic cards for the process center, not the cached project cards.
+    assert payload["insightCards"] != cards["insightCards"]
+
+
+@pytest.mark.asyncio
+async def test_graph_response_includes_cache_metadata(client, service_headers):
+    _t, _u, project, headers = await _make_project(client, service_headers, "kgcache")
+    r = await client.get(
+        f"/api/projects/{project['id']}/graph?lens=insight-first", headers=headers
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("lastUpdated")
+    assert "snapshotId" in body
+    # A plain GET (no refresh) is served as cached even when it lazily builds.
+    assert body["isCached"] is True
+
+
+@pytest.mark.asyncio
+async def test_node_click_reads_cache_without_rebuild(client, service_headers):
+    _t, _u, project, headers = await _make_project(client, service_headers, "kgclick")
+    pid = project["id"]
+    first = (await client.get(
+        f"/api/projects/{pid}/graph?lens=insight-first", headers=headers
+    )).json()
+    # A node click (center_node) reads the cached snapshot: same timestamp, cached.
+    second = (await client.get(
+        f"/api/projects/{pid}/graph?lens=insight-first&center_node={first['centerNode']['graphKey']}",
+        headers=headers,
+    )).json()
+    assert second["lastUpdated"] == first["lastUpdated"]
+    assert second["isCached"] is True
+
+
+@pytest.mark.asyncio
+async def test_refresh_rebuilds_and_updates_timestamp(client, service_headers):
+    _t, _u, project, headers = await _make_project(client, service_headers, "kgrefresh")
+    pid = project["id"]
+    first = (await client.get(
+        f"/api/projects/{pid}/graph?lens=insight-first", headers=headers
+    )).json()
+    import asyncio
+
+    await asyncio.sleep(0.01)
+    r = await client.post(f"/api/projects/{pid}/graph/refresh", headers=headers)
+    assert r.status_code == 200
+    refreshed = r.json()
+    assert refreshed["lastUpdated"] != first["lastUpdated"]
+    assert "snapshotId" in refreshed
+
+
+@pytest.mark.asyncio
+async def test_refresh_param_rebuilds_snapshot(client, service_headers):
+    _t, _u, project, headers = await _make_project(client, service_headers, "kgrparam")
+    pid = project["id"]
+    first = (await client.get(
+        f"/api/projects/{pid}/graph?lens=insight-first", headers=headers
+    )).json()
+    import asyncio
+
+    await asyncio.sleep(0.01)
+    refreshed = (await client.get(
+        f"/api/projects/{pid}/graph?lens=insight-first&refresh=true", headers=headers
+    )).json()
+    assert refreshed["isCached"] is False
+    assert refreshed["lastUpdated"] != first["lastUpdated"]

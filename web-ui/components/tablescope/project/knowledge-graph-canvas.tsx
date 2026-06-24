@@ -4,8 +4,16 @@ import React, { useMemo } from "react";
 import {
   IconAlertTriangle,
   IconArrowRight,
+  IconChartBar,
+  IconChartLine,
+  IconDatabase,
+  IconFileText,
   IconHelpHexagon,
+  IconSettings,
+  IconTable,
   IconTarget,
+  IconTopologyStar3,
+  type Icon,
 } from "@tabler/icons-react";
 import type { GraphId, GraphNode } from "@/lib/ui/use-project-data";
 import { cn } from "@/lib/cn";
@@ -68,6 +76,10 @@ const CENTER_R = 60;
 const CENTER_GAP = 320; // horizontal space reserved for the center circle + labels
 const PAD = 28;
 const COL_W = PILL_W;
+// Pull edge endpoints slightly off the pill/circle border so arrowheads sit in
+// the gap and never overlap pill text or run through the center circle.
+const ARROW_INSET = 8;
+const CENTER_ARROW_INSET = 6;
 
 function humanizeRel(type: string | undefined): string {
   if (!type) return "";
@@ -93,6 +105,52 @@ function circleBorderPoint(c: Point, toward: Point, r: number): Point {
   const dy = toward.y - c.y;
   const len = Math.hypot(dx, dy) || 1;
   return { x: c.x + (dx / len) * r, y: c.y + (dy / len) * r };
+}
+
+/** Move `from` toward `to` by `amount` px (used to inset edge endpoints). */
+export function insetPoint(from: Point, to: Point, amount: number): Point {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: from.x + (dx / len) * amount, y: from.y + (dy / len) * amount };
+}
+
+/** Smooth cubic edge that bows horizontally away from the center column. */
+export function edgePath(p1: Point, p2: Point): string {
+  const dx = p2.x - p1.x;
+  const c1 = { x: p1.x + dx * 0.35, y: p1.y };
+  const c2 = { x: p2.x - dx * 0.35, y: p2.y };
+  return `M ${p1.x} ${p1.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${p2.x} ${p2.y}`;
+}
+
+/** Point on the cubic edge at t=0.5 — where the relationship label sits. */
+function edgeMidpoint(p1: Point, p2: Point): Point {
+  const dx = p2.x - p1.x;
+  const c1 = { x: p1.x + dx * 0.35, y: p1.y };
+  const c2 = { x: p2.x - dx * 0.35, y: p2.y };
+  return {
+    x: 0.125 * p1.x + 0.375 * c1.x + 0.375 * c2.x + 0.125 * p2.x,
+    y: 0.125 * p1.y + 0.375 * c1.y + 0.375 * c2.y + 0.125 * p2.y,
+  };
+}
+
+/** Icon for the center circle, chosen by node type. */
+function centerIconFor(type: string): Icon {
+  if (type === "project") return IconTopologyStar3;
+  if (type === "process") return IconSettings;
+  if (type === "kpi" || type === "metric" || type === "threshold" || type === "benchmark")
+    return IconChartLine;
+  if (type === "dashboard") return IconChartBar;
+  if (type === "data_source" || type === "datasource" || type === "table")
+    return IconDatabase;
+  if (type === "query" || type === "saved_query") return IconTable;
+  if (
+    type === "risk" || type === "warning" || type === "gap" ||
+    type === "process_gap" || type === "data_gap" || type === "compliance_gap" ||
+    type === "audit_finding" || type === "insight"
+  )
+    return IconAlertTriangle;
+  return IconFileText;
 }
 
 function groupHeight(count: number): number {
@@ -303,19 +361,32 @@ export function KnowledgeGraphCanvas({
     return r ? { x: r.x + r.w / 2, y: r.y + r.h / 2 } : null;
   };
 
-  // Pre-compute drawable edges (both endpoints positioned).
+  const tracingActive = tracedNodeIds !== null;
+
+  // Pre-compute drawable edges (both endpoints positioned + inset).
   const drawn = edges
     .map((e) => {
       const sc = centerOf(e.source);
       const tc = centerOf(e.target);
       if (!sc || !tc) return null;
-      const p1 = attach(e.source, tc);
-      const p2 = attach(e.target, sc);
-      if (!p1 || !p2) return null;
+      const rawP1 = attach(e.source, tc);
+      const rawP2 = attach(e.target, sc);
+      if (!rawP1 || !rawP2) return null;
+      const inset1 = e.source === centerNode.id ? CENTER_ARROW_INSET : ARROW_INSET;
+      const inset2 = e.target === centerNode.id ? CENTER_ARROW_INSET : ARROW_INSET;
+      const p1 = insetPoint(rawP1, rawP2, inset1);
+      const p2 = insetPoint(rawP2, rawP1, inset2);
       const traced =
         tracedNodeIds === null ||
         (tracedNodeIds.has(e.source) && tracedNodeIds.has(e.target));
-      return { e, p1, p2, traced };
+      const isCenterEdge =
+        e.source === centerNode.id || e.target === centerNode.id;
+      // Reduce clutter: in the default view only label center-connected or
+      // high-confidence edges; while tracing only label the traced path.
+      const showLabel = tracingActive
+        ? traced
+        : isCenterEdge || e.confidence >= 0.9;
+      return { e, p1, p2, traced, showLabel };
     })
     .filter((v): v is NonNullable<typeof v> => v !== null);
 
@@ -339,10 +410,10 @@ export function KnowledgeGraphCanvas({
             <marker
               id="kg-arrow"
               viewBox="0 0 10 10"
-              refX="8"
+              refX="6"
               refY="5"
-              markerWidth="7"
-              markerHeight="7"
+              markerWidth="6"
+              markerHeight="6"
               orient="auto-start-reverse"
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
@@ -350,22 +421,20 @@ export function KnowledgeGraphCanvas({
             <marker
               id="kg-arrow-dim"
               viewBox="0 0 10 10"
-              refX="8"
+              refX="6"
               refY="5"
-              markerWidth="7"
-              markerHeight="7"
+              markerWidth="6"
+              markerHeight="6"
               orient="auto-start-reverse"
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#e2e8f0" />
             </marker>
           </defs>
           {drawn.map(({ e, p1, p2, traced }) => (
-            <line
+            <path
               key={String(e.id)}
-              x1={p1.x}
-              y1={p1.y}
-              x2={p2.x}
-              y2={p2.y}
+              d={edgePath(p1, p2)}
+              fill="none"
               stroke={traced ? "#94a3b8" : "#e2e8f0"}
               strokeWidth={traced ? 1.5 : 1}
               strokeDasharray={traced ? undefined : "4 4"}
@@ -374,12 +443,15 @@ export function KnowledgeGraphCanvas({
           ))}
         </svg>
 
-        {/* Edge relationship labels + confidence at the line midpoint */}
-        {drawn.map(({ e, p1, p2, traced }) => {
+        {/* Edge relationship labels + confidence at the curve midpoint.
+            Hidden for low-confidence non-center edges to cut clutter. */}
+        {drawn.map(({ e, p1, p2, traced, showLabel }) => {
+          if (!showLabel) return null;
           const label = humanizeRel(e.type);
           if (!label && !e.confidence) return null;
-          const mx = (p1.x + p2.x) / 2;
-          const my = (p1.y + p2.y) / 2;
+          const mid = edgeMidpoint(p1, p2);
+          const mx = mid.x;
+          const my = mid.y;
           return (
             <div
               key={`lbl-${String(e.id)}`}
@@ -399,21 +471,34 @@ export function KnowledgeGraphCanvas({
           );
         })}
 
-        {/* Center node */}
+        {/* Center node — dark-blue fill with two white border rings + glow */}
         <button
           type="button"
+          data-testid="kg-center-node"
           onClick={() => onNodeClick(centerNode)}
-          className="absolute z-10 flex flex-col items-center justify-center rounded-full border-2 px-3 text-center shadow-lg"
+          className="absolute z-10 flex flex-col items-center justify-center rounded-full px-3 text-center text-white shadow-[0_12px_28px_rgba(15,23,42,0.28)]"
           style={{
             left: layout.center.x - CENTER_R,
             top: layout.center.y - CENTER_R,
             width: CENTER_R * 2,
             height: CENTER_R * 2,
-            backgroundColor: centerPalette.bg,
-            borderColor: centerPalette.border,
+            background:
+              "radial-gradient(circle at 35% 28%, #1E5BB8 0%, #0B3B82 42%, #062A63 100%)",
+            border: "3px solid #FFFFFF",
+            boxShadow:
+              "0 0 0 4px rgba(255,255,255,0.9), 0 0 0 7px rgba(30,91,184,0.22), 0 14px 32px rgba(6,42,99,0.35)",
           }}
         >
-          <span className="line-clamp-3 text-[13px] font-semibold text-white">
+          <span className="pointer-events-none absolute inset-[7px] rounded-full border border-white/80" />
+          {(() => {
+            const Icon = centerIconFor(centerNode.type);
+            return (
+              <span className="mb-1 flex h-7 w-7 items-center justify-center rounded-full border border-white/50 bg-white/10">
+                <Icon size={17} />
+              </span>
+            );
+          })()}
+          <span className="line-clamp-2 text-[12px] font-semibold leading-tight text-white">
             {centerNode.label}
           </span>
           {typeof centerNode.confidence === "number" &&
