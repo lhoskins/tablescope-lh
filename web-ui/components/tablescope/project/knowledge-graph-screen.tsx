@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconDownload, IconMaximize, IconShare, IconTopologyStar3 } from "@tabler/icons-react";
 import {
   useKnowledgeGraph,
+  type GraphId,
   type GraphNode,
   type KnowledgeGraphInsightCard,
 } from "@/lib/ui/use-project-data";
@@ -26,7 +27,7 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [highestFirst, setHighestFirst] = useState(true);
   const [tracingCardId, setTracingCardId] = useState<string | null>(null);
-  const [tracedNodeIds, setTracedNodeIds] = useState<Set<number> | null>(null);
+  const [tracedNodeIds, setTracedNodeIds] = useState<Set<GraphId> | null>(null);
 
   // Hydrate center/lens from the URL once (shareable deep links).
   useEffect(() => {

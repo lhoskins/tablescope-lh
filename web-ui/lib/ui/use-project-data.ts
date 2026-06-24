@@ -315,8 +315,10 @@ export function useRemoveProjectMember(projectId: string) {
 
 // ── Relationship graph ───────────────────────────────────────────────
 
+export type GraphId = number | string;
+
 export interface GraphNode {
-  id: number;
+  id: GraphId;
   type: string;
   label: string;
   source_type: string | null;
@@ -336,9 +338,9 @@ export interface GraphNode {
 }
 
 export interface GraphEdge {
-  id: number;
-  source: number;
-  target: number;
+  id: GraphId;
+  source: GraphId;
+  target: GraphId;
   type: string;
   confidence: number;
   evidence: string;
@@ -384,8 +386,8 @@ export interface KnowledgeGraphInsightCard {
   supportedKpis: string[];
   recommendedAction?: string;
   traceToEvidence: {
-    nodeIds: number[];
-    edgeIds: number[];
+    nodeIds: GraphId[];
+    edgeIds: GraphId[];
     nodeKeys?: string[];
   };
 }

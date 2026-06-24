@@ -86,7 +86,7 @@ _DISPLAY_GROUP_BY_TYPE: dict[str, str] = {
     "project": "Project",
     "document": "Supporting & Governing Documents",
     "document_family": "Supporting & Governing Documents",
-    "reference_document": "Supporting & Governing Documents",
+    "reference_document": "Authoritative Reference Library",
     "policy": "Governing Policies / SOPs",
     "procedure": "Governing Policies / SOPs",
     "standard": "Governing Policies / SOPs",
@@ -348,14 +348,16 @@ def _pick_center(
         if center_node in by_id:
             return by_id[center_node]
 
-    # Default 1: a process node (the mockup centers on a process).
+    # Default 1: the project hub — its overview radiates to every related
+    # source (documents, reference library, data sources, queries, dashboards),
+    # so the first view shows the full neighbourhood with directional edges.
+    projects = [n for n in nodes if n["type"] == "project"]
+    if projects:
+        return _highest_degree(projects, edges)
+    # Default 2: a process node (the mockup centers on a process).
     processes = [n for n in nodes if n["type"] == "process"]
     if processes:
         return _highest_degree(processes, edges)
-    # Default 2: a project node.
-    projects = [n for n in nodes if n["type"] == "project"]
-    if projects:
-        return projects[0]
     # Default 3: the highest-degree node overall.
     return _highest_degree(nodes, edges)
 
@@ -816,6 +818,52 @@ def _empty_stats() -> dict[str, Any]:
     return {"nodeCount": 0, "edgeCount": 0, "cardCount": 0, "gapCount": 0, "byDisplayGroup": {}}
 
 
+def merge_graph_sources(
+    stored_nodes: list[dict[str, Any]],
+    stored_edges: list[dict[str, Any]],
+    extra_nodes: list[dict[str, Any]],
+    extra_edges: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Merge stored (AI) graph rows with structural rows, deduped by graph key.
+
+    Stored nodes win on collision (they carry AI summaries / properties); the
+    structural twin's id is remapped onto the stored node so its edges survive.
+    Edges are deduped by (from, to, relationship_type), keeping the strongest.
+    """
+    canonical_by_key: dict[str, dict[str, Any]] = {}
+    id_remap: dict[Any, Any] = {}
+    merged_nodes: list[dict[str, Any]] = []
+
+    for n in [*stored_nodes, *extra_nodes]:
+        key = graph_key_for(n)
+        existing = canonical_by_key.get(key)
+        if existing is None:
+            canonical_by_key[key] = n
+            merged_nodes.append(n)
+            id_remap[n["id"]] = n["id"]
+        else:
+            id_remap[n["id"]] = existing["id"]
+
+    valid_ids = {n["id"] for n in merged_nodes}
+    seen: dict[tuple[Any, Any, str], int] = {}
+    merged_edges: list[dict[str, Any]] = []
+    for e in [*stored_edges, *extra_edges]:
+        f = id_remap.get(e["from_node_id"], e["from_node_id"])
+        t = id_remap.get(e["to_node_id"], e["to_node_id"])
+        if f == t or f not in valid_ids or t not in valid_ids:
+            continue
+        remapped = {**e, "from_node_id": f, "to_node_id": t}
+        ekey = (f, t, str(e.get("relationship_type") or ""))
+        prev = seen.get(ekey)
+        if prev is not None:
+            if _edge_confidence(remapped) > _edge_confidence(merged_edges[prev]):
+                merged_edges[prev] = remapped
+            continue
+        seen[ekey] = len(merged_edges)
+        merged_edges.append(remapped)
+    return merged_nodes, merged_edges
+
+
 # ── Async DB wrapper ─────────────────────────────────────────────────
 
 async def build_node_centric_graph(
@@ -874,6 +922,18 @@ async def build_node_centric_graph(
         }
         for r in edge_rows.fetchall()
     ]
+
+    # Evidence Collector: fold the project's real assets (documents, reference
+    # library, data sources, queries, dashboards) into the graph so every node's
+    # related sources are present with directional, labelled edges.
+    from app.services.knowledge_graph_context import collect_structural_graph
+
+    extra_nodes, extra_edges, _hub_key = await collect_structural_graph(
+        session, tenant_id=tenant_id, project_id=project_id,
+    )
+    raw_nodes, raw_edges = merge_graph_sources(
+        raw_nodes, raw_edges, extra_nodes, extra_edges,
+    )
 
     payload = build_graph_payload(
         raw_nodes,

@@ -124,8 +124,16 @@ def test_center_by_id():
     assert payload["centerNode"]["id"] == 8
 
 
-def test_default_center_is_a_process():
+def test_default_center_is_the_project_hub():
+    # The project hub radiates to every related source (docs, reference library,
+    # data sources, queries, dashboards), so it is the default first view.
     payload = build_graph_payload(_nodes(), _edges())
+    assert payload["centerNode"]["type"] == "project"
+
+
+def test_default_center_falls_back_to_process_without_project():
+    nodes = [n for n in _nodes() if n["node_type"] != "project"]
+    payload = build_graph_payload(nodes, _edges())
     assert payload["centerNode"]["type"] == "process"
 
 

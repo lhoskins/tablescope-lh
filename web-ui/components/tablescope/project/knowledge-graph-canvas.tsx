@@ -1,39 +1,20 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import React, { useMemo } from "react";
 import {
   IconAlertTriangle,
-  IconTarget,
-  IconHelpHexagon,
   IconArrowRight,
+  IconHelpHexagon,
+  IconTarget,
 } from "@tabler/icons-react";
+import type { GraphId, GraphNode } from "@/lib/ui/use-project-data";
 import { cn } from "@/lib/cn";
-import type { GraphNode } from "@/lib/ui/use-project-data";
 import { alertSignFor, paletteFor } from "./knowledge-graph-style";
 
-/** Where each display group is anchored around the centered node. */
-const REGION_STYLE: Record<string, React.CSSProperties> = {
-  "Supporting & Governing Documents": { left: 0, top: "2%" },
-  "Governing Policies / SOPs": { left: "50%", top: 0, transform: "translateX(-50%)" },
-  "KPIs & Metrics": { right: 0, top: "2%" },
-  Queries: { right: 0, top: "42%" },
-  Dashboards: { right: 0, bottom: "2%" },
-  "Linked Data Sources": { left: "50%", bottom: 0, transform: "translateX(-50%)" },
-  "Related Entities": { left: 0, top: "42%" },
-  "Related Processes": { left: 0, bottom: "2%" },
-  "Insights / Findings": { left: "30%", bottom: "20%" },
-  Recommendations: { left: "55%", bottom: "20%" },
-  Project: { left: "50%", top: "2%", transform: "translateX(-50%)" },
-};
-
+/** Order display groups radiate around the center node. */
 const REGION_ORDER = [
   "Supporting & Governing Documents",
+  "Authoritative Reference Library",
   "Governing Policies / SOPs",
   "KPIs & Metrics",
   "Queries",
@@ -51,17 +32,17 @@ interface Point {
   y: number;
 }
 
-interface Layout {
-  width: number;
-  height: number;
-  center: Point | null;
-  byId: Record<number, Point>;
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 interface CanvasEdge {
-  id: number;
-  source: number;
-  target: number;
+  id: GraphId;
+  source: GraphId;
+  target: GraphId;
   confidence: number;
   type?: string;
 }
@@ -71,28 +52,69 @@ interface CanvasProps {
   nodes: GraphNode[];
   edges: CanvasEdge[];
   selectedNodeKey: string | null;
-  tracedNodeIds: Set<number> | null;
+  tracedNodeIds: Set<GraphId> | null;
   onNodeClick: (node: GraphNode) => void;
 }
 
-/** Max nodes rendered per display group so clusters stay readable. */
+// ── Layout constants (px) ────────────────────────────────────────────
 const MAX_PER_GROUP = 6;
-
-/** Pull a line endpoint back toward the other end so the arrow clears the node. */
-function trim(
-  from: Point,
-  to: Point,
-  pad: number,
-): Point {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const len = Math.hypot(dx, dy) || 1;
-  return { x: to.x - (dx / len) * pad, y: to.y - (dy / len) * pad };
-}
+const PILL_W = 210;
+const PILL_H = 38;
+const PILL_GAP = 8;
+const GROUP_LABEL_H = 22;
+const GROUP_GAP = 26;
+const OVERFLOW_H = 16;
+const CENTER_R = 60;
+const CENTER_GAP = 320; // horizontal space reserved for the center circle + labels
+const PAD = 28;
+const COL_W = PILL_W;
 
 function humanizeRel(type: string | undefined): string {
   if (!type) return "";
   return type.replace(/[_-]+/g, " ").trim();
+}
+
+/** Border point of a rectangle on the ray from its center toward `toward`. */
+function rectBorderPoint(rect: Rect, toward: Point): Point {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  const dx = toward.x - cx;
+  const dy = toward.y - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const tx = dx !== 0 ? rect.w / 2 / Math.abs(dx) : Infinity;
+  const ty = dy !== 0 ? rect.h / 2 / Math.abs(dy) : Infinity;
+  const t = Math.min(tx, ty);
+  return { x: cx + dx * t, y: cy + dy * t };
+}
+
+/** Point on a circle's edge on the ray toward `toward`. */
+function circleBorderPoint(c: Point, toward: Point, r: number): Point {
+  const dx = toward.x - c.x;
+  const dy = toward.y - c.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: c.x + (dx / len) * r, y: c.y + (dy / len) * r };
+}
+
+function groupHeight(count: number): number {
+  const shown = Math.min(count, MAX_PER_GROUP);
+  const overflow = count > MAX_PER_GROUP ? OVERFLOW_H : 0;
+  return GROUP_LABEL_H + shown * PILL_H + (shown - 1) * PILL_GAP + overflow;
+}
+
+interface GroupBox {
+  group: string;
+  nodes: GraphNode[];
+  x: number;
+  y: number;
+  side: "left" | "right";
+}
+
+interface ComputedLayout {
+  width: number;
+  height: number;
+  center: Point;
+  rects: Map<string, Rect>;
+  groups: GroupBox[];
 }
 
 function AlertSign({ type }: { type: string }) {
@@ -135,28 +157,28 @@ function NodeChip({
   selected,
   dimmed,
   onClick,
-  nodeRef,
+  style,
 }: {
   node: GraphNode;
   selected: boolean;
   dimmed: boolean;
   onClick: () => void;
-  nodeRef: (el: HTMLButtonElement | null) => void;
+  style: React.CSSProperties;
 }) {
   const palette = paletteFor(node.type);
   const conf = node.confidence;
   return (
     <button
-      ref={nodeRef}
       type="button"
       onClick={onClick}
       title={node.summary || node.label}
       className={cn(
-        "relative flex w-[200px] max-w-full items-center gap-2 rounded-lg border bg-white px-2.5 py-2 text-left shadow-sm transition-all hover:shadow-md",
+        "absolute z-[5] flex items-center gap-2 rounded-lg border bg-white px-2.5 text-left shadow-sm transition-all hover:shadow-md",
         selected && "ring-2 ring-offset-1",
         dimmed && "opacity-25",
       )}
       style={{
+        ...style,
         borderColor: palette.border,
         ...(selected ? { boxShadow: `0 0 0 2px ${palette.border}` } : {}),
       }}
@@ -181,6 +203,73 @@ function NodeChip({
   );
 }
 
+/** Deterministic two-column radial layout: groups stack down each side of the
+ *  center with fixed sizing, so pills never overlap and the canvas height grows
+ *  with the content (responsive). */
+function computeLayout(centerId: GraphId, nodes: GraphNode[]): ComputedLayout {
+  const byGroup = new Map<string, GraphNode[]>();
+  for (const n of nodes) {
+    if (n.id === centerId) continue;
+    const g = n.displayGroup ?? "Related Entities";
+    const arr = byGroup.get(g) ?? [];
+    arr.push(n);
+    byGroup.set(g, arr);
+  }
+  const present = REGION_ORDER.filter((g) => byGroup.has(g));
+
+  // Greedy balance: assign each group to the currently-shorter column.
+  let leftH = PAD;
+  let rightH = PAD;
+  const leftGroups: { group: string; nodes: GraphNode[]; h: number }[] = [];
+  const rightGroups: { group: string; nodes: GraphNode[]; h: number }[] = [];
+  for (const group of present) {
+    const groupNodes = byGroup.get(group) ?? [];
+    const h = groupHeight(groupNodes.length);
+    if (leftH <= rightH) {
+      leftGroups.push({ group, nodes: groupNodes, h });
+      leftH += h + GROUP_GAP;
+    } else {
+      rightGroups.push({ group, nodes: groupNodes, h });
+      rightH += h + GROUP_GAP;
+    }
+  }
+
+  const leftX = PAD;
+  const rightX = PAD + COL_W + CENTER_GAP;
+  const width = rightX + COL_W + PAD;
+  const contentH = Math.max(leftH, rightH, PAD + CENTER_R * 2);
+  const height = contentH + PAD;
+  const center: Point = { x: PAD + COL_W + CENTER_GAP / 2, y: height / 2 };
+
+  const rects = new Map<string, Rect>();
+  const groups: GroupBox[] = [];
+
+  const place = (
+    col: { group: string; nodes: GraphNode[]; h: number }[],
+    x: number,
+    side: "left" | "right",
+    colHeight: number,
+  ) => {
+    // Vertically center the column block within the canvas.
+    let y = (height - (colHeight - PAD - GROUP_GAP)) / 2;
+    if (y < PAD) y = PAD;
+    for (const g of col) {
+      groups.push({ group: g.group, nodes: g.nodes, x, y, side });
+      let py = y + GROUP_LABEL_H;
+      for (const n of g.nodes.slice(0, MAX_PER_GROUP)) {
+        rects.set(String(n.id), { x, y: py, w: PILL_W, h: PILL_H });
+        py += PILL_H + PILL_GAP;
+      }
+      y += g.h + GROUP_GAP;
+    }
+  };
+
+  place(leftGroups, leftX, "left", leftH);
+  place(rightGroups, rightX, "right", rightH);
+
+  return { width, height, center, rects, groups };
+}
+
 export function KnowledgeGraphCanvas({
   centerNode,
   nodes,
@@ -189,164 +278,111 @@ export function KnowledgeGraphCanvas({
   tracedNodeIds,
   onNodeClick,
 }: CanvasProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const centerRef = useRef<HTMLButtonElement | null>(null);
-  const nodeEls = useRef<Map<number, HTMLButtonElement>>(new Map());
-  const [layout, setLayout] = useState<Layout>({
-    width: 0,
-    height: 0,
-    center: null,
-    byId: {},
-  });
-
-  const others = nodes.filter((n) => n.id !== centerNode.id);
-  const byGroup = new Map<string, GraphNode[]>();
-  for (const n of others) {
-    const g = n.displayGroup ?? "Related Entities";
-    const arr = byGroup.get(g) ?? [];
-    arr.push(n);
-    byGroup.set(g, arr);
-  }
-
-  const measure = useCallback(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const base = container.getBoundingClientRect();
-    const centerEl = centerRef.current;
-    const center: Point | null = centerEl
-      ? (() => {
-          const r = centerEl.getBoundingClientRect();
-          return {
-            x: r.left - base.left + r.width / 2,
-            y: r.top - base.top + r.height / 2,
-          };
-        })()
-      : null;
-    const byId: Record<number, Point> = {};
-    nodeEls.current.forEach((el, id) => {
-      const r = el.getBoundingClientRect();
-      byId[id] = {
-        x: r.left - base.left + r.width / 2,
-        y: r.top - base.top + r.height / 2,
-      };
-    });
-    setLayout({
-      width: container.scrollWidth,
-      height: container.scrollHeight,
-      center,
-      byId,
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    measure();
-  }, [measure, nodes, centerNode.id]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(container);
-    window.addEventListener("resize", measure);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, [measure]);
+  const layout = useMemo(
+    () => computeLayout(centerNode.id, nodes),
+    [centerNode.id, nodes],
+  );
 
   const centerPalette = paletteFor(centerNode.type, true);
-  const isDimmed = (id: number) =>
+  const isDimmed = (id: GraphId) =>
     tracedNodeIds !== null && !tracedNodeIds.has(id);
+
+  /** Resolve the geometric attach point of an endpoint toward the other end. */
+  const attach = (id: GraphId, toward: Point): Point | null => {
+    if (id === centerNode.id) {
+      return circleBorderPoint(layout.center, toward, CENTER_R + 4);
+    }
+    const rect = layout.rects.get(String(id));
+    if (!rect) return null;
+    return rectBorderPoint(rect, toward);
+  };
+
+  const centerOf = (id: GraphId): Point | null => {
+    if (id === centerNode.id) return layout.center;
+    const r = layout.rects.get(String(id));
+    return r ? { x: r.x + r.w / 2, y: r.y + r.h / 2 } : null;
+  };
+
+  // Pre-compute drawable edges (both endpoints positioned).
+  const drawn = edges
+    .map((e) => {
+      const sc = centerOf(e.source);
+      const tc = centerOf(e.target);
+      if (!sc || !tc) return null;
+      const p1 = attach(e.source, tc);
+      const p2 = attach(e.target, sc);
+      if (!p1 || !p2) return null;
+      const traced =
+        tracedNodeIds === null ||
+        (tracedNodeIds.has(e.source) && tracedNodeIds.has(e.target));
+      return { e, p1, p2, traced };
+    })
+    .filter((v): v is NonNullable<typeof v> => v !== null);
 
   return (
     <div
-      ref={containerRef}
-      className="relative min-h-[720px] w-full overflow-auto rounded-lg border border-line-tertiary bg-[radial-gradient(circle,#eef2f7_1px,transparent_1px)] [background-size:22px_22px]"
+      className="relative h-full w-full overflow-auto rounded-lg border border-line-tertiary bg-[radial-gradient(circle,#eef2f7_1px,transparent_1px)] [background-size:22px_22px]"
     >
-      {/* Connector overlay (behind node cards): directional arrows from each
-          related source toward / away from the center, per the edge direction. */}
-      <svg
-        className="pointer-events-none absolute left-0 top-0"
-        width={layout.width || "100%"}
-        height={layout.height || "100%"}
+      <div
+        className="relative"
+        style={{ width: layout.width, height: layout.height, minWidth: "100%" }}
       >
-        <defs>
-          <marker
-            id="kg-arrow"
-            viewBox="0 0 10 10"
-            refX="9"
-            refY="5"
-            markerWidth="6"
-            markerHeight="6"
-            orient="auto-start-reverse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
-          </marker>
-          <marker
-            id="kg-arrow-dim"
-            viewBox="0 0 10 10"
-            refX="9"
-            refY="5"
-            markerWidth="6"
-            markerHeight="6"
-            orient="auto-start-reverse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#e2e8f0" />
-          </marker>
-        </defs>
-        {layout.center &&
-          edges.map((e) => {
-            const isCenterEdge =
-              e.source === centerNode.id || e.target === centerNode.id;
-            if (!isCenterEdge || !layout.center) return null;
-            const srcPt =
-              e.source === centerNode.id ? layout.center : layout.byId[e.source];
-            const tgtPt =
-              e.target === centerNode.id ? layout.center : layout.byId[e.target];
-            if (!srcPt || !tgtPt) return null;
-            // Trim endpoints so the arrowhead clears the center circle / node chip.
-            const p1 = trim(tgtPt, srcPt, e.source === centerNode.id ? 64 : 16);
-            const p2 = trim(srcPt, tgtPt, e.target === centerNode.id ? 64 : 16);
-            const traced =
-              tracedNodeIds === null ||
-              (tracedNodeIds.has(e.source) && tracedNodeIds.has(e.target));
-            return (
-              <line
-                key={e.id}
-                x1={p1.x}
-                y1={p1.y}
-                x2={p2.x}
-                y2={p2.y}
-                stroke={traced ? "#94a3b8" : "#e2e8f0"}
-                strokeWidth={traced ? 1.5 : 1}
-                strokeDasharray={traced ? undefined : "4 4"}
-                markerEnd={`url(#${traced ? "kg-arrow" : "kg-arrow-dim"})`}
-              />
-            );
-          })}
-      </svg>
+        {/* Connector overlay: directional arrows from the center toward each
+            related source (and source-to-source lineage), attached to the pill
+            edge nearest the other endpoint. */}
+        <svg
+          className="pointer-events-none absolute left-0 top-0"
+          width={layout.width}
+          height={layout.height}
+        >
+          <defs>
+            <marker
+              id="kg-arrow"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+            </marker>
+            <marker
+              id="kg-arrow-dim"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#e2e8f0" />
+            </marker>
+          </defs>
+          {drawn.map(({ e, p1, p2, traced }) => (
+            <line
+              key={String(e.id)}
+              x1={p1.x}
+              y1={p1.y}
+              x2={p2.x}
+              y2={p2.y}
+              stroke={traced ? "#94a3b8" : "#e2e8f0"}
+              strokeWidth={traced ? 1.5 : 1}
+              strokeDasharray={traced ? undefined : "4 4"}
+              markerEnd={`url(#${traced ? "kg-arrow" : "kg-arrow-dim"})`}
+            />
+          ))}
+        </svg>
 
-      {/* Edge relationship labels + confidence (above the connectors) */}
-      {layout.center &&
-        edges.map((e) => {
-          const isCenterEdge =
-            e.source === centerNode.id || e.target === centerNode.id;
-          if (!isCenterEdge || !layout.center) return null;
-          const srcPt =
-            e.source === centerNode.id ? layout.center : layout.byId[e.source];
-          const tgtPt =
-            e.target === centerNode.id ? layout.center : layout.byId[e.target];
-          if (!srcPt || !tgtPt) return null;
+        {/* Edge relationship labels + confidence at the line midpoint */}
+        {drawn.map(({ e, p1, p2, traced }) => {
           const label = humanizeRel(e.type);
           if (!label && !e.confidence) return null;
-          const traced =
-            tracedNodeIds === null ||
-            (tracedNodeIds.has(e.source) && tracedNodeIds.has(e.target));
-          const mx = (srcPt.x + tgtPt.x) / 2;
-          const my = (srcPt.y + tgtPt.y) / 2;
+          const mx = (p1.x + p2.x) / 2;
+          const my = (p1.y + p2.y) / 2;
           return (
             <div
-              key={`lbl-${e.id}`}
+              key={`lbl-${String(e.id)}`}
               className={cn(
                 "pointer-events-none absolute z-[6] flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap rounded border border-line-tertiary bg-white px-1.5 py-0.5 text-[9px] font-medium shadow-sm",
                 traced ? "text-ink-tertiary" : "text-line-secondary opacity-60",
@@ -363,58 +399,86 @@ export function KnowledgeGraphCanvas({
           );
         })}
 
-      {/* Center node */}
-      <button
-        ref={centerRef}
-        type="button"
-        onClick={() => onNodeClick(centerNode)}
-        className="absolute left-1/2 top-1/2 z-10 flex h-[120px] w-[120px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border-2 px-3 text-center shadow-lg"
-        style={{ backgroundColor: centerPalette.bg, borderColor: centerPalette.border }}
-      >
-        <span className="line-clamp-3 text-[13px] font-semibold text-white">
-          {centerNode.label}
-        </span>
-        {typeof centerNode.confidence === "number" && centerNode.confidence > 0 && (
-          <span className="mt-1 rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-            {centerNode.confidence.toFixed(2)}
+        {/* Center node */}
+        <button
+          type="button"
+          onClick={() => onNodeClick(centerNode)}
+          className="absolute z-10 flex flex-col items-center justify-center rounded-full border-2 px-3 text-center shadow-lg"
+          style={{
+            left: layout.center.x - CENTER_R,
+            top: layout.center.y - CENTER_R,
+            width: CENTER_R * 2,
+            height: CENTER_R * 2,
+            backgroundColor: centerPalette.bg,
+            borderColor: centerPalette.border,
+          }}
+        >
+          <span className="line-clamp-3 text-[13px] font-semibold text-white">
+            {centerNode.label}
           </span>
-        )}
-      </button>
+          {typeof centerNode.confidence === "number" &&
+            centerNode.confidence > 0 && (
+              <span className="mt-1 rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                {centerNode.confidence.toFixed(2)}
+              </span>
+            )}
+        </button>
 
-      {/* Display-group clusters */}
-      {REGION_ORDER.filter((g) => byGroup.has(g)).map((group) => {
-        const groupNodes = byGroup.get(group) ?? [];
-        const style = REGION_STYLE[group] ?? REGION_STYLE["Related Entities"];
-        return (
+        {/* Display-group labels */}
+        {layout.groups.map((g) => (
           <div
-            key={group}
-            className="absolute z-[5] flex max-w-[230px] flex-col gap-1.5"
-            style={style}
+            key={g.group}
+            className={cn(
+              "absolute z-[5] text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary",
+              g.side === "left" ? "text-left" : "text-left",
+            )}
+            style={{ left: g.x, top: g.y, width: PILL_W }}
           >
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-tertiary">
-              {group}
-            </div>
-            {groupNodes.slice(0, MAX_PER_GROUP).map((n) => (
+            {g.group}
+          </div>
+        ))}
+
+        {/* Pills */}
+        {layout.groups.flatMap((g) => {
+          const items = g.nodes.slice(0, MAX_PER_GROUP).map((n) => {
+            const rect = layout.rects.get(String(n.id));
+            if (!rect) return null;
+            return (
               <NodeChip
-                key={n.id}
+                key={String(n.id)}
                 node={n}
                 selected={selectedNodeKey === n.graphKey}
                 dimmed={isDimmed(n.id)}
                 onClick={() => onNodeClick(n)}
-                nodeRef={(el) => {
-                  if (el) nodeEls.current.set(n.id, el);
-                  else nodeEls.current.delete(n.id);
+                style={{
+                  left: rect.x,
+                  top: rect.y,
+                  width: rect.w,
+                  height: rect.h,
                 }}
               />
-            ))}
-            {groupNodes.length > MAX_PER_GROUP && (
-              <span className="pl-1 text-[10px] font-medium text-ink-tertiary">
-                +{groupNodes.length - MAX_PER_GROUP} more
-              </span>
-            )}
-          </div>
-        );
-      })}
+            );
+          });
+          const overflow = g.nodes.length - MAX_PER_GROUP;
+          if (overflow > 0) {
+            const lastRect = layout.rects.get(
+              String(g.nodes[MAX_PER_GROUP - 1].id),
+            );
+            if (lastRect) {
+              items.push(
+                <span
+                  key={`more-${g.group}`}
+                  className="absolute z-[5] pl-1 text-[10px] font-medium text-ink-tertiary"
+                  style={{ left: g.x, top: lastRect.y + PILL_H + 2 }}
+                >
+                  +{overflow} more
+                </span>,
+              );
+            }
+          }
+          return items;
+        })}
+      </div>
     </div>
   );
 }
