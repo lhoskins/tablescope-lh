@@ -502,6 +502,9 @@ async def add_allowed_domain(
         created_by=context.user_id,
     )
     session.add(row)
+    # Adding a domain expresses intent to restrict access, so turn enforcement on
+    # automatically. Admins can still disable it explicitly to stage domains.
+    tenant.allowed_domains_enabled = True
     await session.commit()
     await session.refresh(row)
     return AllowedDomainRead.model_validate(row)

@@ -1720,6 +1720,9 @@ async def ai_generate_and_save_dashboard(
 
     kept_defs: list[dict[str, Any]] = []
     dropped_widgets: list[dict[str, str]] = []
+    # Widgets kept despite a failed/empty validation run, so the dashboard still
+    # saves; they render with an inline "needs attention" state the user can fix.
+    flagged_widgets: list[dict[str, str]] = []
     repair_count = 0
 
     for w in widget_defs:
@@ -1756,25 +1759,49 @@ async def ai_generate_and_save_dashboard(
                     teiid_port=teiid_port,
                 )
             except Exception as exc:
+                # A failed validation run must not silently delete a widget the
+                # user previewed and chose to save. Keep it, flag it, and let the
+                # dashboard render an inline error the user can repair.
                 logger.warning(
-                    "AI dashboard widget dropped | title=%s reason=%s sql=%s",
+                    "AI dashboard widget flagged (kept) | title=%s reason=%s sql=%s",
                     title, "query failed to execute", widget_sql,
                 )
                 logger.debug("Widget %r SQL error: %s", title, exc)
-                dropped_widgets.append(
+                validation.update(
+                    {
+                        "execution_status": "error",
+                        "warnings": ["query failed to execute"],
+                        "error": str(exc)[:500],
+                    }
+                )
+                flagged_widgets.append(
                     {"title": title, "reason": "query failed to execute"}
                 )
+                w["_validation"] = validation
+                kept_defs.append(w)
                 continue
             cols = result.get("columns", [])
             rows = result.get("rows", [])
             keep, reason = _judge_widget(w, cols, rows)
             if not keep:
+                # Weak/empty result: keep but flag rather than dropping, so the
+                # previewed dashboard is still created.
                 logger.info(
-                    "AI dashboard widget dropped | title=%s reason=%s "
+                    "AI dashboard widget flagged (kept) | title=%s reason=%s "
                     "row_count=%d columns=%s",
                     title, reason, len(rows), cols,
                 )
-                dropped_widgets.append({"title": title, "reason": reason})
+                validation.update(
+                    {
+                        "execution_status": "weak",
+                        "row_count": len(rows),
+                        "columns_returned": cols,
+                        "warnings": [reason],
+                    }
+                )
+                flagged_widgets.append({"title": title, "reason": reason})
+                w["_validation"] = validation
+                kept_defs.append(w)
                 continue
             _correct_widget_chart(w, cols, rows)
             final_type = str(w.get("type", wtype)).lower()
@@ -1800,14 +1827,15 @@ async def ai_generate_and_save_dashboard(
         w["_validation"] = validation
         kept_defs.append(w)
 
-    # Minimum-save rule: a dashboard needs at least 2 strong widgets.
-    if len(kept_defs) < 2:
+    # Minimum-save rule: a dashboard needs at least one chartable widget. Widgets
+    # whose validation query fails or returns weak data are kept (and flagged),
+    # so the only widgets that count as unsavable are narrative/no-SQL findings.
+    if len(kept_defs) < 1:
         detail = (
-            "Not enough strong widgets survived validation to build a dashboard "
-            f"(needed 2, got {len(kept_defs)})."
+            "This suggestion has no chartable widgets to build a dashboard."
         )
         if dropped_widgets:
-            detail += " Dropped: " + "; ".join(
+            detail += " Skipped: " + "; ".join(
                 f"{d['title']} ({d['reason']})" for d in dropped_widgets[:6]
             )
         detail += (
@@ -2022,6 +2050,7 @@ async def ai_generate_and_save_dashboard(
             "dashboard_quality_score": quality_score,
             "approved_widget_count": approved_count,
             "dropped_widget_count": dropped_count,
+            "flagged_widget_count": len(flagged_widgets),
             "repair_count": repair_count,
             "rejected_insights": rejected_insights,
             "validation_summary": validation_summary,
@@ -2045,6 +2074,7 @@ async def ai_generate_and_save_dashboard(
         "dashboard_name": dashboard_title,
         "widgets_created": len(widgets_config),
         "widgets_dropped": dropped_widgets,
+        "widgets_flagged": flagged_widgets,
         "queries_created": created_queries,
         "queries_reused": reused_queries,
         "model_used": ai_result.get("model_used", ""),

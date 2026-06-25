@@ -47,7 +47,7 @@ function Section({
         <span>{title}</span>
         <span className="text-caption text-ink-tertiary">({cards.length})</span>
       </div>
-      <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {cards.map((card) => (
           <IntelligenceCard key={card.id} card={card} onAddToReport={onAdd} />
         ))}

@@ -12,6 +12,7 @@ import pytest
 from app.auth.jwt import create_access_token
 from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.services.knowledge_graph_builder import (
+    MAX_NEIGHBORHOOD_NODES,
     PIPELINE_VERSION,
     _json_safe,
     build_graph_payload,
@@ -166,6 +167,40 @@ def test_low_confidence_edge_hidden_by_default():
     labels = {n["label"] for n in payload["nodes"]}
     # Weakly linked doc is only reachable via a 0.55 edge -> dropped at 0.70.
     assert "Weakly linked doc" not in labels
+
+
+def test_kpis_survive_when_reference_library_exceeds_cap():
+    """Recommended (1-hop, hub-attached) and measured (2-hop, via a query) KPIs
+    must always render even when the bulk reference library would otherwise
+    fill the entire capped neighborhood and crowd them out."""
+    hub = {"id": 1, "node_type": "project", "name": "Proj", "properties": {"project_id": 7}}
+    center = {"id": 2, "node_type": "process", "name": "Center Process", "properties": {"confidence": 0.95}}
+    rec_kpi = {"id": 3, "node_type": "kpi", "name": "Recommended KPI", "properties": {"kpiStatus": "recommended"}}
+    query = {"id": 4, "node_type": "saved_query", "name": "Defect Query", "properties": {}}
+    meas_kpi = {"id": 5, "node_type": "kpi", "name": "Measured KPI", "properties": {"kpiStatus": "measured"}}
+    # Far more reference documents than the node cap, all attached to the hub.
+    ref_docs = [
+        {"id": 100 + i, "node_type": "reference_document", "name": f"Ref {i}", "properties": {}}
+        for i in range(MAX_NEIGHBORHOOD_NODES + 20)
+    ]
+    nodes = [hub, center, rec_kpi, query, meas_kpi, *ref_docs]
+
+    def e(eid, a, b, rel, conf):
+        return {"id": eid, "from_node_id": a, "to_node_id": b, "relationship_type": rel, "confidence": conf, "evidence": {}}
+
+    edges = [
+        e(1, 1, 2, "contains", 0.99),
+        e(2, 1, 3, "recommended_kpi", 0.9),   # hub -> recommended KPI (1-hop after re-root)
+        e(3, 1, 4, "derived_from", 0.95),     # hub -> query (1-hop after re-root)
+        e(4, 4, 5, "measures", 0.9),          # query -> measured KPI (2-hop)
+    ]
+    # Reference docs hang off the hub with high confidence so they compete hard.
+    edges += [e(1000 + i, 1, 100 + i, "references", 0.99) for i in range(len(ref_docs))]
+
+    payload = build_graph_payload(nodes, edges, center_node="process:center_process")
+    labels = {n["label"] for n in payload["nodes"]}
+    assert "Recommended KPI" in labels
+    assert "Measured KPI" in labels
 
 
 def test_inferred_relationships_included_when_requested():

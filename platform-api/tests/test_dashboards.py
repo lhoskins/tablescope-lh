@@ -314,6 +314,88 @@ async def test_save_dashboard_suggestion_persists_with_url(
     assert body["dashboard_url"] == f"/projects/{pid}/dashboards/{dash_id}"
 
 
+async def test_save_dashboard_keeps_widget_that_fails_to_execute(
+    client, service_headers, monkeypatch
+) -> None:
+    """A widget whose validation SQL fails must be kept (flagged), not dropped.
+
+    Previously the save raised "needed 2, got 1" when widget queries failed to
+    execute. The dashboard should now save with the widget present and flagged.
+    """
+    _, _, project, headers = await _setup_tenant_and_project(
+        client, service_headers
+    )
+    pid = project["id"]
+
+    async def _fake_forward(path: str, payload: dict):
+        return {
+            "model_used": "test-model",
+            "suggestions": [
+                {
+                    "title": "Supplier Quality",
+                    "widgets": [
+                        {
+                            "title": "Top 10 Suppliers by Defect Rate",
+                            "type": "bar",
+                            "sql": "SELECT supplier, defect_rate FROM q",
+                            "priority_score": 0.9,
+                        },
+                    ],
+                }
+            ],
+        }
+
+    import app.routes.ai_proxy as ai_proxy
+    import app.routes.query as query_module
+    import app.services.tenant_teiid_resolver as ttr
+
+    class _Endpoint:
+        pg_host = "teiid"
+        pg_port = 35432
+
+    class _FakeResolver:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def resolve_for_org(self, _tenant_id):
+            return _Endpoint()
+
+    async def _fake_resolve_vdb(*, session, context, project_id):
+        return "vdb_db"
+
+    async def _fail_run_sql(**_kwargs):
+        raise RuntimeError("teiid says no")
+
+    monkeypatch.setattr(ai_proxy, "_forward_to_ai", _fake_forward)
+    monkeypatch.setattr(ttr, "TenantTeiidResolver", _FakeResolver)
+    monkeypatch.setattr(query_module, "_resolve_vdb_database", _fake_resolve_vdb)
+    monkeypatch.setattr(query_module, "_run_sql", _fail_run_sql)
+
+    r = await client.post(
+        "/api/ai/actions/save-dashboard-suggestion",
+        json={
+            "project_id": pid,
+            "suggestionId": "suggestion-1",
+            "suggestion": {
+                "title": "Supplier Quality",
+                "widgets": [
+                    {"title": "Top 10 Suppliers by Defect Rate",
+                     "chartType": "bar", "businessQuestion": "which suppliers?"},
+                ],
+                "kpis": [],
+                "dataSources": [],
+            },
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "saved"
+    assert body["widgets_created"] == 1
+    flagged = body.get("widgets_flagged", [])
+    assert any(f["reason"] == "query failed to execute" for f in flagged)
+
+
 async def test_save_dashboard_suggestion_requires_editor(
     client, service_headers
 ) -> None:

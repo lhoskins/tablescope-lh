@@ -131,6 +131,14 @@ export default function AllowedDomainsPage() {
             </button>
           </div>
 
+          {!enabled && domains.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+              Enforcement is <strong>off</strong>. Accounts from any email domain
+              can still be created. Enable the toggle above to restrict signups
+              to the approved domains below.
+            </div>
+          )}
+
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="mb-3 text-sm font-medium text-slate-900">
               Approved domains

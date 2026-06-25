@@ -33,14 +33,16 @@ interface ProjectSummaryResponse {
   ai_status: string;
 }
 
+// Tenant vocabulary only: legacy `editor`/`viewer` roles were retired and now
+// display as "Member" so a deleted/legacy role never lingers in the UI.
 const ROLE_LABEL: Record<string, string> = {
   root_admin: "Root Admin",
   tenant_admin: "Admin",
   admin: "Admin",
   db_admin: "DB Admin",
   member: "Member",
-  editor: "Editor",
-  viewer: "Viewer",
+  editor: "Member",
+  viewer: "Member",
 };
 
 /** Resolve a relative avatar URL to an absolute, browser-fetchable URL. */

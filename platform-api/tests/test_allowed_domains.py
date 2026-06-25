@@ -269,6 +269,39 @@ async def test_allowed_domains_api_and_invite_enforcement(
     assert r.status_code == 204
 
 
+async def test_adding_domain_auto_enables_enforcement(
+    client, service_headers
+) -> None:
+    tenant, _admin, headers = await _setup_admin(client, service_headers)
+
+    # Starts disabled.
+    r = await client.get("/api/tenants/current/allowed-domains", headers=headers)
+    assert r.json()["enabled"] is False
+
+    # Adding the first domain turns enforcement on automatically.
+    r = await client.post(
+        "/api/tenants/current/allowed-domains",
+        json={"domain": "boeing.com"},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+
+    r = await client.get("/api/tenants/current/allowed-domains", headers=headers)
+    assert r.json()["enabled"] is True
+
+    # A disallowed domain is now blocked without any explicit toggle step.
+    r = await client.post(
+        f"/api/tenants/{tenant['id']}/users",
+        json={
+            "email": "leonard.hoskins@safrangroup.com",
+            "role": "member",
+            "external_id": "safran-1",
+        },
+        headers=service_headers,
+    )
+    assert r.status_code == 403, r.text
+
+
 async def test_allowed_domains_requires_admin(client, service_headers) -> None:
     tenant, _admin, _headers = await _setup_admin(client, service_headers)
     member = create_access_token(

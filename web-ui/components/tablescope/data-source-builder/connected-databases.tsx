@@ -51,31 +51,43 @@ export function ConnectedDatabases() {
   const [error, setError] = useState<string | null>(null);
   const [modalSourceId, setModalSourceId] = useState<string | null>(null);
 
-  const handleCreate = async (conn: SavedConnection) => {
+  // Open the table-selection flow for any connection-backed source (a
+  // user-owned saved connection or a datasource assigned by an Admin). Both
+  // resolve to a saved DatabaseConnection whose tables can be listed by id.
+  const openConnection = async (opts: {
+    connectionId: number;
+    displayName: string;
+    dbType: string;
+    host: string;
+    database: string;
+    port?: number | null;
+    username?: string | null;
+  }) => {
     // If this connection already has a session source, just open it.
     const existing = sources.find(
-      (s) => s.connectionConfig.connection_id === String(conn.id),
+      (s) => s.connectionConfig.connection_id === String(opts.connectionId),
     );
     if (existing) {
       setModalSourceId(existing.id);
       return;
     }
-    setBusyId(conn.id);
+    setBusyId(opts.connectionId);
     setError(null);
     try {
-      const tables = await listDbTables({ connection_id: conn.id });
+      const tables = await listDbTables({ connection_id: opts.connectionId });
+      const connectionConfig: Record<string, string> = {
+        connection_id: String(opts.connectionId),
+        db_type: opts.dbType,
+        host: opts.host,
+        database_name: opts.database,
+      };
+      if (opts.port != null) connectionConfig.port = String(opts.port);
+      if (opts.username) connectionConfig.username = opts.username;
       const source: SessionSource = {
-        id: `conn-${conn.id}-${Date.now()}`,
-        sourceType: toSourceType(conn.db_type),
-        displayName: conn.name,
-        connectionConfig: {
-          connection_id: String(conn.id),
-          db_type: conn.db_type,
-          host: conn.host,
-          port: String(conn.port),
-          database_name: conn.database_name,
-          username: conn.username,
-        },
+        id: `conn-${opts.connectionId}-${Date.now()}`,
+        sourceType: toSourceType(opts.dbType),
+        displayName: opts.displayName,
+        connectionConfig,
         status: "connected",
         isFileUpload: false,
         tables: tables.map((t) => ({
@@ -98,6 +110,17 @@ export function ConnectedDatabases() {
       setBusyId(null);
     }
   };
+
+  const handleCreate = (conn: SavedConnection) =>
+    openConnection({
+      connectionId: conn.id,
+      displayName: conn.name,
+      dbType: conn.db_type,
+      host: conn.host,
+      database: conn.database_name,
+      port: conn.port,
+      username: conn.username,
+    });
 
   if (isLoading) {
     return (
@@ -128,51 +151,85 @@ export function ConnectedDatabases() {
   return (
     <div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {assignedSources.map((src) => (
-          <div
-            key={src.id}
-            className="flex flex-col rounded-xl border border-line-tertiary bg-bg-primary p-3.5"
-          >
-            <div className="mb-2 flex items-center gap-2.5">
-              <span
-                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${connectorChip(
-                  src.db_type,
-                )}`}
-              >
-                <BrandLogo connector={src.db_type} size={20} />
-              </span>
-              <div className="min-w-0">
-                <div className="truncate text-[14px] font-semibold text-ink-primary">
-                  {src.display_name}
-                </div>
-                <div className="truncate text-caption text-ink-tertiary">
-                  {connectorDisplayName(src.db_type)}
-                </div>
-                <div className="truncate text-caption text-ink-tertiary">
-                  {src.host}
+        {assignedSources.map((src) => {
+          const connId = src.database_connection_id;
+          const added =
+            connId != null &&
+            sources.some(
+              (s) => s.connectionConfig.connection_id === String(connId),
+            );
+          return (
+            <div
+              key={src.id}
+              className="flex flex-col rounded-xl border border-line-tertiary bg-bg-primary p-3.5"
+            >
+              <div className="mb-2 flex items-center gap-2.5">
+                <span
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${connectorChip(
+                    src.db_type,
+                  )}`}
+                >
+                  <BrandLogo connector={src.db_type} size={20} />
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate text-[14px] font-semibold text-ink-primary">
+                    {src.display_name}
+                  </div>
+                  <div className="truncate text-caption text-ink-tertiary">
+                    {connectorDisplayName(src.db_type)}
+                  </div>
+                  <div className="truncate text-caption text-ink-tertiary">
+                    {src.host}
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="mb-3 flex flex-wrap gap-1.5">
-              <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
-                {src.assigned_by ? `Assigned by ${src.assigned_by}` : "Shared"}
-              </span>
-              {src.read_only && (
-                <span className="rounded-full bg-bg-secondary px-2 py-0.5 text-[11px] font-medium text-ink-tertiary">
-                  Read-only
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
+                  {src.assigned_by ? `Assigned by ${src.assigned_by}` : "Shared"}
                 </span>
+                {src.read_only && (
+                  <span className="rounded-full bg-bg-secondary px-2 py-0.5 text-[11px] font-medium text-ink-tertiary">
+                    Read-only
+                  </span>
+                )}
+              </div>
+              {connId != null ? (
+                <Button
+                  variant={added ? "secondary" : "brandSoft"}
+                  size="sm"
+                  className="mt-auto w-full"
+                  onClick={() =>
+                    openConnection({
+                      connectionId: connId,
+                      displayName: src.display_name,
+                      dbType: src.db_type,
+                      host: src.host,
+                      database: src.database,
+                    })
+                  }
+                  disabled={busyId === connId}
+                >
+                  {busyId === connId ? (
+                    <IconLoader2 size={14} className="animate-spin" />
+                  ) : (
+                    <IconPlus size={14} />
+                  )}
+                  {added ? "Edit selection" : "Create Data Source"}
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-auto w-full"
+                  disabled
+                  title="This shared source has no table picker available."
+                >
+                  Shared data source
+                </Button>
               )}
             </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="mt-auto w-full"
-              disabled
-            >
-              Shared data source
-            </Button>
-          </div>
-        ))}
+          );
+        })}
         {(connections ?? []).map((conn) => {
           const added = sources.some(
             (s) => s.connectionConfig.connection_id === String(conn.id),

@@ -165,6 +165,13 @@ _INSIGHT_TYPES = {
 _GAP_TYPES = {"gap", "process_gap", "data_gap", "compliance_gap"}
 _ACTION_TYPES = {"recommendation", "action"}
 
+# High-value node types that must never be crowded out of the capped
+# neighborhood by the bulk reference library / generic assets. KPIs & metrics
+# (recommended or measured) and findings/gaps/actions always get a seat first.
+_PRIORITY_NEIGHBOR_TYPES = (
+    {"kpi", "metric", "threshold", "benchmark"} | _INSIGHT_TYPES | _ACTION_TYPES
+)
+
 # Edge types that point an insight/gap/recommendation at its evidence.
 _EVIDENCE_EDGE_TYPES = {
     "evidence_for", "governs", "governed_by", "references", "supports",
@@ -420,6 +427,11 @@ def _neighborhood(
         adjacency.setdefault(e["from_node_id"], []).append((e["to_node_id"], e))
         adjacency.setdefault(e["to_node_id"], []).append((e["from_node_id"], e))
 
+    def _priority(pair: tuple[Any, dict[str, Any]]) -> tuple[int, float]:
+        other = nodes_by_id.get(pair[0]) or {}
+        boost = 1 if other.get("type") in _PRIORITY_NEIGHBOR_TYPES else 0
+        return (boost, _edge_confidence(pair[1]))
+
     kept: set[Any] = {center["id"]}
     frontier = [center["id"]]
     for _hop in range(2):
@@ -427,7 +439,7 @@ def _neighborhood(
         for nid in frontier:
             neighbors = sorted(
                 adjacency.get(nid, []),
-                key=lambda pair: _edge_confidence(pair[1]),
+                key=_priority,
                 reverse=True,
             )
             for other_id, _edge in neighbors:
@@ -444,6 +456,26 @@ def _neighborhood(
         frontier = next_frontier
         if not frontier or len(kept) >= max_nodes:
             break
+
+    # Guarantee high-value nodes are never crowded out of the capped
+    # neighborhood: KPIs/metrics, findings and actions must always render even
+    # when the bulk reference library fills the cap first. A KPI may sit two hops
+    # out (via its measuring query/dashboard), so pull it in whenever it connects
+    # to the kept set within two hops — and keep that connector too so the
+    # measurement edge renders. The priority set is small, so this stays bounded.
+    priority_ids = [
+        nid for nid, n in nodes_by_id.items()
+        if n.get("type") in _PRIORITY_NEIGHBOR_TYPES and nid not in kept
+    ]
+    for pid in priority_ids:
+        for other_id, _edge in adjacency.get(pid, []):
+            if other_id in kept:
+                kept.add(pid)
+                break
+            if any(o2 in kept for o2, _e2 in adjacency.get(other_id, [])):
+                kept.add(pid)
+                kept.add(other_id)
+                break
 
     kept_edges = [
         e for e in edges if e["from_node_id"] in kept and e["to_node_id"] in kept

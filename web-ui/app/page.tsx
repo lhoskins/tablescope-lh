@@ -8,7 +8,6 @@ import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
 import { HeroSearch } from "@/components/tablescope/home/hero-search";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
-import { RecentProjectsTable } from "@/components/tablescope/home/recent-projects";
 import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { getUserMeta } from "@/lib/auth";
@@ -35,10 +34,6 @@ const FALLBACK_TENANT: TenantSummary = {
 export default function HomePage() {
   const router = useRouter();
   const { data: identity } = useCurrentUser();
-  const { data: projects, isLoading } = useProjectSummaries({
-    recent: true,
-    limit: 5,
-  });
   const { data: allProjects } = useProjectSummaries();
   const [showCreate, setShowCreate] = useState(false);
 
@@ -81,11 +76,6 @@ export default function HomePage() {
           <HomeAiSuggestions />
         </div>
         <IntelligenceFeed />
-        <div className="mx-auto w-full max-w-content">
-          <RecentProjectsTable
-            projects={isLoading ? [] : (projects ?? [])}
-          />
-        </div>
       </div>
       <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
     </AppShell>
