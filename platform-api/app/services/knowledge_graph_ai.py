@@ -211,6 +211,14 @@ def _map_card(
     }
 
 
+def _clear_cards(payload: dict[str, Any]) -> dict[str, Any]:
+    """Strip all insight cards from a payload (AI-only: no deterministic fallback)."""
+    payload["insightCards"] = []
+    payload["tracePaths"] = []
+    payload["aiGenerated"] = False
+    return payload
+
+
 async def enrich_payload_with_ai(
     payload: dict[str, Any],
     *,
@@ -218,21 +226,23 @@ async def enrich_payload_with_ai(
     user_id: int,
     project_id: int,
 ) -> dict[str, Any]:
-    """Replace deterministic insight cards with AI-generated cards when possible.
+    """Generate the insight cards for a payload from the AI server only.
 
-    Mutates and returns ``payload``. Falls back silently to the deterministic
-    cards already present whenever the AI server is unavailable or returns no
-    usable cards.
+    Mutates and returns ``payload``. Insight cards are produced solely by the
+    AI server — there is no deterministic fallback. If the AI server is
+    disabled, unreachable, or returns no card that grounds to a real graph
+    node, the payload's insight cards are cleared (the panel shows no cards
+    rather than deterministic placeholders).
     """
     if not ai.is_enabled():
-        return payload
+        return _clear_cards(payload)
     center = payload.get("centerNode")
     if not center or not payload.get("nodes"):
-        return payload
+        return _clear_cards(payload)
 
     center_payload, neighbors, documents, kpis = _build_ai_request(payload)
     if not neighbors:
-        return payload
+        return _clear_cards(payload)
 
     try:
         raw_cards = await ai.knowledge_graph_cards(
@@ -246,14 +256,13 @@ async def enrich_payload_with_ai(
             kpis=kpis,
             max_cards=8,
         )
-    except Exception as exc:  # never let AI break the graph
+    except Exception as exc:  # AI failure → no cards (no deterministic fallback)
         logger.warning("KG AI enrichment failed: %s", exc)
-        return payload
+        return _clear_cards(payload)
 
     if not raw_cards:
-        return payload
+        return _clear_cards(payload)
 
-    existing_cards = payload.get("insightCards") or []
     nodes_by_key = {n["graphKey"]: n for n in payload["nodes"]}
     nodes = payload["nodes"]
     edges = payload["edges"]
@@ -269,13 +278,12 @@ async def enrich_payload_with_ai(
             cards.append(card)
 
     if not cards:
-        # AI returned cards but none were grounded in the current graph — keep
-        # the deterministic cards rather than blanking the right panel.
+        # AI returned cards but none grounded to real graph nodes — show no
+        # cards (no deterministic fallback).
         logger.info(
             "KG AI enrichment returned cards but none were grounded in current graph nodes"
         )
-        payload["insightCards"] = existing_cards
-        return payload
+        return _clear_cards(payload)
 
     payload["insightCards"] = cards
     payload["tracePaths"] = [

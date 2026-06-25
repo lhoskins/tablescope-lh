@@ -157,7 +157,9 @@ async def test_enrich_replaces_cards_when_ai_returns_grounded_cards(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_enrich_falls_back_when_ai_unavailable(monkeypatch):
+async def test_enrich_clears_cards_when_ai_unavailable(monkeypatch):
+    # AI-only: when the AI server returns nothing, the panel shows no cards
+    # (no deterministic fallback).
     monkeypatch.setattr(kg_ai.ai, "is_enabled", lambda: True)
 
     async def _none(**kwargs):
@@ -165,16 +167,16 @@ async def test_enrich_falls_back_when_ai_unavailable(monkeypatch):
 
     monkeypatch.setattr(kg_ai.ai, "knowledge_graph_cards", _none)
     payload = _payload()
-    before = payload["insightCards"]
     out = await kg_ai.enrich_payload_with_ai(payload, tenant_id=1, user_id=2, project_id=7)
-    assert out["insightCards"] == before
-    assert "aiGenerated" not in out or out.get("aiGenerated") is not True
+    assert out["insightCards"] == []
+    assert out["tracePaths"] == []
+    assert out.get("aiGenerated") is False
 
 
 @pytest.mark.asyncio
-async def test_enrich_keeps_deterministic_cards_when_ai_cards_ungrounded(monkeypatch):
-    # AI returns cards, but none ground to real nodes — keep the deterministic
-    # cards rather than blanking the right panel.
+async def test_enrich_clears_cards_when_ai_cards_ungrounded(monkeypatch):
+    # AI returns cards, but none ground to real nodes — show no cards (AI-only,
+    # no deterministic fallback).
     monkeypatch.setattr(kg_ai.ai, "is_enabled", lambda: True)
 
     async def _ungrounded(**kwargs):
@@ -182,14 +184,14 @@ async def test_enrich_keeps_deterministic_cards_when_ai_cards_ungrounded(monkeyp
 
     monkeypatch.setattr(kg_ai.ai, "knowledge_graph_cards", _ungrounded)
     payload = _payload()
-    before = list(payload["insightCards"])
     out = await kg_ai.enrich_payload_with_ai(payload, tenant_id=1, user_id=2, project_id=7)
-    assert out["insightCards"] == before
-    assert not any(c["title"] == "Floating" for c in out["insightCards"])
+    assert out["insightCards"] == []
+    assert out.get("aiGenerated") is False
 
 
 @pytest.mark.asyncio
-async def test_enrich_skipped_when_ai_disabled(monkeypatch):
+async def test_enrich_clears_cards_when_ai_disabled(monkeypatch):
+    # AI disabled → no AI call and no cards (no deterministic fallback).
     monkeypatch.setattr(kg_ai.ai, "is_enabled", lambda: False)
     called = False
 
@@ -203,3 +205,5 @@ async def test_enrich_skipped_when_ai_disabled(monkeypatch):
     out = await kg_ai.enrich_payload_with_ai(payload, tenant_id=1, user_id=2, project_id=7)
     assert called is False
     assert out is payload
+    assert out["insightCards"] == []
+    assert out.get("aiGenerated") is False

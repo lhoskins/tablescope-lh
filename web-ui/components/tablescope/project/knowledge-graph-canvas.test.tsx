@@ -7,6 +7,7 @@ import {
   edgePath,
   insetPoint,
   moveToward,
+  rectSidePoint,
 } from "./knowledge-graph-canvas";
 
 function node(over: Partial<GraphNode> & { id: number | string }): GraphNode {
@@ -40,6 +41,28 @@ describe("knowledge graph canvas geometry helpers", () => {
     const p = moveToward({ x: 0, y: 0 }, { x: 0, y: 10 }, 2);
     expect(p.x).toBeCloseTo(0);
     expect(p.y).toBeCloseTo(2);
+  });
+
+  it("rectSidePoint attaches to the pill's vertical edge nearest the circle", () => {
+    const rect = { x: 100, y: 200, w: 210, h: 38 };
+    const midY = 200 + 38 / 2;
+    // Circle to the LEFT of the pill → attach on the pill's LEFT edge.
+    const left = rectSidePoint(rect, { x: 0, y: midY });
+    expect(left.x).toBe(100);
+    expect(left.y).toBeCloseTo(midY);
+    // Circle to the RIGHT of the pill → attach on the pill's RIGHT edge.
+    const right = rectSidePoint(rect, { x: 999, y: midY });
+    expect(right.x).toBe(310);
+    expect(right.y).toBeCloseTo(midY);
+  });
+
+  it("rectSidePoint stays on the side edge even when vertically offset", () => {
+    const rect = { x: 100, y: 0, w: 210, h: 38 };
+    // Circle far below and to the left: still the LEFT edge at mid-height,
+    // never the top/bottom edge.
+    const p = rectSidePoint(rect, { x: 0, y: 800 });
+    expect(p.x).toBe(100);
+    expect(p.y).toBeCloseTo(19);
   });
 
   it("centerLabel keeps short labels and drops file extensions", () => {

@@ -103,17 +103,16 @@ function humanizeRel(type: string | undefined): string {
   return type.replace(/[_-]+/g, " ").trim();
 }
 
-/** Border point of a rectangle on the ray from its center toward `toward`. */
-function rectBorderPoint(rect: Rect, toward: Point): Point {
+/** Attach point on the pill's vertical edge (left/right side) nearest `toward`.
+ *
+ * Lines always terminate on the side of the pill facing the other endpoint
+ * (the centre circle for a centre→pill edge), at the pill's mid-height — never
+ * on the top/bottom edge or in the pill body. */
+export function rectSidePoint(rect: Rect, toward: Point): Point {
   const cx = rect.x + rect.w / 2;
   const cy = rect.y + rect.h / 2;
-  const dx = toward.x - cx;
-  const dy = toward.y - cy;
-  if (dx === 0 && dy === 0) return { x: cx, y: cy };
-  const tx = dx !== 0 ? rect.w / 2 / Math.abs(dx) : Infinity;
-  const ty = dy !== 0 ? rect.h / 2 / Math.abs(dy) : Infinity;
-  const t = Math.min(tx, ty);
-  return { x: cx + dx * t, y: cy + dy * t };
+  const x = toward.x >= cx ? rect.x + rect.w : rect.x;
+  return { x, y: cy };
 }
 
 /** Point on a circle's edge on the ray toward `toward`. */
@@ -374,7 +373,7 @@ export function KnowledgeGraphCanvas({
     }
     const rect = layout.rects.get(String(id));
     if (!rect) return null;
-    return rectBorderPoint(rect, toward);
+    return rectSidePoint(rect, toward);
   };
 
   const centerOf = (id: GraphId): Point | null => {
