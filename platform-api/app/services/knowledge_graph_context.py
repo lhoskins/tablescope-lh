@@ -100,7 +100,7 @@ def _haystack(*parts: Any) -> str:
     for part in parts:
         if part is None:
             continue
-        if isinstance(part, (dict, list)):
+        if isinstance(part, (dict | list)):
             try:
                 chunks.append(json.dumps(part, default=str))
             except (TypeError, ValueError):
