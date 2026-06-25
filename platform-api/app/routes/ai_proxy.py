@@ -114,6 +114,32 @@ class AISuggestDashboardsRequest(BaseModel):
     desired_count: int = 3
 
 
+class AISuggestionWidget(BaseModel):
+    """A single widget outline carried in a dashboard suggestion's savePayload."""
+    title: str = ""
+    chartType: str = ""
+    businessQuestion: str = ""
+
+
+class AISuggestionPayload(BaseModel):
+    """The selected suggestion the user chose to persist (its savePayload)."""
+    title: str = ""
+    description: str = ""
+    businessPurpose: str = ""
+    audience: str = ""
+    prompt: str = ""
+    widgets: list[AISuggestionWidget] = []
+    kpis: list[str] = []
+    dataSources: list[str] = []
+
+
+class AISaveDashboardSuggestionRequest(BaseModel):
+    """Persist a previewed dashboard suggestion (strict save validation)."""
+    project_id: int
+    suggestionId: str | None = None
+    suggestion: AISuggestionPayload
+
+
 class AICreateScopeRequest(BaseModel):
     """Create a single scope from an AI suggestion."""
     sourceTable: str
@@ -2095,19 +2121,39 @@ async def ai_suggest_dashboards(
         data_sources = [
             str(d) for d in s.get("data_sources", []) if str(d) in allowed_tables
         ]
+        title = str(s.get("title") or "AI Dashboard")
+        description = str(s.get("description", ""))
+        business_purpose = str(s.get("business_purpose", ""))
+        audience = str(s.get("audience") or req.audience or "")
+        kpi_names = [str(k) for k in s.get("kpis", []) if k]
+        # savePayload is echoed back verbatim on Save so the strict save stage
+        # persists *this* selected suggestion rather than re-deriving a plan.
+        save_payload = {
+            "title": title,
+            "description": description,
+            "businessPurpose": business_purpose,
+            "audience": audience,
+            "prompt": _suggestion_save_prompt(
+                title, business_purpose, description, widgets, kpi_names
+            ),
+            "widgets": widgets,
+            "kpis": kpi_names,
+            "dataSources": data_sources,
+        }
         suggestions.append(
             {
                 "id": f"suggestion-{idx + 1}",
-                "title": str(s.get("title") or "AI Dashboard"),
-                "description": str(s.get("description", "")),
-                "businessPurpose": str(s.get("business_purpose", "")),
-                "audience": str(s.get("audience") or req.audience or ""),
+                "title": title,
+                "description": description,
+                "businessPurpose": business_purpose,
+                "audience": audience,
                 "widgets": widgets,
-                "kpis": [str(k) for k in s.get("kpis", []) if k],
+                "kpis": kpi_names,
                 "dataSources": data_sources,
                 "confidence": float(s.get("confidence") or 0.0),
                 "qualityScore": int(s.get("quality_score") or 0),
                 "validationSummary": "",
+                "savePayload": save_payload,
             }
         )
 
@@ -2115,11 +2161,87 @@ async def ai_suggest_dashboards(
         "AI action: suggest_dashboards | count=%d project=%d tenant=%d user=%d",
         len(suggestions), req.project_id, context.tenant_id, context.user_id,
     )
+    preview_note = (
+        ""
+        if suggestions
+        else (
+            "Tablescope could not build full dashboard previews from the current "
+            "data. Refine the request or add more data sources, then try again."
+        )
+    )
     return {
         "action": "suggest_dashboards",
         "suggestions": suggestions,
+        "previewNote": preview_note,
         "model_used": ai_result.get("model_used", ""),
     }
+
+
+def _suggestion_save_prompt(
+    title: str,
+    business_purpose: str,
+    description: str,
+    widgets: list[dict[str, Any]],
+    kpis: list[str],
+) -> str:
+    """Build a focused prompt that pins the strict save stage to a chosen plan."""
+    parts: list[str] = [p for p in (title, business_purpose, description) if p]
+    for w in widgets:
+        label = str(w.get("title") or "")
+        question = str(w.get("businessQuestion") or "")
+        if label or question:
+            parts.append(": ".join(p for p in (label, question) if p))
+    if kpis:
+        parts.append("KPIs to cover: " + ", ".join(kpis))
+    return ". ".join(parts)
+
+
+@router.post("/actions/save-dashboard-suggestion")
+async def ai_save_dashboard_suggestion(
+    req: AISaveDashboardSuggestionRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Persist a previewed dashboard suggestion using strict save validation.
+
+    Preview (``/actions/suggest-dashboards``) never persists and never raises the
+    strict "needed 2, got N" error. Saving is a separate stage: it pins the
+    existing strict generate-and-save pipeline to the *selected* suggestion's
+    plan, drops widgets that fail to execute, and only persists a dashboard when
+    enough strong widgets survive — returning a clear reason otherwise.
+    """
+    s = req.suggestion
+    prompt = s.prompt or _suggestion_save_prompt(
+        s.title,
+        s.businessPurpose,
+        s.description,
+        [w.model_dump() for w in s.widgets],
+        list(s.kpis),
+    )
+    saved = await ai_generate_and_save_dashboard(
+        AIGenerateAndSaveDashboardRequest(
+            project_id=req.project_id,
+            prompt=prompt or None,
+            name=s.title or None,
+            description=s.description or None,
+        ),
+        session=session,
+        context=context,
+    )
+    dashboard_id = saved.get("dashboard_id")
+    saved["action"] = "save_dashboard_suggestion"
+    saved["suggestion_id"] = req.suggestionId
+    if dashboard_id is not None:
+        saved["dashboard_url"] = (
+            f"/projects/{req.project_id}/dashboards/{dashboard_id}"
+        )
+    logger.info(
+        "AI action: save_dashboard_suggestion | dashboard_id=%s suggestion=%s "
+        "project=%d tenant=%d user=%d",
+        dashboard_id, req.suggestionId, req.project_id,
+        context.tenant_id, context.user_id,
+    )
+    return saved
 
 
 # Insight-first chart catalog → (dashboard WidgetType, ChartSubtype).

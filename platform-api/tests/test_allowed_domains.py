@@ -9,6 +9,7 @@ from app.services.allowed_domains import (
     email_domain,
     is_valid_domain,
     normalize_domain,
+    normalize_email_domain,
 )
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
@@ -49,6 +50,11 @@ def _mock_supabase(monkeypatch):
 def test_email_domain_lowercases_and_strips() -> None:
     assert email_domain("Alice@Boeing.COM") == "boeing.com"
     assert email_domain("bob@safran-group.com ") == "safran-group.com"
+
+
+def test_normalize_email_domain() -> None:
+    assert normalize_email_domain("Leonard.Hoskins@SafranGroup.com") == "safrangroup.com"
+    assert normalize_email_domain("a@b.com ") == "b.com"
 
 
 def test_normalize_domain() -> None:
@@ -124,6 +130,31 @@ async def test_enabled_allows_listed_denies_unlisted(db_session) -> None:
     )
     assert not await is_email_allowed_for_tenant(
         db_session, tenant_id=tenant.id, email="x@gmail.com"
+    )
+
+
+async def test_enforce_allowed_domain_raises_for_unapproved(db_session) -> None:
+    from fastapi import HTTPException
+
+    from app.services.allowed_domains import enforce_allowed_domain
+
+    tenant, owner, _member = await _make_tenant_with_owner(db_session)
+    # Unapproved domain (the Safran case from the plan) is blocked on signup.
+    with pytest.raises(HTTPException) as exc:
+        await enforce_allowed_domain(
+            db_session,
+            tenant_id=tenant.id,
+            email="leonard.hoskins@safrangroup.com",
+            purpose="signup",
+        )
+    assert exc.value.status_code == 403
+    # Owner is never locked out, even with a disallowed domain.
+    await enforce_allowed_domain(
+        db_session, tenant_id=tenant.id, email=owner.email, user_id=owner.id
+    )
+    # Approved domain passes.
+    await enforce_allowed_domain(
+        db_session, tenant_id=tenant.id, email="pilot@boeing.com"
     )
 
 

@@ -88,8 +88,12 @@ describe("AIDashboardSuggestionsModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(42));
     expect(post).toHaveBeenLastCalledWith(
-      "/api/ai/actions/generate-and-save-dashboard",
-      expect.objectContaining({ project_id: 7, name: "Revenue Overview" }),
+      "/api/ai/actions/save-dashboard-suggestion",
+      expect.objectContaining({
+        project_id: 7,
+        suggestionId: "a",
+        suggestion: expect.objectContaining({ title: "Revenue Overview" }),
+      }),
     );
   });
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,11 @@ _DOMAIN_RE = re.compile(
 def email_domain(email: str) -> str:
     """Return the lowercase domain portion of an email address."""
     return email.split("@")[-1].lower().strip()
+
+
+def normalize_email_domain(email: str) -> str:
+    """Return the normalized (trimmed, lowercase) domain of an email address."""
+    return email.split("@")[-1].strip().lower()
 
 
 def normalize_domain(domain: str) -> str:
@@ -91,3 +97,30 @@ async def is_email_allowed_for_tenant(
             return True
 
     return email_domain(email) in await _active_domains(session, tenant_id)
+
+
+async def enforce_allowed_domain(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    email: str,
+    user_id: int | None = None,
+    purpose: str = "access",
+) -> None:
+    """Raise HTTP 403 when ``email`` is not allowed for ``tenant_id``.
+
+    A no-op when the restriction is disabled or the caller is exempt (the
+    original tenant owner or a tenant/super admin). ``purpose`` is one of
+    ``signup``/``invite``/``email``/``access`` and only shapes the error copy
+    (the allow-list itself is never leaked to the caller).
+    """
+    if await is_email_allowed_for_tenant(
+        session, tenant_id=tenant_id, email=email, user_id=user_id
+    ):
+        return
+    detail = (
+        INVITE_DENIED_MESSAGE
+        if purpose in ("invite", "signup")
+        else ACCESS_DENIED_MESSAGE
+    )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)

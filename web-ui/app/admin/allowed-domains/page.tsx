@@ -87,9 +87,10 @@ export default function AllowedDomainsPage() {
       <header className="mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">Allowed Domains</h1>
         <p className="mt-1 text-sm text-slate-500">
-          When enabled, only users with listed email domains can create accounts,
-          receive tenant transaction emails, and access this tenant. The tenant
-          owner/admin is exempt.
+          When enabled, only users with approved email domains can be invited,
+          create accounts, receive tenant transaction emails, and access this
+          tenant. The original tenant owner remains exempt so they cannot be
+          locked out.
         </p>
       </header>
 

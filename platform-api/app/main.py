@@ -25,6 +25,7 @@ from app.routes import billing as billing_routes
 from app.routes import billing_admin as billing_admin_routes
 from app.routes import connectors as connectors_routes
 from app.routes import dashboards as dashboards_routes
+from app.routes import data_source_assignments as data_source_assignments_routes
 from app.routes import database_sources as database_sources_routes
 from app.routes import document_families as document_families_routes
 from app.routes import file_analysis as file_analysis_routes
@@ -163,6 +164,9 @@ def create_app() -> FastAPI:
     app.include_router(sharing_routes.router, prefix=api_prefix)
     app.include_router(storage_routes.router, prefix=api_prefix)
     app.include_router(database_sources_routes.router, prefix=api_prefix)
+    app.include_router(
+        data_source_assignments_routes.router, prefix=api_prefix
+    )
     app.include_router(saas_sources_routes.router, prefix=api_prefix)
     app.include_router(connectors_routes.router, prefix=api_prefix)
     app.include_router(grid_preferences_routes.router, prefix=api_prefix)

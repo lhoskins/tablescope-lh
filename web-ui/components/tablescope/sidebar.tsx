@@ -10,6 +10,7 @@ import {
   IconUsers,
   IconBuildingBank,
   IconShieldLock,
+  IconDatabaseShare,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import { accentFor } from "@/lib/ui/color";
@@ -135,6 +136,12 @@ export function Sidebar({
           label: "Allowed Domains",
           href: "/admin/allowed-domains",
           icon: IconShieldLock,
+        },
+        {
+          key: "admin-data-source-assignments",
+          label: "Data Source Assignments",
+          href: "/admin/data-source-assignments",
+          icon: IconDatabaseShare,
         },
       ]
     : [];

@@ -22,6 +22,10 @@ import { KnowledgeGraphCanvas } from "./knowledge-graph-canvas";
 import { KnowledgeGraphInsightPanel } from "./knowledge-graph-insight-panel";
 import { humanize } from "./knowledge-graph-style";
 
+// Relationship types that are kept in the payload (so the node stays on the
+// canvas) but not drawn unless the user enables detailed/inferred relationships.
+const HIDDEN_EDGE_TYPES = new Set(["recommended_kpi", "suggested_kpi"]);
+
 interface ScreenProps {
   projectId: number;
   /** Optional breadcrumb context (e.g. document family name). */
@@ -144,13 +148,18 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
   const visibleEdges = useMemo(() => {
     if (!data) return [];
     const edges = data.edges.filter(
-      (e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target),
+      (e) =>
+        visibleNodeIds.has(e.source) &&
+        visibleNodeIds.has(e.target) &&
+        // Recommended/suggested KPI links keep the node on the canvas but are
+        // hidden by default — only drawn when detailed/inferred mode is on.
+        (includeInferred || !HIDDEN_EDGE_TYPES.has(e.type ?? "")),
     );
     if (highestFirst) {
       return [...edges].sort((a, b) => b.confidence - a.confidence);
     }
     return edges;
-  }, [data, visibleNodeIds, highestFirst]);
+  }, [data, visibleNodeIds, highestFirst, includeInferred]);
 
   const center = data?.centerNode ?? null;
   const title = center?.label ?? "Knowledge Graph";

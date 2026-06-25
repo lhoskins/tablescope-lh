@@ -36,8 +36,7 @@ from app.schemas.tenant import (
     UserUpdate,
 )
 from app.services.allowed_domains import (
-    INVITE_DENIED_MESSAGE,
-    is_email_allowed_for_tenant,
+    enforce_allowed_domain,
     is_valid_domain,
     normalize_domain,
 )
@@ -554,10 +553,9 @@ async def create_user(
 
     # Enforce the tenant's Allowed-Domains policy on the invitee's email. The
     # invitee is a new user (never the owner/admin) so they must match the list.
-    if not await is_email_allowed_for_tenant(
-        session, tenant_id=tenant_id, email=payload.email
-    ):
-        raise HTTPException(status_code=403, detail=INVITE_DENIED_MESSAGE)
+    await enforce_allowed_domain(
+        session, tenant_id=tenant_id, email=payload.email, purpose="invite"
+    )
 
     # Supabase is the primary authenticator: create/link a Supabase identity and
     # send a "set your password" invite that lands on the set-password page. No

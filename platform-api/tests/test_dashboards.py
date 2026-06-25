@@ -246,6 +246,88 @@ async def test_suggest_dashboards_returns_min_three(
     assert first["qualityScore"] == 90
 
 
+async def test_save_dashboard_suggestion_persists_with_url(
+    client, service_headers, monkeypatch
+) -> None:
+    """Saving a previewed suggestion runs the strict pipeline and returns a URL."""
+    _, _, project, headers = await _setup_tenant_and_project(
+        client, service_headers
+    )
+    pid = project["id"]
+
+    async def _fake_forward(path: str, payload: dict):
+        # The save stage drives the single strict generate-and-save pipeline.
+        assert path == "/ai/dashboard/suggest"
+        return {
+            "model_used": "test-model",
+            "suggestions": [
+                {
+                    "title": "Supplier Quality",
+                    "widgets": [
+                        {
+                            "title": "Defects by supplier",
+                            "type": "bar",
+                            "sql": "SELECT supplier, defects FROM q",
+                            "priority_score": 0.9,
+                        },
+                        {
+                            "title": "On-time delivery",
+                            "type": "bar",
+                            "sql": "SELECT supplier, ontime FROM q2",
+                            "priority_score": 0.8,
+                        },
+                    ],
+                }
+            ],
+        }
+
+    import app.routes.ai_proxy as ai_proxy
+
+    monkeypatch.setattr(ai_proxy, "_forward_to_ai", _fake_forward)
+
+    r = await client.post(
+        "/api/ai/actions/save-dashboard-suggestion",
+        json={
+            "project_id": pid,
+            "suggestionId": "suggestion-1",
+            "suggestion": {
+                "title": "Supplier Quality",
+                "description": "supplier overview",
+                "businessPurpose": "track supplier risk",
+                "audience": "executive",
+                "widgets": [
+                    {"title": "Defects by supplier", "chartType": "bar",
+                     "businessQuestion": "which suppliers?"},
+                ],
+                "kpis": ["defect_rate"],
+                "dataSources": [],
+            },
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["action"] == "save_dashboard_suggestion"
+    assert body["suggestion_id"] == "suggestion-1"
+    assert body["status"] == "saved"
+    dash_id = body["dashboard_id"]
+    assert body["dashboard_url"] == f"/projects/{pid}/dashboards/{dash_id}"
+
+
+async def test_save_dashboard_suggestion_requires_editor(
+    client, service_headers
+) -> None:
+    _, _, project, _ = await _setup_tenant_and_project(client, service_headers)
+    pid = project["id"]
+    viewer = create_access_token(sub="v", tenant_id=1, user_id=999, role="viewer")
+    r = await client.post(
+        "/api/ai/actions/save-dashboard-suggestion",
+        json={"project_id": pid, "suggestion": {"title": "x"}},
+        headers={"Authorization": f"Bearer {viewer}"},
+    )
+    assert r.status_code == 403
+
+
 async def test_suggest_dashboards_requires_editor(client, service_headers) -> None:
     _, _, project, _ = await _setup_tenant_and_project(client, service_headers)
     pid = project["id"]

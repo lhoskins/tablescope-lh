@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { IconLoader2, IconPlus } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import {
+  listConnectedSources,
   listDbTables,
   listSavedConnections,
   type SavedConnection,
@@ -37,6 +38,13 @@ export function ConnectedDatabases() {
     queryKey: ["builder", "saved-connections"],
     queryFn: listSavedConnections,
   });
+  const { data: connectedSources } = useQuery({
+    queryKey: ["builder", "connected-sources"],
+    queryFn: listConnectedSources,
+  });
+  const assignedSources = (connectedSources ?? []).filter(
+    (s) => s.source === "assigned",
+  );
   const addSource = useBuilderStore((s) => s.addSource);
   const sources = useBuilderStore((s) => s.sources);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -100,7 +108,9 @@ export function ConnectedDatabases() {
     );
   }
 
-  if (!connections || connections.length === 0) {
+  const hasOwned = Boolean(connections && connections.length > 0);
+
+  if (!hasOwned && assignedSources.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-line-secondary px-4 py-6 text-center text-small text-ink-tertiary">
         No connected databases yet. Create a connection on the{" "}
@@ -118,7 +128,52 @@ export function ConnectedDatabases() {
   return (
     <div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {connections.map((conn) => {
+        {assignedSources.map((src) => (
+          <div
+            key={src.id}
+            className="flex flex-col rounded-xl border border-line-tertiary bg-bg-primary p-3.5"
+          >
+            <div className="mb-2 flex items-center gap-2.5">
+              <span
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${connectorChip(
+                  src.db_type,
+                )}`}
+              >
+                <BrandLogo connector={src.db_type} size={20} />
+              </span>
+              <div className="min-w-0">
+                <div className="truncate text-[14px] font-semibold text-ink-primary">
+                  {src.display_name}
+                </div>
+                <div className="truncate text-caption text-ink-tertiary">
+                  {connectorDisplayName(src.db_type)}
+                </div>
+                <div className="truncate text-caption text-ink-tertiary">
+                  {src.host}
+                </div>
+              </div>
+            </div>
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
+                {src.assigned_by ? `Assigned by ${src.assigned_by}` : "Shared"}
+              </span>
+              {src.read_only && (
+                <span className="rounded-full bg-bg-secondary px-2 py-0.5 text-[11px] font-medium text-ink-tertiary">
+                  Read-only
+                </span>
+              )}
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-auto w-full"
+              disabled
+            >
+              Shared data source
+            </Button>
+          </div>
+        ))}
+        {(connections ?? []).map((conn) => {
           const added = sources.some(
             (s) => s.connectionConfig.connection_id === String(conn.id),
           );

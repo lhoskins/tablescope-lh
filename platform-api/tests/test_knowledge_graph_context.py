@@ -212,12 +212,88 @@ async def test_kpis_collected_from_document_relationships(db_session) -> None:
     assert "SUP_Supplier_Quality_Manual_2026.docx" in (
         kpi_node["properties"]["source_documents"]
     )
-    # The KPI is attached to the hub with a supports_kpi edge (kept under the
-    # confidence floor because it is structural, confidence 0.9).
+    # No query/dashboard measures it, so it is a *recommended* KPI: attached to
+    # the hub with a hidden ``recommended_kpi`` edge (no noisy document lines).
+    assert kpi_node["properties"]["kpiStatus"] == "recommended"
     assert any(
-        e["relationship_type"] == "supports_kpi"
+        e["relationship_type"] == "recommended_kpi"
         and e["to_node_id"].startswith("s:kpi:")
         and e["confidence"] == 0.9
+        for e in edges
+    )
+    # And it does *not* get a visible measured edge.
+    assert not any(
+        e["relationship_type"] in ("measures", "visualizes")
+        for e in edges
+    )
+
+
+async def test_recommended_kpi_has_no_visible_edge_after_merge(db_session) -> None:
+    """A recommended KPI renders on the canvas but its only edge is hidden."""
+    tenant_id = 1
+    project_id = await _seed_project(db_session, tenant_id=tenant_id)
+    kpi = AIProjectGraphNode(
+        tenant_id=tenant_id, project_id=project_id, node_type="kpi",
+        name="supplier_quality_score", created_by=1, is_active=True,
+    )
+    db_session.add(kpi)
+    await db_session.flush()
+
+    nodes, edges, _hub = await collect_structural_graph(
+        db_session, tenant_id=tenant_id, project_id=project_id
+    )
+    kpi_node = next(n for n in nodes if n["node_type"] == "kpi")
+    assert kpi_node["properties"]["kpiStatus"] == "recommended"
+    kpi_edges = [e for e in edges if e["to_node_id"] == kpi_node["id"]]
+    assert kpi_edges and all(
+        e["relationship_type"] == "recommended_kpi" for e in kpi_edges
+    )
+
+
+async def test_measured_kpi_gets_query_and_dashboard_edges(db_session) -> None:
+    """A KPI depicted by a saved query/dashboard becomes ``measured`` with
+    visible query → KPI and dashboard → KPI edges (no recommended_kpi edge)."""
+    from app.models.dashboard import Dashboard
+
+    tenant_id = 1
+    project_id = await _seed_project(db_session, tenant_id=tenant_id)
+    kpi = AIProjectGraphNode(
+        tenant_id=tenant_id, project_id=project_id, node_type="kpi",
+        name="defect_rate", created_by=1, is_active=True,
+    )
+    db_session.add(kpi)
+    query = SavedQuery(
+        project_id=project_id, owner_id=1, name="Supplier Defect Rate Trend",
+        sql_text="SELECT supplier, count(*) AS defect_rate FROM capa GROUP BY supplier",
+    )
+    dashboard = Dashboard(
+        project_id=project_id, owner_id=1, tenant_id=tenant_id,
+        name="Quality Overview",
+        config={"widgets": [{"title": "Defect Rate by Supplier", "type": "bar"}]},
+    )
+    db_session.add_all([query, dashboard])
+    await db_session.flush()
+
+    nodes, edges, _hub = await collect_structural_graph(
+        db_session, tenant_id=tenant_id, project_id=project_id
+    )
+    kpi_node = next(n for n in nodes if n["node_type"] == "kpi")
+    assert kpi_node["properties"]["kpiStatus"] == "measured"
+
+    kpi_id = kpi_node["id"]
+    measures = [
+        e for e in edges
+        if e["to_node_id"] == kpi_id and e["relationship_type"] == "measures"
+    ]
+    visualizes = [
+        e for e in edges
+        if e["to_node_id"] == kpi_id and e["relationship_type"] == "visualizes"
+    ]
+    assert measures and measures[0]["from_node_id"].startswith("s:query:")
+    assert visualizes and visualizes[0]["from_node_id"].startswith("s:dashboard:")
+    # A measured KPI never carries the hidden recommended link.
+    assert not any(
+        e["to_node_id"] == kpi_id and e["relationship_type"] == "recommended_kpi"
         for e in edges
     )
 

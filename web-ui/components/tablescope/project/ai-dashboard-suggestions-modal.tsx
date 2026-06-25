@@ -12,19 +12,40 @@ import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
+export interface SuggestionWidget {
+  title: string;
+  chartType: string;
+  businessQuestion: string;
+}
+
 export interface DashboardSuggestion {
   id: string;
   title: string;
   description: string;
   businessPurpose: string;
   audience: string;
-  widgets: { title: string; chartType: string; businessQuestion: string }[];
+  widgets: SuggestionWidget[];
   kpis: string[];
   dataSources: string[];
   confidence: number;
   qualityScore: number;
   validationSummary: string;
+  savePayload?: Record<string, unknown>;
 }
+
+const CHART_GLYPH: Record<string, string> = {
+  bar: "▬",
+  column: "▬",
+  horizontal_bar: "▬",
+  line: "↗",
+  area: "↗",
+  pie: "◐",
+  donut: "◐",
+  kpi: "#",
+  table: "☷",
+  scatter: "⋰",
+  narrative: "¶",
+};
 
 const AUDIENCES = ["", "executive", "manager", "analyst", "operational"];
 const AUDIENCE_LABEL: Record<string, string> = {
@@ -79,15 +100,20 @@ export function AIDashboardSuggestionsModal({
 
   const saveMutation = useMutation({
     mutationFn: (s: DashboardSuggestion) =>
-      apiClient.post<{ dashboard_id: number; dashboard_name: string }>(
-        "/api/ai/actions/generate-and-save-dashboard",
+      apiClient.post<{ dashboard_id: number; dashboard_name: string; dashboard_url?: string }>(
+        "/api/ai/actions/save-dashboard-suggestion",
         {
           project_id: Number(projectId),
-          name: s.title,
-          description: s.description,
-          prompt: [s.businessPurpose, s.description, ...s.widgets.map((w) => w.businessQuestion || w.title)]
-            .filter(Boolean)
-            .join(". "),
+          suggestionId: s.id,
+          suggestion: s.savePayload ?? {
+            title: s.title,
+            description: s.description,
+            businessPurpose: s.businessPurpose,
+            audience: s.audience,
+            widgets: s.widgets,
+            kpis: s.kpis,
+            dataSources: s.dataSources,
+          },
         },
       ),
     onSuccess: (res) => {
@@ -227,6 +253,28 @@ export function AIDashboardSuggestionsModal({
                   </Badge>
                 )}
               </div>
+
+              {s.widgets.length > 0 && (
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {s.widgets.slice(0, 6).map((w, i) => (
+                    <div
+                      key={`${s.id}-w-${i}`}
+                      className="rounded-md border border-line-secondary bg-bg-secondary/40 p-2"
+                      title={w.businessQuestion || w.title}
+                    >
+                      <div className="flex items-center gap-1.5 text-[11px] uppercase text-ink-tertiary">
+                        <span aria-hidden className="text-ink-secondary">
+                          {CHART_GLYPH[(w.chartType || "").toLowerCase()] ?? "▭"}
+                        </span>
+                        {w.chartType || "widget"}
+                      </div>
+                      <div className="mt-1 line-clamp-2 text-[12px] text-ink-primary">
+                        {w.title || w.businessQuestion || "Untitled widget"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {s.kpis.length > 0 && (
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">

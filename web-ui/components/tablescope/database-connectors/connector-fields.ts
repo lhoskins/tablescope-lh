@@ -21,12 +21,23 @@ export interface ConnectorSpec {
   fields: ConnectorField[];
 }
 
-const DB_FIELDS = (defaultPort: number): ConnectorField[] => [
+const DB_FIELDS = (
+  defaultPort: number,
+  opts: { passwordOptional?: boolean } = {},
+): ConnectorField[] => [
   { key: "host", label: "Host", placeholder: "db.example.com" },
   { key: "port", label: "Port", type: "number", placeholder: String(defaultPort) },
   { key: "database_name", label: "Database name", placeholder: "analytics" },
   { key: "username", label: "Username" },
-  { key: "password", label: "Password", type: "password" },
+  {
+    key: "password",
+    label: "Password",
+    type: "password",
+    // Some MySQL deployments allow blank/credentialless access on a trusted
+    // network, so the password is not required for MySQL.
+    optional: opts.passwordOptional,
+    placeholder: opts.passwordOptional ? "Password optional" : undefined,
+  },
 ];
 
 export const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
@@ -64,7 +75,7 @@ export const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
     initials: "MY",
     chip: "bg-amber-100 text-amber-700",
     defaultPort: 3306,
-    fields: DB_FIELDS(3306),
+    fields: DB_FIELDS(3306, { passwordOptional: true }),
   },
   salesforce: {
     key: "salesforce",

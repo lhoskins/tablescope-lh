@@ -27,8 +27,13 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.database_connection import DatabaseConnection
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
+from app.models.database_data_source_assignment import (
+    DatabaseDataSourceAssignment,
+)
 from app.models.project import Project
+from app.models.user import User
 from app.models.user_vdb import UserVDB
+from app.schemas.data_source_assignment import ConnectedSource
 from app.schemas.database_source import (
     ColumnRequest,
     ColumnsResponse,
@@ -206,6 +211,85 @@ async def list_saved_connections(
         )
     ).all()
     return [SavedConnectionRead(**r.to_dict()) for r in rows]
+
+
+@router.get("/connected", response_model=list[ConnectedSource])
+async def list_connected_databases(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[ConnectedSource]:
+    """Unified "Connected Databases" list: owned connections + assigned sources.
+
+    Owned items are the caller's saved connection profiles (editable).
+    Assigned items are datasources an Admin/DB Admin shared with the caller;
+    their credentials are never exposed and cannot be edited.
+    """
+    items: list[ConnectedSource] = []
+
+    owned = (
+        await session.scalars(
+            select(DatabaseConnection).where(
+                DatabaseConnection.tenant_id == context.tenant_id,
+                DatabaseConnection.created_by == context.user_id,
+            )
+        )
+    ).all()
+    for c in owned:
+        items.append(
+            ConnectedSource(
+                id=f"owned-{c.id}",
+                source="owned",
+                database_connection_id=c.id,
+                display_name=c.name,
+                db_type=c.db_type,
+                host=c.host,
+                database=c.database_name,
+                read_only=False,
+                can_edit_connection=True,
+                can_select=True,
+            )
+        )
+
+    assignments = (
+        await session.scalars(
+            select(DatabaseDataSourceAssignment).where(
+                DatabaseDataSourceAssignment.tenant_id == context.tenant_id,
+                DatabaseDataSourceAssignment.assigned_user_id
+                == context.user_id,
+                DatabaseDataSourceAssignment.is_active.is_(True),
+            )
+        )
+    ).all()
+    for a in assignments:
+        source = await session.get(
+            DatabaseDataSource, a.database_data_source_id
+        )
+        if source is None or source.archived:
+            continue
+        assigner = (
+            await session.get(User, a.assigned_by) if a.assigned_by else None
+        )
+        assigned_by_name = None
+        if assigner is not None:
+            assigned_by_name = assigner.display_name or assigner.email
+        items.append(
+            ConnectedSource(
+                id=f"assigned-{a.id}",
+                source="assigned",
+                database_data_source_id=a.database_data_source_id,
+                database_connection_id=a.database_connection_id,
+                display_name=a.friendly_name,
+                db_type=source.db_type,
+                host=source.host,
+                database=source.database_name,
+                read_only=a.read_only,
+                assigned_by=assigned_by_name,
+                can_edit_connection=False,
+                can_select=True,
+            )
+        )
+
+    return items
 
 
 @router.post("/connections", response_model=SavedConnectionRead)

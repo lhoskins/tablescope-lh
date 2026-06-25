@@ -174,6 +174,31 @@ export function listSavedConnections(): Promise<SavedConnection[]> {
   );
 }
 
+/**
+ * A Connected Databases entry: either a user-owned connection or a database
+ * datasource assigned to the user by an Admin / DB Admin.
+ */
+export interface ConnectedSource {
+  id: string;
+  source: "owned" | "assigned";
+  database_data_source_id: number | null;
+  database_connection_id: number | null;
+  display_name: string;
+  db_type: string;
+  host: string;
+  database: string;
+  read_only: boolean;
+  assigned_by: string | null;
+  can_edit_connection: boolean;
+  can_select: boolean;
+}
+
+export function listConnectedSources(): Promise<ConnectedSource[]> {
+  return apiClient.get<ConnectedSource[]>(
+    "/api/database-sources/connected",
+  );
+}
+
 export function createDbSource(body: {
   display_name: string;
   table_name: string;

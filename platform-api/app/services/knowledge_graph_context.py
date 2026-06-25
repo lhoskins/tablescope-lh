@@ -17,6 +17,7 @@ every edge is a factual containment/lineage relationship (confidence 1.0).
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -49,6 +50,13 @@ _REL_QUERY = "query"
 _REL_DASHBOARD = "dashboard"
 _REL_QUERY_READS = "reads_from"
 _REL_SUPPORTS_KPI = "supports_kpi"
+# A recommended KPI keeps a (low-noise) link to the hub so it stays on the
+# canvas, but the relationship is hidden by default — the FE only draws it when
+# detailed/inferred relationships are enabled.
+_REL_RECOMMENDED_KPI = "recommended_kpi"
+# Measured KPIs are connected to the query/dashboard that depicts them.
+_REL_QUERY_MEASURES = "measures"
+_REL_DASHBOARD_VISUALIZES = "visualizes"
 
 # Edge types that mean a document/process/family references or defines a KPI.
 _KPI_EDGE_TYPES = ("supports_kpi", "measures", "defines", "tracks", "monitors")
@@ -63,6 +71,47 @@ def _norm(value: str | None) -> str:
     return "".join(
         ch if ch.isalnum() else "_" for ch in (value or "").lower()
     ).strip("_")
+
+
+# Minimum length for a KPI phrase to be matched against query/dashboard text,
+# so short/ambiguous tokens never create spurious "measured" relationships.
+_KPI_PHRASE_MIN = 4
+
+
+def _kpi_phrases(name: str | None, props: dict[str, Any]) -> set[str]:
+    """Normalized phrases that identify a KPI in free text (name + aliases)."""
+    phrases: set[str] = set()
+    candidates = [name, props.get("display_name"), props.get("kpi_key")]
+    aliases = props.get("aliases")
+    if isinstance(aliases, list):
+        candidates.extend(aliases)
+    for raw in candidates:
+        if not isinstance(raw, str):
+            continue
+        norm = _norm(raw)
+        if len(norm) >= _KPI_PHRASE_MIN:
+            phrases.add(norm)
+    return phrases
+
+
+def _haystack(*parts: Any) -> str:
+    """Normalized concatenation of text/JSON parts for substring matching."""
+    chunks: list[str] = []
+    for part in parts:
+        if part is None:
+            continue
+        if isinstance(part, (dict, list)):
+            try:
+                chunks.append(json.dumps(part, default=str))
+            except (TypeError, ValueError):
+                continue
+        else:
+            chunks.append(str(part))
+    return _norm(" ".join(chunks))
+
+
+def _phrase_in(phrases: set[str], haystack: str) -> bool:
+    return any(p in haystack for p in phrases)
 
 
 def _node(
@@ -231,8 +280,21 @@ async def collect_structural_graph(
             .limit(_MAX_PER_KIND)
         )
     ).all()
+    # (node_id, display name, normalized searchable text) per query/dashboard,
+    # used to detect which KPIs a query/dashboard actually measures.
+    query_haystacks: list[tuple[str, str, str]] = []
+    dashboard_haystacks: list[tuple[str, str, str]] = []
     for q in queries:
         nid = f"s:query:{q.id}"
+        query_haystacks.append((
+            nid,
+            q.name or f"query {q.id}",
+            _haystack(
+                q.name, q.description, q.sql_text,
+                q.left_column, q.right_column,
+                q.left_datasource, q.right_datasource,
+            ),
+        ))
         nodes.append(
             _node(
                 nid,
@@ -274,6 +336,11 @@ async def collect_structural_graph(
     ).all()
     for d in dashboards:
         nid = f"s:dashboard:{d.id}"
+        dashboard_haystacks.append((
+            nid,
+            d.name or f"dashboard {d.id}",
+            _haystack(d.name, d.description, d.config),
+        ))
         nodes.append(
             _node(
                 nid,
@@ -374,10 +441,31 @@ async def collect_structural_graph(
             label = kp.get("display_name") or k.name or f"kpi {k.id}"
             nid = f"s:kpi:{k.id}"
             docs = kpi_sources.get(k.id, [])
-            summary = (
-                f"KPI referenced by {', '.join(docs[:3])}." if docs
-                else "KPI extracted from project documents."
-            )
+
+            # Detect whether a saved query or dashboard actually depicts this
+            # KPI (by name / description / SQL aliases / dashboard config). Only
+            # then is the KPI "measured" and given a visible edge — recommended
+            # KPIs stay edgeless so the canvas isn't flooded with document lines.
+            phrases = _kpi_phrases(k.name, kp)
+            measuring_queries = [
+                (qid, qname) for qid, qname, hay in query_haystacks
+                if phrases and _phrase_in(phrases, hay)
+            ]
+            measuring_dashboards = [
+                (did, dname) for did, dname, hay in dashboard_haystacks
+                if phrases and _phrase_in(phrases, hay)
+            ]
+            is_measured = bool(measuring_queries or measuring_dashboards)
+            kpi_status = "measured" if is_measured else "recommended"
+
+            if is_measured:
+                measured_names = [n for _id, n in (*measuring_queries, *measuring_dashboards)]
+                summary = f"KPI measured by {', '.join(measured_names[:3])}."
+            elif docs:
+                summary = f"KPI recommended by {', '.join(docs[:3])}."
+            else:
+                summary = "KPI recommended from project document analysis."
+
             nodes.append(
                 _node(
                     nid,
@@ -388,18 +476,42 @@ async def collect_structural_graph(
                     properties={
                         "graph_key": f"kpi:{_norm(k.name)}",
                         "kpi_key": k.name,
+                        "kpiStatus": kpi_status,
                         "summary": summary,
                         "source_documents": docs,
                         "confidence": 0.9,
                     },
                 )
             )
-            edges.append(
-                _edge(
-                    f"se:kpi:{k.id}", hub_id, nid, _REL_SUPPORTS_KPI,
-                    summary, confidence=0.9,
+
+            if is_measured:
+                # Visible measured relationships: query → KPI, dashboard → KPI.
+                for qid, qname in measuring_queries:
+                    edges.append(
+                        _edge(
+                            f"se:kpi:{k.id}:meas:{qid}", qid, nid,
+                            _REL_QUERY_MEASURES,
+                            f"{qname} measures {label}.",
+                        )
+                    )
+                for did, dname in measuring_dashboards:
+                    edges.append(
+                        _edge(
+                            f"se:kpi:{k.id}:viz:{did}", did, nid,
+                            _REL_DASHBOARD_VISUALIZES,
+                            f"{dname} visualizes {label}.",
+                        )
+                    )
+            else:
+                # Recommended KPI: keep it attached to the hub so it renders in
+                # the KPIs & Metrics group, but with a hidden relationship type
+                # (no visible line unless detailed/inferred mode is enabled).
+                edges.append(
+                    _edge(
+                        f"se:kpi:{k.id}", hub_id, nid, _REL_RECOMMENDED_KPI,
+                        summary, confidence=0.9,
+                    )
                 )
-            )
 
     # ── Authoritative reference library (project + company + industry) ─
     ref_docs = (

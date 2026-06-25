@@ -39,6 +39,7 @@ export type NavKey =
   | "admin-tenants"
   | "admin-data-planes"
   | "admin-allowed-domains"
+  | "admin-data-source-assignments"
   // Project-mode nav
   | "overview"
   | "project-data-sources"

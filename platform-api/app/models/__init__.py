@@ -38,6 +38,9 @@ from app.models.data_source_ai_profile import (
 )
 from app.models.database_connection import DatabaseConnection
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
+from app.models.database_data_source_assignment import (
+    DatabaseDataSourceAssignment,
+)
 from app.models.file_source_meta import FileSourceMeta
 from app.models.grid_preference import GridPreference
 from app.models.intelligence_snapshot import IntelligenceSnapshot
@@ -99,6 +102,7 @@ __all__ = [
     "DatabaseConnection",
     "DataSourceColumn",
     "DatabaseDataSource",
+    "DatabaseDataSourceAssignment",
     "FileSourceMeta",
     "GridPreference",
     "IntelligenceSnapshot",
