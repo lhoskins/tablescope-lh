@@ -783,6 +783,22 @@ def build_graph_payload(
         if overview:
             cards.append(overview)
 
+    # KPI measurement-gap card: when the centred KPI has no query or dashboard
+    # measuring it, surface a gap (no fabricated evidence — it's a real
+    # coverage gap derived from the KPI's own connections).
+    if center["type"] in ("kpi", "metric"):
+        kpi_gap = _kpi_measurement_gap_card(center, kept_edges, kept_by_id)
+        if kpi_gap:
+            cards.append(kpi_gap)
+            gaps.append({
+                "id": f"gap:kpi:{center['graphKey']}",
+                "nodeKey": center["graphKey"],
+                "title": kpi_gap["title"],
+                "summary": kpi_gap["summary"],
+                "severity": kpi_gap["severity"],
+                "confidence": kpi_gap["confidence"],
+            })
+
     cards = _rank_and_dedupe_cards(cards)
 
     if severity and severity != "all":
@@ -841,6 +857,50 @@ def _center_overview_card(
         "sourceDashboards": sources["dashboards"],
         "supportedKpis": sources["kpis"],
         "recommendedAction": "",
+        "traceToEvidence": {
+            "nodeIds": [center["id"], *[o["id"] for o, _e in neighbors]],
+            "edgeIds": [e["id"] for _o, e in neighbors],
+            "nodeKeys": [],
+        },
+    }
+
+
+def _kpi_measurement_gap_card(
+    center: dict[str, Any],
+    edges: list[dict[str, Any]],
+    nodes_by_id: dict[Any, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Gap card for a centred KPI that no query or dashboard measures.
+
+    Returns ``None`` when a query or dashboard already measures the KPI (no
+    gap). The gap is grounded in the KPI's own supporting documents — never
+    fabricated.
+    """
+    neighbors = _connected(center["id"], edges, nodes_by_id)
+    sources = _bucket_sources(neighbors)
+    if sources["queries"] or sources["dashboards"]:
+        return None
+    return {
+        "id": f"kgcard:gap:kpi:{center['graphKey']}",
+        "nodeKey": center["graphKey"],
+        "category": "gap",
+        "severity": "warning",
+        "title": f"{center['label']} is not measured",
+        "summary": (
+            f"No saved query or dashboard measures {center['label']}. "
+            "Build a query or dashboard so this KPI can be tracked against its "
+            "documented target."
+        ),
+        "businessQuestion": f"How is {center['label']} currently tracked?",
+        "businessImpact": "Unmeasured KPIs cannot be monitored or trended.",
+        "confidence": center["confidence"] if center["confidence"] is not None else 0.9,
+        "evidencePath": [center["graphKey"]],
+        "sourceDocuments": sources["documents"],
+        "sourceTables": sources["tables"],
+        "sourceQueries": [],
+        "sourceDashboards": [],
+        "supportedKpis": [center["label"]],
+        "recommendedAction": f"Create a query or dashboard that measures {center['label']}.",
         "traceToEvidence": {
             "nodeIds": [center["id"], *[o["id"] for o, _e in neighbors]],
             "edgeIds": [e["id"] for _o, e in neighbors],

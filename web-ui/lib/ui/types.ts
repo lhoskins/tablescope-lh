@@ -38,6 +38,7 @@ export type NavKey =
   | "admin-users"
   | "admin-tenants"
   | "admin-data-planes"
+  | "admin-allowed-domains"
   // Project-mode nav
   | "overview"
   | "project-data-sources"
@@ -67,4 +68,8 @@ export interface CurrentUser {
   isSuperAdmin?: boolean;
   tenantName: string;
   initials: string;
+  /** Numeric user id (used for the avatar URL). */
+  id?: number;
+  /** Safe served avatar URL, or null when the user has no picture. */
+  avatarUrl?: string | null;
 }

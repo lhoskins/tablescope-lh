@@ -14,16 +14,20 @@ class Role(StrEnum):
     ROOT_ADMIN = "root_admin"
     TENANT_ADMIN = "tenant_admin"
     ADMIN = "admin"
+    DB_ADMIN = "db_admin"
     EDITOR = "editor"
+    MEMBER = "member"
     VIEWER = "viewer"
 
 
 _ROLE_ORDER: dict[Role, int] = {
     Role.VIEWER: 0,
+    Role.MEMBER: 1,
     Role.EDITOR: 1,
-    Role.ADMIN: 2,
-    Role.TENANT_ADMIN: 3,
-    Role.ROOT_ADMIN: 4,
+    Role.DB_ADMIN: 2,
+    Role.ADMIN: 3,
+    Role.TENANT_ADMIN: 4,
+    Role.ROOT_ADMIN: 5,
 }
 
 

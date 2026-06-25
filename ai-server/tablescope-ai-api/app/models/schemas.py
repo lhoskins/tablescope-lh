@@ -75,6 +75,22 @@ class SuggestDashboardRequest(AIBaseRequest):
     allowed_tables: list[str] = []
 
 
+class SuggestDashboardsMultiRequest(AIBaseRequest):
+    """Ask the planner for several distinct dashboard *plans* (lightweight).
+
+    Unlike :class:`SuggestDashboardRequest` (which yields one fully-specced
+    dashboard with executable SQL), this returns ``desired_count`` higher-level
+    plans the user can pick from; the heavy validation/build happens on save via
+    the existing generate-and-save-dashboard pipeline.
+    """
+
+    prompt: str = ""
+    audience: str = ""
+    desired_count: int = 3
+    allowed_tables: list[str] = []
+    kpis: list[str] = Field(default_factory=list)
+
+
 class QueryInfo(BaseModel):
     """Minimal query info for scope analysis."""
     id: int
@@ -477,6 +493,34 @@ class DashboardSuggestion(BaseModel):
 
 class SuggestDashboardResponse(BaseModel):
     suggestions: list[DashboardSuggestion]
+    request_id: str
+    model_used: str
+
+
+class DashboardPlanWidget(BaseModel):
+    """A lightweight widget outline within a dashboard plan (no SQL yet)."""
+
+    title: str = ""
+    chart_type: str = ""
+    business_question: str = ""
+
+
+class DashboardPlanSuggestion(BaseModel):
+    """A high-level dashboard plan the user can preview and choose to save."""
+
+    title: str
+    description: str = ""
+    business_purpose: str = ""
+    audience: str = ""
+    widgets: list[DashboardPlanWidget] = Field(default_factory=list)
+    kpis: list[str] = Field(default_factory=list)
+    data_sources: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    quality_score: int = 0
+
+
+class SuggestDashboardsMultiResponse(BaseModel):
+    suggestions: list[DashboardPlanSuggestion]
     request_id: str
     model_used: str
 

@@ -23,6 +23,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.models.dashboard import Dashboard
 from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
@@ -47,6 +48,10 @@ _REL_DATA_SOURCE = "data_source"
 _REL_QUERY = "query"
 _REL_DASHBOARD = "dashboard"
 _REL_QUERY_READS = "reads_from"
+_REL_SUPPORTS_KPI = "supports_kpi"
+
+# Edge types that mean a document/process/family references or defines a KPI.
+_KPI_EDGE_TYPES = ("supports_kpi", "measures", "defines", "tracks", "monitors")
 _REF_REL_BY_TIER = {
     TIER_PROJECT: "project_reference",
     TIER_COMPANY: "company_reference",
@@ -318,6 +323,83 @@ async def collect_structural_graph(
                 f"{a.title} is a document in this project.",
             )
         )
+
+    # ── KPIs & Metrics (same source of truth as the View Family panel) ─
+    # KPIs live in ``ai_project_graph_nodes`` (node_type='kpi'/'metric'),
+    # connected to the documents that reference them via supports_kpi edges.
+    # Surface them as a structural asset class so they always render in the
+    # KPIs & Metrics group and recenter cleanly — never fabricated.
+    kpi_nodes = (
+        await session.scalars(
+            select(AIProjectGraphNode)
+            .where(
+                AIProjectGraphNode.tenant_id == tenant_id,
+                AIProjectGraphNode.project_id == project_id,
+                AIProjectGraphNode.is_active.is_(True),
+                AIProjectGraphNode.node_type.in_(("kpi", "metric")),
+            )
+            .order_by(AIProjectGraphNode.id)
+            .limit(_MAX_PER_KIND)
+        )
+    ).all()
+    if kpi_nodes:
+        kpi_id_set = {k.id for k in kpi_nodes}
+        # Map each KPI to the names of the documents/processes that reference it.
+        kpi_sources: dict[int, list[str]] = {kid: [] for kid in kpi_id_set}
+        kpi_edges = (
+            await session.execute(
+                select(
+                    AIProjectGraphEdge.to_node_id,
+                    AIProjectGraphNode.name,
+                )
+                .join(
+                    AIProjectGraphNode,
+                    AIProjectGraphNode.id == AIProjectGraphEdge.from_node_id,
+                )
+                .where(
+                    AIProjectGraphEdge.tenant_id == tenant_id,
+                    AIProjectGraphEdge.project_id == project_id,
+                    AIProjectGraphEdge.is_active.is_(True),
+                    AIProjectGraphEdge.to_node_id.in_(kpi_id_set),
+                    AIProjectGraphEdge.relationship_type.in_(_KPI_EDGE_TYPES),
+                    AIProjectGraphNode.is_active.is_(True),
+                )
+            )
+        ).all()
+        for kpi_id, src_name in kpi_edges:
+            if src_name and src_name not in kpi_sources[kpi_id]:
+                kpi_sources[kpi_id].append(src_name)
+        for k in kpi_nodes:
+            kp = k.properties if isinstance(k.properties, dict) else {}
+            label = kp.get("display_name") or k.name or f"kpi {k.id}"
+            nid = f"s:kpi:{k.id}"
+            docs = kpi_sources.get(k.id, [])
+            summary = (
+                f"KPI referenced by {', '.join(docs[:3])}." if docs
+                else "KPI extracted from project documents."
+            )
+            nodes.append(
+                _node(
+                    nid,
+                    "kpi",
+                    label,
+                    source_type="ai_graph_node",
+                    source_id=k.id,
+                    properties={
+                        "graph_key": f"kpi:{_norm(k.name)}",
+                        "kpi_key": k.name,
+                        "summary": summary,
+                        "source_documents": docs,
+                        "confidence": 0.9,
+                    },
+                )
+            )
+            edges.append(
+                _edge(
+                    f"se:kpi:{k.id}", hub_id, nid, _REL_SUPPORTS_KPI,
+                    summary, confidence=0.9,
+                )
+            )
 
     # ── Authoritative reference library (project + company + industry) ─
     ref_docs = (

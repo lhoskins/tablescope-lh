@@ -47,3 +47,4 @@ class CurrentUserResponse(BaseModel):
     tenant_id: int
     tenant_name: str
     tenant_slug: str | None = None
+    avatar_url: str | None = None

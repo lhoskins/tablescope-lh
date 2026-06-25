@@ -27,6 +27,10 @@ from app.schemas.auth import (
     CurrentUserResponse,
     DirectLoginRequest,
 )
+from app.services.allowed_domains import (
+    ACCESS_DENIED_MESSAGE,
+    is_email_allowed_for_tenant,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -53,6 +57,7 @@ async def get_current_user(
         tenant_id=user.tenant_id,
         tenant_name=tenant.name if tenant else "",
         tenant_slug=tenant.slug if tenant else None,
+        avatar_url=user.avatar_url,
     )
 
 
@@ -103,6 +108,13 @@ async def exchange_token(
                 detail=f"No platform-api user linked to external id {external_user_id}",
             )
 
+    if not await is_email_allowed_for_tenant(
+        session, tenant_id=user.tenant_id, email=user.email, user_id=user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=ACCESS_DENIED_MESSAGE
+        )
+
     access_token = create_access_token(
         sub=external_user_id,
         tenant_id=user.tenant_id,
@@ -139,6 +151,13 @@ async def direct_login(
     user = await session.scalar(query)
     if user is None or not user.verify_password(payload.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if not await is_email_allowed_for_tenant(
+        session, tenant_id=user.tenant_id, email=user.email, user_id=user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=ACCESS_DENIED_MESSAGE
+        )
 
     access_token = create_access_token(
         sub=user.external_id or str(user.id),

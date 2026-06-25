@@ -59,7 +59,7 @@ from app.models.saved_query import SavedQuery
 from app.models.scope_canvas_layout import ScopeCanvasLayout
 from app.models.scope_set import ScopeSet
 from app.models.shared_vdb import SharedVDB
-from app.models.tenant import Tenant
+from app.models.tenant import Tenant, TenantAllowedDomain
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
 from app.models.tenant_membership import TenantAuthBinding, TenantMembership
 from app.models.user import User
@@ -117,6 +117,7 @@ __all__ = [
     "SavedQuery",
     "SharedVDB",
     "Tenant",
+    "TenantAllowedDomain",
     "TenantDataPlane",
     "TenantSecretRef",
     "TenantAuthBinding",

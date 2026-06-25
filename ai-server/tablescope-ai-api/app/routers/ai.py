@@ -56,8 +56,12 @@ from app.models.schemas import (
     RelationshipSuggestion,
     ScopeSuggestion,
     SelectedSource,
+    DashboardPlanSuggestion,
+    DashboardPlanWidget,
     SuggestDashboardRequest,
     SuggestDashboardResponse,
+    SuggestDashboardsMultiRequest,
+    SuggestDashboardsMultiResponse,
 )
 from app.services import context_builder, llm_client, vector_store
 from app.services.context_builder import ContextBuildError
@@ -814,6 +818,169 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     update_activity(req.user_id, req.tenant_id, req.project_id)
 
     return SuggestDashboardResponse(
+        suggestions=suggestions,
+        request_id=request_id,
+        model_used=settings.sql_model,
+    )
+
+
+@router.post(
+    "/dashboard/suggest-multi", response_model=SuggestDashboardsMultiResponse
+)
+async def suggest_dashboards_multi(
+    req: SuggestDashboardsMultiRequest,
+) -> SuggestDashboardsMultiResponse:
+    """Suggest several distinct dashboard *plans* (insight-first, lightweight).
+
+    Returns at least ``desired_count`` plans, each grounded in the project's real
+    tables, KPI references, and reference-library standards. These are previews:
+    the heavy SQL validation/build happens on save via the existing
+    generate-and-save-dashboard pipeline.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+
+    try:
+        ctx = await context_builder.build_context(
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            project_id=req.project_id,
+            scope="project",
+            question="",
+            feature="suggest_dashboard",
+        )
+    except ContextBuildError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied: {e.reason}",
+        )
+
+    context_text = context_builder.context_to_prompt_text(ctx)
+
+    allowed_tables = req.allowed_tables
+    if not allowed_tables:
+        allowed_tables = [
+            ds.get("view_name", ds.get("name", ""))
+            for ds in ctx.allowed_context.get("metadata", [])
+            if ds.get("view_name") or ds.get("name")
+        ]
+
+    desired = max(3, int(req.desired_count or 3))
+    audience_line = (
+        f"Target audience: {req.audience}.\n" if req.audience else ""
+    )
+    user_instruction = f"\nUser request: {req.prompt}\n" if req.prompt else ""
+    kpi_line = (
+        f"Known project KPIs (cover the relevant ones): {', '.join(req.kpis)}\n"
+        if req.kpis
+        else ""
+    )
+
+    best_practices = load_prompt_reference("dashboard_best_practices.md")
+    best_practices_block = (
+        f"Dashboard Best Practices (authoritative policy):\n{best_practices}\n\n"
+        if best_practices
+        else ""
+    )
+
+    prompt = (
+        f"{context_text}\n\n"
+        f"{best_practices_block}"
+        f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
+        f"{audience_line}"
+        f"{kpi_line}"
+        f"{user_instruction}\n"
+        f"Propose {desired} DISTINCT, non-overlapping dashboard PLANS a senior "
+        "analyst would build for this project. Each plan must target a different "
+        "business theme, audience, or decision (e.g. executive overview, supplier "
+        "quality & risk, on-time delivery & operations). Think first about what "
+        "matters; do not just regroup the same charts.\n\n"
+        "Grounding rules:\n"
+        "- Ground every plan in the project's REAL tables, columns, saved "
+        "queries, documents, KPI references, and reference-library standards "
+        "shown above.\n"
+        "- Do NOT invent tables, columns, metrics, KPIs, or data sources. Only "
+        "list data_sources from the allowed tables and kpis from the project's "
+        "real KPI references.\n"
+        "- Reference Library documents are authoritative guidance, NOT data "
+        "sources: never list a reference document as a data source.\n"
+        "- 3-6 widgets per plan; each widget is an outline (no SQL needed here).\n\n"
+        f"Return ONLY a JSON object with at least {desired} suggestions:\n"
+        "{\n"
+        '  "suggestions": [ {\n'
+        '    "title": "dashboard name",\n'
+        '    "description": "one-line description",\n'
+        '    "business_purpose": "the decision/question this dashboard drives",\n'
+        '    "audience": "executive|manager|analyst|operational",\n'
+        '    "widgets": [ {"title": "", "chart_type": "<chart type>", '
+        '"business_question": ""} ],\n'
+        '    "kpis": ["kpi names this dashboard covers"],\n'
+        '    "data_sources": ["allowed table names this dashboard uses"],\n'
+        '    "confidence": 0.0,\n'
+        '    "quality_score": 0\n'
+        "  } ]\n"
+        "}\n\n"
+        "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
+        "prose, no markdown, no code fences. Begin with { and end with }."
+    )
+
+    raw = await llm_client.generate(
+        prompt=prompt,
+        system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
+        model=settings.sql_model,
+        temperature=0.4,
+        num_ctx=24576,
+        response_format="json",
+    )
+
+    parsed = _parse_json_response(raw)
+    raw_suggestions: list[dict] = []
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("suggestions"), list):
+            raw_suggestions = [s for s in parsed["suggestions"] if isinstance(s, dict)]
+        else:
+            raw_suggestions = [parsed]
+    elif isinstance(parsed, list):
+        raw_suggestions = [s for s in parsed if isinstance(s, dict)]
+    else:
+        logger.warning("Failed to parse dashboard plans: %s", raw[:200])
+
+    allowed_set = {t.lower() for t in allowed_tables}
+    suggestions: list[DashboardPlanSuggestion] = []
+    for s in raw_suggestions:
+        widgets = [
+            DashboardPlanWidget(
+                title=str(w.get("title", "")),
+                chart_type=str(w.get("chart_type") or w.get("type") or ""),
+                business_question=str(w.get("business_question", "")),
+            )
+            for w in s.get("widgets", [])
+            if isinstance(w, dict)
+        ]
+        # Keep only data sources that are real allowed tables (drop hallucinations
+        # and any reference document the planner may have slipped in).
+        data_sources = [
+            str(d)
+            for d in s.get("data_sources", [])
+            if str(d).lower() in allowed_set
+        ]
+        suggestions.append(
+            DashboardPlanSuggestion(
+                title=str(s.get("title") or "AI Dashboard"),
+                description=str(s.get("description", "")),
+                business_purpose=str(s.get("business_purpose", "")),
+                audience=str(s.get("audience") or req.audience or ""),
+                widgets=widgets,
+                kpis=[str(k) for k in s.get("kpis", []) if k],
+                data_sources=data_sources,
+                confidence=float(s.get("confidence") or 0.0),
+                quality_score=int(s.get("quality_score") or 0),
+            )
+        )
+
+    update_activity(req.user_id, req.tenant_id, req.project_id)
+
+    return SuggestDashboardsMultiResponse(
         suggestions=suggestions,
         request_id=request_id,
         model_used=settings.sql_model,

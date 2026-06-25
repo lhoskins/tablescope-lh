@@ -106,6 +106,14 @@ class AIGenerateAndSaveDashboardRequest(BaseModel):
     description: str | None = None
 
 
+class AISuggestDashboardsRequest(BaseModel):
+    """Request several dashboard plan suggestions for a project (no save)."""
+    project_id: int
+    prompt: str | None = None
+    audience: str | None = None
+    desired_count: int = 3
+
+
 class AICreateScopeRequest(BaseModel):
     """Create a single scope from an AI suggestion."""
     sourceTable: str
@@ -2013,6 +2021,103 @@ async def ai_generate_and_save_dashboard(
         "widgets_dropped": dropped_widgets,
         "queries_created": created_queries,
         "queries_reused": reused_queries,
+        "model_used": ai_result.get("model_used", ""),
+    }
+
+
+@router.post("/actions/suggest-dashboards")
+async def ai_suggest_dashboards(
+    req: AISuggestDashboardsRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Return >= 3 dashboard plan suggestions for a project (insight-first).
+
+    Mirrors the Home "New Dashboard Suggestions" flow on the Dashboard page.
+    These are previews only — nothing is saved. The user saves a chosen plan via
+    the existing ``/actions/generate-and-save-dashboard`` pipeline, which runs the
+    full SQL validation/judge and drops empty widgets.
+    """
+    await _check_project_access(session, context, req.project_id)
+
+    # Allowed tables = the project's real datasources (reference docs excluded).
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == req.project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
+    # Real KPI names from the project graph (never invented).
+    from app.models.ai_project_graph import AIProjectGraphNode
+
+    kpi_rows = (
+        await session.scalars(
+            select(AIProjectGraphNode.name).where(
+                AIProjectGraphNode.tenant_id == context.tenant_id,
+                AIProjectGraphNode.project_id == req.project_id,
+                AIProjectGraphNode.is_active.is_(True),
+                AIProjectGraphNode.node_type.in_(("kpi", "metric")),
+            )
+        )
+    ).all()
+    kpis = [k for k in kpi_rows if k]
+
+    desired = max(3, int(req.desired_count or 3))
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+        "prompt": req.prompt or "",
+        "audience": req.audience or "",
+        "desired_count": desired,
+        "allowed_tables": allowed_tables,
+        "kpis": kpis,
+    }
+    ai_result = await _forward_to_ai("/ai/dashboard/suggest-multi", payload)
+    raw_suggestions = ai_result.get("suggestions", []) or []
+
+    suggestions: list[dict[str, Any]] = []
+    for idx, s in enumerate(raw_suggestions):
+        if not isinstance(s, dict):
+            continue
+        widgets = [
+            {
+                "title": str(w.get("title", "")),
+                "chartType": str(w.get("chart_type") or w.get("type") or ""),
+                "businessQuestion": str(w.get("business_question", "")),
+            }
+            for w in s.get("widgets", [])
+            if isinstance(w, dict)
+        ]
+        # Only surface allowed tables as data sources (defence in depth).
+        data_sources = [
+            str(d) for d in s.get("data_sources", []) if str(d) in allowed_tables
+        ]
+        suggestions.append(
+            {
+                "id": f"suggestion-{idx + 1}",
+                "title": str(s.get("title") or "AI Dashboard"),
+                "description": str(s.get("description", "")),
+                "businessPurpose": str(s.get("business_purpose", "")),
+                "audience": str(s.get("audience") or req.audience or ""),
+                "widgets": widgets,
+                "kpis": [str(k) for k in s.get("kpis", []) if k],
+                "dataSources": data_sources,
+                "confidence": float(s.get("confidence") or 0.0),
+                "qualityScore": int(s.get("quality_score") or 0),
+                "validationSummary": "",
+            }
+        )
+
+    logger.info(
+        "AI action: suggest_dashboards | count=%d project=%d tenant=%d user=%d",
+        len(suggestions), req.project_id, context.tenant_id, context.user_id,
+    )
+    return {
+        "action": "suggest_dashboards",
+        "suggestions": suggestions,
         "model_used": ai_result.get("model_used", ""),
     }
 

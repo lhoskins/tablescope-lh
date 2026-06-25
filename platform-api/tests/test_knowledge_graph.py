@@ -465,6 +465,78 @@ def test_center_eligible_keys_excludes_project_and_covers_all_nodes():
     assert "process:corrective_action_process" in keys
 
 
+def test_kpi_center_uses_kpi_centric_lens():
+    kpi = enrich_node(_nodes()[3])  # "On-time Closure"
+    assert kpi["type"] == "kpi"
+    assert kpi["displayGroup"] == "KPIs & Metrics"
+    assert kpi["recommendedLens"] == "kpi-centric"
+
+
+def test_kpi_gap_card_when_no_query_or_dashboard_measures_it():
+    # KPI connected only to a document -> measurement-gap card surfaces.
+    nodes = [
+        {"id": 1, "node_type": "kpi", "name": "defect_rate", "source_type": None,
+         "source_id": None, "properties": {"confidence": 0.9}},
+        {"id": 2, "node_type": "document", "name": "Quality Manual",
+         "source_type": "asset", "source_id": 20, "properties": {}},
+    ]
+    edges = [{"id": 1, "from_node_id": 2, "to_node_id": 1,
+              "relationship_type": "supports_kpi", "confidence": 0.9, "evidence": {}}]
+    payload = build_graph_payload(nodes, edges, center_node="kpi:defect_rate")
+    gap_cards = [c for c in payload["insightCards"] if c["category"] == "gap"]
+    assert any("not measured" in c["title"] for c in gap_cards)
+    assert any(g["nodeKey"] == "kpi:defect_rate" for g in payload["gaps"])
+
+
+def test_kpi_no_gap_card_when_dashboard_measures_it():
+    nodes = [
+        {"id": 1, "node_type": "kpi", "name": "defect_rate", "source_type": None,
+         "source_id": None, "properties": {"confidence": 0.9}},
+        {"id": 2, "node_type": "dashboard", "name": "Quality Dashboard",
+         "source_type": "dashboard", "source_id": 20, "properties": {}},
+    ]
+    edges = [{"id": 1, "from_node_id": 2, "to_node_id": 1,
+              "relationship_type": "measures", "confidence": 0.9, "evidence": {}}]
+    payload = build_graph_payload(nodes, edges, center_node="kpi:defect_rate")
+    assert not any("not measured" in c["title"] for c in payload["insightCards"])
+
+
+def test_gate_severity_caps_reference_only_findings():
+    from app.services.evidence_severity import gate_severity
+
+    assert gate_severity("critical", has_project_evidence=False) == "watch"
+    assert gate_severity("warning", has_project_evidence=False) == "watch"
+    assert gate_severity("critical", has_project_evidence=True) == "critical"
+    assert gate_severity("info", has_project_evidence=False) == "info"
+    assert gate_severity("opportunity", has_project_evidence=False) == "opportunity"
+
+
+def test_ai_card_grounded_only_in_reference_doc_is_capped_to_watch():
+    from app.services.knowledge_graph_ai import _map_card
+
+    center = enrich_node({
+        "id": 1, "node_type": "reference_document", "name": "DFARS Part 3",
+        "source_type": "reference_document", "source_id": 1, "properties": {},
+    })
+    ref = enrich_node({
+        "id": 2, "node_type": "reference_document", "name": "TCFD",
+        "source_type": "reference_document", "source_id": 2, "properties": {},
+    })
+    nodes = [center, ref]
+    nodes_by_key = {n["graphKey"]: n for n in nodes}
+    raw = {
+        "id": "c1", "category": "risk", "severity": "critical",
+        "title": "Non-compliance risk", "summary": "Reference says so.",
+        "confidence": 0.9, "evidenceKeys": [ref["graphKey"]],
+    }
+    card = _map_card(
+        raw, index=0, center=center, nodes_by_key=nodes_by_key,
+        nodes=nodes, edges=[],
+    )
+    assert card is not None
+    assert card["severity"] == "watch"
+
+
 def test_from_snapshot_shows_no_cards_for_uncached_center():
     # AI-only: a centre with no cached AI bundle shows no cards (no
     # deterministic fallback), never another centre's cached cards.

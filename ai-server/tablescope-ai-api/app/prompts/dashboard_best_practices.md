@@ -648,3 +648,15 @@ The Dashboard Judge should use this file to:
   - drop empty, weak, misleading, or duplicate widgets
   - preserve validation metadata
   - decide whether the dashboard should be saved
+
+## Reference Library vs. Project Evidence (Authoritative Guidance Rule)
+
+Reference Library documents are authoritative guidance, not live project datasource records.
+
+Use reference documents to define standards, benchmarks, policy requirements, expected controls, and thresholds only when explicitly stated.
+
+Do not use Reference Library documents as SQL query sources.
+
+Do not create critical, urgent, risk, anomaly, or breach findings from reference documents alone. A risk or breach requires project-specific evidence such as data, documents, dashboards, queries, or validated graph relationships.
+
+For empty tenants or projects with no relevant data, return an info/watch guidance card instead of a critical finding (for example: "Reference guidance available; add project data to assess compliance").

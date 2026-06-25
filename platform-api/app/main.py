@@ -49,6 +49,7 @@ from app.routes import tenant_data_planes as tenant_data_planes_routes
 from app.routes import tenants as tenants_routes
 from app.routes import upload as upload_routes
 from app.routes import user_preferences as user_preferences_routes
+from app.routes import users as users_routes
 from app.services.connection_pool import pool_manager
 
 logger = logging.getLogger(__name__)
@@ -182,6 +183,7 @@ def create_app() -> FastAPI:
     app.include_router(reference_library_bulk_routes.router, prefix=api_prefix)
     app.include_router(reports_routes.router, prefix=api_prefix)
     app.include_router(user_preferences_routes.router, prefix=api_prefix)
+    app.include_router(users_routes.router, prefix=api_prefix)
 
     return app
 

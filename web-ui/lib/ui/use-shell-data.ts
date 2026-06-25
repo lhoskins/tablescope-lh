@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, getApiBaseUrl } from "@/lib/api-client";
 import { initials, toAiStatus } from "./format";
 import { accentFor } from "./color";
 import type { CurrentUser, ProjectSummary, TenantSummary } from "./types";
@@ -17,6 +17,7 @@ interface CurrentUserResponse {
   tenant_id: number;
   tenant_name: string;
   tenant_slug: string | null;
+  avatar_url: string | null;
 }
 
 interface ProjectSummaryResponse {
@@ -36,9 +37,18 @@ const ROLE_LABEL: Record<string, string> = {
   root_admin: "Root Admin",
   tenant_admin: "Admin",
   admin: "Admin",
+  db_admin: "DB Admin",
+  member: "Member",
   editor: "Editor",
   viewer: "Viewer",
 };
+
+/** Resolve a relative avatar URL to an absolute, browser-fetchable URL. */
+function absoluteAvatarUrl(url: string | null): string | null {
+  if (!url) return null;
+  if (/^https?:\/\//.test(url)) return url;
+  return `${getApiBaseUrl()}${url}`;
+}
 
 function displayName(u: CurrentUserResponse): string {
   if (u.display_name) return u.display_name;
@@ -61,6 +71,8 @@ export function useCurrentUser() {
           isSuperAdmin: me.is_super_admin,
           tenantName: me.tenant_name,
           initials: initials(name),
+          id: me.user_id,
+          avatarUrl: absoluteAvatarUrl(me.avatar_url),
         },
         tenant: {
           name: me.tenant_name,

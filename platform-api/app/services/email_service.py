@@ -31,12 +31,28 @@ class EmailService:
         variables: dict[str, str],
         subject: str | None = None,
         reply_to: str | None = None,
+        tenant_id: int | None = None,
     ) -> bool:
         """Render + send a branded transactional email by template name.
 
         Returns True when delivered, False when email is not configured (the
         send is recorded but not delivered).
+
+        When ``tenant_id`` is supplied and that tenant restricts access to
+        approved email domains, the message is suppressed (returns False) if the
+        recipient's domain is not allowed — transactional mail must never reach a
+        disallowed domain.
         """
+        if tenant_id is not None and not await self._recipient_allowed(
+            tenant_id, to
+        ):
+            logger.info(
+                "email.suppressed_disallowed_domain",
+                template=template,
+                tenant_id=tenant_id,
+            )
+            return False
+
         from app.services.email import send_transactional_email
 
         result = await send_transactional_email(
@@ -47,3 +63,13 @@ class EmailService:
             reply_to=reply_to,
         )
         return result.delivered
+
+    async def _recipient_allowed(self, tenant_id: int, to: str) -> bool:
+        """Whether ``to`` may receive transactional mail under the tenant policy."""
+        from app.database import SessionLocal
+        from app.services.allowed_domains import is_email_allowed_for_tenant
+
+        async with SessionLocal() as session:
+            return await is_email_allowed_for_tenant(
+                session, tenant_id=tenant_id, email=to
+            )

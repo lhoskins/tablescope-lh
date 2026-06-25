@@ -77,7 +77,9 @@ async def test_auth_me_returns_identity(client, service_headers) -> None:
     assert body["display_name"] == "Sum User"
     assert body["tenant_name"] == "Summary Tenant"
     assert body["tenant_slug"] == "sum-tenant"
-    assert body["role"] == "editor"
+    # Legacy "editor" is stored as the tenant role "member" (tenant roles are
+    # limited to admin / db_admin / member).
+    assert body["role"] == "member"
 
 
 async def test_auth_me_requires_auth(client) -> None:

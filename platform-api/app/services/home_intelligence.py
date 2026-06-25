@@ -37,6 +37,7 @@ from app.models.reference_library import (
     TIER_PROJECT,
     ReferenceDocument,
 )
+from app.services.evidence_severity import gate_severity
 from app.services.prompt_loader import load_prompt_reference
 
 logger = logging.getLogger(__name__)
@@ -1393,6 +1394,12 @@ async def run_ai_intelligence(
         if res:
             interpreted.update(res)
 
+    # Reference Library docs are authoritative guidance, not project evidence —
+    # used below to cap reference-only findings to watch severity.
+    reference_titles = {
+        d.title for d in ctx.documents if d.ai_metadata.get("reference_tier")
+    }
+
     cards: list[dict[str, Any]] = []
     for item in executed:
         a = item["analysis"]
@@ -1468,6 +1475,13 @@ async def run_ai_intelligence(
             method = "reference_backed" if documents_used else "llm_planned"
         else:
             method = "llm_planned"
+
+        # A risk/warning/critical finding needs project-specific evidence
+        # (executed data or a project document). When grounded only in
+        # Reference Library guidance, cap it to watch severity.
+        project_docs = [t for t in documents_used if t not in reference_titles]
+        has_project_evidence = result is not None or bool(project_docs)
+        severity = gate_severity(severity, has_project_evidence=has_project_evidence)
 
         relationship_meta = None
         if is_multi_table:

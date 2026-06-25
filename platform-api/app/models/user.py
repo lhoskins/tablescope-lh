@@ -41,12 +41,19 @@ class User(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Profile avatar: a safe served URL (never a filesystem path) plus the
+    # stored object key/filename used to locate the image on disk / in S3.
+    avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    avatar_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Per-user preferences (e.g. home intelligence settings).
     preferences: Mapped[dict] = mapped_column(
         _JSON, nullable=False, default=dict, server_default="{}"
     )
 
-    tenant: Mapped[Tenant] = relationship(back_populates="users")  # type: ignore[name-defined]  # noqa: F821
+    tenant: Mapped[Tenant] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="users",
+        foreign_keys="User.tenant_id",
+    )
     owned_projects: Mapped[list[Project]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="owner",
         foreign_keys="Project.owner_id",

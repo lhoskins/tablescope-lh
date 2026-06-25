@@ -186,6 +186,80 @@ async def test_dashboard_workspace_metadata(client, service_headers) -> None:
     assert r.json()["ai_generated"] is True
 
 
+async def test_suggest_dashboards_returns_min_three(
+    client, service_headers, monkeypatch
+) -> None:
+    """The Dashboard-page AI flow returns >= 3 shaped suggestions (no save)."""
+    _, _, project, headers = await _setup_tenant_and_project(
+        client, service_headers
+    )
+    pid = project["id"]
+
+    async def _fake_forward(path: str, payload: dict):
+        assert path == "/ai/dashboard/suggest-multi"
+        assert payload["desired_count"] >= 3
+        return {
+            "model_used": "test-model",
+            "suggestions": [
+                {
+                    "title": f"Dashboard {i}",
+                    "description": f"desc {i}",
+                    "business_purpose": "drive a decision",
+                    "audience": "executive",
+                    "widgets": [
+                        {
+                            "title": "Widget",
+                            "chart_type": "bar",
+                            "business_question": "q?",
+                        }
+                    ],
+                    "kpis": ["defect_rate"],
+                    # An invalid / hallucinated table must be dropped.
+                    "data_sources": ["NW_Sales_CSV", "Made_Up_Table"],
+                    "confidence": 0.8,
+                    "quality_score": 90,
+                }
+                for i in range(3)
+            ],
+        }
+
+    import app.routes.ai_proxy as ai_proxy
+
+    monkeypatch.setattr(ai_proxy, "_forward_to_ai", _fake_forward)
+
+    r = await client.post(
+        "/api/ai/actions/suggest-dashboards",
+        json={"project_id": pid, "prompt": "supplier quality", "desired_count": 3},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["action"] == "suggest_dashboards"
+    suggestions = body["suggestions"]
+    assert len(suggestions) >= 3
+    first = suggestions[0]
+    assert first["id"] == "suggestion-1"
+    assert first["title"] == "Dashboard 0"
+    assert first["widgets"][0]["chartType"] == "bar"
+    # Hallucinated table dropped; project has no datasources here so none survive.
+    assert "Made_Up_Table" not in first["dataSources"]
+    assert first["qualityScore"] == 90
+
+
+async def test_suggest_dashboards_requires_editor(client, service_headers) -> None:
+    _, _, project, _ = await _setup_tenant_and_project(client, service_headers)
+    pid = project["id"]
+    viewer = create_access_token(
+        sub="v", tenant_id=1, user_id=999, role="viewer"
+    )
+    r = await client.post(
+        "/api/ai/actions/suggest-dashboards",
+        json={"project_id": pid},
+        headers={"Authorization": f"Bearer {viewer}"},
+    )
+    assert r.status_code == 403
+
+
 async def test_dashboard_not_found(client, service_headers) -> None:
     _, _, project, headers = await _setup_tenant_and_project(client, service_headers)
     pid = project["id"]

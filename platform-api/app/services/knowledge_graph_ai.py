@@ -16,6 +16,7 @@ import logging
 from typing import Any
 
 from app.services import ai_intelligence_client as ai
+from app.services.evidence_severity import REFERENCE_NODE_TYPES, gate_severity
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +180,15 @@ def _map_card(
     ]
 
     category = str(raw.get("category", "business_insight"))
-    severity = str(raw.get("severity", "info"))
+    # Reference Library docs are authoritative guidance, not project evidence:
+    # a card grounded only in reference documents may not exceed watch severity.
+    has_project_evidence = any(
+        n["type"] not in REFERENCE_NODE_TYPES for n in evidence_nodes
+    )
+    severity = gate_severity(
+        str(raw.get("severity", "info")),
+        has_project_evidence=has_project_evidence,
+    )
     try:
         confidence = max(0.0, min(1.0, float(raw.get("confidence", 0.0))))
     except (TypeError, ValueError):

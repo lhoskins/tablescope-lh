@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { IconArrowLeft } from "@tabler/icons-react";
 import { AppShell } from "./app-shell";
 import { Breadcrumb } from "./top-bar";
 import { getUserMeta } from "@/lib/auth";
@@ -41,12 +42,23 @@ export function ProjectShell({
       otherProjects={otherProjects}
       counts={counts}
       topBarLeft={
-        <Breadcrumb
-          items={[
-            { label: project?.name ?? "Project", href: `/projects/${projectId}` },
-            { label: breadcrumbLabel },
-          ]}
-        />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-label="Back to projects"
+            title="Back to projects"
+            onClick={() => router.push("/projects")}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-tertiary hover:bg-brand-50/60 hover:text-ink-primary"
+          >
+            <IconArrowLeft size={16} />
+          </button>
+          <Breadcrumb
+            items={[
+              { label: project?.name ?? "Project", href: `/projects/${projectId}` },
+              { label: breadcrumbLabel },
+            ]}
+          />
+        </div>
       }
       topBarRight={actions}
       contextPanel={contextPanel}

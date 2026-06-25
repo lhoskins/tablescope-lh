@@ -8,6 +8,7 @@ AI graph before the node-centric payload is built.
 
 from __future__ import annotations
 
+from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.models.project import Project
 from app.models.reference_library import (
     TIER_COMPANY,
@@ -171,6 +172,78 @@ async def test_structural_merge_into_payload_groups_reference_library(
     # The project is never the center and never drawn on the canvas.
     assert payload["centerNode"]["type"] == "process"
     assert all(n["type"] != "project" for n in payload["nodes"])
+
+
+async def test_kpis_collected_from_document_relationships(db_session) -> None:
+    """KPIs referenced by project documents become structural KPI nodes.
+
+    Same source of truth as the View Family panel (ai_project_graph kpi nodes
+    connected to documents via supports_kpi edges).
+    """
+    tenant_id = 1
+    project_id = await _seed_project(db_session, tenant_id=tenant_id)
+    doc = AIProjectGraphNode(
+        tenant_id=tenant_id, project_id=project_id, node_type="document",
+        name="SUP_Supplier_Quality_Manual_2026.docx", created_by=1, is_active=True,
+    )
+    kpi = AIProjectGraphNode(
+        tenant_id=tenant_id, project_id=project_id, node_type="kpi",
+        name="supplier_defect_rate", created_by=1, is_active=True,
+    )
+    db_session.add_all([doc, kpi])
+    await db_session.flush()
+    db_session.add(
+        AIProjectGraphEdge(
+            tenant_id=tenant_id, project_id=project_id,
+            from_node_id=doc.id, to_node_id=kpi.id,
+            relationship_type="supports_kpi", confidence=0.7, created_by=1,
+            is_active=True,
+        )
+    )
+    await db_session.flush()
+
+    nodes, edges, _hub = await collect_structural_graph(
+        db_session, tenant_id=tenant_id, project_id=project_id
+    )
+    kpi_nodes = [n for n in nodes if n["node_type"] == "kpi"]
+    assert {n["name"] for n in kpi_nodes} == {"supplier_defect_rate"}
+    kpi_node = kpi_nodes[0]
+    assert kpi_node["properties"]["graph_key"] == "kpi:supplier_defect_rate"
+    assert "SUP_Supplier_Quality_Manual_2026.docx" in (
+        kpi_node["properties"]["source_documents"]
+    )
+    # The KPI is attached to the hub with a supports_kpi edge (kept under the
+    # confidence floor because it is structural, confidence 0.9).
+    assert any(
+        e["relationship_type"] == "supports_kpi"
+        and e["to_node_id"].startswith("s:kpi:")
+        and e["confidence"] == 0.9
+        for e in edges
+    )
+
+
+async def test_kpi_nodes_render_in_kpis_group_after_merge(db_session) -> None:
+    """KPIs collected structurally land in the KPIs & Metrics display group."""
+    tenant_id = 1
+    project_id = await _seed_project(db_session, tenant_id=tenant_id)
+    kpi = AIProjectGraphNode(
+        tenant_id=tenant_id, project_id=project_id, node_type="kpi",
+        name="on_time_delivery_rate", created_by=1, is_active=True,
+    )
+    db_session.add(kpi)
+    await db_session.flush()
+
+    extra_nodes, extra_edges, _hub = await collect_structural_graph(
+        db_session, tenant_id=tenant_id, project_id=project_id
+    )
+    stored = [{
+        "id": 9001, "node_type": "process", "name": "Supplier Qualification",
+        "source_type": None, "source_id": None, "properties": {"confidence": 0.9},
+    }]
+    merged_nodes, merged_edges = merge_graph_sources(stored, [], extra_nodes, extra_edges)
+    payload = build_graph_payload(merged_nodes, merged_edges)
+    groups = {n["label"]: n["displayGroup"] for n in payload["nodes"]}
+    assert groups.get("on_time_delivery_rate") == "KPIs & Metrics"
 
 
 async def test_company_library_reaches_ai_server_request(db_session) -> None:
