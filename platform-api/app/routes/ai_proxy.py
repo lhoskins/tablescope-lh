@@ -39,6 +39,9 @@ from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
 from app.services.auto_scope import _get_or_create_ai_scope_set
+from app.services.knowledge_graph_ai_context import (
+    collect_knowledge_graph_ai_context,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -477,6 +480,59 @@ async def route_prompt(
     return RoutePromptResponse(route="/projects/new", prefilled=prompt)
 
 
+async def _kg_context(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    *,
+    max_items: int = 20,
+) -> dict[str, Any]:
+    """Collect the project's Knowledge Graph context for AI generation.
+
+    Best-effort: a graph that fails to load must never block dashboard/query
+    generation, so any error yields an empty context block.
+    """
+    try:
+        return await collect_knowledge_graph_ai_context(
+            session,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            user_id=context.user_id,
+            max_items=max_items,
+        )
+    except Exception:  # context is optional enrichment
+        logger.exception(
+            "Failed to collect Knowledge Graph context for project %s", project_id,
+        )
+        return {}
+
+
+def _kg_context_chips(kg: dict[str, Any]) -> dict[str, Any]:
+    """Compact, chip-friendly KG summary for dashboard preview cards.
+
+    Returns short title lists (not full objects) the frontend renders as chips.
+    """
+    def _titles(key: str, cap: int = 4) -> list[str]:
+        items = kg.get(key) or []
+        out: list[str] = []
+        for it in items:
+            title = str((it or {}).get("title") or "").strip()
+            if title and title not in out:
+                out.append(title)
+            if len(out) >= cap:
+                break
+        return out
+
+    return {
+        "risks": _titles("risks"),
+        "opportunities": _titles("opportunities"),
+        "gaps": _titles("gaps"),
+        "measuredKpis": _titles("measured_kpis"),
+        "recommendedKpis": _titles("recommended_kpis"),
+        "governingDocuments": _titles("governing_documents"),
+    }
+
+
 @router.post("/query/generate")
 async def generate_sql(
     req: AIGenerateSQLRequest,
@@ -497,12 +553,22 @@ async def generate_sql(
         ds_result = await session.execute(ds_stmt)
         allowed_tables = [ds.view_name for ds in ds_result.scalars()]
 
+    source_catalog = await _build_source_catalog(
+        session, tenant_id=context.tenant_id, project_id=req.project_id
+    )
+
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
         "prompt": req.prompt,
         "allowed_tables": allowed_tables,
+        "source_catalog": source_catalog,
+        # All query AI generation includes Knowledge Graph context so SQL targets
+        # the risks/gaps/KPIs the graph surfaces (never Reference Library docs).
+        "knowledge_graph_context": await _kg_context(
+            session, context, req.project_id,
+        ),
     }
     return await _forward_to_ai("/ai/query/generate", payload)
 
@@ -1131,10 +1197,25 @@ async def suggest_dashboard(
     """Suggest dashboard widgets based on project data."""
     await _check_project_access(session, context, req.project_id)
 
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == req.project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
+        "prompt": "",
+        "allowed_tables": allowed_tables,
+        # Knowledge Graph context steers suggestions toward validated
+        # risks/gaps/measured KPIs and governing documents.
+        "knowledge_graph_context": await _kg_context(
+            session, context, req.project_id,
+        ),
     }
     return await _forward_to_ai("/ai/dashboard/suggest", payload)
 
@@ -1547,6 +1628,11 @@ async def ai_generate_and_save_query(
         "prompt": prompt_text,
         "allowed_tables": allowed_tables,
         "source_catalog": source_catalog,
+        # Knowledge Graph context steers generated SQL toward validated
+        # risks/gaps/measured KPIs surfaced by the graph.
+        "knowledge_graph_context": await _kg_context(
+            session, context, req.project_id,
+        ),
     }
     ai_result: dict[str, Any] = {}
     try:
@@ -1672,6 +1758,11 @@ async def ai_generate_and_save_dashboard(
         "project_id": req.project_id,
         "prompt": req.prompt or "",
         "allowed_tables": allowed_tables,
+        # Knowledge Graph context steers the plan toward validated risks, gaps,
+        # measured/recommended KPIs, and governing documents.
+        "knowledge_graph_context": await _kg_context(
+            session, context, req.project_id,
+        ),
     }
     ai_result = await _forward_to_ai("/ai/dashboard/suggest", payload)
     suggestions = ai_result.get("suggestions", [])
@@ -2120,6 +2211,8 @@ async def ai_suggest_dashboards(
     ).all()
     kpis = [k for k in kpi_rows if k]
 
+    kg_context = await _kg_context(session, context, req.project_id)
+
     desired = max(3, int(req.desired_count or 3))
     payload = {
         "tenant_id": context.tenant_id,
@@ -2130,9 +2223,14 @@ async def ai_suggest_dashboards(
         "desired_count": desired,
         "allowed_tables": allowed_tables,
         "kpis": kpis,
+        # Steer each preview toward the graph's risks/gaps/KPIs/governing docs.
+        "knowledge_graph_context": kg_context,
     }
     ai_result = await _forward_to_ai("/ai/dashboard/suggest-multi", payload)
     raw_suggestions = ai_result.get("suggestions", []) or []
+
+    # Compact, chip-friendly KG summary the FE renders on each preview card.
+    kg_chips = _kg_context_chips(kg_context)
 
     suggestions: list[dict[str, Any]] = []
     for idx, s in enumerate(raw_suggestions):
@@ -2183,6 +2281,7 @@ async def ai_suggest_dashboards(
                 "confidence": float(s.get("confidence") or 0.0),
                 "qualityScore": int(s.get("quality_score") or 0),
                 "validationSummary": "",
+                "knowledgeGraphContext": kg_chips,
                 "savePayload": save_payload,
             }
         )

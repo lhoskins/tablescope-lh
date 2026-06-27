@@ -1,6 +1,31 @@
 "use client";
 
 import { paletteFor, humanize, LEGEND } from "./knowledge-graph-style";
+import type { RelationshipStrength } from "@/lib/ui/use-project-data";
+
+// The relationship-evidence filter: each class maps to a connector style on the
+// canvas. Explicit + inferred show by default; recommended/hidden are opt-in.
+const STRENGTHS: {
+  value: RelationshipStrength;
+  label: string;
+  hint: string;
+  preview: "solid" | "dotted" | "recommended";
+}[] = [
+  { value: "explicit", label: "Explicit", hint: "Stated in project evidence", preview: "solid" },
+  { value: "inferred", label: "Inferred", hint: "High-confidence inference", preview: "dotted" },
+  { value: "recommended", label: "Recommended", hint: "Best-practice suggestion", preview: "recommended" },
+  { value: "none", label: "Hidden / weak", hint: "Low-confidence links", preview: "dotted" },
+];
+
+function ConnectorPreview({ kind }: { kind: "solid" | "dotted" | "recommended" }) {
+  const stroke = kind === "recommended" ? "#fbbf24" : kind === "solid" ? "#94a3b8" : "#cbd5e1";
+  const dash = kind === "solid" ? undefined : kind === "recommended" ? "2 4" : "4 4";
+  return (
+    <svg width="22" height="6" className="shrink-0">
+      <line x1="0" y1="3" x2="22" y2="3" stroke={stroke} strokeWidth={1.5} strokeDasharray={dash} />
+    </svg>
+  );
+}
 
 const LENSES: { value: string; label: string }[] = [
   { value: "insight-first", label: "Insight-First" },
@@ -27,6 +52,8 @@ interface ControlsProps {
   onToggleType: (type: string) => void;
   highestFirst: boolean;
   onHighestFirstChange: (value: boolean) => void;
+  strengths: Set<RelationshipStrength>;
+  onToggleStrength: (value: RelationshipStrength) => void;
   onReset: () => void;
 }
 
@@ -42,6 +69,8 @@ export function KnowledgeGraphControls({
   onToggleType,
   highestFirst,
   onHighestFirstChange,
+  strengths,
+  onToggleStrength,
   onReset,
 }: ControlsProps) {
   return (
@@ -141,6 +170,31 @@ export function KnowledgeGraphControls({
         />
         Highest confidence first
       </label>
+
+      {/* Relationship evidence (connector-style policy) */}
+      <div>
+        <div className="mb-1.5 text-small font-medium text-ink-secondary">
+          Relationship Evidence
+        </div>
+        <div className="space-y-1">
+          {STRENGTHS.map((s) => (
+            <label
+              key={s.value}
+              title={s.hint}
+              className="flex cursor-pointer items-center gap-2 text-small text-ink-secondary"
+            >
+              <input
+                type="checkbox"
+                checked={strengths.has(s.value)}
+                onChange={() => onToggleStrength(s.value)}
+                className="accent-brand"
+              />
+              <ConnectorPreview kind={s.preview} />
+              <span className="flex-1 truncate">{s.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
 
       {/* Legend */}
       <div>

@@ -18,6 +18,15 @@ export interface SuggestionWidget {
   businessQuestion: string;
 }
 
+export interface KnowledgeGraphContextChips {
+  risks?: string[];
+  opportunities?: string[];
+  gaps?: string[];
+  measuredKpis?: string[];
+  recommendedKpis?: string[];
+  governingDocuments?: string[];
+}
+
 export interface DashboardSuggestion {
   id: string;
   title: string;
@@ -30,6 +39,7 @@ export interface DashboardSuggestion {
   confidence: number;
   qualityScore: number;
   validationSummary: string;
+  knowledgeGraphContext?: KnowledgeGraphContextChips;
   savePayload?: Record<string, unknown>;
 }
 
@@ -47,6 +57,87 @@ const CHART_GLYPH: Record<string, string> = {
   narrative: "¶",
 };
 
+// Chart-family classification so each widget renders a representative visual
+// preview (not just text). Previews are not executed, so these are schematic
+// mockups of the chosen chart type.
+function chartFamily(chartType: string): string {
+  const t = (chartType || "").toLowerCase();
+  if (/kpi|gauge|bullet|metric|number|stat/.test(t)) return "kpi";
+  if (/line|area|spark|trend/.test(t)) return "line";
+  if (/pie|donut/.test(t)) return "pie";
+  if (/table|pivot|grid/.test(t)) return "table";
+  if (/narrative|insight|text|prose/.test(t)) return "narrative";
+  if (/scatter|bubble/.test(t)) return "scatter";
+  return "bar";
+}
+
+function WidgetPreviewGlyph({ chartType }: { chartType: string }) {
+  const fam = chartFamily(chartType);
+  const cls = "h-10 w-full text-brand-500";
+  if (fam === "kpi") {
+    return (
+      <div className="flex h-10 items-center justify-center">
+        <span className="text-[18px] font-semibold text-ink-primary">123.4</span>
+      </div>
+    );
+  }
+  if (fam === "line") {
+    return (
+      <svg viewBox="0 0 100 40" className={cls} preserveAspectRatio="none" aria-hidden>
+        <polyline points="0,32 20,24 40,28 60,12 80,18 100,4" fill="none" stroke="currentColor" strokeWidth="2" />
+      </svg>
+    );
+  }
+  if (fam === "pie") {
+    return (
+      <svg viewBox="0 0 40 40" className="mx-auto h-10" aria-hidden>
+        <circle cx="20" cy="20" r="16" fill="none" stroke="currentColor" className="text-line-secondary" strokeWidth="8" />
+        <circle cx="20" cy="20" r="16" fill="none" stroke="currentColor" className="text-brand-500" strokeWidth="8" strokeDasharray="60 100" transform="rotate(-90 20 20)" />
+      </svg>
+    );
+  }
+  if (fam === "table") {
+    return (
+      <div className="grid h-10 grid-rows-3 gap-0.5" aria-hidden>
+        {[0, 1, 2].map((r) => (
+          <div key={r} className="grid grid-cols-3 gap-0.5">
+            {[0, 1, 2].map((c) => (
+              <div key={c} className="rounded-[1px] bg-line-secondary" />
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (fam === "narrative") {
+    return (
+      <div className="flex h-10 flex-col justify-center gap-1" aria-hidden>
+        <div className="h-1.5 w-full rounded bg-line-secondary" />
+        <div className="h-1.5 w-4/5 rounded bg-line-secondary" />
+        <div className="h-1.5 w-3/5 rounded bg-line-secondary" />
+      </div>
+    );
+  }
+  if (fam === "scatter") {
+    return (
+      <svg viewBox="0 0 100 40" className={cls} aria-hidden>
+        {[[12, 30], [28, 18], [44, 24], [60, 10], [76, 20], [90, 6]].map(([x, y], i) => (
+          <circle key={i} cx={x} cy={y} r="3" fill="currentColor" />
+        ))}
+      </svg>
+    );
+  }
+  // bar (default)
+  return (
+    <svg viewBox="0 0 100 40" className={cls} preserveAspectRatio="none" aria-hidden>
+      {[8, 26, 44, 62, 80].map((x, i) => {
+        const h = [16, 28, 12, 34, 22][i];
+        return <rect key={x} x={x} y={40 - h} width="10" height={h} fill="currentColor" />;
+      })}
+    </svg>
+  );
+}
+
 const AUDIENCES = ["", "executive", "manager", "analyst", "operational"];
 const AUDIENCE_LABEL: Record<string, string> = {
   "": "Any audience",
@@ -55,6 +146,49 @@ const AUDIENCE_LABEL: Record<string, string> = {
   analyst: "Analyst",
   operational: "Operational",
 };
+
+const KG_CHIP_GROUPS: {
+  key: keyof KnowledgeGraphContextChips;
+  label: string;
+  tone: "danger" | "success" | "warning" | "ai" | "outline" | "neutral";
+}[] = [
+  { key: "risks", label: "Risk", tone: "danger" },
+  { key: "gaps", label: "Gap", tone: "warning" },
+  { key: "opportunities", label: "Opportunity", tone: "success" },
+  { key: "measuredKpis", label: "KPI", tone: "ai" },
+  { key: "recommendedKpis", label: "Rec. KPI", tone: "outline" },
+  { key: "governingDocuments", label: "Doc", tone: "neutral" },
+];
+
+function KnowledgeGraphChips({
+  kg,
+}: {
+  kg?: KnowledgeGraphContextChips;
+}) {
+  if (!kg) return null;
+  const groups = KG_CHIP_GROUPS.map((g) => ({
+    ...g,
+    items: (kg[g.key] ?? []).filter(Boolean),
+  })).filter((g) => g.items.length > 0);
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="mt-3 rounded-md border border-dashed border-line-secondary bg-bg-secondary/30 p-2">
+      <div className="mb-1.5 text-[11px] uppercase text-ink-tertiary">
+        Knowledge Graph context
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {groups.flatMap((g) =>
+          g.items.slice(0, 3).map((item) => (
+            <Badge key={`${g.key}-${item}`} tone={g.tone}>
+              <span className="opacity-70">{g.label}:</span>&nbsp;{item}
+            </Badge>
+          )),
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function AIDashboardSuggestionsModal({
   open,
@@ -268,6 +402,9 @@ export function AIDashboardSuggestionsModal({
                         </span>
                         {w.chartType || "widget"}
                       </div>
+                      <div className="mt-1.5">
+                        <WidgetPreviewGlyph chartType={w.chartType} />
+                      </div>
                       <div className="mt-1 line-clamp-2 text-[12px] text-ink-primary">
                         {w.title || w.businessQuestion || "Untitled widget"}
                       </div>
@@ -275,6 +412,8 @@ export function AIDashboardSuggestionsModal({
                   ))}
                 </div>
               )}
+
+              <KnowledgeGraphChips kg={s.knowledgeGraphContext} />
 
               {s.kpis.length > 0 && (
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">

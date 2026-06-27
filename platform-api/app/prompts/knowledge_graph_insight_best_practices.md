@@ -512,3 +512,118 @@ Do not use Reference Library documents as SQL query sources.
 Do not create critical, urgent, risk, anomaly, or breach findings from reference documents alone. A risk or breach requires project-specific evidence such as data, documents, dashboards, queries, or validated graph relationships.
 
 For empty tenants or projects with no relevant data, return an info/watch guidance card instead of a critical finding (for example: "Reference guidance available; add project data to assess compliance").
+
+## Relationship Evidence Classification and Connector Style Policy
+
+The Knowledge Graph must classify every relationship by evidence strength before
+displaying it. The system must not draw every possible relationship as a solid
+line. Each relationship is assigned:
+
+```json
+{
+  "relationship_strength": "explicit|inferred|recommended|none",
+  "connector_style": "solid|dotted|recommended|hidden",
+  "confidence": 0.0,
+  "evidence_basis": "",
+  "evidence_summary": "",
+  "display_by_default": true
+}
+```
+
+### 1. Solid Connector — explicit
+
+Use a solid connector only when the relationship is explicitly supported by
+strong project evidence or authoritative text: a document explicitly references
+another document; a policy explicitly governs a process; a procedure explicitly
+supports a process; a document explicitly names a KPI; a query explicitly
+calculates/selects a KPI; a dashboard explicitly visualizes a KPI/query; a
+datasource is explicitly used by a query; a document explicitly references a
+supplier/customer/entity; an authoritative reference is explicitly cited; a
+control/audit requirement/standard is directly named in a project document.
+
+```json
+{"relationship_strength": "explicit", "connector_style": "solid",
+ "confidence": 0.90, "display_by_default": true, "validation_status": "validated"}
+```
+
+### 2. Dotted Connector — inferred
+
+Use a dotted connector when the relationship is inferred with high confidence but
+not explicitly stated (two documents discuss the same process without citing each
+other; a policy appears applicable by terminology/domain; a KPI is strongly
+implied but not named; a query likely measures a KPI based on field names/aliases;
+a dashboard likely supports a process based on widget titles/data sources).
+
+```json
+{"relationship_strength": "inferred", "connector_style": "dotted",
+ "confidence": 0.75, "display_by_default": true, "validation_status": "inferred"}
+```
+
+Dotted connectors display by default only when confidence is at least **0.75**.
+Lower-confidence inferred relationships are hidden unless the user enables
+inferred relationships.
+
+### 3. Recommended Connector — no visible line by default
+
+Use recommended status when the AI believes a relationship *should* exist based on
+industry standards, best practices, Reference Library guidance, or domain
+reasoning, but there is no strong evidence it exists in the project today (an
+industry standard suggests a missing policy; a KPI should exist for a process but
+no query/dashboard measures it; a dashboard should visualize a KPI but none does;
+a document should reference an authoritative policy but does not; a best-practice
+control is missing).
+
+Recommended relationships appear as: a right-side recommendation card, a gap /
+opportunity card, an optional connector when the user enables "Show Recommended",
+and a legend item — but **no visible line by default**.
+
+```json
+{"relationship_strength": "recommended", "connector_style": "recommended",
+ "confidence": 0.60, "display_by_default": false, "validation_status": "suggested",
+ "recommendation_reason": "Best practice suggests this relationship should exist, but current project evidence does not prove it."}
+```
+
+Recommended relationships must not be treated as validated evidence and must not
+create critical/urgent findings unless supported by project-specific evidence.
+
+### 4. Hidden / No Connector — none
+
+Use no connector when confidence is too low, the relationship is speculative or
+based only on generic similarity, evidence is insufficient, the reference document
+is unrelated to the selected node, or the relationship would clutter the graph
+without business value.
+
+```json
+{"relationship_strength": "none", "connector_style": "hidden",
+ "confidence": 0.0, "display_by_default": false, "validation_status": "rejected"}
+```
+
+### KPI Connector Policy
+
+KPI relationships distinguish **recommended** KPIs from **measured** KPIs.
+
+- **Recommended KPI** — should be tracked based on documents, process context,
+  Reference Library guidance, or best practices. May appear in the KPIs & Metrics
+  section with `kpi_status: "recommended"` and `display_without_edge: true`; no
+  visible connector by default.
+- **Measured KPI** — connected to actual project evidence (saved query, dashboard,
+  datasource field, validated SQL, dashboard widget). Measured-KPI connectors are
+  solid when explicitly calculated/visualized (`relationship_type: "measures"` /
+  `"visualizes"`), dotted when only inferred from SQL fields/aliases/widget titles.
+
+### Reference Library Connector Policy
+
+Reference Library documents are guidance/standards/authority, never datasources.
+Use a solid connector only when a project document explicitly cites the reference;
+a dotted connector for high-confidence semantic alignment without explicit
+citation; and a recommended relationship (card/gap, not a solid line) when the
+project would benefit from referencing best-practice guidance it does not
+currently follow.
+
+### Output contract for the UI
+
+Every edge in the payload carries `relationshipStrength`, `connectorStyle`,
+`displayByDefault`, `evidenceBasis`, and `validationStatus`. The UI renders solid,
+dotted, and recommended (faint/optional) connectors, hides `none`, and exposes
+Show Explicit / Show Inferred / Show Recommended / Show Hidden toggles plus a
+connector-style legend.

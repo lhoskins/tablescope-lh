@@ -53,6 +53,29 @@ interface CanvasEdge {
   target: GraphId;
   confidence: number;
   type?: string;
+  connectorStyle?: "solid" | "dotted" | "recommended" | "hidden";
+}
+
+/** Stroke appearance for a relationship connector by its evidence class. */
+function connectorStroke(
+  style: CanvasEdge["connectorStyle"],
+  traced: boolean,
+): { stroke: string; strokeWidth: number; dash?: string; marker: string } {
+  if (traced) {
+    return { stroke: "#94a3b8", strokeWidth: 1.5, marker: "kg-arrow" };
+  }
+  switch (style) {
+    case "solid":
+      // Explicit project evidence — a confident solid line.
+      return { stroke: "#94a3b8", strokeWidth: 1.25, marker: "kg-arrow" };
+    case "recommended":
+      // Best-practice recommendation — faint, widely-dashed, amber.
+      return { stroke: "#fbbf24", strokeWidth: 1, dash: "2 5", marker: "kg-arrow-rec" };
+    case "dotted":
+    default:
+      // Inferred relationship — light dashed line.
+      return { stroke: "#cbd5e1", strokeWidth: 1, dash: "4 4", marker: "kg-arrow-dim" };
+  }
 }
 
 interface CanvasProps {
@@ -448,20 +471,34 @@ export function KnowledgeGraphCanvas({
               markerHeight="5"
               orient="auto-start-reverse"
             >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#e2e8f0" />
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#cbd5e1" />
+            </marker>
+            <marker
+              id="kg-arrow-rec"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#fbbf24" />
             </marker>
           </defs>
-          {drawn.map(({ e, p1, p2, traced }) => (
-            <path
-              key={String(e.id)}
-              d={edgePath(p1, p2)}
-              fill="none"
-              stroke={traced ? "#94a3b8" : "#e2e8f0"}
-              strokeWidth={traced ? 1.5 : 1}
-              strokeDasharray={traced ? undefined : "4 4"}
-              markerEnd={`url(#${traced ? "kg-arrow" : "kg-arrow-dim"})`}
-            />
-          ))}
+          {drawn.map(({ e, p1, p2, traced }) => {
+            const s = connectorStroke(e.connectorStyle, traced);
+            return (
+              <path
+                key={String(e.id)}
+                d={edgePath(p1, p2)}
+                fill="none"
+                stroke={s.stroke}
+                strokeWidth={s.strokeWidth}
+                strokeDasharray={s.dash}
+                markerEnd={`url(#${s.marker})`}
+              />
+            );
+          })}
         </svg>
 
         {/* Edge relationship labels are disabled by default (too cluttered);

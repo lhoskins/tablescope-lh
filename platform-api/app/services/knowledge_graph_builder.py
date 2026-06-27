@@ -348,6 +348,115 @@ def _evidence_summary(edge: dict[str, Any]) -> str:
     return str(ev or "")
 
 
+# ── Relationship evidence classification (connector-style policy) ─────
+#
+# Every edge is classified by evidence strength so the UI can draw it with the
+# right connector: a solid line for explicit project evidence, a dashed line for
+# high-confidence inference, a faint/optional line for best-practice
+# recommendations, and nothing for low-confidence noise.  See
+# ``prompts/knowledge_graph_insight_best_practices.md``.
+
+# Relationships that only ever express a *recommendation* (a missing
+# best-practice item), never proven project evidence.
+_RECOMMENDED_REL_TYPES = {
+    "recommended_kpi", "suggested_kpi", "recommends",
+    "missing_required_evidence", "missing_required_policy",
+    "missing_required_procedure", "missing_required_kpi",
+    "missing_required_datasource",
+}
+# Relationships that are inferred rather than explicitly stated.
+_INFERRED_REL_TYPES = {"linked_by_inferred_join", "mentions", "applies_to"}
+# Minimum confidence for an inferred (dotted) relationship to display by default.
+_INFERRED_DISPLAY_FLOOR = 0.75
+
+
+def _evidence_basis(rel_type: str, src: dict[str, Any] | None, tgt: dict[str, Any] | None) -> str:
+    if rel_type in _RECOMMENDED_REL_TYPES:
+        return "best_practice_recommendation"
+    if rel_type in ("measures", "calculated_from", "threshold_from", "benchmarked_against"):
+        return "kpi_mapping"
+    if rel_type == "visualizes":
+        return "dashboard_lineage"
+    if rel_type in (
+        "uses", "feeds", "derived_from", "reads_from",
+        "linked_by_validated_join", "linked_by_inferred_join",
+    ):
+        return "query_lineage"
+    if rel_type in ("mentions", "applies_to"):
+        return "semantic_inference"
+    types = {
+        str((src or {}).get("type") or ""),
+        str((tgt or {}).get("type") or ""),
+    }
+    if types & {
+        "business_entity", "supplier", "customer", "product", "facility", "contract",
+    }:
+        return "entity_extraction"
+    return "explicit_citation"
+
+
+def _classify_relationship(
+    edge: dict[str, Any],
+    src: dict[str, Any] | None,
+    tgt: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Assign connector style + evidence strength to an edge.
+
+    Order of decision (most-to-least supported), matching the AI decision rules
+    in the best-practices prompt:
+
+    1. explicit project evidence  → solid line
+    2. strong inference           → dotted line (shown only if conf >= 0.75)
+    3. best-practice recommended  → faint/optional line, hidden by default
+    4. weak / rejected            → no line
+    """
+    rel_type = str(edge.get("relationship_type") or edge.get("edge_type") or "")
+    conf = _edge_confidence(edge)
+    ev = _as_dict(edge.get("evidence"))
+    vstatus = str(ev.get("validation_status") or "").lower()
+
+    # A KPI endpoint that the collector marked "recommended" makes the edge a
+    # recommendation regardless of its raw relationship type.
+    kpi_recommended = any(
+        str(_as_dict((n or {}).get("properties")).get("kpiStatus") or "") == "recommended"
+        for n in (src, tgt)
+        if n and str(n.get("type") or "") in ("kpi", "metric")
+    )
+
+    is_recommended = (
+        rel_type in _RECOMMENDED_REL_TYPES
+        or vstatus in ("suggested", "gap")
+        or kpi_recommended
+    )
+
+    if vstatus == "rejected" or (conf and conf < 0.5 and not is_recommended):
+        strength, style, display, vstat = "none", "hidden", False, "rejected"
+    elif is_recommended:
+        strength, style, display, vstat = "recommended", "recommended", False, "suggested"
+    elif vstatus == "inferred" or rel_type in _INFERRED_REL_TYPES:
+        strength = "inferred"
+        style = "dotted"
+        display = conf >= _INFERRED_DISPLAY_FLOOR
+        vstat = "inferred"
+    elif vstatus == "validated" or conf >= 0.90:
+        strength, style, display, vstat = "explicit", "solid", True, "validated"
+    elif conf >= _INFERRED_DISPLAY_FLOOR:
+        # Strong-but-not-validated: treat as high-confidence inference.
+        strength, style, display, vstat = "inferred", "dotted", True, "inferred"
+    elif conf >= 0.70:
+        strength, style, display, vstat = "inferred", "dotted", False, "inferred"
+    else:
+        strength, style, display, vstat = "none", "hidden", False, "rejected"
+
+    return {
+        "relationshipStrength": strength,
+        "connectorStyle": style,
+        "displayByDefault": display,
+        "evidenceBasis": _evidence_basis(rel_type, src, tgt),
+        "validationStatus": vstat,
+    }
+
+
 # ── Neighborhood selection ───────────────────────────────────────────
 
 def _is_canvas_hidden(node: dict[str, Any]) -> bool:
@@ -942,7 +1051,9 @@ def _kpi_measurement_gap_card(
 
 
 def _edge_payload(edge: dict[str, Any], nodes_by_id: dict[Any, dict[str, Any]]) -> dict[str, Any]:
-    ev = _as_dict(edge.get("evidence"))
+    src = nodes_by_id.get(edge["from_node_id"])
+    tgt = nodes_by_id.get(edge["to_node_id"])
+    classification = _classify_relationship(edge, src, tgt)
     return {
         "id": edge["id"],
         "source": edge["from_node_id"],
@@ -950,7 +1061,7 @@ def _edge_payload(edge: dict[str, Any], nodes_by_id: dict[Any, dict[str, Any]]) 
         "type": edge.get("relationship_type") or edge.get("edge_type") or "",
         "confidence": _edge_confidence(edge),
         "evidence": _evidence_summary(edge),
-        "validationStatus": str(ev.get("validation_status") or ""),
+        **classification,
     }
 
 

@@ -14,6 +14,7 @@ from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.services.knowledge_graph_builder import (
     MAX_NEIGHBORHOOD_NODES,
     PIPELINE_VERSION,
+    _classify_relationship,
     _json_safe,
     build_graph_payload,
     build_node_centric_graph_from_snapshot,
@@ -282,6 +283,97 @@ def test_empty_graph_returns_empty_payload():
     assert payload["nodes"] == []
     assert payload["insightCards"] == []
     assert payload["pipeline_version"] == PIPELINE_VERSION
+
+
+# ── Relationship evidence classification (connector-style policy) ─────
+
+def _kpi_node(status: str | None = None) -> dict:
+    props = {"kpiStatus": status} if status else {}
+    return {"id": 9, "type": "kpi", "label": "On-time Closure", "properties": props}
+
+
+def _doc_node() -> dict:
+    return {"id": 3, "type": "policy", "label": "Quality Manual", "properties": {}}
+
+
+def test_classify_validated_edge_is_solid_explicit():
+    edge = {"relationship_type": "governs", "confidence": 0.95,
+            "evidence": {"validation_status": "validated"}}
+    cls = _classify_relationship(edge, _doc_node(), {"id": 2, "type": "process"})
+    assert cls["relationshipStrength"] == "explicit"
+    assert cls["connectorStyle"] == "solid"
+    assert cls["displayByDefault"] is True
+    assert cls["validationStatus"] == "validated"
+
+
+def test_classify_high_confidence_no_status_is_solid_explicit():
+    edge = {"relationship_type": "measures", "confidence": 0.92, "evidence": {}}
+    cls = _classify_relationship(edge, {"id": 2, "type": "process"}, _kpi_node("measured"))
+    assert cls["relationshipStrength"] == "explicit"
+    assert cls["connectorStyle"] == "solid"
+    assert cls["evidenceBasis"] == "kpi_mapping"
+
+
+def test_classify_inferred_rel_type_is_dotted():
+    edge = {"relationship_type": "linked_by_inferred_join", "confidence": 0.8,
+            "evidence": {}}
+    cls = _classify_relationship(edge, {"id": 1, "type": "data_source"},
+                                 {"id": 2, "type": "data_source"})
+    assert cls["relationshipStrength"] == "inferred"
+    assert cls["connectorStyle"] == "dotted"
+    assert cls["displayByDefault"] is True  # >= 0.75 floor
+
+
+def test_classify_inferred_below_floor_hidden_by_default():
+    edge = {"relationship_type": "mentions", "confidence": 0.72, "evidence": {}}
+    cls = _classify_relationship(edge, _doc_node(), {"id": 2, "type": "process"})
+    assert cls["relationshipStrength"] == "inferred"
+    assert cls["connectorStyle"] == "dotted"
+    assert cls["displayByDefault"] is False
+
+
+def test_classify_recommended_rel_type():
+    edge = {"relationship_type": "recommended_kpi", "confidence": 0.6, "evidence": {}}
+    cls = _classify_relationship(edge, {"id": 2, "type": "process"}, _kpi_node())
+    assert cls["relationshipStrength"] == "recommended"
+    assert cls["connectorStyle"] == "recommended"
+    assert cls["displayByDefault"] is False
+    assert cls["validationStatus"] == "suggested"
+
+
+def test_classify_recommended_kpi_endpoint_overrides_rel_type():
+    # A normal "measures" edge but the KPI endpoint is recommended → recommended.
+    edge = {"relationship_type": "measures", "confidence": 0.95, "evidence": {}}
+    cls = _classify_relationship(edge, {"id": 2, "type": "process"},
+                                 _kpi_node("recommended"))
+    assert cls["relationshipStrength"] == "recommended"
+    assert cls["connectorStyle"] == "recommended"
+
+
+def test_classify_rejected_status_is_hidden():
+    edge = {"relationship_type": "governs", "confidence": 0.95,
+            "evidence": {"validation_status": "rejected"}}
+    cls = _classify_relationship(edge, _doc_node(), {"id": 2, "type": "process"})
+    assert cls["relationshipStrength"] == "none"
+    assert cls["connectorStyle"] == "hidden"
+    assert cls["displayByDefault"] is False
+
+
+def test_classify_low_confidence_is_hidden():
+    edge = {"relationship_type": "governs", "confidence": 0.3, "evidence": {}}
+    cls = _classify_relationship(edge, _doc_node(), {"id": 2, "type": "process"})
+    assert cls["connectorStyle"] == "hidden"
+    assert cls["relationshipStrength"] == "none"
+
+
+def test_classified_metadata_present_on_built_edges():
+    payload = build_graph_payload(
+        _nodes(), _edges(), center_node="process:corrective_action_process",
+    )
+    for edge in payload["edges"]:
+        assert "relationshipStrength" in edge
+        assert "connectorStyle" in edge
+        assert edge["connectorStyle"] in ("solid", "dotted", "recommended", "hidden")
 
 
 # ── Endpoint wiring / tenant scope ───────────────────────────────────

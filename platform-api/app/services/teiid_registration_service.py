@@ -22,6 +22,7 @@ from app.config import get_settings
 from app.services.database_introspection_service import (
     build_jdbc_url,
     get_db_type_config,
+    normalize_db_password,
 )
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,11 @@ class TeiidRegistrationService:
             db_type=db_type, host=host, port=port, database_name=database_name
         )
 
+        # No-password sources must register without a credential. WildFly
+        # rejects an empty password, so send "" (the servlet omits the
+        # parameter) rather than a meaningless empty value.
+        normalized_password = normalize_db_password(password) or ""
+
         payload = {
             "vdb_id": vdb_id,
             "org_id": org_id,
@@ -140,7 +146,7 @@ class TeiidRegistrationService:
             "schema_name": schema_name or "",
             "table_name": table_name,
             "username": username,
-            "password": password,
+            "password": normalized_password,
             "ssl_mode": ssl_mode or "",
             "model_name": model_name,
             "teiid_table_name": teiid_table_name,

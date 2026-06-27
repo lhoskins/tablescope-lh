@@ -14,6 +14,7 @@ import {
   type GraphId,
   type GraphNode,
   type KnowledgeGraphInsightCard,
+  type RelationshipStrength,
 } from "@/lib/ui/use-project-data";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import { cn } from "@/lib/cn";
@@ -24,7 +25,12 @@ import { humanize } from "./knowledge-graph-style";
 
 // Relationship types that are kept in the payload (so the node stays on the
 // canvas) but not drawn unless the user enables detailed/inferred relationships.
+// Used only as a fallback for legacy edges that lack a relationshipStrength.
 const HIDDEN_EDGE_TYPES = new Set(["recommended_kpi", "suggested_kpi"]);
+
+// Relationship-evidence classes shown by default (explicit + inferred);
+// recommended/weak links are opt-in via the Relationship Evidence toggles.
+const DEFAULT_STRENGTHS: RelationshipStrength[] = ["explicit", "inferred"];
 
 interface ScreenProps {
   projectId: number;
@@ -39,6 +45,9 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
   const [includeInferred, setIncludeInferred] = useState(false);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [highestFirst, setHighestFirst] = useState(true);
+  const [strengths, setStrengths] = useState<Set<RelationshipStrength>>(
+    new Set(DEFAULT_STRENGTHS),
+  );
   const [tracingCardId, setTracingCardId] = useState<string | null>(null);
   const [tracedNodeIds, setTracedNodeIds] = useState<Set<GraphId> | null>(null);
 
@@ -109,6 +118,7 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
     setIncludeInferred(false);
     setHiddenTypes(new Set());
     setHighestFirst(true);
+    setStrengths(new Set(DEFAULT_STRENGTHS));
     setTracingCardId(null);
     setTracedNodeIds(null);
   }, []);
@@ -118,6 +128,15 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
       const next = new Set(prev);
       if (next.has(type)) next.delete(type);
       else next.add(type);
+      return next;
+    });
+  }, []);
+
+  const toggleStrength = useCallback((value: RelationshipStrength) => {
+    setStrengths((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
       return next;
     });
   }, []);
@@ -147,19 +166,23 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
 
   const visibleEdges = useMemo(() => {
     if (!data) return [];
-    const edges = data.edges.filter(
-      (e) =>
-        visibleNodeIds.has(e.source) &&
-        visibleNodeIds.has(e.target) &&
-        // Recommended/suggested KPI links keep the node on the canvas but are
-        // hidden by default — only drawn when detailed/inferred mode is on.
-        (includeInferred || !HIDDEN_EDGE_TYPES.has(e.type ?? "")),
-    );
+    const edges = data.edges.filter((e) => {
+      if (!visibleNodeIds.has(e.source) || !visibleNodeIds.has(e.target)) {
+        return false;
+      }
+      // Each edge is classified by evidence strength. Honor the Relationship
+      // Evidence toggles; fall back to recommended/explicit for older payloads
+      // that predate the classification metadata.
+      const strength: RelationshipStrength =
+        e.relationshipStrength ??
+        (HIDDEN_EDGE_TYPES.has(e.type ?? "") ? "recommended" : "explicit");
+      return strengths.has(strength);
+    });
     if (highestFirst) {
       return [...edges].sort((a, b) => b.confidence - a.confidence);
     }
     return edges;
-  }, [data, visibleNodeIds, highestFirst, includeInferred]);
+  }, [data, visibleNodeIds, highestFirst, strengths]);
 
   const center = data?.centerNode ?? null;
   const title = center?.label ?? "Knowledge Graph";
@@ -181,6 +204,8 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
           onToggleType={toggleType}
           highestFirst={highestFirst}
           onHighestFirstChange={setHighestFirst}
+          strengths={strengths}
+          onToggleStrength={toggleStrength}
           onReset={handleReset}
         />
       </aside>

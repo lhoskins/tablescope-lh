@@ -48,6 +48,25 @@ def source_identifier(db_type: str, name: str | None) -> str | None:
     return name
 
 
+def normalize_db_password(value: str | None) -> str | None:
+    """Collapse a blank/whitespace-only DB password to ``None``.
+
+    Some databases (e.g. a MySQL account configured without a password) connect
+    with no password at all.  An empty string must be treated as "no password"
+    so the credential can be omitted from the connection URL and the
+    Teiid/WildFly datasource registration (WildFly rejects ``password=""``).
+    Non-empty passwords are returned verbatim — passwords may legitimately
+    contain leading/trailing spaces, so we only treat all-whitespace as blank.
+    """
+    if value is None:
+        return None
+    if value == "":
+        return None
+    if value.strip() == "":
+        return None
+    return value
+
+
 class DatabaseIntrospectionError(Exception):
     """User-facing introspection failure (safe message, no secrets)."""
 
@@ -170,16 +189,19 @@ class ConnectionParams:
 def _build_engine(params: ConnectionParams) -> Engine:
     cfg = get_db_type_config(params.db_type)
     user = quote_plus(params.username)
-    pwd = quote_plus(params.password)
+    raw_pwd = normalize_db_password(params.password)
+    # No-password connections must not produce ``user:@host`` — omit the
+    # credential separator entirely so drivers connect without a password.
+    auth = f"{user}:{quote_plus(raw_pwd)}" if raw_pwd is not None else user
     host = params.host
     port = params.resolved_port
     db = quote_plus(params.database_name)
 
     if params.db_type == "oracle":
         # Connect by service name (matches the JDBC thin service-name form).
-        url = f"{cfg.sa_dialect}://{user}:{pwd}@{host}:{port}/?service_name={db}"
+        url = f"{cfg.sa_dialect}://{auth}@{host}:{port}/?service_name={db}"
     else:
-        url = f"{cfg.sa_dialect}://{user}:{pwd}@{host}:{port}/{db}"
+        url = f"{cfg.sa_dialect}://{auth}@{host}:{port}/{db}"
 
     # Connection-timeout argument names differ across DBAPI drivers.
     connect_args: dict = {}

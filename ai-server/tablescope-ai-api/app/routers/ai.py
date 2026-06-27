@@ -65,6 +65,7 @@ from app.models.schemas import (
 )
 from app.services import context_builder, llm_client, vector_store
 from app.services.context_builder import ContextBuildError
+from app.services.kg_context import format_knowledge_graph_context
 from app.services.prompt_loader import load_prompt_reference
 from app.services.sql_validator import SQLValidationError, validate_sql
 
@@ -504,6 +505,12 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
 
     context_text = context_builder.context_to_prompt_text(ctx)
 
+    # Fold in the Knowledge Graph context so generated SQL targets the validated
+    # risks/gaps/measured KPIs the graph surfaces (never Reference Library docs).
+    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+    if kg_block:
+        context_text = f"{context_text}\n\n{kg_block}"
+
     # Determine allowed tables
     allowed_tables = req.allowed_tables
     if not allowed_tables:
@@ -686,8 +693,12 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         else ""
     )
 
+    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+    kg_prompt_block = f"{kg_block}\n\n" if kg_block else ""
+
     prompt = (
         f"{context_text}\n\n"
+        f"{kg_prompt_block}"
         f"{best_practices_block}"
         f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
         "CRITICAL: every widget's SQL must reference ONLY the allowed tables "
@@ -883,8 +894,12 @@ async def suggest_dashboards_multi(
         else ""
     )
 
+    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+    kg_prompt_block = f"{kg_block}\n\n" if kg_block else ""
+
     prompt = (
         f"{context_text}\n\n"
+        f"{kg_prompt_block}"
         f"{best_practices_block}"
         f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
         f"{audience_line}"

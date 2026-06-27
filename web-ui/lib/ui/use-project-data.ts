@@ -337,6 +337,9 @@ export interface GraphNode {
   recommendedLens?: string;
 }
 
+export type RelationshipStrength = "explicit" | "inferred" | "recommended" | "none";
+export type ConnectorStyle = "solid" | "dotted" | "recommended" | "hidden";
+
 export interface GraphEdge {
   id: GraphId;
   source: GraphId;
@@ -345,6 +348,12 @@ export interface GraphEdge {
   confidence: number;
   evidence: string;
   validationStatus?: string;
+  // Relationship evidence classification (connector-style policy). Absent on
+  // legacy responses, in which case the canvas falls back to confidence.
+  relationshipStrength?: RelationshipStrength;
+  connectorStyle?: ConnectorStyle;
+  displayByDefault?: boolean;
+  evidenceBasis?: string;
 }
 
 export interface GraphResponse {

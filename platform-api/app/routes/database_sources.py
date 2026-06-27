@@ -597,10 +597,15 @@ async def create_database_source(
         )
     except TeiidRegistrationError as exc:
         await session.rollback()
+        # Keep the raw WildFly/Teiid error in the logs only; the verbatim CLI
+        # JSON is noisy and unhelpful (and potentially sensitive) for end users.
         logger.error("Teiid registration failed: %s", exc)
         raise HTTPException(
             status_code=502,
-            detail=f"Data source created but could not be made queryable: {exc}",
+            detail=(
+                "Data source registration failed in the query engine. "
+                "Please retry. If the issue continues, contact support."
+            ),
         ) from exc
     finally:
         await reg.aclose()

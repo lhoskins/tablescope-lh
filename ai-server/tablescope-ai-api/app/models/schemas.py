@@ -68,11 +68,15 @@ class GenerateSQLRequest(AIBaseRequest):
     prompt: str
     allowed_tables: list[str] = Field(default_factory=list)
     source_catalog: list[SourceCatalogEntry] = Field(default_factory=list)
+    # Compact, AI-safe Knowledge Graph summary (risks/gaps/measured KPIs/docs);
+    # steers SQL toward validated business questions, never Reference Library.
+    knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class SuggestDashboardRequest(AIBaseRequest):
     prompt: str = ""
     allowed_tables: list[str] = []
+    knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class SuggestDashboardsMultiRequest(AIBaseRequest):
@@ -89,6 +93,7 @@ class SuggestDashboardsMultiRequest(AIBaseRequest):
     desired_count: int = 3
     allowed_tables: list[str] = []
     kpis: list[str] = Field(default_factory=list)
+    knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class QueryInfo(BaseModel):
