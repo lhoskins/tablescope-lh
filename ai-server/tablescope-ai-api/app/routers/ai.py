@@ -600,6 +600,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         model_used=settings.sql_model,
         selected_sources=selected,
         repaired=repaired,
+        knowledge_graph_context_used=bool(kg_block),
     )
 
 
@@ -919,7 +920,15 @@ async def suggest_dashboards_multi(
         "real KPI references.\n"
         "- Reference Library documents are authoritative guidance, NOT data "
         "sources: never list a reference document as a data source.\n"
-        "- 3-6 widgets per plan; each widget is an outline (no SQL needed here).\n\n"
+        "- 3-6 widgets per plan. Each chart/table/KPI widget MUST include a "
+        "complete, runnable SQL query grounded in the allowed tables/columns "
+        "above so the dashboard can render real data. Use exact table and column "
+        "names; aggregate where appropriate; add ORDER BY and a small LIMIT "
+        "(<= 12 rows) for ranked/top-N widgets.\n"
+        "- For each widget also name the label_column (category/x axis) and "
+        "value_column (numeric/y axis) from the SELECT list.\n"
+        "- A narrative/risk/gap widget (chart_type 'narrative_insight') has an "
+        "empty sql; use these sparingly and prefer real data widgets.\n\n"
         f"Return ONLY a JSON object with at least {desired} suggestions:\n"
         "{\n"
         '  "suggestions": [ {\n'
@@ -928,7 +937,8 @@ async def suggest_dashboards_multi(
         '    "business_purpose": "the decision/question this dashboard drives",\n'
         '    "audience": "executive|manager|analyst|operational",\n'
         '    "widgets": [ {"title": "", "chart_type": "<chart type>", '
-        '"business_question": ""} ],\n'
+        '"business_question": "", "sql": "SELECT ... (empty for '
+        'narrative_insight)", "label_column": "", "value_column": ""} ],\n'
         '    "kpis": ["kpi names this dashboard covers"],\n'
         '    "data_sources": ["allowed table names this dashboard uses"],\n'
         '    "confidence": 0.0,\n'
@@ -963,15 +973,34 @@ async def suggest_dashboards_multi(
     allowed_set = {t.lower() for t in allowed_tables}
     suggestions: list[DashboardPlanSuggestion] = []
     for s in raw_suggestions:
-        widgets = [
-            DashboardPlanWidget(
-                title=str(w.get("title", "")),
-                chart_type=str(w.get("chart_type") or w.get("type") or ""),
-                business_question=str(w.get("business_question", "")),
+        widgets: list[DashboardPlanWidget] = []
+        for w in s.get("widgets", []):
+            if not isinstance(w, dict):
+                continue
+            sql = (w.get("sql") or "").strip()
+            if sql:
+                # Clean + validate against the allowed tables. Drop widgets whose
+                # SQL references tables outside the project (hallucinated/reference
+                # docs); narrative widgets (empty sql) are always kept.
+                sql = _clean_sql(sql)
+                try:
+                    validate_sql(sql, allowed_tables)
+                except SQLValidationError as e:
+                    logger.warning(
+                        "Dropping multi-suggest widget %r: %s",
+                        w.get("title", "untitled"), e.reason,
+                    )
+                    continue
+            widgets.append(
+                DashboardPlanWidget(
+                    title=str(w.get("title", "")),
+                    chart_type=str(w.get("chart_type") or w.get("type") or ""),
+                    business_question=str(w.get("business_question", "")),
+                    sql=sql,
+                    label_column=str(w.get("label_column", "")),
+                    value_column=str(w.get("value_column", "")),
+                )
             )
-            for w in s.get("widgets", [])
-            if isinstance(w, dict)
-        ]
         # Keep only data sources that are real allowed tables (drop hallucinations
         # and any reference document the planner may have slipped in).
         data_sources = [

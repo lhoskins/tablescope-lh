@@ -366,6 +366,41 @@ def test_classify_low_confidence_is_hidden():
     assert cls["relationshipStrength"] == "none"
 
 
+def _reference_node() -> dict:
+    return {"id": 9, "type": "reference_document", "label": "ISO 9001",
+            "properties": {}}
+
+
+def test_classify_reference_membership_is_recommended_not_solid():
+    # A reference doc attached to the project hub at confidence 1.0 must NOT be
+    # a solid line — membership is guidance, not proven project evidence.
+    edge = {"relationship_type": "industry_standard", "confidence": 1.0,
+            "evidence": {"evidence_summary": "authoritative reference",
+                         "structural": True}}
+    cls = _classify_relationship(edge, _doc_node(), _reference_node())
+    assert cls["relationshipStrength"] == "recommended"
+    assert cls["connectorStyle"] == "recommended"
+    assert cls["displayByDefault"] is False
+    assert cls["evidenceBasis"] == "reference_membership"
+
+
+def test_classify_reference_with_explicit_citation_is_solid():
+    edge = {"relationship_type": "project_reference", "confidence": 1.0,
+            "evidence": {"evidence_basis": "explicit_citation"}}
+    cls = _classify_relationship(edge, _doc_node(), _reference_node())
+    assert cls["relationshipStrength"] == "explicit"
+    assert cls["connectorStyle"] == "solid"
+    assert cls["displayByDefault"] is True
+
+
+def test_classify_reference_with_inference_is_dotted():
+    edge = {"relationship_type": "company_reference", "confidence": 0.8,
+            "evidence": {"validation_status": "inferred"}}
+    cls = _classify_relationship(edge, _doc_node(), _reference_node())
+    assert cls["relationshipStrength"] == "inferred"
+    assert cls["connectorStyle"] == "dotted"
+
+
 def test_classified_metadata_present_on_built_edges():
     payload = build_graph_payload(
         _nodes(), _edges(), center_node="process:corrective_action_process",

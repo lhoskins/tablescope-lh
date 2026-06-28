@@ -11,11 +11,27 @@ import {
 import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { InsightChartBlock } from "@/components/tablescope/home/intelligence-card";
+import type { InsightChart } from "@/lib/api/home-intelligence";
+
+export interface WidgetPreviewData {
+  columns?: string[];
+  rows?: Record<string, unknown>[];
+}
 
 export interface SuggestionWidget {
   title: string;
   chartType: string;
   businessQuestion: string;
+  /** Real chart series built from executing the widget SQL (Home renderer). */
+  chart?: InsightChart | null;
+  /** Raw rows/columns, used to render a table when there is no chart. */
+  previewData?: WidgetPreviewData;
+  /** "valid" | "preview_only" | "narrative" — small indicator only. */
+  status?: string;
+  sql?: string;
+  labelColumn?: string;
+  valueColumn?: string;
 }
 
 export interface KnowledgeGraphContextChips {
@@ -43,98 +59,86 @@ export interface DashboardSuggestion {
   savePayload?: Record<string, unknown>;
 }
 
-const CHART_GLYPH: Record<string, string> = {
-  bar: "▬",
-  column: "▬",
-  horizontal_bar: "▬",
-  line: "↗",
-  area: "↗",
-  pie: "◐",
-  donut: "◐",
-  kpi: "#",
-  table: "☷",
-  scatter: "⋰",
-  narrative: "¶",
-};
-
-// Chart-family classification so each widget renders a representative visual
-// preview (not just text). Previews are not executed, so these are schematic
-// mockups of the chosen chart type.
-function chartFamily(chartType: string): string {
-  const t = (chartType || "").toLowerCase();
-  if (/kpi|gauge|bullet|metric|number|stat/.test(t)) return "kpi";
-  if (/line|area|spark|trend/.test(t)) return "line";
-  if (/pie|donut/.test(t)) return "pie";
-  if (/table|pivot|grid/.test(t)) return "table";
-  if (/narrative|insight|text|prose/.test(t)) return "narrative";
-  if (/scatter|bubble/.test(t)) return "scatter";
-  return "bar";
+function WidgetStatusBadge({ status }: { status?: string }) {
+  if (!status || status === "valid") return null;
+  const label = status === "narrative" ? "Insight" : "Preview only";
+  return (
+    <span className="rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] uppercase text-ink-tertiary">
+      {label}
+    </span>
+  );
 }
 
-function WidgetPreviewGlyph({ chartType }: { chartType: string }) {
-  const fam = chartFamily(chartType);
-  const cls = "h-10 w-full text-brand-500";
-  if (fam === "kpi") {
-    return (
-      <div className="flex h-10 items-center justify-center">
-        <span className="text-[18px] font-semibold text-ink-primary">123.4</span>
-      </div>
-    );
-  }
-  if (fam === "line") {
-    return (
-      <svg viewBox="0 0 100 40" className={cls} preserveAspectRatio="none" aria-hidden>
-        <polyline points="0,32 20,24 40,28 60,12 80,18 100,4" fill="none" stroke="currentColor" strokeWidth="2" />
-      </svg>
-    );
-  }
-  if (fam === "pie") {
-    return (
-      <svg viewBox="0 0 40 40" className="mx-auto h-10" aria-hidden>
-        <circle cx="20" cy="20" r="16" fill="none" stroke="currentColor" className="text-line-secondary" strokeWidth="8" />
-        <circle cx="20" cy="20" r="16" fill="none" stroke="currentColor" className="text-brand-500" strokeWidth="8" strokeDasharray="60 100" transform="rotate(-90 20 20)" />
-      </svg>
-    );
-  }
-  if (fam === "table") {
-    return (
-      <div className="grid h-10 grid-rows-3 gap-0.5" aria-hidden>
-        {[0, 1, 2].map((r) => (
-          <div key={r} className="grid grid-cols-3 gap-0.5">
-            {[0, 1, 2].map((c) => (
-              <div key={c} className="rounded-[1px] bg-line-secondary" />
-            ))}
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (fam === "narrative") {
-    return (
-      <div className="flex h-10 flex-col justify-center gap-1" aria-hidden>
-        <div className="h-1.5 w-full rounded bg-line-secondary" />
-        <div className="h-1.5 w-4/5 rounded bg-line-secondary" />
-        <div className="h-1.5 w-3/5 rounded bg-line-secondary" />
-      </div>
-    );
-  }
-  if (fam === "scatter") {
-    return (
-      <svg viewBox="0 0 100 40" className={cls} aria-hidden>
-        {[[12, 30], [28, 18], [44, 24], [60, 10], [76, 20], [90, 6]].map(([x, y], i) => (
-          <circle key={i} cx={x} cy={y} r="3" fill="currentColor" />
-        ))}
-      </svg>
-    );
-  }
-  // bar (default)
+/** Render a widget's executed result as a compact table (chart fallback). */
+function WidgetTable({ data }: { data?: WidgetPreviewData }) {
+  const columns = data?.columns ?? [];
+  const rows = data?.rows ?? [];
+  if (columns.length === 0 || rows.length === 0) return null;
   return (
-    <svg viewBox="0 0 100 40" className={cls} preserveAspectRatio="none" aria-hidden>
-      {[8, 26, 44, 62, 80].map((x, i) => {
-        const h = [16, 28, 12, 34, 22][i];
-        return <rect key={x} x={x} y={40 - h} width="10" height={h} fill="currentColor" />;
-      })}
-    </svg>
+    <div className="max-h-[180px] overflow-auto">
+      <table className="w-full border-collapse text-[11px]">
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th
+                key={c}
+                className="border-b border-line-tertiary px-1.5 py-1 text-left font-medium text-ink-secondary"
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 8).map((row, ri) => (
+            <tr key={ri}>
+              {columns.map((c) => (
+                <td
+                  key={c}
+                  className="border-b border-line-tertiary/60 px-1.5 py-1 text-ink-primary"
+                >
+                  {row[c] == null ? "" : String(row[c])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Render a single dashboard widget as the user will see it: the real chart
+ * (via the same {@link InsightChartBlock} renderer the Home suggestions and the
+ * dashboard use), a table fallback when there is data but no chart, or a
+ * narrative/insight card when the widget has no measurable data.
+ */
+function DashboardWidgetPreview({ widget }: { widget: SuggestionWidget }) {
+  const hasChart = !!widget.chart;
+  const hasTable =
+    (widget.previewData?.rows?.length ?? 0) > 0 &&
+    (widget.previewData?.columns?.length ?? 0) > 0;
+
+  return (
+    <div className="rounded-md border border-line-secondary bg-bg-primary p-3">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0 text-small font-medium text-ink-primary">
+          {widget.title || widget.businessQuestion || "Untitled widget"}
+        </div>
+        <WidgetStatusBadge status={widget.status} />
+      </div>
+      {hasChart ? (
+        <InsightChartBlock chart={widget.chart as InsightChart} />
+      ) : hasTable ? (
+        <WidgetTable data={widget.previewData} />
+      ) : (
+        <div className="rounded-md bg-bg-secondary/40 p-3 text-[12px] text-ink-secondary">
+          {widget.businessQuestion ||
+            "No measurable data for this widget yet — add a data source that supports this metric."}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -389,26 +393,9 @@ export function AIDashboardSuggestionsModal({
               </div>
 
               {s.widgets.length > 0 && (
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {s.widgets.slice(0, 6).map((w, i) => (
-                    <div
-                      key={`${s.id}-w-${i}`}
-                      className="rounded-md border border-line-secondary bg-bg-secondary/40 p-2"
-                      title={w.businessQuestion || w.title}
-                    >
-                      <div className="flex items-center gap-1.5 text-[11px] uppercase text-ink-tertiary">
-                        <span aria-hidden className="text-ink-secondary">
-                          {CHART_GLYPH[(w.chartType || "").toLowerCase()] ?? "▭"}
-                        </span>
-                        {w.chartType || "widget"}
-                      </div>
-                      <div className="mt-1.5">
-                        <WidgetPreviewGlyph chartType={w.chartType} />
-                      </div>
-                      <div className="mt-1 line-clamp-2 text-[12px] text-ink-primary">
-                        {w.title || w.businessQuestion || "Untitled widget"}
-                      </div>
-                    </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {s.widgets.map((w, i) => (
+                    <DashboardWidgetPreview key={`${s.id}-w-${i}`} widget={w} />
                   ))}
                 </div>
               )}

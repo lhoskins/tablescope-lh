@@ -32,8 +32,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 PIPELINE_VERSION = "knowledge_graph_node_centric_v2"
-# Cached full-graph snapshot pipeline version.
-SNAPSHOT_PIPELINE_VERSION = "knowledge_graph_snapshot_v1"
+# Cached full-graph snapshot pipeline version. Bumped to v2 for the connector
+# -style policy: reference-library edges are no longer solid by default, so any
+# snapshot built under an older version is rebuilt automatically on read.
+SNAPSHOT_PIPELINE_VERSION = "knowledge_graph_connector_styles_v2"
 
 # Default edge/node confidence floor for the visible graph.
 DEFAULT_MIN_CONFIDENCE = 0.70
@@ -369,6 +371,16 @@ _INFERRED_REL_TYPES = {"linked_by_inferred_join", "mentions", "applies_to"}
 # Minimum confidence for an inferred (dotted) relationship to display by default.
 _INFERRED_DISPLAY_FLOOR = 0.75
 
+# Reference-library membership relationships (a project/company/industry
+# reference doc attached to the project hub). Belonging to the library is NOT
+# proof the project uses or cites the document, so these are guidance by default
+# — recommended/hidden — unless there is explicit-citation or inference evidence.
+_REFERENCE_MEMBERSHIP_REL_TYPES = {
+    "reference", "project_reference", "company_reference", "industry_standard",
+}
+# Relationships expressing that a project document explicitly cites a reference.
+_CITATION_REL_TYPES = {"cites", "cited_by", "references_document", "citation"}
+
 
 def _evidence_basis(rel_type: str, src: dict[str, Any] | None, tgt: dict[str, Any] | None) -> str:
     if rel_type in _RECOMMENDED_REL_TYPES:
@@ -382,6 +394,10 @@ def _evidence_basis(rel_type: str, src: dict[str, Any] | None, tgt: dict[str, An
         "linked_by_validated_join", "linked_by_inferred_join",
     ):
         return "query_lineage"
+    if rel_type in _CITATION_REL_TYPES:
+        return "explicit_citation"
+    if rel_type in _REFERENCE_MEMBERSHIP_REL_TYPES:
+        return "reference_membership"
     if rel_type in ("mentions", "applies_to"):
         return "semantic_inference"
     types = {
@@ -414,6 +430,40 @@ def _classify_relationship(
     conf = _edge_confidence(edge)
     ev = _as_dict(edge.get("evidence"))
     vstatus = str(ev.get("validation_status") or "").lower()
+    ev_basis = str(ev.get("evidence_basis") or "").lower()
+
+    # Reference-library membership: a reference doc attached to the project hub.
+    # Membership alone is guidance, not proof the project uses/cites it, so it is
+    # NOT solid by default. It becomes solid only with explicit-citation
+    # evidence, dotted with inference/semantic evidence, otherwise recommended
+    # (hidden by default).
+    if rel_type in _REFERENCE_MEMBERSHIP_REL_TYPES:
+        is_citation = ev_basis == "explicit_citation" or bool(
+            ev.get("citation") or ev.get("cited_by")
+        )
+        is_inferred_ref = (
+            vstatus == "inferred"
+            or ev_basis == "semantic_inference"
+            or bool(ev.get("semantic_match"))
+        )
+        if is_citation:
+            strength, style, display, vstat = "explicit", "solid", True, "validated"
+        elif is_inferred_ref:
+            strength, style = "inferred", "dotted"
+            display, vstat = conf >= _INFERRED_DISPLAY_FLOOR, "inferred"
+        else:
+            strength, style, display, vstat = (
+                "recommended", "recommended", False, "suggested",
+            )
+        return {
+            "relationshipStrength": strength,
+            "connectorStyle": style,
+            "displayByDefault": display,
+            "evidenceBasis": "explicit_citation" if is_citation
+            else "semantic_inference" if is_inferred_ref
+            else "reference_membership",
+            "validationStatus": vstat,
+        }
 
     # A KPI endpoint that the collector marked "recommended" makes the edge a
     # recommendation regardless of its raw relationship type.
@@ -1501,6 +1551,18 @@ async def build_node_centric_graph(
         snapshot = await get_project_graph_snapshot(
             session, tenant_id=tenant_id, project_id=project_id,
         )
+        # A snapshot built under an older pipeline version (e.g. before the
+        # connector-style policy) is rebuilt automatically so the new policy
+        # takes effect without a manual refresh.
+        if snapshot is not None and (
+            str(snapshot.get("pipelineVersion") or "") != SNAPSHOT_PIPELINE_VERSION
+        ):
+            logger.info(
+                "KG snapshot stale (have=%s want=%s) — rebuilding project %s",
+                snapshot.get("pipelineVersion"), SNAPSHOT_PIPELINE_VERSION,
+                project_id,
+            )
+            snapshot = None
     if snapshot is None:
         snapshot = await rebuild_project_graph_snapshot(
             session, tenant_id=tenant_id, project_id=project_id, user_id=user_id,

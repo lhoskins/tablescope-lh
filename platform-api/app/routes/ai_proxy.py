@@ -13,6 +13,7 @@ access before retrieving vectors or building context.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -118,10 +119,18 @@ class AISuggestDashboardsRequest(BaseModel):
 
 
 class AISuggestionWidget(BaseModel):
-    """A single widget outline carried in a dashboard suggestion's savePayload."""
+    """A single widget carried in a dashboard suggestion's savePayload.
+
+    Previews now carry executable ``sql`` (plus label/value columns), so Save can
+    persist the exact widgets the user previewed instead of re-deriving a plan.
+    """
     title: str = ""
     chartType: str = ""
     businessQuestion: str = ""
+    sql: str = ""
+    labelColumn: str = ""
+    valueColumn: str = ""
+    status: str = ""
 
 
 class AISuggestionPayload(BaseModel):
@@ -2232,19 +2241,19 @@ async def ai_suggest_dashboards(
     # Compact, chip-friendly KG summary the FE renders on each preview card.
     kg_chips = _kg_context_chips(kg_context)
 
+    # A runner bound to this project's VDB so each widget's SQL is executed and
+    # turned into real, renderable chart series (same as the Home dashboard
+    # suggestions). Previews are best-effort: a widget that fails or returns no
+    # rows is still returned (status != "valid") so the preview never collapses.
+    from app.routes.home_intelligence import _make_runner
+
+    runner = _make_runner(session, context, req.project_id)
+
     suggestions: list[dict[str, Any]] = []
     for idx, s in enumerate(raw_suggestions):
         if not isinstance(s, dict):
             continue
-        widgets = [
-            {
-                "title": str(w.get("title", "")),
-                "chartType": str(w.get("chart_type") or w.get("type") or ""),
-                "businessQuestion": str(w.get("business_question", "")),
-            }
-            for w in s.get("widgets", [])
-            if isinstance(w, dict)
-        ]
+        widgets = await _render_preview_widgets(runner, s.get("widgets", []))
         # Only surface allowed tables as data sources (defence in depth).
         data_sources = [
             str(d) for d in s.get("data_sources", []) if str(d) in allowed_tables
@@ -2254,8 +2263,9 @@ async def ai_suggest_dashboards(
         business_purpose = str(s.get("business_purpose", ""))
         audience = str(s.get("audience") or req.audience or "")
         kpi_names = [str(k) for k in s.get("kpis", []) if k]
-        # savePayload is echoed back verbatim on Save so the strict save stage
-        # persists *this* selected suggestion rather than re-deriving a plan.
+        # savePayload is echoed back verbatim on Save so the save stage persists
+        # *this* selected suggestion (its real widget SQL) rather than
+        # re-deriving a plan from scratch.
         save_payload = {
             "title": title,
             "description": description,
@@ -2306,6 +2316,63 @@ async def ai_suggest_dashboards(
     }
 
 
+async def _render_preview_widgets(
+    runner: Any, raw_widgets: list[Any]
+) -> list[dict[str, Any]]:
+    """Execute each plan widget's SQL and attach real, renderable chart data.
+
+    Mirrors the Home "New Dashboard Suggestions" flow: the AI returns widget SQL
+    grounded in the project's real tables, we run it against the project VDB and
+    build a ``{label, value}`` chart series the FE renders with the same widget
+    renderer the dashboard uses. Best-effort and side-effect free — a widget that
+    has no SQL (narrative/risk/gap), fails to execute, or returns no rows is still
+    returned with a non-``valid`` status so the preview never collapses to a
+    "not enough strong widgets" error.
+    """
+    from app.services import home_intelligence as hi
+
+    async def render(w: Any) -> dict[str, Any] | None:
+        if not isinstance(w, dict):
+            return None
+        title = str(w.get("title", ""))
+        chart_type = str(w.get("chart_type") or w.get("type") or "")
+        business_question = str(w.get("business_question", ""))
+        sql = (w.get("sql") or "").strip()
+        label_col = str(w.get("label_column", ""))
+        value_col = str(w.get("value_column", ""))
+        widget: dict[str, Any] = {
+            "title": title,
+            "chartType": chart_type,
+            "businessQuestion": business_question,
+            "sql": sql,
+            "labelColumn": label_col,
+            "valueColumn": value_col,
+            "chart": None,
+            "previewData": {"columns": [], "rows": []},
+            "status": "narrative" if not sql else "preview_only",
+        }
+        if not sql:
+            return widget
+        result = await hi._safe_query(runner, sql)
+        if result and result.get("rows"):
+            widget["previewData"] = {
+                "columns": list(result.get("columns", [])),
+                "rows": list(result.get("rows", []))[:100],
+            }
+            widget["status"] = "valid"
+            chart = hi._build_chart(
+                chart_type or "bar", title, result, label_col, value_col
+            )
+            if chart:
+                widget["chart"] = chart
+        return widget
+
+    rendered = await asyncio.gather(
+        *(render(w) for w in raw_widgets if isinstance(w, dict))
+    )
+    return [w for w in rendered if w]
+
+
 def _suggestion_save_prompt(
     title: str,
     business_purpose: str,
@@ -2334,12 +2401,60 @@ async def ai_save_dashboard_suggestion(
     """Persist a previewed dashboard suggestion using strict save validation.
 
     Preview (``/actions/suggest-dashboards``) never persists and never raises the
-    strict "needed 2, got N" error. Saving is a separate stage: it pins the
-    existing strict generate-and-save pipeline to the *selected* suggestion's
-    plan, drops widgets that fail to execute, and only persists a dashboard when
-    enough strong widgets survive — returning a clear reason otherwise.
+    strict "needed 2, got N" error. Saving is a separate stage:
+
+    * When the previewed suggestion carries executable widget SQL (the normal
+      path now), persist exactly those widgets — each SQL is saved as a project
+      query and referenced from the dashboard config — so the saved dashboard
+      matches what the user previewed.
+    * Otherwise fall back to the strict generate-and-save pipeline, which
+      re-derives a plan from the prompt and drops widgets that fail to execute.
     """
     s = req.suggestion
+
+    # Persist the previewed widgets directly when they carry runnable SQL.
+    sql_widgets = [w for w in s.widgets if (w.sql or "").strip()]
+    if sql_widgets:
+        from app.routes.home_intelligence import (
+            SaveDashboardRequest,
+            SaveDashboardWidget,
+            home_save_dashboard,
+        )
+
+        saved = await home_save_dashboard(
+            SaveDashboardRequest(
+                project_id=req.project_id,
+                title=s.title or "AI Dashboard",
+                widgets=[
+                    SaveDashboardWidget(
+                        title=w.title or "Widget",
+                        sql=w.sql,
+                        chartType=w.chartType or "bar",
+                        labelColumn=w.labelColumn or None,
+                        valueColumn=w.valueColumn or None,
+                    )
+                    for w in sql_widgets
+                ],
+            ),
+            session=session,
+            context=context,
+        )
+        dashboard_id = saved.get("dashboard_id")
+        saved["action"] = "save_dashboard_suggestion"
+        saved["suggestion_id"] = req.suggestionId
+        saved["dashboard_name"] = saved.get("name")
+        if dashboard_id is not None:
+            saved["dashboard_url"] = (
+                f"/projects/{req.project_id}/dashboards/{dashboard_id}"
+            )
+        logger.info(
+            "AI action: save_dashboard_suggestion (direct) | dashboard_id=%s "
+            "suggestion=%s widgets=%d project=%d tenant=%d user=%d",
+            dashboard_id, req.suggestionId, len(sql_widgets), req.project_id,
+            context.tenant_id, context.user_id,
+        )
+        return saved
+
     prompt = s.prompt or _suggestion_save_prompt(
         s.title,
         s.businessPurpose,

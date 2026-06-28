@@ -437,6 +437,9 @@ class GenerateSQLResponse(BaseModel):
     selected_sources: list[SelectedSource] = Field(default_factory=list)
     selected_fields: list[SelectedField] = Field(default_factory=list)
     repaired: bool = False
+    # True when Knowledge Graph context was folded into the generation prompt,
+    # so the platform can persist query metadata (knowledgeGraphContextUsed).
+    knowledge_graph_context_used: bool = False
 
 
 class WidgetValidationExpectations(BaseModel):
@@ -503,11 +506,19 @@ class SuggestDashboardResponse(BaseModel):
 
 
 class DashboardPlanWidget(BaseModel):
-    """A lightweight widget outline within a dashboard plan (no SQL yet)."""
+    """A widget outline within a dashboard plan, including renderable SQL.
+
+    ``sql`` is grounded in the project's real tables so the platform can execute
+    it and return real preview data for the Generate-tab dashboard previews.
+    ``narrative_insight`` / risk / gap widgets carry an empty ``sql``.
+    """
 
     title: str = ""
     chart_type: str = ""
     business_question: str = ""
+    sql: str = ""
+    label_column: str = ""
+    value_column: str = ""
 
 
 class DashboardPlanSuggestion(BaseModel):
