@@ -141,6 +141,48 @@ async def test_oversized_file_rejected(client, service_headers) -> None:
     assert r.status_code == 422
 
 
+async def test_get_my_profile(client, service_headers) -> None:
+    _tenant, user, headers = await _make_user(
+        client, service_headers, email="p@test.com", ext_id="up1"
+    )
+    r = await client.get("/api/users/me", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["id"] == user["id"]
+    assert body["email"] == "p@test.com"
+    assert body["role"] == "member"
+
+
+async def test_patch_my_profile_updates_display_name(client, service_headers) -> None:
+    _tenant, _user, headers = await _make_user(
+        client, service_headers, email="q@test.com", ext_id="up2"
+    )
+    r = await client.patch(
+        "/api/users/me", json={"display_name": "New Name"}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["display_name"] == "New Name"
+
+    me = await client.get("/api/users/me", headers=headers)
+    assert me.json()["display_name"] == "New Name"
+
+
+async def test_patch_my_profile_rejects_blank_name(client, service_headers) -> None:
+    _tenant, _user, headers = await _make_user(
+        client, service_headers, email="r@test.com", ext_id="up3"
+    )
+    r = await client.patch(
+        "/api/users/me", json={"display_name": "   "}, headers=headers
+    )
+    assert r.status_code == 422
+
+
+async def test_get_my_profile_requires_auth(client, service_headers) -> None:
+    await _make_user(client, service_headers, email="s@test.com", ext_id="up4")
+    r = await client.get("/api/users/me")
+    assert r.status_code == 401
+
+
 async def test_upload_only_affects_own_avatar(client, service_headers) -> None:
     _t1, user_a, headers_a = await _make_user(
         client, service_headers, email="e@test.com", ext_id="u5"

@@ -9,6 +9,11 @@ vi.mock("@/lib/api-client", () => ({
   getApiBaseUrl: () => "http://api.test",
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/",
+}));
+
 import { Sidebar } from "./sidebar";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 

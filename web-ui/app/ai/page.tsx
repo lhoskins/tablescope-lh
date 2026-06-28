@@ -9,6 +9,8 @@ import {
   IconPlus,
   IconTrash,
   IconMessageCircle,
+  IconGitBranch,
+  IconRefresh,
 } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,7 @@ import {
   createConversation,
   sendConversationMessage,
   deleteConversation,
+  branchConversation,
   type AiChatMessage,
 } from "@/lib/ui/use-shell-data";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
@@ -56,10 +59,6 @@ export default function AiAssistantPage() {
     if (!getUserMeta()) router.replace("/login");
   }, [router]);
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages.length]);
-
   const invalidateConvos = () =>
     queryClient.invalidateQueries({ queryKey: ["ai", "conversations"] });
 
@@ -87,13 +86,32 @@ export default function AiAssistantPage() {
     },
   });
 
+  const branchMutation = useMutation({
+    mutationFn: ({ id, messageId }: { id: number; messageId: number }) =>
+      branchConversation(id, messageId),
+    onSuccess: (convo) => {
+      queryClient.setQueryData(["ai", "conversation", convo.id], convo);
+      setActiveId(convo.id);
+      invalidateConvos();
+    },
+  });
+
   const busy = sendMutation.isPending;
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages.length, busy]);
 
   const send = (raw: string) => {
     const question = raw.trim();
     if (!question || busy) return;
     setInput("");
     sendMutation.mutate(question);
+  };
+
+  const retryLast = () => {
+    if (busy || !sendMutation.variables) return;
+    sendMutation.mutate(String(sendMutation.variables));
   };
 
   const user = identity?.user ?? FALLBACK_USER;
@@ -145,7 +163,11 @@ export default function AiAssistantPage() {
                     : "text-ink-secondary hover:bg-bg-primary",
                 )}
               >
-                <IconMessageCircle size={14} className="shrink-0" />
+                {c.parentConversationId ? (
+                  <IconGitBranch size={14} className="shrink-0" />
+                ) : (
+                  <IconMessageCircle size={14} className="shrink-0" />
+                )}
                 <button
                   type="button"
                   onClick={() => setActiveId(c.id)}
@@ -191,9 +213,22 @@ export default function AiAssistantPage() {
             ) : (
               <div className="mx-auto max-w-3xl space-y-5">
                 {messages.map((m) => (
-                  <ChatBubble key={m.id} message={m} />
+                  <ChatBubble
+                    key={m.id}
+                    message={m}
+                    onBranch={
+                      activeId != null && m.id > 0
+                        ? () =>
+                            branchMutation.mutate({
+                              id: activeId,
+                              messageId: m.id,
+                            })
+                        : undefined
+                    }
+                    branching={branchMutation.isPending}
+                  />
                 ))}
-                {pendingQuestion && messages.length === 0 && (
+                {pendingQuestion && (
                   <ChatBubble
                     message={{
                       id: -1,
@@ -215,6 +250,22 @@ export default function AiAssistantPage() {
                         <span className="animate-pulse delay-200">●</span>
                       </span>
                     </div>
+                  </div>
+                )}
+                {sendMutation.isError && !busy && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-[13px] text-danger">
+                    <span>
+                      {(sendMutation.error as Error)?.message ??
+                        "Something went wrong."}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={retryLast}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-danger/40 px-2 py-1 text-[12px] font-medium hover:bg-danger/10"
+                    >
+                      <IconRefresh size={13} />
+                      Retry
+                    </button>
                   </div>
                 )}
               </div>
@@ -258,23 +309,57 @@ export default function AiAssistantPage() {
   );
 }
 
-function ChatBubble({ message }: { message: AiChatMessage }) {
+function BranchButton({
+  onBranch,
+  branching,
+}: {
+  onBranch?: () => void;
+  branching?: boolean;
+}) {
+  if (!onBranch) return null;
+  return (
+    <button
+      type="button"
+      onClick={onBranch}
+      disabled={branching}
+      title="Branch a new conversation from here"
+      className="mt-1 inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-[11px] text-ink-tertiary opacity-0 transition-opacity hover:bg-bg-secondary hover:text-ink-secondary group-hover:opacity-100 disabled:opacity-50"
+    >
+      <IconGitBranch size={12} />
+      Branch
+    </button>
+  );
+}
+
+function ChatBubble({
+  message,
+  onBranch,
+  branching,
+}: {
+  message: AiChatMessage;
+  onBranch?: () => void;
+  branching?: boolean;
+}) {
   if (message.role === "user") {
     return (
-      <div className="flex items-start justify-end gap-3">
+      <div className="group flex flex-col items-end gap-0">
         <div className="max-w-[75%] rounded-xl bg-brand px-4 py-3 text-[13px] leading-relaxed text-brand-fg">
           <span className="whitespace-pre-wrap">{message.content}</span>
         </div>
+        <BranchButton onBranch={onBranch} branching={branching} />
       </div>
     );
   }
   return (
-    <div className="flex items-start gap-3">
+    <div className="group flex items-start gap-3">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
         <IconSparkles size={16} />
       </div>
-      <div className="max-w-[75%] rounded-xl bg-bg-secondary px-4 py-3 text-[13px] leading-relaxed text-ink-primary">
-        <span className="whitespace-pre-wrap">{message.content}</span>
+      <div className="flex max-w-[75%] flex-col">
+        <div className="rounded-xl bg-bg-secondary px-4 py-3 text-[13px] leading-relaxed text-ink-primary">
+          <span className="whitespace-pre-wrap">{message.content}</span>
+        </div>
+        <BranchButton onBranch={onBranch} branching={branching} />
       </div>
     </div>
   );

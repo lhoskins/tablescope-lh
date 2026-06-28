@@ -96,12 +96,24 @@ async def get_project_graph(
     center_node: str | None = None,
     min_confidence: float = 0.70,
     include_inferred: bool = False,
+    # Connector-style policy toggles (see knowledge_graph_builder). Explicit and
+    # inferred edges show by default; recommended (dashed) and weak (faint) edges
+    # are opt-in. Enabling either widens the returned edge set so the frontend
+    # can render and toggle them by ``relationshipStrength``.
+    show_explicit: bool = True,
+    show_inferred: bool = True,
+    show_recommended: bool = False,
+    show_weak: bool = False,
     severity: str = "all",
     refresh: bool = False,  # rebuild the cached snapshot instead of reading it
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ):
     await _require_project_access(project_id, session, context)
+
+    # Recommended/weak connectors live below the default confidence floor, so
+    # asking for them implies the wider (inferred) edge set.
+    include_inferred = include_inferred or show_recommended or show_weak
 
     # Node-centric Insight-First Knowledge Graph: any new-UI caller passes a
     # ``lens`` (or a ``center_node``). Legacy callers (no new params) keep the

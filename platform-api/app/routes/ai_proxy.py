@@ -2715,6 +2715,8 @@ def _conversation_dict(
         "id": c.id,
         "title": c.title,
         "projectId": c.project_id,
+        "parentConversationId": c.parent_conversation_id,
+        "branchedFromMessageId": c.branched_from_message_id,
         "createdAt": c.created_at.isoformat() if c.created_at else None,
         "updatedAt": c.updated_at.isoformat() if c.updated_at else None,
     }
@@ -2925,7 +2927,68 @@ async def add_conversation_message(
     except Exception:
         pass  # best-effort — don't block the response
 
+    # Expire the (stale, empty) messages collection so the re-query below
+    # actually reloads it with the just-appended user/assistant pair — without
+    # this the identity-mapped object would return its earlier-loaded state.
+    session.expire(convo, ["messages"])
     refreshed = await _get_owned_conversation(
         session, context, conversation_id, with_messages=True
+    )
+    return _conversation_dict(refreshed, include_messages=True)
+
+
+class ConversationBranchCreate(BaseModel):
+    message_id: int
+    title: str | None = None
+
+
+@router.post("/conversations/{conversation_id}/branch")
+async def branch_conversation(
+    conversation_id: int,
+    req: ConversationBranchCreate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Fork a new conversation from a point in an existing one.
+
+    Copies every message up to and including ``message_id`` into a fresh
+    conversation that records its parent + the branch point, so the user can
+    explore an alternative direction without disturbing the original thread.
+    """
+    source = await _get_owned_conversation(
+        session, context, conversation_id, with_messages=True
+    )
+    branch_point = next(
+        (m for m in source.messages if m.id == req.message_id), None
+    )
+    if branch_point is None:
+        raise HTTPException(
+            status_code=404, detail="Branch message not found in conversation"
+        )
+
+    title = (req.title or "").strip() or f"Branch of {source.title}"
+    branch = AiConversation(
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=source.project_id,
+        title=title[:255],
+        parent_conversation_id=source.id,
+        branched_from_message_id=branch_point.id,
+    )
+    session.add(branch)
+    await session.flush()
+
+    for m in source.messages:
+        session.add(
+            AiConversationMessage(
+                conversation_id=branch.id, role=m.role, content=m.content
+            )
+        )
+        if m.id == branch_point.id:
+            break
+
+    await session.commit()
+    refreshed = await _get_owned_conversation(
+        session, context, branch.id, with_messages=True
     )
     return _conversation_dict(refreshed, include_messages=True)

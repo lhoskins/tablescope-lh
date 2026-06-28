@@ -6,7 +6,11 @@ import { IconHelpCircle } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
+import { HeroSearch } from "@/components/tablescope/home/hero-search";
+import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
+import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
 import { getUserMeta } from "@/lib/auth";
+import { greeting } from "@/lib/ui/format";
 import {
   useCurrentUser,
   useProjectSummaries,
@@ -26,7 +30,7 @@ const FALLBACK_TENANT: TenantSummary = {
   initials: "TS",
 };
 
-export default function HomePage() {
+export default function BusinessInsightPage() {
   const router = useRouter();
   const { data: identity } = useCurrentUser();
   const { data: allProjects } = useProjectSummaries();
@@ -41,10 +45,15 @@ export default function HomePage() {
   return (
     <AppShell
       mode="home"
-      activeNav="home"
+      activeNav="business-insight"
       tenant={tenant}
       user={user}
       counts={{ projects: allProjects?.length }}
+      topBarLeft={
+        <span className="text-[15px] text-ink-secondary">
+          {user.name ? greeting(user.name) : "Business Insight"}
+        </span>
+      }
       topBarRight={
         <>
           <StatusDot tone="online" className="mr-1" />
@@ -59,19 +68,12 @@ export default function HomePage() {
         </>
       }
     >
-      <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
-        <h1 className="text-h1 text-ink-primary">Home</h1>
-        <p className="mt-2 max-w-md text-body text-ink-tertiary">
-          This page is reserved for future development. Visit{" "}
-          <button
-            type="button"
-            className="text-brand-700 underline hover:text-brand-800"
-            onClick={() => router.push("/business-insight")}
-          >
-            Business Insight
-          </button>{" "}
-          for AI suggestions and intelligence.
-        </p>
+      <div className="space-y-10 py-6">
+        <div className="mx-auto w-full max-w-content space-y-6">
+          <HeroSearch />
+          <HomeAiSuggestions />
+        </div>
+        <IntelligenceFeed />
       </div>
     </AppShell>
   );

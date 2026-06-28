@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.context import RequestContext, get_request_context
+from app.auth.context import RequestContext
+from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
@@ -51,7 +52,7 @@ class DatasourceQueryRequest(BaseModel):
 async def fetch_table_data(
     payload: QueryRequest,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
 ) -> QueryResponse:
     routing = VDBRoutingService(session)
     scopes = ScopeProxyService()

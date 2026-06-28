@@ -337,8 +337,13 @@ export interface GraphNode {
   recommendedLens?: string;
 }
 
-export type RelationshipStrength = "explicit" | "inferred" | "recommended" | "none";
-export type ConnectorStyle = "solid" | "dotted" | "recommended" | "hidden";
+export type RelationshipStrength =
+  | "explicit"
+  | "inferred"
+  | "recommended"
+  | "weak"
+  | "hidden";
+export type ConnectorStyle = "solid" | "dotted" | "dashed" | "hidden";
 
 export interface GraphEdge {
   id: GraphId;
@@ -354,6 +359,7 @@ export interface GraphEdge {
   connectorStyle?: ConnectorStyle;
   displayByDefault?: boolean;
   evidenceBasis?: string;
+  evidenceSummary?: string;
 }
 
 export interface GraphResponse {

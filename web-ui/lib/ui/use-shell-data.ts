@@ -168,6 +168,8 @@ export interface AiConversation {
   id: number;
   title: string;
   projectId: number | null;
+  parentConversationId?: number | null;
+  branchedFromMessageId?: number | null;
   createdAt: string | null;
   updatedAt: string | null;
   messages?: AiChatMessage[];
@@ -208,6 +210,17 @@ export function sendConversationMessage(
 
 export function deleteConversation(conversationId: number): Promise<void> {
   return apiClient.delete<void>(`/api/ai/conversations/${conversationId}`);
+}
+
+export function branchConversation(
+  conversationId: number,
+  messageId: number,
+  title?: string,
+): Promise<AiConversation> {
+  return apiClient.post<AiConversation>(
+    `/api/ai/conversations/${conversationId}/branch`,
+    { message_id: messageId, title },
+  );
 }
 
 export function deleteProject(projectId: number | string): Promise<void> {

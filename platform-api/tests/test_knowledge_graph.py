@@ -336,7 +336,7 @@ def test_classify_recommended_rel_type():
     edge = {"relationship_type": "recommended_kpi", "confidence": 0.6, "evidence": {}}
     cls = _classify_relationship(edge, {"id": 2, "type": "process"}, _kpi_node())
     assert cls["relationshipStrength"] == "recommended"
-    assert cls["connectorStyle"] == "recommended"
+    assert cls["connectorStyle"] == "dashed"
     assert cls["displayByDefault"] is False
     assert cls["validationStatus"] == "suggested"
 
@@ -347,23 +347,44 @@ def test_classify_recommended_kpi_endpoint_overrides_rel_type():
     cls = _classify_relationship(edge, {"id": 2, "type": "process"},
                                  _kpi_node("recommended"))
     assert cls["relationshipStrength"] == "recommended"
-    assert cls["connectorStyle"] == "recommended"
+    assert cls["connectorStyle"] == "dashed"
 
 
 def test_classify_rejected_status_is_hidden():
     edge = {"relationship_type": "governs", "confidence": 0.95,
             "evidence": {"validation_status": "rejected"}}
     cls = _classify_relationship(edge, _doc_node(), {"id": 2, "type": "process"})
-    assert cls["relationshipStrength"] == "none"
+    assert cls["relationshipStrength"] == "hidden"
     assert cls["connectorStyle"] == "hidden"
     assert cls["displayByDefault"] is False
+
+
+def test_classify_weak_confidence_is_weak_dotted():
+    # 0.50 <= confidence < 0.75 with no other evidence → weak, dotted, off.
+    edge = {"relationship_type": "governs", "confidence": 0.6, "evidence": {}}
+    cls = _classify_relationship(edge, _doc_node(), {"id": 2, "type": "process"})
+    assert cls["relationshipStrength"] == "weak"
+    assert cls["connectorStyle"] == "dotted"
+    assert cls["displayByDefault"] is False
+    assert cls["validationStatus"] == "weak"
 
 
 def test_classify_low_confidence_is_hidden():
     edge = {"relationship_type": "governs", "confidence": 0.3, "evidence": {}}
     cls = _classify_relationship(edge, _doc_node(), {"id": 2, "type": "process"})
     assert cls["connectorStyle"] == "hidden"
-    assert cls["relationshipStrength"] == "none"
+    assert cls["relationshipStrength"] == "hidden"
+
+
+def test_classify_connector_style_public_wrapper_node_agnostic():
+    from app.services.knowledge_graph_builder import classify_connector_style
+
+    cls = classify_connector_style(
+        {"relationship_type": "recommended_kpi", "confidence": 0.6, "evidence": {}}
+    )
+    assert cls["relationshipStrength"] == "recommended"
+    assert cls["connectorStyle"] == "dashed"
+    assert "evidenceSummary" in cls
 
 
 def _reference_node() -> dict:
@@ -379,7 +400,7 @@ def test_classify_reference_membership_is_recommended_not_solid():
                          "structural": True}}
     cls = _classify_relationship(edge, _doc_node(), _reference_node())
     assert cls["relationshipStrength"] == "recommended"
-    assert cls["connectorStyle"] == "recommended"
+    assert cls["connectorStyle"] == "dashed"
     assert cls["displayByDefault"] is False
     assert cls["evidenceBasis"] == "reference_membership"
 
@@ -408,7 +429,8 @@ def test_classified_metadata_present_on_built_edges():
     for edge in payload["edges"]:
         assert "relationshipStrength" in edge
         assert "connectorStyle" in edge
-        assert edge["connectorStyle"] in ("solid", "dotted", "recommended", "hidden")
+        assert "evidenceSummary" in edge
+        assert edge["connectorStyle"] in ("solid", "dotted", "dashed", "hidden")
 
 
 # ── Endpoint wiring / tenant scope ───────────────────────────────────

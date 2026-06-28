@@ -5,21 +5,38 @@ import type { RelationshipStrength } from "@/lib/ui/use-project-data";
 
 // The relationship-evidence filter: each class maps to a connector style on the
 // canvas. Explicit + inferred show by default; recommended/hidden are opt-in.
+type ConnectorKind = "solid" | "dotted" | "dashed";
+
 const STRENGTHS: {
   value: RelationshipStrength;
   label: string;
   hint: string;
-  preview: "solid" | "dotted" | "recommended";
+  preview: ConnectorKind;
 }[] = [
-  { value: "explicit", label: "Explicit", hint: "Stated in project evidence", preview: "solid" },
+  { value: "explicit", label: "Explicit", hint: "Stated / validated in project evidence", preview: "solid" },
   { value: "inferred", label: "Inferred", hint: "High-confidence inference", preview: "dotted" },
-  { value: "recommended", label: "Recommended", hint: "Best-practice suggestion", preview: "recommended" },
-  { value: "none", label: "Hidden / weak", hint: "Low-confidence links", preview: "dotted" },
+  { value: "recommended", label: "Recommended", hint: "Best-practice suggestion (off by default)", preview: "dashed" },
+  { value: "weak", label: "Weak / Hidden", hint: "Low-confidence links (off by default)", preview: "dotted" },
 ];
 
-function ConnectorPreview({ kind }: { kind: "solid" | "dotted" | "recommended" }) {
-  const stroke = kind === "recommended" ? "#fbbf24" : kind === "solid" ? "#94a3b8" : "#cbd5e1";
-  const dash = kind === "solid" ? undefined : kind === "recommended" ? "2 4" : "4 4";
+// Connector-style legend (line appearance ↔ evidence class).
+const CONNECTOR_LEGEND: { label: string; preview: ConnectorKind | "hidden" }[] = [
+  { label: "Solid — Explicit / validated", preview: "solid" },
+  { label: "Dotted — Inferred / high confidence", preview: "dotted" },
+  { label: "Dashed — Recommended / best practice", preview: "dashed" },
+  { label: "Hidden — Weak / unsupported", preview: "hidden" },
+];
+
+function ConnectorPreview({ kind }: { kind: ConnectorKind | "hidden" }) {
+  if (kind === "hidden") {
+    return (
+      <svg width="22" height="6" className="shrink-0">
+        <line x1="0" y1="3" x2="22" y2="3" stroke="#e2e8f0" strokeWidth={1} strokeDasharray="1 4" />
+      </svg>
+    );
+  }
+  const stroke = kind === "dashed" ? "#fbbf24" : kind === "solid" ? "#94a3b8" : "#cbd5e1";
+  const dash = kind === "solid" ? undefined : kind === "dashed" ? "8 6" : "4 4";
   return (
     <svg width="22" height="6" className="shrink-0">
       <line x1="0" y1="3" x2="22" y2="3" stroke={stroke} strokeWidth={1.5} strokeDasharray={dash} />
@@ -192,6 +209,24 @@ export function KnowledgeGraphControls({
               <ConnectorPreview kind={s.preview} />
               <span className="flex-1 truncate">{s.label}</span>
             </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Connector style legend (line appearance ↔ evidence class) */}
+      <div>
+        <div className="mb-1.5 text-small font-medium text-ink-secondary">
+          Connector Styles
+        </div>
+        <div className="space-y-1">
+          {CONNECTOR_LEGEND.map((entry) => (
+            <div
+              key={entry.label}
+              className="flex items-center gap-2 text-small text-ink-tertiary"
+            >
+              <ConnectorPreview kind={entry.preview} />
+              <span className="flex-1 truncate">{entry.label}</span>
+            </div>
           ))}
         </div>
       </div>

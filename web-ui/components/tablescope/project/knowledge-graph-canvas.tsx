@@ -47,34 +47,56 @@ interface Rect {
   h: number;
 }
 
+type EdgeStrength = "explicit" | "inferred" | "recommended" | "weak" | "hidden";
+
 interface CanvasEdge {
   id: GraphId;
   source: GraphId;
   target: GraphId;
   confidence: number;
   type?: string;
-  connectorStyle?: "solid" | "dotted" | "recommended" | "hidden";
+  connectorStyle?: "solid" | "dotted" | "dashed" | "hidden";
+  relationshipStrength?: EdgeStrength;
+}
+
+/** Dash pattern for an edge connector by its style. */
+function edgeDash(style: CanvasEdge["connectorStyle"]): string | undefined {
+  if (style === "dotted") return "4 4";
+  if (style === "dashed") return "8 6";
+  return undefined;
+}
+
+/** Opacity for an edge connector by its evidence strength. */
+function edgeOpacity(strength: EdgeStrength | undefined): number {
+  if (strength === "hidden") return 0.18;
+  if (strength === "recommended") return 0.4;
+  if (strength === "weak") return 0.25;
+  if (strength === "inferred") return 0.7;
+  return 1;
 }
 
 /** Stroke appearance for a relationship connector by its evidence class. */
 function connectorStroke(
   style: CanvasEdge["connectorStyle"],
+  strength: EdgeStrength | undefined,
   traced: boolean,
-): { stroke: string; strokeWidth: number; dash?: string; marker: string } {
+): { stroke: string; strokeWidth: number; dash?: string; marker: string; opacity: number } {
   if (traced) {
-    return { stroke: "#94a3b8", strokeWidth: 1.5, marker: "kg-arrow" };
+    return { stroke: "#94a3b8", strokeWidth: 1.5, marker: "kg-arrow", opacity: 1 };
   }
+  const opacity = edgeOpacity(strength);
+  const dash = edgeDash(style);
   switch (style) {
     case "solid":
       // Explicit project evidence — a confident solid line.
-      return { stroke: "#94a3b8", strokeWidth: 1.25, marker: "kg-arrow" };
-    case "recommended":
-      // Best-practice recommendation — faint, widely-dashed, amber.
-      return { stroke: "#fbbf24", strokeWidth: 1, dash: "2 5", marker: "kg-arrow-rec" };
+      return { stroke: "#94a3b8", strokeWidth: 1.25, marker: "kg-arrow", opacity };
+    case "dashed":
+      // Best-practice recommendation — faint amber dashes.
+      return { stroke: "#fbbf24", strokeWidth: 1, dash, marker: "kg-arrow-rec", opacity };
     case "dotted":
     default:
-      // Inferred relationship — light dashed line.
-      return { stroke: "#cbd5e1", strokeWidth: 1, dash: "4 4", marker: "kg-arrow-dim" };
+      // Inferred / weak relationship — light dotted line.
+      return { stroke: "#cbd5e1", strokeWidth: 1, dash, marker: "kg-arrow-dim", opacity };
   }
 }
 
@@ -486,7 +508,7 @@ export function KnowledgeGraphCanvas({
             </marker>
           </defs>
           {drawn.map(({ e, p1, p2, traced }) => {
-            const s = connectorStroke(e.connectorStyle, traced);
+            const s = connectorStroke(e.connectorStyle, e.relationshipStrength, traced);
             return (
               <path
                 key={String(e.id)}
@@ -495,6 +517,7 @@ export function KnowledgeGraphCanvas({
                 stroke={s.stroke}
                 strokeWidth={s.strokeWidth}
                 strokeDasharray={s.dash}
+                strokeOpacity={s.opacity}
                 markerEnd={`url(#${s.marker})`}
               />
             );

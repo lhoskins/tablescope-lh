@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.context import RequestContext, get_request_context
+from app.auth.context import RequestContext
+from app.auth.membership import require_membership
 from app.database import get_db
 from app.models.user import User
 from app.services.avatar_storage import (
@@ -27,14 +29,53 @@ def _profile(user: User) -> dict:
         "email": user.email,
         "display_name": user.display_name,
         "avatar_url": user.avatar_url,
+        "role": user.role,
+        "tenant_id": user.tenant_id,
     }
+
+
+class ProfileUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
+
+
+@router.get("/me")
+async def get_my_profile(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_membership),
+) -> dict:
+    """Return the authenticated user's profile."""
+    user = await session.get(User, context.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _profile(user)
+
+
+@router.patch("/me")
+async def update_my_profile(
+    payload: ProfileUpdate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_membership),
+) -> dict:
+    """Update the authenticated user's editable profile fields."""
+    user = await session.get(User, context.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if payload.display_name is not None:
+        name = payload.display_name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Display name cannot be empty")
+        user.display_name = name
+    await session.commit()
+    await session.refresh(user)
+    logger.info("Profile updated for user %d (tenant %d)", user.id, user.tenant_id)
+    return _profile(user)
 
 
 @router.post("/me/avatar")
 async def upload_my_avatar(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
 ) -> dict:
     """Upload/replace the authenticated user's profile picture.
 

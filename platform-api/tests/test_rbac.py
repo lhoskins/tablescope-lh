@@ -22,20 +22,22 @@ def _context(role: str = "viewer", permissions: list[str] | None = None) -> Requ
     )
 
 
-def test_admin_passes_admin_requirement() -> None:
+async def test_admin_passes_admin_requirement() -> None:
     dep = require_role(Role.ADMIN)
-    assert dep(context=_context("admin")).role == "admin"
+    ctx = await dep(context=_context("admin"))
+    assert ctx.role == "admin"
 
 
-def test_viewer_fails_editor_requirement() -> None:
+async def test_viewer_fails_editor_requirement() -> None:
     dep = require_role(Role.EDITOR)
     with pytest.raises(HTTPException) as exc:
-        dep(context=_context("viewer"))
+        await dep(context=_context("viewer"))
     assert exc.value.status_code == 403
 
 
-def test_permission_required() -> None:
+async def test_permission_required() -> None:
     dep = require_permission("scopes:write")
     with pytest.raises(HTTPException):
-        dep(context=_context("editor", []))
-    assert dep(context=_context("editor", ["scopes:write"])).has_permission("scopes:write")
+        await dep(context=_context("editor", []))
+    ctx = await dep(context=_context("editor", ["scopes:write"]))
+    assert ctx.has_permission("scopes:write")

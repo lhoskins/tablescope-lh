@@ -34,11 +34,24 @@ class AiConversation(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(
         String(255), nullable=False, default="New conversation"
     )
+    # Conversation branching: a sub-chat forked from a point in another
+    # conversation. ``parent_conversation_id`` is the source thread and
+    # ``branched_from_message_id`` is the message the branch diverged from.
+    parent_conversation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_conversations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    branched_from_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ai_conversation_messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     messages: Mapped[list[AiConversationMessage]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",
         order_by="AiConversationMessage.id",
+        foreign_keys="AiConversationMessage.conversation_id",
     )
 
     def __repr__(self) -> str:
@@ -59,6 +72,7 @@ class AiConversationMessage(TimestampMixin, Base):
 
     conversation: Mapped[AiConversation] = relationship(
         back_populates="messages",
+        foreign_keys=[conversation_id],
     )
 
     def __repr__(self) -> str:

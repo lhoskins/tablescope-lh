@@ -7,7 +7,8 @@ from enum import StrEnum
 
 from fastapi import Depends, HTTPException, status
 
-from app.auth.context import RequestContext, get_request_context
+from app.auth.context import RequestContext
+from app.auth.membership import require_membership
 
 
 class Role(StrEnum):
@@ -49,9 +50,15 @@ def has_role(actual: str, required: Role) -> bool:
 
 
 def require_role(required: Role) -> Callable[[RequestContext], RequestContext]:
-    """FastAPI dependency factory enforcing minimum role."""
+    """FastAPI dependency factory enforcing minimum role.
 
-    def _dependency(context: RequestContext = Depends(get_request_context)) -> RequestContext:
+    Membership (active, tenant-scoped) is verified first via
+    :func:`require_membership`, which also pins the effective role from the DB.
+    """
+
+    async def _dependency(
+        context: RequestContext = Depends(require_membership),
+    ) -> RequestContext:
         if context.is_service:
             return context
         if not _at_least(context.role, required):
@@ -67,7 +74,9 @@ def require_role(required: Role) -> Callable[[RequestContext], RequestContext]:
 def require_permission(permission: str) -> Callable[[RequestContext], RequestContext]:
     """FastAPI dependency factory enforcing a specific permission."""
 
-    def _dependency(context: RequestContext = Depends(get_request_context)) -> RequestContext:
+    async def _dependency(
+        context: RequestContext = Depends(require_membership),
+    ) -> RequestContext:
         if context.is_service:
             return context
         if not context.has_permission(permission):

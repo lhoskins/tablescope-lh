@@ -13,7 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.context import RequestContext, get_request_context
+from app.auth.context import RequestContext
+from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
 from app.auth.tenant_roles import to_tenant_role, validate_tenant_role
 from app.config import get_settings
@@ -79,7 +80,7 @@ async def _is_super_admin(session: AsyncSession, context: RequestContext) -> boo
 
 async def _require_user_management(
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
 ) -> RequestContext:
     """User management is an admin duty within a tenant.
 
@@ -100,7 +101,7 @@ async def _require_user_management(
 
 async def _require_root_or_super(
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
 ) -> RequestContext:
     """Platform-level tenant administration: list all tenants, delete any tenant,
     and view any tenant's details / VDB status.
@@ -396,7 +397,7 @@ async def get_tenant_details(
 @router.get("/me", response_model=TenantRead)
 async def get_my_tenant(
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
 ) -> TenantRead:
     tenant = await session.get(Tenant, context.tenant_id)
     if tenant is None:

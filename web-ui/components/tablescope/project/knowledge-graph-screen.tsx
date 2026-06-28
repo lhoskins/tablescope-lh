@@ -61,11 +61,17 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
     if (l) setLens(l);
   }, []);
 
+  // Recommended/weak connectors live below the default confidence floor, so the
+  // server only returns them when inferred relationships are pulled in. Enabling
+  // either toggle implies we need that wider edge set.
+  const effectiveIncludeInferred =
+    includeInferred || strengths.has("recommended") || strengths.has("weak");
+
   const query = useKnowledgeGraph(String(projectId), {
     lens,
     centerNode,
     minConfidence,
-    includeInferred,
+    includeInferred: effectiveIncludeInferred,
   });
   const data = query.data;
   const refreshGraph = useRefreshKnowledgeGraph(String(projectId));
@@ -176,6 +182,9 @@ export function KnowledgeGraphScreen({ projectId, breadcrumb }: ScreenProps) {
       const strength: RelationshipStrength =
         e.relationshipStrength ??
         (HIDDEN_EDGE_TYPES.has(e.type ?? "") ? "recommended" : "explicit");
+      // "hidden" (rejected/very-low confidence) edges ride the Weak toggle so
+      // they only ever appear when the user explicitly opts into weak links.
+      if (strength === "hidden") return strengths.has("weak");
       return strengths.has(strength);
     });
     if (highestFirst) {

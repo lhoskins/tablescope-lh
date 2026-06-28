@@ -20,6 +20,7 @@ export interface ProjectSummary {
 export type NavKey =
   // Home-mode nav
   | "home"
+  | "business-insight"
   | "projects"
   | "ai-assistant"
   | "activity"

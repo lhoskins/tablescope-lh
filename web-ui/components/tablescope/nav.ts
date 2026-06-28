@@ -2,6 +2,7 @@ import {
   IconHome,
   IconFolders,
   IconSparkles,
+  IconBulb,
   IconActivity,
   IconFileText,
   IconLayoutDashboard,
@@ -40,6 +41,12 @@ export function homeNavGroups(): NavGroup[] {
     {
       items: [
         { key: "home", label: "Home", href: "/", icon: IconHome },
+        {
+          key: "business-insight",
+          label: "Business Insight",
+          href: "/business-insight",
+          icon: IconBulb,
+        },
         {
           key: "projects",
           label: "Projects",
