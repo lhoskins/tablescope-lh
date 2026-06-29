@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext, get_request_context
 from app.auth.mfa_errors import MfaRequiredError
 from app.auth.mfa_policy import mfa_required_for_request
+from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
 
@@ -71,8 +72,12 @@ async def require_membership(
 
     # Twilio SMS MFA: admin-tier roles must hold an aal2 session for any route
     # that is not on the MFA-exempt allowlist (identity + MFA setup/challenge).
-    if not _is_mfa_exempt(request.url.path) and mfa_required_for_request(
-        user.role, context.aal
+    # Gated behind a master switch so the feature can ship without locking out
+    # admins before Supabase phone MFA + Twilio are provisioned.
+    if (
+        get_settings().mfa_enforcement_enabled
+        and not _is_mfa_exempt(request.url.path)
+        and mfa_required_for_request(user.role, context.aal)
     ):
         raise MfaRequiredError
 

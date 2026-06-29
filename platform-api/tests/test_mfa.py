@@ -39,6 +39,17 @@ async def _seed(db_session, *, role="admin", email="u@test.com", ext="ext-u"):
     return tenant, user
 
 
+@pytest.fixture(autouse=True)
+def _enable_mfa_enforcement(monkeypatch):
+    """The enforcement master switch defaults OFF; turn it on for MFA tests."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("MFA_ENFORCEMENT_ENABLED", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 def _headers(tenant_id, user_id, *, role="admin", aal=None, sub="ext-u"):
     extra = {"aal": aal} if aal is not None else None
     return {

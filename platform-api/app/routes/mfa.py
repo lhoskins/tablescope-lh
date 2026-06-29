@@ -60,7 +60,9 @@ async def mfa_status(
     """Report the caller's MFA requirement + whether the session satisfies it."""
     user = await session.get(User, context.user_id)
     role = (user.role if user else context.role) or "viewer"
-    requires = role_requires_mfa(role)
+    # roleRequiresMfa reflects *effective* enforcement: only true when the master
+    # switch is on, so the frontend gate doesn't redirect before MFA is live.
+    requires = get_settings().mfa_enforcement_enabled and role_requires_mfa(role)
     satisfied = session_has_mfa(context.aal)
     required_action: str | None = None
     if requires and not satisfied:

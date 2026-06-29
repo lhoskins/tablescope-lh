@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     # Shared secret that Supabase signs its Send-SMS hook payloads with. Used to
     # authenticate inbound hook calls to /api/auth/hooks/send-sms.
     supabase_send_sms_hook_secret: str = ""
+    # Master switch for aal2 enforcement on admin-tier roles. Defaults OFF so
+    # the feature can ship to production without locking out admins before
+    # Supabase phone MFA + the Twilio Send-SMS hook are configured. Flip to
+    # true (env: MFA_ENFORCEMENT_ENABLED=true) once MFA is fully provisioned.
+    mfa_enforcement_enabled: bool = False
     # MFA cost controls.
     mfa_sms_resend_cooldown_seconds: int = 60
     mfa_sms_max_sends_per_window: int = 5
