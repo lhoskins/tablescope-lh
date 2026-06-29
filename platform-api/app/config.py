@@ -104,19 +104,23 @@ class Settings(BaseSettings):
     twilio_api_key_sid: str = ""
     twilio_api_key_secret: str = ""
     twilio_messaging_service_sid: str = ""
-    # Shared secret that Supabase signs its Send-SMS hook payloads with. Used to
-    # authenticate inbound hook calls to /api/auth/hooks/send-sms.
-    supabase_send_sms_hook_secret: str = ""
+    # Twilio Verify service (the MFA primitive that generates/validates OTPs).
+    # SMS MFA goes through Twilio Verify directly (no Supabase phone-MFA addon).
+    twilio_verify_service_sid: str = ""
     # Master switch for aal2 enforcement on admin-tier roles. Defaults OFF so
     # the feature can ship to production without locking out admins before
-    # Supabase phone MFA + the Twilio Send-SMS hook are configured. Flip to
-    # true (env: MFA_ENFORCEMENT_ENABLED=true) once MFA is fully provisioned.
+    # Twilio Verify is configured. Flip to true
+    # (env: MFA_ENFORCEMENT_ENABLED=true) once MFA is fully provisioned.
     mfa_enforcement_enabled: bool = False
     # MFA cost controls.
     mfa_sms_resend_cooldown_seconds: int = 60
     mfa_sms_max_sends_per_window: int = 5
     mfa_sms_window_seconds: int = 900
     mfa_sms_max_attempts_per_challenge: int = 5
+    # How long a successful SMS verification keeps the session at aal2 before a
+    # re-challenge is required (minutes). Applied to the verified-factor record
+    # so reloads / re-logins within the window do not re-prompt.
+    mfa_session_ttl_minutes: int = 720
 
     @property
     def twilio_configured(self) -> bool:
@@ -125,6 +129,15 @@ class Settings(BaseSettings):
             and self.twilio_api_key_sid
             and self.twilio_api_key_secret
             and self.twilio_messaging_service_sid
+        )
+
+    @property
+    def twilio_verify_configured(self) -> bool:
+        return bool(
+            self.twilio_account_sid
+            and self.twilio_api_key_sid
+            and self.twilio_api_key_secret
+            and self.twilio_verify_service_sid
         )
 
     # --- Stripe billing ---

@@ -73,7 +73,7 @@ async def require_membership(
     # Twilio SMS MFA: admin-tier roles must hold an aal2 session for any route
     # that is not on the MFA-exempt allowlist (identity + MFA setup/challenge).
     # Gated behind a master switch so the feature can ship without locking out
-    # admins before Supabase phone MFA + Twilio are provisioned.
+    # admins before Twilio Verify is provisioned.
     if (
         get_settings().mfa_enforcement_enabled
         and not _is_mfa_exempt(request.url.path)

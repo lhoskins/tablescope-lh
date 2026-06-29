@@ -1,12 +1,14 @@
 """Multi-factor-authentication policy.
 
-Twilio SMS is the primary MFA method. Owner / Admin / DB Admin roles must
-complete an SMS challenge (Supabase assurance level ``aal2``) before they can
-reach any tenant data or admin API; Members may enable MFA optionally.
+Twilio SMS (via Twilio Verify) is the primary MFA method. Owner / Admin / DB
+Admin roles must complete an SMS challenge (assurance level ``aal2``) before they
+can reach any tenant data or admin API; Members may enable MFA optionally.
 
-Enforcement reads the Supabase ``aal`` claim, which is carried through the
-first-party token at ``/auth/exchange`` (see :mod:`app.routes.auth`). A missing
-``aal`` claim is treated as ``aal1`` (not satisfied).
+Enforcement reads the ``aal`` claim on the first-party token. That claim is set
+when an SMS code is verified (``/api/mfa/phone/verify`` mints an ``aal2`` token)
+and re-derived at ``/auth/exchange`` from the user's verified-phone record while
+its window is open (see :mod:`app.services.mfa_phone_service`). A missing ``aal``
+claim is treated as ``aal1`` (not satisfied).
 """
 
 from __future__ import annotations

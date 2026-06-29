@@ -1,46 +1,66 @@
-"""MFA status + Twilio Send-SMS hook.
+"""SMS MFA (Twilio Verify) status + enroll/challenge endpoints.
 
 * ``GET /api/mfa/status`` — tells the client whether the caller's role requires
-  MFA and whether the current session already satisfies it (aal2). Reachable at
-  aal1 (it is on the MFA-exempt allowlist) so the client can decide whether to
-  route to setup or challenge.
+  MFA, whether the current session already satisfies it (aal2), and whether a
+  verified phone exists (so the client can route to setup vs challenge).
+  Reachable at aal1 (it is on the MFA-exempt allowlist).
 
-* ``POST /api/auth/hooks/send-sms`` — Supabase **Send SMS Hook**. Supabase calls
-  this with the OTP it generated; we deliver it via the Twilio Messaging Service.
-  The hook secret is validated, the OTP is never logged, the phone is masked, and
-  cost controls + audit are applied. This route is anonymous (it authenticates
-  itself via the hook secret).
+* ``POST /api/mfa/phone/start`` — send an OTP via Twilio Verify (cost-controlled
+  + audited). Used for both enrollment and challenge.
+
+* ``POST /api/mfa/phone/verify`` — check the OTP via Twilio Verify; on success,
+  persist the verified phone factor and return a fresh first-party token
+  elevated to ``aal2``.
+
+* ``DELETE /api/mfa/phone`` — remove the verified phone (disable MFA), unless the
+  caller's role requires it.
+
+OTP codes are never logged or stored; phone numbers are stored masked + hashed.
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import logging
-from typing import Any
+import re
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
+from app.auth.jwt import create_access_token
 from app.auth.membership import require_membership
 from app.auth.mfa_policy import (
+    AAL2,
     PREFERRED_FACTOR_TYPE,
     role_requires_mfa,
     session_has_mfa,
 )
 from app.config import get_settings
 from app.database import get_db
+from app.models.mfa_sms_event import MFA_SMS_FACTOR_REMOVED
 from app.models.user import User
-from app.services.mfa_sms_service import MfaRateLimitedError, send_mfa_sms
+from app.services.mfa_phone_service import (
+    deactivate_factor,
+    get_active_factor,
+    phone_matches_factor,
+    upsert_verified_factor,
+)
+from app.services.mfa_sms_service import (
+    MfaRateLimitedError,
+    check_mfa_verification,
+    record_event,
+    start_mfa_verification,
+)
+from app.services.twilio_sms_service import TwilioConfigError, mask_phone
+from app.services.twilio_verify_service import TwilioVerifyError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["mfa"])
+
+E164 = re.compile(r"^\+[1-9]\d{7,14}$")
+CODE = re.compile(r"^\d{4,10}$")
 
 
 class MfaStatusResponse(BaseModel):
@@ -48,8 +68,38 @@ class MfaStatusResponse(BaseModel):
     roleRequiresMfa: bool
     aal: str | None
     mfaSatisfied: bool
+    hasVerifiedFactor: bool
+    maskedPhone: str | None
     preferredFactorType: str
     requiredAction: str | None
+
+
+class PhoneStartRequest(BaseModel):
+    phone: str
+
+
+class PhoneStartResponse(BaseModel):
+    maskedPhone: str
+    cooldownSeconds: int
+    status: str
+
+
+class PhoneVerifyRequest(BaseModel):
+    phone: str
+    code: str
+
+
+class PhoneVerifyResponse(BaseModel):
+    verified: bool
+    access_token: str
+    token_type: str
+    expires_in: int
+    aal: str
+    maskedPhone: str | None
+
+
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
 
 
 @router.get("/mfa/status", response_model=MfaStatusResponse)
@@ -64,140 +114,190 @@ async def mfa_status(
     # switch is on, so the frontend gate doesn't redirect before MFA is live.
     requires = get_settings().mfa_enforcement_enabled and role_requires_mfa(role)
     satisfied = session_has_mfa(context.aal)
+    factor = await get_active_factor(session, context.user_id)
+    has_factor = factor is not None
     required_action: str | None = None
     if requires and not satisfied:
-        required_action = "setup_or_challenge"
+        required_action = "challenge" if has_factor else "setup"
     return MfaStatusResponse(
         role=role,
         roleRequiresMfa=requires,
         aal=context.aal,
         mfaSatisfied=satisfied,
+        hasVerifiedFactor=has_factor,
+        maskedPhone=factor.masked_phone if factor else None,
         preferredFactorType=PREFERRED_FACTOR_TYPE,
         requiredAction=required_action,
     )
 
 
-def _verify_hook_signature(request: Request, raw_body: bytes) -> bool:
-    """Validate the Supabase Send-SMS hook secret.
-
-    Supports the Standard Webhooks signature (``webhook-id`` /
-    ``webhook-timestamp`` / ``webhook-signature`` headers signed with a
-    base64 ``v1,whsec_...`` secret) and a simple bearer-secret fallback.
-    """
-    settings = get_settings()
-    secret = settings.supabase_send_sms_hook_secret
-    if not secret:
-        # Not configured → reject (fail closed) so we never deliver unauthenticated.
-        return False
-
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer ") and hmac.compare_digest(
-        auth.split(" ", 1)[1].strip(), secret
-    ):
-        return True
-
-    webhook_id = request.headers.get("webhook-id")
-    timestamp = request.headers.get("webhook-timestamp")
-    signature_header = request.headers.get("webhook-signature")
-    if not (webhook_id and timestamp and signature_header):
-        return False
-
-    secret_bytes = secret
-    if secret_bytes.startswith("v1,whsec_"):
-        secret_bytes = secret_bytes.split("whsec_", 1)[1]
-    elif secret_bytes.startswith("whsec_"):
-        secret_bytes = secret_bytes.split("whsec_", 1)[1]
-    try:
-        key = base64.b64decode(secret_bytes)
-    except Exception:
-        key = secret.encode()
-
-    signed_content = f"{webhook_id}.{timestamp}.{raw_body.decode()}".encode()
-    expected = base64.b64encode(
-        hmac.new(key, signed_content, hashlib.sha256).digest()
-    ).decode()
-    # Header may contain space-separated "v1,<sig>" entries.
-    for part in signature_header.split(" "):
-        candidate = part.split(",", 1)[-1]
-        if hmac.compare_digest(candidate, expected):
-            return True
-    return False
-
-
-@router.post("/auth/hooks/send-sms")
-async def send_sms_hook(
+@router.post("/mfa/phone/start", response_model=PhoneStartResponse)
+async def start_phone(
+    payload: PhoneStartRequest,
     request: Request,
     session: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Deliver a Supabase-generated MFA OTP via Twilio (Send SMS Hook)."""
-    raw_body = await request.body()
-    if not _verify_hook_signature(request, raw_body):
-        return JSONResponse(
-            status_code=401,
-            content={"error": {"http_code": 401, "message": "Invalid hook signature"}},
+    context: RequestContext = Depends(require_membership),
+) -> PhoneStartResponse:
+    """Send an SMS verification code via Twilio Verify (enroll or challenge)."""
+    settings = get_settings()
+    phone = payload.phone.strip()
+    if not E164.match(phone):
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a phone number in international format, e.g. +16615551212.",
+        )
+
+    # If a phone is already enrolled, a new number can't be used to challenge it;
+    # the user must remove the old factor first (prevents silent takeover).
+    existing = await get_active_factor(session, context.user_id)
+    if existing is not None and not phone_matches_factor(existing, phone):
+        raise HTTPException(
+            status_code=400,
+            detail="This number doesn't match the phone on file for your account.",
         )
 
     try:
-        payload: dict[str, Any] = await request.json()
-    except Exception:
-        return JSONResponse(
-            status_code=400,
-            content={"error": {"http_code": 400, "message": "Invalid JSON body"}},
-        )
-
-    user_obj = payload.get("user") or {}
-    sms_obj = payload.get("sms") or {}
-    phone = user_obj.get("phone") or sms_obj.get("phone")
-    otp = sms_obj.get("otp")
-    if not phone or not otp:
-        return JSONResponse(
-            status_code=400,
-            content={"error": {"http_code": 400, "message": "Missing phone or otp"}},
-        )
-
-    # Best-effort map to a local user/tenant for tenant-scoped tracking.
-    tenant_id: int | None = None
-    user_id: int | None = None
-    supa_id = user_obj.get("id")
-    if supa_id:
-        local = await session.scalar(
-            select(User).where(User.supabase_user_id == str(supa_id))
-        )
-        if local is not None:
-            tenant_id = local.tenant_id
-            user_id = local.id
-
-    message = f"Your Tablescope verification code is {otp}"
-    try:
-        await send_mfa_sms(
+        await start_mfa_verification(
             session,
             phone=phone,
-            message=message,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            ip_address=request.client.host if request.client else None,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            ip_address=_client_ip(request),
             user_agent=request.headers.get("user-agent"),
         )
         await session.commit()
     except MfaRateLimitedError as exc:
         await session.commit()
-        return JSONResponse(
+        raise HTTPException(
             status_code=429,
-            content={
-                "error": {
-                    "http_code": 429,
-                    "message": "Too many SMS requests. Please wait and try again.",
-                    "reason": exc.reason,
-                    "retryAfterSeconds": exc.retry_after_seconds,
-                }
-            },
-        )
-    except Exception as exc:  # pragma: no cover - Twilio/network failure
+            detail="Too many requests. Please wait before requesting another code.",
+            headers=(
+                {"Retry-After": str(exc.retry_after_seconds)}
+                if exc.retry_after_seconds
+                else None
+            ),
+        ) from exc
+    except TwilioConfigError as exc:
         await session.rollback()
-        logger.warning("MFA SMS hook delivery failed: %s", type(exc).__name__)
-        return JSONResponse(
+        logger.warning("Twilio Verify not configured: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="SMS verification isn't available yet. Contact your administrator.",
+        ) from exc
+    except TwilioVerifyError as exc:
+        await session.rollback()
+        logger.warning("Twilio Verify start failed: %s", type(exc).__name__)
+        raise HTTPException(
             status_code=502,
-            content={"error": {"http_code": 502, "message": "SMS delivery failed"}},
+            detail="We couldn't send the code. Please try again in a moment.",
+        ) from exc
+
+    return PhoneStartResponse(
+        maskedPhone=mask_phone(phone),
+        cooldownSeconds=settings.mfa_sms_resend_cooldown_seconds,
+        status="pending",
+    )
+
+
+@router.post("/mfa/phone/verify", response_model=PhoneVerifyResponse)
+async def verify_phone(
+    payload: PhoneVerifyRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_membership),
+) -> PhoneVerifyResponse:
+    """Verify an SMS code; on success mint an aal2 token + persist the factor."""
+    settings = get_settings()
+    phone = payload.phone.strip()
+    code = payload.code.strip()
+    if not E164.match(phone):
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+    if not CODE.match(code):
+        raise HTTPException(
+            status_code=400, detail="Enter the numeric code from the text message."
         )
 
-    return JSONResponse(status_code=200, content={})
+    existing = await get_active_factor(session, context.user_id)
+    if existing is not None and not phone_matches_factor(existing, phone):
+        raise HTTPException(
+            status_code=400,
+            detail="This number doesn't match the phone on file for your account.",
+        )
+
+    try:
+        approved = await check_mfa_verification(
+            session,
+            phone=phone,
+            code=code,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
+    except TwilioConfigError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="SMS verification isn't available yet. Contact your administrator.",
+        ) from exc
+
+    if not approved:
+        # Persist the failed-attempt audit row before surfacing the error.
+        await session.commit()
+        raise HTTPException(
+            status_code=400,
+            detail="That code is incorrect or expired. Request a new one and try again.",
+        )
+
+    factor = await upsert_verified_factor(
+        session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        phone=phone,
+    )
+    await session.commit()
+
+    token = create_access_token(
+        sub=context.claims.sub,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        role=context.role,
+        permissions=context.permissions,
+        extra_claims={"aal": AAL2},
+    )
+    return PhoneVerifyResponse(
+        verified=True,
+        access_token=token,
+        token_type="bearer",
+        expires_in=settings.jwt_access_token_ttl_minutes * 60,
+        aal=AAL2,
+        maskedPhone=factor.masked_phone,
+    )
+
+
+@router.delete("/mfa/phone", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_phone(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_membership),
+) -> Response:
+    """Remove the verified phone (disable MFA), unless the role requires it."""
+    settings = get_settings()
+    user = await session.get(User, context.user_id)
+    role = (user.role if user else context.role) or "viewer"
+    if settings.mfa_enforcement_enabled and role_requires_mfa(role):
+        raise HTTPException(
+            status_code=400,
+            detail="SMS verification is required for your role and can't be removed.",
+        )
+    removed = await deactivate_factor(session, context.user_id)
+    if removed:
+        await record_event(
+            session,
+            event_type=MFA_SMS_FACTOR_REMOVED,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            status="removed",
+        )
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

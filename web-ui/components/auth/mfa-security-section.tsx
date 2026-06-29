@@ -4,15 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { IconLoader2, IconShieldCheck, IconShieldOff } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { PhoneMfaForm } from "@/components/auth/phone-mfa-form";
-import {
-  getMfaStatus,
-  getVerifiedPhoneFactor,
-  refreshTablescopeSession,
-  unenrollPhone,
-  type MfaStatus,
-  type PhoneFactor,
-} from "@/lib/mfa";
-import { getUserMeta } from "@/lib/auth";
+import { getMfaStatus, removePhone, type MfaStatus } from "@/lib/mfa";
 
 /**
  * Profile → Security: SMS multi-factor authentication. Admin-tier roles must
@@ -21,7 +13,6 @@ import { getUserMeta } from "@/lib/auth";
  */
 export function MfaSecuritySection() {
   const [status, setStatus] = useState<MfaStatus | null>(null);
-  const [factor, setFactor] = useState<PhoneFactor | null>(null);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -31,12 +22,7 @@ export function MfaSecuritySection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, f] = await Promise.all([
-        getMfaStatus().catch(() => null),
-        getVerifiedPhoneFactor().catch(() => null),
-      ]);
-      setStatus(s);
-      setFactor(f);
+      setStatus(await getMfaStatus().catch(() => null));
     } finally {
       setLoading(false);
     }
@@ -49,21 +35,14 @@ export function MfaSecuritySection() {
   async function onVerified() {
     setAdding(false);
     setNote("SMS verification enabled.");
-    const meta = getUserMeta();
-    try {
-      await refreshTablescopeSession(meta?.tenant_slug ?? null);
-    } catch {
-      /* token refresh best-effort */
-    }
     await load();
   }
 
   async function onRemove() {
-    if (!factor) return;
     setBusy(true);
     setError(null);
     try {
-      await unenrollPhone(factor.id);
+      await removePhone();
       setNote("SMS verification removed.");
       await load();
     } catch (err) {
@@ -74,6 +53,7 @@ export function MfaSecuritySection() {
   }
 
   const required = status?.roleRequiresMfa ?? false;
+  const hasFactor = status?.hasVerifiedFactor ?? false;
 
   return (
     <section className="space-y-4 rounded-lg border border-line-tertiary bg-bg-primary p-5">
@@ -85,7 +65,7 @@ export function MfaSecuritySection() {
             (SMS).
           </p>
         </div>
-        {factor ? (
+        {hasFactor ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-1 text-caption font-medium text-success">
             <IconShieldCheck size={14} /> Enabled
           </span>
@@ -102,18 +82,20 @@ export function MfaSecuritySection() {
         </p>
       ) : (
         <>
-          {required && !factor && (
+          {required && !hasFactor && (
             <p className="rounded-md bg-warning/10 px-3 py-2 text-small text-warning">
               Your role requires SMS verification for access. Add a phone number
               to continue.
             </p>
           )}
 
-          {factor ? (
+          {hasFactor ? (
             <div className="flex items-center justify-between rounded-md border border-line-tertiary px-3 py-2">
               <div className="text-[13px] text-ink-secondary">
                 Verified phone{" "}
-                <span className="font-medium">{factor.phone ?? "on file"}</span>
+                <span className="font-medium">
+                  {status?.maskedPhone ?? "on file"}
+                </span>
               </div>
               <Button
                 variant="secondary"

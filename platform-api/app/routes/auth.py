@@ -29,6 +29,7 @@ from app.schemas.auth import (
     DirectLoginRequest,
 )
 from app.services.allowed_domains import enforce_allowed_domain
+from app.services.mfa_phone_service import mfa_aal_for_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -121,14 +122,15 @@ async def exchange_token(
         purpose="access",
     )
 
-    # Carry the Supabase assurance level so backend MFA enforcement can require
-    # aal2 for admin roles. A missing claim is treated as aal1 downstream.
+    # Derive the assurance level from the user's verified-phone record: aal2
+    # while a recent SMS verification window is open, else aal1. This lets a
+    # reload / re-login inside the window skip the SMS challenge.
     access_token = create_access_token(
         sub=external_user_id,
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
-        extra_claims={"aal": external_claims.get("aal")},
+        extra_claims={"aal": await mfa_aal_for_user(session, user.id)},
     )
     tenant = await session.get(Tenant, user.tenant_id)
     return AuthTokenResponse(
@@ -174,6 +176,7 @@ async def direct_login(
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
+        extra_claims={"aal": await mfa_aal_for_user(session, user.id)},
     )
     login_tenant = await session.get(Tenant, user.tenant_id)
     return AuthTokenResponse(

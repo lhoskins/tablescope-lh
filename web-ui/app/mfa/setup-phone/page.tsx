@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PhoneMfaForm } from "@/components/auth/phone-mfa-form";
 import { getUserMeta } from "@/lib/auth";
-import { getVerifiedPhoneFactor, refreshTablescopeSession } from "@/lib/mfa";
+import { getMfaStatus } from "@/lib/mfa";
 
 export default function SetupPhoneMfaPage() {
   const router = useRouter();
@@ -19,8 +19,8 @@ export default function SetupPhoneMfaPage() {
     // If a verified factor already exists, this is really a challenge.
     (async () => {
       try {
-        const factor = await getVerifiedPhoneFactor();
-        if (factor) {
+        const status = await getMfaStatus();
+        if (status.hasVerifiedFactor) {
           router.replace("/mfa/challenge-phone");
           return;
         }
@@ -31,9 +31,8 @@ export default function SetupPhoneMfaPage() {
     })();
   }, [router]);
 
-  async function onVerified() {
-    const meta = getUserMeta();
-    await refreshTablescopeSession(meta?.tenant_slug ?? null);
+  function onVerified() {
+    // verifyPhone() already stored the aal2 token.
     router.replace("/");
   }
 

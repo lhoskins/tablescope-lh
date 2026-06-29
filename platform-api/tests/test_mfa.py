@@ -1,19 +1,24 @@
-"""Twilio SMS MFA tests.
+"""Twilio Verify SMS MFA tests.
 
 Covers backend aal2 enforcement for admin roles, the ``/mfa/status`` endpoint,
-the Twilio service contract (Messaging Service SID, no code/secret logging),
-SMS cost controls (resend cooldown + send caps), audit writes, and the Supabase
-Send-SMS hook signature gate.
+the Twilio Verify service contract (Verify Service SID, no code/secret logging),
+SMS cost controls (resend cooldown + send caps), audit writes, the
+start/verify endpoints (OTP send + aal2 token mint), and aal derivation from the
+verified-phone record at ``/auth/exchange``.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import ClassVar
 
 import pytest
 
 from app.auth.jwt import create_access_token
+from app.models.mfa_phone_factor import MfaPhoneFactor
 from app.models.mfa_sms_event import (
+    MFA_SMS_CHALLENGE_FAILED,
+    MFA_SMS_CHALLENGE_SUCCESS,
     MFA_SMS_CODE_SENT,
     MfaSmsEvent,
 )
@@ -64,6 +69,39 @@ def _headers(tenant_id, user_id, *, role="admin", aal=None, sub="ext-u"):
     }
 
 
+# --- Fake Twilio Verify -----------------------------------------------------
+
+
+class _FakeVerify:
+    """Drop-in for TwilioVerifyService: records sends, approves a known code."""
+
+    instances: ClassVar[list[_FakeVerify]] = []
+    approve_code: ClassVar[str] = "123456"
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+        self.checked: list[tuple[str, str]] = []
+        type(self).instances.append(self)
+
+    def start_verification(self, *, to_phone: str) -> str:
+        self.sent.append(to_phone)
+        return "VE_fake_123"
+
+    def check_verification(self, *, to_phone: str, code: str) -> bool:
+        self.checked.append((to_phone, code))
+        return code == type(self).approve_code
+
+
+@pytest.fixture
+def fake_verify(monkeypatch):
+    import app.services.mfa_sms_service as svc
+
+    _FakeVerify.instances = []
+    _FakeVerify.approve_code = "123456"
+    monkeypatch.setattr(svc, "TwilioVerifyService", _FakeVerify)
+    return _FakeVerify
+
+
 # --- aal2 enforcement -------------------------------------------------------
 
 
@@ -112,7 +150,7 @@ async def test_member_aal1_can_access(client_strict, db_session) -> None:
 # --- /mfa/status ------------------------------------------------------------
 
 
-async def test_mfa_status_admin_aal1(client_strict, db_session) -> None:
+async def test_mfa_status_admin_aal1_no_factor(client_strict, db_session) -> None:
     tenant, user = await _seed(db_session, role="admin", ext="ext-st1")
     r = await client_strict.get(
         "/api/mfa/status",
@@ -122,8 +160,33 @@ async def test_mfa_status_admin_aal1(client_strict, db_session) -> None:
     body = r.json()
     assert body["roleRequiresMfa"] is True
     assert body["mfaSatisfied"] is False
-    assert body["requiredAction"] == "setup_or_challenge"
+    assert body["hasVerifiedFactor"] is False
+    assert body["requiredAction"] == "setup"
     assert body["preferredFactorType"] == "phone"
+
+
+async def test_mfa_status_admin_aal1_with_factor_is_challenge(
+    client_strict, db_session
+) -> None:
+    tenant, user = await _seed(db_session, role="admin", ext="ext-stf")
+    db_session.add(
+        MfaPhoneFactor(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            masked_phone="+1******1212",
+            phone_hash="x" * 64,
+            active=True,
+        )
+    )
+    await db_session.commit()
+    r = await client_strict.get(
+        "/api/mfa/status",
+        headers=_headers(tenant.id, user.id, role="admin", aal="aal1", sub="ext-stf"),
+    )
+    body = r.json()
+    assert body["hasVerifiedFactor"] is True
+    assert body["maskedPhone"] == "+1******1212"
+    assert body["requiredAction"] == "challenge"
 
 
 async def test_mfa_status_admin_aal2_satisfied(client_strict, db_session) -> None:
@@ -149,46 +212,102 @@ async def test_mfa_status_member_optional(client_strict, db_session) -> None:
     assert r.json()["roleRequiresMfa"] is False
 
 
-# --- Twilio service contract ------------------------------------------------
+# --- Twilio Verify service contract -----------------------------------------
 
 
-class _FakeMessage:
-    sid = "SM_fake_123"
-
-
-class _FakeMessages:
+class _FakeVerifications:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        return _FakeMessage()
+        return type("V", (), {"sid": "VE_x", "status": "pending"})()
+
+
+class _FakeChecks:
+    def __init__(self, status: str) -> None:
+        self._status = status
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return type("C", (), {"sid": "VC_x", "status": self._status})()
+
+
+class _FakeService:
+    def __init__(self, check_status: str) -> None:
+        self.verifications = _FakeVerifications()
+        self.verification_checks = _FakeChecks(check_status)
+
+
+class _FakeServices:
+    def __init__(self, check_status: str) -> None:
+        self.requested: list[str] = []
+        self._svc = _FakeService(check_status)
+
+    def __call__(self, sid: str):
+        self.requested.append(sid)
+        return self._svc
+
+
+class _FakeV2:
+    def __init__(self, check_status: str) -> None:
+        self.services = _FakeServices(check_status)
+
+
+class _FakeVerifyNs:
+    def __init__(self, check_status: str) -> None:
+        self.v2 = _FakeV2(check_status)
 
 
 class _FakeTwilioClient:
+    check_status = "approved"
+
     def __init__(self, *args, **kwargs) -> None:
-        self.messages = _FakeMessages()
+        self.verify = _FakeVerifyNs(type(self).check_status)
 
 
-def test_twilio_service_uses_messaging_service_sid(monkeypatch) -> None:
+def _configure_verify(monkeypatch, *, check_status="approved"):
     monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC_test")
     monkeypatch.setenv("TWILIO_API_KEY_SID", "SK_test")
     monkeypatch.setenv("TWILIO_API_KEY_SECRET", "secret")
-    monkeypatch.setenv("TWILIO_MESSAGING_SERVICE_SID", "MG_test")
+    monkeypatch.setenv("TWILIO_VERIFY_SERVICE_SID", "VA_test")
     from app.config import get_settings
 
     get_settings.cache_clear()
     import twilio.rest
 
+    _FakeTwilioClient.check_status = check_status
     monkeypatch.setattr(twilio.rest, "Client", _FakeTwilioClient)
-    from app.services.twilio_sms_service import TwilioSmsService
 
-    svc = TwilioSmsService()
-    sid = svc.send_mfa_code(to_phone="+16615551212", message="code 123456")
-    assert sid == "SM_fake_123"
-    call = svc.client.messages.calls[0]
-    assert call["messaging_service_sid"] == "MG_test"
+
+def test_twilio_verify_service_uses_verify_service_sid(monkeypatch) -> None:
+    _configure_verify(monkeypatch)
+    from app.services.twilio_verify_service import TwilioVerifyService
+
+    svc = TwilioVerifyService()
+    sid = svc.start_verification(to_phone="+16615551212")
+    assert sid == "VE_x"
+    services = svc.client.verify.v2.services
+    assert services.requested == ["VA_test"]
+    call = services._svc.verifications.calls[0]
     assert call["to"] == "+16615551212"
+    assert call["channel"] == "sms"
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+
+def test_twilio_verify_check_approved_and_denied(monkeypatch) -> None:
+    _configure_verify(monkeypatch, check_status="approved")
+    from app.services.twilio_verify_service import TwilioVerifyService
+
+    assert TwilioVerifyService().check_verification(to_phone="+1661", code="1") is True
+
+    _configure_verify(monkeypatch, check_status="pending")
+    assert TwilioVerifyService().check_verification(to_phone="+1661", code="1") is False
+    from app.config import get_settings
+
     get_settings.cache_clear()
 
 
@@ -204,23 +323,14 @@ def test_mask_phone() -> None:
 # --- cost controls + audit --------------------------------------------------
 
 
-class _RecordingTwilio:
-    def __init__(self) -> None:
-        self.messages = _FakeMessages()
-
-    def send_mfa_code(self, *, to_phone, message):
-        self.messages.create(to=to_phone, body=message)
-        return "SM_rec"
-
-
-async def test_send_mfa_sms_writes_audit_and_no_code_logged(db_session, monkeypatch) -> None:
+async def test_start_verification_writes_audit_and_no_code(
+    db_session, fake_verify
+) -> None:
     import app.services.mfa_sms_service as svc
 
-    monkeypatch.setattr(svc, "TwilioSmsService", _RecordingTwilio)
-    await svc.send_mfa_sms(
+    await svc.start_mfa_verification(
         db_session,
         phone="+16615551212",
-        message="Your Tablescope verification code is 999111",
         tenant_id=None,
         user_id=None,
     )
@@ -233,16 +343,37 @@ async def test_send_mfa_sms_writes_audit_and_no_code_logged(db_session, monkeypa
     assert row["masked_phone"].endswith("1212")
     assert "6615551212" not in (row["masked_phone"] or "")
     assert row["phone_hash"] and len(row["phone_hash"]) == 64
-    assert row["twilio_message_sid"] == "SM_rec"
+    assert row["twilio_message_sid"] == "VE_fake_123"
 
 
-async def test_resend_cooldown_enforced(db_session, monkeypatch) -> None:
+async def test_check_verification_audits_success_and_failure(
+    db_session, fake_verify
+) -> None:
     import app.services.mfa_sms_service as svc
 
-    monkeypatch.setattr(svc, "TwilioSmsService", _RecordingTwilio)
-    await svc.send_mfa_sms(db_session, phone="+16615551212", message="m", user_id=1)
+    ok = await svc.check_mfa_verification(
+        db_session, phone="+16615551212", code="123456", user_id=1
+    )
+    bad = await svc.check_mfa_verification(
+        db_session, phone="+16615551212", code="000000", user_id=1
+    )
+    await db_session.commit()
+    assert ok is True
+    assert bad is False
+    types = {
+        e._mapping["event_type"]
+        for e in (await db_session.execute(MfaSmsEvent.__table__.select())).fetchall()
+    }
+    assert MFA_SMS_CHALLENGE_SUCCESS in types
+    assert MFA_SMS_CHALLENGE_FAILED in types
+
+
+async def test_resend_cooldown_enforced(db_session, fake_verify) -> None:
+    import app.services.mfa_sms_service as svc
+
+    await svc.start_mfa_verification(db_session, phone="+16615551212", user_id=1)
     with pytest.raises(svc.MfaRateLimitedError) as exc:
-        await svc.send_mfa_sms(db_session, phone="+16615551212", message="m", user_id=1)
+        await svc.start_mfa_verification(db_session, phone="+16615551212", user_id=1)
     assert exc.value.reason == "resend_cooldown"
     assert exc.value.retry_after_seconds and exc.value.retry_after_seconds > 0
 
@@ -271,30 +402,141 @@ async def test_phone_send_limit_enforced(db_session) -> None:
     assert result.reason == "phone_send_limit"
 
 
-# --- Send-SMS hook ----------------------------------------------------------
+# --- start / verify endpoints ----------------------------------------------
 
 
-async def test_send_sms_hook_rejects_without_secret(client_strict) -> None:
+async def test_phone_start_sends_code(client_strict, db_session, fake_verify) -> None:
+    tenant, user = await _seed(db_session, role="admin", ext="ext-start")
     r = await client_strict.post(
-        "/api/auth/hooks/send-sms",
-        json={"user": {"phone": "+16615551212"}, "sms": {"otp": "123456"}},
-    )
-    # No hook secret configured in tests → fail closed (401).
-    assert r.status_code == 401
-
-
-async def test_send_sms_hook_accepts_bearer_secret(client_strict, db_session, monkeypatch) -> None:
-    monkeypatch.setenv("SUPABASE_SEND_SMS_HOOK_SECRET", "hooksecret")
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    import app.services.mfa_sms_service as svc
-
-    monkeypatch.setattr(svc, "TwilioSmsService", _RecordingTwilio)
-    r = await client_strict.post(
-        "/api/auth/hooks/send-sms",
-        headers={"Authorization": "Bearer hooksecret"},
-        json={"user": {"phone": "+16615551212"}, "sms": {"otp": "654321"}},
+        "/api/mfa/phone/start",
+        headers=_headers(tenant.id, user.id, role="admin", aal="aal1", sub="ext-start"),
+        json={"phone": "+16615551212"},
     )
     assert r.status_code == 200, r.text
-    get_settings.cache_clear()
+    body = r.json()
+    assert body["status"] == "pending"
+    assert body["maskedPhone"].endswith("1212")
+    assert fake_verify.instances and fake_verify.instances[-1].sent == ["+16615551212"]
+
+
+async def test_phone_start_rejects_bad_format(
+    client_strict, db_session, fake_verify
+) -> None:
+    tenant, user = await _seed(db_session, role="admin", ext="ext-bad")
+    r = await client_strict.post(
+        "/api/mfa/phone/start",
+        headers=_headers(tenant.id, user.id, role="admin", aal="aal1", sub="ext-bad"),
+        json={"phone": "6615551212"},
+    )
+    assert r.status_code == 400
+
+
+async def test_phone_verify_mints_aal2_and_persists_factor(
+    client_strict, db_session, fake_verify
+) -> None:
+    tenant, user = await _seed(db_session, role="admin", ext="ext-verify")
+    r = await client_strict.post(
+        "/api/mfa/phone/verify",
+        headers=_headers(
+            tenant.id, user.id, role="admin", aal="aal1", sub="ext-verify"
+        ),
+        json={"phone": "+16615551212", "code": "123456"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["verified"] is True
+    assert body["aal"] == "aal2"
+    assert body["access_token"]
+
+    # The minted token actually carries aal2 and unlocks admin routes.
+    r2 = await client_strict.get(
+        "/api/projects",
+        headers={"Authorization": f"Bearer {body['access_token']}"},
+    )
+    assert r2.status_code == 200, r2.text
+
+    from app.services.mfa_phone_service import get_factor
+
+    factor = await get_factor(db_session, user.id)
+    assert factor is not None
+    assert factor.masked_phone.endswith("1212")
+    assert "6615551212" not in factor.masked_phone
+    assert factor.verified_until is not None
+
+
+async def test_phone_verify_wrong_code_rejected(
+    client_strict, db_session, fake_verify
+) -> None:
+    tenant, user = await _seed(db_session, role="admin", ext="ext-wrong")
+    r = await client_strict.post(
+        "/api/mfa/phone/verify",
+        headers=_headers(tenant.id, user.id, role="admin", aal="aal1", sub="ext-wrong"),
+        json={"phone": "+16615551212", "code": "000000"},
+    )
+    assert r.status_code == 400
+
+
+async def test_phone_verify_rejects_mismatched_number(
+    client_strict, db_session, fake_verify
+) -> None:
+    tenant, user = await _seed(db_session, role="admin", ext="ext-mismatch")
+    from app.services.mfa_phone_service import hash_phone
+
+    db_session.add(
+        MfaPhoneFactor(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            masked_phone="+1******1212",
+            phone_hash=hash_phone("+16615551212"),
+            active=True,
+        )
+    )
+    await db_session.commit()
+    r = await client_strict.post(
+        "/api/mfa/phone/start",
+        headers=_headers(
+            tenant.id, user.id, role="admin", aal="aal1", sub="ext-mismatch"
+        ),
+        json={"phone": "+19998887777"},
+    )
+    assert r.status_code == 400
+
+
+# --- aal derivation from verified factor ------------------------------------
+
+
+async def test_mfa_aal_for_user_window(db_session) -> None:
+    from app.services.mfa_phone_service import mfa_aal_for_user
+
+    tenant, user = await _seed(db_session, role="admin", ext="ext-win")
+    # Open window → aal2.
+    db_session.add(
+        MfaPhoneFactor(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            masked_phone="+1******1212",
+            phone_hash="h" * 64,
+            active=True,
+            verified_until=datetime.now(tz=UTC) + timedelta(hours=1),
+        )
+    )
+    await db_session.commit()
+    assert await mfa_aal_for_user(db_session, user.id) == "aal2"
+
+
+async def test_mfa_aal_for_user_expired_window(db_session) -> None:
+    from app.services.mfa_phone_service import mfa_aal_for_user
+
+    tenant, user = await _seed(db_session, role="admin", ext="ext-exp")
+    db_session.add(
+        MfaPhoneFactor(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            masked_phone="+1******1212",
+            phone_hash="h" * 64,
+            active=True,
+            verified_until=datetime.now(tz=UTC) - timedelta(minutes=1),
+        )
+    )
+    await db_session.commit()
+    assert await mfa_aal_for_user(db_session, user.id) is None

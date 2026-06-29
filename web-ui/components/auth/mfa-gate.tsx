@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { getMfaStatus, getVerifiedPhoneFactor } from "@/lib/mfa";
+import { getMfaStatus } from "@/lib/mfa";
 import { getUserMeta } from "@/lib/auth";
 
 /**
@@ -28,13 +28,9 @@ export function MfaGate() {
       try {
         const status = await getMfaStatus();
         if (!status.roleRequiresMfa || status.mfaSatisfied) return;
-        let hasFactor = false;
-        try {
-          hasFactor = (await getVerifiedPhoneFactor()) !== null;
-        } catch {
-          hasFactor = false;
-        }
-        router.replace(hasFactor ? "/mfa/challenge-phone" : "/mfa/setup-phone");
+        router.replace(
+          status.hasVerifiedFactor ? "/mfa/challenge-phone" : "/mfa/setup-phone",
+        );
       } catch {
         /* Status check failed (e.g. offline) — backend still enforces. */
       }

@@ -3,21 +3,14 @@
 import { useEffect, useState } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
-import {
-  challengePhone,
-  enrollPhone,
-  verifyPhone,
-} from "@/lib/mfa";
+import { startPhone, verifyPhone } from "@/lib/mfa";
 
-const RESEND_COOLDOWN_SECONDS = 60;
 const E164 = /^\+[1-9]\d{7,14}$/;
 
 export type PhoneMfaMode = "setup" | "challenge";
 
 export interface PhoneMfaFormProps {
   mode: PhoneMfaMode;
-  /** For challenge mode: the verified factor to challenge. */
-  factorId?: string;
   /** Masked phone to display in challenge mode (e.g. +1******1212). */
   maskedPhone?: string | null;
   /** Called after a successful verify (factor enrolled + session aal2). */
@@ -27,34 +20,23 @@ export interface PhoneMfaFormProps {
 type Step = "phone" | "code";
 
 /**
- * Shared phone-SMS MFA form. In setup mode the user enters an E.164 number,
- * receives a code (Supabase enroll + challenge -> backend Twilio hook), and
- * verifies it. In challenge mode the verified factor is challenged directly.
+ * Shared phone-SMS MFA form (Twilio Verify). The user enters an E.164 number,
+ * the backend sends a code via Twilio Verify, and the entered code is checked.
+ * On success the backend returns an aal2 token (stored by `verifyPhone`). In
+ * challenge mode the enrolled number must be re-entered (we never store it in
+ * the clear); the masked form is shown as a hint.
  */
 export function PhoneMfaForm({
   mode,
-  factorId: existingFactorId,
   maskedPhone,
   onVerified,
 }: PhoneMfaFormProps) {
-  const [step, setStep] = useState<Step>(mode === "challenge" ? "code" : "phone");
+  const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
-  const [factorId, setFactorId] = useState<string | null>(
-    existingFactorId ?? null,
-  );
-  const [challengeId, setChallengeId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
-
-  // Auto-send the first challenge when entering challenge mode.
-  useEffect(() => {
-    if (mode === "challenge" && existingFactorId && !challengeId) {
-      void sendCode(existingFactorId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, existingFactorId]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -62,19 +44,10 @@ export function PhoneMfaForm({
     return () => clearTimeout(t);
   }, [cooldown]);
 
-  async function sendCode(targetFactorId: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      const cid = await challengePhone(targetFactorId);
-      setChallengeId(cid);
-      setStep("code");
-      setCooldown(RESEND_COOLDOWN_SECONDS);
-    } catch (err) {
-      setError(friendly((err as Error).message));
-    } finally {
-      setBusy(false);
-    }
+  async function sendCode(targetPhone: string) {
+    const res = await startPhone(targetPhone);
+    setStep("code");
+    setCooldown(res.cooldownSeconds || 60);
   }
 
   async function onSubmitPhone(e: React.FormEvent) {
@@ -86,26 +59,29 @@ export function PhoneMfaForm({
     setBusy(true);
     setError(null);
     try {
-      const id = await enrollPhone(phone);
-      setFactorId(id);
-      await sendCode(id);
+      await sendCode(phone);
     } catch (err) {
       setError(friendly((err as Error).message));
+    } finally {
       setBusy(false);
     }
   }
 
   async function onResend() {
-    if (cooldown > 0 || !factorId) return;
-    await sendCode(factorId);
+    if (cooldown > 0 || !phone) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await sendCode(phone);
+    } catch (err) {
+      setError(friendly((err as Error).message));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onSubmitCode(e: React.FormEvent) {
     e.preventDefault();
-    if (!factorId || !challengeId) {
-      setError("No active challenge. Resend a code and try again.");
-      return;
-    }
     if (!/^\d{4,8}$/.test(code.trim())) {
       setError("Enter the numeric code from the text message.");
       return;
@@ -113,7 +89,7 @@ export function PhoneMfaForm({
     setBusy(true);
     setError(null);
     try {
-      await verifyPhone(factorId, challengeId, code.trim());
+      await verifyPhone(phone, code.trim());
       await onVerified();
     } catch (err) {
       setError(friendly((err as Error).message));
@@ -138,8 +114,10 @@ export function PhoneMfaForm({
               className="w-full rounded-md border border-line-tertiary px-3 py-2 text-sm"
             />
             <p className="mt-1 text-caption text-ink-tertiary">
-              We&apos;ll text a verification code to this number. Standard
-              messaging rates may apply.
+              {mode === "challenge" && maskedPhone
+                ? `Enter the phone number on file (ending ${maskedPhone}). `
+                : "We'll text a verification code to this number. "}
+              Standard messaging rates may apply.
             </p>
           </div>
           {error && <p className="text-small text-danger">{error}</p>}
@@ -150,11 +128,10 @@ export function PhoneMfaForm({
         </form>
       ) : (
         <form onSubmit={onSubmitCode} className="space-y-4">
-          {maskedPhone && (
-            <p className="text-small text-ink-tertiary">
-              Code sent to <span className="font-medium">{maskedPhone}</span>.
-            </p>
-          )}
+          <p className="text-small text-ink-tertiary">
+            Code sent to{" "}
+            <span className="font-medium">{maskedPhone ?? phone}</span>.
+          </p>
           <div>
             <label className="mb-1 block text-sm font-medium text-ink-secondary">
               Verification code
@@ -190,10 +167,10 @@ export function PhoneMfaForm({
   );
 }
 
-/** Map raw Supabase / rate-limit errors to user-friendly copy. */
+/** Map raw API / rate-limit errors to user-friendly copy. */
 function friendly(message: string): string {
   const m = message.toLowerCase();
-  if (m.includes("invalid") && m.includes("code")) {
+  if (m.includes("incorrect") || (m.includes("code") && m.includes("expired"))) {
     return "That code is incorrect or expired. Request a new one and try again.";
   }
   if (m.includes("rate") || m.includes("too many") || m.includes("429")) {
@@ -201,6 +178,9 @@ function friendly(message: string): string {
   }
   if (m.includes("expired")) {
     return "That code has expired. Request a new one.";
+  }
+  if (m.includes("match")) {
+    return "This number doesn't match the phone on file for your account.";
   }
   return message || "Something went wrong. Please try again.";
 }

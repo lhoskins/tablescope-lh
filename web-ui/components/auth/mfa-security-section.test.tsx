@@ -2,15 +2,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 const getMfaStatus = vi.fn();
-const getVerifiedPhoneFactor = vi.fn();
-const unenrollPhone = vi.fn();
-const refreshTablescopeSession = vi.fn();
+const removePhone = vi.fn();
 
 vi.mock("@/lib/mfa", () => ({
   getMfaStatus: (...a: unknown[]) => getMfaStatus(...a),
-  getVerifiedPhoneFactor: (...a: unknown[]) => getVerifiedPhoneFactor(...a),
-  unenrollPhone: (...a: unknown[]) => unenrollPhone(...a),
-  refreshTablescopeSession: (...a: unknown[]) => refreshTablescopeSession(...a),
+  removePhone: (...a: unknown[]) => removePhone(...a),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -26,8 +22,7 @@ import { MfaSecuritySection } from "./mfa-security-section";
 describe("MfaSecuritySection", () => {
   beforeEach(() => {
     getMfaStatus.mockReset();
-    getVerifiedPhoneFactor.mockReset();
-    unenrollPhone.mockReset();
+    removePhone.mockReset();
   });
 
   it("shows Enabled with the verified phone when a factor exists", async () => {
@@ -36,13 +31,10 @@ describe("MfaSecuritySection", () => {
       roleRequiresMfa: true,
       aal: "aal2",
       mfaSatisfied: true,
+      hasVerifiedFactor: true,
+      maskedPhone: "+1******1212",
       preferredFactorType: "phone",
       requiredAction: null,
-    });
-    getVerifiedPhoneFactor.mockResolvedValue({
-      id: "f1",
-      status: "verified",
-      phone: "+1******1212",
     });
     render(<MfaSecuritySection />);
     await waitFor(() => expect(screen.getByText("Enabled")).toBeTruthy());
@@ -58,10 +50,11 @@ describe("MfaSecuritySection", () => {
       roleRequiresMfa: true,
       aal: "aal1",
       mfaSatisfied: false,
+      hasVerifiedFactor: false,
+      maskedPhone: null,
       preferredFactorType: "phone",
-      requiredAction: "setup_or_challenge",
+      requiredAction: "setup",
     });
-    getVerifiedPhoneFactor.mockResolvedValue(null);
     render(<MfaSecuritySection />);
     await waitFor(() =>
       expect(screen.getByText(/role requires sms verification/i)).toBeTruthy(),

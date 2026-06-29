@@ -1,6 +1,6 @@
 """MFA SMS cost controls + audit.
 
-Wraps :class:`TwilioSmsService` with:
+Wraps :class:`TwilioVerifyService` with:
   * resend cooldown (per user / phone),
   * per-user and per-phone send caps within a rolling window,
   * audit rows in ``mfa_sms_events`` for every action,
@@ -21,11 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.mfa_sms_event import (
+    MFA_SMS_CHALLENGE_FAILED,
+    MFA_SMS_CHALLENGE_SUCCESS,
     MFA_SMS_CODE_SENT,
     MFA_SMS_RATE_LIMITED,
     MfaSmsEvent,
 )
-from app.services.twilio_sms_service import TwilioSmsService, mask_phone
+from app.services.twilio_sms_service import mask_phone
+from app.services.twilio_verify_service import TwilioVerifyService
 
 logger = logging.getLogger(__name__)
 
@@ -147,19 +150,19 @@ async def check_send_allowed(
     return RateLimitResult(allowed=True)
 
 
-async def send_mfa_sms(
+async def start_mfa_verification(
     session: AsyncSession,
     *,
     phone: str,
-    message: str,
     tenant_id: int | None = None,
     user_id: int | None = None,
     ip_address: str | None = None,
     user_agent: str | None = None,
 ) -> MfaSmsEvent:
-    """Rate-limit, deliver via Twilio, and audit a single MFA SMS send.
+    """Rate-limit, send an OTP via Twilio Verify, and audit the send.
 
     Raises :class:`MfaRateLimitedError` if a cost control blocks the send.
+    Twilio Verify owns the OTP itself; we never see or store the code.
     """
     decision = await check_send_allowed(session, user_id=user_id, phone=phone)
     if not decision.allowed:
@@ -179,8 +182,8 @@ async def send_mfa_sms(
             retry_after_seconds=decision.retry_after_seconds,
         )
 
-    service = TwilioSmsService()
-    sid = service.send_mfa_code(to_phone=phone, message=message)
+    service = TwilioVerifyService()
+    sid = service.start_verification(to_phone=phone)
     return await record_event(
         session,
         event_type=MFA_SMS_CODE_SENT,
@@ -192,6 +195,37 @@ async def send_mfa_sms(
         ip_address=ip_address,
         user_agent=user_agent,
     )
+
+
+async def check_mfa_verification(
+    session: AsyncSession,
+    *,
+    phone: str,
+    code: str,
+    tenant_id: int | None = None,
+    user_id: int | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> bool:
+    """Check an OTP via Twilio Verify and audit the result.
+
+    Returns True only when Twilio reports the code ``approved``. The code is
+    never logged or stored.
+    """
+    service = TwilioVerifyService()
+    approved = service.check_verification(to_phone=phone, code=code)
+    await record_event(
+        session,
+        event_type=MFA_SMS_CHALLENGE_SUCCESS if approved else MFA_SMS_CHALLENGE_FAILED,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        phone=phone,
+        status="approved" if approved else "failed",
+        failure_reason=None if approved else "invalid_code",
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return approved
 
 
 class MfaRateLimitedError(RuntimeError):

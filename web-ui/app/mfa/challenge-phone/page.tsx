@@ -4,15 +4,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PhoneMfaForm } from "@/components/auth/phone-mfa-form";
 import { getUserMeta } from "@/lib/auth";
-import {
-  getVerifiedPhoneFactor,
-  refreshTablescopeSession,
-  type PhoneFactor,
-} from "@/lib/mfa";
+import { getMfaStatus } from "@/lib/mfa";
 
 export default function ChallengePhoneMfaPage() {
   const router = useRouter();
-  const [factor, setFactor] = useState<PhoneFactor | null>(null);
+  const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "no-factor">(
     "loading",
   );
@@ -25,13 +21,13 @@ export default function ChallengePhoneMfaPage() {
     }
     (async () => {
       try {
-        const f = await getVerifiedPhoneFactor();
-        if (!f) {
-          router.replace("/mfa/setup-phone");
+        const status = await getMfaStatus();
+        if (!status.hasVerifiedFactor) {
           setState("no-factor");
+          router.replace("/mfa/setup-phone");
           return;
         }
-        setFactor(f);
+        setMaskedPhone(status.maskedPhone);
         setState("ready");
       } catch {
         setState("no-factor");
@@ -40,9 +36,8 @@ export default function ChallengePhoneMfaPage() {
     })();
   }, [router]);
 
-  async function onVerified() {
-    const meta = getUserMeta();
-    await refreshTablescopeSession(meta?.tenant_slug ?? null);
+  function onVerified() {
+    // verifyPhone() already stored the aal2 token.
     router.replace("/");
   }
 
@@ -52,13 +47,12 @@ export default function ChallengePhoneMfaPage() {
         Verify it&apos;s you
       </h1>
       <p className="mb-6 text-sm text-ink-tertiary">
-        Enter the verification code we sent by text message to continue.
+        Enter your phone number to receive a verification code by text message.
       </p>
-      {state === "ready" && factor ? (
+      {state === "ready" ? (
         <PhoneMfaForm
           mode="challenge"
-          factorId={factor.id}
-          maskedPhone={factor.phone}
+          maskedPhone={maskedPhone}
           onVerified={onVerified}
         />
       ) : (
