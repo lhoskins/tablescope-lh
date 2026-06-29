@@ -35,6 +35,7 @@ _ANONYMOUS_PATH_PREFIXES = (
     "/redoc",
     "/api/auth/login",
     "/api/auth/exchange",
+    "/api/auth/hooks/send-sms",
     "/api/billing/catalog",
     "/api/billing/checkout/session",
     "/api/billing/stripe/webhook",

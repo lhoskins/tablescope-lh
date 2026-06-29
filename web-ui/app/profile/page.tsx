@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { IconDeviceFloppy, IconLoader2, IconUpload } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
+import { MfaSecuritySection } from "@/components/auth/mfa-security-section";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
@@ -198,6 +199,8 @@ export default function ProfilePage() {
             )}
           </div>
         </section>
+
+        <MfaSecuritySection />
       </div>
     </AppShell>
   );

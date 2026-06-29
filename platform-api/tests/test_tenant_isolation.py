@@ -67,11 +67,15 @@ async def _make_user(client_strict, service_headers, tenant_id, email, ext_id, r
     return r.json()
 
 
-def _headers(tenant_id, user_id, role="member", sub="ext"):
+def _headers(tenant_id, user_id, role="member", sub="ext", aal=None):
     return {
         "Authorization": "Bearer "
         + create_access_token(
-            sub=sub, tenant_id=tenant_id, user_id=user_id, role=role
+            sub=sub,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            role=role,
+            extra_claims={"aal": aal} if aal is not None else None,
         )
     }
 
@@ -170,7 +174,7 @@ async def test_role_resolved_from_membership_not_token(
     )
     assert r.status_code == 403
 
-    # The genuine admin can.
-    good = _headers(tenant["id"], admin["id"], role="admin", sub="ext-adm")
+    # The genuine admin can (admin routes require an aal2 / MFA-satisfied session).
+    good = _headers(tenant["id"], admin["id"], role="admin", sub="ext-adm", aal="aal2")
     r = await client_strict.get("/api/tenants/current/allowed-domains", headers=good)
     assert r.status_code == 200, r.text

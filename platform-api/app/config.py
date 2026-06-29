@@ -96,6 +96,32 @@ class Settings(BaseSettings):
     supabase_database_url: str = ""
     supabase_jwt_secret: str = ""
 
+    # --- Twilio SMS MFA (primary MFA method) ---
+    # Secrets are injected at deploy time (never committed). The API key secret
+    # is rotated separately from the repo. SMS is delivered via the Twilio
+    # Messaging Service SID.
+    twilio_account_sid: str = ""
+    twilio_api_key_sid: str = ""
+    twilio_api_key_secret: str = ""
+    twilio_messaging_service_sid: str = ""
+    # Shared secret that Supabase signs its Send-SMS hook payloads with. Used to
+    # authenticate inbound hook calls to /api/auth/hooks/send-sms.
+    supabase_send_sms_hook_secret: str = ""
+    # MFA cost controls.
+    mfa_sms_resend_cooldown_seconds: int = 60
+    mfa_sms_max_sends_per_window: int = 5
+    mfa_sms_window_seconds: int = 900
+    mfa_sms_max_attempts_per_challenge: int = 5
+
+    @property
+    def twilio_configured(self) -> bool:
+        return bool(
+            self.twilio_account_sid
+            and self.twilio_api_key_sid
+            and self.twilio_api_key_secret
+            and self.twilio_messaging_service_sid
+        )
+
     # --- Stripe billing ---
     stripe_mode: Literal["test", "live"] = "test"
     stripe_publishable_key: str = ""

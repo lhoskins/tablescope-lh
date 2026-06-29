@@ -121,11 +121,14 @@ async def exchange_token(
         purpose="access",
     )
 
+    # Carry the Supabase assurance level so backend MFA enforcement can require
+    # aal2 for admin roles. A missing claim is treated as aal1 downstream.
     access_token = create_access_token(
         sub=external_user_id,
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
+        extra_claims={"aal": external_claims.get("aal")},
     )
     tenant = await session.get(Tenant, user.tenant_id)
     return AuthTokenResponse(

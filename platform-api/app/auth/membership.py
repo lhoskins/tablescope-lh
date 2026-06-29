@@ -13,15 +13,31 @@ chokepoint enforcing tenant isolation for authenticated routes.
 
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext, get_request_context
+from app.auth.mfa_errors import MfaRequiredError
+from app.auth.mfa_policy import mfa_required_for_request
 from app.database import get_db
 from app.models.user import User
 
+# Routes reachable before completing MFA so an admin can read their identity and
+# set up / challenge a factor. Everything else requires aal2 for admin roles.
+_MFA_EXEMPT_PREFIXES = (
+    "/api/auth/me",
+    "/api/users/me",
+    "/api/mfa",
+    "/api/auth/logout",
+)
+
+
+def _is_mfa_exempt(path: str) -> bool:
+    return any(path.startswith(prefix) for prefix in _MFA_EXEMPT_PREFIXES)
+
 
 async def require_membership(
+    request: Request,
     context: RequestContext = Depends(get_request_context),
     session: AsyncSession = Depends(get_db),
 ) -> RequestContext:
@@ -52,4 +68,12 @@ async def require_membership(
     # effect immediately rather than waiting for the token to expire.
     if user.role and context.claims.role != user.role:
         context.claims.role = user.role
+
+    # Twilio SMS MFA: admin-tier roles must hold an aal2 session for any route
+    # that is not on the MFA-exempt allowlist (identity + MFA setup/challenge).
+    if not _is_mfa_exempt(request.url.path) and mfa_required_for_request(
+        user.role, context.aal
+    ):
+        raise MfaRequiredError
+
     return context

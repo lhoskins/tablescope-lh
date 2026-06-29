@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
+from app.auth.mfa_errors import MfaRequiredError, mfa_required_handler
 from app.auth.middleware import AuthMiddleware
 from app.config import get_settings
 from app.logging_config import configure_logging
@@ -32,6 +33,7 @@ from app.routes import file_analysis as file_analysis_routes
 from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
 from app.routes import home_intelligence as home_intelligence_routes
+from app.routes import mfa as mfa_routes
 from app.routes import project_assets as project_assets_routes
 from app.routes import project_graph as project_graph_routes
 from app.routes import projects as projects_routes
@@ -133,6 +135,8 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(AuthMiddleware)
 
+    app.add_exception_handler(MfaRequiredError, mfa_required_handler)
+
     @app.middleware("http")
     async def _add_request_id(request: Request, call_next):
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
@@ -188,6 +192,7 @@ def create_app() -> FastAPI:
     app.include_router(reports_routes.router, prefix=api_prefix)
     app.include_router(user_preferences_routes.router, prefix=api_prefix)
     app.include_router(users_routes.router, prefix=api_prefix)
+    app.include_router(mfa_routes.router, prefix=api_prefix)
 
     return app
 

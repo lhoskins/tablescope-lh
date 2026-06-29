@@ -5,6 +5,7 @@ import type {
   ProjectSummary,
   TenantSummary,
 } from "@/lib/ui/types";
+import { MfaGate } from "@/components/auth/mfa-gate";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -42,6 +43,7 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className="flex h-screen bg-bg-secondary">
+      <MfaGate />
       <Sidebar
         mode={mode}
         activeNav={activeNav}
