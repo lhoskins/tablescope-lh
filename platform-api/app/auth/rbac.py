@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
 
 from fastapi import Depends, HTTPException, status
@@ -49,7 +49,9 @@ def has_role(actual: str, required: Role) -> bool:
     return _at_least(actual, required)
 
 
-def require_role(required: Role) -> Callable[[RequestContext], RequestContext]:
+def require_role(
+    required: Role,
+) -> Callable[[RequestContext], Awaitable[RequestContext]]:
     """FastAPI dependency factory enforcing minimum role.
 
     Membership (active, tenant-scoped) is verified first via
@@ -71,7 +73,9 @@ def require_role(required: Role) -> Callable[[RequestContext], RequestContext]:
     return _dependency
 
 
-def require_permission(permission: str) -> Callable[[RequestContext], RequestContext]:
+def require_permission(
+    permission: str,
+) -> Callable[[RequestContext], Awaitable[RequestContext]]:
     """FastAPI dependency factory enforcing a specific permission."""
 
     async def _dependency(

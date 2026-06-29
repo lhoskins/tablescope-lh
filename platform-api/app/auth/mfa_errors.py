@@ -39,5 +39,5 @@ class MfaRequiredError(Exception):
     """Raised by enforcement when an admin session is missing aal2."""
 
 
-async def mfa_required_handler(_: Request, __: MfaRequiredError) -> JSONResponse:
+async def mfa_required_handler(_: Request, __: Exception) -> JSONResponse:
     return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content=mfa_required_body())
