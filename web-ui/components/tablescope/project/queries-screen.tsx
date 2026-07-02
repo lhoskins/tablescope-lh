@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { IconSparkles, IconSearch, IconTable } from "@tabler/icons-react";
+import { IconSparkles, IconSearch, IconTable, IconTarget } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import {
   ContextPanel,
@@ -311,8 +311,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-4 py-2 font-medium">Source</th>
                   <th className="px-4 py-2 font-medium">Origin</th>
-                  <th className="px-4 py-2 font-medium">Visibility</th>
-                  <th className="px-4 py-2 font-medium">Runs</th>
+                  <th className="px-4 py-2 font-medium">Owner</th>
                   <th className="px-4 py-2 font-medium">Avg time</th>
                   <th className="px-4 py-2 font-medium">Updated</th>
                 </tr>
@@ -336,13 +335,22 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
                       )}
                     >
                       <td className="px-4 py-2.5">
-                        <span
-                          className={cn(
-                            "font-medium",
-                            active ? "text-brand-700" : "text-ink-primary",
+                        <span className="flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "font-medium",
+                              active ? "text-brand-700" : "text-ink-primary",
+                            )}
+                          >
+                            {q.name}
+                          </span>
+                          {q.has_active_scope && (
+                            <IconTarget
+                              size={14}
+                              className="shrink-0 text-brand-500"
+                              title="This table has an active scope assigned"
+                            />
                           )}
-                        >
-                          {q.name}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-ink-secondary">
@@ -350,16 +358,11 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
                       </td>
                       <td className="px-4 py-2.5">
                         <Badge tone={q.ai_generated ? "ai" : "outline"}>
-                          {q.ai_generated ? "AI" : "Manual"}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <Badge tone={q.is_shared ? "success" : "neutral"}>
-                          {q.is_shared ? "Shared" : "Private"}
+                          {q.origin_label}
                         </Badge>
                       </td>
                       <td className="px-4 py-2.5 text-ink-secondary">
-                        {q.run_count}
+                        {q.owner_name ?? "—"}
                       </td>
                       <td className="px-4 py-2.5 text-ink-secondary">
                         {runtimeLabel(q.avg_runtime_ms)}

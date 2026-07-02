@@ -69,6 +69,11 @@ export interface SavedQuery {
   avg_runtime_ms: number | null;
   created_at: string;
   updated_at: string;
+  owner_name: string | null;
+  origin: string;
+  origin_label: string;
+  has_active_scope: boolean;
+  active_scope_count: number;
 }
 
 export function useProjectQueries(projectId: string) {

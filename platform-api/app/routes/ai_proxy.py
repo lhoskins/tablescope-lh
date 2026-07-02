@@ -1533,6 +1533,7 @@ async def ai_save_query(
         description=req.description or "",
         sql_text=req.sql_text,
         left_datasource=left_datasource,
+        ai_generated=True,
     )
     session.add(query)
     await session.commit()
@@ -1712,6 +1713,7 @@ async def ai_generate_and_save_query(
         description=req.description or req.prompt,
         sql_text=generated_sql,
         left_datasource=left_datasource,
+        ai_generated=True,
     )
     session.add(query)
     await session.commit()
@@ -2031,6 +2033,7 @@ async def ai_generate_and_save_dashboard(
                 description=str(w.get("business_question") or ""),
                 sql_text=widget_sql,
                 left_datasource=left_ds,
+                ai_generated=True,
             )
             session.add(query)
             await session.flush()
@@ -2938,7 +2941,8 @@ async def add_conversation_message(
 
 
 class ConversationBranchCreate(BaseModel):
-    message_id: int
+    # When omitted, the branch forks from the last message of the source.
+    message_id: int | None = None
     title: str | None = None
 
 
@@ -2958,13 +2962,22 @@ async def branch_conversation(
     source = await _get_owned_conversation(
         session, context, conversation_id, with_messages=True
     )
-    branch_point = next(
-        (m for m in source.messages if m.id == req.message_id), None
-    )
-    if branch_point is None:
-        raise HTTPException(
-            status_code=404, detail="Branch message not found in conversation"
+    if req.message_id is None:
+        # Branch from the tail of the thread.
+        if not source.messages:
+            raise HTTPException(
+                status_code=400, detail="Cannot branch an empty conversation"
+            )
+        branch_point = source.messages[-1]
+    else:
+        branch_point = next(
+            (m for m in source.messages if m.id == req.message_id), None
         )
+        if branch_point is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Branch message not found in conversation",
+            )
 
     title = (req.title or "").strip() or f"Branch of {source.title}"
     branch = AiConversation(

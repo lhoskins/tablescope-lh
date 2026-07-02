@@ -156,6 +156,45 @@ async def test_branch_conversation_copies_history_to_point(
     assert len(orig["messages"]) == 6
 
 
+async def test_branch_without_message_id_forks_from_last(
+    client, service_headers
+) -> None:
+    _t, _u, project, headers = await _setup(client, service_headers)
+    convo = (
+        await client.post("/api/ai/conversations", json={}, headers=headers)
+    ).json()
+    for q in ("first", "second"):
+        await client.post(
+            f"/api/ai/conversations/{convo['id']}/messages",
+            json={"question": q, "project_id": project["id"]},
+            headers=headers,
+        )
+
+    # Omitting message_id branches from the tail (the whole thread).
+    r = await client.post(
+        f"/api/ai/conversations/{convo['id']}/branch",
+        json={},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    branch = r.json()
+    assert branch["parentConversationId"] == convo["id"]
+    assert len(branch["messages"]) == 4
+
+
+async def test_branch_empty_conversation_400(client, service_headers) -> None:
+    _t, _u, _project, headers = await _setup(client, service_headers)
+    convo = (
+        await client.post("/api/ai/conversations", json={}, headers=headers)
+    ).json()
+    r = await client.post(
+        f"/api/ai/conversations/{convo['id']}/branch",
+        json={},
+        headers=headers,
+    )
+    assert r.status_code == 400
+
+
 async def test_branch_unknown_message_404(client, service_headers) -> None:
     _t, _u, _project, headers = await _setup(client, service_headers)
     convo = (

@@ -11,9 +11,12 @@ import {
   IconMessageCircle,
   IconGitBranch,
   IconRefresh,
+  IconDots,
+  IconPencil,
 } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/cn";
 import { getUserMeta } from "@/lib/auth";
 import {
@@ -23,9 +26,11 @@ import {
   useConversation,
   createConversation,
   sendConversationMessage,
+  renameConversation,
   deleteConversation,
   branchConversation,
   type AiChatMessage,
+  type AiConversation,
 } from "@/lib/ui/use-shell-data";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 
@@ -78,6 +83,15 @@ export default function AiAssistantPage() {
     },
   });
 
+  const renameMutation = useMutation({
+    mutationFn: ({ id, title }: { id: number; title: string }) =>
+      renameConversation(id, title),
+    onSuccess: (convo) => {
+      queryClient.setQueryData(["ai", "conversation", convo.id], convo);
+      invalidateConvos();
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteConversation(id),
     onSuccess: (_data, id) => {
@@ -87,7 +101,7 @@ export default function AiAssistantPage() {
   });
 
   const branchMutation = useMutation({
-    mutationFn: ({ id, messageId }: { id: number; messageId: number }) =>
+    mutationFn: ({ id, messageId }: { id: number; messageId?: number }) =>
       branchConversation(id, messageId),
     onSuccess: (convo) => {
       queryClient.setQueryData(["ai", "conversation", convo.id], convo);
@@ -95,6 +109,8 @@ export default function AiAssistantPage() {
       invalidateConvos();
     },
   });
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const busy = sendMutation.isPending;
 
@@ -154,37 +170,17 @@ export default function AiAssistantPage() {
               </p>
             )}
             {(conversations ?? []).map((c) => (
-              <div
+              <ConversationRow
                 key={c.id}
-                className={cn(
-                  "group flex items-center gap-2 rounded-md px-2 py-2 text-[13px]",
-                  activeId === c.id
-                    ? "bg-brand-50 text-brand-700"
-                    : "text-ink-secondary hover:bg-bg-primary",
-                )}
-              >
-                {c.parentConversationId ? (
-                  <IconGitBranch size={14} className="shrink-0" />
-                ) : (
-                  <IconMessageCircle size={14} className="shrink-0" />
-                )}
-                <button
-                  type="button"
-                  onClick={() => setActiveId(c.id)}
-                  className="min-w-0 flex-1 truncate text-left"
-                  title={c.title}
-                >
-                  {c.title}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => deleteMutation.mutate(c.id)}
-                  aria-label="Delete conversation"
-                  className="shrink-0 text-ink-tertiary opacity-0 hover:text-danger group-hover:opacity-100"
-                >
-                  <IconTrash size={13} />
-                </button>
-              </div>
+                conversation={c}
+                active={activeId === c.id}
+                onSelect={() => setActiveId(c.id)}
+                onRename={(title) =>
+                  renameMutation.mutate({ id: c.id, title })
+                }
+                onBranch={() => branchMutation.mutate({ id: c.id })}
+                onDelete={() => setConfirmDeleteId(c.id)}
+              />
             ))}
           </div>
         </aside>
@@ -305,7 +301,167 @@ export default function AiAssistantPage() {
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmDeleteId != null}
+        title="Delete conversation?"
+        message="This permanently deletes the conversation and all its messages."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          if (confirmDeleteId != null) deleteMutation.mutate(confirmDeleteId);
+          setConfirmDeleteId(null);
+        }}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </AppShell>
+  );
+}
+
+function ConversationRow({
+  conversation,
+  active,
+  onSelect,
+  onRename,
+  onBranch,
+  onDelete,
+}: {
+  conversation: AiConversation;
+  active: boolean;
+  onSelect: () => void;
+  onRename: (title: string) => void;
+  onBranch: () => void;
+  onDelete: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(conversation.title);
+
+  const startRename = () => {
+    setDraft(conversation.title);
+    setEditing(true);
+    setMenuOpen(false);
+  };
+
+  const commitRename = () => {
+    const next = draft.trim();
+    if (next && next !== conversation.title) onRename(next);
+    setEditing(false);
+  };
+
+  return (
+    <div
+      className={cn(
+        "group relative flex items-center gap-2 rounded-md px-2 py-2 text-[13px]",
+        active
+          ? "bg-brand-50 text-brand-700"
+          : "text-ink-secondary hover:bg-bg-primary",
+      )}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenuOpen(true);
+      }}
+    >
+      {conversation.parentConversationId ? (
+        <IconGitBranch size={14} className="shrink-0" />
+      ) : (
+        <IconMessageCircle size={14} className="shrink-0" />
+      )}
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitRename();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          className="min-w-0 flex-1 rounded border border-line-secondary bg-bg-primary px-1.5 py-0.5 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={onSelect}
+          className="min-w-0 flex-1 truncate text-left"
+          title={conversation.title}
+        >
+          {conversation.title}
+        </button>
+      )}
+      {!editing && (
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-label="Conversation actions"
+          className={cn(
+            "shrink-0 rounded text-ink-tertiary hover:text-ink-secondary",
+            menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+          )}
+        >
+          <IconDots size={15} />
+        </button>
+      )}
+      {menuOpen && (
+        <>
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            className="fixed inset-0 z-40 cursor-default"
+            onClick={() => setMenuOpen(false)}
+          />
+          <div className="absolute right-1 top-8 z-50 w-36 overflow-hidden rounded-md border border-line-tertiary bg-bg-primary py-1 shadow-lg">
+            <MenuItem
+              icon={<IconPencil size={14} />}
+              label="Rename"
+              onClick={startRename}
+            />
+            <MenuItem
+              icon={<IconGitBranch size={14} />}
+              label="Branch"
+              onClick={() => {
+                onBranch();
+                setMenuOpen(false);
+              }}
+            />
+            <MenuItem
+              icon={<IconTrash size={14} />}
+              label="Delete"
+              danger
+              onClick={() => {
+                onDelete();
+                setMenuOpen(false);
+              }}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({
+  icon,
+  label,
+  onClick,
+  danger,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-bg-secondary",
+        danger ? "text-danger" : "text-ink-secondary",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

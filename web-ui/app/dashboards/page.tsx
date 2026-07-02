@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { IconSearch, IconTrash } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
-import { SharedByBadge } from "@/components/tablescope/shared-by-badge";
+import { OwnerBadge } from "@/components/tablescope/owner-badge";
 import { Badge } from "@/components/ui/badge";
 import { apiClient } from "@/lib/api-client";
 import { getUserMeta } from "@/lib/auth";
@@ -105,7 +105,7 @@ export default function HomeDashboardsPage() {
               <tr className="border-b border-line-tertiary bg-bg-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
                 <th className="px-4 py-2.5 font-medium">Name</th>
                 <th className="px-4 py-2.5 font-medium">Project Assigned</th>
-                <th className="px-4 py-2.5 font-medium">Shared by</th>
+                <th className="px-4 py-2.5 font-medium">Owner</th>
                 <th className="px-4 py-2.5 font-medium">Date Created</th>
                 <th className="w-10 px-4 py-2.5 font-medium"></th>
               </tr>
@@ -158,7 +158,7 @@ export default function HomeDashboardsPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3">
-                    <SharedByBadge value={d.sharedBy} />
+                    <OwnerBadge name={d.ownerName} />
                   </td>
                   <td className="px-4 py-3 text-ink-tertiary">
                     {formatDate(d.createdAt)}

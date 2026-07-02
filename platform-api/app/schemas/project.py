@@ -122,3 +122,9 @@ class SavedQueryRead(BaseModel):
     avg_runtime_ms: int | None = None
     created_at: datetime
     updated_at: datetime
+    # Enriched fields for the All Tables view (populated by the list endpoint).
+    owner_name: str | None = None
+    origin: str = "manual"
+    origin_label: str = "Manual"
+    has_active_scope: bool = False
+    active_scope_count: int = 0

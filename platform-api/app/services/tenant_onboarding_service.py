@@ -392,6 +392,12 @@ class TenantOnboardingService:
         workspace_url = f"{settings.app_base_url}/{req.tenant_slug}"
         company_name = req.company_name or req.tenant_slug
 
+        # Idempotency: the single root-admin onboarding email is sent exactly
+        # once. A replayed webhook or a retry after a mid-provisioning failure
+        # must never send a duplicate.
+        if req.root_admin_email_sent_at is not None:
+            return
+
         # Single combined onboarding email for the initial tenant admin: the
         # "workspace ready" message whose primary CTA is "Create your password"
         # (the set-password link), so the admin never lands on a login page
@@ -425,6 +431,7 @@ class TenantOnboardingService:
             )
         if sent:
             req.root_admin_status = "invite_sent"
+            req.root_admin_email_sent_at = datetime.now(UTC)
             audit.audit(
                 audit.ROOT_ADMIN_INVITE_SENT,
                 provisioning_request_id=req.id,

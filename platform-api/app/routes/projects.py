@@ -29,7 +29,9 @@ from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.project_asset import ProjectAsset
+from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
+from app.models.scope_set import ScopeSet
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.project import (
@@ -288,6 +290,29 @@ def _shared_by(
     return user_names.get(item_owner_id, "Shared")
 
 
+def _owner(
+    project: _ProjectMeta | None,
+    item_owner_id: int | None,
+    user_names: dict[int, str],
+) -> tuple[int | None, str]:
+    """Resolve the actual owner/creator (id, name) of an item.
+
+    Falls back to the project owner when the item has no explicit owner.
+    """
+    owner_id = item_owner_id
+    if owner_id is None and project is not None:
+        owner_id = project.owner_id
+    name = user_names.get(owner_id, "—") if owner_id is not None else "—"
+    return owner_id, name
+
+
+def _query_origin(query: SavedQuery) -> tuple[str, str]:
+    """Normalize a saved query's origin into (key, human label)."""
+    if query.ai_generated:
+        return "ai_generated", "AI Generated"
+    return "manual", "Manual"
+
+
 @router.get("/dashboards-all")
 async def list_all_dashboards(
     session: AsyncSession = Depends(get_db),
@@ -316,6 +341,12 @@ async def list_all_dashboards(
             "sharedBy": _shared_by(
                 projects.get(d.project_id), d.owner_id, user_names
             ),
+            "ownerId": _owner(
+                projects.get(d.project_id), d.owner_id, user_names
+            )[0],
+            "ownerName": _owner(
+                projects.get(d.project_id), d.owner_id, user_names
+            )[1],
             "createdAt": d.created_at.isoformat() if d.created_at else None,
         }
         for d in rows
@@ -507,6 +538,12 @@ async def list_all_documents(
             "sharedBy": _shared_by(
                 projects.get(a.project_id), a.owner_user_id, user_names
             ),
+            "ownerId": _owner(
+                projects.get(a.project_id), a.owner_user_id, user_names
+            )[0],
+            "ownerName": _owner(
+                projects.get(a.project_id), a.owner_user_id, user_names
+            )[1],
             "createdAt": a.created_at.isoformat() if a.created_at else None,
         }
         for a in rows
@@ -1497,10 +1534,57 @@ async def list_saved_queries(
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Project not found")
-    rows = await session.scalars(
-        select(SavedQuery).where(SavedQuery.project_id == project_id).order_by(SavedQuery.created_at.desc())
+    rows = list(
+        await session.scalars(
+            select(SavedQuery)
+            .where(SavedQuery.project_id == project_id)
+            .order_by(SavedQuery.created_at.desc())
+        )
     )
-    return [SavedQueryRead.model_validate(q) for q in rows]
+
+    # Owner names for the "Owner" column.
+    users = list(
+        await session.scalars(
+            select(User).where(User.tenant_id == context.tenant_id)
+        )
+    )
+    user_names = {u.id: _user_label(u) for u in users}
+
+    # Active-scope participation: an enabled scope whose parent set is enabled
+    # (or has no parent set). A table "has an active scope" when it takes part
+    # as either the source or the target of such a scope.
+    scope_rows = (
+        await session.execute(
+            select(QueryScope.query_id, QueryScope.target_query_id)
+            .outerjoin(ScopeSet, QueryScope.scope_set_id == ScopeSet.id)
+            .where(
+                QueryScope.project_id == project_id,
+                QueryScope.enabled.is_(True),
+                or_(
+                    QueryScope.scope_set_id.is_(None),
+                    ScopeSet.enabled.is_(True),
+                ),
+            )
+        )
+    ).all()
+    scope_counts: dict[int, int] = {}
+    for source_id, target_id in scope_rows:
+        for qid in (source_id, target_id):
+            if qid is not None:
+                scope_counts[qid] = scope_counts.get(qid, 0) + 1
+
+    results: list[SavedQueryRead] = []
+    for q in rows:
+        read = SavedQueryRead.model_validate(q)
+        read.owner_name = (
+            user_names.get(q.owner_id) if q.owner_id is not None else None
+        )
+        read.origin, read.origin_label = _query_origin(q)
+        count = scope_counts.get(q.id, 0)
+        read.active_scope_count = count
+        read.has_active_scope = count > 0
+        results.append(read)
+    return results
 
 
 @router.post("/{project_id}/queries", response_model=SavedQueryRead,
@@ -1531,7 +1615,9 @@ async def create_saved_query(
     session.add(query)
     await session.commit()
     await session.refresh(query)
-    return SavedQueryRead.model_validate(query)
+    read = SavedQueryRead.model_validate(query)
+    read.origin, read.origin_label = _query_origin(query)
+    return read
 
 
 @router.put("/{project_id}/queries/{query_id}", response_model=SavedQueryRead)
@@ -1572,7 +1658,9 @@ async def update_saved_query(
 
     await session.commit()
     await session.refresh(query)
-    return SavedQueryRead.model_validate(query)
+    read = SavedQueryRead.model_validate(query)
+    read.origin, read.origin_label = _query_origin(query)
+    return read
 
 
 @router.delete("/{project_id}/queries/{query_id}")

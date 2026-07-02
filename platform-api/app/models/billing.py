@@ -204,6 +204,11 @@ class TenantProvisioningRequest(TimestampMixin, Base):
 
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     provisioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set once the single root-admin onboarding email has been sent, so replayed
+    # webhooks / provisioning retries never send a duplicate.
+    root_admin_email_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Optimistic-lock / row-claim counter used to make provisioning idempotent.
     lock_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 

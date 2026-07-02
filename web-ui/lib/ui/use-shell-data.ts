@@ -109,6 +109,8 @@ export interface HomeDashboardRow {
   projectName: string;
   status: string;
   sharedBy: string;
+  ownerId: number | null;
+  ownerName: string;
   createdAt: string | null;
 }
 
@@ -119,6 +121,8 @@ export interface HomeDocumentRow {
   projectName: string;
   aiStatus: string;
   sharedBy: string;
+  ownerId: number | null;
+  ownerName: string;
   createdAt: string | null;
 }
 
@@ -208,18 +212,28 @@ export function sendConversationMessage(
   );
 }
 
+export function renameConversation(
+  conversationId: number,
+  title: string,
+): Promise<AiConversation> {
+  return apiClient.put<AiConversation>(
+    `/api/ai/conversations/${conversationId}`,
+    { title },
+  );
+}
+
 export function deleteConversation(conversationId: number): Promise<void> {
   return apiClient.delete<void>(`/api/ai/conversations/${conversationId}`);
 }
 
 export function branchConversation(
   conversationId: number,
-  messageId: number,
+  messageId?: number | null,
   title?: string,
 ): Promise<AiConversation> {
   return apiClient.post<AiConversation>(
     `/api/ai/conversations/${conversationId}/branch`,
-    { message_id: messageId, title },
+    { message_id: messageId ?? null, title },
   );
 }
 

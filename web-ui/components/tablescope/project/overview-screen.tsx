@@ -67,6 +67,8 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
   const [ask, setAsk] = useState("");
   const [showMembers, setShowMembers] = useState(false);
+  const [openTables, setOpenTables] = useState(false);
+  const [openSources, setOpenSources] = useState(false);
   const { toasts, push, dismiss } = useToasts();
   const [detail, setDetail] = useState<
     { kind: "query"; id: number } | { kind: "source"; name: string } | null
@@ -312,7 +314,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             hint={`${connectedSources} connected`}
           />
           <StatTile
-            label="Queries"
+            label="Tables"
             value={project?.queryCount ?? queryRows.length}
             hint={
               newQueriesThisWeek > 0
@@ -339,99 +341,127 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         </div>
 
         <Card className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-            <span className="text-h3 text-ink-primary">Queries</span>
-            <button
-              type="button"
-              onClick={() => router.push(`/projects/${projectId}/queries`)}
-              className="text-small font-medium text-brand-700 hover:underline"
-            >
-              {queryRows.length} total · View all
-            </button>
-          </div>
-          {recentQueries.length === 0 ? (
+          <button
+            type="button"
+            onClick={() => setOpenTables((v) => !v)}
+            aria-expanded={openTables}
+            className="flex w-full items-center gap-2 border-b border-line-tertiary px-4 py-3 text-left hover:bg-bg-secondary"
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center text-body font-semibold text-ink-tertiary">
+              {openTables ? "−" : "+"}
+            </span>
+            <span className="text-h3 text-ink-primary">
+              Tables ({queryRows.length})
+            </span>
+          </button>
+          {!openTables ? null : recentQueries.length === 0 ? (
             <div className="px-4 py-10 text-center text-small text-ink-tertiary">
-              No queries yet.
+              No tables yet.
             </div>
           ) : (
-            <table className="w-full text-left text-[13px]">
-              <thead>
-                <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
-                  <Th>Name</Th>
-                  <Th>Source</Th>
-                  <Th>Origin</Th>
-                  <Th>Visibility</Th>
-                  <Th className="text-right">Updated</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentQueries.map((q) => (
-                  <QueryRow
-                    key={q.id}
-                    q={q}
-                    onClick={() => router.push(`/projects/${projectId}/queries?q=${q.id}`)}
-                  />
-                ))}
-              </tbody>
-            </table>
+            <>
+              <table className="w-full text-left text-[13px]">
+                <thead>
+                  <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
+                    <Th>Name</Th>
+                    <Th>Source</Th>
+                    <Th>Origin</Th>
+                    <Th>Visibility</Th>
+                    <Th className="text-right">Updated</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentQueries.map((q) => (
+                    <QueryRow
+                      key={q.id}
+                      q={q}
+                      onClick={() => router.push(`/projects/${projectId}/queries?q=${q.id}`)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+              <div className="flex justify-end border-t border-line-tertiary px-4 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/projects/${projectId}/queries`)}
+                  className="text-small font-medium text-brand-700 hover:underline"
+                >
+                  View all
+                </button>
+              </div>
+            </>
           )}
         </Card>
 
         <Card className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-            <span className="text-h3 text-ink-primary">Data Sources</span>
-            <button
-              type="button"
-              onClick={() => router.push(`/projects/${projectId}/data-sources`)}
-              className="text-small font-medium text-brand-700 hover:underline"
-            >
-              {sourceRows.length} total · Connect new
-            </button>
-          </div>
-          {sourceRows.length === 0 ? (
+          <button
+            type="button"
+            onClick={() => setOpenSources((v) => !v)}
+            aria-expanded={openSources}
+            className="flex w-full items-center gap-2 border-b border-line-tertiary px-4 py-3 text-left hover:bg-bg-secondary"
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center text-body font-semibold text-ink-tertiary">
+              {openSources ? "−" : "+"}
+            </span>
+            <span className="text-h3 text-ink-primary">
+              Data Sources ({sourceRows.length})
+            </span>
+          </button>
+          {!openSources ? null : sourceRows.length === 0 ? (
             <div className="px-4 py-10 text-center text-small text-ink-tertiary">
               No data sources connected yet.
             </div>
           ) : (
-            <table className="w-full text-left text-[13px]">
-              <thead>
-                <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
-                  <Th>Name</Th>
-                  <Th>Type</Th>
-                  <Th className="text-right">Tables</Th>
-                  <Th>Status</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {sourceRows.slice(0, 5).map((s) => (
-                  <tr
-                    key={s.viewName || s.fileName}
-                    onClick={() =>
-                      setDetail({
-                        kind: "source",
-                        name: s.viewName || s.fileName,
-                      })
-                    }
-                    className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-secondary"
-                  >
-                    <td className="px-4 py-2.5 font-medium text-ink-primary">
-                      {s.viewName || s.fileName}
-                    </td>
-                    <td className="px-4 py-2.5 text-ink-secondary">
-                      {sourceTypeLabel(s)}
-                    </td>
-                    <td className="px-4 py-2.5 text-right text-ink-secondary">
-                      {s.columnTypes?.length ?? "—"}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <Badge tone={isSaas(s) ? "warning" : "success"}>
-                        {isSaas(s) ? "Pending auth" : "Connected"}
-                      </Badge>
-                    </td>
+            <>
+              <table className="w-full text-left text-[13px]">
+                <thead>
+                  <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
+                    <Th>Name</Th>
+                    <Th>Type</Th>
+                    <Th className="text-right">Tables</Th>
+                    <Th>Status</Th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sourceRows.slice(0, 5).map((s) => (
+                    <tr
+                      key={s.viewName || s.fileName}
+                      onClick={() =>
+                        setDetail({
+                          kind: "source",
+                          name: s.viewName || s.fileName,
+                        })
+                      }
+                      className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-secondary"
+                    >
+                      <td className="px-4 py-2.5 font-medium text-ink-primary">
+                        {s.viewName || s.fileName}
+                      </td>
+                      <td className="px-4 py-2.5 text-ink-secondary">
+                        {sourceTypeLabel(s)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-ink-secondary">
+                        {s.columnTypes?.length ?? "—"}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Badge tone={isSaas(s) ? "warning" : "success"}>
+                          {isSaas(s) ? "Pending auth" : "Connected"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="flex justify-end border-t border-line-tertiary px-4 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/projects/${projectId}/data-sources`)}
+                  className="text-small font-medium text-brand-700 hover:underline"
+                >
+                  Connect new
+                </button>
+              </div>
+            </>
           )}
         </Card>
       </div>

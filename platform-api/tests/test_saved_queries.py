@@ -126,3 +126,42 @@ async def test_query_metadata_defaults_and_roundtrip(client, service_headers) ->
         "Manual Query",
         "Backorder Rate by Supplier",
     }
+
+
+async def test_query_list_enriches_owner_origin_scope(
+    client, service_headers
+) -> None:
+    project, headers = await _setup(client, service_headers)
+    pid = project["id"]
+
+    await client.post(
+        f"/api/projects/{pid}/queries",
+        json={"name": "Manual Query", "left_datasource": "inventory_db"},
+        headers=headers,
+    )
+    await client.post(
+        f"/api/projects/{pid}/queries",
+        json={
+            "name": "AI Query",
+            "left_datasource": "inventory_db",
+            "ai_generated": True,
+        },
+        headers=headers,
+    )
+
+    rows = (
+        await client.get(f"/api/projects/{pid}/queries", headers=headers)
+    ).json()
+    by_name = {q["name"]: q for q in rows}
+
+    manual = by_name["Manual Query"]
+    assert manual["origin"] == "manual"
+    assert manual["origin_label"] == "Manual"
+    assert manual["owner_name"] == "Q User"
+    # No scopes defined yet → no active scope, so the UI shows no icon.
+    assert manual["has_active_scope"] is False
+    assert manual["active_scope_count"] == 0
+
+    ai = by_name["AI Query"]
+    assert ai["origin"] == "ai_generated"
+    assert ai["origin_label"] == "AI Generated"

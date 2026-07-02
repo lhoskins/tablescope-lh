@@ -673,6 +673,7 @@ async def home_save_dashboard(
                 description="",
                 sql_text=sql,
                 left_datasource=_detect_datasource(sql, allowed_tables),
+                ai_generated=True,
             )
             session.add(query)
             await session.flush()
