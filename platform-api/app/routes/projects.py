@@ -8,7 +8,7 @@ members. Shared projects are visible to all active members.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -1703,7 +1703,7 @@ async def archive_saved_query(
     if project is None or project.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Project not found")
     query.is_archived = True
-    query.archived_at = datetime.now(timezone.utc)
+    query.archived_at = datetime.now(UTC)
     query.archived_by = context.user_id
     await session.commit()
     await session.refresh(query)
