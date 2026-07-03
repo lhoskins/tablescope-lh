@@ -47,8 +47,9 @@ describe("PhoneMfaForm", () => {
     await waitFor(() =>
       expect(startPhone).toHaveBeenCalledWith("+16615551212"),
     );
-    // Now on the code step.
-    fireEvent.change(screen.getByPlaceholderText("123456"), {
+    // Now on the code step (wait for the async re-render to the code input).
+    const codeInput = await screen.findByPlaceholderText("123456");
+    fireEvent.change(codeInput, {
       target: { value: "654321" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^verify$/i }));
