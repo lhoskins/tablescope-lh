@@ -120,6 +120,8 @@ class SavedQueryRead(BaseModel):
     run_count: int = 0
     last_run_at: datetime | None = None
     avg_runtime_ms: int | None = None
+    is_archived: bool = False
+    archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     # Enriched fields for the All Tables view (populated by the list endpoint).

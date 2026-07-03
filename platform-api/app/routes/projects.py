@@ -8,6 +8,7 @@ members. Shared projects are visible to all active members.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -148,7 +149,15 @@ async def list_project_summaries(
         )
         return {pid: count for pid, count in result.all()}
 
-    query_counts = await _grouped_counts(SavedQuery)
+    query_result = await session.execute(
+        select(SavedQuery.project_id, func.count())
+        .where(
+            SavedQuery.project_id.in_(ids),
+            SavedQuery.is_archived.is_(False),
+        )
+        .group_by(SavedQuery.project_id)
+    )
+    query_counts = {pid: count for pid, count in query_result.all()}
     dashboard_counts = await _grouped_counts(Dashboard)
     asset_counts = await _grouped_counts(ProjectAsset)
     member_counts = await _grouped_counts(ProjectMember)
@@ -1528,18 +1537,18 @@ def _move_shared_files_to_user(*, tenant_id: int, user_id: int) -> None:
 @router.get("/{project_id}/queries", response_model=list[SavedQueryRead])
 async def list_saved_queries(
     project_id: int,
+    include_archived: bool = Query(default=False),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[SavedQueryRead]:
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Project not found")
+    stmt = select(SavedQuery).where(SavedQuery.project_id == project_id)
+    if not include_archived:
+        stmt = stmt.where(SavedQuery.is_archived.is_(False))
     rows = list(
-        await session.scalars(
-            select(SavedQuery)
-            .where(SavedQuery.project_id == project_id)
-            .order_by(SavedQuery.created_at.desc())
-        )
+        await session.scalars(stmt.order_by(SavedQuery.created_at.desc()))
     )
 
     # Owner names for the "Owner" column.
@@ -1676,6 +1685,113 @@ async def update_saved_query(
     return read
 
 
+@router.post(
+    "/{project_id}/queries/{query_id}/archive",
+    response_model=SavedQueryRead,
+)
+async def archive_saved_query(
+    project_id: int,
+    query_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> SavedQueryRead:
+    """Archive a query. It stays executable but is hidden from normal lists."""
+    query = await session.get(SavedQuery, query_id)
+    if query is None or query.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Query not found")
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+    query.is_archived = True
+    query.archived_at = datetime.now(timezone.utc)
+    query.archived_by = context.user_id
+    await session.commit()
+    await session.refresh(query)
+    read = SavedQueryRead.model_validate(query)
+    read.origin, read.origin_label = _query_origin(query)
+    return read
+
+
+@router.post(
+    "/{project_id}/queries/{query_id}/restore",
+    response_model=SavedQueryRead,
+)
+async def restore_saved_query(
+    project_id: int,
+    query_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> SavedQueryRead:
+    """Restore an archived query back to the active list."""
+    query = await session.get(SavedQuery, query_id)
+    if query is None or query.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Query not found")
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+    query.is_archived = False
+    query.archived_at = None
+    query.archived_by = None
+    await session.commit()
+    await session.refresh(query)
+    read = SavedQueryRead.model_validate(query)
+    read.origin, read.origin_label = _query_origin(query)
+    return read
+
+
+async def _query_dependencies(
+    session: AsyncSession, query: SavedQuery
+) -> dict[str, int]:
+    """Count blocking dependencies for a saved query.
+
+    Delete is refused while any of these are non-zero.
+    """
+    scope_source = (
+        await session.scalar(
+            select(func.count())
+            .select_from(QueryScope)
+            .where(QueryScope.query_id == query.id)
+        )
+    ) or 0
+    scope_target = (
+        await session.scalar(
+            select(func.count())
+            .select_from(QueryScope)
+            .where(QueryScope.target_query_id == query.id)
+        )
+    ) or 0
+
+    # Dashboards whose widget config references this query id.
+    dashboards = list(
+        await session.scalars(
+            select(Dashboard).where(Dashboard.project_id == query.project_id)
+        )
+    )
+    dashboard_refs = 0
+    for dash in dashboards:
+        config = dash.config if isinstance(dash.config, dict) else {}
+        widgets = config.get("widgets")
+        if not isinstance(widgets, list):
+            continue
+        for widget in widgets:
+            if not isinstance(widget, dict):
+                continue
+            source = widget.get("dataSource")
+            if (
+                isinstance(source, dict)
+                and source.get("kind") == "query"
+                and source.get("queryId") == query.id
+            ):
+                dashboard_refs += 1
+                break
+
+    return {
+        "dashboards": dashboard_refs,
+        "scopes_source": scope_source,
+        "scopes_target": scope_target,
+    }
+
+
 @router.delete("/{project_id}/queries/{query_id}")
 async def delete_saved_query(
     project_id: int,
@@ -1689,6 +1805,37 @@ async def delete_saved_query(
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # A query can only be permanently deleted once archived.
+    if not query.is_archived:
+        raise HTTPException(
+            status_code=409,
+            detail="Query must be archived before it can be deleted.",
+        )
+
+    # And only when it has no remaining dependencies.
+    deps = await _query_dependencies(session, query)
+    scope_total = deps["scopes_source"] + deps["scopes_target"]
+    if deps["dashboards"] > 0 or scope_total > 0:
+        parts: list[str] = []
+        if deps["dashboards"] > 0:
+            parts.append(
+                f"{deps['dashboards']} dashboard"
+                f"{'s' if deps['dashboards'] != 1 else ''}"
+            )
+        if scope_total > 0:
+            parts.append(
+                f"{scope_total} scope{'s' if scope_total != 1 else ''}"
+            )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot delete this query — it is still used by "
+                + " and ".join(parts)
+                + ". Remove those dependencies first."
+            ),
+        )
+
     await session.delete(query)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

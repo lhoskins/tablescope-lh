@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { apiClient } from "@/lib/api-client";
 import { DataGrid } from "@/components/data-grid/DataGrid";
 
@@ -49,6 +49,13 @@ type Props = {
   initialSql?: string;
   editQuery?: EditQuery;
   saveLabel?: string;
+  // Archive lifecycle (edit mode only). Archive sits to the right of Save;
+  // once archived, Save is replaced by Restore + Delete.
+  isArchived?: boolean;
+  onArchive?: () => void;
+  onRestore?: () => void;
+  onDelete?: () => void;
+  lifecycleBusy?: boolean;
 };
 
 const JOIN_TYPES = [
@@ -214,9 +221,78 @@ function buildSql(
   return sql;
 }
 
+// ── Inline-editable text (title / description) ──────────────────────
+// Click to edit, Enter/blur commits, Escape cancels.
+
+function InlineEditable({
+  value,
+  onCommit,
+  placeholder,
+  displayClassName,
+  inputClassName,
+  ariaLabel,
+}: {
+  value: string;
+  onCommit: (next: string) => void;
+  placeholder: string;
+  displayClassName: string;
+  inputClassName: string;
+  ariaLabel: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(value);
+      // Focus after the input mounts.
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [editing, value]);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        aria-label={ariaLabel}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          onCommit(draft.trim());
+          setEditing(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onCommit(draft.trim());
+            setEditing(false);
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setEditing(false);
+          }
+        }}
+        className={inputClassName}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      aria-label={`Edit ${ariaLabel}`}
+      className={`text-left ${displayClassName} ${value ? "" : "text-slate-400"}`}
+    >
+      {value || placeholder}
+    </button>
+  );
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
-export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSaving, initialSql, editQuery, saveLabel }: Props) {
+export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSaving, initialSql, editQuery, saveLabel, isArchived, onArchive, onRestore, onDelete, lifecycleBusy }: Props) {
   const isEdit = !!editQuery;
   // Datasource selection
   const [leftDs, setLeftDs] = useState<string>(editQuery?.left_datasource ?? "");
@@ -463,10 +539,32 @@ export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSavin
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-        <h3 className="text-lg font-semibold text-slate-900">{isEdit ? "Edit Query" : "Query Builder"}</h3>
-        <button onClick={onCancel} className="text-sm text-slate-500 hover:text-slate-700">
+      {/* Header — inline-editable query title + description, above Data Sources */}
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-6 py-4">
+        <div className="min-w-0 flex-1">
+          <InlineEditable
+            value={queryName}
+            onCommit={setQueryName}
+            placeholder={isEdit ? "Untitled query" : "New query"}
+            ariaLabel="query title"
+            displayClassName="block w-full truncate text-lg font-semibold text-slate-900 hover:text-slate-700"
+            inputClassName="block w-full rounded-md border border-slate-300 px-2 py-1 text-lg font-semibold text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300"
+          />
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="shrink-0 text-xs font-medium text-slate-500">
+              Description:
+            </span>
+            <InlineEditable
+              value={queryDesc}
+              onCommit={setQueryDesc}
+              placeholder="Add a description"
+              ariaLabel="query description"
+              displayClassName="block min-w-0 flex-1 truncate text-xs text-slate-500 hover:text-slate-700"
+              inputClassName="block w-full rounded-md border border-slate-300 px-2 py-0.5 text-xs text-slate-600 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300"
+            />
+          </div>
+        </div>
+        <button onClick={onCancel} className="shrink-0 text-sm text-slate-500 hover:text-slate-700">
           Cancel
         </button>
       </div>
@@ -912,20 +1010,6 @@ export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSavin
           </button>
           <div className="flex-1" />
           <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={queryName}
-              onChange={(e) => setQueryName(e.target.value)}
-              placeholder="Query name..."
-              className="w-48 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
-            />
-            <input
-              type="text"
-              value={queryDesc}
-              onChange={(e) => setQueryDesc(e.target.value)}
-              placeholder="Description (optional)"
-              className="w-56 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
-            />
             <button
               onClick={handleSave}
               disabled={!queryName.trim() || !effectiveSql || isSaving}
@@ -933,6 +1017,34 @@ export function QueryBuilder({ projectId, datasources, onCancel, onSave, isSavin
             >
               {isSaving ? "Saving..." : (saveLabel ?? (isEdit ? "Update Query" : "Save Query"))}
             </button>
+            {/* Archive lifecycle — Archive right of Save; Restore/Delete when archived */}
+            {isEdit && !isArchived && onArchive && (
+              <button
+                onClick={onArchive}
+                disabled={lifecycleBusy}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Archive
+              </button>
+            )}
+            {isEdit && isArchived && onRestore && (
+              <button
+                onClick={onRestore}
+                disabled={lifecycleBusy}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Restore
+              </button>
+            )}
+            {isEdit && isArchived && onDelete && (
+              <button
+                onClick={onDelete}
+                disabled={lifecycleBusy}
+                className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+              >
+                Delete
+              </button>
+            )}
           </div>
         </div>
 
