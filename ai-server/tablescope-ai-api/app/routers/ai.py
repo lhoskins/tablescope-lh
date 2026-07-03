@@ -9,6 +9,7 @@ Every endpoint:
 6. Updates last_activity for idle shutdown
 """
 
+import difflib
 import json
 import logging
 import re
@@ -461,19 +462,53 @@ def _referenced_tables(sql: str) -> list[str]:
     return re.findall(r"(?:FROM|JOIN)\s+\"?(\w+)\"?(?![\w(])", sql or "", re.IGNORECASE)
 
 
+_SOURCE_SUFFIX_RE = re.compile(
+    r"(_csv|_xlsx|_xls|_json|_parquet|_tsv|_table|_tbl|_view)$", re.IGNORECASE
+)
+
+
+def normalize_source_name(name: str) -> str:
+    """Lowercase, drop a file-format suffix, and collapse separators to spaces.
+
+    Lets ``fin_gl_chart_of_accounts`` / ``chart of accounts`` match the physical
+    source ``fin_gl_chart_of_accounts_CSV`` even without the exact suffix.
+    """
+    text = _SOURCE_SUFFIX_RE.sub("", (name or "").strip().lower())
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _score_source_match(request: str, source: str) -> int:
+    """Score how well ``request`` refers to authorized ``source`` (0–100)."""
+    req = (request or "").strip().lower()
+    src = (source or "").strip().lower()
+    if not req or not src:
+        return 0
+    if req == src:
+        return 100
+    req_n = normalize_source_name(request)
+    src_n = normalize_source_name(source)
+    if req_n and req_n == src_n:
+        return 95
+    if req == _SOURCE_SUFFIX_RE.sub("", src):
+        return 92
+    req_tokens = [t for t in req_n.split() if t]
+    src_tokens = {t for t in src_n.split() if t}
+    if req_tokens and set(req_tokens).issubset(src_tokens):
+        return 80
+    if req_n and src_n and difflib.SequenceMatcher(None, req_n, src_n).ratio() >= 0.85:
+        return 70
+    if req_n and req_n in src_n:
+        return 60
+    return 0
+
+
 def _suggest_sources(prompt: str, allowed_tables: list[str], limit: int = 5) -> list[str]:
-    """Rank authorized sources by token overlap with the user's prompt."""
-    tokens = {t for t in re.split(r"[^a-z0-9]+", prompt.lower()) if len(t) > 2}
-    scored: list[tuple[int, str]] = []
-    for table in allowed_tables:
-        parts = {p for p in re.split(r"[^a-z0-9]+", table.lower()) if len(p) > 2}
-        overlap = sum(
-            1
-            for p in parts
-            if any(p in tok or tok in p for tok in tokens)
-        )
-        scored.append((overlap, table))
-    scored.sort(key=lambda x: (-x[0], x[1]))
+    """Rank authorized sources by normalized/fuzzy match with the user's prompt."""
+    scored = sorted(
+        ((_score_source_match(prompt, t), t) for t in allowed_tables),
+        key=lambda x: (-x[0], x[1]),
+    )
     ranked = [t for score, t in scored if score > 0]
     return (ranked or allowed_tables)[:limit]
 

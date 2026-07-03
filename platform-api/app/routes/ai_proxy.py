@@ -14,6 +14,7 @@ access before retrieving vectors or building context.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import hashlib
 import hmac
 import json
@@ -25,7 +26,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -389,18 +390,80 @@ def _clarification_response(
 
 
 def _heuristic_rank_sources(prompt: str, allowed_tables: list[str]) -> list[str]:
-    """Rank authorized sources by token overlap with the prompt (top 5)."""
-    tokens = {t for t in re.split(r"[^a-z0-9]+", prompt.lower()) if len(t) > 2}
-    scored: list[tuple[int, str]] = []
-    for table in allowed_tables:
-        parts = {p for p in re.split(r"[^a-z0-9]+", table.lower()) if len(p) > 2}
-        overlap = sum(
-            1 for p in parts if any(p in tok or tok in p for tok in tokens)
-        )
-        scored.append((overlap, table))
-    scored.sort(key=lambda x: (-x[0], x[1]))
+    """Rank authorized sources by normalized/fuzzy match with the prompt."""
+    scored = sorted(
+        ((_score_source_match(prompt, t), t) for t in allowed_tables),
+        key=lambda x: (-x[0], x[1]),
+    )
     ranked = [t for score, t in scored if score > 0]
     return (ranked or allowed_tables)[:5]
+
+
+# ---------------------------------------------------------------------------
+# Fuzzy source-name matching
+#
+# Users refer to a data source by a partial or suffix-insensitive name
+# ("fin_gl_chart_of_accounts", "chart of accounts") when the physical source is
+# "fin_gl_chart_of_accounts_CSV". Normalize both sides and score the match so a
+# confident single match is auto-selected and ambiguous matches ask the user.
+# ---------------------------------------------------------------------------
+
+_SOURCE_SUFFIX_RE = re.compile(
+    r"(_csv|_xlsx|_xls|_json|_parquet|_tsv|_table|_tbl|_view)$", re.IGNORECASE
+)
+
+
+def _strip_source_suffix(name: str) -> str:
+    return _SOURCE_SUFFIX_RE.sub("", (name or "").strip())
+
+
+def _normalize_source_name(name: str) -> str:
+    """Lowercase, drop a file-format suffix, and collapse separators to spaces."""
+    text = _strip_source_suffix((name or "").lower())
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _score_source_match(request: str, source: str) -> int:
+    """Score how well ``request`` refers to authorized ``source`` (0-100)."""
+    req = (request or "").strip().lower()
+    src = (source or "").strip().lower()
+    if not req or not src:
+        return 0
+    if req == src:
+        return 100
+    req_n = _normalize_source_name(request)
+    src_n = _normalize_source_name(source)
+    if req_n and req_n == src_n:
+        return 95
+    if req == _strip_source_suffix(src).lower():
+        return 92
+    req_tokens = [t for t in req_n.split() if t]
+    src_tokens = set(t for t in src_n.split() if t)
+    if req_tokens and set(req_tokens).issubset(src_tokens):
+        return 80
+    if req_n and src_n and difflib.SequenceMatcher(None, req_n, src_n).ratio() >= 0.85:
+        return 70
+    if req_n and req_n in src_n:
+        return 60
+    return 0
+
+
+def _resolve_prompt_source(
+    prompt: str, allowed_tables: list[str]
+) -> tuple[list[str], list[str]]:
+    """Return ``(strong, close)`` source matches for a table-name-like prompt.
+
+    ``strong`` are confident matches (score ≥ 90); ``close`` are plausible but
+    ambiguous ones (60 ≤ score < 90). Both are ordered best-first.
+    """
+    scored = sorted(
+        ((_score_source_match(prompt, t), t) for t in allowed_tables),
+        key=lambda x: (-x[0], x[1]),
+    )
+    strong = [t for s, t in scored if s >= 90]
+    close = [t for s, t in scored if 60 <= s < 90]
+    return strong, close
 
 
 def _heuristic_sql(prompt: str, allowed_tables: list[str]) -> str:
@@ -426,6 +489,132 @@ def _heuristic_sql(prompt: str, allowed_tables: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Query-summary intent
+#
+# "Can you give me a summary of my queries?" is answered directly from the
+# database rather than the AI server: the summary is then always
+# authorization-correct (only the caller's accessible queries) and never
+# depends on the AI server being reachable or schema-compatible — which also
+# avoids the "Invalid request signature" failure users saw for this prompt.
+# ---------------------------------------------------------------------------
+
+_QUERY_SUMMARY_PATTERNS = [
+    re.compile(r"\bsummary of (my|all|the) queries\b", re.IGNORECASE),
+    re.compile(
+        r"\b(summarize|summarise|list|show|overview of|recap) "
+        r"(my|all|the) queries\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bhow many queries (do i|have i)\b", re.IGNORECASE),
+]
+
+
+def _is_query_summary_request(question: str) -> bool:
+    """True when the prompt is asking for an overview of the user's queries."""
+    q = (question or "").strip()
+    return any(p.search(q) for p in _QUERY_SUMMARY_PATTERNS)
+
+
+def _plural(n: int, singular: str, plural: str) -> str:
+    return singular if n == 1 else plural
+
+
+async def _build_query_summary(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    include_archived: bool = False,
+) -> str:
+    """Build a friendly, authorization-scoped summary of the user's queries.
+
+    Includes queries in every project the caller can access (private projects
+    they own + shared projects they are an active member of). Archived queries
+    are excluded unless explicitly requested.
+    """
+    member_sub = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == context.user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    projects = list(
+        await session.scalars(
+            select(Project)
+            .where(
+                Project.tenant_id == context.tenant_id,
+                or_(
+                    Project.owner_id == context.user_id,
+                    Project.id.in_(member_sub),
+                ),
+            )
+            .order_by(Project.name)
+        )
+    )
+    if not projects:
+        return (
+            "You don't have access to any projects yet, so there are no "
+            "queries to summarize."
+        )
+
+    ids = [p.id for p in projects]
+    count_stmt = select(SavedQuery.project_id, func.count()).where(
+        SavedQuery.project_id.in_(ids)
+    )
+    if not include_archived:
+        count_stmt = count_stmt.where(SavedQuery.is_archived.is_(False))
+    count_stmt = count_stmt.group_by(SavedQuery.project_id)
+    counts = {pid: c for pid, c in (await session.execute(count_stmt)).all()}
+
+    total = sum(counts.values())
+    private = [
+        (p, counts.get(p.id, 0)) for p in projects if not p.is_shared
+    ]
+    shared = [(p, counts.get(p.id, 0)) for p in projects if p.is_shared]
+
+    lines: list[str] = []
+    if total == 0:
+        lines.append(
+            "You don't have any "
+            + ("" if include_archived else "active ")
+            + "queries yet across your "
+            + f"{len(projects)} accessible "
+            + _plural(len(projects), "project", "projects")
+            + "."
+        )
+        return "\n".join(lines)
+
+    scope_word = "" if include_archived else "active "
+    lines.append(
+        f"You currently have {total} {scope_word}"
+        f"{_plural(total, 'query', 'queries')} across your "
+        f"{len(projects)} accessible "
+        f"{_plural(len(projects), 'project', 'projects')}."
+    )
+
+    def _section(heading: str, rows: list[tuple[Project, int]]) -> None:
+        with_queries = [(p, c) for p, c in rows if c > 0]
+        if not with_queries:
+            return
+        lines.append("")
+        lines.append(f"{heading}:")
+        for p, c in with_queries:
+            lines.append(f"- {p.name}: {c} {_plural(c, 'query', 'queries')}")
+
+    _section("Private projects", private)
+    _section("Shared projects", shared)
+
+    lines.append("")
+    if include_archived:
+        lines.append(
+            "This summary includes archived queries as requested."
+        )
+    else:
+        lines.append(
+            "All queries listed are active and available for execution. "
+            "Archived queries are not included."
+        )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # AI Proxy endpoints
 # ---------------------------------------------------------------------------
 
@@ -437,6 +626,16 @@ async def ask(
 ) -> dict[str, Any]:
     """Ask Tablescope AI a question about the active project."""
     await _check_project_access(session, context, req.project_id)
+
+    # A request for a summary of the user's queries is answered directly from
+    # the database (authorization-correct, no AI-server dependency).
+    if _is_query_summary_request(req.question):
+        return {
+            "answer": await _build_query_summary(session, context),
+            "model_used": "tablescope-direct",
+            "request_id": "",
+            "context_summary": {},
+        }
 
     payload = {
         "tenant_id": context.tenant_id,
@@ -1681,27 +1880,53 @@ async def ai_generate_and_save_query(
             "Do not emit CREATE TABLE, DDL, or any write statement."
         )
 
-    source_catalog = await _build_source_catalog(
-        session, tenant_id=context.tenant_id, project_id=req.project_id
-    )
-
-    payload = {
-        "tenant_id": context.tenant_id,
-        "user_id": context.user_id,
-        "project_id": req.project_id,
-        "prompt": prompt_text,
-        "allowed_tables": allowed_tables,
-        "source_catalog": source_catalog,
-        # Knowledge Graph context steers generated SQL toward validated
-        # risks/gaps/measured KPIs surfaced by the graph.
-        "knowledge_graph_context": await _kg_context(
-            session, context, req.project_id,
-        ),
-    }
+    # Fuzzy source match: when the prompt is essentially a source name given
+    # without its physical suffix ("fin_gl_chart_of_accounts" for
+    # "fin_gl_chart_of_accounts_CSV"), resolve it directly. A single confident
+    # match is auto-selected; several plausible matches ask the user to choose.
     ai_result: dict[str, Any] = {}
+    generated_sql = ""
+    if not existing_query and allowed_tables:
+        strong, close = _resolve_prompt_source(base_prompt, allowed_tables)
+        if len(strong) == 1 and not close:
+            matched = strong[0]
+            generated_sql = f'SELECT * FROM "{matched}" LIMIT 100'
+            ai_result = {
+                "explanation": (
+                    f'Matched your request to authorized source "{matched}".'
+                ),
+                "model_used": "source-match",
+            }
+        elif len(strong) > 1 or (not strong and len(close) > 1):
+            return {
+                "action": "generate_and_save_query",
+                "status": "needs_clarification",
+                "message": (
+                    "I found multiple matching sources. Which one should I use?"
+                ),
+                "suggested_sources": (strong or close)[:5],
+            }
+
     try:
-        ai_result = await _forward_to_ai("/ai/query/generate", payload)
-        generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
+        if not generated_sql:  # not resolved by fuzzy source match
+            source_catalog = await _build_source_catalog(
+                session, tenant_id=context.tenant_id, project_id=req.project_id
+            )
+            payload = {
+                "tenant_id": context.tenant_id,
+                "user_id": context.user_id,
+                "project_id": req.project_id,
+                "prompt": prompt_text,
+                "allowed_tables": allowed_tables,
+                "source_catalog": source_catalog,
+                # Knowledge Graph context steers generated SQL toward validated
+                # risks/gaps/measured KPIs surfaced by the graph.
+                "knowledge_graph_context": await _kg_context(
+                    session, context, req.project_id,
+                ),
+            }
+            ai_result = await _forward_to_ai("/ai/query/generate", payload)
+            generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
     except HTTPException as exc:
         # A 422 means the AI generated SQL that could not be validated/repaired
         # (e.g. it could not map the request to an authorized source). Surface a
@@ -2952,7 +3177,12 @@ async def add_conversation_message(
     session.add(user_msg)
 
     answer: str
-    if project_id is None:
+    if _is_query_summary_request(question):
+        # Answered directly from the DB across all accessible projects — no
+        # AI-server call, so it never fails with a signature error and always
+        # reflects the caller's real authorized queries.
+        answer = await _build_query_summary(session, context)
+    elif project_id is None:
         answer = (
             "I couldn't find a project to ground my answer. Create a project "
             "with data first, then ask again."

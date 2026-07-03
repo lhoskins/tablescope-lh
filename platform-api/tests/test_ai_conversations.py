@@ -110,6 +110,39 @@ async def test_message_returns_updated_conversation_without_refresh(
     assert body["title"] == "What is revenue?"
 
 
+async def test_query_summary_intent_answered_from_db(
+    client, service_headers
+) -> None:
+    # "summary of my queries" is answered directly from the DB (no AI server),
+    # so it never hits the signature path and reflects real authorized queries.
+    _t, _u, project, headers = await _setup(client, service_headers)
+    for name in ("Revenue by Month", "Top Vendors"):
+        r = await client.post(
+            f"/api/projects/{project['id']}/queries",
+            json={"name": name, "left_datasource": "sales_CSV"},
+            headers=headers,
+        )
+        assert r.status_code == 201
+
+    convo = (
+        await client.post("/api/ai/conversations", json={}, headers=headers)
+    ).json()
+    r = await client.post(
+        f"/api/ai/conversations/{convo['id']}/messages",
+        json={
+            "question": "Can you give me a summary of my queries?",
+            "project_id": project["id"],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    answer = r.json()["messages"][1]["content"]
+    # Real summary — not the mocked "Echo:" AI-server reply.
+    assert "Echo:" not in answer
+    assert "2 active queries" in answer
+    assert project["name"] in answer
+
+
 async def test_branch_conversation_copies_history_to_point(
     client, service_headers
 ) -> None:
