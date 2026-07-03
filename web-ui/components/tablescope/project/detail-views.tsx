@@ -162,6 +162,7 @@ export function QueryBuilderEdit({
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: (payload: {
       name: string;
@@ -194,9 +195,72 @@ export function QueryBuilderEdit({
     },
   });
 
+  const invalidateLists = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: ["project", projectId, "queries"],
+    });
+    await queryClient.invalidateQueries({
+      queryKey: ["query-result", projectId, query.id],
+    });
+  };
+
+  const archive = useMutation({
+    mutationFn: () =>
+      apiClient.post(
+        `/api/projects/${projectId}/queries/${query.id}/archive`,
+        {},
+      ),
+    onSuccess: async () => {
+      setLifecycleError(null);
+      await invalidateLists();
+      onSaved();
+    },
+    onError: (e: Error) => setLifecycleError(e.message),
+  });
+
+  const restore = useMutation({
+    mutationFn: () =>
+      apiClient.post(
+        `/api/projects/${projectId}/queries/${query.id}/restore`,
+        {},
+      ),
+    onSuccess: async () => {
+      setLifecycleError(null);
+      await invalidateLists();
+      onSaved();
+    },
+    onError: (e: Error) => setLifecycleError(e.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: () =>
+      apiClient.delete(`/api/projects/${projectId}/queries/${query.id}`),
+    onSuccess: async () => {
+      setLifecycleError(null);
+      await invalidateLists();
+      onSaved();
+    },
+    onError: (e: Error) => setLifecycleError(e.message),
+  });
+
+  const handleDelete = () => {
+    if (
+      window.confirm(
+        "Delete this archived query permanently? This cannot be undone.",
+      )
+    ) {
+      remove.mutate();
+    }
+  };
+
   return (
     <div className="space-y-4">
       <DetailBackBar label={backLabel} onBack={onBack} />
+      {lifecycleError && (
+        <div className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-2.5 text-small text-danger">
+          {lifecycleError}
+        </div>
+      )}
       <QueryBuilder
         projectId={Number(projectId)}
         datasources={datasources.map((d) => ({
@@ -220,6 +284,13 @@ export function QueryBuilderEdit({
         onSave={(payload) => save.mutate(payload)}
         isSaving={save.isPending}
         saveLabel="Save changes"
+        isArchived={query.is_archived}
+        onArchive={() => archive.mutate()}
+        onRestore={() => restore.mutate()}
+        onDelete={handleDelete}
+        lifecycleBusy={
+          archive.isPending || restore.isPending || remove.isPending
+        }
       />
     </div>
   );

@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { IconPlus, IconSearch } from "@tabler/icons-react";
+import {
+  IconPlus,
+  IconSearch,
+  IconLock,
+  IconUsersGroup,
+} from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { ProjectRowActions } from "@/components/tablescope/project/project-row-actions";
@@ -70,8 +75,9 @@ export default function ProjectsPage() {
     [rows],
   );
 
-  const [openPrivate, setOpenPrivate] = useState(true);
-  const [openShared, setOpenShared] = useState(true);
+  // Collapsed by default on first entry to the Projects page.
+  const [openPrivate, setOpenPrivate] = useState(false);
+  const [openShared, setOpenShared] = useState(false);
 
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
@@ -107,7 +113,9 @@ export default function ProjectsPage() {
         </div>
 
         <ProjectAccordionSection
+          type="private"
           title="Private"
+          subtitle="Projects only visible to you"
           count={privateRows.length}
           open={openPrivate}
           onToggle={() => setOpenPrivate((v) => !v)}
@@ -124,7 +132,9 @@ export default function ProjectsPage() {
         </ProjectAccordionSection>
 
         <ProjectAccordionSection
+          type="shared"
           title="Shared"
+          subtitle="Projects shared with your organization"
           count={sharedRows.length}
           open={openShared}
           onToggle={() => setOpenShared((v) => !v)}
@@ -147,35 +157,90 @@ export default function ProjectsPage() {
   );
 }
 
+const SECTION_STYLES = {
+  private: {
+    background: "#F8FBFF",
+    border: "#D7E8FF",
+    accent: "#1E6FD9",
+    Icon: IconLock,
+  },
+  shared: {
+    background: "#F7FFFB",
+    border: "#D4F0E2",
+    accent: "#2EA66F",
+    Icon: IconUsersGroup,
+  },
+} as const;
+
 function ProjectAccordionSection({
+  type,
   title,
+  subtitle,
   count,
   open,
   onToggle,
   children,
 }: {
+  type: "private" | "shared";
   title: string;
+  subtitle: string;
   count: number;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
 }) {
+  const style = SECTION_STYLES[type];
+  const Icon = style.Icon;
   return (
-    <div className="overflow-hidden rounded-lg border border-line-tertiary bg-bg-primary">
+    <div
+      className="overflow-hidden rounded-xl border"
+      style={{ background: style.background, borderColor: style.border }}
+    >
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-bg-tertiary"
+        className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
       >
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-body font-semibold text-ink-tertiary">
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+          style={{ background: `${style.accent}1A`, color: style.accent }}
+        >
+          <Icon size={18} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span
+              className="text-h3 font-semibold"
+              style={{ color: style.accent }}
+            >
+              {title}
+            </span>
+            <span
+              className="rounded-full px-2 py-0.5 text-caption font-medium tabular-nums"
+              style={{ background: `${style.accent}1A`, color: style.accent }}
+            >
+              {count}
+            </span>
+          </span>
+          <span className="block text-small text-ink-tertiary">{subtitle}</span>
+        </span>
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-body font-semibold"
+          style={{ borderColor: style.border, color: style.accent }}
+          aria-hidden
+        >
           {open ? "−" : "+"}
         </span>
-        <span className="text-h3 text-ink-primary">
-          {title} ({count})
-        </span>
       </button>
-      {open && <div className="border-t border-line-tertiary">{children}</div>}
+      {open && (
+        <div
+          className="border-t bg-bg-primary"
+          style={{ borderColor: style.border }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 }

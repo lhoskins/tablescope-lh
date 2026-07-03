@@ -111,12 +111,12 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         null)
       : null;
 
-  const recentQueries = [...queryRows]
-    .sort(
-      (a, b) =>
-        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-    )
-    .slice(0, 4);
+  // All tables, most-recently-updated first. The Tables accordion shows the
+  // full list (no truncation) when expanded.
+  const sortedQueries = [...queryRows].sort(
+    (a, b) =>
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  );
 
 
 
@@ -354,12 +354,12 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
               Tables ({queryRows.length})
             </span>
           </button>
-          {!openTables ? null : recentQueries.length === 0 ? (
+          {!openTables ? null : sortedQueries.length === 0 ? (
             <div className="px-4 py-10 text-center text-small text-ink-tertiary">
               No tables yet.
             </div>
           ) : (
-            <>
+            <div className="max-h-[32rem] overflow-y-auto">
               <table className="w-full text-left text-[13px]">
                 <thead>
                   <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
@@ -371,7 +371,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentQueries.map((q) => (
+                  {sortedQueries.map((q) => (
                     <QueryRow
                       key={q.id}
                       q={q}
@@ -380,16 +380,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
                   ))}
                 </tbody>
               </table>
-              <div className="flex justify-end border-t border-line-tertiary px-4 py-2.5">
-                <button
-                  type="button"
-                  onClick={() => router.push(`/projects/${projectId}/queries`)}
-                  className="text-small font-medium text-brand-700 hover:underline"
-                >
-                  View all
-                </button>
-              </div>
-            </>
+            </div>
           )}
         </Card>
 
@@ -413,6 +404,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             </div>
           ) : (
             <>
+              <div className="max-h-[32rem] overflow-y-auto">
               <table className="w-full text-left text-[13px]">
                 <thead>
                   <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
@@ -423,7 +415,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {sourceRows.slice(0, 5).map((s) => (
+                  {sourceRows.map((s) => (
                     <tr
                       key={s.viewName || s.fileName}
                       onClick={() =>
@@ -452,6 +444,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
                   ))}
                 </tbody>
               </table>
+              </div>
               <div className="flex justify-end border-t border-line-tertiary px-4 py-2.5">
                 <button
                   type="button"
