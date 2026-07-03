@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNotifyScopesChanged } from "@/lib/ui/scope-refresh";
 import {
   IconArrowNarrowRight,
   IconArrowsExchange,
@@ -100,6 +101,7 @@ export function ScopeBuilder({
   scopeSetId: number;
 }) {
   const router = useRouter();
+  const notifyScopesChanged = useNotifyScopesChanged();
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
 
@@ -793,6 +795,7 @@ export function ScopeBuilder({
         })),
       });
       setStatus("Scope saved.");
+      notifyScopesChanged();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -816,6 +819,7 @@ export function ScopeBuilder({
     setError(null);
     try {
       await scopesApi.deleteScopeSet(scopeSetId);
+      notifyScopesChanged();
       router.push(`/projects/${projectId}/scopes`);
     } catch (e) {
       setError((e as Error).message);

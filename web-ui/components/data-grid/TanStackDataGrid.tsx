@@ -32,6 +32,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { apiClient } from "@/lib/api-client";
+import { useNotifyScopesChanged } from "@/lib/ui/scope-refresh";
 import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
 
 type QueryRef = {
@@ -155,6 +156,7 @@ export function TanStackDataGrid({
 
   // ── Scopes (query_id-based, NOT datasource-based) ───────────────
   const [scopes, setScopes] = useState<QueryScope[]>([]);
+  const notifyScopesChanged = useNotifyScopesChanged();
 
   const loadScopes = useCallback(async (qid: number | null) => {
     if (qid == null) {
@@ -254,13 +256,18 @@ export function TanStackDataGrid({
         });
       }
       await loadScopes(currentQueryId);
+      notifyScopesChanged();
       closeDialog();
     } catch (e) { setError((e as Error).message); } finally { setSaving(false); }
   };
 
   const removeScope = async (scope: QueryScope) => {
     setError(null);
-    try { await apiClient.delete(`/api/query-scopes/${scope.id}`); await loadScopes(currentQueryId); }
+    try {
+      await apiClient.delete(`/api/query-scopes/${scope.id}`);
+      await loadScopes(currentQueryId);
+      notifyScopesChanged();
+    }
     catch (e) { setError((e as Error).message); }
   };
 

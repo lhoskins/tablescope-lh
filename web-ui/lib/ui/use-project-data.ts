@@ -67,6 +67,8 @@ export interface SavedQuery {
   run_count: number;
   last_run_at: string | null;
   avg_runtime_ms: number | null;
+  is_archived: boolean;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
   owner_name: string | null;
