@@ -72,6 +72,11 @@ export interface SavedQuery {
   owner_name: string | null;
   origin: string;
   origin_label: string;
+  source_name: string | null;
+  has_outgoing_scope: boolean;
+  outgoing_scope_count: number;
+  has_incoming_scope: boolean;
+  incoming_scope_count: number;
   has_active_scope: boolean;
   active_scope_count: number;
 }

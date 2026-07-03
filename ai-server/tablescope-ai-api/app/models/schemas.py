@@ -24,6 +24,10 @@ class AskRequest(AIBaseRequest):
     scope: str = "project"  # project | personal | shared_project
     include_query_history: bool = True
     include_dashboard_context: bool = True
+    # Prior turns of the same conversation (oldest→newest), each
+    # {"role": "user"|"assistant", "content": "..."}. Lets the model resolve
+    # follow-up references ("explain more", "the second option").
+    history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class IndexDocumentRequest(AIBaseRequest):

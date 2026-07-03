@@ -18,6 +18,13 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tenantParam = searchParams.get("tenant");
+  // Path the user was trying to reach before being bounced to login. Only
+  // same-origin relative paths are honored to avoid open-redirects.
+  const nextParam = searchParams.get("next");
+  const destination =
+    nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
+      ? nextParam
+      : "/";
 
   const [method, setMethod] = useState<AuthMethod>("password");
   const [email, setEmail] = useState("");
@@ -41,14 +48,14 @@ function LoginForm() {
           user_id: result.user_id,
           tenant_slug: result.tenant_slug,
         });
-        router.replace("/");
+        router.replace(destination);
       })
       .catch((err) => {
         setError((err as Error).message);
         setMethod("supabase");
         setLoading(false);
       });
-  }, [router, tenantParam]);
+  }, [router, tenantParam, destination]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -70,7 +77,7 @@ function LoginForm() {
         user_id: result.user_id,
         tenant_slug: result.tenant_slug,
       });
-      router.replace("/");
+      router.replace(destination);
     } catch (err) {
       setError((err as Error).message);
     } finally {

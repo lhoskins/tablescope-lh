@@ -1551,8 +1551,9 @@ async def list_saved_queries(
     user_names = {u.id: _user_label(u) for u in users}
 
     # Active-scope participation: an enabled scope whose parent set is enabled
-    # (or has no parent set). A table "has an active scope" when it takes part
-    # as either the source or the target of such a scope.
+    # (or has no parent set) AND that has a target table. Only the *source* of
+    # such a scope gets the scope icon (outgoing); a table that is only a
+    # target has an incoming scope but no icon.
     scope_rows = (
         await session.execute(
             select(QueryScope.query_id, QueryScope.target_query_id)
@@ -1560,6 +1561,7 @@ async def list_saved_queries(
             .where(
                 QueryScope.project_id == project_id,
                 QueryScope.enabled.is_(True),
+                QueryScope.target_query_id.is_not(None),
                 or_(
                     QueryScope.scope_set_id.is_(None),
                     ScopeSet.enabled.is_(True),
@@ -1567,11 +1569,13 @@ async def list_saved_queries(
             )
         )
     ).all()
-    scope_counts: dict[int, int] = {}
+    outgoing_counts: dict[int, int] = {}
+    incoming_counts: dict[int, int] = {}
     for source_id, target_id in scope_rows:
-        for qid in (source_id, target_id):
-            if qid is not None:
-                scope_counts[qid] = scope_counts.get(qid, 0) + 1
+        if source_id is not None:
+            outgoing_counts[source_id] = outgoing_counts.get(source_id, 0) + 1
+        if target_id is not None:
+            incoming_counts[target_id] = incoming_counts.get(target_id, 0) + 1
 
     results: list[SavedQueryRead] = []
     for q in rows:
@@ -1580,9 +1584,18 @@ async def list_saved_queries(
             user_names.get(q.owner_id) if q.owner_id is not None else None
         )
         read.origin, read.origin_label = _query_origin(q)
-        count = scope_counts.get(q.id, 0)
-        read.active_scope_count = count
-        read.has_active_scope = count > 0
+        read.source_name = q.left_datasource or (
+            "AI Generated" if q.ai_generated else None
+        )
+        outgoing = outgoing_counts.get(q.id, 0)
+        incoming = incoming_counts.get(q.id, 0)
+        read.outgoing_scope_count = outgoing
+        read.has_outgoing_scope = outgoing > 0
+        read.incoming_scope_count = incoming
+        read.has_incoming_scope = incoming > 0
+        # Backward-compat aggregate.
+        read.active_scope_count = outgoing + incoming
+        read.has_active_scope = read.active_scope_count > 0
         results.append(read)
     return results
 

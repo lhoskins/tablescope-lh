@@ -49,6 +49,10 @@ router = APIRouter(prefix="/ai", tags=["AI"])
 
 TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
+# Bounded window of prior conversation turns forwarded to the AI server so
+# follow-up questions resolve against recent context without unbounded prompts.
+CONVERSATION_HISTORY_LIMIT = 20
+
 
 # ---------------------------------------------------------------------------
 # Request/Response schemas for the proxy
@@ -271,13 +275,20 @@ async def _check_project_access(
 
 
 def _detect_datasource(sql: str, allowed_tables: list[str]) -> str | None:
-    """Find which datasource view_name is referenced in the generated SQL."""
+    """Find which datasource view_name is referenced in the generated SQL.
+
+    An AI-generated table must never be left with a blank source: a blank
+    ``left_datasource`` makes the All Tables row show no Source and causes a
+    "no datasource associated" error when a query is built from it. When no
+    referenced table can be matched we fall back to the first allowed table so
+    the query still binds to a real, executable datasource.
+    """
     sql_upper = sql.upper()
     for table in allowed_tables:
         # Check for table name in FROM/JOIN clauses (with or without quotes)
         if table.upper() in sql_upper or f'"{table}"'.upper() in sql_upper:
             return table
-    return allowed_tables[0] if len(allowed_tables) == 1 else None
+    return allowed_tables[0] if allowed_tables else None
 
 
 async def _build_source_catalog(
@@ -435,6 +446,7 @@ async def ask(
         "scope": req.scope,
         "include_query_history": req.include_query_history,
         "include_dashboard_context": req.include_dashboard_context,
+        "history": [],
     }
     return await _forward_to_ai("/ai/ask", payload)
 
@@ -1552,6 +1564,35 @@ async def ai_save_query(
     }
 
 
+# Leading intent verb the user may type in the "Generate with AI" box, e.g.
+# "generate table supplier performance" or "build query top vendors". Both the
+# table and query phrasings must reach the SAME read-only query-generation flow;
+# stripping the verb also stops the model from reading "table" as a DDL/CREATE
+# request (which the SQL validator rejects — the source of the earlier
+# "authorization error" on `generate table …`).
+_GENERATION_INTENT_PATTERN = re.compile(
+    r"^\s*(?:please\s+)?(?:generate|create|build|make)\s+(table|query)\b[:\s-]*",
+    re.IGNORECASE,
+)
+
+
+def normalize_ai_generation_intent(prompt: str) -> tuple[str, str]:
+    """Normalize an AI generation prompt into ``(intent, cleaned_prompt)``.
+
+    ``intent`` is ``"table"`` or ``"query"`` (defaults to ``"query"``). Both
+    intents use the same authorized, read-only query-generation path — the only
+    difference is a hint appended to the prompt. The recognised leading verb is
+    stripped so the remaining text describes the desired data, not a DDL action.
+    """
+    text = prompt or ""
+    match = _GENERATION_INTENT_PATTERN.match(text)
+    if not match:
+        return "query", text.strip()
+    intent = match.group(1).lower()
+    remainder = text[match.end():].strip()
+    return intent, remainder or text.strip()
+
+
 @router.post("/actions/generate-and-save-query")
 async def ai_generate_and_save_query(
     req: AIGenerateAndSaveQueryRequest,
@@ -1566,6 +1607,11 @@ async def ai_generate_and_save_query(
     existing query is updated in place instead of creating a new one.
     """
     project = await _check_project_access(session, context, req.project_id)
+
+    # Normalize "generate/create/build table|query …" so both phrasings hit this
+    # same authorized flow and the model treats the request as a read-only query
+    # rather than a table (DDL) creation.
+    gen_intent, base_prompt = normalize_ai_generation_intent(req.prompt)
 
     # Resolve allowed tables from project datasources if not provided
     allowed_tables = req.allowed_tables
@@ -1616,15 +1662,23 @@ async def ai_generate_and_save_query(
             )
 
     # Step 1: Call AI server to generate SQL
-    prompt_text = req.prompt
+    prompt_text = base_prompt
     if existing_query and existing_query.sql_text:
         # Include the existing SQL so the AI can modify it
         prompt_text = (
-            f"{req.prompt}\n\n"
+            f"{base_prompt}\n\n"
             f"Here is the current SQL for the query \"{existing_query.name}\":\n"
             f"{existing_query.sql_text}\n\n"
             f"Please modify this SQL according to the request above. "
             f"Return ONLY the modified SQL."
+        )
+    elif gen_intent == "table":
+        # A "generate table" request still resolves to a single read-only
+        # SELECT that materializes the table — never CREATE/DDL.
+        prompt_text = (
+            f"{base_prompt}\n\n"
+            "Return a single read-only SELECT query that produces this table. "
+            "Do not emit CREATE TABLE, DDL, or any write statement."
         )
 
     source_catalog = await _build_source_catalog(
@@ -1702,8 +1756,9 @@ async def ai_generate_and_save_query(
             "sql_text": existing_query.sql_text,
         }
 
-    # Step 2: Derive a name if not provided
-    name = req.name or _shorten_ai_name(req.prompt)
+    # Step 2: Derive a name if not provided (from the cleaned prompt, so the
+    # "generate table"/"generate query" verb isn't baked into the table name).
+    name = req.name or _shorten_ai_name(base_prompt)
 
     # Step 3: Save as new query
     query = SavedQuery(
@@ -2869,6 +2924,15 @@ async def add_conversation_message(
         session, context, conversation_id, with_messages=True
     )
 
+    # Prior turns (oldest→newest) so the AI can resolve follow-up references
+    # like "explain more" or "the second option" without the user restating
+    # context. Captured before the new user message is appended.
+    history = [
+        {"role": m.role, "content": m.content}
+        for m in convo.messages[-CONVERSATION_HISTORY_LIMIT:]
+        if (m.content or "").strip()
+    ]
+
     # Resolve the project used to scope the AI answer.
     project_id = req.project_id or convo.project_id
     if project_id is not None:
@@ -2903,6 +2967,7 @@ async def add_conversation_message(
                 "scope": "project",
                 "include_query_history": True,
                 "include_dashboard_context": True,
+                "history": history,
             }
             result = await _forward_to_ai("/ai/ask", payload)
             answer = str(result.get("answer") or "").strip() or (
@@ -2968,16 +3033,19 @@ async def branch_conversation(
             raise HTTPException(
                 status_code=400, detail="Cannot branch an empty conversation"
             )
-        branch_point = source.messages[-1]
+        branch_point: AiConversationMessage = source.messages[-1]
     else:
-        branch_point = next(
-            (m for m in source.messages if m.id == req.message_id), None
-        )
-        if branch_point is None:
+        found: AiConversationMessage | None = None
+        for _m in source.messages:
+            if _m.id == req.message_id:
+                found = _m
+                break
+        if found is None:
             raise HTTPException(
                 status_code=404,
                 detail="Branch message not found in conversation",
             )
+        branch_point = found
 
     title = (req.title or "").strip() or f"Branch of {source.title}"
     branch = AiConversation(

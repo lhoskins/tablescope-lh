@@ -184,6 +184,11 @@ class TenantProvisioningRequest(TimestampMixin, Base):
     tenant_admin_email: Mapped[str] = mapped_column(String(320), nullable=False)
     tenant_admin_first_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     tenant_admin_last_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    tenant_admin_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    company_street: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    company_city: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    company_state: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    company_postal_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     region: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # State machine.

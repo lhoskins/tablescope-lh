@@ -38,6 +38,54 @@ export class ApiError extends Error {
 }
 
 const TOKEN_KEY = "tablescope.token";
+// Mirrors USER_META_KEY in lib/auth.ts; duplicated here to avoid an import
+// cycle (auth.ts imports from this module).
+const USER_META_KEY = "tablescope.user_meta";
+
+// Error codes that mean the session/token is no longer valid (as opposed to a
+// legitimate authorization failure like project membership or MFA_REQUIRED).
+const AUTH_EXPIRY_CODES = new Set([
+  "SESSION_EXPIRED",
+  "TOKEN_EXPIRED",
+  "INVALID_TOKEN",
+]);
+
+let redirectingToLogin = false;
+
+function onAuthPage(pathname: string): boolean {
+  return /(^|\/)(login|set-password|forgot-password)(\/|$)/.test(pathname);
+}
+
+/**
+ * Clear stale auth state and redirect to login, preserving the intended path
+ * via `?next=`. Called when a protected request comes back unauthenticated so
+ * an expired/idle session lands on login instead of rendering blank data.
+ */
+function redirectToLogin(): void {
+  if (typeof window === "undefined" || redirectingToLogin) return;
+  let slug: string | null = null;
+  try {
+    const raw = window.localStorage.getItem(USER_META_KEY);
+    if (raw) slug = (JSON.parse(raw) as { tenant_slug?: string | null })?.tenant_slug ?? null;
+  } catch {
+    /* ignore */
+  }
+  window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(USER_META_KEY);
+  const { pathname, search } = window.location;
+  if (onAuthPage(pathname)) return;
+  redirectingToLogin = true;
+  const next = encodeURIComponent(pathname + search);
+  const base = slug ? `/${slug}/login` : "/login";
+  window.location.href = `${base}?next=${next}`;
+}
+
+/** Whether an HTTP status + error code represents an expired/invalid session. */
+function isAuthExpiry(status: number, code: string | null): boolean {
+  if (status === 401) return true;
+  if (status === 403 && code) return AUTH_EXPIRY_CODES.has(code);
+  return false;
+}
 
 function readToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -78,8 +126,10 @@ async function request<T>(
 
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
+    let code: string | null = null;
     try {
       const payload = await response.json();
+      code = payload?.code ?? payload?.error ?? null;
       if (payload?.detail) {
         if (typeof payload.detail === "string") {
           detail = payload.detail;
@@ -88,10 +138,17 @@ async function request<T>(
           detail = payload.detail.map((e: { msg?: string }) => e.msg ?? JSON.stringify(e)).join("; ");
         } else {
           detail = JSON.stringify(payload.detail);
+          code = code ?? (payload.detail as { code?: string })?.code ?? null;
         }
       }
     } catch {
       /* ignore */
+    }
+    // An expired/idle session must land on login rather than surfacing as
+    // empty data. Legitimate 403s (project membership, MFA_REQUIRED) are left
+    // for callers to handle.
+    if (isAuthExpiry(response.status, code)) {
+      redirectToLogin();
     }
     throw new ApiError(detail, response.status);
   }
@@ -129,11 +186,16 @@ async function uploadFile<T>(
   });
   if (!response.ok) {
     let detail = `Upload failed: ${response.status}`;
+    let code: string | null = null;
     try {
       const payload = await response.json();
+      code = payload?.code ?? payload?.error ?? null;
       if (payload?.detail) detail = payload.detail;
     } catch {
       /* ignore */
+    }
+    if (isAuthExpiry(response.status, code)) {
+      redirectToLogin();
     }
     throw new Error(detail);
   }
@@ -213,8 +275,10 @@ export const apiClient = {
     }).then(async (response) => {
       if (!response.ok) {
         let detail = `Request failed: ${response.status}`;
+        let code: string | null = null;
         try {
           const payload = await response.json();
+          code = payload?.code ?? payload?.error ?? null;
           if (payload?.detail) {
             detail =
               typeof payload.detail === "string"
@@ -223,6 +287,9 @@ export const apiClient = {
           }
         } catch {
           /* ignore */
+        }
+        if (isAuthExpiry(response.status, code)) {
+          redirectToLogin();
         }
         throw new Error(detail);
       }

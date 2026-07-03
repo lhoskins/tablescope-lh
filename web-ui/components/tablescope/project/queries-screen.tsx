@@ -312,7 +312,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
                   <th className="px-4 py-2 font-medium">Source</th>
                   <th className="px-4 py-2 font-medium">Origin</th>
                   <th className="px-4 py-2 font-medium">Owner</th>
-                  <th className="px-4 py-2 font-medium">Avg time</th>
                   <th className="px-4 py-2 font-medium">Updated</th>
                 </tr>
               </thead>
@@ -344,17 +343,17 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
                           >
                             {q.name}
                           </span>
-                          {q.has_active_scope && (
+                          {q.has_outgoing_scope && (
                             <IconTarget
                               size={14}
                               className="shrink-0 text-brand-500"
-                              title="This table has an active scope assigned"
+                              title="This table has an active outgoing scope relationship."
                             />
                           )}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-ink-secondary">
-                        {q.left_datasource ?? "—"}
+                        {q.source_name ?? q.left_datasource ?? "—"}
                       </td>
                       <td className="px-4 py-2.5">
                         <Badge tone={q.ai_generated ? "ai" : "outline"}>
@@ -363,9 +362,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
                       </td>
                       <td className="px-4 py-2.5 text-ink-secondary">
                         {q.owner_name ?? "—"}
-                      </td>
-                      <td className="px-4 py-2.5 text-ink-secondary">
-                        {runtimeLabel(q.avg_runtime_ms)}
                       </td>
                       <td className="px-4 py-2.5 text-ink-tertiary">
                         {timeAgo(q.updated_at)}

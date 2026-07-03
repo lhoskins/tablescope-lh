@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.models.billing import SubscriptionTierCatalog
 from app.schemas.billing import (
     CheckoutSessionRequest,
     CheckoutSessionResponse,
+    TenantSlugAvailabilityResponse,
     TierCard,
 )
 from app.services import billing_audit as audit
@@ -59,6 +60,24 @@ async def get_catalog(session: AsyncSession = Depends(get_db)) -> list[TierCard]
         )
     ).all()
     return [_to_card(r) for r in rows]
+
+
+@router.get(
+    "/tenant-slug-availability",
+    response_model=TenantSlugAvailabilityResponse,
+)
+async def tenant_slug_availability(
+    slug: str = Query(..., min_length=1, max_length=64),
+    session: AsyncSession = Depends(get_db),
+) -> TenantSlugAvailabilityResponse:
+    """Public check for whether a workspace slug is available to claim."""
+    normalized = slug.strip().lower()
+    available, reason = await CheckoutService(session).check_slug_availability(
+        normalized
+    )
+    return TenantSlugAvailabilityResponse(
+        slug=normalized, available=available, reason=reason
+    )
 
 
 @router.post("/checkout/session", response_model=CheckoutSessionResponse)

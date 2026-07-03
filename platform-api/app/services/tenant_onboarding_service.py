@@ -370,6 +370,14 @@ class TenantOnboardingService:
     async def _ensure_default_project(
         self, req: TenantProvisioningRequest, tenant: Tenant, owner: User
     ) -> None:
+        from app.config import get_settings
+
+        # Off by default: new tenants no longer get an auto-created default
+        # workspace — the admin creates their own after onboarding. Existing
+        # tenant projects are untouched regardless of this flag.
+        if not get_settings().create_default_project_on_tenant_provisioning:
+            return
+
         existing = await self._session.scalar(
             select(Project).where(Project.tenant_id == tenant.id)
         )

@@ -122,6 +122,11 @@ class Settings(BaseSettings):
     # so reloads / re-logins within the window do not re-prompt.
     mfa_session_ttl_minutes: int = 720
 
+    # Whether tenant provisioning auto-creates a default "<Tenant> Workspace"
+    # project for the new tenant admin. Defaults OFF — admins create their own
+    # workspace after onboarding. Existing projects are never removed.
+    create_default_project_on_tenant_provisioning: bool = False
+
     @property
     def twilio_configured(self) -> bool:
         return bool(

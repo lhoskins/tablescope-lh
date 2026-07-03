@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -164,7 +165,33 @@ SYSTEM_PROMPT = (
     "\n"
     "If the context is insufficient to answer, say specifically what additional "
     "project data or document would be needed. Do not invent facts.\n"
+    "\n"
+    "Use the prior messages in this conversation to interpret follow-up "
+    "questions. If the user says \"that\", \"it\", \"the second option\", "
+    "\"explain more\", or \"continue\", resolve the reference from the "
+    "conversation history above rather than asking them to restate it.\n"
 )
+
+
+# Cap history sent to the model so long conversations stay within budget.
+_MAX_HISTORY_TURNS = 20
+
+
+def _format_conversation_history(history: list[dict[str, Any]]) -> str:
+    """Render prior conversation turns into a prompt block (oldest→newest)."""
+    if not history:
+        return ""
+    lines: list[str] = []
+    for msg in history[-_MAX_HISTORY_TURNS:]:
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            continue
+        role = str(msg.get("role") or "user").lower()
+        speaker = "User" if role == "user" else "Assistant"
+        lines.append(f"{speaker}: {content}")
+    if not lines:
+        return ""
+    return "Conversation so far:\n" + "\n".join(lines) + "\n\n"
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -193,7 +220,8 @@ async def ask(req: AskRequest) -> AskResponse:
 
     # 3. Send ONLY allowed context to LLM
     context_text = context_builder.context_to_prompt_text(ctx)
-    prompt = f"{context_text}\n\nUser question: {req.question}"
+    history_text = _format_conversation_history(req.history)
+    prompt = f"{context_text}\n\n{history_text}User question: {req.question}"
 
     answer = await llm_client.generate(
         prompt=prompt,
