@@ -18,6 +18,7 @@ interface CurrentUserResponse {
   tenant_name: string;
   tenant_slug: string | null;
   avatar_url: string | null;
+  company_logo_url: string | null;
 }
 
 interface ProjectSummaryResponse {
@@ -45,8 +46,8 @@ const ROLE_LABEL: Record<string, string> = {
   viewer: "Member",
 };
 
-/** Resolve a relative avatar URL to an absolute, browser-fetchable URL. */
-function absoluteAvatarUrl(url: string | null): string | null {
+/** Resolve a relative served URL to an absolute, browser-fetchable URL. */
+function absoluteUrl(url: string | null): string | null {
   if (!url) return null;
   if (/^https?:\/\//.test(url)) return url;
   return `${getApiBaseUrl()}${url}`;
@@ -74,12 +75,13 @@ export function useCurrentUser() {
           tenantName: me.tenant_name,
           initials: initials(name),
           id: me.user_id,
-          avatarUrl: absoluteAvatarUrl(me.avatar_url),
+          avatarUrl: absoluteUrl(me.avatar_url),
         },
         tenant: {
           name: me.tenant_name,
           slug: me.tenant_slug ?? "",
           initials: initials(me.tenant_name),
+          logoUrl: absoluteUrl(me.company_logo_url),
         },
       };
     },

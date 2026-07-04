@@ -25,8 +25,15 @@ class TenantRead(BaseModel):
     name: str
     external_id: str | None
     is_active: bool
+    logo_url: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class CompanyLogoRead(BaseModel):
+    """The calling tenant's company logo URL (or null when unset)."""
+
+    logo_url: str | None = None
 
 
 class TenantDeleteResponse(BaseModel):

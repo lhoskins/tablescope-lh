@@ -6,6 +6,7 @@ import type {
   TenantSummary,
 } from "@/lib/ui/types";
 import { MfaGate } from "@/components/auth/mfa-gate";
+import { CompanyLogo } from "./company-logo";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -54,7 +55,15 @@ export function AppShell({
         counts={counts}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar left={topBarLeft} right={topBarRight} />
+        <TopBar
+          left={topBarLeft}
+          right={
+            <>
+              {topBarRight}
+              <CompanyLogo url={tenant.logoUrl} name={tenant.name} />
+            </>
+          }
+        />
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <main className="flex-1 overflow-y-auto">
             <div

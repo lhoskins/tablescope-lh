@@ -41,6 +41,7 @@ export type NavKey =
   | "admin-data-planes"
   | "admin-allowed-domains"
   | "admin-data-source-assignments"
+  | "admin-branding"
   // Project-mode nav
   | "overview"
   | "project-data-sources"
@@ -58,6 +59,8 @@ export interface TenantSummary {
   name: string;
   slug: string;
   initials: string;
+  /** Admin-uploaded company logo URL (absolute), or null when unset. */
+  logoUrl?: string | null;
 }
 
 export interface CurrentUser {

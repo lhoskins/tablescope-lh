@@ -8,7 +8,15 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +37,7 @@ from app.schemas.tenant import (
     AllowedDomainRead,
     AllowedDomainsResponse,
     AllowedDomainsSettingsUpdate,
+    CompanyLogoRead,
     TenantCreate,
     TenantDeleteResponse,
     TenantRead,
@@ -40,6 +49,12 @@ from app.services.allowed_domains import (
     enforce_allowed_domain,
     is_valid_domain,
     normalize_domain,
+)
+from app.services.company_logo_storage import (
+    CompanyLogoValidationError,
+    read_company_logo,
+    store_company_logo,
+    validate_company_logo,
 )
 from app.services.customer_folders import CustomerFolderError, CustomerFolderService
 from app.services.email_service import EmailService
@@ -403,6 +418,90 @@ async def get_my_tenant(
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
     return TenantRead.model_validate(tenant)
+
+
+# ---------------------------------------------------------------------------
+# Company logo (tenant branding)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/current/logo", response_model=CompanyLogoRead)
+async def get_company_logo(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_membership),
+) -> CompanyLogoRead:
+    """Return the calling tenant's company logo URL (or null when unset).
+
+    Any authenticated member of the tenant may read it.
+    """
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return CompanyLogoRead(logo_url=tenant.logo_url)
+
+
+@router.post("/current/logo", response_model=CompanyLogoRead)
+async def upload_company_logo(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> CompanyLogoRead:
+    """Upload/replace the calling tenant's company logo (admins only).
+
+    The logo is always stored against the caller's own tenant, so an admin can
+    never overwrite another tenant's branding.
+    """
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    content = await file.read()
+    try:
+        ext = validate_company_logo(
+            content=content,
+            content_type=file.content_type,
+            filename=file.filename,
+        )
+    except CompanyLogoValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    file_id = store_company_logo(
+        tenant_id=tenant.id,
+        content=content,
+        ext=ext,
+    )
+    tenant.logo_file_id = file_id
+    # Cache-bust on every upload so the new logo shows immediately.
+    tenant.logo_url = f"/api/tenants/{tenant.id}/logo?v={file_id.split('.')[0]}"
+    await session.commit()
+    await session.refresh(tenant)
+
+    logger.info("Company logo uploaded for tenant %d", tenant.id)
+    return CompanyLogoRead(logo_url=tenant.logo_url)
+
+
+@router.get("/{tenant_id}/logo")
+async def get_company_logo_image(
+    tenant_id: int,
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Serve a tenant's company logo image by opaque URL (no path exposed)."""
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None or not tenant.logo_file_id:
+        raise HTTPException(status_code=404, detail="No logo")
+
+    result = read_company_logo(
+        tenant_id=tenant.id,
+        file_id=tenant.logo_file_id,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="No logo")
+    content, content_type = result
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 def _user_read_tenant(user: User) -> UserRead:

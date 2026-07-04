@@ -57,6 +57,7 @@ async def get_current_user(
         tenant_name=tenant.name if tenant else "",
         tenant_slug=tenant.slug if tenant else None,
         avatar_url=user.avatar_url,
+        company_logo_url=tenant.logo_url if tenant else None,
     )
 
 

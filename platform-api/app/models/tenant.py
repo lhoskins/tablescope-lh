@@ -48,6 +48,11 @@ class Tenant(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Admin-uploaded company logo (tenant/customer branding shown in the top
+    # header). ``logo_url`` is the opaque served URL; ``logo_file_id`` locates
+    # the image on disk / in S3. Distinct from the static Tablescope product logo.
+    logo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    logo_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     allowed_domains: Mapped[list[TenantAllowedDomain]] = relationship(
         back_populates="tenant",

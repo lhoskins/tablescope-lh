@@ -12,6 +12,7 @@ import {
   IconBuildingBank,
   IconShieldLock,
   IconDatabaseShare,
+  IconPhoto,
   IconUserCircle,
   IconLogout,
   IconLayoutSidebarLeftCollapse,
@@ -186,6 +187,12 @@ export function Sidebar({
           label: "Data Source Assignments",
           href: "/admin/data-source-assignments",
           icon: IconDatabaseShare,
+        },
+        {
+          key: "admin-branding",
+          label: "Branding",
+          href: "/admin/branding",
+          icon: IconPhoto,
         },
       ]
     : [];
