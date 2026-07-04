@@ -128,6 +128,55 @@ async def test_query_metadata_defaults_and_roundtrip(client, service_headers) ->
     }
 
 
+async def test_archive_lifecycle(client, service_headers) -> None:
+    project, headers = await _setup(client, service_headers)
+    pid = project["id"]
+
+    q = (
+        await client.post(
+            f"/api/projects/{pid}/queries",
+            json={"name": "Archive Me", "left_datasource": "inventory_db"},
+            headers=headers,
+        )
+    ).json()
+    qid = q["id"]
+
+    # Archive returns 200 (not 500) and flips the flag with a timestamp.
+    r = await client.post(
+        f"/api/projects/{pid}/queries/{qid}/archive", json={}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["is_archived"] is True
+    assert body["archived_at"] is not None
+
+    # Archived query is hidden from the normal list…
+    rows = (
+        await client.get(f"/api/projects/{pid}/queries", headers=headers)
+    ).json()
+    assert all(row["id"] != qid for row in rows)
+
+    # …but visible when archived are explicitly requested, and it persists.
+    rows = (
+        await client.get(
+            f"/api/projects/{pid}/queries?include_archived=true", headers=headers
+        )
+    ).json()
+    assert any(row["id"] == qid and row["is_archived"] for row in rows)
+
+    # Restore brings it back to the active list and clears archive metadata.
+    r = await client.post(
+        f"/api/projects/{pid}/queries/{qid}/restore", json={}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["is_archived"] is False
+    assert r.json()["archived_at"] is None
+    rows = (
+        await client.get(f"/api/projects/{pid}/queries", headers=headers)
+    ).json()
+    assert any(row["id"] == qid for row in rows)
+
+
 async def test_query_list_enriches_owner_origin_scope(
     client, service_headers
 ) -> None:

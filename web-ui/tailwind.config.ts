@@ -68,7 +68,7 @@ const config: Config = {
         rail: "272px",
       },
       height: {
-        topbar: "56px",
+        topbar: "64px",
       },
     },
   },

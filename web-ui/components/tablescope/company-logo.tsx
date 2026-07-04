@@ -30,7 +30,7 @@ export function CompanyLogo({
       src={url}
       alt={name ? `${name} logo` : "Company logo"}
       onError={() => setErrored(true)}
-      className="h-8 max-w-[160px] shrink-0 object-contain"
+      className="h-16 max-h-full max-w-[320px] shrink-0 object-contain"
     />
   );
 }
