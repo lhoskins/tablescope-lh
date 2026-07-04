@@ -14,6 +14,8 @@ import {
   IconDatabaseShare,
   IconUserCircle,
   IconLogout,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
 } from "@tabler/icons-react";
 import { signOut } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -32,6 +34,8 @@ import {
   type NavItem,
 } from "./nav";
 
+const COLLAPSE_STORAGE_KEY = "tablescope:sidebar-collapsed";
+
 export interface SidebarProps {
   mode: "home" | "project";
   activeNav: NavKey;
@@ -46,28 +50,36 @@ function NavRow({
   item,
   active,
   count,
+  collapsed,
 }: {
   item: NavItem;
   active: boolean;
   count?: number;
+  collapsed: boolean;
 }) {
   const Icon = item.icon;
   return (
     <Link
       href={item.href}
+      title={collapsed ? item.label : undefined}
+      aria-label={collapsed ? item.label : undefined}
       className={cn(
-        "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px]",
+        "relative flex items-center rounded-md text-[13px]",
+        collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2.5 py-1.5",
         active
           ? "bg-brand-50 font-semibold text-brand-500"
           : "text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
       )}
     >
-      <Icon size={15} stroke={1.8} className="shrink-0" />
-      <span className="flex-1 truncate">{item.label}</span>
-      {typeof count === "number" && count > 0 && (
+      <Icon size={collapsed ? 18 : 15} stroke={1.8} className="shrink-0" />
+      {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+      {!collapsed && typeof count === "number" && count > 0 && (
         <span className="rounded-full bg-brand-50 px-1.5 text-[11px] font-medium text-brand-700">
           {count}
         </span>
+      )}
+      {collapsed && typeof count === "number" && count > 0 && (
+        <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-brand-500" />
       )}
     </Link>
   );
@@ -77,24 +89,28 @@ function NavGroupBlock({
   group,
   activeNav,
   counts,
+  collapsed,
 }: {
   group: NavGroup;
   activeNav: NavKey;
   counts?: SidebarProps["counts"];
+  collapsed: boolean;
 }) {
   return (
     <div className="space-y-0.5">
-      {group.heading && (
+      {group.heading && !collapsed && (
         <div className="px-2.5 pb-1 pt-3 text-caption uppercase tracking-wide text-ink-tertiary">
           {group.heading}
         </div>
       )}
+      {group.heading && collapsed && <div className="pt-3" />}
       {group.items.map((item) => (
         <NavRow
           key={item.key}
           item={item}
           active={item.key === activeNav}
           count={item.countKey ? counts?.[item.countKey] : undefined}
+          collapsed={collapsed}
         />
       ))}
     </div>
@@ -110,6 +126,30 @@ export function Sidebar({
   otherProjects = [],
   counts,
 }: SidebarProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      setCollapsed(
+        window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === "true",
+      );
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((v) => {
+      const next = !v;
+      try {
+        window.localStorage.setItem(COLLAPSE_STORAGE_KEY, String(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   const groups =
     mode === "project" && project
       ? projectNavGroups(project.id)
@@ -151,48 +191,107 @@ export function Sidebar({
     : [];
 
   return (
-    <aside className="flex w-sidebar shrink-0 flex-col border-r border-line-tertiary bg-bg-primary">
-      <Link
-        href="/"
-        className="flex items-center gap-2 px-4 py-3.5 transition-opacity hover:opacity-80"
-      >
-        <BrandMark />
-        <span className="text-h2 text-ink-primary">Tablescope</span>
-      </Link>
+    <aside
+      className={cn(
+        "flex shrink-0 flex-col border-r border-line-tertiary bg-bg-primary transition-[width] duration-200",
+        collapsed ? "w-14" : "w-sidebar",
+      )}
+    >
+      {collapsed ? (
+        <div className="flex flex-col items-center gap-1 px-2 py-3">
+          <Link
+            href="/"
+            title="Tablescope home"
+            className="transition-opacity hover:opacity-80"
+          >
+            <BrandMark />
+          </Link>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
+          >
+            <IconLayoutSidebarLeftExpand size={18} />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 px-4 py-3.5">
+          <Link
+            href="/"
+            className="flex min-w-0 flex-1 items-center gap-2 transition-opacity hover:opacity-80"
+          >
+            <BrandMark />
+            <span className="truncate text-h2 text-ink-primary">Tablescope</span>
+          </Link>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
+          >
+            <IconLayoutSidebarLeftCollapse size={18} />
+          </button>
+        </div>
+      )}
 
       {/* Selector pill */}
-      <div className="px-3 pb-2">
+      <div className={cn("pb-2", collapsed ? "px-2" : "px-3")}>
         {mode === "project" && project ? (
           <Link
             href={`/projects/${project.id}`}
-            className="flex items-center gap-2 rounded-md border border-line-secondary px-2.5 py-2 text-[13px] font-medium text-ink-primary hover:bg-bg-secondary"
+            title={collapsed ? project.name : undefined}
+            className={cn(
+              "flex items-center rounded-md border border-line-secondary text-[13px] font-medium text-ink-primary hover:bg-bg-secondary",
+              collapsed ? "justify-center px-0 py-2" : "gap-2 px-2.5 py-2",
+            )}
           >
             <span
               className="h-2.5 w-2.5 shrink-0 rounded-full"
               style={{ background: project.accent ?? accentFor(project.id) }}
             />
-            <span className="flex-1 truncate">{project.name}</span>
-            <IconChevronDown size={14} className="text-ink-tertiary" />
+            {!collapsed && (
+              <>
+                <span className="flex-1 truncate">{project.name}</span>
+                <IconChevronDown size={14} className="text-ink-tertiary" />
+              </>
+            )}
           </Link>
         ) : (
-          <div className="flex items-center gap-2 rounded-md border border-line-secondary px-2.5 py-2">
+          <div
+            className={cn(
+              "flex items-center rounded-md border border-line-secondary",
+              collapsed ? "justify-center px-0 py-2" : "gap-2 px-2.5 py-2",
+            )}
+            title={collapsed ? tenant.name : undefined}
+          >
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-brand-50 text-[10px] font-semibold text-brand-700">
               {tenant.initials}
             </span>
-            <span className="flex-1 truncate text-[13px] font-medium text-ink-primary">
-              {tenant.name}
-            </span>
+            {!collapsed && (
+              <span className="flex-1 truncate text-[13px] font-medium text-ink-primary">
+                {tenant.name}
+              </span>
+            )}
           </div>
         )}
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+      <nav
+        className={cn(
+          "flex-1 space-y-1 overflow-y-auto pb-4",
+          collapsed ? "px-2" : "px-3",
+        )}
+      >
         {groups.map((group, i) => (
           <NavGroupBlock
             key={group.heading ?? `g${i}`}
             group={group}
             activeNav={activeNav}
             counts={counts}
+            collapsed={collapsed}
           />
         ))}
 
@@ -200,44 +299,62 @@ export function Sidebar({
           <NavGroupBlock
             group={{ heading: "Administration", items: adminItems }}
             activeNav={activeNav}
+            collapsed={collapsed}
           />
         )}
 
         {mode === "project" && otherProjects.length > 0 && (
           <div className="space-y-0.5">
-            <div className="px-2.5 pb-1 pt-3 text-caption uppercase tracking-wide text-ink-tertiary">
-              Other Projects
-            </div>
+            {!collapsed && (
+              <div className="px-2.5 pb-1 pt-3 text-caption uppercase tracking-wide text-ink-tertiary">
+                Other Projects
+              </div>
+            )}
+            {collapsed && <div className="pt-3" />}
             {otherProjects.map((p) => (
               <Link
                 key={p.id}
                 href={`/projects/${p.id}`}
-                className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
+                title={collapsed ? p.name : undefined}
+                className={cn(
+                  "flex items-center rounded-md text-[13px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary",
+                  collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2.5 py-1.5",
+                )}
               >
                 <span
                   className="h-2 w-2 shrink-0 rounded-full"
                   style={{ background: p.accent ?? accentFor(p.id) }}
                 />
-                <span className="flex-1 truncate">{p.name}</span>
+                {!collapsed && <span className="flex-1 truncate">{p.name}</span>}
               </Link>
             ))}
             <Link
               href="/projects?new=1"
-              className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
+              title={collapsed ? "New project" : undefined}
+              className={cn(
+                "flex items-center rounded-md text-[13px] text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary",
+                collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2.5 py-1.5",
+              )}
             >
-              <IconPlus size={15} stroke={1.8} />
-              <span>New project</span>
+              <IconPlus size={15} stroke={1.8} className="shrink-0" />
+              {!collapsed && <span>New project</span>}
             </Link>
           </div>
         )}
       </nav>
 
-      <AccountMenu user={user} />
+      <AccountMenu user={user} collapsed={collapsed} />
     </aside>
   );
 }
 
-function AccountMenu({ user }: { user: CurrentUser }) {
+function AccountMenu({
+  user,
+  collapsed,
+}: {
+  user: CurrentUser;
+  collapsed: boolean;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -266,37 +383,59 @@ function AccountMenu({ user }: { user: CurrentUser }) {
   return (
     <div
       ref={containerRef}
-      className="relative flex items-center gap-2.5 border-t border-line-tertiary px-3 py-3"
+      className={cn(
+        "relative flex items-center border-t border-line-tertiary py-3",
+        collapsed ? "flex-col gap-1 px-2" : "gap-2.5 px-3",
+      )}
     >
       <AvatarUploader user={user} />
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-bg-secondary"
-      >
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-medium text-ink-primary">
-            {user.name}
+      {collapsed ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title={`${user.name} · account menu`}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
+        >
+          <IconChevronDown
+            size={14}
+            className={cn("transition-transform", open && "rotate-180")}
+          />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-bg-secondary"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium text-ink-primary">
+              {user.name}
+            </span>
+            <span className="block truncate text-caption text-ink-tertiary">
+              {user.role} · {user.tenantName}
+            </span>
           </span>
-          <span className="block truncate text-caption text-ink-tertiary">
-            {user.role} · {user.tenantName}
-          </span>
-        </span>
-        <IconChevronDown
-          size={14}
-          className={cn(
-            "shrink-0 text-ink-tertiary transition-transform",
-            open && "rotate-180",
-          )}
-        />
-      </button>
+          <IconChevronDown
+            size={14}
+            className={cn(
+              "shrink-0 text-ink-tertiary transition-transform",
+              open && "rotate-180",
+            )}
+          />
+        </button>
+      )}
 
       {open && (
         <div
           role="menu"
-          className="absolute bottom-[calc(100%-4px)] left-3 right-3 z-20 overflow-hidden rounded-md border border-line-secondary bg-bg-primary py-1 shadow-lg"
+          className={cn(
+            "absolute bottom-[calc(100%-4px)] z-20 overflow-hidden rounded-md border border-line-secondary bg-bg-primary py-1 shadow-lg",
+            collapsed ? "left-2 w-48" : "left-3 right-3",
+          )}
         >
           <button
             type="button"

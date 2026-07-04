@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   IconArrowUp,
   IconUsers,
+  IconTable,
+  IconDatabase,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { MembersDialog } from "@/components/tablescope/project/members-dialog";
@@ -340,21 +342,15 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           />
         </div>
 
-        <Card className="overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setOpenTables((v) => !v)}
-            aria-expanded={openTables}
-            className="flex w-full items-center gap-2 border-b border-line-tertiary px-4 py-3 text-left hover:bg-bg-secondary"
-          >
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center text-body font-semibold text-ink-tertiary">
-              {openTables ? "−" : "+"}
-            </span>
-            <span className="text-h3 text-ink-primary">
-              Tables ({queryRows.length})
-            </span>
-          </button>
-          {!openTables ? null : sortedQueries.length === 0 ? (
+        <OverviewAccordionSection
+          type="tables"
+          title="Tables"
+          subtitle="Saved and AI-generated tables in this project"
+          count={queryRows.length}
+          open={openTables}
+          onToggle={() => setOpenTables((v) => !v)}
+        >
+          {sortedQueries.length === 0 ? (
             <div className="px-4 py-10 text-center text-small text-ink-tertiary">
               No tables yet.
             </div>
@@ -382,23 +378,17 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
               </table>
             </div>
           )}
-        </Card>
+        </OverviewAccordionSection>
 
-        <Card className="overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setOpenSources((v) => !v)}
-            aria-expanded={openSources}
-            className="flex w-full items-center gap-2 border-b border-line-tertiary px-4 py-3 text-left hover:bg-bg-secondary"
-          >
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center text-body font-semibold text-ink-tertiary">
-              {openSources ? "−" : "+"}
-            </span>
-            <span className="text-h3 text-ink-primary">
-              Data Sources ({sourceRows.length})
-            </span>
-          </button>
-          {!openSources ? null : sourceRows.length === 0 ? (
+        <OverviewAccordionSection
+          type="sources"
+          title="Data Sources"
+          subtitle="Connected databases, files, and SaaS objects"
+          count={sourceRows.length}
+          open={openSources}
+          onToggle={() => setOpenSources((v) => !v)}
+        >
+          {sourceRows.length === 0 ? (
             <div className="px-4 py-10 text-center text-small text-ink-tertiary">
               No data sources connected yet.
             </div>
@@ -456,7 +446,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
               </div>
             </>
           )}
-        </Card>
+        </OverviewAccordionSection>
       </div>
       )}
       <MembersDialog
@@ -505,4 +495,92 @@ function Th({
   className?: string;
 }) {
   return <th className={cn("px-4 py-2 font-medium", className)}>{children}</th>;
+}
+
+const OVERVIEW_SECTION_STYLES = {
+  tables: {
+    background: "#F8FBFF",
+    border: "#D7E8FF",
+    accent: "#1E6FD9",
+    Icon: IconTable,
+  },
+  sources: {
+    background: "#F7FFFB",
+    border: "#D4F0E2",
+    accent: "#2EA66F",
+    Icon: IconDatabase,
+  },
+} as const;
+
+function OverviewAccordionSection({
+  type,
+  title,
+  subtitle,
+  count,
+  open,
+  onToggle,
+  children,
+}: {
+  type: "tables" | "sources";
+  title: string;
+  subtitle: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const style = OVERVIEW_SECTION_STYLES[type];
+  const Icon = style.Icon;
+  return (
+    <div
+      className="overflow-hidden rounded-xl border"
+      style={{ background: style.background, borderColor: style.border }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+      >
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+          style={{ background: `${style.accent}1A`, color: style.accent }}
+        >
+          <Icon size={18} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span
+              className="text-h3 font-semibold"
+              style={{ color: style.accent }}
+            >
+              {title}
+            </span>
+            <span
+              className="rounded-full px-2 py-0.5 text-caption font-medium tabular-nums"
+              style={{ background: `${style.accent}1A`, color: style.accent }}
+            >
+              {count}
+            </span>
+          </span>
+          <span className="block text-small text-ink-tertiary">{subtitle}</span>
+        </span>
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-body font-semibold"
+          style={{ borderColor: style.border, color: style.accent }}
+          aria-hidden
+        >
+          {open ? "−" : "+"}
+        </span>
+      </button>
+      {open && (
+        <div
+          className="border-t bg-bg-primary"
+          style={{ borderColor: style.border }}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
 }

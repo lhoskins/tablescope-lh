@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { IconSparkles, IconSearch, IconTable, IconTarget } from "@tabler/icons-react";
+import { IconSparkles, IconSearch, IconTarget, IconPlus } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import {
   ContextPanel,
@@ -161,8 +161,8 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       activeNav="project-queries"
       breadcrumbLabel="Tables"
       actions={
-        <Button variant="secondary" onClick={() => setShowAddTable(true)}>
-          <IconTable size={14} />
+        <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
+          <IconPlus size={15} />
           New Table
         </Button>
       }
