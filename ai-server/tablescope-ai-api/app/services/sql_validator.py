@@ -21,6 +21,13 @@ WRITE_KEYWORDS = {
 
 SELECT_STAR_PATTERN = re.compile(r"\bSELECT\s+\*", re.IGNORECASE)
 
+# Strip leading SQL comments so a query prefixed with a ``-- ...`` or
+# ``/* ... */`` note still passes the "starts with SELECT/WITH" guard.
+_LEADING_COMMENT_RE = re.compile(
+    r"^(?:\s*(?:--[^\n]*\n|/\*.*?\*/))+", re.DOTALL
+)
+_STATEMENT_START_RE = re.compile(r"^(?:SELECT|WITH)\b", re.IGNORECASE)
+
 
 class SQLValidationError(Exception):
     def __init__(self, reason: str, violations: list[str]):
@@ -40,7 +47,15 @@ def validate_sql(
     unauthorized data sources.
     """
     violations: list[str] = []
-    sql_upper = sql.upper()
+
+    # Must be a single read-only statement — reject prose or non-SELECT text
+    # before it can reach Teiid (e.g. "To calculate the defect rate ...").
+    body = _LEADING_COMMENT_RE.sub("", sql.strip()).lstrip()
+    if not _STATEMENT_START_RE.match(body):
+        violations.append(
+            "Query must be a single read-only statement starting with "
+            "SELECT or WITH"
+        )
 
     # Check for write operations
     for keyword in WRITE_KEYWORDS:

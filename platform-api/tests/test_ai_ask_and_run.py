@@ -14,7 +14,12 @@ from fastapi import HTTPException
 
 from app.auth.jwt import create_access_token
 from app.routes import ai_proxy
-from app.routes.ai_proxy import _apply_row_limit, _suggest_visualization
+from app.routes.ai_proxy import (
+    _ai_generation_error,
+    _apply_row_limit,
+    _is_read_only_select,
+    _suggest_visualization,
+)
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
 
@@ -171,7 +176,9 @@ async def test_ask_and_run_generation_error_is_structured(
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "generation_error"
-    assert "unreachable" in body["error"]
+    # Friendly user-facing message; raw detail only in expandable details.
+    assert body["error"] == "We could not safely build a query for this question."
+    assert "unreachable" in body["errorDetails"]["validationError"]
     assert body["sql"] == ""
 
 
@@ -198,7 +205,102 @@ async def test_ask_and_run_execution_error_reveals_sql(
     body = r.json()
     assert body["status"] == "execution_error"
     assert body["sql"] == "SELECT * FROM broken"
-    assert "bad column" in body["error"]
+    assert body["error"] == (
+        "We could not run this query against the project's data."
+    )
+    assert "bad column" in body["errorDetails"]["executionError"]
+    assert body["errorDetails"]["sql"] == "SELECT * FROM broken"
+
+
+async def test_ask_and_run_blocks_prose_before_execution(
+    client, service_headers, monkeypatch
+):
+    """Prose returned as SQL must never reach Teiid — return a clean error."""
+    _, _, project, headers = await _setup(client, service_headers, "askprose")
+
+    async def fake_generate(session, context, project_id, question):
+        return {
+            "sql": "To calculate the defect rate we group by supplier.",
+            "explanation": "",
+        }
+
+    executed: list[str] = []
+
+    async def fake_execute(session, context, project_id, sql):
+        executed.append(sql)
+        return {"columns": [], "rows": []}
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "x?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "generation_error"
+    assert executed == []  # prose was never executed
+    assert body["error"] == "We could not safely build a query for this question."
+
+
+async def test_ask_and_run_clarification_surfaces_matched_sources(
+    client, service_headers, monkeypatch
+):
+    """AI-server 422 clarification maps to a friendly message + matched sources."""
+    _, _, project, headers = await _setup(client, service_headers, "askclar")
+
+    async def fake_generate(session, context, project_id, question):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "needs_clarification",
+                "message": (
+                    "Could not match part of your request to an authorized "
+                    "project source."
+                ),
+                "reason": "Unauthorized table reference: Sales",
+                "suggested_sources": ["SUP_Suppliers_CSV", "LOG_Shipments_CSV"],
+            },
+        )
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "sales?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "generation_error"
+    assert "authorized project source" in body["error"]
+    assert body["errorDetails"]["matchedSources"] == [
+        "SUP_Suppliers_CSV",
+        "LOG_Shipments_CSV",
+    ]
+    assert "Sales" in body["errorDetails"]["validationError"]
+
+
+def test_is_read_only_select_accepts_select_with_and_comments():
+    assert _is_read_only_select("SELECT a FROM t")
+    assert _is_read_only_select("  with cte as (select 1) select * from cte")
+    assert _is_read_only_select("-- note\nSELECT a FROM t")
+
+
+def test_is_read_only_select_rejects_prose_and_writes():
+    assert not _is_read_only_select("To calculate the rate, SELECT a FROM t")
+    assert not _is_read_only_select("DELETE FROM t")
+    assert not _is_read_only_select("")
+
+
+def test_ai_generation_error_from_string_detail():
+    friendly, details = _ai_generation_error(
+        HTTPException(status_code=503, detail="AI server unreachable")
+    )
+    assert friendly == "We could not safely build a query for this question."
+    assert details["validationError"] == "AI server unreachable"
 
 
 async def test_ask_and_run_rejects_other_tenant(client, service_headers):

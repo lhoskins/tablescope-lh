@@ -14,6 +14,13 @@ export type AiActionStatus =
   | "generation_error"
   | "execution_error";
 
+export interface AiErrorDetails {
+  matchedSources?: string[];
+  sql?: string;
+  validationError?: string;
+  executionError?: string;
+}
+
 export interface AskAndRunResult {
   question: string;
   sql: string;
@@ -24,6 +31,7 @@ export interface AskAndRunResult {
   dataSourcesUsed: string[];
   status: AiActionStatus;
   error: string | null;
+  errorDetails?: AiErrorDetails;
 }
 
 export interface GenerateQueryPreviewResult {
@@ -37,6 +45,7 @@ export interface GenerateQueryPreviewResult {
   explanation: string;
   status: AiActionStatus;
   error: string | null;
+  errorDetails?: AiErrorDetails;
 }
 
 export interface SaveQueryResult {

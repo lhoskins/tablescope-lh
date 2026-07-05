@@ -151,6 +151,50 @@ def _clean_sql(raw: str) -> str:
     return sql
 
 
+# A CTE starts with ``WITH <name> AS (`` — matching that (rather than a bare
+# ``WITH``) avoids treating the word "with" inside prose as the start of SQL.
+_WITH_CTE_RE = re.compile(r"\bWITH\s+\"?\w+\"?\s+AS\s*\(", re.IGNORECASE)
+_SELECT_RE = re.compile(r"\bSELECT\b", re.IGNORECASE)
+
+
+def _extract_sql(raw: str) -> str:
+    """Extract a single clean, read-only SQL statement from a model response.
+
+    Models sometimes wrap SQL in markdown, prefix it with prose ("To calculate
+    the defect rate ..."), or append an explanation after the query. Any of that
+    reaching Teiid raises a parser error (``TEIID31100 ... Encountered "To ..."``),
+    so this strips everything before the first ``SELECT``/``WITH`` statement and
+    everything after the first complete statement. Returns "" when the response
+    contains no SQL statement, so the caller can ask for clarification instead of
+    executing prose.
+    """
+    if not raw:
+        return ""
+    text = raw.strip()
+    # Prefer a fenced ```sql block when present; keep the fenced body only.
+    if "```" in text:
+        for seg in text.split("```"):
+            candidate = seg.strip()
+            if candidate.lower().startswith("sql"):
+                candidate = candidate[3:].strip()
+            if _SELECT_RE.search(candidate) or _WITH_CTE_RE.search(candidate):
+                text = candidate
+                break
+    starts = [
+        m.start()
+        for m in (_SELECT_RE.search(text), _WITH_CTE_RE.search(text))
+        if m
+    ]
+    if not starts:
+        return ""
+    text = text[min(starts):]
+    # Keep only the first statement — drop trailing statements/prose.
+    semicolon = text.find(";")
+    if semicolon != -1:
+        text = text[:semicolon]
+    return _fix_teiid_group_by(text.strip()).strip()
+
+
 SYSTEM_PROMPT = (
     "You are Tablescope AI, an assistant for the user's active project.\n"
     "Answer using ONLY the provided context package (project metadata/tables, "
@@ -640,17 +684,19 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
             },
         )
 
-    # Initial generation.
-    sql = _clean_sql(
-        await llm_client.generate_sql(
-            prompt=req.prompt,
-            context=context_text,
-            allowed_tables=allowed_tables,
-            source_catalog=catalog,
-        )
+    # Initial generation. Extract a single clean SQL statement so any prose the
+    # model wraps around the query never reaches Teiid.
+    raw = await llm_client.generate_sql(
+        prompt=req.prompt,
+        context=context_text,
+        allowed_tables=allowed_tables,
+        source_catalog=catalog,
     )
-    if _needs_clarification(sql):
+    if _needs_clarification(raw):
         raise _clarify("Model could not find a matching authorized source.")
+    sql = _extract_sql(raw)
+    if not sql:
+        raise _clarify("Model did not return a runnable SQL query.")
 
     repaired = False
     last_error = ""
@@ -670,19 +716,20 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
                 "Repairing generated SQL (attempt %d) | error=%s",
                 attempt + 1, e.reason,
             )
-            sql = _clean_sql(
-                await llm_client.repair_sql(
-                    prompt=req.prompt,
-                    context=context_text,
-                    allowed_tables=allowed_tables,
-                    failed_sql=sql,
-                    validation_error=e.reason,
-                    source_catalog=catalog,
-                )
+            raw = await llm_client.repair_sql(
+                prompt=req.prompt,
+                context=context_text,
+                allowed_tables=allowed_tables,
+                failed_sql=sql,
+                validation_error=e.reason,
+                source_catalog=catalog,
             )
             repaired = True
-            if _needs_clarification(sql):
+            if _needs_clarification(raw):
                 raise _clarify(last_error)
+            sql = _extract_sql(raw)
+            if not sql:
+                raise _clarify(last_error or "Model did not return a runnable SQL query.")
 
     selected = _selected_sources(req.prompt, sql, allowed_tables)
 

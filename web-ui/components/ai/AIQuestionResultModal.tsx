@@ -14,7 +14,11 @@ import {
   IconArrowRight,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
-import { aiActionsApi, type AskAndRunResult } from "@/lib/api/ai-actions";
+import {
+  aiActionsApi,
+  type AiErrorDetails,
+  type AskAndRunResult,
+} from "@/lib/api/ai-actions";
 import {
   PROGRESS_STEPS,
   ProgressSteps,
@@ -43,6 +47,7 @@ export function AIQuestionResultModal({
 }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [showSql, setShowSql] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const run = useMutation<AskAndRunResult>({
@@ -68,6 +73,7 @@ export function AIQuestionResultModal({
   useEffect(() => {
     if (!open) return;
     setShowSql(false);
+    setShowDetails(false);
     setSaved(false);
     setStepIndex(0);
     run.mutate();
@@ -119,33 +125,32 @@ export function AIQuestionResultModal({
           {run.isPending ? (
             <ProgressSteps activeIndex={stepIndex} />
           ) : failedToGenerate ? (
-            <div className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger-bg px-3 py-2.5 text-[13px] text-danger">
-              <IconAlertTriangle size={16} className="mt-0.5 shrink-0" />
-              <div>
-                <div className="font-medium">
-                  Couldn&apos;t build a query for this question.
-                </div>
-                <div className="mt-0.5 text-ink-secondary">
-                  {run.isError
-                    ? (run.error as Error).message
-                    : result?.error}
-                </div>
-              </div>
-            </div>
+            <ErrorBlock
+              title={
+                run.isError
+                  ? "We couldn't reach the AI service to answer this."
+                  : result?.error ||
+                    "We couldn't safely build a query for this question."
+              }
+              message={
+                run.isError ? (run.error as Error).message : undefined
+              }
+              details={result?.errorDetails}
+              showDetails={showDetails}
+              onToggleDetails={() => setShowDetails((v) => !v)}
+            />
           ) : (
             <>
               {executionError && (
-                <div className="mb-3 flex items-start gap-2 rounded-md border border-danger/30 bg-danger-bg px-3 py-2.5 text-[13px] text-danger">
-                  <IconAlertTriangle size={16} className="mt-0.5 shrink-0" />
-                  <div>
-                    <div className="font-medium">
-                      The query could not be executed.
-                    </div>
-                    <div className="mt-0.5 text-ink-secondary">
-                      {result?.error}
-                    </div>
-                  </div>
-                </div>
+                <ErrorBlock
+                  title={
+                    result?.error ||
+                    "We couldn't run this query against the project's data."
+                  }
+                  details={result?.errorDetails}
+                  showDetails={showDetails}
+                  onToggleDetails={() => setShowDetails((v) => !v)}
+                />
               )}
 
               {success && result?.explanation && (
@@ -241,6 +246,74 @@ export function AIQuestionResultModal({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ErrorBlock({
+  title,
+  message,
+  details,
+  showDetails,
+  onToggleDetails,
+}: {
+  title: string;
+  message?: string;
+  details?: AiErrorDetails;
+  showDetails: boolean;
+  onToggleDetails: () => void;
+}) {
+  const rows: [string, string][] = [];
+  if (details?.matchedSources?.length)
+    rows.push(["Matched sources", details.matchedSources.join(", ")]);
+  if (details?.validationError)
+    rows.push(["Validation error", details.validationError]);
+  if (details?.executionError)
+    rows.push(["Execution error", details.executionError]);
+  const hasTechnical = rows.length > 0 || Boolean(details?.sql);
+
+  return (
+    <div className="rounded-md border border-danger/30 bg-danger-bg px-3 py-2.5 text-[13px] text-danger">
+      <div className="flex items-start gap-2">
+        <IconAlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <div className="min-w-0">
+          <div className="font-medium">{title}</div>
+          {message && message !== title && (
+            <div className="mt-0.5 text-ink-secondary">{message}</div>
+          )}
+        </div>
+      </div>
+      {hasTechnical && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={onToggleDetails}
+            className="flex items-center gap-1 text-[12px] text-ink-tertiary hover:text-ink-secondary"
+          >
+            {showDetails ? (
+              <IconChevronDown size={14} />
+            ) : (
+              <IconChevronRight size={14} />
+            )}
+            {showDetails ? "Hide technical details" : "Show technical details"}
+          </button>
+          {showDetails && (
+            <div className="mt-1.5 space-y-1.5">
+              {rows.map(([label, value]) => (
+                <div key={label} className="text-[12px] text-ink-secondary">
+                  <span className="font-medium text-ink-primary">{label}:</span>{" "}
+                  {value}
+                </div>
+              ))}
+              {details?.sql && (
+                <pre className="overflow-auto rounded-md bg-bg-secondary p-2.5 text-[11px] leading-relaxed text-ink-primary">
+                  {details.sql}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

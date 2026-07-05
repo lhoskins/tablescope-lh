@@ -59,6 +59,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const [dashboardGen, setDashboardGen] = useState<{ open: boolean }>({
     open: false,
   });
+  const [customQuestion, setCustomQuestion] = useState("");
 
   const { data, isLoading, isError, refetch, isFetching } =
     useQuery<ProjectInsight>({
@@ -105,6 +106,13 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
 
   const askQuestion = (question: string, source = "project_overview_question") => {
     setAskModal({ open: true, question, source });
+  };
+
+  const submitCustomQuestion = () => {
+    const q = customQuestion.trim();
+    if (!q) return;
+    askQuestion(q, "project_custom_question");
+    setCustomQuestion("");
   };
 
   const openInAssistant = (question: string) => {
@@ -238,6 +246,31 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                     ))}
                   </ul>
                 )}
+                <div className="mt-3 flex items-center gap-2 border-t border-line-tertiary pt-3">
+                  <input
+                    type="text"
+                    value={customQuestion}
+                    onChange={(e) => setCustomQuestion(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        submitCustomQuestion();
+                      }
+                    }}
+                    placeholder="Ask a question about this project..."
+                    aria-label="Ask a question about this project"
+                    className="min-w-0 flex-1 rounded-md border border-line-tertiary bg-bg-primary px-2.5 py-1.5 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+                  />
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={!customQuestion.trim()}
+                    onClick={submitCustomQuestion}
+                  >
+                    <IconSparkles size={14} />
+                    Ask
+                  </Button>
+                </div>
               </Panel>
 
               <Panel

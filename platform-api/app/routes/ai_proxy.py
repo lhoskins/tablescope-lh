@@ -2136,6 +2136,49 @@ async def _execute_project_sql(
     )
 
 
+_READONLY_START_RE = re.compile(r"^(?:SELECT|WITH)\b", re.IGNORECASE)
+_LEADING_SQL_COMMENT_RE = re.compile(
+    r"^(?:\s*(?:--[^\n]*\n|/\*.*?\*/))+", re.DOTALL
+)
+
+
+def _is_read_only_select(sql: str) -> bool:
+    """True only for a single read-only statement (defense-in-depth vs prose).
+
+    The AI server already strips prose, but this guard guarantees natural-language
+    text is never forwarded to Teiid as SQL even if the AI server misbehaves.
+    """
+    body = _LEADING_SQL_COMMENT_RE.sub("", (sql or "").strip()).lstrip()
+    return bool(_READONLY_START_RE.match(body))
+
+
+def _ai_generation_error(exc: HTTPException) -> tuple[str, dict[str, Any]]:
+    """Translate an AI-server generation failure into a friendly message + details.
+
+    Returns ``(message, details)`` where ``message`` is safe to show a user and
+    ``details`` carries expandable technical context (matched sources, validation
+    error) — never a raw dict repr or stack trace.
+    """
+    friendly = "We could not safely build a query for this question."
+    details: dict[str, Any] = {}
+    detail = exc.detail
+    if isinstance(detail, dict):
+        message = detail.get("message")
+        if message:
+            friendly = str(message)
+        if detail.get("reason"):
+            details["validationError"] = str(detail["reason"])
+        sources = detail.get("suggested_sources")
+        if isinstance(sources, list) and sources:
+            details["matchedSources"] = [
+                (s.get("name") if isinstance(s, dict) else str(s))
+                for s in sources
+            ]
+    elif isinstance(detail, str) and detail:
+        details["validationError"] = detail
+    return friendly, details
+
+
 async def _generate_sql_for_question(
     session: AsyncSession,
     context: RequestContext,
@@ -2195,6 +2238,7 @@ async def ai_ask_and_run(
             session, context, req.project_id, req.question
         )
     except HTTPException as exc:
+        friendly, details = _ai_generation_error(exc)
         return {
             "question": req.question,
             "sql": "",
@@ -2204,22 +2248,24 @@ async def ai_ask_and_run(
             "explanation": "",
             "dataSourcesUsed": [],
             "status": "generation_error",
-            "error": str(exc.detail),
+            "error": friendly,
+            "errorDetails": details,
         }
 
     allowed_tables = ai_result.pop("_allowed_tables", [])
     sql = (ai_result.get("sql") or "").strip().rstrip(";")
-    if not sql:
+    if not sql or not _is_read_only_select(sql):
         return {
             "question": req.question,
-            "sql": "",
+            "sql": sql if sql else "",
             "columns": [],
             "rows": [],
             "suggestedVisualization": {"type": "table"},
             "explanation": ai_result.get("explanation", ""),
             "dataSourcesUsed": [],
             "status": "generation_error",
-            "error": "The AI could not generate a query for this question.",
+            "error": "We could not safely build a query for this question.",
+            "errorDetails": {"sql": sql} if sql else {},
         }
 
     bounded_sql = _apply_row_limit(sql, req.max_rows)
@@ -2237,7 +2283,11 @@ async def ai_ask_and_run(
             "explanation": ai_result.get("explanation", ""),
             "dataSourcesUsed": [_detect_datasource(sql, allowed_tables) or ""],
             "status": "execution_error",
-            "error": str(exc.detail),
+            "error": "We could not run this query against the project's data.",
+            "errorDetails": {
+                "sql": sql,
+                "executionError": str(exc.detail),
+            },
         }
 
     columns = result.get("columns", [])
@@ -2276,6 +2326,7 @@ async def ai_generate_query_preview(
             session, context, req.project_id, req.question
         )
     except HTTPException as exc:
+        friendly, details = _ai_generation_error(exc)
         return {
             "title": title,
             "description": req.description or "",
@@ -2286,23 +2337,25 @@ async def ai_generate_query_preview(
             "dataSourcesUsed": [],
             "explanation": "",
             "status": "generation_error",
-            "error": str(exc.detail),
+            "error": friendly,
+            "errorDetails": details,
         }
 
     allowed_tables = ai_result.pop("_allowed_tables", [])
     sql = (ai_result.get("sql") or "").strip().rstrip(";")
-    if not sql:
+    if not sql or not _is_read_only_select(sql):
         return {
             "title": title,
             "description": req.description or "",
-            "sql": "",
+            "sql": sql if sql else "",
             "columns": [],
             "rows": [],
             "suggestedVisualization": {"type": "table"},
             "dataSourcesUsed": [],
             "explanation": ai_result.get("explanation", ""),
             "status": "generation_error",
-            "error": "The AI could not generate a query for this recommendation.",
+            "error": "We could not safely build a query for this recommendation.",
+            "errorDetails": {"sql": sql} if sql else {},
         }
 
     bounded_sql = _apply_row_limit(sql, req.max_rows)
@@ -2321,7 +2374,11 @@ async def ai_generate_query_preview(
             "dataSourcesUsed": [_detect_datasource(sql, allowed_tables) or ""],
             "explanation": ai_result.get("explanation", ""),
             "status": "execution_error",
-            "error": str(exc.detail),
+            "error": "We could not run this query against the project's data.",
+            "errorDetails": {
+                "sql": sql,
+                "executionError": str(exc.detail),
+            },
         }
 
     columns = result.get("columns", [])

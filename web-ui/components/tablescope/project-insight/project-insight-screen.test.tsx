@@ -284,6 +284,20 @@ describe("ProjectInsightScreen", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  it("opens the same AI answer modal from the custom question box", async () => {
+    renderScreen();
+    const input = await screen.findByLabelText(
+      "Ask a question about this project",
+    );
+    fireEvent.change(input, {
+      target: { value: "What is the total spend?" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
+    expect(dialog.textContent).toContain("What is the total spend?");
+    expect(push).not.toHaveBeenCalled();
+  });
+
   it("opens the query preview modal when a recommended query's Generate is clicked", async () => {
     renderScreen();
     await screen.findByText("Recommended Queries");

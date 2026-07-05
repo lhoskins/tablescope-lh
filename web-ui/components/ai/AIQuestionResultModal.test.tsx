@@ -82,17 +82,40 @@ describe("AIQuestionResultModal", () => {
       columns: [],
       rows: [],
       status: "generation_error",
-      error: "AI server unreachable",
+      error: "We could not safely build a query for this question.",
     });
     const { onOpenAssistant } = renderModal();
     expect(
-      await screen.findByText(/Couldn't build a query/i),
+      await screen.findByText(/could(n't| not) safely build a query/i),
     ).toBeTruthy();
     const btn = screen.getByRole("button", { name: /open in ai assistant/i });
     fireEvent.click(btn);
     expect(onOpenAssistant).toHaveBeenCalledWith(
       "What is the defect rate per supplier?",
     );
+  });
+
+  it("reveals matched sources and validation error under Show technical details", async () => {
+    askAndRun.mockResolvedValue({
+      ...SUCCESS,
+      sql: "",
+      columns: [],
+      rows: [],
+      status: "generation_error",
+      error: "Could not match part of your request to an authorized source.",
+      errorDetails: {
+        matchedSources: ["SUP_Suppliers_CSV"],
+        validationError: "Unauthorized table reference: Sales",
+      },
+    });
+    renderModal();
+    // Technical details are hidden until expanded.
+    expect(screen.queryByText(/Unauthorized table reference/)).toBeNull();
+    fireEvent.click(
+      await screen.findByText(/show technical details/i),
+    );
+    expect(await screen.findByText(/SUP_Suppliers_CSV/)).toBeTruthy();
+    expect(screen.getByText(/Unauthorized table reference: Sales/)).toBeTruthy();
   });
 
   it("saves the query when Save Query is clicked", async () => {
