@@ -2110,7 +2110,10 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
         "clear business language, be concise, and ground everything in the "
         "context above. Recommended dashboards/queries/KPIs are suggestions and "
         "do not need to already exist. Do not fabricate KPI values.\n\n"
-        "Return ONLY this JSON object:\n"
+        "Return ONLY a JSON object with EXACTLY these keys. Replace every "
+        "descriptive placeholder below with real, project-specific content "
+        "drawn from the context above — never echo the placeholder text and "
+        "never leave a primary field (question, label, title, name) blank.\n"
         "{\n"
         '  "executiveSummary": {\n'
         '    "summary": "2-4 sentence project status summary",\n'
@@ -2119,25 +2122,43 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
         '    "opportunities": ["short bullet", ...],\n'
         '    "recommendations": ["short bullet", ...]\n'
         "  },\n"
-        '  "questionsToAsk": [{"id":"q1","question":"","reason":"",'
+        '  "questionsToAsk": [{"id":"q1","question":"<a real, specific question '
+        'about THIS project\'s data>","reason":"<why it matters>",'
         '"suggestedAction":"ask_project"}],\n'
-        '  "trendDetection": [{"id":"t1","label":"Trend A","title":"",'
-        '"description":"","possibleCause":"","sourceSummary":"","chartLink":"",'
-        '"confidence":0.0}],\n'
-        '  "recommendedDashboards": [{"id":"d1","title":"","description":"",'
-        '"reason":"","status":"suggested","confidence":0.0,"backingSignals":[],'
+        '  "trendDetection": [{"id":"t1","label":"<short descriptive trend name '
+        'derived from the actual trend, e.g. Rising Late Deliveries>",'
+        '"title":"<one-line headline>","description":"<what the trend shows>",'
+        '"possibleCause":"<likely cause>","sourceSummary":"<evidence>",'
+        '"chartLink":"","confidence":0.0}],\n'
+        '  "recommendedDashboards": [{"id":"d1","title":"<specific dashboard '
+        'name>","description":"<what it shows>","reason":"<why>",'
+        '"status":"suggested","confidence":0.0,"backingSignals":[],'
         '"suggestedWidgets":[],"action":"generate"}],\n'
-        '  "recommendedQueries": [{"id":"rq1","title":"","businessQuestion":"",'
-        '"reason":"","status":"suggested","confidence":0.0,"backingSignals":[],'
+        '  "recommendedQueries": [{"id":"rq1","title":"<specific query name>",'
+        '"businessQuestion":"<the question it answers>","reason":"<why>",'
+        '"status":"suggested","confidence":0.0,"backingSignals":[],'
         '"recommendedTables":[],"recommendedKpis":[],"action":"generate"}],\n'
-        '  "recommendedKpis": [{"id":"k1","name":"","description":"",'
-        '"status":"recommended","currentValue":null,"targetValue":null,'
-        '"unit":"","reason":"","confidence":0.0,"backingSignals":[],'
-        '"relatedDashboards":[],"relatedQueries":[],"relatedDataSources":[]}],\n'
-        '  "insightValidationWorkflow": [{"id":"i1","title":"","type":"risk",'
-        '"priority":"medium","confidence":0.0,"status":"new",'
-        '"evidenceSummary":"","recommendedAction":""}]\n'
+        '  "recommendedKpis": [{"id":"k1","name":"<specific KPI name>",'
+        '"description":"<what it measures>","status":"recommended",'
+        '"currentValue":null,"targetValue":null,"unit":"","reason":"<why>",'
+        '"confidence":0.0,"backingSignals":[],"relatedDashboards":[],'
+        '"relatedQueries":[],"relatedDataSources":[]}],\n'
+        '  "insightValidationWorkflow": [{"id":"i1","title":"<specific insight '
+        'title>","type":"risk","priority":"medium","confidence":0.0,'
+        '"status":"new","evidenceSummary":"<evidence>","recommendedAction":""}]\n'
         "}\n\n"
+        "RULES:\n"
+        "- Provide 3-6 questionsToAsk, each a real question tied to this "
+        "project's tables, documents, queries, or KPIs.\n"
+        "- trendDetection: include a trend only when the context supports it, "
+        "and give it a descriptive label derived from the actual trend (never "
+        "'Trend A' or any generic placeholder).\n"
+        "- Every recommendedDashboards / recommendedQueries / recommendedKpis / "
+        "insightValidationWorkflow item MUST have a concrete title/name; omit "
+        "any item you cannot name specifically rather than emitting a blank.\n"
+        "- Do NOT return items whose question/label/title/name is empty — "
+        "return an empty array for that section instead.\n"
+        "- Do NOT fabricate KPI values; use null when unknown.\n\n"
         "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
         "prose, no markdown, no code fences. Begin with { and end with }."
     )

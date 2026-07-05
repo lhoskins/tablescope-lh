@@ -32,3 +32,11 @@ def test_project_insight_prompt_is_project_scoped_not_business() -> None:
     lowered = text.lower()
     assert "reviewed" in lowered
     assert "acknowledged" in lowered
+
+
+def test_project_insight_prompt_has_no_placeholder_trend_label() -> None:
+    """The trend example must not seed the literal 'Trend A' placeholder, which
+    weaker models echo verbatim instead of deriving a real trend name."""
+    text = load_prompt_reference("project_insight_best_practices.md")
+    assert '"label": "Trend A"' not in text
+    assert "derived from the actual trend" in text

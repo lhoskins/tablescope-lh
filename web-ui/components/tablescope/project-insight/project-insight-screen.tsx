@@ -63,6 +63,23 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
 
   const es = data?.executiveSummary;
 
+  const questions = (data?.questionsToAsk ?? []).filter((q) =>
+    q.question?.trim(),
+  );
+  const trends = (data?.trendDetection ?? []).filter((t) =>
+    (t.label || t.title || t.description)?.trim(),
+  );
+  const dashboards = (data?.recommendedDashboards ?? []).filter((d) =>
+    d.title?.trim(),
+  );
+  const queries = (data?.recommendedQueries ?? []).filter((q) =>
+    q.title?.trim(),
+  );
+  const kpis = (data?.recommendedKpis ?? []).filter((k) => k.name?.trim());
+  const workflow = (data?.insightValidationWorkflow ?? []).filter((i) =>
+    i.title?.trim(),
+  );
+
   return (
     <ProjectShell
       projectId={projectId}
@@ -147,11 +164,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 title="AI-Generated Questions to Ask"
                 icon={<IconHelpCircle size={16} className="text-brand-500" />}
               >
-                {data.questionsToAsk.length === 0 ? (
+                {questions.length === 0 ? (
                   <PanelEmpty text="No suggested questions yet." />
                 ) : (
                   <ul className="divide-y divide-line-tertiary">
-                    {data.questionsToAsk.map((q) => (
+                    {questions.map((q) => (
                       <li key={q.id}>
                         <button
                           type="button"
@@ -174,16 +191,18 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 title="Trend Detection"
                 icon={<IconTrendingUp size={16} className="text-brand-500" />}
               >
-                {data.trendDetection.length === 0 ? (
+                {trends.length === 0 ? (
                   <PanelEmpty text="No trends detected yet." />
                 ) : (
                   <div className="space-y-3">
-                    {data.trendDetection.map((t) => (
+                    {trends.map((t) => (
                       <div key={t.id} className="text-[13px]">
                         <div className="flex items-baseline gap-2">
-                          <span className="font-medium text-ink-primary">
-                            {t.label || "Trend"}
-                          </span>
+                          {t.label && (
+                            <span className="font-medium text-ink-primary">
+                              {t.label}
+                            </span>
+                          )}
                           <span className="text-ink-secondary">
                             {t.title || t.description}
                           </span>
@@ -208,14 +227,14 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                   <IconLayoutDashboard size={16} className="text-brand-500" />
                 }
               >
-                {data.recommendedDashboards.length === 0 ? (
+                {dashboards.length === 0 ? (
                   <PanelEmpty text="No dashboard suggestions." />
                 ) : (
                   <div className="space-y-2.5">
-                    {data.recommendedDashboards.map((d) => (
+                    {dashboards.map((d) => (
                       <SuggestionRow
                         key={d.id}
-                        title={d.title || "Dashboard"}
+                        title={d.title ?? ""}
                         subtitle={d.description || d.reason}
                         status={d.status}
                         action={d.action}
@@ -229,14 +248,14 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 title="Recommended Queries"
                 icon={<IconCode size={16} className="text-brand-500" />}
               >
-                {data.recommendedQueries.length === 0 ? (
+                {queries.length === 0 ? (
                   <PanelEmpty text="No query suggestions." />
                 ) : (
                   <div className="space-y-2.5">
-                    {data.recommendedQueries.map((q) => (
+                    {queries.map((q) => (
                       <SuggestionRow
                         key={q.id}
-                        title={q.title || "Query"}
+                        title={q.title ?? ""}
                         subtitle={q.businessQuestion || q.reason}
                         status={q.status}
                         action={q.action}
@@ -250,18 +269,18 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 title="Recommended KPIs"
                 icon={<IconTargetArrow size={16} className="text-brand-500" />}
               >
-                {data.recommendedKpis.length === 0 ? (
+                {kpis.length === 0 ? (
                   <PanelEmpty text="No KPI suggestions." />
                 ) : (
                   <div className="space-y-2.5">
-                    {data.recommendedKpis.map((k) => (
+                    {kpis.map((k) => (
                       <div
                         key={k.id}
                         className="rounded-md border border-line-tertiary px-3 py-2"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-[13px] font-medium text-ink-primary">
-                            {k.name || "KPI"}
+                            {k.name}
                           </span>
                           <KpiStatusBadge status={k.status} />
                         </div>
@@ -325,11 +344,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                   title="Insight Validation Workflow"
                   icon={<IconCheck size={16} className="text-brand-500" />}
                 >
-                  {data.insightValidationWorkflow.length === 0 ? (
+                  {workflow.length === 0 ? (
                     <PanelEmpty text="No insights to review." />
                   ) : (
                     <div className="space-y-2">
-                      {data.insightValidationWorkflow.map((item) => (
+                      {workflow.map((item) => (
                         <WorkflowRow
                           key={item.id}
                           item={item}
@@ -527,11 +546,13 @@ function WorkflowRow({
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate text-[13px] font-medium text-ink-primary">
-            {item.title || "Insight"}
+            {item.title}
           </span>
-          <Badge tone={priorityTone} size="sm">
-            {item.priority || "medium"}
-          </Badge>
+          {item.priority && (
+            <Badge tone={priorityTone} size="sm">
+              {item.priority}
+            </Badge>
+          )}
         </div>
         {item.evidenceSummary && (
           <div className="mt-0.5 truncate text-small text-ink-tertiary">

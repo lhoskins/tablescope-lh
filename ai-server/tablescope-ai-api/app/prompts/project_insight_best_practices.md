@@ -244,7 +244,7 @@ Return trends like:
 ```json
 {
   "id": "",
-  "label": "Trend A",
+  "label": "",
   "title": "",
   "description": "",
   "possibleCause": "",
@@ -253,6 +253,10 @@ Return trends like:
   "confidence": 0.0
 }
 ```
+
+The `label` must be a short, descriptive name derived from the actual trend
+(for example "Rising Late Deliveries" or "Declining Supplier Quality"). Never
+return a generic placeholder such as "Trend A", "Trend 1", or "Trend".
 
 Trends should be concise and useful.
 

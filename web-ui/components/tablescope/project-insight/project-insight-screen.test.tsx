@@ -174,6 +174,39 @@ describe("ProjectInsightScreen", () => {
     expect(await screen.findByText("Reviewed by Leonard")).toBeTruthy();
   });
 
+  it("filters out empty items instead of showing placeholder fallbacks", async () => {
+    getInsight.mockResolvedValue({
+      ...INSIGHT,
+      questionsToAsk: [{ id: "q1", question: "   ", reason: "" }],
+      trendDetection: [{ id: "t1", label: "Trend A", description: "" }],
+      recommendedDashboards: [{ id: "d1", title: "", status: "suggested" }],
+      recommendedQueries: [
+        {
+          id: "rq1",
+          title: "",
+          businessQuestion: "What drove late deliveries?",
+          status: "suggested",
+        },
+      ],
+      recommendedKpis: [
+        { id: "k1", name: "", status: "recommended", currentValue: null },
+      ],
+      insightValidationWorkflow: [{ id: "i1", title: "", status: "new" }],
+    });
+    renderScreen();
+    // Trend A here has a label, so it still renders (the model must derive a
+    // real label) — but empty-title items must not render placeholder text.
+    await screen.findByText("Recommended Queries");
+    expect(screen.queryByText("Query")).toBeNull();
+    expect(screen.queryByText("KPI")).toBeNull();
+    expect(screen.queryByText("Dashboard")).toBeNull();
+    expect(screen.getByText("No query suggestions.")).toBeTruthy();
+    expect(screen.getByText("No KPI suggestions.")).toBeTruthy();
+    expect(screen.getByText("No dashboard suggestions.")).toBeTruthy();
+    expect(screen.getByText("No suggested questions yet.")).toBeTruthy();
+    expect(screen.getByText("No insights to review.")).toBeTruthy();
+  });
+
   it("opens the project-scoped ask flow when a question is clicked", async () => {
     renderScreen();
     const q = await screen.findByText("Why did Supplier A slip?");
