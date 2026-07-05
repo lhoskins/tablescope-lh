@@ -625,23 +625,47 @@ async def home_project_dashboard(
         )
         if not chart:
             continue
+        value_label = a.get("value_column", "") or ""
+        hi.enhance_bar_readability(chart)
+        fmt = hi._detect_value_format(
+            value_label, chart.get("data", {}).get("series") or []
+        )
+        explanation = hi.build_widget_explanation(chart, value_label, fmt)
+        # Persist the horizontal orientation we chose so the saved dashboard
+        # renders the same readable chart, not a jumbled vertical bar.
+        chart_type_out = (
+            "horizontal_bar"
+            if chart.get("type") == "bar"
+            and chart.get("subtype") == "horizontal_bar"
+            else a.get("chart_type", "bar")
+        )
         widgets.append(
             {
                 "title": a.get("title") or "Widget",
-                "chartType": a.get("chart_type", "bar"),
+                "subtitle": a.get("rationale") or "",
+                "explanation": explanation,
+                "format": fmt,
+                "chartType": chart_type_out,
                 "chart": chart,
                 "sql": sql,
                 "labelColumn": a.get("label_column", ""),
-                "valueColumn": a.get("value_column", ""),
+                "valueColumn": value_label,
             }
         )
 
+    narrative = hi.build_dashboard_narrative(widgets)
     return {
         "projectId": str(project.id),
         "projectName": project.name,
         "projectColor": hi.project_color(project.id),
         "dashboard": (
-            {"title": f"{project.name} — AI Dashboard", "widgets": widgets}
+            {
+                "title": f"{project.name} — AI Dashboard",
+                "summary": narrative["summary"],
+                "keyFindings": narrative["keyFindings"],
+                "recommendedActions": narrative["recommendedActions"],
+                "widgets": widgets,
+            }
             if widgets
             else None
         ),
@@ -693,6 +717,7 @@ class SaveDashboardWidget(BaseModel):
     title: str
     sql: str
     chartType: str = "bar"
+    explanation: str | None = None
     labelColumn: str | None = None
     valueColumn: str | None = None
 
@@ -701,6 +726,9 @@ class SaveDashboardRequest(BaseModel):
     project_id: int
     title: str
     widgets: list[SaveDashboardWidget]
+    summary: str | None = None
+    keyFindings: list[str] = []
+    recommendedActions: list[str] = []
 
 
 @router.post("/home/save-dashboard")
@@ -787,6 +815,7 @@ async def home_save_dashboard(
             {
                 "id": f"ai_widget_{idx}",
                 "title": w.title,
+                "explanation": w.explanation or "",
                 "type": mapped_type,
                 "chartSubtype": _map_chart_subtype(w.chartType),
                 "dataSource": {"kind": "query", "queryId": query_id},
@@ -816,6 +845,9 @@ async def home_save_dashboard(
             "globalFilters": [],
             "layout": "grid",
             "ai_generated": True,
+            "summary": req.summary or "",
+            "keyFindings": req.keyFindings,
+            "recommendedActions": req.recommendedActions,
         },
     )
     session.add(dashboard)

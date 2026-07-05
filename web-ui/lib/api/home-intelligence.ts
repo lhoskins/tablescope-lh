@@ -319,6 +319,11 @@ export function suggestQueries(
 
 export interface DashboardWidgetSuggestion {
   title: string;
+  subtitle?: string;
+  /** Plain-English, data-grounded explanation of what the chart shows. */
+  explanation?: string;
+  /** Value format for the metric: percent | currency | count | number. */
+  format?: string;
   chartType: string;
   chart: InsightChart;
   sql: string;
@@ -328,6 +333,9 @@ export interface DashboardWidgetSuggestion {
 
 export interface DashboardSuggestion {
   title: string;
+  summary?: string;
+  keyFindings?: string[];
+  recommendedActions?: string[];
   widgets: DashboardWidgetSuggestion[];
 }
 
@@ -378,10 +386,14 @@ export function saveQuerySuggestion(body: {
 export function saveDashboardSuggestion(body: {
   project_id: number;
   title: string;
+  summary?: string;
+  keyFindings?: string[];
+  recommendedActions?: string[];
   widgets: {
     title: string;
     sql: string;
     chartType: string;
+    explanation?: string;
     labelColumn?: string;
     valueColumn?: string;
   }[];
