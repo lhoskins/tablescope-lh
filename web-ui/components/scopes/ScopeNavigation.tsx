@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format-datetime";
 import { scopesApi, type ScopeSet } from "@/lib/api/scopes";
+import { useNotifyScopesChanged } from "@/lib/ui/scope-refresh";
 
 function mappingsLabel(s: ScopeSet): string {
   if (s.scope_count === 0) {
@@ -25,6 +26,7 @@ function creatorLabel(s: ScopeSet): string {
 export function ScopeNavigation({ projectId }: { projectId: number }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const notifyScopesChanged = useNotifyScopesChanged();
   const queryKey = ["project", projectId, "scope_sets"];
   const [pendingDelete, setPendingDelete] = useState<ScopeSet | null>(null);
 
@@ -36,7 +38,10 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
   const toggle = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
       scopesApi.updateScopeSet(id, { enabled }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      notifyScopesChanged();
+    },
   });
 
   const remove = useMutation({
@@ -44,6 +49,7 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
     onSuccess: () => {
       setPendingDelete(null);
       queryClient.invalidateQueries({ queryKey });
+      notifyScopesChanged();
     },
   });
 
