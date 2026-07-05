@@ -115,6 +115,33 @@ class AIGenerateAndSaveDashboardRequest(BaseModel):
     description: str | None = None
 
 
+class AIAskAndRunRequest(BaseModel):
+    """Generate SQL for a natural-language question, execute it, return rows.
+
+    Powers the inline AI Question modal: the user clicks an AI-generated
+    question and sees the answer (results) directly instead of being routed to
+    the AI Assistant chat.
+    """
+    project_id: int
+    question: str
+    source: str | None = None
+    max_rows: int = 200
+
+
+class AIGenerateQueryPreviewRequest(BaseModel):
+    """Generate + execute a recommended query and return a renderable preview.
+
+    Powers the Recommended Queries "Generate" button: generates SQL from the
+    recommendation's business question, executes it, and returns rows so the
+    user can preview before saving.
+    """
+    project_id: int
+    question: str
+    title: str | None = None
+    description: str | None = None
+    max_rows: int = 200
+
+
 class AISuggestDashboardsRequest(BaseModel):
     """Request several dashboard plan suggestions for a project (no save)."""
     project_id: int
@@ -2013,6 +2040,304 @@ async def ai_generate_and_save_query(
         "model_used": ai_result.get("model_used", ""),
         "selected_sources": ai_result.get("selected_sources", []),
         "repaired": ai_result.get("repaired", False),
+    }
+
+
+def _is_numeric_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int | float):
+        return True
+    if isinstance(value, str):
+        try:
+            float(value.replace(",", "").strip())
+            return True
+        except (ValueError, AttributeError):
+            return False
+    return False
+
+
+def _looks_like_time_column(name: str) -> bool:
+    lowered = name.lower()
+    return any(
+        token in lowered
+        for token in ("date", "time", "month", "year", "day", "week", "quarter")
+    )
+
+
+def _suggest_visualization(
+    columns: list[str], rows: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Pick a sensible default chart for a result set (deterministic).
+
+    - single numeric cell -> kpi
+    - a time column + a numeric column -> line
+    - a categorical column + a numeric column -> bar
+    - otherwise -> table
+    """
+    if not columns or not rows:
+        return {"type": "table"}
+
+    sample = rows[0]
+    numeric_cols = [
+        c
+        for c in columns
+        if any(_is_numeric_value(r.get(c)) for r in rows[:20])
+    ]
+    non_numeric_cols = [c for c in columns if c not in numeric_cols]
+
+    if len(rows) == 1 and len(columns) == 1 and _is_numeric_value(sample.get(columns[0])):
+        return {"type": "kpi", "metricField": columns[0]}
+
+    if numeric_cols and non_numeric_cols:
+        y_field = numeric_cols[0]
+        time_cols = [c for c in non_numeric_cols if _looks_like_time_column(c)]
+        if time_cols:
+            return {"type": "line", "xField": time_cols[0], "yField": y_field}
+        return {"type": "bar", "xField": non_numeric_cols[0], "yField": y_field}
+
+    return {"type": "table"}
+
+
+_LIMIT_RE = re.compile(r"\blimit\s+\d+\s*$", re.IGNORECASE)
+
+
+def _apply_row_limit(sql: str, max_rows: int) -> str:
+    """Ensure a preview query is bounded so it never runs unbounded."""
+    trimmed = sql.strip().rstrip(";").rstrip()
+    if _LIMIT_RE.search(trimmed):
+        return trimmed
+    return f"{trimmed} LIMIT {max_rows}"
+
+
+async def _execute_project_sql(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    sql: str,
+) -> dict[str, Any]:
+    """Execute SQL against the project's VDB and return ``{columns, rows}``."""
+    from app.routes.query import (
+        _auto_cast_aggregates,
+        _resolve_vdb_database,
+        _run_sql,
+    )
+    from app.services.tenant_teiid_resolver import TenantTeiidResolver
+
+    database = await _resolve_vdb_database(
+        session=session, context=context, project_id=project_id
+    )
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    return await _run_sql(
+        database=database,
+        sql=_auto_cast_aggregates(sql),
+        teiid_host=endpoint.pg_host,
+        teiid_port=endpoint.pg_port,
+    )
+
+
+async def _generate_sql_for_question(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    question: str,
+) -> dict[str, Any]:
+    """Generate SQL for a natural-language question via the AI server.
+
+    Returns the raw AI result dict (``sql``/``explanation``/``selected_sources``)
+    plus the resolved ``allowed_tables``. Raises HTTPException on failure so the
+    caller can convert it into a structured, non-fatal modal error.
+    """
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
+    source_catalog = await _build_source_catalog(
+        session, tenant_id=context.tenant_id, project_id=project_id
+    )
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": project_id,
+        "prompt": question,
+        "allowed_tables": allowed_tables,
+        "source_catalog": source_catalog,
+        "knowledge_graph_context": await _kg_context(
+            session, context, project_id
+        ),
+    }
+    ai_result = await _forward_to_ai("/ai/query/generate", payload)
+    ai_result["_allowed_tables"] = allowed_tables
+    return ai_result
+
+
+@router.post("/actions/ask-and-run")
+async def ai_ask_and_run(
+    req: AIAskAndRunRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate SQL for a question, execute it, and return the results.
+
+    Never raises on a generation/execution failure: returns a structured
+    ``status`` (``success`` / ``generation_error`` / ``execution_error``) with
+    the SQL (when available) and an error message so the modal can render an
+    inline error and reveal the SQL instead of navigating away.
+    """
+    await _check_project_access(session, context, req.project_id)
+
+    try:
+        ai_result = await _generate_sql_for_question(
+            session, context, req.project_id, req.question
+        )
+    except HTTPException as exc:
+        return {
+            "question": req.question,
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": "",
+            "dataSourcesUsed": [],
+            "status": "generation_error",
+            "error": str(exc.detail),
+        }
+
+    allowed_tables = ai_result.pop("_allowed_tables", [])
+    sql = (ai_result.get("sql") or "").strip().rstrip(";")
+    if not sql:
+        return {
+            "question": req.question,
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": ai_result.get("explanation", ""),
+            "dataSourcesUsed": [],
+            "status": "generation_error",
+            "error": "The AI could not generate a query for this question.",
+        }
+
+    bounded_sql = _apply_row_limit(sql, req.max_rows)
+    try:
+        result = await _execute_project_sql(
+            session, context, req.project_id, bounded_sql
+        )
+    except HTTPException as exc:
+        return {
+            "question": req.question,
+            "sql": sql,
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": ai_result.get("explanation", ""),
+            "dataSourcesUsed": [_detect_datasource(sql, allowed_tables) or ""],
+            "status": "execution_error",
+            "error": str(exc.detail),
+        }
+
+    columns = result.get("columns", [])
+    rows = result.get("rows", [])[: req.max_rows]
+    used = _detect_datasource(sql, allowed_tables)
+    return {
+        "question": req.question,
+        "sql": sql,
+        "columns": columns,
+        "rows": rows,
+        "suggestedVisualization": _suggest_visualization(columns, rows),
+        "explanation": ai_result.get("explanation", ""),
+        "dataSourcesUsed": [used] if used else [],
+        "status": "success",
+        "error": None,
+    }
+
+
+@router.post("/actions/generate-query-preview")
+async def ai_generate_query_preview(
+    req: AIGenerateQueryPreviewRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate + execute a recommended query and return a preview.
+
+    Same generation/execution path as ask-and-run, but returns query metadata
+    (title/description) so the Recommended Queries modal can preview then save.
+    Non-fatal: returns a structured ``status`` on failure.
+    """
+    await _check_project_access(session, context, req.project_id)
+    title = req.title or _shorten_ai_name(req.question)
+
+    try:
+        ai_result = await _generate_sql_for_question(
+            session, context, req.project_id, req.question
+        )
+    except HTTPException as exc:
+        return {
+            "title": title,
+            "description": req.description or "",
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "dataSourcesUsed": [],
+            "explanation": "",
+            "status": "generation_error",
+            "error": str(exc.detail),
+        }
+
+    allowed_tables = ai_result.pop("_allowed_tables", [])
+    sql = (ai_result.get("sql") or "").strip().rstrip(";")
+    if not sql:
+        return {
+            "title": title,
+            "description": req.description or "",
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "dataSourcesUsed": [],
+            "explanation": ai_result.get("explanation", ""),
+            "status": "generation_error",
+            "error": "The AI could not generate a query for this recommendation.",
+        }
+
+    bounded_sql = _apply_row_limit(sql, req.max_rows)
+    try:
+        result = await _execute_project_sql(
+            session, context, req.project_id, bounded_sql
+        )
+    except HTTPException as exc:
+        return {
+            "title": title,
+            "description": req.description or "",
+            "sql": sql,
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "dataSourcesUsed": [_detect_datasource(sql, allowed_tables) or ""],
+            "explanation": ai_result.get("explanation", ""),
+            "status": "execution_error",
+            "error": str(exc.detail),
+        }
+
+    columns = result.get("columns", [])
+    rows = result.get("rows", [])[: req.max_rows]
+    used = _detect_datasource(sql, allowed_tables)
+    return {
+        "title": title,
+        "description": req.description or "",
+        "sql": sql,
+        "columns": columns,
+        "rows": rows,
+        "suggestedVisualization": _suggest_visualization(columns, rows),
+        "dataSourcesUsed": [used] if used else [],
+        "explanation": ai_result.get("explanation", ""),
+        "status": "success",
+        "error": None,
     }
 
 

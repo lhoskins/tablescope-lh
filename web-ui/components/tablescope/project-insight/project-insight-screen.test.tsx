@@ -66,6 +66,21 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
 }));
 
+vi.mock("@/components/ai/AIQuestionResultModal", () => ({
+  AIQuestionResultModal: ({
+    open,
+    question,
+  }: {
+    open: boolean;
+    question: string;
+  }) =>
+    open ? (
+      <div role="dialog" aria-label="AI Answer">
+        {question}
+      </div>
+    ) : null,
+}));
+
 vi.mock("@/components/tablescope/project-shell", () => ({
   ProjectShell: ({
     children,
@@ -207,12 +222,13 @@ describe("ProjectInsightScreen", () => {
     expect(screen.getByText("No insights to review.")).toBeTruthy();
   });
 
-  it("opens the project-scoped ask flow when a question is clicked", async () => {
+  it("opens the AI answer modal (no navigation) when a question is clicked", async () => {
     renderScreen();
     const q = await screen.findByText("Why did Supplier A slip?");
     fireEvent.click(q);
-    expect(push).toHaveBeenCalledWith(
-      "/projects/42/ai?q=Why%20did%20Supplier%20A%20slip%3F",
-    );
+    // Opens the inline modal rather than routing to the AI Assistant page.
+    const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
+    expect(dialog.textContent).toContain("Why did Supplier A slip?");
+    expect(push).not.toHaveBeenCalled();
   });
 });

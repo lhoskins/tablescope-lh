@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
+import { AIQuestionResultModal } from "@/components/ai/AIQuestionResultModal";
 import {
   projectInsightApi,
   type ProjectInsight,
@@ -35,6 +36,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
+  const [askModal, setAskModal] = useState<{
+    open: boolean;
+    question: string;
+    source: string;
+  }>({ open: false, question: "", source: "" });
 
   const { data, isLoading, isError, refetch, isFetching } =
     useQuery<ProjectInsight>({
@@ -55,10 +61,13 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     onError: () => push("Could not record review", "error"),
   });
 
-  const askQuestion = (question: string) => {
-    router.push(
-      `/projects/${projectId}/ai?q=${encodeURIComponent(question)}`,
-    );
+  const askQuestion = (question: string, source = "project_overview_question") => {
+    setAskModal({ open: true, question, source });
+  };
+
+  const openInAssistant = (question: string) => {
+    setAskModal((m) => ({ ...m, open: false }));
+    router.push(`/projects/${projectId}/ai?q=${encodeURIComponent(question)}`);
   };
 
   const es = data?.executiveSummary;
@@ -367,6 +376,15 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
           </>
         )}
       </div>
+      <AIQuestionResultModal
+        open={askModal.open}
+        projectId={projectId}
+        question={askModal.question}
+        source={askModal.source}
+        onClose={() => setAskModal((m) => ({ ...m, open: false }))}
+        onOpenAssistant={openInAssistant}
+        notify={push}
+      />
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );

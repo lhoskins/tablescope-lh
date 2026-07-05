@@ -1,0 +1,386 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import {
+  IconSparkles,
+  IconX,
+  IconCheck,
+  IconLoader2,
+  IconAlertTriangle,
+  IconChevronDown,
+  IconChevronRight,
+  IconMessagePlus,
+  IconDeviceFloppy,
+  IconLayoutDashboard,
+  IconArrowRight,
+} from "@tabler/icons-react";
+import { Button } from "@/components/ui/button";
+import { InsightChartBlock } from "@/components/tablescope/home/intelligence-card";
+import type { InsightChart } from "@/lib/api/home-intelligence";
+import {
+  aiActionsApi,
+  type AskAndRunResult,
+  type SuggestedVisualization,
+} from "@/lib/api/ai-actions";
+
+const PROGRESS_STEPS = [
+  "Understanding question",
+  "Selecting authorized data sources",
+  "Building query",
+  "Running query",
+  "Formatting results",
+] as const;
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const n = Number(value.replace(/,/g, "").trim());
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** Build a renderable chart from result rows + the suggested visualization. */
+function buildChart(
+  columns: string[],
+  rows: Record<string, unknown>[],
+  viz: SuggestedVisualization,
+): InsightChart | null {
+  if (!rows.length || !columns.length) return null;
+  if (viz.type === "table") return null;
+
+  if (viz.type === "kpi") {
+    const field = viz.metricField ?? columns[0];
+    const value = rows[0]?.[field];
+    if (value == null) return null;
+    return {
+      type: "kpi_grid",
+      data: { kpis: [{ value: String(value), label: field }] },
+    };
+  }
+
+  const xField = viz.xField ?? columns[0];
+  const yField = viz.yField ?? columns[1] ?? columns[0];
+  const series = rows
+    .slice(0, 25)
+    .map((r) => ({
+      label: String(r[xField] ?? ""),
+      value: toNumber(r[yField]) ?? 0,
+    }))
+    .filter((s) => s.label !== "");
+  if (!series.length) return null;
+
+  const type = viz.type === "pie" ? "pie" : viz.type === "line" ? "line" : "bar";
+  return { type, data: { series }, seriesLabels: { value: yField } };
+}
+
+function ResultTable({
+  columns,
+  rows,
+}: {
+  columns: string[];
+  rows: Record<string, unknown>[];
+}) {
+  if (!columns.length || !rows.length) {
+    return (
+      <p className="py-6 text-center text-[13px] text-ink-tertiary">
+        The query ran but returned no rows.
+      </p>
+    );
+  }
+  return (
+    <div className="max-h-[320px] overflow-auto rounded-md border border-line-tertiary">
+      <table className="w-full border-collapse text-[12px]">
+        <thead className="sticky top-0 bg-bg-secondary">
+          <tr>
+            {columns.map((c) => (
+              <th
+                key={c}
+                className="border-b border-line-tertiary px-2 py-1.5 text-left font-medium text-ink-secondary"
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 100).map((row, ri) => (
+            <tr key={ri}>
+              {columns.map((c) => (
+                <td
+                  key={c}
+                  className="border-b border-line-tertiary/60 px-2 py-1.5 text-ink-primary"
+                >
+                  {row[c] == null ? "" : String(row[c])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ProgressSteps({ activeIndex }: { activeIndex: number }) {
+  return (
+    <ul className="space-y-2 py-2">
+      {PROGRESS_STEPS.map((label, i) => {
+        const done = i < activeIndex;
+        const active = i === activeIndex;
+        return (
+          <li key={label} className="flex items-center gap-2 text-[13px]">
+            {done ? (
+              <IconCheck size={15} className="text-success" />
+            ) : active ? (
+              <IconLoader2 size={15} className="animate-spin text-brand-500" />
+            ) : (
+              <span className="h-[15px] w-[15px] rounded-full border border-line-secondary" />
+            )}
+            <span
+              className={
+                done
+                  ? "text-ink-secondary"
+                  : active
+                    ? "text-ink-primary"
+                    : "text-ink-tertiary"
+              }
+            >
+              {label}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+export function AIQuestionResultModal({
+  open,
+  projectId,
+  question,
+  source,
+  onClose,
+  onOpenAssistant,
+  onCreateDashboard,
+  notify,
+}: {
+  open: boolean;
+  projectId: string;
+  question: string;
+  source?: string;
+  onClose: () => void;
+  onOpenAssistant: (question: string) => void;
+  onCreateDashboard?: (question: string) => void;
+  notify: (message: string, tone?: "success" | "error" | "info") => void;
+}) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const [showSql, setShowSql] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const run = useMutation<AskAndRunResult>({
+    mutationFn: () => aiActionsApi.askAndRun(projectId, question, source),
+  });
+
+  const save = useMutation({
+    mutationFn: (sql: string) =>
+      aiActionsApi.saveQuery(
+        projectId,
+        question.replace(/\?+$/, "").slice(0, 120) || "AI Query",
+        sql,
+        question,
+      ),
+    onSuccess: (res) => {
+      setSaved(true);
+      notify(`Saved query "${res.name}"`, "success");
+    },
+    onError: (err: Error) => notify(err.message, "error"),
+  });
+
+  // Reset and kick off generation whenever the modal opens for a question.
+  useEffect(() => {
+    if (!open) return;
+    setShowSql(false);
+    setSaved(false);
+    setStepIndex(0);
+    run.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, question]);
+
+  // Animate the progress checklist while the single request is in flight.
+  useEffect(() => {
+    if (!open || !run.isPending) return;
+    setStepIndex(0);
+    const id = setInterval(() => {
+      setStepIndex((i) => Math.min(i + 1, PROGRESS_STEPS.length - 1));
+    }, 700);
+    return () => clearInterval(id);
+  }, [open, run.isPending]);
+
+  const result = run.data;
+  const chart = useMemo(() => {
+    if (!result || result.status !== "success") return null;
+    return buildChart(
+      result.columns,
+      result.rows,
+      result.suggestedVisualization,
+    );
+  }, [result]);
+
+  if (!open) return null;
+
+  const failedToGenerate =
+    run.isError || (result && result.status === "generation_error");
+  const executionError = result && result.status === "execution_error";
+  const success = result && result.status === "success";
+  const sql = result?.sql ?? "";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4">
+      <div className="my-8 w-full max-w-3xl rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-lg">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-h2 text-ink-primary">
+              <IconSparkles size={18} className="text-ai" />
+              AI Answer
+            </h2>
+            <p className="mt-1 text-[13px] text-ink-secondary">{question}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="shrink-0 text-ink-tertiary hover:text-ink-primary"
+          >
+            <IconX size={18} />
+          </button>
+        </div>
+
+        <div className="mt-4">
+          {run.isPending ? (
+            <ProgressSteps activeIndex={stepIndex} />
+          ) : failedToGenerate ? (
+            <div className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger-bg px-3 py-2.5 text-[13px] text-danger">
+              <IconAlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <div>
+                <div className="font-medium">
+                  Couldn&apos;t build a query for this question.
+                </div>
+                <div className="mt-0.5 text-ink-secondary">
+                  {run.isError
+                    ? (run.error as Error).message
+                    : result?.error}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {executionError && (
+                <div className="mb-3 flex items-start gap-2 rounded-md border border-danger/30 bg-danger-bg px-3 py-2.5 text-[13px] text-danger">
+                  <IconAlertTriangle size={16} className="mt-0.5 shrink-0" />
+                  <div>
+                    <div className="font-medium">
+                      The query could not be executed.
+                    </div>
+                    <div className="mt-0.5 text-ink-secondary">
+                      {result?.error}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {success && result?.explanation && (
+                <p className="mb-3 text-[13px] text-ink-secondary">
+                  {result.explanation}
+                </p>
+              )}
+
+              {chart && (
+                <div className="mb-3 rounded-md border border-line-tertiary p-3">
+                  <InsightChartBlock chart={chart} />
+                </div>
+              )}
+
+              {success && (
+                <ResultTable
+                  columns={result.columns}
+                  rows={result.rows}
+                />
+              )}
+
+              {sql && (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowSql((v) => !v)}
+                    className="flex items-center gap-1 text-[12px] text-ink-tertiary hover:text-ink-secondary"
+                  >
+                    {showSql ? (
+                      <IconChevronDown size={14} />
+                    ) : (
+                      <IconChevronRight size={14} />
+                    )}
+                    {showSql ? "Hide SQL" : "Show SQL"}
+                  </button>
+                  {showSql && (
+                    <pre className="mt-1.5 overflow-auto rounded-md bg-bg-secondary p-2.5 text-[11px] leading-relaxed text-ink-primary">
+                      {sql}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-line-tertiary pt-4">
+          {success && sql && (
+            <>
+              <Button
+                variant="secondary"
+                size="md"
+                disabled={save.isPending || saved}
+                onClick={() => save.mutate(sql)}
+              >
+                <IconDeviceFloppy size={15} />
+                {saved ? "Saved" : save.isPending ? "Saving…" : "Save Query"}
+              </Button>
+              {onCreateDashboard && (
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => onCreateDashboard(question)}
+                >
+                  <IconLayoutDashboard size={15} />
+                  Create Dashboard
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                size="md"
+                onClick={() => onOpenAssistant(question)}
+              >
+                <IconMessagePlus size={15} />
+                Ask Follow-up
+              </Button>
+            </>
+          )}
+          {(failedToGenerate || executionError) && (
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => onOpenAssistant(question)}
+            >
+              <IconArrowRight size={15} />
+              Open in AI Assistant
+            </Button>
+          )}
+          <Button variant="primary" size="md" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
