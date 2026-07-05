@@ -165,7 +165,8 @@ describe("ProjectInsightScreen", () => {
     renderScreen();
     expect(await screen.findByText("Critical")).toBeTruthy();
     expect(screen.getByText("Warnings")).toBeTruthy();
-    expect(screen.getByText("Opportunities")).toBeTruthy();
+    // "Opportunities" is both an executive-summary column and a card section.
+    expect(screen.getAllByText("Opportunities").length).toBeGreaterThan(0);
     expect(screen.getByText("Recommendations")).toBeTruthy();
     expect(screen.getByText("Supplier A SLA breach")).toBeTruthy();
   });
@@ -317,6 +318,88 @@ describe("ProjectInsightScreen", () => {
     expect(
       await screen.findByRole("dialog", { name: "Generate Dashboard" }),
     ).toBeTruthy();
+  });
+
+  it("shows a clean empty state for risks, trends, and opportunities", async () => {
+    renderScreen();
+    expect(
+      await screen.findByText(
+        "No risks detected from this project's data yet.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("No trends detected from this project's data yet."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "No opportunities detected from this project's data yet.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("renders risk/opportunity cards with severity badges", async () => {
+    getInsight.mockResolvedValue({
+      ...INSIGHT,
+      risks: [
+        {
+          id: "risk-1",
+          insightType: "risk_sla",
+          title: "Delivery lead time exceeds SLA threshold",
+          summary: "Average lead time is high.",
+          severity: "critical",
+          recommendedAction: "Escalate with the supplier.",
+          question: "Which suppliers exceed the SLA threshold?",
+          supportingSources: ["SUP_Quality_CSV"],
+        },
+      ],
+      opportunities: [
+        {
+          id: "opp-1",
+          insightType: "opportunity_supplier",
+          title: "Top-performing suppliers identified",
+          summary: "Consolidate with the strongest suppliers.",
+          severity: "recommendation",
+          question: "Which suppliers have the highest performance scores?",
+          supportingSources: [],
+        },
+      ],
+    });
+    renderScreen();
+    expect(
+      await screen.findByText("Delivery lead time exceeds SLA threshold"),
+    ).toBeTruthy();
+    // Deterministic severity badge labels (Business Insight style).
+    expect(screen.getByText("Recommendation")).toBeTruthy();
+    expect(screen.getByText("Escalate with the supplier.")).toBeTruthy();
+    expect(screen.getByText("SUP_Quality_CSV")).toBeTruthy();
+  });
+
+  it("opens the AI answer modal (no navigation) when a card is investigated", async () => {
+    getInsight.mockResolvedValue({
+      ...INSIGHT,
+      trends: [
+        {
+          id: "trend-1",
+          insightType: "trend_spend",
+          title: "Spend tracking over budget",
+          summary: "Spend is up.",
+          severity: "warning",
+          question: "How has total spend changed across recent periods?",
+          supportingSources: ["FIN_Spend_CSV"],
+        },
+      ],
+    });
+    renderScreen();
+    await screen.findByText("Spend tracking over budget");
+    const investigate = screen.getAllByRole("button", {
+      name: /investigate/i,
+    });
+    fireEvent.click(investigate[0]);
+    const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
+    expect(dialog.textContent).toContain(
+      "How has total spend changed across recent periods?",
+    );
+    expect(push).not.toHaveBeenCalled();
   });
 
   it("shows reviewed insights in the Reviewed tab and can reopen one", async () => {

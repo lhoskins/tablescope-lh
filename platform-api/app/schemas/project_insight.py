@@ -47,6 +47,11 @@ class ProjectInsightResponse(BaseModel):
     recommendedDashboards: list[dict[str, Any]] = Field(default_factory=list)
     recommendedQueries: list[dict[str, Any]] = Field(default_factory=list)
     recommendedKpis: list[dict[str, Any]] = Field(default_factory=list)
+    # Business Insight-style cards, grouped and severity-normalized. Deterministic
+    # (grounded in the project's real data), so present even when aiAvailable=False.
+    risks: list[dict[str, Any]] = Field(default_factory=list)
+    trends: list[dict[str, Any]] = Field(default_factory=list)
+    opportunities: list[dict[str, Any]] = Field(default_factory=list)
     whatChangedSinceLastVisit: WhatChangedSinceLastVisit = Field(
         default_factory=WhatChangedSinceLastVisit
     )

@@ -17,6 +17,9 @@ import {
   IconTargetArrow,
   IconCheck,
   IconChevronRight,
+  IconSearch,
+  IconTable,
+  IconFileText,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
@@ -26,9 +29,12 @@ import { cn } from "@/lib/cn";
 import { AIQuestionResultModal } from "@/components/ai/AIQuestionResultModal";
 import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewModal";
 import { GenerateDashboardModal } from "@/components/tablescope/project-insight/generate-dashboard-modal";
+import { renderBold } from "@/components/tablescope/home/intelligence-card";
 import {
   projectInsightApi,
   type ProjectInsight,
+  type ProjectInsightCard,
+  type InsightCardSeverity,
   type InsightWorkflowItem,
   type ReviewedInsight,
 } from "@/lib/api/project-insight";
@@ -140,6 +146,22 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   );
   const openWorkflow = workflow.filter((i) => i.status !== "reviewed");
   const reviewedItems: ReviewedInsight[] = reviewedQuery.data?.items ?? [];
+  const reviewedIds = new Set(reviewedItems.map((i) => i.insightId));
+
+  const riskCards = (data?.risks ?? []).filter((c) => c.title?.trim());
+  const trendCards = (data?.trends ?? []).filter((c) => c.title?.trim());
+  const opportunityCards = (data?.opportunities ?? []).filter((c) =>
+    c.title?.trim(),
+  );
+
+  const reviewCard = (card: ProjectInsightCard) =>
+    acknowledge.mutate({
+      id: card.id,
+      title: card.title,
+      type: card.insightType,
+      priority: card.severity,
+      evidenceSummary: card.summary,
+    });
 
   return (
     <ProjectShell
@@ -218,6 +240,53 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 />
               </div>
             </section>
+
+            {/* Risks / Trends / Opportunities cards */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <InsightCardColumn
+                title="Risks"
+                icon={
+                  <IconAlertTriangle size={16} className="text-danger" />
+                }
+                cards={riskCards}
+                emptyText="No risks detected from this project's data yet."
+                reviewedIds={reviewedIds}
+                onInvestigate={(c) =>
+                  askQuestion(c.question, "project_insight_risk")
+                }
+                onReview={reviewCard}
+                reviewPending={acknowledge.isPending}
+                reviewPendingId={acknowledge.variables?.id}
+              />
+              <InsightCardColumn
+                title="Trends"
+                icon={
+                  <IconTrendingUp size={16} className="text-brand-500" />
+                }
+                cards={trendCards}
+                emptyText="No trends detected from this project's data yet."
+                reviewedIds={reviewedIds}
+                onInvestigate={(c) =>
+                  askQuestion(c.question, "project_insight_trend")
+                }
+                onReview={reviewCard}
+                reviewPending={acknowledge.isPending}
+                reviewPendingId={acknowledge.variables?.id}
+              />
+              <InsightCardColumn
+                title="Opportunities"
+                icon={<IconBulb size={16} className="text-success" />}
+                cards={opportunityCards}
+                emptyText="No opportunities detected from this project's data yet."
+                reviewedIds={reviewedIds}
+                onInvestigate={(c) =>
+                  askQuestion(c.question, "project_insight_opportunity")
+                }
+                onReview={reviewCard}
+                reviewPending={acknowledge.isPending}
+                reviewPendingId={acknowledge.variables?.id}
+              />
+            </div>
 
             {/* 2 + 3. Questions to Ask | Trend Detection */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -686,6 +755,172 @@ function ReviewedRow({
 
 function PanelEmpty({ text }: { text: string }) {
   return <p className="py-2 text-[13px] text-ink-tertiary">{text}</p>;
+}
+
+const CARD_SEVERITY: Record<
+  InsightCardSeverity,
+  { accent: string; chip: string; label: string }
+> = {
+  critical: {
+    accent: "border-l-danger",
+    chip: "bg-danger/10 text-danger",
+    label: "Critical",
+  },
+  urgent: {
+    accent: "border-l-warning",
+    chip: "bg-warning/10 text-warning",
+    label: "Urgent",
+  },
+  warning: {
+    accent: "border-l-warning",
+    chip: "bg-warning/10 text-warning",
+    label: "Warning",
+  },
+  watch: {
+    accent: "border-l-line-secondary",
+    chip: "bg-bg-tertiary text-ink-secondary",
+    label: "Watch",
+  },
+  opportunity: {
+    accent: "border-l-success",
+    chip: "bg-success/10 text-success",
+    label: "Opportunity",
+  },
+  recommendation: {
+    accent: "border-l-brand-500",
+    chip: "bg-brand-50 text-brand-700",
+    label: "Recommendation",
+  },
+  informational: {
+    accent: "border-l-line-secondary",
+    chip: "bg-bg-tertiary text-ink-secondary",
+    label: "Informational",
+  },
+};
+
+function InsightCardColumn({
+  title,
+  icon,
+  cards,
+  emptyText,
+  reviewedIds,
+  onInvestigate,
+  onReview,
+  reviewPending,
+  reviewPendingId,
+}: {
+  title: string;
+  icon: ReactNode;
+  cards: ProjectInsightCard[];
+  emptyText: string;
+  reviewedIds: Set<string>;
+  onInvestigate: (card: ProjectInsightCard) => void;
+  onReview: (card: ProjectInsightCard) => void;
+  reviewPending: boolean;
+  reviewPendingId?: string;
+}) {
+  return (
+    <Panel title={title} icon={icon}>
+      {cards.length === 0 ? (
+        <PanelEmpty text={emptyText} />
+      ) : (
+        <div className="space-y-3">
+          {cards.map((card) => (
+            <InsightCardItem
+              key={card.id}
+              card={card}
+              reviewed={reviewedIds.has(card.id)}
+              onInvestigate={() => onInvestigate(card)}
+              onReview={() => onReview(card)}
+              reviewPending={reviewPending && reviewPendingId === card.id}
+            />
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function InsightCardItem({
+  card,
+  reviewed,
+  onInvestigate,
+  onReview,
+  reviewPending,
+}: {
+  card: ProjectInsightCard;
+  reviewed: boolean;
+  onInvestigate: () => void;
+  onReview: () => void;
+  reviewPending: boolean;
+}) {
+  const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.informational;
+  return (
+    <article
+      className={cn(
+        "rounded-md border border-line-tertiary border-l-[3px] bg-bg-primary p-3",
+        sev.accent,
+      )}
+    >
+      <header className="flex items-start justify-between gap-2">
+        <h4 className="min-w-0 text-[13px] font-semibold text-ink-primary">
+          {card.title}
+        </h4>
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+            sev.chip,
+          )}
+        >
+          {sev.label}
+        </span>
+      </header>
+      <p className="mt-1 text-[13px] leading-snug text-ink-secondary">
+        {renderBold(card.summary)}
+      </p>
+      {card.recommendedAction && (
+        <div className="mt-2 flex items-start gap-1.5 rounded-md bg-bg-secondary/60 p-2 text-small text-ink-secondary">
+          <IconBulb size={14} className="mt-0.5 shrink-0 text-brand-500" />
+          <span>{renderBold(card.recommendedAction)}</span>
+        </div>
+      )}
+      {card.supportingSources.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ink-tertiary">
+          {card.supportingSources.slice(0, 3).map((s) => (
+            <span key={s} className="inline-flex items-center gap-1">
+              {/\.(pdf|docx?|txt|csv)$/i.test(s) ? (
+                <IconFileText size={12} />
+              ) : (
+                <IconTable size={12} />
+              )}
+              {s}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="mt-2.5 flex items-center gap-2 border-t border-line-tertiary pt-2.5">
+        <Button variant="secondary" size="sm" onClick={onInvestigate}>
+          <IconSearch size={13} />
+          Investigate
+        </Button>
+        {reviewed ? (
+          <Badge tone="success" size="sm">
+            <IconCheck size={12} />
+            Reviewed
+          </Badge>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onReview}
+            disabled={reviewPending}
+          >
+            {reviewPending ? "Saving…" : "Mark reviewed"}
+          </Button>
+        )}
+      </div>
+    </article>
+  );
 }
 
 function statusLabel(status?: string): string {

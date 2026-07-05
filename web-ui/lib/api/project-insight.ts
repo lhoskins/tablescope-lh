@@ -63,6 +63,26 @@ export interface RecommendedKpi {
   confidence?: number;
 }
 
+export type InsightCardSeverity =
+  | "critical"
+  | "urgent"
+  | "warning"
+  | "watch"
+  | "opportunity"
+  | "recommendation"
+  | "informational";
+
+export interface ProjectInsightCard {
+  id: string;
+  insightType: string;
+  title: string;
+  summary: string;
+  severity: InsightCardSeverity;
+  recommendedAction?: string;
+  question: string;
+  supportingSources: string[];
+}
+
 export interface WhatChangedSinceLastVisit {
   newFilesAdded: number;
   changedDataSources: number;
@@ -96,6 +116,9 @@ export interface ProjectInsight {
   recommendedDashboards: RecommendedDashboard[];
   recommendedQueries: RecommendedQuery[];
   recommendedKpis: RecommendedKpi[];
+  risks: ProjectInsightCard[];
+  trends: ProjectInsightCard[];
+  opportunities: ProjectInsightCard[];
   whatChangedSinceLastVisit: WhatChangedSinceLastVisit;
   insightValidationWorkflow: InsightWorkflowItem[];
   aiAvailable: boolean;

@@ -405,6 +405,101 @@ async def test_reviewed_list_rejects_other_tenant(
     assert r.status_code == 404
 
 
+async def test_project_insight_exposes_card_groups(
+    client, service_headers, _mock_ai
+) -> None:
+    _, _, project, headers = await _setup(client, service_headers, "pi-cards")
+    body = (
+        await client.get(
+            f"/api/projects/{project['id']}/insight", headers=headers
+        )
+    ).json()
+    for key in ("risks", "trends", "opportunities"):
+        assert key in body
+        assert isinstance(body[key], list)
+
+
+def test_normalize_severity_coerces_to_allowed_values() -> None:
+    from app.services import project_insight_service as pis
+
+    # risks keep their value when allowed, else fall back to watch.
+    assert pis._normalize_severity("critical", "risks") == "critical"
+    assert pis._normalize_severity("bogus", "risks") == "watch"
+    # trends never carry critical/urgent (mapped to warning).
+    assert pis._normalize_severity("urgent", "trends") == "warning"
+    assert pis._normalize_severity("critical", "trends") == "warning"
+    assert pis._normalize_severity("watch", "trends") == "watch"
+    assert pis._normalize_severity("", "trends") == "informational"
+    # opportunities only opportunity/recommendation.
+    assert pis._normalize_severity("recommendation", "opportunities") == (
+        "recommendation"
+    )
+    assert pis._normalize_severity("critical", "opportunities") == "opportunity"
+
+
+def test_card_group_maps_insight_type() -> None:
+    from app.services import project_insight_service as pis
+
+    assert pis._card_group("risk_sla") == "risks"
+    assert pis._card_group("trend_spend") == "trends"
+    assert pis._card_group("opportunity_supplier") == "opportunities"
+    assert pis._card_group("something_else") is None
+
+
+async def test_grouped_intelligence_cards_groups_and_maps(monkeypatch) -> None:
+    from app.services import home_intelligence as hi
+    from app.services import project_insight_service as pis
+
+    sample = [
+        {
+            "id": "c1",
+            "insightType": "risk_sla",
+            "severity": "critical",
+            "title": "Delivery lead time exceeds SLA threshold",
+            "summary": "**High** lead time.",
+            "callout": {"type": "risk", "text": "Escalate with supplier."},
+            "sources": {"tables": ["SUP_Quality_CSV"], "documents": []},
+        },
+        {
+            "id": "c2",
+            "insightType": "trend_spend",
+            "severity": "urgent",
+            "title": "Spend tracking over budget",
+            "summary": "Spend up.",
+            "sources": {"tables": ["FIN_Spend_CSV"]},
+        },
+        {
+            "id": "c3",
+            "insightType": "opportunity_supplier",
+            "severity": "opportunity",
+            "title": "Top-performing suppliers identified",
+            "summary": "Great performers.",
+            "sources": {},
+        },
+    ]
+
+    async def fake_suite(project, ctx, prompt_types, runner):
+        return sample
+
+    monkeypatch.setattr(hi, "run_intelligence_suite", fake_suite)
+
+    class _P:
+        id = 1
+
+    grouped = await pis._grouped_intelligence_cards(_P(), None, None)
+
+    assert len(grouped["risks"]) == 1
+    risk = grouped["risks"][0]
+    assert risk["severity"] == "critical"
+    assert risk["recommendedAction"] == "Escalate with supplier."
+    assert risk["question"] == pis._INVESTIGATION_QUESTIONS["risk_sla"]
+    assert risk["supportingSources"] == ["SUP_Quality_CSV"]
+
+    # trend urgent is normalized down to warning (allowed for trends).
+    assert grouped["trends"][0]["severity"] == "warning"
+    assert grouped["opportunities"][0]["severity"] == "opportunity"
+
+
 async def test_project_insight_rejects_other_tenant(
     client, service_headers, _mock_ai
 ) -> None:

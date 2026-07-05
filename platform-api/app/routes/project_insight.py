@@ -65,12 +65,16 @@ async def get_project_insight(
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> ProjectInsightResponse:
     """Return the project-scoped executive insight report for one project."""
+    from app.routes.home_intelligence import _make_runner
+
     project = await _require_project_access(project_id, session, context)
+    runner = _make_runner(session, context, project.id)
     return await build_project_insight(
         session,
         project=project,
         tenant_id=context.tenant_id,
         user_id=context.user_id,
+        runner=runner,
     )
 
 

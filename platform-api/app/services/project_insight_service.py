@@ -47,6 +47,112 @@ logger = logging.getLogger(__name__)
 # Window used for the deterministic "What Changed Since Last Visit" deltas.
 _ACTIVITY_WINDOW = timedelta(days=7)
 
+# Allowed severity values per card group (Package 3 unified schema).
+_RISK_SEVERITIES = {"critical", "urgent", "warning", "watch"}
+_TREND_SEVERITIES = {"watch", "warning", "informational"}
+_OPPORTUNITY_SEVERITIES = {"opportunity", "recommendation"}
+
+# A concrete, data-grounded question per built-in card type. Clicking a card
+# opens the same AI Answer modal (Package 1) seeded with this question, so the
+# investigation runs real SQL against the project's authorized sources.
+_INVESTIGATION_QUESTIONS = {
+    "risk_sla": (
+        "Which suppliers have the highest average delivery lead times, and "
+        "which exceed the SLA threshold?"
+    ),
+    "risk_expiry": (
+        "Which contracts or documents are expiring within the next 90 days?"
+    ),
+    "trend_spend": "How has total spend changed across recent periods?",
+    "opportunity_supplier": (
+        "Which suppliers have the highest performance scores?"
+    ),
+}
+
+
+def _card_group(insight_type: str) -> str | None:
+    """Map a built-in insight type onto risks / trends / opportunities."""
+    if insight_type.startswith("risk"):
+        return "risks"
+    if insight_type.startswith("trend"):
+        return "trends"
+    if insight_type.startswith("opportunity"):
+        return "opportunities"
+    return None
+
+
+def _normalize_severity(severity: str, group: str) -> str:
+    """Coerce a card's severity onto the allowed values for its group."""
+    sev = (severity or "").strip().lower()
+    if group == "risks":
+        return sev if sev in _RISK_SEVERITIES else "watch"
+    if group == "trends":
+        if sev in ("urgent", "critical"):
+            return "warning"
+        return sev if sev in _TREND_SEVERITIES else "informational"
+    return sev if sev in _OPPORTUNITY_SEVERITIES else "opportunity"
+
+
+def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
+    """Map a deterministic Business Insight card onto the unified card schema."""
+    insight_type = str(card.get("insightType", ""))
+    callout = card.get("callout")
+    recommended_action = (
+        str(callout.get("text", "")) if isinstance(callout, dict) else ""
+    )
+    sources = card.get("sources") or {}
+    supporting = [
+        *(sources.get("tables") or []),
+        *(sources.get("documents") or []),
+    ]
+    return {
+        "id": str(card.get("id", "")),
+        "insightType": insight_type,
+        "title": str(card.get("title", "")),
+        "summary": str(card.get("summary", "")),
+        "severity": _normalize_severity(str(card.get("severity", "")), group),
+        "recommendedAction": recommended_action,
+        "question": _INVESTIGATION_QUESTIONS.get(
+            insight_type, str(card.get("title", ""))
+        ),
+        "supportingSources": [str(s) for s in supporting],
+    }
+
+
+async def _grouped_intelligence_cards(
+    project: Project,
+    ctx: hi.ProjectContext,
+    runner: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    """Generate Business Insight-style cards grouped by risk/trend/opportunity.
+
+    Deterministic and project-scoped: reuses the existing Business Insight card
+    generators against this project's real data via its VDB runner. Returns
+    empty groups (clean empty state) when the data does not support any card.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {
+        "risks": [],
+        "trends": [],
+        "opportunities": [],
+    }
+    try:
+        cards = await hi.run_intelligence_suite(
+            project, ctx, hi.ALL_PROMPT_TYPES, runner
+        )
+    except Exception as exc:
+        logger.warning(
+            "project insight cards failed for project %s: %s", project.id, exc
+        )
+        return grouped
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        group = _card_group(str(card.get("insightType", "")))
+        if group is None:
+            continue
+        grouped[group].append(_to_insight_card(card, group))
+    return grouped
+
 
 async def _count_recent(
     session: AsyncSession, model: Any, project_id: int, since: datetime
@@ -127,6 +233,7 @@ async def build_project_insight(
     project: Project,
     tenant_id: int,
     user_id: int,
+    runner: Any = None,
 ) -> ProjectInsightResponse:
     """Build the Project Insight report for one authorized project."""
     now_iso = datetime.now(UTC).isoformat()
@@ -137,6 +244,7 @@ async def build_project_insight(
     )
 
     ctx = await hi.gather_project_context(session, project)
+    grouped_cards = await _grouped_intelligence_cards(project, ctx, runner)
     tables_payload = [
         {
             "name": t.view_name,
@@ -208,6 +316,9 @@ async def build_project_insight(
             project=project_meta,
             generatedAt=now_iso,
             lastUpdatedAt=now_iso,
+            risks=grouped_cards["risks"],
+            trends=grouped_cards["trends"],
+            opportunities=grouped_cards["opportunities"],
             whatChangedSinceLastVisit=what_changed,
             aiAvailable=False,
         )
@@ -241,6 +352,9 @@ async def build_project_insight(
         recommendedKpis=[
             k for k in (ai_result.get("recommendedKpis") or []) if isinstance(k, dict)
         ],
+        risks=grouped_cards["risks"],
+        trends=grouped_cards["trends"],
+        opportunities=grouped_cards["opportunities"],
         whatChangedSinceLastVisit=what_changed,
         insightValidationWorkflow=workflow,
         aiAvailable=True,
