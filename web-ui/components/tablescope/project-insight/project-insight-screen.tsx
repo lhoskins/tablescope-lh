@@ -24,6 +24,8 @@ import { Badge } from "@/components/ui/badge";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
 import { AIQuestionResultModal } from "@/components/ai/AIQuestionResultModal";
+import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewModal";
+import { AIDashboardSuggestionsModal } from "@/components/tablescope/project/ai-dashboard-suggestions-modal";
 import {
   projectInsightApi,
   type ProjectInsight,
@@ -41,6 +43,16 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     question: string;
     source: string;
   }>({ open: false, question: "", source: "" });
+  const [queryPreview, setQueryPreview] = useState<{
+    open: boolean;
+    question: string;
+    title: string;
+    description: string;
+  }>({ open: false, question: "", title: "", description: "" });
+  const [dashboardGen, setDashboardGen] = useState<{
+    open: boolean;
+    prompt: string;
+  }>({ open: false, prompt: "" });
 
   const { data, isLoading, isError, refetch, isFetching } =
     useQuery<ProjectInsight>({
@@ -247,6 +259,14 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                         subtitle={d.description || d.reason}
                         status={d.status}
                         action={d.action}
+                        onGenerate={() =>
+                          setDashboardGen({
+                            open: true,
+                            prompt: [d.title, d.description]
+                              .filter(Boolean)
+                              .join(" — "),
+                          })
+                        }
                       />
                     ))}
                   </div>
@@ -268,6 +288,15 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                         subtitle={q.businessQuestion || q.reason}
                         status={q.status}
                         action={q.action}
+                        onGenerate={() =>
+                          setQueryPreview({
+                            open: true,
+                            question:
+                              q.businessQuestion || q.title || "",
+                            title: q.title ?? "",
+                            description: q.businessQuestion || q.reason || "",
+                          })
+                        }
                       />
                     ))}
                   </div>
@@ -385,6 +414,37 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
         onOpenAssistant={openInAssistant}
         notify={push}
       />
+      <GenerateQueryPreviewModal
+        open={queryPreview.open}
+        projectId={projectId}
+        question={queryPreview.question}
+        title={queryPreview.title}
+        description={queryPreview.description}
+        onClose={() => setQueryPreview((m) => ({ ...m, open: false }))}
+        onSaved={() => {
+          queryClient.invalidateQueries({
+            queryKey: ["project", projectId, "queries"],
+          });
+        }}
+        notify={push}
+      />
+      {dashboardGen.open && (
+        <AIDashboardSuggestionsModal
+          open={dashboardGen.open}
+          projectId={projectId}
+          initialPrompt={dashboardGen.prompt}
+          autoGenerate
+          onClose={() => setDashboardGen((m) => ({ ...m, open: false }))}
+          onSaved={() => {
+            queryClient.invalidateQueries({
+              queryKey: ["project", projectId, "dashboards"],
+            });
+            push("Dashboard saved", "success");
+            setDashboardGen((m) => ({ ...m, open: false }));
+          }}
+          notify={push}
+        />
+      )}
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );
@@ -478,11 +538,13 @@ function SuggestionRow({
   subtitle,
   status,
   action,
+  onGenerate,
 }: {
   title: string;
   subtitle?: string;
   status?: string;
   action?: string;
+  onGenerate?: () => void;
 }) {
   const actionLabel =
     action === "open"
@@ -507,9 +569,16 @@ function SuggestionRow({
         <div className="mt-0.5 text-small text-ink-tertiary">{subtitle}</div>
       )}
       <div className="mt-1.5">
-        <Badge tone="outline" size="sm">
-          {actionLabel}
-        </Badge>
+        {onGenerate ? (
+          <Button variant="secondary" size="sm" onClick={onGenerate}>
+            <IconSparkles size={13} />
+            {actionLabel}
+          </Button>
+        ) : (
+          <Badge tone="outline" size="sm">
+            {actionLabel}
+          </Badge>
+        )}
       </div>
     </div>
   );

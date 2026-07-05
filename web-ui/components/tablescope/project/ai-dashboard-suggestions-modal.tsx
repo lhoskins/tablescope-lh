@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   IconSparkles,
@@ -200,14 +200,20 @@ export function AIDashboardSuggestionsModal({
   onClose,
   onSaved,
   notify,
+  initialPrompt,
+  autoGenerate,
 }: {
   open: boolean;
   projectId: string;
   onClose: () => void;
   onSaved: (dashboardId: number) => void;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
+  /** Seed the prompt (e.g. from a recommended-dashboard title). */
+  initialPrompt?: string;
+  /** When true with an initialPrompt, generate immediately on open. */
+  autoGenerate?: boolean;
 }) {
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt ?? "");
   const [audience, setAudience] = useState("");
   const [suggestions, setSuggestions] = useState<DashboardSuggestion[]>([]);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -235,6 +241,23 @@ export function AIDashboardSuggestionsModal({
     },
     onError: (err: Error) => setError(err.message),
   });
+
+  // When opened from a recommendation, seed the prompt and (optionally) kick
+  // off generation once so the user lands directly on a preview.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
+    if (initialPrompt) {
+      setPrompt(initialPrompt);
+      if (autoGenerate) generateMutation.mutate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialPrompt, autoGenerate]);
 
   const saveMutation = useMutation({
     mutationFn: (s: DashboardSuggestion) =>

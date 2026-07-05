@@ -8,13 +8,13 @@ import {
   IconAlertTriangle,
   IconChevronDown,
   IconChevronRight,
-  IconMessagePlus,
   IconDeviceFloppy,
-  IconLayoutDashboard,
-  IconArrowRight,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
-import { aiActionsApi, type AskAndRunResult } from "@/lib/api/ai-actions";
+import {
+  aiActionsApi,
+  type GenerateQueryPreviewResult,
+} from "@/lib/api/ai-actions";
 import {
   PROGRESS_STEPS,
   ProgressSteps,
@@ -22,49 +22,61 @@ import {
   ResultTable,
 } from "@/components/ai/ai-result-view";
 
-export function AIQuestionResultModal({
+/**
+ * Generate + execute a recommended query and preview it before saving.
+ *
+ * Reuses the shared result view (chart + table) and the generate-query-preview
+ * endpoint. Save persists via the existing AI save-query action.
+ */
+export function GenerateQueryPreviewModal({
   open,
   projectId,
   question,
-  source,
+  title,
+  description,
   onClose,
-  onOpenAssistant,
-  onCreateDashboard,
+  onSaved,
   notify,
 }: {
   open: boolean;
   projectId: string;
   question: string;
-  source?: string;
+  title?: string;
+  description?: string;
   onClose: () => void;
-  onOpenAssistant: (question: string) => void;
-  onCreateDashboard?: (question: string) => void;
+  onSaved?: (queryId: number) => void;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
 }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [showSql, setShowSql] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const run = useMutation<AskAndRunResult>({
-    mutationFn: () => aiActionsApi.askAndRun(projectId, question, source),
+  const run = useMutation<GenerateQueryPreviewResult>({
+    mutationFn: () =>
+      aiActionsApi.generateQueryPreview(
+        projectId,
+        question,
+        title,
+        description,
+      ),
   });
 
   const save = useMutation({
-    mutationFn: (sql: string) =>
+    mutationFn: (result: GenerateQueryPreviewResult) =>
       aiActionsApi.saveQuery(
         projectId,
-        question.replace(/\?+$/, "").slice(0, 120) || "AI Query",
-        sql,
-        question,
+        result.title || question.slice(0, 120) || "AI Query",
+        result.sql,
+        result.description || question,
       ),
     onSuccess: (res) => {
       setSaved(true);
       notify(`Saved query "${res.name}"`, "success");
+      onSaved?.(res.query_id);
     },
     onError: (err: Error) => notify(err.message, "error"),
   });
 
-  // Reset and kick off generation whenever the modal opens for a question.
   useEffect(() => {
     if (!open) return;
     setShowSql(false);
@@ -72,9 +84,8 @@ export function AIQuestionResultModal({
     setStepIndex(0);
     run.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, question]);
+  }, [open, question, title]);
 
-  // Animate the progress checklist while the single request is in flight.
   useEffect(() => {
     if (!open || !run.isPending) return;
     setStepIndex(0);
@@ -93,6 +104,7 @@ export function AIQuestionResultModal({
   const executionError = result && result.status === "execution_error";
   const success = result && result.status === "success";
   const sql = result?.sql ?? "";
+  const headerTitle = result?.title || title || "Generated Query";
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4">
@@ -101,9 +113,13 @@ export function AIQuestionResultModal({
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-h2 text-ink-primary">
               <IconSparkles size={18} className="text-ai" />
-              AI Answer
+              {headerTitle}
             </h2>
-            <p className="mt-1 text-[13px] text-ink-secondary">{question}</p>
+            {(result?.description || description || question) && (
+              <p className="mt-1 text-[13px] text-ink-secondary">
+                {result?.description || description || question}
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -123,12 +139,10 @@ export function AIQuestionResultModal({
               <IconAlertTriangle size={16} className="mt-0.5 shrink-0" />
               <div>
                 <div className="font-medium">
-                  Couldn&apos;t build a query for this question.
+                  Couldn&apos;t generate this query.
                 </div>
                 <div className="mt-0.5 text-ink-secondary">
-                  {run.isError
-                    ? (run.error as Error).message
-                    : result?.error}
+                  {run.isError ? (run.error as Error).message : result?.error}
                 </div>
               </div>
             </div>
@@ -148,12 +162,6 @@ export function AIQuestionResultModal({
                 </div>
               )}
 
-              {success && result?.explanation && (
-                <p className="mb-3 text-[13px] text-ink-secondary">
-                  {result.explanation}
-                </p>
-              )}
-
               {success && (
                 <ResultChart
                   columns={result.columns}
@@ -161,12 +169,8 @@ export function AIQuestionResultModal({
                   viz={result.suggestedVisualization}
                 />
               )}
-
               {success && (
-                <ResultTable
-                  columns={result.columns}
-                  rows={result.rows}
-                />
+                <ResultTable columns={result.columns} rows={result.rows} />
               )}
 
               {sql && (
@@ -196,48 +200,18 @@ export function AIQuestionResultModal({
 
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-line-tertiary pt-4">
           {success && sql && (
-            <>
-              <Button
-                variant="secondary"
-                size="md"
-                disabled={save.isPending || saved}
-                onClick={() => save.mutate(sql)}
-              >
-                <IconDeviceFloppy size={15} />
-                {saved ? "Saved" : save.isPending ? "Saving…" : "Save Query"}
-              </Button>
-              {onCreateDashboard && (
-                <Button
-                  variant="secondary"
-                  size="md"
-                  onClick={() => onCreateDashboard(question)}
-                >
-                  <IconLayoutDashboard size={15} />
-                  Create Dashboard
-                </Button>
-              )}
-              <Button
-                variant="secondary"
-                size="md"
-                onClick={() => onOpenAssistant(question)}
-              >
-                <IconMessagePlus size={15} />
-                Ask Follow-up
-              </Button>
-            </>
-          )}
-          {(failedToGenerate || executionError) && (
             <Button
               variant="secondary"
               size="md"
-              onClick={() => onOpenAssistant(question)}
+              disabled={save.isPending || saved}
+              onClick={() => save.mutate(result)}
             >
-              <IconArrowRight size={15} />
-              Open in AI Assistant
+              <IconDeviceFloppy size={15} />
+              {saved ? "Saved" : save.isPending ? "Saving…" : "Save Query"}
             </Button>
           )}
           <Button variant="primary" size="md" onClick={onClose}>
-            Close
+            {saved ? "Done" : "Discard"}
           </Button>
         </div>
       </div>

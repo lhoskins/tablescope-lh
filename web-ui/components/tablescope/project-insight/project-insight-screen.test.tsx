@@ -81,6 +81,38 @@ vi.mock("@/components/ai/AIQuestionResultModal", () => ({
     ) : null,
 }));
 
+vi.mock("@/components/ai/GenerateQueryPreviewModal", () => ({
+  GenerateQueryPreviewModal: ({
+    open,
+    question,
+    title,
+  }: {
+    open: boolean;
+    question: string;
+    title?: string;
+  }) =>
+    open ? (
+      <div role="dialog" aria-label="Generate Query">
+        {title || question}
+      </div>
+    ) : null,
+}));
+
+vi.mock("@/components/tablescope/project/ai-dashboard-suggestions-modal", () => ({
+  AIDashboardSuggestionsModal: ({
+    open,
+    initialPrompt,
+  }: {
+    open: boolean;
+    initialPrompt?: string;
+  }) =>
+    open ? (
+      <div role="dialog" aria-label="Generate Dashboard">
+        {initialPrompt}
+      </div>
+    ) : null,
+}));
+
 vi.mock("@/components/tablescope/project-shell", () => ({
   ProjectShell: ({
     children,
@@ -230,5 +262,26 @@ describe("ProjectInsightScreen", () => {
     const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
     expect(dialog.textContent).toContain("Why did Supplier A slip?");
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("opens the query preview modal when a recommended query's Generate is clicked", async () => {
+    renderScreen();
+    await screen.findByText("Recommended Queries");
+    // The recommended query "Late shipments" has a Generate button.
+    const generateButtons = screen.getAllByRole("button", { name: /generate/i });
+    fireEvent.click(generateButtons[generateButtons.length - 1]);
+    expect(
+      await screen.findByRole("dialog", { name: "Generate Query" }),
+    ).toBeTruthy();
+  });
+
+  it("opens the dashboard generation modal when a recommended dashboard's Generate is clicked", async () => {
+    renderScreen();
+    await screen.findByText("Recommended Dashboards");
+    const generateButtons = screen.getAllByRole("button", { name: /generate/i });
+    fireEvent.click(generateButtons[0]);
+    expect(
+      await screen.findByRole("dialog", { name: "Generate Dashboard" }),
+    ).toBeTruthy();
   });
 });
