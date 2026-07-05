@@ -506,6 +506,38 @@ def _score_source_match(request: str, source: str) -> int:
     return 0
 
 
+def _remap_tables_to_authorized(sql: str, allowed_tables: list[str]) -> str:
+    """Rewrite FROM/JOIN table references to their best-matching authorized source.
+
+    The model frequently drops a source's file-format suffix — writing
+    ``SUP_Quality_Inspections`` for the authorized ``SUP_Quality_Inspections_CSV`` —
+    which then fails validation as an "unauthorized table reference". Deterministically
+    remap each unauthorized identifier to the closest authorized table (using the same
+    normalized/fuzzy scoring as source suggestions) so valid SQL is not rejected on a
+    cosmetic name mismatch. Identifiers that already match, or that have no confident
+    authorized match, are left untouched.
+    """
+    if not sql or not allowed_tables:
+        return sql
+    allowed_upper = {t.upper() for t in allowed_tables}
+    remapped = sql
+    for ref in set(_referenced_tables(sql)):
+        if ref.upper() in allowed_upper:
+            continue
+        best_score = 0
+        best: str | None = None
+        for table in allowed_tables:
+            score = _score_source_match(ref, table)
+            if score > best_score:
+                best_score, best = score, table
+        if best and best_score >= 80 and best.upper() != ref.upper():
+            pattern = re.compile(rf'("?)\b{re.escape(ref)}\b("?)')
+            remapped = pattern.sub(
+                lambda m, b=best: f"{m.group(1)}{b}{m.group(2)}", remapped
+            )
+    return remapped
+
+
 def _suggest_sources(prompt: str, allowed_tables: list[str], limit: int = 5) -> list[str]:
     """Rank authorized sources by normalized/fuzzy match with the user's prompt."""
     scored = sorted(
@@ -622,8 +654,11 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
 
     repaired = False
     last_error = ""
-    # Validate, then repair up to 2 times.
+    # Validate, then repair up to 2 times. Remap cosmetic table-name mismatches
+    # (e.g. a dropped ``_CSV`` suffix) to the authorized source before validating
+    # so a valid query is not rejected on a name technicality.
     for attempt in range(3):
+        sql = _remap_tables_to_authorized(sql, allowed_tables)
         try:
             validate_sql(sql, allowed_tables)
             break

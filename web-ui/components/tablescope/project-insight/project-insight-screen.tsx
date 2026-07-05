@@ -25,7 +25,7 @@ import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
 import { AIQuestionResultModal } from "@/components/ai/AIQuestionResultModal";
 import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewModal";
-import { AIDashboardSuggestionsModal } from "@/components/tablescope/project/ai-dashboard-suggestions-modal";
+import { GenerateDashboardModal } from "@/components/tablescope/project-insight/generate-dashboard-modal";
 import {
   projectInsightApi,
   type ProjectInsight,
@@ -56,10 +56,9 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     title: string;
     description: string;
   }>({ open: false, question: "", title: "", description: "" });
-  const [dashboardGen, setDashboardGen] = useState<{
-    open: boolean;
-    prompt: string;
-  }>({ open: false, prompt: "" });
+  const [dashboardGen, setDashboardGen] = useState<{ open: boolean }>({
+    open: false,
+  });
 
   const { data, isLoading, isError, refetch, isFetching } =
     useQuery<ProjectInsight>({
@@ -292,14 +291,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                         subtitle={d.description || d.reason}
                         status={d.status}
                         action={d.action}
-                        onGenerate={() =>
-                          setDashboardGen({
-                            open: true,
-                            prompt: [d.title, d.description]
-                              .filter(Boolean)
-                              .join(" — "),
-                          })
-                        }
+                        onGenerate={() => setDashboardGen({ open: true })}
                       />
                     ))}
                   </div>
@@ -496,18 +488,14 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
         notify={push}
       />
       {dashboardGen.open && (
-        <AIDashboardSuggestionsModal
+        <GenerateDashboardModal
           open={dashboardGen.open}
           projectId={projectId}
-          initialPrompt={dashboardGen.prompt}
-          autoGenerate
-          onClose={() => setDashboardGen((m) => ({ ...m, open: false }))}
+          onClose={() => setDashboardGen({ open: false })}
           onSaved={() => {
             queryClient.invalidateQueries({
               queryKey: ["project", projectId, "dashboards"],
             });
-            push("Dashboard saved", "success");
-            setDashboardGen((m) => ({ ...m, open: false }));
           }}
           notify={push}
         />

@@ -380,6 +380,35 @@ class SuggestRequest(BaseModel):
     granularity: int = 3
 
 
+class ProjectDashboardRequest(BaseModel):
+    project_id: int
+    max_widgets: int = 6
+    granularity: int = 3
+
+
+async def _project_for_access(
+    session: AsyncSession, context: RequestContext, project_id: int
+) -> Project:
+    """Fetch one project the caller can access, or raise 404 (tenant-scoped)."""
+    member_sub = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == context.user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    project = await session.scalar(
+        select(Project).where(
+            Project.id == project_id,
+            Project.tenant_id == context.tenant_id,
+            or_(
+                Project.owner_id == context.user_id,
+                Project.id.in_(member_sub),
+            ),
+        )
+    )
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
 async def _plan_analyses(
     session: AsyncSession,
     context: RequestContext,
@@ -546,6 +575,77 @@ async def home_dashboard_suggestions(
 
     results = await asyncio.gather(*(work(p) for p in projects))
     return {"projects": list(results)}
+
+
+@router.post("/home/project-dashboard")
+async def home_project_dashboard(
+    req: ProjectDashboardRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate a real, chart-rendered dashboard for ONE project.
+
+    Mirrors the Home "New Dashboard Suggestions" flow (plan → execute real SQL →
+    build renderable chart series) but scoped to a single project, so the Project
+    Insight page can generate a working dashboard instead of a preview. Widgets
+    whose SQL does not execute or returns no rows are dropped (never surfaced as
+    preview-only). Nothing is saved until the user clicks Save.
+    """
+    project = await _project_for_access(session, context, req.project_id)
+    runner = _make_runner(session, context, project.id)
+    widgets: list[dict[str, Any]] = []
+    try:
+        analyses = await _plan_analyses(
+            session,
+            context,
+            project,
+            max_analyses=req.max_widgets,
+            granularity=req.granularity,
+        )
+    except Exception as exc:
+        logger.warning(
+            "project dashboard plan failed for project %s: %s",
+            project.id,
+            exc,
+        )
+        analyses = []
+    for a in analyses:
+        sql = (a.get("sql") or "").strip()
+        if not sql:
+            continue
+        result = await hi._safe_query(runner, sql)
+        if not result or not result.get("rows"):
+            continue
+        chart = hi._build_chart(
+            a.get("chart_type", "bar"),
+            a.get("title", ""),
+            result,
+            a.get("label_column", ""),
+            a.get("value_column", ""),
+        )
+        if not chart:
+            continue
+        widgets.append(
+            {
+                "title": a.get("title") or "Widget",
+                "chartType": a.get("chart_type", "bar"),
+                "chart": chart,
+                "sql": sql,
+                "labelColumn": a.get("label_column", ""),
+                "valueColumn": a.get("value_column", ""),
+            }
+        )
+
+    return {
+        "projectId": str(project.id),
+        "projectName": project.name,
+        "projectColor": hi.project_color(project.id),
+        "dashboard": (
+            {"title": f"{project.name} — AI Dashboard", "widgets": widgets}
+            if widgets
+            else None
+        ),
+    }
 
 
 @router.post("/home/insights")

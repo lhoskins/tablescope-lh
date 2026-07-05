@@ -657,3 +657,74 @@ async def test_run_intelligence_suite_no_access(client, service_headers) -> None
     )
     assert r.status_code == 200
     assert r.json()["error"] == "no_access"
+
+
+async def test_project_dashboard_rejects_inaccessible_project(
+    client, service_headers
+) -> None:
+    _, _, headers = await _setup(client, service_headers)
+    r = await client.post(
+        "/api/ai/home/project-dashboard",
+        json={"project_id": 99999},
+        headers=headers,
+    )
+    assert r.status_code == 404
+
+
+async def test_project_dashboard_builds_real_chart_widgets(
+    client, service_headers, monkeypatch
+) -> None:
+    _, _, headers = await _setup(client, service_headers)
+    r = await client.post(
+        "/api/projects",
+        json={"name": "Dash P", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert r.status_code == 201
+    project_id = r.json()["id"]
+
+    import app.routes.home_intelligence as hir
+
+    async def fake_plan(session, context, project, *, max_analyses, granularity):
+        return [
+            {
+                "title": "Spend by supplier",
+                "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend '
+                'FROM "SUP_Suppliers_CSV" GROUP BY "supplier"',
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "spend",
+            },
+            # A widget whose SQL returns nothing is dropped, never "preview only".
+            {"title": "Empty", "sql": 'SELECT "x" FROM "empty"', "chart_type": "bar"},
+        ]
+
+    def fake_make_runner(session, context, project_id):
+        async def runner(sql: str) -> dict:
+            if "SUP_Suppliers_CSV" in sql:
+                return {
+                    "columns": ["supplier", "spend"],
+                    "rows": [
+                        {"supplier": "Acme", "spend": 1200.0},
+                        {"supplier": "Globex", "spend": 800.0},
+                    ],
+                }
+            return {"columns": [], "rows": []}
+
+        return runner
+
+    monkeypatch.setattr(hir, "_plan_analyses", fake_plan)
+    monkeypatch.setattr(hir, "_make_runner", fake_make_runner)
+
+    r = await client.post(
+        "/api/ai/home/project-dashboard",
+        json={"project_id": project_id},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["dashboard"] is not None
+    widgets = body["dashboard"]["widgets"]
+    assert len(widgets) == 1  # the empty widget was dropped
+    assert widgets[0]["title"] == "Spend by supplier"
+    assert widgets[0]["chart"]["type"] == "bar"

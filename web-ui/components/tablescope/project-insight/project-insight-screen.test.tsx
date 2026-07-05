@@ -103,19 +103,9 @@ vi.mock("@/components/ai/GenerateQueryPreviewModal", () => ({
     ) : null,
 }));
 
-vi.mock("@/components/tablescope/project/ai-dashboard-suggestions-modal", () => ({
-  AIDashboardSuggestionsModal: ({
-    open,
-    initialPrompt,
-  }: {
-    open: boolean;
-    initialPrompt?: string;
-  }) =>
-    open ? (
-      <div role="dialog" aria-label="Generate Dashboard">
-        {initialPrompt}
-      </div>
-    ) : null,
+vi.mock("@/components/tablescope/project-insight/generate-dashboard-modal", () => ({
+  GenerateDashboardModal: ({ open }: { open: boolean }) =>
+    open ? <div role="dialog" aria-label="Generate Dashboard" /> : null,
 }));
 
 vi.mock("@/components/tablescope/project-shell", () => ({

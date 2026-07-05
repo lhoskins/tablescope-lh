@@ -347,6 +347,16 @@ export function suggestDashboards(
   });
 }
 
+export function generateProjectDashboard(
+  projectId: number,
+  maxWidgets = 6,
+): Promise<DashboardSuggestionsProject> {
+  return apiClient.post("/api/ai/home/project-dashboard", {
+    project_id: projectId,
+    max_widgets: maxWidgets,
+  });
+}
+
 export function suggestInsights(
   granularity = 3,
 ): Promise<{ projects: ProjectResult[] }> {
