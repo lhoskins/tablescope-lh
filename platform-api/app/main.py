@@ -36,6 +36,7 @@ from app.routes import home_intelligence as home_intelligence_routes
 from app.routes import mfa as mfa_routes
 from app.routes import project_assets as project_assets_routes
 from app.routes import project_graph as project_graph_routes
+from app.routes import project_insight as project_insight_routes
 from app.routes import projects as projects_routes
 from app.routes import provisioning as provisioning_routes
 from app.routes import query as query_routes
@@ -182,6 +183,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_asset_metadata_routes.router, prefix=api_prefix)
     app.include_router(project_assets_routes.router, prefix=api_prefix)
     app.include_router(project_graph_routes.router, prefix=api_prefix)
+    app.include_router(project_insight_routes.router, prefix=api_prefix)
     app.include_router(document_families_routes.router, prefix=api_prefix)
     app.include_router(billing_routes.router, prefix=api_prefix)
     app.include_router(billing_admin_routes.router, prefix=api_prefix)

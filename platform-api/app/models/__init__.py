@@ -50,6 +50,9 @@ from app.models.mfa_sms_event import MfaSmsEvent
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_asset import ProjectAsset
+from app.models.project_insight_acknowledgement import (
+    ProjectInsightAcknowledgement,
+)
 from app.models.query_scope import QueryScope
 from app.models.reference_library import (
     ReferenceAdditionRequest,
@@ -114,6 +117,7 @@ __all__ = [
     "OrganizationVDB",
     "Project",
     "ProjectAsset",
+    "ProjectInsightAcknowledgement",
     "ProjectMember",
     "QueryScope",
     "ReferenceAdditionRequest",

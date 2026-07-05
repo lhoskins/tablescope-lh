@@ -1,0 +1,185 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+
+const { push, getInsight, acknowledge } = vi.hoisted(() => ({
+  push: vi.fn(),
+  getInsight: vi.fn(),
+  acknowledge: vi.fn().mockResolvedValue({
+    insightId: "i1",
+    status: "reviewed",
+    acknowledgedByUserId: 1,
+    acknowledgedByName: "Leonard",
+    acknowledgedAt: "2026-06-25T00:00:00Z",
+  }),
+}));
+
+const INSIGHT = {
+  project: { id: 42, name: "Boeing", status: "Active" },
+  generatedAt: "2026-06-25T00:00:00Z",
+  lastUpdatedAt: "2026-06-25T00:00:00Z",
+  executiveSummary: {
+    summary: "Project is healthy overall.",
+    critical: ["Supplier A SLA breach"],
+    warnings: ["Budget variance up"],
+    opportunities: ["Consolidate spend"],
+    recommendations: ["Renegotiate contract"],
+  },
+  questionsToAsk: [
+    { id: "q1", question: "Why did Supplier A slip?", reason: "risk" },
+  ],
+  trendDetection: [{ id: "t1", label: "Spend up", description: "MoM +12%" }],
+  recommendedDashboards: [
+    { id: "d1", title: "Supplier SLA", status: "suggested" },
+  ],
+  recommendedQueries: [
+    { id: "rq1", title: "Late shipments", status: "suggested" },
+  ],
+  recommendedKpis: [
+    { id: "k1", name: "On-time %", status: "recommended", currentValue: null },
+  ],
+  whatChangedSinceLastVisit: {
+    newFilesAdded: 2,
+    changedDataSources: 1,
+    newRisksIdentified: 0,
+    newQueries: 3,
+    newDashboards: 1,
+    updatedKnowledgeGraph: 4,
+    changeLogLink: "/projects/42/audit-log",
+  },
+  insightValidationWorkflow: [
+    { id: "i1", title: "Supplier A risk", priority: "high", status: "new" },
+  ],
+  aiAvailable: true,
+};
+
+vi.mock("@/lib/api/project-insight", () => ({
+  projectInsightApi: {
+    get: (projectId: string) => getInsight(projectId),
+    acknowledge: (projectId: string, insightId: string) =>
+      acknowledge(projectId, insightId),
+  },
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push }),
+}));
+
+vi.mock("@/components/tablescope/project-shell", () => ({
+  ProjectShell: ({
+    children,
+    actions,
+  }: {
+    children: ReactNode;
+    actions?: ReactNode;
+  }) => (
+    <div>
+      <div data-testid="actions">{actions}</div>
+      {children}
+    </div>
+  ),
+}));
+
+import { ProjectInsightScreen } from "./project-insight-screen";
+
+function renderScreen() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <ProjectInsightScreen projectId="42" />
+    </QueryClientProvider>,
+  );
+}
+
+describe("ProjectInsightScreen", () => {
+  beforeEach(() => {
+    push.mockClear();
+    acknowledge.mockClear();
+    getInsight.mockReset();
+    getInsight.mockResolvedValue(INSIGHT);
+  });
+
+  it("renders the approved layout sections", async () => {
+    renderScreen();
+    expect(
+      await screen.findByText("Executive Project Summary"),
+    ).toBeTruthy();
+    expect(screen.getByText("AI-Generated Questions to Ask")).toBeTruthy();
+    expect(screen.getByText("Trend Detection")).toBeTruthy();
+    expect(screen.getByText("Recommended Dashboards")).toBeTruthy();
+    expect(screen.getByText("Recommended Queries")).toBeTruthy();
+    expect(screen.getByText("Recommended KPIs")).toBeTruthy();
+    expect(screen.getByText("What Changed Since Last Visit")).toBeTruthy();
+    expect(screen.getByText("Insight Validation Workflow")).toBeTruthy();
+  });
+
+  it("shows executive summary bullet categories", async () => {
+    renderScreen();
+    expect(await screen.findByText("Critical")).toBeTruthy();
+    expect(screen.getByText("Warnings")).toBeTruthy();
+    expect(screen.getByText("Opportunities")).toBeTruthy();
+    expect(screen.getByText("Recommendations")).toBeTruthy();
+    expect(screen.getByText("Supplier A SLA breach")).toBeTruthy();
+  });
+
+  it("shows suggestion status on recommended assets", async () => {
+    renderScreen();
+    // "Suggested" appears for dashboards + queries; KPI shows "Suggested" too.
+    expect((await screen.findAllByText("Suggested")).length).toBeGreaterThan(0);
+  });
+
+  it("does not show Approve or Reject in the validation workflow", async () => {
+    renderScreen();
+    await screen.findByText("Insight Validation Workflow");
+    expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /reject/i })).toBeNull();
+  });
+
+  it("marks an insight reviewed and updates status", async () => {
+    let reviewed = false;
+    const reviewedInsight = {
+      ...INSIGHT,
+      insightValidationWorkflow: [
+        {
+          id: "i1",
+          title: "Supplier A risk",
+          priority: "high",
+          status: "reviewed",
+          acknowledgedBy: "Leonard",
+        },
+      ],
+    };
+    getInsight.mockImplementation(() =>
+      Promise.resolve(reviewed ? reviewedInsight : INSIGHT),
+    );
+    acknowledge.mockImplementation(() => {
+      reviewed = true;
+      return Promise.resolve({
+        insightId: "i1",
+        status: "reviewed",
+        acknowledgedByUserId: 1,
+        acknowledgedByName: "Leonard",
+        acknowledgedAt: "2026-06-25T00:00:00Z",
+      });
+    });
+    renderScreen();
+    const btn = await screen.findByRole("button", { name: /mark reviewed/i });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(acknowledge).toHaveBeenCalledWith("42", "i1"),
+    );
+    expect(await screen.findByText("Reviewed by Leonard")).toBeTruthy();
+  });
+
+  it("opens the project-scoped ask flow when a question is clicked", async () => {
+    renderScreen();
+    const q = await screen.findByText("Why did Supplier A slip?");
+    fireEvent.click(q);
+    expect(push).toHaveBeenCalledWith(
+      "/projects/42/ai?q=Why%20did%20Supplier%20A%20slip%3F",
+    );
+  });
+});

@@ -153,9 +153,9 @@ export function projectNavGroups(projectId: string): NavGroup[] {
       heading: "Intelligence",
       items: [
         {
-          key: "project-ai-assistant",
-          label: "AI Assistant",
-          href: `${base}/ai`,
+          key: "project-insight",
+          label: "Project Insight",
+          href: `${base}/insight`,
           icon: IconSparkles,
         },
         {
