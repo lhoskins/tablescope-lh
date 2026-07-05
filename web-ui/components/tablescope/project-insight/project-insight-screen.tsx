@@ -30,9 +30,16 @@ import {
   projectInsightApi,
   type ProjectInsight,
   type InsightWorkflowItem,
+  type ReviewedInsight,
 } from "@/lib/api/project-insight";
 
 const INSIGHT_KEY = (projectId: string) => ["project", projectId, "insight"];
+const REVIEWED_KEY = (projectId: string) => [
+  "project",
+  projectId,
+  "insight",
+  "reviewed",
+];
 
 export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -60,17 +67,41 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       queryFn: () => projectInsightApi.get(projectId),
     });
 
+  const [workflowTab, setWorkflowTab] = useState<"open" | "reviewed">("open");
+
   const acknowledge = useMutation({
-    mutationFn: (insightId: string) =>
-      projectInsightApi.acknowledge(projectId, insightId),
+    mutationFn: (item: InsightWorkflowItem) =>
+      projectInsightApi.acknowledge(projectId, item.id, {
+        title: item.title,
+        summary: item.evidenceSummary,
+        category: item.type,
+        severity: item.priority,
+      }),
     onSuccess: (res) => {
       push(
         `Insight reviewed by ${res.acknowledgedByName || "you"}.`,
         "success",
       );
       queryClient.invalidateQueries({ queryKey: INSIGHT_KEY(projectId) });
+      queryClient.invalidateQueries({ queryKey: REVIEWED_KEY(projectId) });
     },
     onError: () => push("Could not record review", "error"),
+  });
+
+  const reviewedQuery = useQuery({
+    queryKey: REVIEWED_KEY(projectId),
+    queryFn: () => projectInsightApi.reviewed(projectId),
+  });
+
+  const reopen = useMutation({
+    mutationFn: (insightId: string) =>
+      projectInsightApi.reopen(projectId, insightId),
+    onSuccess: () => {
+      push("Insight reopened.", "success");
+      queryClient.invalidateQueries({ queryKey: INSIGHT_KEY(projectId) });
+      queryClient.invalidateQueries({ queryKey: REVIEWED_KEY(projectId) });
+    },
+    onError: () => push("Could not reopen insight", "error"),
   });
 
   const askQuestion = (question: string, source = "project_overview_question") => {
@@ -100,6 +131,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const workflow = (data?.insightValidationWorkflow ?? []).filter((i) =>
     i.title?.trim(),
   );
+  const openWorkflow = workflow.filter((i) => i.status !== "reviewed");
+  const reviewedItems: ReviewedInsight[] = reviewedQuery.data?.items ?? [];
 
   return (
     <ProjectShell
@@ -381,20 +414,54 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 <Panel
                   title="Insight Validation Workflow"
                   icon={<IconCheck size={16} className="text-brand-500" />}
+                  headerRight={
+                    <div className="flex items-center gap-1 rounded-md bg-bg-secondary p-0.5">
+                      <WorkflowTab
+                        label="Open"
+                        count={openWorkflow.length}
+                        active={workflowTab === "open"}
+                        onClick={() => setWorkflowTab("open")}
+                      />
+                      <WorkflowTab
+                        label="Reviewed"
+                        count={reviewedItems.length}
+                        active={workflowTab === "reviewed"}
+                        onClick={() => setWorkflowTab("reviewed")}
+                      />
+                    </div>
+                  }
                 >
-                  {workflow.length === 0 ? (
-                    <PanelEmpty text="No insights to review." />
+                  {workflowTab === "open" ? (
+                    openWorkflow.length === 0 ? (
+                      <PanelEmpty text="No insights to review." />
+                    ) : (
+                      <div className="space-y-2">
+                        {openWorkflow.map((item) => (
+                          <WorkflowRow
+                            key={item.id}
+                            item={item}
+                            pending={
+                              acknowledge.isPending &&
+                              acknowledge.variables?.id === item.id
+                            }
+                            onReview={() => acknowledge.mutate(item)}
+                          />
+                        ))}
+                      </div>
+                    )
+                  ) : reviewedItems.length === 0 ? (
+                    <PanelEmpty text="No reviewed insights yet." />
                   ) : (
                     <div className="space-y-2">
-                      {workflow.map((item) => (
-                        <WorkflowRow
-                          key={item.id}
+                      {reviewedItems.map((item) => (
+                        <ReviewedRow
+                          key={item.insightId}
                           item={item}
                           pending={
-                            acknowledge.isPending &&
-                            acknowledge.variables === item.id
+                            reopen.isPending &&
+                            reopen.variables === item.insightId
                           }
-                          onReview={() => acknowledge.mutate(item.id)}
+                          onReopen={() => reopen.mutate(item.insightId)}
                         />
                       ))}
                     </div>
@@ -497,19 +564,102 @@ function Panel({
   title,
   icon,
   children,
+  headerRight,
 }: {
   title: string;
   icon: ReactNode;
   children: ReactNode;
+  headerRight?: ReactNode;
 }) {
   return (
     <section className="rounded-lg border border-line-tertiary bg-bg-primary">
-      <div className="flex items-center gap-2 border-b border-line-tertiary px-4 py-3">
-        {icon}
-        <h3 className="text-h3 text-ink-primary">{title}</h3>
+      <div className="flex items-center justify-between gap-2 border-b border-line-tertiary px-4 py-3">
+        <div className="flex items-center gap-2">
+          {icon}
+          <h3 className="text-h3 text-ink-primary">{title}</h3>
+        </div>
+        {headerRight}
       </div>
       <div className="p-4">{children}</div>
     </section>
+  );
+}
+
+function WorkflowTab({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded px-2.5 py-1 text-[12px] font-medium transition-colors",
+        active
+          ? "bg-bg-primary text-ink-primary shadow-sm"
+          : "text-ink-tertiary hover:text-ink-secondary",
+      )}
+    >
+      {label}
+      <span className="ml-1 text-ink-tertiary">{count}</span>
+    </button>
+  );
+}
+
+function ReviewedRow({
+  item,
+  pending,
+  onReopen,
+}: {
+  item: ReviewedInsight;
+  pending: boolean;
+  onReopen: () => void;
+}) {
+  const priorityTone =
+    PRIORITY_TONE[item.severity as keyof typeof PRIORITY_TONE] ?? "neutral";
+  const reviewedAt = item.reviewedAt
+    ? new Date(item.reviewedAt).toLocaleDateString()
+    : "";
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-line-tertiary px-3 py-2">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-[13px] font-medium text-ink-primary">
+            {item.title || item.insightId}
+          </span>
+          {item.severity && (
+            <Badge tone={priorityTone} size="sm">
+              {item.severity}
+            </Badge>
+          )}
+        </div>
+        {item.summary && (
+          <div className="mt-0.5 truncate text-small text-ink-tertiary">
+            {item.summary}
+          </div>
+        )}
+        <div className="mt-0.5 text-small text-success">
+          Reviewed{item.reviewedByName ? ` by ${item.reviewedByName}` : ""}
+          {reviewedAt ? ` · ${reviewedAt}` : ""}
+        </div>
+      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={onReopen}
+        disabled={pending}
+        className="shrink-0"
+      >
+        {pending ? "Reopening…" : "Reopen"}
+      </Button>
+    </div>
   );
 }
 

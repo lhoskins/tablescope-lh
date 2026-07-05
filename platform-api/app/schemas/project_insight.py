@@ -58,6 +58,12 @@ class ProjectInsightResponse(BaseModel):
 
 class AcknowledgeInsightRequest(BaseModel):
     note: str | None = None
+    # Snapshot of the insight at review time (so the Reviewed list survives
+    # report regeneration). All optional; unknown fields ignored.
+    title: str | None = None
+    summary: str | None = None
+    category: str | None = None
+    severity: str | None = None
 
 
 class AcknowledgeInsightResponse(BaseModel):
@@ -66,3 +72,24 @@ class AcknowledgeInsightResponse(BaseModel):
     acknowledgedByUserId: int | None = None
     acknowledgedByName: str = ""
     acknowledgedAt: datetime | None = None
+
+
+class ReviewedInsight(BaseModel):
+    insightId: str
+    title: str = ""
+    summary: str = ""
+    category: str = ""
+    severity: str = ""
+    note: str | None = None
+    reviewedByUserId: int | None = None
+    reviewedByName: str = ""
+    reviewedAt: datetime | None = None
+
+
+class ReviewedInsightsResponse(BaseModel):
+    items: list[ReviewedInsight] = Field(default_factory=list)
+
+
+class ReopenInsightResponse(BaseModel):
+    insightId: str
+    status: str = "reopened"

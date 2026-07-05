@@ -28,6 +28,9 @@ from app.schemas.project_insight import (
     AcknowledgeInsightRequest,
     AcknowledgeInsightResponse,
     ProjectInsightResponse,
+    ReopenInsightResponse,
+    ReviewedInsight,
+    ReviewedInsightsResponse,
 )
 from app.services.project_insight_service import build_project_insight
 
@@ -104,6 +107,15 @@ async def acknowledge_insight(
     ack.user_id = context.user_id
     ack.status = "reviewed"
     ack.note = body.note
+    # Persist the snapshot so the Reviewed list survives report regeneration.
+    if body.title is not None:
+        ack.title = body.title
+    if body.summary is not None:
+        ack.summary = body.summary
+    if body.category is not None:
+        ack.category = body.category
+    if body.severity is not None:
+        ack.severity = body.severity
 
     session.add(
         AuditEvent(
@@ -131,3 +143,91 @@ async def acknowledge_insight(
         acknowledgedByName=name,
         acknowledgedAt=ack.updated_at or datetime.now(UTC),
     )
+
+
+@router.get(
+    "/{project_id}/insights/reviewed",
+    response_model=ReviewedInsightsResponse,
+)
+async def list_reviewed_insights(
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> ReviewedInsightsResponse:
+    """List insights that have been reviewed for a project (most recent first)."""
+    await _require_project_access(project_id, session, context)
+
+    rows = (
+        await session.execute(
+            select(
+                ProjectInsightAcknowledgement, User.display_name, User.email
+            )
+            .join(
+                User,
+                User.id == ProjectInsightAcknowledgement.user_id,
+                isouter=True,
+            )
+            .where(
+                ProjectInsightAcknowledgement.project_id == project_id,
+                ProjectInsightAcknowledgement.status == "reviewed",
+            )
+            .order_by(ProjectInsightAcknowledgement.updated_at.desc())
+        )
+    ).all()
+
+    items = [
+        ReviewedInsight(
+            insightId=ack.insight_id,
+            title=ack.title or "",
+            summary=ack.summary or "",
+            category=ack.category or "",
+            severity=ack.severity or "",
+            note=ack.note,
+            reviewedByUserId=ack.user_id,
+            reviewedByName=display_name or email or "",
+            reviewedAt=ack.updated_at,
+        )
+        for ack, display_name, email in rows
+    ]
+    return ReviewedInsightsResponse(items=items)
+
+
+@router.post(
+    "/{project_id}/insights/{insight_id}/reopen",
+    response_model=ReopenInsightResponse,
+)
+async def reopen_insight(
+    project_id: int,
+    insight_id: str,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> ReopenInsightResponse:
+    """Reopen a reviewed insight so it returns to the Open list (audited)."""
+    await _require_project_access(project_id, session, context)
+
+    ack = await session.scalar(
+        select(ProjectInsightAcknowledgement).where(
+            ProjectInsightAcknowledgement.project_id == project_id,
+            ProjectInsightAcknowledgement.insight_id == insight_id,
+        )
+    )
+    if ack is None:
+        raise HTTPException(status_code=404, detail="Insight not reviewed")
+
+    ack.status = "reopened"
+    ack.user_id = context.user_id
+
+    session.add(
+        AuditEvent(
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            user_id=context.user_id,
+            event_type="project_insight_reopened",
+            prompt_type=insight_id[:100],
+            scope="project_insight",
+            title=f"Reopened insight {insight_id}",
+        )
+    )
+    await session.commit()
+
+    return ReopenInsightResponse(insightId=insight_id, status="reopened")

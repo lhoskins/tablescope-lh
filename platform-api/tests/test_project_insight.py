@@ -294,6 +294,117 @@ async def test_project_insight_degrades_when_ai_unavailable(
     assert "whatChangedSinceLastVisit" in body
 
 
+async def test_acknowledge_persists_snapshot_and_lists_reviewed(
+    client, service_headers, _mock_ai
+) -> None:
+    _, user, project, headers = await _setup(client, service_headers, "pi-snap")
+    pid = project["id"]
+
+    r = await client.post(
+        f"/api/projects/{pid}/insights/i1/acknowledge",
+        json={
+            "note": "looks right",
+            "title": "Supplier A risk",
+            "summary": "Lead time breached SLA",
+            "category": "risk",
+            "severity": "high",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200
+
+    r = await client.get(
+        f"/api/projects/{pid}/insights/reviewed", headers=headers
+    )
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert len(items) == 1
+    item = items[0]
+    assert item["insightId"] == "i1"
+    assert item["title"] == "Supplier A risk"
+    assert item["summary"] == "Lead time breached SLA"
+    assert item["category"] == "risk"
+    assert item["severity"] == "high"
+    assert item["note"] == "looks right"
+    assert item["reviewedByName"]
+    assert item["reviewedByUserId"] == user["id"]
+    assert item["reviewedAt"]
+
+
+async def test_reopen_removes_from_reviewed_and_audits(
+    client, service_headers, _mock_ai, db_session
+) -> None:
+    _, user, project, headers = await _setup(client, service_headers, "pi-reopen")
+    pid = project["id"]
+
+    await client.post(
+        f"/api/projects/{pid}/insights/i1/acknowledge",
+        json={"note": None, "title": "Supplier A risk"},
+        headers=headers,
+    )
+    reviewed = (
+        await client.get(
+            f"/api/projects/{pid}/insights/reviewed", headers=headers
+        )
+    ).json()["items"]
+    assert len(reviewed) == 1
+
+    r = await client.post(
+        f"/api/projects/{pid}/insights/i1/reopen", headers=headers
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "reopened"
+
+    reviewed = (
+        await client.get(
+            f"/api/projects/{pid}/insights/reviewed", headers=headers
+        )
+    ).json()["items"]
+    assert reviewed == []
+
+    # The reopened insight is back in the Open workflow (not 'reviewed').
+    body = (
+        await client.get(f"/api/projects/{pid}/insight", headers=headers)
+    ).json()
+    workflow = {w["id"]: w for w in body["insightValidationWorkflow"]}
+    assert workflow["i1"]["status"] != "reviewed"
+
+    audit = (
+        await db_session.execute(
+            select(AuditEvent).where(
+                AuditEvent.project_id == pid,
+                AuditEvent.event_type == "project_insight_reopened",
+            )
+        )
+    ).scalar_one()
+    assert audit.user_id == user["id"]
+    assert audit.prompt_type == "i1"
+
+
+async def test_reopen_unknown_insight_returns_404(
+    client, service_headers, _mock_ai
+) -> None:
+    _, _, project, headers = await _setup(client, service_headers, "pi-reopen404")
+    r = await client.post(
+        f"/api/projects/{project['id']}/insights/nope/reopen", headers=headers
+    )
+    assert r.status_code == 404
+
+
+async def test_reviewed_list_rejects_other_tenant(
+    client, service_headers, _mock_ai
+) -> None:
+    _, _, project, _ = await _setup(client, service_headers, "pi-rev-iso-a")
+    _, _, _, other_headers = await _setup(
+        client, service_headers, "pi-rev-iso-b"
+    )
+    r = await client.get(
+        f"/api/projects/{project['id']}/insights/reviewed",
+        headers=other_headers,
+    )
+    assert r.status_code == 404
+
+
 async def test_project_insight_rejects_other_tenant(
     client, service_headers, _mock_ai
 ) -> None:

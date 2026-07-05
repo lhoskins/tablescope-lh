@@ -32,6 +32,12 @@ class ProjectInsightAcknowledgement(TimestampMixin, Base):
         String(50), nullable=False, default="reviewed"
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Snapshot of the insight taken at review time so the Reviewed list stays
+    # meaningful even after the AI report is regenerated with different items.
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    severity: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(

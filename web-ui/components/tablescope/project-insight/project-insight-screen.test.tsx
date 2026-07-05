@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-const { push, getInsight, acknowledge } = vi.hoisted(() => ({
+const { push, getInsight, acknowledge, reviewed, reopen } = vi.hoisted(() => ({
   push: vi.fn(),
   getInsight: vi.fn(),
   acknowledge: vi.fn().mockResolvedValue({
@@ -13,6 +13,8 @@ const { push, getInsight, acknowledge } = vi.hoisted(() => ({
     acknowledgedByName: "Leonard",
     acknowledgedAt: "2026-06-25T00:00:00Z",
   }),
+  reviewed: vi.fn().mockResolvedValue({ items: [] }),
+  reopen: vi.fn().mockResolvedValue({ insightId: "i1", status: "reopened" }),
 }));
 
 const INSIGHT = {
@@ -59,6 +61,9 @@ vi.mock("@/lib/api/project-insight", () => ({
     get: (projectId: string) => getInsight(projectId),
     acknowledge: (projectId: string, insightId: string) =>
       acknowledge(projectId, insightId),
+    reviewed: (projectId: string) => reviewed(projectId),
+    reopen: (projectId: string, insightId: string) =>
+      reopen(projectId, insightId),
   },
 }));
 
@@ -145,6 +150,9 @@ describe("ProjectInsightScreen", () => {
   beforeEach(() => {
     push.mockClear();
     acknowledge.mockClear();
+    reopen.mockClear();
+    reviewed.mockReset();
+    reviewed.mockResolvedValue({ items: [] });
     getInsight.mockReset();
     getInsight.mockResolvedValue(INSIGHT);
   });
@@ -185,8 +193,9 @@ describe("ProjectInsightScreen", () => {
     expect(screen.queryByRole("button", { name: /reject/i })).toBeNull();
   });
 
-  it("marks an insight reviewed and updates status", async () => {
-    let reviewed = false;
+  it("marks an insight reviewed; it moves to the Reviewed tab", async () => {
+    // After review, the insight is no longer 'new' in the report and the
+    // reviewed-list endpoint returns it.
     const reviewedInsight = {
       ...INSIGHT,
       insightValidationWorkflow: [
@@ -199,11 +208,23 @@ describe("ProjectInsightScreen", () => {
         },
       ],
     };
-    getInsight.mockImplementation(() =>
-      Promise.resolve(reviewed ? reviewedInsight : INSIGHT),
-    );
     acknowledge.mockImplementation(() => {
-      reviewed = true;
+      getInsight.mockResolvedValue(reviewedInsight);
+      reviewed.mockResolvedValue({
+        items: [
+          {
+            insightId: "i1",
+            title: "Supplier A risk",
+            summary: "",
+            category: "risk",
+            severity: "high",
+            note: null,
+            reviewedByUserId: 1,
+            reviewedByName: "Leonard",
+            reviewedAt: "2026-06-25T00:00:00Z",
+          },
+        ],
+      });
       return Promise.resolve({
         insightId: "i1",
         status: "reviewed",
@@ -218,7 +239,16 @@ describe("ProjectInsightScreen", () => {
     await waitFor(() =>
       expect(acknowledge).toHaveBeenCalledWith("42", "i1"),
     );
-    expect(await screen.findByText("Reviewed by Leonard")).toBeTruthy();
+    // The Open tab no longer shows the reviewed item.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /mark reviewed/i })).toBeNull(),
+    );
+    // It now appears under the Reviewed tab (with the reviewer name).
+    fireEvent.click(screen.getByRole("button", { name: /^Reviewed/ }));
+    expect(await screen.findByText("Supplier A risk")).toBeTruthy();
+    expect(
+      (await screen.findAllByText((t) => t.includes("by Leonard"))).length,
+    ).toBeGreaterThan(0);
   });
 
   it("filters out empty items instead of showing placeholder fallbacks", async () => {
@@ -283,5 +313,32 @@ describe("ProjectInsightScreen", () => {
     expect(
       await screen.findByRole("dialog", { name: "Generate Dashboard" }),
     ).toBeTruthy();
+  });
+
+  it("shows reviewed insights in the Reviewed tab and can reopen one", async () => {
+    reviewed.mockResolvedValue({
+      items: [
+        {
+          insightId: "i9",
+          title: "Reviewed supplier risk",
+          summary: "Confirmed and mitigated",
+          category: "risk",
+          severity: "high",
+          note: null,
+          reviewedByUserId: 1,
+          reviewedByName: "Leonard",
+          reviewedAt: "2026-06-25T00:00:00Z",
+        },
+      ],
+    });
+    renderScreen();
+    // Switch to the Reviewed tab.
+    fireEvent.click(await screen.findByRole("button", { name: /^Reviewed/ }));
+    expect(await screen.findByText("Reviewed supplier risk")).toBeTruthy();
+    const reopenBtn = await screen.findByRole("button", { name: /reopen/i });
+    fireEvent.click(reopenBtn);
+    await waitFor(() =>
+      expect(reopen).toHaveBeenCalledWith("42", "i9"),
+    );
   });
 });

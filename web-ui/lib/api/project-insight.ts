@@ -109,12 +109,49 @@ export interface AcknowledgeResponse {
   acknowledgedAt: string | null;
 }
 
+export interface InsightSnapshot {
+  title?: string;
+  summary?: string;
+  category?: string;
+  severity?: string;
+}
+
+export interface ReviewedInsight {
+  insightId: string;
+  title: string;
+  summary: string;
+  category: string;
+  severity: string;
+  note: string | null;
+  reviewedByUserId: number | null;
+  reviewedByName: string;
+  reviewedAt: string | null;
+}
+
+export interface ReviewedInsightsResponse {
+  items: ReviewedInsight[];
+}
+
 export const projectInsightApi = {
   get: (projectId: string) =>
     apiClient.get<ProjectInsight>(`/api/projects/${projectId}/insight`),
-  acknowledge: (projectId: string, insightId: string, note?: string) =>
+  acknowledge: (
+    projectId: string,
+    insightId: string,
+    snapshot?: InsightSnapshot,
+    note?: string,
+  ) =>
     apiClient.post<AcknowledgeResponse>(
       `/api/projects/${projectId}/insights/${encodeURIComponent(insightId)}/acknowledge`,
-      { note: note ?? null },
+      { note: note ?? null, ...(snapshot ?? {}) },
+    ),
+  reviewed: (projectId: string) =>
+    apiClient.get<ReviewedInsightsResponse>(
+      `/api/projects/${projectId}/insights/reviewed`,
+    ),
+  reopen: (projectId: string, insightId: string) =>
+    apiClient.post<{ insightId: string; status: string }>(
+      `/api/projects/${projectId}/insights/${encodeURIComponent(insightId)}/reopen`,
+      {},
     ),
 };
