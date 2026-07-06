@@ -210,18 +210,70 @@ _AGG_CAST_RE = re.compile(
 )
 
 
+def _cast_timestampdiff(sql: str) -> str:
+    """Wrap every TIMESTAMPDIFF(...) call in CAST(... AS double).
+
+    TIMESTAMPDIFF returns a bigint; the driver cannot decode the result of an
+    aggregate over it (AVG/SUM) across Teiid's pg wire ("insufficient data in
+    buffer"). Casting the difference to double keeps day/month counts exact and
+    lets aggregation decode correctly. Already-cast calls are left untouched.
+    """
+    out: list[str] = []
+    i = 0
+    lowered = sql.lower()
+    token = "timestampdiff"
+    while True:
+        idx = lowered.find(token, i)
+        if idx == -1:
+            out.append(sql[i:])
+            break
+        # Locate the opening paren after the function name.
+        j = idx + len(token)
+        while j < len(sql) and sql[j].isspace():
+            j += 1
+        if j >= len(sql) or sql[j] != "(":
+            out.append(sql[i : idx + len(token)])
+            i = idx + len(token)
+            continue
+        # Match balanced parentheses for the full call.
+        depth = 0
+        k = j
+        while k < len(sql):
+            if sql[k] == "(":
+                depth += 1
+            elif sql[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        if depth != 0:  # unbalanced — leave the remainder untouched
+            out.append(sql[i:])
+            break
+        call = sql[idx : k + 1]
+        # Skip if this call is already the argument of a CAST(...).
+        prefix = sql[:idx].rstrip()
+        if prefix.lower().endswith("cast("):
+            out.append(sql[i : k + 1])
+        else:
+            out.append(sql[i:idx])
+            out.append(f"CAST({call} AS double)")
+        i = k + 1
+    return "".join(out)
+
+
 def _auto_cast_aggregates(sql: str) -> str:
     """Wrap SUM/AVG/MIN/MAX column arguments with CAST(col AS double).
 
     Teiid imports CSV columns as string, causing numeric aggregations to fail.
-    This transparently casts the argument for the user.
+    This transparently casts the argument for the user. TIMESTAMPDIFF results
+    (bigint) are also cast so aggregates over date differences decode correctly.
     """
     def _replacer(m: re.Match[str]) -> str:
         func = m.group(1).upper()
         col = m.group(2)
         return f"{func}(CAST({col} AS double))"
 
-    return _AGG_CAST_RE.sub(_replacer, sql)
+    return _cast_timestampdiff(_AGG_CAST_RE.sub(_replacer, sql))
 
 
 @router.post("/datasource")

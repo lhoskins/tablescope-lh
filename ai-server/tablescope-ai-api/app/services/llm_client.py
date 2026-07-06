@@ -85,10 +85,14 @@ _TEIID_RULES = (
     "10. For a ratio/rate/percentage, CAST BOTH operands of the division: "
     "CAST(\"DefectQty\" AS double) / CAST(\"ReceivedQty\" AS double). Guard "
     "divide-by-zero with NULLIF(CAST(\"denom\" AS double), 0).\n"
-    "11. Never use DATEDIFF, DATE_DIFF or DATE_PART — they are not Teiid "
-    "functions. For a day count between two dates use "
-    "TIMESTAMPDIFF(SQL_TSI_DAY, CAST(\"d1\" AS timestamp), "
-    "CAST(\"d2\" AS timestamp)).\n"
+    "11. Never use DATEDIFF, DATE_DIFF or DATE_PART, and NEVER subtract two "
+    "dates/timestamps (d2 - d1 raises TEIID30070) or wrap a subtraction in "
+    "EXTRACT(DAY FROM ...). For a day count between two dates use "
+    "TIMESTAMPDIFF(SQL_TSI_DAY, <earlier>, <later>), parsing text dates first. "
+    "When you aggregate the day count, CAST it to double so it decodes: "
+    "AVG(CAST(TIMESTAMPDIFF(SQL_TSI_DAY, "
+    "PARSETIMESTAMP(\"ShipDate\", 'M/d/yyyy'), "
+    "PARSETIMESTAMP(\"DeliveryDate\", 'M/d/yyyy')) AS double)).\n"
 )
 
 _SEMANTIC_RULES = (
