@@ -61,6 +61,7 @@ from app.models.schemas import (
     RelationshipSuggestion,
     ScopeSuggestion,
     SelectedSource,
+    SourceCatalogEntry,
     DashboardPlanSuggestion,
     DashboardPlanWidget,
     SuggestDashboardRequest,
@@ -550,6 +551,25 @@ def _score_source_match(request: str, source: str) -> int:
     return 0
 
 
+def _catalog_table_columns(
+    catalog: list[SourceCatalogEntry] | None,
+) -> dict[str, list[str]]:
+    """Extract ``{source name: real columns}`` for table-kind catalog entries.
+
+    Feeds column-level validation so hallucinated column names (e.g.
+    ``DefectRate`` when the real column is ``DefectQty``) are caught and sent
+    back through the repair pass. Saved queries and sources without a known
+    column list are skipped.
+    """
+    result: dict[str, list[str]] = {}
+    for entry in catalog or []:
+        if entry.kind == "query":
+            continue
+        if entry.name and entry.columns:
+            result[entry.name] = list(entry.columns)
+    return result
+
+
 def _remap_tables_to_authorized(sql: str, allowed_tables: list[str]) -> str:
     """Rewrite FROM/JOIN table references to their best-matching authorized source.
 
@@ -663,6 +683,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         ]
 
     catalog = req.source_catalog or None
+    table_columns = _catalog_table_columns(catalog)
 
     def _clarify(reason: str) -> HTTPException:
         suggestions = _suggest_sources(req.prompt, allowed_tables)
@@ -708,7 +729,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
     for attempt in range(3):
         sql = _remap_tables_to_authorized(sql, allowed_tables)
         try:
-            validate_sql(sql, allowed_tables)
+            validate_sql(sql, allowed_tables, table_columns=table_columns)
             break
         except SQLValidationError as e:
             last_error = e.reason
