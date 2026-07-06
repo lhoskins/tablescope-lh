@@ -132,27 +132,30 @@ async def test_resolves_logistics_delay(db_session) -> None:
     assert result.preferred_sources == ["LOG_Shipments_CSV"]
 
 
-async def test_ambiguous_returns_clarification_candidates(db_session) -> None:
-    # Two sources with equally strong supplier evidence and no distinguishing
-    # metric term in the question.
+async def test_close_scores_auto_pick_top_source(db_session) -> None:
+    # Two sources with equally strong evidence (supplier entity + spend metric):
+    # the resolver never asks the user to choose — it always auto-selects the
+    # single highest-ranked source (deterministic tie-break by score then name).
     await _add_file_source(
         session=db_session,
-        view_name="SUP_Directory_A_CSV",
-        columns=["SupplierID", "SupplierName"],
+        view_name="SUP_Spend_A_CSV",
+        columns=["SupplierID", "Amount"],
     )
     await _add_file_source(
         session=db_session,
-        view_name="SUP_Directory_B_CSV",
-        columns=["SupplierID", "SupplierName"],
+        view_name="SUP_Spend_B_CSV",
+        columns=["SupplierID", "Amount"],
     )
     result = await resolve_project_source(
         db_session,
         tenant_id=TENANT,
         project_id=PROJECT,
-        question="Tell me about suppliers",
+        question="What is total supplier spend?",
     )
-    assert result.status == "ambiguous"
-    assert len(result.preferred_sources) >= 2
+    assert result.status == "resolved"
+    assert len(result.preferred_sources) == 1
+    # The chosen source is the deterministic top rank, not a user prompt.
+    assert result.preferred_sources[0] in {"SUP_Spend_A_CSV", "SUP_Spend_B_CSV"}
 
 
 async def test_unauthorized_source_never_selected(db_session) -> None:
@@ -233,3 +236,44 @@ async def test_no_sources_returns_no_match(db_session) -> None:
     )
     assert result.status == "no_match"
     assert "no authorized data sources" in result.reason.lower()
+
+
+async def test_partition_questions_splits_answerable_and_needs_data(
+    db_session,
+) -> None:
+    from app.services.project_insight_service import _partition_questions
+
+    await _seed_supply_chain(db_session)
+    items = [
+        {"id": "a", "question": "What is the defect rate for each supplier?"},
+        {"id": "b", "question": "What is the employee headcount by department?"},
+    ]
+    answerable, needs_data = await _partition_questions(
+        db_session,
+        tenant_id=TENANT,
+        project_id=PROJECT,
+        kpi_names=[],
+        items=items,
+        question_keys=("question",),
+        has_sources=True,
+    )
+    assert [q["id"] for q in answerable] == ["a"]
+    assert [q["id"] for q in needs_data] == ["b"]
+    assert needs_data[0]["missingDataHint"]  # explains the missing data
+
+
+async def test_partition_questions_no_sources_keeps_all(db_session) -> None:
+    from app.services.project_insight_service import _partition_questions
+
+    items = [{"id": "a", "question": "What is the defect rate?"}]
+    answerable, needs_data = await _partition_questions(
+        db_session,
+        tenant_id=TENANT,
+        project_id=PROJECT,
+        kpi_names=[],
+        items=items,
+        question_keys=("question",),
+        has_sources=False,
+    )
+    assert answerable == items
+    assert needs_data == []

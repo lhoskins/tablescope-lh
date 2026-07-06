@@ -15,6 +15,16 @@ export interface QuestionToAsk {
   suggestedAction?: string;
 }
 
+export interface QuestionNeedingData {
+  id?: string;
+  question?: string;
+  businessQuestion?: string;
+  title?: string;
+  reason?: string;
+  // Data-driven explanation of what the project would need to answer this.
+  missingDataHint?: string;
+}
+
 export interface TrendDetection {
   id: string;
   label?: string;
@@ -121,6 +131,7 @@ export interface ProjectInsight {
   lastUpdatedAt: string;
   executiveSummary: ExecutiveSummary;
   questionsToAsk: QuestionToAsk[];
+  questionsNeedingData: QuestionNeedingData[];
   trendDetection: TrendDetection[];
   recommendedDashboards: RecommendedDashboard[];
   recommendedQueries: RecommendedQuery[];

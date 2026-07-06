@@ -11,9 +11,11 @@ click. The resolver never emits SQL and never uses hard-coded business SQL
 templates — it only scores authorized sources by their real columns, metadata,
 and any card-supplied source context, and returns one of:
 
-    resolved   — a confident single best source (+ relevant columns)
-    ambiguous  — several plausible sources; ask the user to choose
-    no_match   — nothing scored above the floor; ask the user to pick/rephrase
+    resolved   — the highest-confidence authorized source (+ relevant columns).
+                 When several sources score close together the top-ranked one is
+                 chosen automatically; the user is never asked to pick.
+    no_match   — nothing scored above the confidence floor, so the request
+                 cannot be answered from an authorized source.
 
 Supports both file (``FileSourceMeta``) and database (``DatabaseDataSource``)
 sources, scoped to the caller's tenant + project so an unauthorized source can
@@ -41,11 +43,10 @@ from app.models.saved_query import SavedQuery
 # ---------------------------------------------------------------------------
 # A source must score at least this to be considered a candidate at all.
 _MIN_CANDIDATE_SCORE = 25.0
-# The top candidate is accepted outright when it clears this score.
+# The top candidate is accepted outright when it clears this score. When
+# several sources clear it, the highest-scoring one is always chosen (the user
+# is never asked to disambiguate).
 _RESOLVE_SCORE = 40.0
-# Two candidates are "ambiguous" when both clear the floor and the runner-up is
-# within this fraction of the leader (i.e. no clear winner).
-_AMBIGUOUS_RATIO = 0.8
 
 # Weighted evidence contributions (see plan scoring model).
 _W_METRIC_COLUMN = 40.0
@@ -351,19 +352,18 @@ def _score_source(
 def _classify(
     candidates: list[ResolverCandidate],
 ) -> tuple[str, float]:
-    """Decide resolved / ambiguous / no_match from ranked candidates."""
+    """Decide resolved / no_match from ranked candidates.
+
+    The highest-scoring candidate is always chosen when it clears the confidence
+    floor — several close scores never produce an "ambiguous" outcome, because
+    the user is never asked to pick a source. If nothing clears the floor the
+    request is ``no_match`` (it cannot be answered from an authorized source).
+    """
     viable = [c for c in candidates if c.score >= _MIN_CANDIDATE_SCORE]
     if not viable:
         return "no_match", 0.0
     top = viable[0]
     confidence = max(0.0, min(1.0, top.score / 100.0))
-    if len(viable) >= 2:
-        second = viable[1]
-        if top.score < _RESOLVE_SCORE or (
-            second.score >= _MIN_CANDIDATE_SCORE
-            and second.score >= top.score * _AMBIGUOUS_RATIO
-        ):
-            return "ambiguous", confidence
     if top.score < _RESOLVE_SCORE:
         return "no_match", confidence
     return "resolved", confidence
@@ -473,17 +473,6 @@ async def resolve_project_source(
             confidence=confidence,
             reason=f"Best match: {top.reason}.",
             candidates=candidates[:5],
-        )
-    if status == "ambiguous":
-        viable = [c for c in candidates if c.score >= _MIN_CANDIDATE_SCORE][:4]
-        return ResolverResult(
-            status="ambiguous",
-            preferred_sources=[c.source for c in viable],
-            relevant_columns=[],
-            intent=intent,
-            confidence=confidence,
-            reason="Multiple sources could answer this request.",
-            candidates=viable,
         )
     return ResolverResult(
         status="no_match",

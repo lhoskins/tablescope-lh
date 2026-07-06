@@ -171,6 +171,27 @@ describe("ProjectInsightScreen", () => {
     expect(screen.getByText("Supplier A SLA breach")).toBeTruthy();
   });
 
+  it("shows unanswerable questions in a Needs additional data section", async () => {
+    getInsight.mockResolvedValue({
+      ...INSIGHT,
+      questionsNeedingData: [
+        {
+          id: "nd1",
+          question: "What is employee headcount by department?",
+          missingDataHint: "Add a source with the relevant data to enable it.",
+        },
+      ],
+    });
+    renderScreen();
+    expect(await screen.findByText("Needs additional data")).toBeTruthy();
+    expect(
+      screen.getByText("What is employee headcount by department?"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Add a source with the relevant data to enable it."),
+    ).toBeTruthy();
+  });
+
   it("shows suggestion status on recommended assets", async () => {
     renderScreen();
     // "Suggested" appears for dashboards + queries; KPI shows "Suggested" too.

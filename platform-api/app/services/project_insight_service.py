@@ -47,6 +47,88 @@ logger = logging.getLogger(__name__)
 # Window used for the deterministic "What Changed Since Last Visit" deltas.
 _ACTIVITY_WINDOW = timedelta(days=7)
 
+
+def _missing_data_hint(result: Any) -> str:
+    """Explain (data-driven) why a question can't be answered from the project.
+
+    Uses the resolver's near-miss candidates when available; never hard-codes a
+    business field. The message tells the user the current authorized sources
+    lack the data and that adding the relevant source would enable the question.
+    """
+    near = [c for c in (result.candidates or []) if getattr(c, "score", 0) > 0]
+    if near:
+        closest = ", ".join(c.source for c in near[:2])
+        return (
+            "The project's current data sources "
+            f"(closest: {closest}) don't contain the fields needed to answer "
+            "this. Add a source with the relevant data to enable it."
+        )
+    return (
+        "The project has no authorized data source with the fields needed to "
+        "answer this. Add a source with the relevant data to enable it."
+    )
+
+
+async def _partition_questions(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int,
+    kpi_names: list[str],
+    items: list[dict[str, Any]],
+    question_keys: tuple[str, ...],
+    has_sources: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split questions into (answerable, needs-additional-data).
+
+    Every suggested question is run through the Project Semantic Source
+    Resolver. Items it can ground on a real authorized source
+    (``status == "resolved"``) are answerable; the rest are returned separately
+    (not dropped) annotated with a ``missingDataHint`` describing the data the
+    project would need to answer them. Nothing is hard-coded — a question is
+    answerable purely on whether its terms match a real source's columns.
+    """
+    from app.services.project_source_resolver import resolve_project_source
+
+    if not has_sources:
+        # With no authorized sources at all the answerable/needs-data split is
+        # meaningless (project setup, not a data-coverage gap) — keep the AI's
+        # suggestions as-is rather than emptying the list.
+        return list(items), []
+
+    answerable: list[dict[str, Any]] = []
+    needs_data: list[dict[str, Any]] = []
+    for item in items:
+        question = ""
+        for key in question_keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                question = value.strip()
+                break
+        if not question:
+            continue
+        try:
+            result = await resolve_project_source(
+                session,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                question=question,
+                kpi_names=kpi_names,
+            )
+        except Exception as exc:  # never break the page on a resolver failure
+            logger.warning(
+                "resolver filter failed for project %s question %r: %s",
+                project_id, question, exc,
+            )
+            answerable.append(item)
+            continue
+        if result.status == "resolved":
+            answerable.append(item)
+        else:
+            needs_data.append({**item, "missingDataHint": _missing_data_hint(result)})
+    return answerable, needs_data
+
+
 # Allowed severity values per card group (Package 3 unified schema).
 _RISK_SEVERITIES = {"critical", "urgent", "warning", "watch"}
 _TREND_SEVERITIES = {"watch", "warning", "informational"}
@@ -345,19 +427,43 @@ async def build_project_insight(
         acks,
     )
 
+    # Split suggested questions by whether the resolver can ground them on a
+    # confident authorized source. Answerable ones stay clickable; the rest are
+    # surfaced separately with a hint about the additional data they'd need
+    # (not dropped, not left to fail when clicked). Recommended queries the
+    # project can't run are moved into the same "needs data" bucket.
+    has_sources = bool(ctx.tables)
+    questions_to_ask, questions_needing_data = await _partition_questions(
+        session,
+        tenant_id=tenant_id,
+        project_id=project.id,
+        kpi_names=kpi_names,
+        items=[q for q in (ai_result.get("questionsToAsk") or []) if isinstance(q, dict)],
+        question_keys=("question", "text", "label"),
+        has_sources=has_sources,
+    )
+    recommended_queries, queries_needing_data = await _partition_questions(
+        session,
+        tenant_id=tenant_id,
+        project_id=project.id,
+        kpi_names=kpi_names,
+        items=[q for q in (ai_result.get("recommendedQueries") or []) if isinstance(q, dict)],
+        question_keys=("businessQuestion", "title", "name", "description"),
+        has_sources=has_sources,
+    )
+
     return ProjectInsightResponse(
         project=project_meta,
         generatedAt=now_iso,
         lastUpdatedAt=now_iso,
         executiveSummary=executive,
-        questionsToAsk=[q for q in (ai_result.get("questionsToAsk") or []) if isinstance(q, dict)],
+        questionsToAsk=questions_to_ask,
+        questionsNeedingData=questions_needing_data + queries_needing_data,
         trendDetection=[t for t in (ai_result.get("trendDetection") or []) if isinstance(t, dict)],
         recommendedDashboards=[
             d for d in (ai_result.get("recommendedDashboards") or []) if isinstance(d, dict)
         ],
-        recommendedQueries=[
-            q for q in (ai_result.get("recommendedQueries") or []) if isinstance(q, dict)
-        ],
+        recommendedQueries=recommended_queries,
         recommendedKpis=[
             k for k in (ai_result.get("recommendedKpis") or []) if isinstance(k, dict)
         ],

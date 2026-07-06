@@ -2373,29 +2373,6 @@ async def _resolve_action_sources(
     )
 
 
-def _clarification_payload(resolver: Any, question: str) -> dict[str, Any]:
-    """Build a friendly, structured clarification response for the modal."""
-    return {
-        "question": question,
-        "sql": "",
-        "columns": [],
-        "rows": [],
-        "suggestedVisualization": {"type": "table"},
-        "explanation": "",
-        "dataSourcesUsed": [],
-        "status": "needs_clarification",
-        "error": None,
-        "message": (
-            "I found multiple possible sources for this question. Which one "
-            "should I use?"
-        ),
-        "suggestedSources": [
-            {"name": c.source, "reason": c.reason}
-            for c in resolver.candidates
-        ],
-    }
-
-
 @router.post("/actions/ask-and-run")
 async def ai_ask_and_run(
     req: AIAskAndRunRequest,
@@ -2419,8 +2396,6 @@ async def ai_ask_and_run(
         source=req.source,
         card_context=req.card_context,
     )
-    if resolver.status == "ambiguous":
-        return _clarification_payload(resolver, req.question)
 
     try:
         ai_result = await _generate_sql_for_question(
@@ -2525,11 +2500,6 @@ async def ai_generate_query_preview(
         intent="recommended_query",
         card_context=req.card_context,
     )
-    if resolver.status == "ambiguous":
-        clar = _clarification_payload(resolver, req.question)
-        clar["title"] = title
-        clar["description"] = req.description or ""
-        return clar
 
     try:
         ai_result = await _generate_sql_for_question(

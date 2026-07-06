@@ -151,6 +151,9 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const questions = (data?.questionsToAsk ?? []).filter((q) =>
     q.question?.trim(),
   );
+  const questionsNeedingData = (data?.questionsNeedingData ?? []).filter((q) =>
+    (q.question || q.businessQuestion || q.title)?.trim(),
+  );
   const trends = (data?.trendDetection ?? []).filter((t) =>
     (t.label || t.title || t.description)?.trim(),
   );
@@ -334,6 +337,33 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                       </li>
                     ))}
                   </ul>
+                )}
+                {questionsNeedingData.length > 0 && (
+                  <div className="mt-3 border-t border-line-tertiary pt-3">
+                    <div className="mb-2 flex items-center gap-1.5 text-[12px] font-medium text-ink-tertiary">
+                      <IconAlertCircle size={14} className="text-warning" />
+                      Needs additional data
+                    </div>
+                    <ul className="space-y-2">
+                      {questionsNeedingData.map((q, i) => {
+                        const text =
+                          q.question || q.businessQuestion || q.title || "";
+                        return (
+                          <li
+                            key={q.id ?? `${text}-${i}`}
+                            className="rounded-md bg-bg-secondary px-2.5 py-2 text-[13px]"
+                          >
+                            <div className="text-ink-secondary">{text}</div>
+                            {q.missingDataHint && (
+                              <div className="mt-1 text-[12px] text-ink-tertiary">
+                                {q.missingDataHint}
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
                 )}
                 <div className="mt-3 flex items-center gap-2 border-t border-line-tertiary pt-3">
                   <input

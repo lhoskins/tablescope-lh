@@ -43,6 +43,10 @@ class ProjectInsightResponse(BaseModel):
     lastUpdatedAt: str = ""
     executiveSummary: ExecutiveSummary = Field(default_factory=ExecutiveSummary)
     questionsToAsk: list[dict[str, Any]] = Field(default_factory=list)
+    # Suggested questions the project's current authorized sources cannot answer.
+    # Surfaced separately (not dropped) so the user sees what additional data
+    # would be needed to answer them, each carrying a ``missingDataHint``.
+    questionsNeedingData: list[dict[str, Any]] = Field(default_factory=list)
     trendDetection: list[dict[str, Any]] = Field(default_factory=list)
     recommendedDashboards: list[dict[str, Any]] = Field(default_factory=list)
     recommendedQueries: list[dict[str, Any]] = Field(default_factory=list)

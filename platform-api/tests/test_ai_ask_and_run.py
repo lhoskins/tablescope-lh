@@ -340,10 +340,15 @@ async def test_ask_and_run_clarification_surfaces_matched_sources(
     assert "Sales" in body["errorDetails"]["validationError"]
 
 
-async def test_ask_and_run_ambiguous_returns_clarification(
+async def test_ask_and_run_auto_selects_top_source(
     client, service_headers, monkeypatch
 ):
-    """An ambiguous resolver result surfaces a clarification, not a red error."""
+    """The resolver auto-picks one source and ask-and-run runs it — no prompt.
+
+    Even when several sources score closely the resolver returns a single
+    ``resolved`` source; ask-and-run proceeds to generation with that source's
+    ``preferred_sources`` and never asks the user to choose.
+    """
     _, _, project, headers = await _setup(client, service_headers, "askamb")
 
     from app.services.project_source_resolver import (
@@ -351,25 +356,29 @@ async def test_ask_and_run_ambiguous_returns_clarification(
         ResolverResult,
     )
 
+    passed_preferred: list[str] = []
+
     async def fake_resolve(session, context, **kwargs):
         return ResolverResult(
-            status="ambiguous",
-            preferred_sources=["SUP_A_CSV", "SUP_B_CSV"],
+            status="resolved",
+            preferred_sources=["SUP_A_CSV"],
+            relevant_columns=["SupplierID"],
             candidates=[
                 ResolverCandidate("SUP_A_CSV", 45.0, ["SupplierID"], "entity"),
                 ResolverCandidate("SUP_B_CSV", 44.0, ["SupplierID"], "entity"),
             ],
         )
 
-    called = False
-
     async def fake_generate(session, context, project_id, question, **kwargs):
-        nonlocal called
-        called = True
-        return {"sql": "SELECT 1", "explanation": ""}
+        passed_preferred.extend(kwargs.get("preferred_sources") or [])
+        return {"sql": "SELECT supplier FROM q", "explanation": ""}
+
+    async def fake_execute(session, context, project_id, sql):
+        return {"columns": ["supplier"], "rows": [{"supplier": "A"}]}
 
     monkeypatch.setattr(ai_proxy, "_resolve_action_sources", fake_resolve)
     monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
 
     r = await client.post(
         "/api/ai/actions/ask-and-run",
@@ -378,12 +387,9 @@ async def test_ask_and_run_ambiguous_returns_clarification(
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["status"] == "needs_clarification"
-    assert [s["name"] for s in body["suggestedSources"]] == [
-        "SUP_A_CSV",
-        "SUP_B_CSV",
-    ]
-    assert called is False  # no SQL generation on ambiguity
+    assert body["status"] != "needs_clarification"
+    assert body["status"] == "success"
+    assert passed_preferred == ["SUP_A_CSV"]  # auto-selected top source
 
 
 async def test_ask_and_run_passes_preferred_sources_to_generator(
