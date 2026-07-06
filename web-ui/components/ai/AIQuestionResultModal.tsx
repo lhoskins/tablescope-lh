@@ -110,6 +110,8 @@ export function AIQuestionResultModal({
     run.isError || (result && result.status === "generation_error");
   const executionError = result && result.status === "execution_error";
   const success = result && result.status === "success";
+  const isTextAnswer = success && result?.answerType === "text";
+  const isDataAnswer = success && !isTextAnswer;
   const sql = result?.sql ?? "";
 
   return (
@@ -174,13 +176,19 @@ export function AIQuestionResultModal({
                 />
               )}
 
-              {success && result?.explanation && (
+              {isTextAnswer && result?.explanation && (
+                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-primary">
+                  {result.explanation}
+                </p>
+              )}
+
+              {isDataAnswer && result?.explanation && (
                 <p className="mb-3 text-[13px] text-ink-secondary">
                   {result.explanation}
                 </p>
               )}
 
-              {success && (
+              {isDataAnswer && (
                 <ResultChart
                   columns={result.columns}
                   rows={result.rows}
@@ -188,7 +196,7 @@ export function AIQuestionResultModal({
                 />
               )}
 
-              {success && (
+              {isDataAnswer && (
                 <ResultTable
                   columns={result.columns}
                   rows={result.rows}
@@ -251,6 +259,16 @@ export function AIQuestionResultModal({
                 Ask Follow-up
               </Button>
             </>
+          )}
+          {isTextAnswer && (
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => onOpenAssistant(question)}
+            >
+              <IconMessagePlus size={15} />
+              Ask Follow-up
+            </Button>
           )}
           {(failedToGenerate || executionError || needsClarification) && (
             <Button

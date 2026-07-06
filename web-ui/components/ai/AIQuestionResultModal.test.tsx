@@ -75,6 +75,27 @@ describe("AIQuestionResultModal", () => {
     expect(await screen.findByText(/SELECT supplier, defects/)).toBeTruthy();
   });
 
+  it("renders a prose answer (no table) for a text fallback answer", async () => {
+    askAndRun.mockResolvedValue({
+      ...SUCCESS,
+      sql: "",
+      columns: [],
+      rows: [],
+      explanation: "Late deliveries stem from port congestion and carrier shortages.",
+      answerType: "text",
+    });
+    const { onOpenAssistant } = renderModal();
+    expect(
+      await screen.findByText(/port congestion and carrier shortages/i),
+    ).toBeTruthy();
+    // No data table / "no rows" placeholder for a prose answer.
+    expect(screen.queryByText(/returned no rows/i)).toBeNull();
+    // No Save Query button (nothing to save), but a follow-up is offered.
+    expect(screen.queryByRole("button", { name: /save query/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /ask follow-up/i }));
+    expect(onOpenAssistant).toHaveBeenCalled();
+  });
+
   it("shows a friendly error and Open in AI Assistant on generation failure", async () => {
     askAndRun.mockResolvedValue({
       ...SUCCESS,

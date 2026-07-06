@@ -46,6 +46,9 @@ export interface AskAndRunResult {
   explanation: string;
   dataSourcesUsed: string[];
   status: AiActionStatus;
+  // "data" for an executed query (rows + chart); "text" for a prose answer
+  // from the documents/knowledge-graph fallback when no data source matched.
+  answerType?: "data" | "text";
   error: string | null;
   errorDetails?: AiErrorDetails;
   message?: string;

@@ -182,6 +182,46 @@ async def test_ask_and_run_generation_error_is_structured(
     assert body["sql"] == ""
 
 
+async def test_ask_and_run_falls_back_to_prose_when_no_source(
+    client, service_headers, monkeypatch
+):
+    # Analytical/document questions that don't map to a single SQL source
+    # (generation_error) fall back to the documents/knowledge-graph prose answer
+    # instead of showing a "couldn't match a source" error.
+    _, _, project, headers = await _setup(client, service_headers, "askprose")
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        raise HTTPException(
+            status_code=422,
+            detail="Could not match part of your request to an authorized "
+            "project source",
+        )
+
+    async def fake_forward(path, payload):
+        assert path == "/ai/ask"
+        return {"answer": "Late deliveries stem from port congestion..."}
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_forward_to_ai", fake_forward)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={
+            "project_id": project["id"],
+            "question": "What are the key factors contributing to late "
+            "deliveries?",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "success"
+    assert body["answerType"] == "text"
+    assert "port congestion" in body["explanation"]
+    assert body["sql"] == ""
+    assert body["rows"] == []
+
+
 async def test_ask_and_run_execution_error_reveals_sql(
     client, service_headers, monkeypatch
 ):

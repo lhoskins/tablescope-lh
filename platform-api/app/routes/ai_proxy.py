@@ -2482,6 +2482,34 @@ async def _ask_and_run_core(
     }
 
 
+async def _forward_prose_answer(
+    context: RequestContext,
+    *,
+    project_id: int,
+    question: str,
+    history: list[dict[str, str]] | None = None,
+) -> str:
+    """Free-text answer from the AI server's documents + knowledge-graph path.
+
+    Used as a fallback for analytical/document questions that don't map to a
+    single SQL source, so they get a real answer instead of a hard error.
+    """
+    try:
+        result = await _forward_to_ai("/ai/ask", {
+            "tenant_id": context.tenant_id,
+            "user_id": context.user_id,
+            "project_id": project_id,
+            "question": question,
+            "scope": "project",
+            "include_query_history": True,
+            "include_dashboard_context": True,
+            "history": history or [],
+        })
+    except HTTPException:
+        return ""
+    return str(result.get("answer") or "").strip()
+
+
 @router.post("/actions/ask-and-run")
 async def ai_ask_and_run(
     req: AIAskAndRunRequest,
@@ -2494,9 +2522,14 @@ async def ai_ask_and_run(
     ``status`` (``success`` / ``generation_error`` / ``execution_error``) with
     the SQL (when available) and an error message so the modal can render an
     inline error and reveal the SQL instead of navigating away.
+
+    When the question can't be grounded on a data source (``generation_error``
+    from source resolution), fall back to the free-text documents/knowledge-graph
+    answer — the same path the AI Assistant uses — so analytical questions are
+    answered as prose instead of showing a "couldn't match a source" error.
     """
     await _check_project_access(session, context, req.project_id)
-    return await _ask_and_run_core(
+    result = await _ask_and_run_core(
         session, context,
         project_id=req.project_id,
         question=req.question,
@@ -2504,6 +2537,27 @@ async def ai_ask_and_run(
         source=req.source,
         card_context=req.card_context,
     )
+    if result.get("status") == "success":
+        result["answerType"] = "data"
+        return result
+    if result.get("status") == "generation_error":
+        prose = await _forward_prose_answer(
+            context, project_id=req.project_id, question=req.question
+        )
+        if prose:
+            return {
+                "question": req.question,
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "suggestedVisualization": {"type": "table"},
+                "explanation": prose,
+                "dataSourcesUsed": [],
+                "status": "success",
+                "answerType": "text",
+                "error": None,
+            }
+    return result
 
 
 @router.post("/actions/generate-query-preview")
@@ -3832,23 +3886,12 @@ async def add_conversation_message(
                 "dataSourcesUsed": run.get("dataSourcesUsed", []),
             }
         else:
-            try:
-                payload = {
-                    "tenant_id": context.tenant_id,
-                    "user_id": context.user_id,
-                    "project_id": project_id,
-                    "question": question,
-                    "scope": "project",
-                    "include_query_history": True,
-                    "include_dashboard_context": True,
-                    "history": history,
-                }
-                result = await _forward_to_ai("/ai/ask", payload)
-                answer = str(result.get("answer") or "").strip() or (
-                    "The AI returned an empty response."
-                )
-            except HTTPException as e:
-                answer = f"Sorry — I couldn't answer that. {e.detail}"
+            answer = await _forward_prose_answer(
+                context,
+                project_id=project_id,
+                question=question,
+                history=history,
+            ) or "The AI returned an empty response."
 
     assistant_msg = AiConversationMessage(
         conversation_id=convo.id, role="assistant", content=answer,
