@@ -92,6 +92,20 @@ export function useProjectQueries(projectId: string) {
   });
 }
 
+/** Archived queries only — powers the Queries "Archive" folder. */
+export function useProjectArchivedQueries(projectId: string) {
+  return useQuery({
+    queryKey: ["project", projectId, "queries", "archived"],
+    queryFn: async () => {
+      const all = await apiClient.get<SavedQuery[]>(
+        `/api/projects/${projectId}/queries?include_archived=true`,
+      );
+      return all.filter((q) => q.is_archived);
+    },
+    enabled: Boolean(projectId),
+  });
+}
+
 // ── Dashboards ───────────────────────────────────────────────────────
 
 export interface Dashboard {

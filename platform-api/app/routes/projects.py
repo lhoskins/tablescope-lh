@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, or_, select
@@ -1741,25 +1742,37 @@ async def restore_saved_query(
 
 async def _query_dependencies(
     session: AsyncSession, query: SavedQuery
-) -> dict[str, int]:
-    """Count blocking dependencies for a saved query.
+) -> dict[str, Any]:
+    """Blocking dependencies for a saved query.
 
-    Delete is refused while any of these are non-zero.
+    Delete is refused while any exist. Returns per-kind counts plus an
+    ``items`` list of ``{"type", "name"}`` descriptors so the caller can render
+    a specific dependency warning (e.g. "Dashboard: Executive KPI Dashboard").
     """
-    scope_source = (
-        await session.scalar(
-            select(func.count())
-            .select_from(QueryScope)
-            .where(QueryScope.query_id == query.id)
+    items: list[dict[str, str]] = []
+
+    # Scopes: this query feeds another (source) or is fed by another (target).
+    # Name each by the counterpart table on the scope so the warning is concrete.
+    source_scopes = list(
+        await session.scalars(
+            select(QueryScope).where(QueryScope.query_id == query.id)
         )
-    ) or 0
-    scope_target = (
-        await session.scalar(
-            select(func.count())
-            .select_from(QueryScope)
-            .where(QueryScope.target_query_id == query.id)
+    )
+    target_scopes = list(
+        await session.scalars(
+            select(QueryScope).where(QueryScope.target_query_id == query.id)
         )
-    ) or 0
+    )
+    for sc in source_scopes:
+        items.append({
+            "type": "Scope",
+            "name": f"→ {sc.target_table or 'linked table'}",
+        })
+    for sc in target_scopes:
+        items.append({
+            "type": "Scope",
+            "name": f"{sc.source_table or 'linked table'} →",
+        })
 
     # Dashboards whose widget config references this query id.
     dashboards = list(
@@ -1783,12 +1796,14 @@ async def _query_dependencies(
                 and source.get("queryId") == query.id
             ):
                 dashboard_refs += 1
+                items.append({"type": "Dashboard", "name": dash.name})
                 break
 
     return {
         "dashboards": dashboard_refs,
-        "scopes_source": scope_source,
-        "scopes_target": scope_target,
+        "scopes_source": len(source_scopes),
+        "scopes_target": len(target_scopes),
+        "items": items,
     }
 
 
@@ -1815,24 +1830,14 @@ async def delete_saved_query(
 
     # And only when it has no remaining dependencies.
     deps = await _query_dependencies(session, query)
-    scope_total = deps["scopes_source"] + deps["scopes_target"]
-    if deps["dashboards"] > 0 or scope_total > 0:
-        parts: list[str] = []
-        if deps["dashboards"] > 0:
-            parts.append(
-                f"{deps['dashboards']} dashboard"
-                f"{'s' if deps['dashboards'] != 1 else ''}"
-            )
-        if scope_total > 0:
-            parts.append(
-                f"{scope_total} scope{'s' if scope_total != 1 else ''}"
-            )
+    items: list[dict[str, str]] = deps["items"]
+    if items:
+        named = "; ".join(f"{d['type']}: {d['name']}" for d in items)
         raise HTTPException(
             status_code=409,
             detail=(
-                "Cannot delete this query — it is still used by "
-                + " and ".join(parts)
-                + ". Remove those dependencies first."
+                "Cannot delete this query — remove these dependencies first: "
+                + named
             ),
         )
 

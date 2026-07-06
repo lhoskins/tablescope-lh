@@ -37,6 +37,7 @@ import {
   type SavedQuery,
   type DataSource,
 } from "@/lib/ui/use-project-data";
+import { useAccordion } from "@/lib/ui/use-accordion";
 
 const QUICK_PROMPTS = [
   "Supplier delay trends",
@@ -69,8 +70,8 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
   const [ask, setAsk] = useState("");
   const [showMembers, setShowMembers] = useState(false);
-  const [openTables, setOpenTables] = useState(false);
-  const [openSources, setOpenSources] = useState(false);
+  // Single-expand accordion: at most one section open, all may be collapsed.
+  const { toggle, isOpen } = useAccordion();
   const { toasts, push, dismiss } = useToasts();
   const [detail, setDetail] = useState<
     { kind: "query"; id: number } | { kind: "source"; name: string } | null
@@ -347,8 +348,8 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           title="Tables"
           subtitle="Saved and AI-generated tables in this project"
           count={queryRows.length}
-          open={openTables}
-          onToggle={() => setOpenTables((v) => !v)}
+          open={isOpen("tables")}
+          onToggle={() => toggle("tables")}
         >
           {sortedQueries.length === 0 ? (
             <div className="px-4 py-10 text-center text-small text-ink-tertiary">
@@ -385,8 +386,8 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           title="Data Sources"
           subtitle="Connected databases, files, and SaaS objects"
           count={sourceRows.length}
-          open={openSources}
-          onToggle={() => setOpenSources((v) => !v)}
+          open={isOpen("sources")}
+          onToggle={() => toggle("sources")}
         >
           {sourceRows.length === 0 ? (
             <div className="px-4 py-10 text-center text-small text-ink-tertiary">

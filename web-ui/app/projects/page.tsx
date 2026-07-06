@@ -19,6 +19,7 @@ import { getUserMeta } from "@/lib/auth";
 import { aiStatusLabel, aiStatusTone, timeAgo } from "@/lib/ui/format";
 import { accentFor } from "@/lib/ui/color";
 import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
+import { useAccordion } from "@/lib/ui/use-accordion";
 import type {
   CurrentUser,
   ProjectSummary,
@@ -75,9 +76,9 @@ export default function ProjectsPage() {
     [rows],
   );
 
+  // Single-expand accordion: at most one section open, all may be collapsed.
   // Collapsed by default on first entry to the Projects page.
-  const [openPrivate, setOpenPrivate] = useState(false);
-  const [openShared, setOpenShared] = useState(false);
+  const { toggle, isOpen } = useAccordion();
 
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
@@ -117,8 +118,8 @@ export default function ProjectsPage() {
           title="Private"
           subtitle="Projects only visible to you"
           count={privateRows.length}
-          open={openPrivate}
-          onToggle={() => setOpenPrivate((v) => !v)}
+          open={isOpen("private")}
+          onToggle={() => toggle("private")}
         >
           <ProjectTable
             rows={privateRows}
@@ -136,8 +137,8 @@ export default function ProjectsPage() {
           title="Shared"
           subtitle="Projects shared with your organization"
           count={sharedRows.length}
-          open={openShared}
-          onToggle={() => setOpenShared((v) => !v)}
+          open={isOpen("shared")}
+          onToggle={() => toggle("shared")}
         >
           <ProjectTable
             rows={sharedRows}

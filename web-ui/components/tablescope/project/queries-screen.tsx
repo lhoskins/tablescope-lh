@@ -1,8 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { IconSparkles, IconSearch, IconTarget, IconPlus } from "@tabler/icons-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  IconSparkles,
+  IconSearch,
+  IconTarget,
+  IconPlus,
+  IconArchive,
+  IconArrowBackUp,
+  IconTrash,
+} from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import {
   ContextPanel,
@@ -18,6 +26,7 @@ import { apiClient } from "@/lib/api-client";
 import { timeAgo } from "@/lib/ui/format";
 import {
   useProjectQueries,
+  useProjectArchivedQueries,
   useProjectDataSources,
   type SavedQuery,
 } from "@/lib/ui/use-project-data";
@@ -28,7 +37,7 @@ import {
 } from "@/components/tablescope/project/detail-views";
 
 
-type Filter = "all" | "ai" | "manual" | "shared" | "private";
+type Filter = "all" | "ai" | "manual" | "shared" | "private" | "archive";
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
@@ -36,7 +45,13 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "manual", label: "Manual" },
   { key: "shared", label: "Shared" },
   { key: "private", label: "Private" },
+  { key: "archive", label: "Archive" },
 ];
+
+function archivedDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString();
+}
 
 function runtimeLabel(ms: number | null): string {
   if (ms == null) return "—";
@@ -57,8 +72,10 @@ function tablesFor(q: SavedQuery): string {
 export function QueriesScreen({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useProjectQueries(projectId);
+  const { data: archivedData } = useProjectArchivedQueries(projectId);
   const { data: dataSources } = useProjectDataSources(projectId);
   const rows = useMemo(() => data ?? [], [data]);
+  const archivedRows = useMemo(() => archivedData ?? [], [archivedData]);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -66,6 +83,40 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const [editing, setEditing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showAddTable, setShowAddTable] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+
+  const refreshQueries = useCallback(() => {
+    queryClient.invalidateQueries({
+      queryKey: ["project", projectId, "queries"],
+    });
+  }, [queryClient, projectId]);
+
+  const restoreMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiClient.post(`/api/projects/${projectId}/queries/${id}/restore`, {}),
+    onSuccess: () => {
+      setArchiveError(null);
+      refreshQueries();
+    },
+    onError: (e: Error) => setArchiveError(e.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiClient.delete(`/api/projects/${projectId}/queries/${id}`),
+    onSuccess: () => {
+      setArchiveError(null);
+      refreshQueries();
+    },
+    onError: (e: Error) => setArchiveError(e.message),
+  });
+
+  const archiveBusyId =
+    restoreMutation.isPending
+      ? (restoreMutation.variables ?? null)
+      : deleteMutation.isPending
+        ? (deleteMutation.variables ?? null)
+        : null;
 
   // ── Deep-link: open a specific query via ?q=<id> ────────────────────
   useEffect(() => {
@@ -147,6 +198,30 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
     });
   }, [rows, filter, search]);
 
+  const filteredArchived = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return term
+      ? archivedRows.filter((q) => q.name.toLowerCase().includes(term))
+      : archivedRows;
+  }, [archivedRows, search]);
+
+  const handleRestore = useCallback(
+    (id: number) => restoreMutation.mutate(id),
+    [restoreMutation],
+  );
+  const handleDelete = useCallback(
+    (q: SavedQuery) => {
+      if (
+        window.confirm(
+          `Permanently delete "${q.name}"? This cannot be undone.`,
+        )
+      ) {
+        deleteMutation.mutate(q.id);
+      }
+    },
+    [deleteMutation],
+  );
+
   const selected =
     rows.find((q) => q.id === selectedId) ?? filtered[0] ?? rows[0] ?? null;
   const detailQuery = rows.find((q) => q.id === detailId) ?? null;
@@ -206,6 +281,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         />
       ) : (
       <div className="space-y-4">
+        {filter !== "archive" && (
         <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="flex flex-1 items-center gap-2 rounded-md border border-line-secondary bg-bg-primary px-2.5">
@@ -251,7 +327,9 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             <p className="mt-2 text-[12px] text-success">{aiSuccess}</p>
           )}
         </div>
+        )}
 
+        {filter !== "archive" && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Total tables" value={rows.length} />
           <StatTile
@@ -266,6 +344,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           />
           <StatTile label="Avg run time" value={avgRuntime(rows)} />
         </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
@@ -297,6 +376,15 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           ))}
         </div>
 
+        {filter === "archive" ? (
+          <ArchiveCard
+            rows={filteredArchived}
+            error={archiveError}
+            busyId={archiveBusyId}
+            onRestore={handleRestore}
+            onDelete={handleDelete}
+          />
+        ) : (
         <Card>
           <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
             <span className="text-h3 text-ink-primary">All Tables</span>
@@ -385,9 +473,107 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             )}
           </div>
         </Card>
+        )}
       </div>
       )}
     </ProjectShell>
+  );
+}
+
+function ArchiveCard({
+  rows,
+  error,
+  busyId,
+  onRestore,
+  onDelete,
+}: {
+  rows: SavedQuery[];
+  error: string | null;
+  busyId: number | null;
+  onRestore: (id: number) => void;
+  onDelete: (q: SavedQuery) => void;
+}) {
+  return (
+    <Card>
+      <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
+        <span className="flex items-center gap-1.5 text-h3 text-ink-primary">
+          <IconArchive size={16} className="text-ink-tertiary" />
+          Archive
+        </span>
+        <span className="text-small text-ink-tertiary">
+          {rows.length} archived {rows.length === 1 ? "table" : "tables"}
+        </span>
+      </div>
+      {error && (
+        <div className="border-b border-danger/30 bg-danger/5 px-4 py-2.5 text-small text-danger">
+          {error}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-line-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
+              <th className="px-4 py-2 font-medium">Name</th>
+              <th className="px-4 py-2 font-medium">Description</th>
+              <th className="px-4 py-2 font-medium">Archived</th>
+              <th className="px-4 py-2 font-medium">Owner</th>
+              <th className="px-4 py-2 text-right font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((q) => {
+              const busy = busyId === q.id;
+              return (
+                <tr
+                  key={q.id}
+                  className="border-b border-line-tertiary last:border-0"
+                >
+                  <td className="px-4 py-2.5 font-medium text-ink-primary">
+                    {q.name}
+                  </td>
+                  <td className="px-4 py-2.5 text-ink-secondary">
+                    {q.description || "—"}
+                  </td>
+                  <td className="px-4 py-2.5 text-ink-tertiary">
+                    {archivedDate(q.archived_at)}
+                  </td>
+                  <td className="px-4 py-2.5 text-ink-secondary">
+                    {q.owner_name ?? "—"}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => onRestore(q.id)}
+                      >
+                        <IconArrowBackUp size={14} />
+                        Restore
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => onDelete(q)}
+                      >
+                        <IconTrash size={14} />
+                        Delete
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {rows.length === 0 && (
+          <div className="px-4 py-12 text-center text-small text-ink-tertiary">
+            No archived tables. Archive a table to see it here.
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
