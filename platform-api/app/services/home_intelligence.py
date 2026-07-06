@@ -656,6 +656,15 @@ async def _risk_sla(
     return _card(
         project, "risk_sla", severity, title, summary,
         chart=chart, callout=callout, tables=[table.view_name],
+        metadata={
+            "sourceContext": {
+                "metric": lead_col,
+                "periodColumn": period_col,
+                "sourceColumns": [
+                    c for c in (lead_col, period_col, supplier_col) if c
+                ],
+            }
+        },
     )
 
 
@@ -782,6 +791,15 @@ async def _trend_spend(
     return _card(
         project, "trend_spend", severity, title, summary,
         chart=chart, tables=[table.view_name],
+        metadata={
+            "sourceContext": {
+                "metric": amount_col,
+                "periodColumn": period_col,
+                "sourceColumns": [
+                    c for c in (amount_col, budget_col, period_col) if c
+                ],
+            }
+        },
     )
 
 
@@ -830,6 +848,14 @@ async def _opportunity_supplier(
         project, "opportunity_supplier", "opportunity",
         f"{len(top)} top-performing suppliers identified", summary,
         callout=callout, tables=[table.view_name],
+        metadata={
+            "sourceContext": {
+                "metric": metric_col,
+                "sourceColumns": [
+                    c for c in (supplier_col, metric_col) if c
+                ],
+            }
+        },
     )
 
 

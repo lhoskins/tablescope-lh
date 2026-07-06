@@ -28,6 +28,7 @@ import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
 import { AIQuestionResultModal } from "@/components/ai/AIQuestionResultModal";
 import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewModal";
+import type { AiCardContext } from "@/lib/api/ai-actions";
 import { GenerateDashboardModal } from "@/components/tablescope/project-insight/generate-dashboard-modal";
 import { renderBold } from "@/components/tablescope/home/intelligence-card";
 import {
@@ -38,6 +39,16 @@ import {
   type InsightWorkflowItem,
   type ReviewedInsight,
 } from "@/lib/api/project-insight";
+
+function cardContextFromCard(card: ProjectInsightCard): AiCardContext {
+  return {
+    insight_type: card.insightType,
+    source_tables: card.sourceTables ?? card.supportingSources,
+    source_columns: card.sourceColumns,
+    metric: card.metric,
+    period_column: card.periodColumn,
+  };
+}
 
 const INSIGHT_KEY = (projectId: string) => ["project", projectId, "insight"];
 const REVIEWED_KEY = (projectId: string) => [
@@ -55,12 +66,14 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     open: boolean;
     question: string;
     source: string;
+    cardContext?: AiCardContext;
   }>({ open: false, question: "", source: "" });
   const [queryPreview, setQueryPreview] = useState<{
     open: boolean;
     question: string;
     title: string;
     description: string;
+    cardContext?: AiCardContext;
   }>({ open: false, question: "", title: "", description: "" });
   const [dashboardGen, setDashboardGen] = useState<{ open: boolean }>({
     open: false,
@@ -110,9 +123,16 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     onError: () => push("Could not reopen insight", "error"),
   });
 
-  const askQuestion = (question: string, source = "project_overview_question") => {
-    setAskModal({ open: true, question, source });
+  const askQuestion = (
+    question: string,
+    source = "project_overview_question",
+    cardContext?: AiCardContext,
+  ) => {
+    setAskModal({ open: true, question, source, cardContext });
   };
+
+  const investigateCard = (card: ProjectInsightCard, source: string) =>
+    askQuestion(card.question, source, cardContextFromCard(card));
 
   const submitCustomQuestion = () => {
     const q = customQuestion.trim();
@@ -252,7 +272,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 emptyText="No risks detected from this project's data yet."
                 reviewedIds={reviewedIds}
                 onInvestigate={(c) =>
-                  askQuestion(c.question, "project_insight_risk")
+                  investigateCard(c, "project_insight_risk")
                 }
                 onReview={reviewCard}
                 reviewPending={acknowledge.isPending}
@@ -267,7 +287,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 emptyText="No trends detected from this project's data yet."
                 reviewedIds={reviewedIds}
                 onInvestigate={(c) =>
-                  askQuestion(c.question, "project_insight_trend")
+                  investigateCard(c, "project_insight_trend")
                 }
                 onReview={reviewCard}
                 reviewPending={acknowledge.isPending}
@@ -280,7 +300,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 emptyText="No opportunities detected from this project's data yet."
                 reviewedIds={reviewedIds}
                 onInvestigate={(c) =>
-                  askQuestion(c.question, "project_insight_opportunity")
+                  investigateCard(c, "project_insight_opportunity")
                 }
                 onReview={reviewCard}
                 reviewPending={acknowledge.isPending}
@@ -422,6 +442,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                               q.businessQuestion || q.title || "",
                             title: q.title ?? "",
                             description: q.businessQuestion || q.reason || "",
+                            cardContext: {
+                              source_tables: q.recommendedTables,
+                              source_columns: q.sourceColumns,
+                              metric: q.metric,
+                            },
                           })
                         }
                       />
@@ -571,6 +596,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
         projectId={projectId}
         question={askModal.question}
         source={askModal.source}
+        cardContext={askModal.cardContext}
         onClose={() => setAskModal((m) => ({ ...m, open: false }))}
         onOpenAssistant={openInAssistant}
         notify={push}
@@ -581,6 +607,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
         question={queryPreview.question}
         title={queryPreview.title}
         description={queryPreview.description}
+        cardContext={queryPreview.cardContext}
         onClose={() => setQueryPreview((m) => ({ ...m, open: false }))}
         onSaved={() => {
           queryClient.invalidateQueries({

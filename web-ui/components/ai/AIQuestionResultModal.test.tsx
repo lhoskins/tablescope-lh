@@ -118,6 +118,38 @@ describe("AIQuestionResultModal", () => {
     expect(screen.getByText(/Unauthorized table reference: Sales/)).toBeTruthy();
   });
 
+  it("renders a source clarification and re-runs with the chosen source", async () => {
+    askAndRun
+      .mockResolvedValueOnce({
+        ...SUCCESS,
+        sql: "",
+        columns: [],
+        rows: [],
+        status: "needs_clarification",
+        message: "Which source should I use?",
+        suggestedSources: [
+          { name: "SUP_Quality_Inspections_CSV", reason: "entity column" },
+          { name: "SUP_Purchase_Orders_CSV", reason: "source-name match" },
+        ],
+      })
+      .mockResolvedValueOnce(SUCCESS);
+    renderModal();
+    // Clarification message + choices, not a red error.
+    expect(await screen.findByText("Which source should I use?")).toBeTruthy();
+    const choice = await screen.findByText("SUP_Quality_Inspections_CSV");
+    fireEvent.click(choice);
+    // The chosen source is forwarded and the success result renders.
+    await waitFor(() =>
+      expect(askAndRun).toHaveBeenLastCalledWith(
+        "42",
+        "What is the defect rate per supplier?",
+        "SUP_Quality_Inspections_CSV",
+        undefined,
+      ),
+    );
+    expect(await screen.findByText("Computed from the quality table.")).toBeTruthy();
+  });
+
   it("saves the query when Save Query is clicked", async () => {
     askAndRun.mockResolvedValue(SUCCESS);
     saveQuery.mockResolvedValue({

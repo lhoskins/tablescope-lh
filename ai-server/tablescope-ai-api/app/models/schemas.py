@@ -72,6 +72,11 @@ class GenerateSQLRequest(AIBaseRequest):
     prompt: str
     allowed_tables: list[str] = Field(default_factory=list)
     source_catalog: list[SourceCatalogEntry] = Field(default_factory=list)
+    # Resolved by the platform-api Project Semantic Source Resolver before this
+    # call: the authorized source(s) and columns the request most likely maps
+    # to. The generator must prefer these unless they cannot answer the prompt.
+    preferred_sources: list[str] = Field(default_factory=list)
+    relevant_columns: list[str] = Field(default_factory=list)
     # Compact, AI-safe Knowledge Graph summary (risks/gaps/measured KPIs/docs);
     # steers SQL toward validated business questions, never Reference Library.
     knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)

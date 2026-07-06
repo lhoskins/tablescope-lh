@@ -49,6 +49,9 @@ export interface RecommendedQuery {
   recommendedTables?: string[];
   recommendedKpis?: string[];
   action?: string;
+  // Source context so the resolver can ground generation in a real source.
+  sourceColumns?: string[];
+  metric?: string;
 }
 
 export interface RecommendedKpi {
@@ -81,6 +84,12 @@ export interface ProjectInsightCard {
   recommendedAction?: string;
   question: string;
   supportingSources: string[];
+  // Source context (from Business Insight) so Investigate can ground the
+  // question in the exact authorized source/columns the finding came from.
+  sourceTables?: string[];
+  sourceColumns?: string[];
+  metric?: string;
+  periodColumn?: string;
 }
 
 export interface WhatChangedSinceLastVisit {

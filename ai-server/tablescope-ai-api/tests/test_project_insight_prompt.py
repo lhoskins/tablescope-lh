@@ -34,6 +34,19 @@ def test_project_insight_prompt_is_project_scoped_not_business() -> None:
     assert "acknowledged" in lowered
 
 
+def test_project_insight_prompt_requires_source_context() -> None:
+    """The unified resolver approach: every actionable output carries source
+    context and the prompt forbids hard-coded SQL templates."""
+    text = load_prompt_reference("project_insight_best_practices.md")
+    assert "Source Context Requirement" in text
+    lowered = text.lower()
+    assert "sourcecolumns" in lowered
+    assert "sourcetables" in lowered
+    # No prompt guidance should encourage SQL templates.
+    assert "never emit hard-coded or business-specific sql templates" in lowered
+    assert "resolver" in lowered
+
+
 def test_project_insight_prompt_has_no_placeholder_trend_label() -> None:
     """The trend example must not seed the literal 'Trend A' placeholder, which
     weaker models echo verbatim instead of deriving a real trend name."""

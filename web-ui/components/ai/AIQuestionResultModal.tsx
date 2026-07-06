@@ -16,8 +16,10 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   aiActionsApi,
+  type AiCardContext,
   type AiErrorDetails,
   type AskAndRunResult,
+  type SuggestedSource,
 } from "@/lib/api/ai-actions";
 import {
   PROGRESS_STEPS,
@@ -31,6 +33,7 @@ export function AIQuestionResultModal({
   projectId,
   question,
   source,
+  cardContext,
   onClose,
   onOpenAssistant,
   onCreateDashboard,
@@ -40,6 +43,7 @@ export function AIQuestionResultModal({
   projectId: string;
   question: string;
   source?: string;
+  cardContext?: AiCardContext;
   onClose: () => void;
   onOpenAssistant: (question: string) => void;
   onCreateDashboard?: (question: string) => void;
@@ -50,8 +54,14 @@ export function AIQuestionResultModal({
   const [showDetails, setShowDetails] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const run = useMutation<AskAndRunResult>({
-    mutationFn: () => aiActionsApi.askAndRun(projectId, question, source),
+  const run = useMutation<AskAndRunResult, Error, string | undefined>({
+    mutationFn: (chosenSource) =>
+      aiActionsApi.askAndRun(
+        projectId,
+        question,
+        chosenSource ?? source,
+        cardContext,
+      ),
   });
 
   const save = useMutation({
@@ -76,7 +86,7 @@ export function AIQuestionResultModal({
     setShowDetails(false);
     setSaved(false);
     setStepIndex(0);
-    run.mutate();
+    run.mutate(undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, question]);
 
@@ -94,6 +104,8 @@ export function AIQuestionResultModal({
 
   if (!open) return null;
 
+  const needsClarification =
+    result && result.status === "needs_clarification";
   const failedToGenerate =
     run.isError || (result && result.status === "generation_error");
   const executionError = result && result.status === "execution_error";
@@ -124,6 +136,15 @@ export function AIQuestionResultModal({
         <div className="mt-4">
           {run.isPending ? (
             <ProgressSteps activeIndex={stepIndex} />
+          ) : needsClarification ? (
+            <ClarificationBlock
+              message={
+                result?.message ||
+                "I couldn't confidently identify which project source answers this question. Choose a source or rephrase the question."
+              }
+              sources={result?.suggestedSources ?? []}
+              onPick={(name) => run.mutate(name)}
+            />
           ) : failedToGenerate ? (
             <ErrorBlock
               title={
@@ -231,7 +252,7 @@ export function AIQuestionResultModal({
               </Button>
             </>
           )}
-          {(failedToGenerate || executionError) && (
+          {(failedToGenerate || executionError || needsClarification) && (
             <Button
               variant="secondary"
               size="md"
@@ -244,6 +265,54 @@ export function AIQuestionResultModal({
           <Button variant="primary" size="md" onClick={onClose}>
             Close
           </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ClarificationBlock({
+  message,
+  sources,
+  onPick,
+}: {
+  message: string;
+  sources: SuggestedSource[];
+  onPick: (name: string) => void;
+}) {
+  return (
+    <div className="rounded-md border border-line-tertiary bg-bg-secondary px-3 py-3 text-[13px] text-ink-primary">
+      <div className="flex items-start gap-2">
+        <IconSparkles size={16} className="mt-0.5 shrink-0 text-ai" />
+        <div className="min-w-0">
+          <div className="font-medium">{message}</div>
+          {sources.length > 0 && (
+            <div className="mt-2.5 flex flex-col gap-1.5">
+              {sources.map((s) => (
+                <button
+                  key={s.name}
+                  type="button"
+                  onClick={() => onPick(s.name)}
+                  className="flex items-center justify-between gap-3 rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-left hover:border-ai hover:bg-ai/5"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-ink-primary">
+                      {s.name}
+                    </span>
+                    {s.reason && (
+                      <span className="block truncate text-[12px] text-ink-tertiary">
+                        {s.reason}
+                      </span>
+                    )}
+                  </span>
+                  <IconArrowRight
+                    size={15}
+                    className="shrink-0 text-ink-tertiary"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

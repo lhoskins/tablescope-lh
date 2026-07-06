@@ -459,6 +459,11 @@ async def test_grouped_intelligence_cards_groups_and_maps(monkeypatch) -> None:
             "summary": "**High** lead time.",
             "callout": {"type": "risk", "text": "Escalate with supplier."},
             "sources": {"tables": ["SUP_Quality_CSV"], "documents": []},
+            "sourceContext": {
+                "metric": "lead_time_days",
+                "periodColumn": "month",
+                "sourceColumns": ["lead_time_days", "month", "supplier"],
+            },
         },
         {
             "id": "c2",
@@ -494,6 +499,12 @@ async def test_grouped_intelligence_cards_groups_and_maps(monkeypatch) -> None:
     assert risk["recommendedAction"] == "Escalate with supplier."
     assert risk["question"] == pis._INVESTIGATION_QUESTIONS["risk_sla"]
     assert risk["supportingSources"] == ["SUP_Quality_CSV"]
+    # Source context (Business Insight source of truth) flows onto the card so
+    # Investigate can ground the resolver in the exact source/columns.
+    assert risk["sourceTables"] == ["SUP_Quality_CSV"]
+    assert risk["metric"] == "lead_time_days"
+    assert risk["periodColumn"] == "month"
+    assert risk["sourceColumns"] == ["lead_time_days", "month", "supplier"]
 
     # trend urgent is normalized down to warning (allowed for trends).
     assert grouped["trends"][0]["severity"] == "warning"

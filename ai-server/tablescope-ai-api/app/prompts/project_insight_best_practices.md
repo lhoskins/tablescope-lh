@@ -83,6 +83,25 @@ Return Project Insight in this structure:
 }
 ```
 
+## Source Context Requirement
+
+Every actionable output must carry the source context it is grounded in so the
+platform's shared source resolver can deterministically pick the correct
+authorized project source before any SQL is generated.
+
+- Recommended queries, generated questions, and each risk / trend / opportunity
+  must reference the concrete authorized source(s) and column(s) the finding
+  came from: `sourceTables`, `sourceColumns`, and where applicable a `metric`
+  column and a `periodColumn`.
+- Only use authorized sources and real column names from the selected project's
+  context. Never invent table or column names.
+- Never emit hard-coded or business-specific SQL templates, and never write SQL
+  directly in these recommendations. SQL is produced downstream by the shared
+  resolver + generator, which uses the source context you supply. Your job is to
+  identify the right source and columns, not to author SQL.
+- If you cannot tie an item to a concrete authorized source and its columns,
+  omit the item rather than guessing or emitting a placeholder.
+
 ## Executive Project Summary
 
 The Executive Project Summary must be concise and action-oriented.
@@ -181,12 +200,18 @@ Each recommended query should include:
   "confidence": 0.0,
   "backingSignals": [],
   "recommendedTables": [],
+  "sourceColumns": [],
+  "metric": "",
   "recommendedKpis": [],
   "action": "generate|run|save|open"
 }
 ```
 
 Recommended queries should be practical and executable if the project has the supporting data.
+
+`recommendedTables`, `sourceColumns`, and `metric` are the source context the
+resolver uses to ground SQL generation. Populate them with real authorized
+sources and column names from this project. Do not write SQL here.
 
 If the project lacks the required data, explain the gap instead of inventing SQL.
 
@@ -236,8 +261,12 @@ Each trend should include:
 - trend label
 - trend description
 - possible cause
-- source or evidence
+- source or evidence (the concrete authorized source and columns behind it)
 - link to chart if available
+
+Risks, trends, and opportunities must each cite the source evidence they are
+grounded in (the authorized source table and the relevant metric / period
+columns) so Investigate can hand that source context to the resolver.
 
 Return trends like:
 
@@ -275,9 +304,15 @@ Each question should include:
   "id": "",
   "question": "",
   "reason": "",
-  "suggestedAction": "ask_project"
+  "suggestedAction": "ask_project",
+  "sourceTables": [],
+  "sourceColumns": []
 }
 ```
+
+Each question must be answerable from the project's authorized sources. Include
+the `sourceTables` and `sourceColumns` the question targets so the resolver can
+ground the answer without re-inferring the source.
 
 ## What Changed Since Last Visit
 

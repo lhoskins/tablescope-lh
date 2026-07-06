@@ -101,10 +101,15 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
         str(callout.get("text", "")) if isinstance(callout, dict) else ""
     )
     sources = card.get("sources") or {}
+    source_tables = [str(t) for t in (sources.get("tables") or [])]
     supporting = [
-        *(sources.get("tables") or []),
-        *(sources.get("documents") or []),
+        *source_tables,
+        *(str(d) for d in (sources.get("documents") or [])),
     ]
+    ctx = card.get("sourceContext") or {}
+    metric = str(ctx.get("metric") or "")
+    period_column = str(ctx.get("periodColumn") or "")
+    source_columns = [str(c) for c in (ctx.get("sourceColumns") or [])]
     return {
         "id": str(card.get("id", "")),
         "insightType": insight_type,
@@ -115,7 +120,11 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
         "question": _INVESTIGATION_QUESTIONS.get(
             insight_type, str(card.get("title", ""))
         ),
-        "supportingSources": [str(s) for s in supporting],
+        "supportingSources": supporting,
+        "sourceTables": source_tables,
+        "sourceColumns": source_columns,
+        "metric": metric,
+        "periodColumn": period_column,
     }
 
 

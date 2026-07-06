@@ -691,6 +691,8 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         context=context_text,
         allowed_tables=allowed_tables,
         source_catalog=catalog,
+        preferred_sources=req.preferred_sources,
+        relevant_columns=req.relevant_columns,
     )
     if _needs_clarification(raw):
         raise _clarify("Model could not find a matching authorized source.")
@@ -723,6 +725,8 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
                 failed_sql=sql,
                 validation_error=e.reason,
                 source_catalog=catalog,
+                preferred_sources=req.preferred_sources,
+                relevant_columns=req.relevant_columns,
             )
             repaired = True
             if _needs_clarification(raw):

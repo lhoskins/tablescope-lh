@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   aiActionsApi,
+  type AiCardContext,
   type GenerateQueryPreviewResult,
 } from "@/lib/api/ai-actions";
 import {
@@ -34,6 +35,7 @@ export function GenerateQueryPreviewModal({
   question,
   title,
   description,
+  cardContext,
   onClose,
   onSaved,
   notify,
@@ -43,6 +45,7 @@ export function GenerateQueryPreviewModal({
   question: string;
   title?: string;
   description?: string;
+  cardContext?: AiCardContext;
   onClose: () => void;
   onSaved?: (queryId: number) => void;
   notify: (message: string, tone?: "success" | "error" | "info") => void;
@@ -51,15 +54,20 @@ export function GenerateQueryPreviewModal({
   const [showSql, setShowSql] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const run = useMutation<GenerateQueryPreviewResult>({
-    mutationFn: () =>
-      aiActionsApi.generateQueryPreview(
-        projectId,
-        question,
-        title,
-        description,
-      ),
-  });
+  const run = useMutation<GenerateQueryPreviewResult, Error, string | undefined>(
+    {
+      mutationFn: (chosenSource) =>
+        aiActionsApi.generateQueryPreview(
+          projectId,
+          question,
+          title,
+          description,
+          chosenSource
+            ? { ...cardContext, source_tables: [chosenSource] }
+            : cardContext,
+        ),
+    },
+  );
 
   const save = useMutation({
     mutationFn: (result: GenerateQueryPreviewResult) =>
@@ -82,7 +90,7 @@ export function GenerateQueryPreviewModal({
     setShowSql(false);
     setSaved(false);
     setStepIndex(0);
-    run.mutate();
+    run.mutate(undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, question, title]);
 
@@ -99,6 +107,8 @@ export function GenerateQueryPreviewModal({
 
   if (!open) return null;
 
+  const needsClarification =
+    result && result.status === "needs_clarification";
   const failedToGenerate =
     run.isError || (result && result.status === "generation_error");
   const executionError = result && result.status === "execution_error";
@@ -134,6 +144,39 @@ export function GenerateQueryPreviewModal({
         <div className="mt-4">
           {run.isPending ? (
             <ProgressSteps activeIndex={stepIndex} />
+          ) : needsClarification ? (
+            <div className="rounded-md border border-line-tertiary bg-bg-secondary px-3 py-3 text-[13px] text-ink-primary">
+              <div className="flex items-start gap-2">
+                <IconSparkles size={16} className="mt-0.5 shrink-0 text-ai" />
+                <div className="min-w-0">
+                  <div className="font-medium">
+                    {result?.message ||
+                      "I couldn't confidently identify which source to use. Choose one or rephrase."}
+                  </div>
+                  {(result?.suggestedSources ?? []).length > 0 && (
+                    <div className="mt-2.5 flex flex-col gap-1.5">
+                      {(result?.suggestedSources ?? []).map((s) => (
+                        <button
+                          key={s.name}
+                          type="button"
+                          onClick={() => run.mutate(s.name)}
+                          className="flex flex-col rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-left hover:border-ai hover:bg-ai/5"
+                        >
+                          <span className="truncate font-medium text-ink-primary">
+                            {s.name}
+                          </span>
+                          {s.reason && (
+                            <span className="truncate text-[12px] text-ink-tertiary">
+                              {s.reason}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           ) : failedToGenerate ? (
             <div className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger-bg px-3 py-2.5 text-[13px] text-danger">
               <IconAlertTriangle size={16} className="mt-0.5 shrink-0" />

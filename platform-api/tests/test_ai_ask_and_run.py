@@ -132,7 +132,7 @@ def test_suggest_visualization_table_when_no_rows():
 async def test_ask_and_run_success(client, service_headers, monkeypatch):
     _, _, project, headers = await _setup(client, service_headers, "askok")
 
-    async def fake_generate(session, context, project_id, question):
+    async def fake_generate(session, context, project_id, question, **kwargs):
         return {"sql": "SELECT supplier, defects FROM q", "explanation": "why"}
 
     async def fake_execute(session, context, project_id, sql):
@@ -162,7 +162,7 @@ async def test_ask_and_run_generation_error_is_structured(
 ):
     _, _, project, headers = await _setup(client, service_headers, "askgen")
 
-    async def fake_generate(session, context, project_id, question):
+    async def fake_generate(session, context, project_id, question, **kwargs):
         raise HTTPException(status_code=503, detail="AI server unreachable")
 
     monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
@@ -187,7 +187,7 @@ async def test_ask_and_run_execution_error_reveals_sql(
 ):
     _, _, project, headers = await _setup(client, service_headers, "askexec")
 
-    async def fake_generate(session, context, project_id, question):
+    async def fake_generate(session, context, project_id, question, **kwargs):
         return {"sql": "SELECT * FROM broken", "explanation": ""}
 
     async def fake_execute(session, context, project_id, sql):
@@ -218,7 +218,7 @@ async def test_ask_and_run_blocks_prose_before_execution(
     """Prose returned as SQL must never reach Teiid — return a clean error."""
     _, _, project, headers = await _setup(client, service_headers, "askprose")
 
-    async def fake_generate(session, context, project_id, question):
+    async def fake_generate(session, context, project_id, question, **kwargs):
         return {
             "sql": "To calculate the defect rate we group by supplier.",
             "explanation": "",
@@ -251,7 +251,7 @@ async def test_ask_and_run_clarification_surfaces_matched_sources(
     """AI-server 422 clarification maps to a friendly message + matched sources."""
     _, _, project, headers = await _setup(client, service_headers, "askclar")
 
-    async def fake_generate(session, context, project_id, question):
+    async def fake_generate(session, context, project_id, question, **kwargs):
         raise HTTPException(
             status_code=422,
             detail={
@@ -281,6 +281,91 @@ async def test_ask_and_run_clarification_surfaces_matched_sources(
         "LOG_Shipments_CSV",
     ]
     assert "Sales" in body["errorDetails"]["validationError"]
+
+
+async def test_ask_and_run_ambiguous_returns_clarification(
+    client, service_headers, monkeypatch
+):
+    """An ambiguous resolver result surfaces a clarification, not a red error."""
+    _, _, project, headers = await _setup(client, service_headers, "askamb")
+
+    from app.services.project_source_resolver import (
+        ResolverCandidate,
+        ResolverResult,
+    )
+
+    async def fake_resolve(session, context, **kwargs):
+        return ResolverResult(
+            status="ambiguous",
+            preferred_sources=["SUP_A_CSV", "SUP_B_CSV"],
+            candidates=[
+                ResolverCandidate("SUP_A_CSV", 45.0, ["SupplierID"], "entity"),
+                ResolverCandidate("SUP_B_CSV", 44.0, ["SupplierID"], "entity"),
+            ],
+        )
+
+    called = False
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        nonlocal called
+        called = True
+        return {"sql": "SELECT 1", "explanation": ""}
+
+    monkeypatch.setattr(ai_proxy, "_resolve_action_sources", fake_resolve)
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "suppliers?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "needs_clarification"
+    assert [s["name"] for s in body["suggestedSources"]] == [
+        "SUP_A_CSV",
+        "SUP_B_CSV",
+    ]
+    assert called is False  # no SQL generation on ambiguity
+
+
+async def test_ask_and_run_passes_preferred_sources_to_generator(
+    client, service_headers, monkeypatch
+):
+    """A resolved source + columns are forwarded to SQL generation."""
+    _, _, project, headers = await _setup(client, service_headers, "askpref")
+
+    from app.services.project_source_resolver import ResolverResult
+
+    async def fake_resolve(session, context, **kwargs):
+        return ResolverResult(
+            status="resolved",
+            preferred_sources=["SUP_Quality_Inspections_CSV"],
+            relevant_columns=["SupplierID", "DefectRate"],
+            confidence=0.9,
+        )
+
+    seen: dict = {}
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        seen.update(kwargs)
+        return {"sql": "SELECT SupplierID, DefectRate FROM q", "explanation": ""}
+
+    async def fake_execute(session, context, project_id, sql):
+        return {"columns": ["SupplierID"], "rows": []}
+
+    monkeypatch.setattr(ai_proxy, "_resolve_action_sources", fake_resolve)
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "defect rate?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert seen["preferred_sources"] == ["SUP_Quality_Inspections_CSV"]
+    assert seen["relevant_columns"] == ["SupplierID", "DefectRate"]
 
 
 def test_is_read_only_select_accepts_select_with_and_comments():
@@ -320,7 +405,7 @@ async def test_generate_query_preview_success(
 ):
     _, _, project, headers = await _setup(client, service_headers, "prev")
 
-    async def fake_generate(session, context, project_id, question):
+    async def fake_generate(session, context, project_id, question, **kwargs):
         return {"sql": "SELECT month, revenue FROM q", "explanation": "e"}
 
     async def fake_execute(session, context, project_id, sql):

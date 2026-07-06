@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -115,6 +115,29 @@ class AIGenerateAndSaveDashboardRequest(BaseModel):
     description: str | None = None
 
 
+class AICardContext(BaseModel):
+    """Source context carried from a Business/Project Insight card.
+
+    Lets the Project Semantic Source Resolver prefer the exact authorized
+    source a card's finding was grounded in, instead of re-inferring it from
+    the plain sentence.
+    """
+    insight_type: str | None = None
+    source_tables: list[str] = Field(default_factory=list)
+    source_columns: list[str] = Field(default_factory=list)
+    metric: str | None = None
+    period_column: str | None = None
+
+    def to_resolver_context(self) -> dict[str, Any]:
+        return {
+            "insightType": self.insight_type,
+            "sourceTables": self.source_tables,
+            "sourceColumns": self.source_columns,
+            "metric": self.metric,
+            "periodColumn": self.period_column,
+        }
+
+
 class AIAskAndRunRequest(BaseModel):
     """Generate SQL for a natural-language question, execute it, return rows.
 
@@ -125,6 +148,7 @@ class AIAskAndRunRequest(BaseModel):
     project_id: int
     question: str
     source: str | None = None
+    card_context: AICardContext | None = None
     max_rows: int = 200
 
 
@@ -139,6 +163,7 @@ class AIGenerateQueryPreviewRequest(BaseModel):
     question: str
     title: str | None = None
     description: str | None = None
+    card_context: AICardContext | None = None
     max_rows: int = 200
 
 
@@ -811,6 +836,8 @@ async def generate_sql(
         "prompt": req.prompt,
         "allowed_tables": allowed_tables,
         "source_catalog": source_catalog,
+        "preferred_sources": [],
+        "relevant_columns": [],
         # All query AI generation includes Knowledge Graph context so SQL targets
         # the risks/gaps/KPIs the graph surfaces (never Reference Library docs).
         "knowledge_graph_context": await _kg_context(
@@ -1946,6 +1973,8 @@ async def ai_generate_and_save_query(
                 "prompt": prompt_text,
                 "allowed_tables": allowed_tables,
                 "source_catalog": source_catalog,
+                "preferred_sources": [],
+                "relevant_columns": [],
                 # Knowledge Graph context steers generated SQL toward validated
                 # risks/gaps/measured KPIs surfaced by the graph.
                 "knowledge_graph_context": await _kg_context(
@@ -2184,12 +2213,19 @@ async def _generate_sql_for_question(
     context: RequestContext,
     project_id: int,
     question: str,
+    *,
+    preferred_sources: list[str] | None = None,
+    relevant_columns: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate SQL for a natural-language question via the AI server.
 
     Returns the raw AI result dict (``sql``/``explanation``/``selected_sources``)
     plus the resolved ``allowed_tables``. Raises HTTPException on failure so the
     caller can convert it into a structured, non-fatal modal error.
+
+    ``preferred_sources``/``relevant_columns`` come from the Project Semantic
+    Source Resolver and steer the model toward the authorized source the
+    request maps to.
     """
     ds_stmt = select(FileSourceMeta).where(
         FileSourceMeta.project_id == project_id,
@@ -2209,6 +2245,8 @@ async def _generate_sql_for_question(
         "prompt": question,
         "allowed_tables": allowed_tables,
         "source_catalog": source_catalog,
+        "preferred_sources": preferred_sources or [],
+        "relevant_columns": relevant_columns or [],
         "knowledge_graph_context": await _kg_context(
             session, context, project_id
         ),
@@ -2216,6 +2254,61 @@ async def _generate_sql_for_question(
     ai_result = await _forward_to_ai("/ai/query/generate", payload)
     ai_result["_allowed_tables"] = allowed_tables
     return ai_result
+
+
+async def _resolve_action_sources(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    question: str,
+    intent: str,
+    source: str | None = None,
+    card_context: AICardContext | None = None,
+) -> Any:
+    """Run the Project Semantic Source Resolver for one AI action.
+
+    A user-picked ``source`` (e.g. chosen from a prior clarification) is treated
+    as an authorized card source so the resolver locks onto it.
+    """
+    from app.services.project_source_resolver import resolve_project_source
+
+    ctx: dict[str, Any] = (
+        card_context.to_resolver_context() if card_context else {}
+    )
+    if source:
+        ctx = {**ctx, "sourceTables": [source]}
+    return await resolve_project_source(
+        session,
+        tenant_id=context.tenant_id,
+        project_id=project_id,
+        question=question,
+        intent=intent,
+        card_context=ctx or None,
+    )
+
+
+def _clarification_payload(resolver: Any, question: str) -> dict[str, Any]:
+    """Build a friendly, structured clarification response for the modal."""
+    return {
+        "question": question,
+        "sql": "",
+        "columns": [],
+        "rows": [],
+        "suggestedVisualization": {"type": "table"},
+        "explanation": "",
+        "dataSourcesUsed": [],
+        "status": "needs_clarification",
+        "error": None,
+        "message": (
+            "I found multiple possible sources for this question. Which one "
+            "should I use?"
+        ),
+        "suggestedSources": [
+            {"name": c.source, "reason": c.reason}
+            for c in resolver.candidates
+        ],
+    }
 
 
 @router.post("/actions/ask-and-run")
@@ -2233,9 +2326,22 @@ async def ai_ask_and_run(
     """
     await _check_project_access(session, context, req.project_id)
 
+    resolver = await _resolve_action_sources(
+        session, context,
+        project_id=req.project_id,
+        question=req.question,
+        intent="question_answer",
+        source=req.source,
+        card_context=req.card_context,
+    )
+    if resolver.status == "ambiguous":
+        return _clarification_payload(resolver, req.question)
+
     try:
         ai_result = await _generate_sql_for_question(
-            session, context, req.project_id, req.question
+            session, context, req.project_id, req.question,
+            preferred_sources=resolver.preferred_sources,
+            relevant_columns=resolver.relevant_columns,
         )
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc)
@@ -2321,9 +2427,24 @@ async def ai_generate_query_preview(
     await _check_project_access(session, context, req.project_id)
     title = req.title or _shorten_ai_name(req.question)
 
+    resolver = await _resolve_action_sources(
+        session, context,
+        project_id=req.project_id,
+        question=req.question,
+        intent="recommended_query",
+        card_context=req.card_context,
+    )
+    if resolver.status == "ambiguous":
+        clar = _clarification_payload(resolver, req.question)
+        clar["title"] = title
+        clar["description"] = req.description or ""
+        return clar
+
     try:
         ai_result = await _generate_sql_for_question(
-            session, context, req.project_id, req.question
+            session, context, req.project_id, req.question,
+            preferred_sources=resolver.preferred_sources,
+            relevant_columns=resolver.relevant_columns,
         )
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc)

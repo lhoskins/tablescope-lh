@@ -131,14 +131,42 @@ def _catalog_text(
     )
 
 
+def _resolver_hint(
+    preferred_sources: list[str] | None,
+    relevant_columns: list[str] | None,
+) -> str:
+    """Render the resolver's preferred source/column guidance, if any."""
+    if not preferred_sources and not relevant_columns:
+        return ""
+    lines = ["Resolved source guidance (from the semantic source resolver):"]
+    if preferred_sources:
+        lines.append(
+            "- Preferred source(s) — use these unless they cannot answer the "
+            f"request: {', '.join(preferred_sources)}"
+        )
+    if relevant_columns:
+        lines.append(
+            "- Relevant columns to prioritize: "
+            f"{', '.join(relevant_columns)}"
+        )
+    lines.append(
+        "- Only fall back to another authorized source if the preferred "
+        "source genuinely cannot answer the request."
+    )
+    return "\n".join(lines) + "\n\n"
+
+
 async def generate_sql(
     prompt: str,
     context: str,
     allowed_tables: list[str],
     source_catalog: list[Any] | None = None,
+    preferred_sources: list[str] | None = None,
+    relevant_columns: list[str] | None = None,
 ) -> str:
     """Generate SQL using the code-specialized model with semantic discovery."""
     catalog = _catalog_text(allowed_tables, source_catalog)
+    hint = _resolver_hint(preferred_sources, relevant_columns)
     system_prompt = (
         "You are Tablescope AI.\n"
         "You may only answer using the provided context package.\n"
@@ -156,6 +184,7 @@ async def generate_sql(
         "data source.\n\n"
         f"{_SEMANTIC_RULES}\n"
         f"{_TEIID_RULES}\n"
+        f"{hint}"
         f"{catalog}\n\n"
         f"Context:\n{context}"
     )
@@ -175,9 +204,12 @@ async def repair_sql(
     failed_sql: str,
     validation_error: str,
     source_catalog: list[Any] | None = None,
+    preferred_sources: list[str] | None = None,
+    relevant_columns: list[str] | None = None,
 ) -> str:
     """Ask the model to fix SQL that failed validation, preserving intent."""
     catalog = _catalog_text(allowed_tables, source_catalog)
+    hint = _resolver_hint(preferred_sources, relevant_columns)
     system_prompt = (
         "You are Tablescope AI repairing a SQL query that failed validation.\n"
         "Fix the SQL so it passes, while preserving the user's analytical intent.\n"
@@ -192,6 +224,7 @@ async def repair_sql(
         "'NEED_CLARIFICATION'.\n"
         "Return ONLY the corrected SQL, no explanation.\n\n"
         f"{_TEIID_RULES}\n"
+        f"{hint}"
         f"{catalog}\n\n"
         f"Context:\n{context}"
     )
