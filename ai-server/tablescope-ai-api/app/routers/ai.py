@@ -570,7 +570,11 @@ def _catalog_table_columns(
     return result
 
 
-def _remap_tables_to_authorized(sql: str, allowed_tables: list[str]) -> str:
+def _remap_tables_to_authorized(
+    sql: str,
+    allowed_tables: list[str],
+    preferred_sources: list[str] | None = None,
+) -> str:
     """Rewrite FROM/JOIN table references to their best-matching authorized source.
 
     The model frequently drops a source's file-format suffix — writing
@@ -578,12 +582,25 @@ def _remap_tables_to_authorized(sql: str, allowed_tables: list[str]) -> str:
     which then fails validation as an "unauthorized table reference". Deterministically
     remap each unauthorized identifier to the closest authorized table (using the same
     normalized/fuzzy scoring as source suggestions) so valid SQL is not rejected on a
-    cosmetic name mismatch. Identifiers that already match, or that have no confident
-    authorized match, are left untouched.
+    cosmetic name mismatch.
+
+    When the semantic resolver has already auto-selected the source for this
+    request (``preferred_sources``) and the model instead invents a table name
+    with no confident fuzzy match (e.g. ``transactions``), the unknown reference
+    is remapped to that single resolved source rather than left to fail. This is
+    data-driven — it reuses the resolver's decision, not a hard-coded table — and
+    only applies when exactly one source was resolved, so legitimate multi-table
+    joins are never collapsed.
     """
     if not sql or not allowed_tables:
         return sql
     allowed_upper = {t.upper() for t in allowed_tables}
+    # A single resolved source is a safe force-remap target for invented names.
+    forced: str | None = None
+    if preferred_sources:
+        resolved = [s for s in preferred_sources if s.upper() in allowed_upper]
+        if len(set(s.upper() for s in resolved)) == 1:
+            forced = resolved[0]
     remapped = sql
     for ref in set(_referenced_tables(sql)):
         if ref.upper() in allowed_upper:
@@ -594,10 +611,15 @@ def _remap_tables_to_authorized(sql: str, allowed_tables: list[str]) -> str:
             score = _score_source_match(ref, table)
             if score > best_score:
                 best_score, best = score, table
-        if best and best_score >= 80 and best.upper() != ref.upper():
+        target: str | None = None
+        if best and best_score >= 80:
+            target = best
+        elif forced is not None:
+            target = forced
+        if target and target.upper() != ref.upper():
             pattern = re.compile(rf'("?)\b{re.escape(ref)}\b("?)')
             remapped = pattern.sub(
-                lambda m, b=best: f"{m.group(1)}{b}{m.group(2)}", remapped
+                lambda m, t=target: f"{m.group(1)}{t}{m.group(2)}", remapped
             )
     return remapped
 
@@ -727,7 +749,9 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
     # (e.g. a dropped ``_CSV`` suffix) to the authorized source before validating
     # so a valid query is not rejected on a name technicality.
     for attempt in range(3):
-        sql = _remap_tables_to_authorized(sql, allowed_tables)
+        sql = _remap_tables_to_authorized(
+            sql, allowed_tables, preferred_sources=req.preferred_sources
+        )
         try:
             validate_sql(sql, allowed_tables, table_columns=table_columns)
             break

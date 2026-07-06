@@ -7,7 +7,9 @@ list of messages (user / assistant).
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, String, Text
+from typing import Any
+
+from sqlalchemy import JSON, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -69,6 +71,10 @@ class AiConversationMessage(TimestampMixin, Base):
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Structured result an assistant message was grounded on (executed-query
+    # payload: sql, columns, rows, suggested visualization). Null for plain
+    # text answers and every user message.
+    data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     conversation: Mapped[AiConversation] = relationship(
         back_populates="messages",

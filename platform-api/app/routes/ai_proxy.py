@@ -54,6 +54,9 @@ TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 # follow-up questions resolve against recent context without unbounded prompts.
 CONVERSATION_HISTORY_LIMIT = 20
 
+# Row cap for a data answer rendered inline in the AI Assistant chat.
+CHAT_ANSWER_MAX_ROWS = 100
+
 
 # ---------------------------------------------------------------------------
 # Request/Response schemas for the proxy
@@ -2373,40 +2376,41 @@ async def _resolve_action_sources(
     )
 
 
-@router.post("/actions/ask-and-run")
-async def ai_ask_and_run(
-    req: AIAskAndRunRequest,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
+async def _ask_and_run_core(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    question: str,
+    max_rows: int,
+    source: str | None = None,
+    card_context: Any | None = None,
 ) -> dict[str, Any]:
-    """Generate SQL for a question, execute it, and return the results.
+    """Resolve a source, generate SQL, execute it, and return the result dict.
 
-    Never raises on a generation/execution failure: returns a structured
-    ``status`` (``success`` / ``generation_error`` / ``execution_error``) with
-    the SQL (when available) and an error message so the modal can render an
-    inline error and reveal the SQL instead of navigating away.
+    Shared by the ask-and-run action endpoint and the AI Assistant chat so both
+    ground answers on real executed data. Never raises on a generation/execution
+    failure — returns a structured ``status`` with SQL + error instead.
     """
-    await _check_project_access(session, context, req.project_id)
-
     resolver = await _resolve_action_sources(
         session, context,
-        project_id=req.project_id,
-        question=req.question,
+        project_id=project_id,
+        question=question,
         intent="question_answer",
-        source=req.source,
-        card_context=req.card_context,
+        source=source,
+        card_context=card_context,
     )
 
     try:
         ai_result = await _generate_sql_for_question(
-            session, context, req.project_id, req.question,
+            session, context, project_id, question,
             preferred_sources=resolver.preferred_sources,
             relevant_columns=resolver.relevant_columns,
         )
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc)
         return {
-            "question": req.question,
+            "question": question,
             "sql": "",
             "columns": [],
             "rows": [],
@@ -2422,7 +2426,7 @@ async def ai_ask_and_run(
     sql = (ai_result.get("sql") or "").strip().rstrip(";")
     if not sql or not _is_read_only_select(sql):
         return {
-            "question": req.question,
+            "question": question,
             "sql": sql if sql else "",
             "columns": [],
             "rows": [],
@@ -2435,19 +2439,19 @@ async def ai_ask_and_run(
         }
 
     table_schema = await _project_table_schema(
-        session, tenant_id=context.tenant_id, project_id=req.project_id
+        session, tenant_id=context.tenant_id, project_id=project_id
     )
     result, sql, exec_error = await _execute_with_repair(
         session, context,
-        project_id=req.project_id,
+        project_id=project_id,
         sql=sql,
         allowed_tables=allowed_tables,
-        max_rows=req.max_rows,
+        max_rows=max_rows,
         table_schema=table_schema,
     )
     if result is None:
         return {
-            "question": req.question,
+            "question": question,
             "sql": sql,
             "columns": [],
             "rows": [],
@@ -2463,10 +2467,10 @@ async def ai_ask_and_run(
         }
 
     columns = result.get("columns", [])
-    rows = result.get("rows", [])[: req.max_rows]
+    rows = result.get("rows", [])[:max_rows]
     used = _detect_datasource(sql, allowed_tables)
     return {
-        "question": req.question,
+        "question": question,
         "sql": sql,
         "columns": columns,
         "rows": rows,
@@ -2476,6 +2480,30 @@ async def ai_ask_and_run(
         "status": "success",
         "error": None,
     }
+
+
+@router.post("/actions/ask-and-run")
+async def ai_ask_and_run(
+    req: AIAskAndRunRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate SQL for a question, execute it, and return the results.
+
+    Never raises on a generation/execution failure: returns a structured
+    ``status`` (``success`` / ``generation_error`` / ``execution_error``) with
+    the SQL (when available) and an error message so the modal can render an
+    inline error and reveal the SQL instead of navigating away.
+    """
+    await _check_project_access(session, context, req.project_id)
+    return await _ask_and_run_core(
+        session, context,
+        project_id=req.project_id,
+        question=req.question,
+        max_rows=req.max_rows,
+        source=req.source,
+        card_context=req.card_context,
+    )
 
 
 @router.post("/actions/generate-query-preview")
@@ -3557,8 +3585,29 @@ def _message_dict(m: AiConversationMessage) -> dict[str, Any]:
         "id": m.id,
         "role": m.role,
         "content": m.content,
+        "data": m.data,
         "createdAt": m.created_at.isoformat() if m.created_at else None,
     }
+
+
+def _chat_answer_text(question: str, run: dict[str, Any]) -> str:
+    """Short natural-language answer for an executed chat query.
+
+    Prefers the generator's plain-English explanation; otherwise states the
+    single scalar result (KPI-style questions) or how many rows were returned.
+    The full result table + chart are attached separately as structured data.
+    """
+    explanation = (run.get("explanation") or "").strip()
+    columns = run.get("columns") or []
+    rows = run.get("rows") or []
+    if not rows:
+        return explanation or "The query ran but returned no rows."
+    if len(rows) == 1 and len(columns) == 1:
+        value = rows[0].get(columns[0])
+        scalar = f"{columns[0]}: {value}"
+        return f"{explanation}\n\n{scalar}".strip() if explanation else scalar
+    summary = f"Here are the results ({len(rows)} rows)."
+    return f"{explanation}\n\n{summary}".strip() if explanation else summary
 
 
 def _conversation_dict(
@@ -3747,6 +3796,7 @@ async def add_conversation_message(
     session.add(user_msg)
 
     answer: str
+    answer_data: dict[str, Any] | None = None
     if _is_query_summary_request(question):
         # Answered directly from the DB across all accessible projects — no
         # AI-server call, so it never fails with a signature error and always
@@ -3758,26 +3808,51 @@ async def add_conversation_message(
             "with data first, then ask again."
         )
     else:
-        try:
-            payload = {
-                "tenant_id": context.tenant_id,
-                "user_id": context.user_id,
-                "project_id": project_id,
-                "question": question,
-                "scope": "project",
-                "include_query_history": True,
-                "include_dashboard_context": True,
-                "history": history,
+        # Answer data questions the same way the Project Insight page does:
+        # auto-resolve the source, generate + execute SQL, and return the real
+        # result (rows + suggested chart) rather than printing SQL. If the
+        # question isn't a data question the source can ground (e.g. a document
+        # or summary request), fall back to the free-text AI answer.
+        run = await _ask_and_run_core(
+            session, context,
+            project_id=project_id,
+            question=question,
+            max_rows=CHAT_ANSWER_MAX_ROWS,
+        )
+        if run.get("status") == "success":
+            answer = _chat_answer_text(question, run)
+            answer_data = {
+                "sql": run.get("sql", ""),
+                "columns": run.get("columns", []),
+                "rows": run.get("rows", []),
+                "suggestedVisualization": run.get(
+                    "suggestedVisualization", {"type": "table"}
+                ),
+                "explanation": run.get("explanation", ""),
+                "dataSourcesUsed": run.get("dataSourcesUsed", []),
             }
-            result = await _forward_to_ai("/ai/ask", payload)
-            answer = str(result.get("answer") or "").strip() or (
-                "The AI returned an empty response."
-            )
-        except HTTPException as e:
-            answer = f"Sorry — I couldn't answer that. {e.detail}"
+        else:
+            try:
+                payload = {
+                    "tenant_id": context.tenant_id,
+                    "user_id": context.user_id,
+                    "project_id": project_id,
+                    "question": question,
+                    "scope": "project",
+                    "include_query_history": True,
+                    "include_dashboard_context": True,
+                    "history": history,
+                }
+                result = await _forward_to_ai("/ai/ask", payload)
+                answer = str(result.get("answer") or "").strip() or (
+                    "The AI returned an empty response."
+                )
+            except HTTPException as e:
+                answer = f"Sorry — I couldn't answer that. {e.detail}"
 
     assistant_msg = AiConversationMessage(
-        conversation_id=convo.id, role="assistant", content=answer
+        conversation_id=convo.id, role="assistant", content=answer,
+        data=answer_data,
     )
     session.add(assistant_msg)
     await session.commit()
@@ -3862,7 +3937,8 @@ async def branch_conversation(
     for m in source.messages:
         session.add(
             AiConversationMessage(
-                conversation_id=branch.id, role=m.role, content=m.content
+                conversation_id=branch.id, role=m.role, content=m.content,
+                data=m.data,
             )
         )
         if m.id == branch_point.id:

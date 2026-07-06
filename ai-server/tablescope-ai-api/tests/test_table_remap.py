@@ -44,3 +44,33 @@ def test_leaves_unmatched_reference_untouched() -> None:
 def test_noop_without_allowed_tables() -> None:
     sql = "SELECT 1 FROM foo"
     assert _remap_tables_to_authorized(sql, []) == sql
+
+
+def test_invented_table_remapped_to_single_resolved_source() -> None:
+    # The model invented a table name with no fuzzy match; the resolver had
+    # already auto-selected one source, so the unknown reference is remapped to
+    # it rather than left to fail validation.
+    sql = 'SELECT SUM("Amount") AS spend FROM transactions'
+    out = _remap_tables_to_authorized(
+        sql, ALLOWED, preferred_sources=["LOG_Shipments_CSV"]
+    )
+    assert out == 'SELECT SUM("Amount") AS spend FROM LOG_Shipments_CSV'
+
+
+def test_invented_table_not_forced_when_multiple_sources_resolved() -> None:
+    # With more than one resolved source we cannot safely guess which one an
+    # invented name meant, so it is left untouched (real joins stay intact).
+    sql = "SELECT 1 FROM transactions"
+    out = _remap_tables_to_authorized(
+        sql, ALLOWED, preferred_sources=["LOG_Shipments_CSV", "SUP_Suppliers_CSV"]
+    )
+    assert out == sql
+
+
+def test_fuzzy_match_still_wins_over_forced_source() -> None:
+    # A confident suffix-drop match is used even when a preferred source exists.
+    sql = "SELECT 1 FROM SUP_Suppliers"
+    out = _remap_tables_to_authorized(
+        sql, ALLOWED, preferred_sources=["LOG_Shipments_CSV"]
+    )
+    assert "FROM SUP_Suppliers_CSV" in out

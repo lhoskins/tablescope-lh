@@ -30,8 +30,10 @@ import {
   deleteConversation,
   branchConversation,
   type AiChatMessage,
+  type AiChatMessageData,
   type AiConversation,
 } from "@/lib/ui/use-shell-data";
+import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 
 const FALLBACK_USER: CurrentUser = {
@@ -56,9 +58,18 @@ export default function AiAssistantPage() {
 
   const [activeId, setActiveId] = useState<number | null>(null);
   const [input, setInput] = useState("");
+  const [projectId, setProjectId] = useState<number | null>(null);
+  const [needsProject, setNeedsProject] = useState(false);
   const { data: active } = useConversation(activeId);
   const messages = active?.messages ?? [];
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Reflect the active conversation's project (if any) in the picker so a
+  // returning thread stays scoped to the source it was answered against.
+  useEffect(() => {
+    setProjectId(active?.projectId ?? null);
+    setNeedsProject(false);
+  }, [active?.id, active?.projectId]);
 
   useEffect(() => {
     if (!getUserMeta()) router.replace("/login");
@@ -68,14 +79,20 @@ export default function AiAssistantPage() {
     queryClient.invalidateQueries({ queryKey: ["ai", "conversations"] });
 
   const sendMutation = useMutation({
-    mutationFn: async (question: string) => {
+    mutationFn: async ({
+      question,
+      pid,
+    }: {
+      question: string;
+      pid: number | null;
+    }) => {
       let id = activeId;
       if (id == null) {
-        const convo = await createConversation();
+        const convo = await createConversation({ project_id: pid });
         id = convo.id;
         setActiveId(id);
       }
-      return sendConversationMessage(id, question);
+      return sendConversationMessage(id, question, pid);
     },
     onSuccess: (convo) => {
       queryClient.setQueryData(["ai", "conversation", convo.id], convo);
@@ -121,20 +138,27 @@ export default function AiAssistantPage() {
   const send = (raw: string) => {
     const question = raw.trim();
     if (!question || busy) return;
+    const pid = projectId ?? active?.projectId ?? null;
+    if (pid == null) {
+      // Prompt for the project instead of silently guessing one.
+      setNeedsProject(true);
+      return;
+    }
+    setNeedsProject(false);
     setInput("");
-    sendMutation.mutate(question);
+    sendMutation.mutate({ question, pid });
   };
 
   const retryLast = () => {
     if (busy || !sendMutation.variables) return;
-    sendMutation.mutate(String(sendMutation.variables));
+    sendMutation.mutate(sendMutation.variables);
   };
 
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
 
   const pendingQuestion =
-    busy && sendMutation.variables ? String(sendMutation.variables) : null;
+    busy && sendMutation.variables ? sendMutation.variables.question : null;
 
   return (
     <AppShell
@@ -270,6 +294,35 @@ export default function AiAssistantPage() {
 
           {/* Input area — bottom */}
           <div className="border-t border-line-tertiary px-6 py-4">
+            <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2">
+              <label className="text-[12px] text-ink-tertiary">Project</label>
+              <select
+                value={projectId ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setProjectId(v === "" ? null : Number(v));
+                  if (v !== "") setNeedsProject(false);
+                }}
+                className={cn(
+                  "min-w-0 flex-1 rounded-md border bg-bg-primary px-2 py-1.5 text-[12px] text-ink-primary focus:outline-none",
+                  needsProject
+                    ? "border-danger focus:border-danger"
+                    : "border-line-secondary focus:border-brand-500",
+                )}
+              >
+                <option value="">Select a project…</option>
+                {(projects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {needsProject && (
+              <p className="mx-auto mb-2 max-w-3xl text-[12px] text-danger">
+                Please choose a project so I know which data to use.
+              </p>
+            )}
             <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border border-line-secondary bg-bg-primary px-4 py-3 shadow-sm">
               <textarea
                 value={input}
@@ -506,17 +559,50 @@ function ChatBubble({
       </div>
     );
   }
+  const data = message.data;
+  const hasData = !!data && (data.rows?.length ?? 0) > 0;
   return (
     <div className="group flex items-start gap-3">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
         <IconSparkles size={16} />
       </div>
-      <div className="flex max-w-[75%] flex-col">
+      <div className={cn("flex flex-col", hasData ? "w-full" : "max-w-[75%]")}>
         <div className="rounded-xl bg-bg-secondary px-4 py-3 text-[13px] leading-relaxed text-ink-primary">
           <span className="whitespace-pre-wrap">{message.content}</span>
         </div>
+        {hasData && data && <ChatResult data={data} />}
         <BranchButton onBranch={onBranch} branching={branching} />
       </div>
+    </div>
+  );
+}
+
+function ChatResult({ data }: { data: AiChatMessageData }) {
+  const [showSql, setShowSql] = useState(false);
+  return (
+    <div className="mt-2 rounded-xl border border-line-tertiary bg-bg-primary p-3">
+      <ResultChart
+        columns={data.columns}
+        rows={data.rows}
+        viz={data.suggestedVisualization}
+      />
+      <ResultTable columns={data.columns} rows={data.rows} />
+      {data.sql && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setShowSql((v) => !v)}
+            className="text-[11px] text-ink-tertiary hover:text-ink-secondary"
+          >
+            {showSql ? "Hide SQL" : "Show SQL"}
+          </button>
+          {showSql && (
+            <pre className="mt-1 overflow-auto rounded-md bg-bg-secondary p-2 text-[11px] text-ink-secondary">
+              {data.sql}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }

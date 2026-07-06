@@ -110,6 +110,97 @@ async def test_message_returns_updated_conversation_without_refresh(
     assert body["title"] == "What is revenue?"
 
 
+async def test_data_question_executes_and_returns_data(
+    client, service_headers, monkeypatch
+) -> None:
+    # When the question grounds on a source, the assistant answers like the
+    # Project Insight page: it executes SQL and returns the real result (rows +
+    # suggested chart) attached to the message, not just prose.
+    import app.routes.ai_proxy as ai_proxy
+
+    async def _fake_core(session, context, **kwargs):
+        return {
+            "question": kwargs["question"],
+            "sql": "SELECT Carrier, AVG(x) AS avg_days FROM LOG_Shipments_CSV",
+            "columns": ["Carrier", "avg_days"],
+            "rows": [
+                {"Carrier": "DHL", "avg_days": 4.2},
+                {"Carrier": "FedEx", "avg_days": 4.25},
+            ],
+            "suggestedVisualization": {"type": "bar"},
+            "explanation": "Average days late per carrier.",
+            "dataSourcesUsed": ["LOG_Shipments_CSV"],
+            "status": "success",
+            "error": None,
+        }
+
+    monkeypatch.setattr(ai_proxy, "_ask_and_run_core", _fake_core)
+
+    _t, _u, project, headers = await _setup(client, service_headers)
+    convo = (
+        await client.post("/api/ai/conversations", json={}, headers=headers)
+    ).json()
+    r = await client.post(
+        f"/api/ai/conversations/{convo['id']}/messages",
+        json={
+            "question": "average days late by carrier",
+            "project_id": project["id"],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    msg = r.json()["messages"][1]
+    assert msg["role"] == "assistant"
+    # Data-grounded answer text (explanation), not an "Echo:" AI-server reply.
+    assert "Echo:" not in msg["content"]
+    assert "Average days late per carrier." in msg["content"]
+    # The executed result is attached for the chat to render a table/chart.
+    assert msg["data"] is not None
+    assert msg["data"]["columns"] == ["Carrier", "avg_days"]
+    assert len(msg["data"]["rows"]) == 2
+    assert msg["data"]["suggestedVisualization"]["type"] == "bar"
+
+
+async def test_non_data_question_falls_back_to_prose(
+    client, service_headers, monkeypatch
+) -> None:
+    # When the question can't be grounded on a source, we fall back to the
+    # free-text AI answer and attach no structured data.
+    import app.routes.ai_proxy as ai_proxy
+
+    async def _fake_core(session, context, **kwargs):
+        return {
+            "question": kwargs["question"],
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": "",
+            "dataSourcesUsed": [],
+            "status": "generation_error",
+            "error": "no source",
+        }
+
+    monkeypatch.setattr(ai_proxy, "_ask_and_run_core", _fake_core)
+
+    _t, _u, project, headers = await _setup(client, service_headers)
+    convo = (
+        await client.post("/api/ai/conversations", json={}, headers=headers)
+    ).json()
+    r = await client.post(
+        f"/api/ai/conversations/{convo['id']}/messages",
+        json={
+            "question": "summarize my project documents",
+            "project_id": project["id"],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    msg = r.json()["messages"][1]
+    assert msg["content"] == "Echo: summarize my project documents"
+    assert msg["data"] is None
+
+
 async def test_query_summary_intent_answered_from_db(
     client, service_headers
 ) -> None:

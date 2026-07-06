@@ -5,6 +5,7 @@ import { apiClient, getApiBaseUrl } from "@/lib/api-client";
 import { initials, toAiStatus } from "./format";
 import { accentFor } from "./color";
 import type { CurrentUser, ProjectSummary, TenantSummary } from "./types";
+import type { SuggestedVisualization } from "@/lib/api/ai-actions";
 
 interface CurrentUserResponse {
   user_id: number;
@@ -163,10 +164,21 @@ export function useAllDataSources() {
   });
 }
 
+/** Executed-query result attached to an assistant message (data answers). */
+export interface AiChatMessageData {
+  sql: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  suggestedVisualization: SuggestedVisualization;
+  explanation: string;
+  dataSourcesUsed: string[];
+}
+
 export interface AiChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
+  data?: AiChatMessageData | null;
   createdAt: string | null;
 }
 
