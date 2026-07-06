@@ -193,8 +193,14 @@ async def test_ask_and_run_execution_error_reveals_sql(
     async def fake_execute(session, context, project_id, sql):
         raise HTTPException(status_code=502, detail="Query failed: bad column")
 
+    async def fake_fix(**kwargs):
+        return None  # repair declines -> honest execution error
+
+    import app.services.ai_intelligence_client as aic
+
     monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
     monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
+    monkeypatch.setattr(aic, "fix_sql", fake_fix)
 
     r = await client.post(
         "/api/ai/actions/ask-and-run",
@@ -210,6 +216,57 @@ async def test_ask_and_run_execution_error_reveals_sql(
     )
     assert "bad column" in body["errorDetails"]["executionError"]
     assert body["errorDetails"]["sql"] == "SELECT * FROM broken"
+
+
+async def test_ask_and_run_repairs_execution_error_then_succeeds(
+    client, service_headers, monkeypatch
+):
+    """A Teiid error (e.g. DATEDIFF) is fed back to the AI and the repaired
+    SQL re-runs successfully — the same self-heal the dashboard path uses."""
+    _, _, project, headers = await _setup(client, service_headers, "askfix")
+
+    bad = "SELECT AVG(DATEDIFF(DeliveryDate, ShipDate)) AS x FROM LOG_Shipments_CSV"
+    good = (
+        "SELECT AVG(TIMESTAMPDIFF(SQL_TSI_DAY, CAST(ShipDate AS timestamp), "
+        "CAST(DeliveryDate AS timestamp))) AS x FROM LOG_Shipments_CSV"
+    )
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        return {"sql": bad, "explanation": ""}
+
+    calls = {"n": 0}
+
+    async def fake_execute(session, context, project_id, sql):
+        calls["n"] += 1
+        if "DATEDIFF" in sql:
+            raise HTTPException(
+                status_code=502,
+                detail="TEIID30068 The function 'DATEDIFF' is an unknown form.",
+            )
+        return {"columns": ["x"], "rows": [{"x": 5}]}
+
+    async def fake_fix(**kwargs):
+        assert "DATEDIFF" in kwargs["error"]
+        return good
+
+    import app.services.ai_intelligence_client as aic
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
+    monkeypatch.setattr(aic, "fix_sql", fake_fix)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "avg days late?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "success"
+    assert "TIMESTAMPDIFF" in body["sql"]
+    assert "DATEDIFF" not in body["sql"]
+    assert body["rows"] == [{"x": 5}]
+    assert calls["n"] == 2  # failed once, succeeded after repair
 
 
 async def test_ask_and_run_blocks_prose_before_execution(

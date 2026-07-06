@@ -2165,6 +2165,91 @@ async def _execute_project_sql(
     )
 
 
+async def _project_table_schema(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int,
+) -> list[dict[str, Any]]:
+    """Build the exact per-source column schema for SQL repair.
+
+    Shape: ``[{"table": view, "columns": [{"name", "type"}]}]`` — the same
+    contract the AI server's ``fix-sql`` endpoint consumes so it can rewrite a
+    rejected query using real columns/types (never invented ones).
+    """
+    rows = (
+        await session.scalars(
+            select(FileSourceMeta).where(
+                FileSourceMeta.project_id == project_id,
+                FileSourceMeta.tenant_id == tenant_id,
+                FileSourceMeta.archived.is_(False),
+            )
+        )
+    ).all()
+    schema: list[dict[str, Any]] = []
+    for ds in rows:
+        columns = [
+            {"name": str(c.get("name")), "type": str(c.get("type") or "")}
+            for c in (ds.column_types or [])
+            if isinstance(c, dict) and c.get("name")
+        ]
+        schema.append({"table": ds.view_name, "columns": columns})
+    return schema
+
+
+async def _execute_with_repair(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    sql: str,
+    allowed_tables: list[str],
+    max_rows: int,
+    table_schema: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str, str]:
+    """Execute SQL; on an engine error, repair via the AI using the exact
+    Teiid error + real schema, then re-run.
+
+    Closes the same self-repair loop the dashboard path uses so Teiid quirks
+    (unsupported functions like DATEDIFF, un-CAST string arithmetic, alias/
+    GROUP BY mistakes) heal automatically instead of surfacing as a dead-end
+    error. Returns ``(result_or_none, final_sql, last_error)``.
+    """
+    from app.services import ai_intelligence_client as ai
+
+    current = sql
+    last_error = ""
+    for attempt in range(3):
+        bounded = _apply_row_limit(current, max_rows)
+        try:
+            result = await _execute_project_sql(
+                session, context, project_id, bounded
+            )
+            return result, current, ""
+        except HTTPException as exc:
+            last_error = str(exc.detail)
+            if attempt >= 2:
+                break
+            fixed = await ai.fix_sql(
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=project_id,
+                sql=current,
+                error=last_error,
+                allowed_tables=allowed_tables,
+                table_schema=table_schema,
+            )
+            normalized = (fixed or "").strip().rstrip(";")
+            if (
+                not normalized
+                or normalized == current.strip().rstrip(";")
+                or not _is_read_only_select(normalized)
+            ):
+                break
+            current = normalized
+    return None, current, last_error
+
+
 _READONLY_START_RE = re.compile(r"^(?:SELECT|WITH)\b", re.IGNORECASE)
 _LEADING_SQL_COMMENT_RE = re.compile(
     r"^(?:\s*(?:--[^\n]*\n|/\*.*?\*/))+", re.DOTALL
@@ -2374,12 +2459,18 @@ async def ai_ask_and_run(
             "errorDetails": {"sql": sql} if sql else {},
         }
 
-    bounded_sql = _apply_row_limit(sql, req.max_rows)
-    try:
-        result = await _execute_project_sql(
-            session, context, req.project_id, bounded_sql
-        )
-    except HTTPException as exc:
+    table_schema = await _project_table_schema(
+        session, tenant_id=context.tenant_id, project_id=req.project_id
+    )
+    result, sql, exec_error = await _execute_with_repair(
+        session, context,
+        project_id=req.project_id,
+        sql=sql,
+        allowed_tables=allowed_tables,
+        max_rows=req.max_rows,
+        table_schema=table_schema,
+    )
+    if result is None:
         return {
             "question": req.question,
             "sql": sql,
@@ -2392,7 +2483,7 @@ async def ai_ask_and_run(
             "error": "We could not run this query against the project's data.",
             "errorDetails": {
                 "sql": sql,
-                "executionError": str(exc.detail),
+                "executionError": exec_error,
             },
         }
 
@@ -2479,12 +2570,18 @@ async def ai_generate_query_preview(
             "errorDetails": {"sql": sql} if sql else {},
         }
 
-    bounded_sql = _apply_row_limit(sql, req.max_rows)
-    try:
-        result = await _execute_project_sql(
-            session, context, req.project_id, bounded_sql
-        )
-    except HTTPException as exc:
+    table_schema = await _project_table_schema(
+        session, tenant_id=context.tenant_id, project_id=req.project_id
+    )
+    result, sql, exec_error = await _execute_with_repair(
+        session, context,
+        project_id=req.project_id,
+        sql=sql,
+        allowed_tables=allowed_tables,
+        max_rows=req.max_rows,
+        table_schema=table_schema,
+    )
+    if result is None:
         return {
             "title": title,
             "description": req.description or "",
@@ -2498,7 +2595,7 @@ async def ai_generate_query_preview(
             "error": "We could not run this query against the project's data.",
             "errorDetails": {
                 "sql": sql,
-                "executionError": str(exc.detail),
+                "executionError": exec_error,
             },
         }
 

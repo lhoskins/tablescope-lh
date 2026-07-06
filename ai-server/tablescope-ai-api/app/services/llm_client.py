@@ -80,7 +80,15 @@ _TEIID_RULES = (
     "7. For grouping by month, use: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM')\n"
     "8. Alias columns using valid identifiers (letters/digits/underscore only, "
     "no reserved words like Month). Use SalesMonth, OrderYear, etc.\n"
-    "9. The GROUP BY clause must match the SELECT expression exactly.\n"
+    "9. The GROUP BY clause must match the SELECT expression exactly. Any "
+    "non-aggregated column in SELECT/ORDER BY must appear in GROUP BY.\n"
+    "10. For a ratio/rate/percentage, CAST BOTH operands of the division: "
+    "CAST(\"DefectQty\" AS double) / CAST(\"ReceivedQty\" AS double). Guard "
+    "divide-by-zero with NULLIF(CAST(\"denom\" AS double), 0).\n"
+    "11. Never use DATEDIFF, DATE_DIFF or DATE_PART — they are not Teiid "
+    "functions. For a day count between two dates use "
+    "TIMESTAMPDIFF(SQL_TSI_DAY, CAST(\"d1\" AS timestamp), "
+    "CAST(\"d2\" AS timestamp)).\n"
 )
 
 _SEMANTIC_RULES = (
