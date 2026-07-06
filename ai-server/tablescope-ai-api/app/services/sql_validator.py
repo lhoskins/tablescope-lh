@@ -40,6 +40,8 @@ _NON_COLUMN_WORDS = {
 }
 
 _STRING_LITERAL_RE = re.compile(r"'[^']*'")
+_LINE_COMMENT_RE = re.compile(r"--[^\n]*")
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 _QUALIFIED_REF_RE = re.compile(r'"?(\w+)"?\.\s*"?(\w+)"?')
 _TABLE_ALIAS_RE = re.compile(
     r'(?:FROM|JOIN)\s+"?(\w+)"?(?:\s+(?:AS\s+)?"?(\w+)"?)?', re.IGNORECASE
@@ -72,6 +74,14 @@ def _validate_columns(
     orig_cols = {t.upper(): list(cols) for t, cols in table_columns.items()}
     if not upper_cols:
         return
+
+    # Strip comments and string literals so words inside a note like
+    # ``-- Avoid division by zero`` or a literal like ``'Late'`` are never
+    # mistaken for column references (a false positive that would wrongly
+    # reject valid SQL).
+    sql = _BLOCK_COMMENT_RE.sub(" ", sql)
+    sql = _LINE_COMMENT_RE.sub(" ", sql)
+    sql = _STRING_LITERAL_RE.sub("''", sql)
 
     # Map every table and its alias to the canonical (upper) table name.
     alias_to_table: dict[str, str] = {}
@@ -111,8 +121,7 @@ def _validate_columns(
         valid = upper_cols[table_upper]
         aliases_upper = set(alias_to_table)
         output_aliases = {a.upper() for a in _OUTPUT_ALIAS_RE.findall(sql)}
-        scrubbed = _STRING_LITERAL_RE.sub("''", sql)
-        for ident in _BARE_IDENT_RE.findall(scrubbed):
+        for ident in _BARE_IDENT_RE.findall(sql):
             u = ident.upper()
             if (
                 u in _NON_COLUMN_WORDS

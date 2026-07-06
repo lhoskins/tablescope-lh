@@ -86,6 +86,27 @@ def test_accepts_valid_bare_columns_with_string_literal() -> None:
     validate_sql(sql, ALLOWED, table_columns=TABLE_COLUMNS)
 
 
+def test_words_in_sql_comment_are_not_flagged_as_columns() -> None:
+    # A note like "-- Avoid division by zero" must not be read as columns
+    # (Avoid/division/zero). Regression: comments were not scrubbed.
+    sql = (
+        "SELECT SupplierID, "
+        "AVG(CAST(DefectQty AS double) / NULLIF(CAST(ReceivedQty AS double), 0)) "
+        "AS defect_rate "
+        "-- Avoid division by zero\n"
+        "FROM SUP_Quality_Inspections_CSV GROUP BY SupplierID"
+    )
+    validate_sql(sql, ALLOWED, table_columns=TABLE_COLUMNS)
+
+
+def test_words_in_block_comment_are_not_flagged_as_columns() -> None:
+    sql = (
+        "SELECT SupplierID /* group by supplier and avoid nulls */, "
+        "COUNT(*) AS c FROM SUP_Quality_Inspections_CSV GROUP BY SupplierID"
+    )
+    validate_sql(sql, ALLOWED, table_columns=TABLE_COLUMNS)
+
+
 def test_no_column_check_without_table_columns() -> None:
     # Backwards compatible: without a column map, only tables are validated.
     sql = "SELECT q.DefectRate FROM SUP_Quality_Inspections_CSV q"
