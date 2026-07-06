@@ -1,0 +1,354 @@
+asset_id,type,make_model,dept,assigned_to,purchase_date,warranty_end,status
+AST00001,Laptop,Lenovo ThinkPad,Engineering,E1000,2022-03-15,2025-03-14,Active
+AST00002,Laptop,HP ThinkPad,Engineering,E1001,2021-11-27,2024-11-26,Active
+AST00003,Laptop,HP MacBook Pro,Engineering,E1003,2022-11-21,2025-11-20,Active
+AST00004,Laptop,HP ProBook,Engineering,E1004,2023-04-06,2026-04-05,Active
+AST00005,Laptop,Dell ProBook,Engineering,E1005,2024-11-13,2027-11-13,Active
+AST00006,Laptop,Apple ThinkPad,Engineering,E1006,2020-07-19,2023-07-19,Active
+AST00007,Laptop,HP ThinkPad,Engineering,E1007,2020-08-20,2023-08-20,Active
+AST00008,Laptop,Dell ThinkPad,Engineering,E1008,2024-02-01,2027-01-31,Active
+AST00009,Laptop,Dell XPS,Engineering,E1009,2020-03-14,2023-03-14,Active
+AST00010,Laptop,Apple XPS,Engineering,E1010,2025-06-01,2028-05-31,Active
+AST00011,Laptop,HP ThinkPad,Engineering,E1011,2022-07-05,2025-07-04,Active
+AST00012,Laptop,Apple ProBook,Engineering,E1012,2023-01-04,2026-01-03,Active
+AST00013,Laptop,Dell ProBook,Engineering,E1013,2022-04-15,2025-04-14,Active
+AST00014,Laptop,Apple ProBook,Engineering,E1014,2023-01-21,2026-01-20,Active
+AST00015,Laptop,Dell ThinkPad,Engineering,E1015,2023-04-06,2026-04-05,Active
+AST00016,Laptop,Apple XPS,Engineering,E1017,2025-04-14,2028-04-13,Active
+AST00017,Laptop,Dell MacBook Pro,Engineering,E1018,2025-06-21,2028-06-20,Active
+AST00018,Laptop,Lenovo ProBook,Engineering,E1019,2023-04-28,2026-04-27,Active
+AST00019,Laptop,Lenovo ProBook,Engineering,E1020,2024-05-20,2027-05-20,Active
+AST00020,Laptop,Lenovo ProBook,Engineering,E1021,2022-11-14,2025-11-13,Active
+AST00021,Laptop,Apple MacBook Pro,Engineering,E1022,2021-08-29,2024-08-28,Active
+AST00022,Laptop,Lenovo ProBook,Engineering,E1023,2021-05-09,2024-05-08,Active
+AST00023,Laptop,Dell XPS,Engineering,E1024,2021-04-27,2024-04-26,Active
+AST00024,Laptop,Apple XPS,Engineering,E1025,2023-04-17,2026-04-16,Active
+AST00025,Laptop,Apple ThinkPad,Engineering,E1026,2020-05-10,2023-05-10,Active
+AST00026,Laptop,HP XPS,Engineering,E1027,2021-01-08,2024-01-08,Active
+AST00027,Laptop,Apple ThinkPad,Engineering,E1028,2021-12-27,2024-12-26,Active
+AST00028,Laptop,HP MacBook Pro,Engineering,E1029,2024-08-09,2027-08-09,Active
+AST00029,Laptop,Dell ThinkPad,Engineering,E1031,2022-04-14,2025-04-13,Active
+AST00030,Laptop,Lenovo ThinkPad,Engineering,E1032,2021-04-01,2024-03-31,Active
+AST00031,Laptop,Dell MacBook Pro,Engineering,E1033,2024-11-19,2027-11-19,Active
+AST00032,Laptop,HP ProBook,Engineering,E1034,2023-07-15,2026-07-14,Active
+AST00033,Laptop,HP ProBook,Engineering,E1035,2020-08-29,2023-08-29,Active
+AST00034,Laptop,Dell XPS,Engineering,E1036,2021-05-22,2024-05-21,Active
+AST00035,Laptop,Dell ThinkPad,Engineering,E1037,2020-05-31,2023-05-31,Active
+AST00036,Laptop,Dell ProBook,Engineering,E1038,2022-07-17,2025-07-16,Active
+AST00037,Laptop,Dell XPS,Engineering,E1039,2021-12-21,2024-12-20,Active
+AST00038,Laptop,Apple ProBook,Engineering,E1040,2022-07-30,2025-07-29,Active
+AST00039,Laptop,Lenovo MacBook Pro,Engineering,E1041,2023-12-21,2026-12-20,Active
+AST00040,Laptop,HP ThinkPad,Finance,E1042,2020-10-14,2023-10-14,Active
+AST00041,Laptop,Lenovo MacBook Pro,Finance,E1043,2020-03-13,2023-03-13,Active
+AST00042,Laptop,Apple MacBook Pro,Finance,E1044,2023-03-27,2026-03-26,Active
+AST00043,Laptop,Lenovo XPS,Finance,E1045,2025-04-27,2028-04-26,Active
+AST00044,Laptop,Lenovo MacBook Pro,Finance,E1046,2021-02-08,2024-02-08,Active
+AST00045,Laptop,Lenovo XPS,Finance,E1047,2024-06-23,2027-06-23,Active
+AST00046,Laptop,HP XPS,Finance,E1048,2022-11-02,2025-11-01,Active
+AST00047,Laptop,Apple ThinkPad,Finance,E1049,2021-06-13,2024-06-12,Active
+AST00048,Laptop,Apple ThinkPad,Finance,E1050,2025-06-01,2028-05-31,Active
+AST00049,Laptop,HP ProBook,Finance,E1051,2021-05-23,2024-05-22,Active
+AST00050,Laptop,HP ProBook,Finance,E1052,2020-03-26,2023-03-26,Active
+AST00051,Laptop,Apple ProBook,Finance,E1053,2021-07-11,2024-07-10,Active
+AST00052,Laptop,Apple ThinkPad,Finance,E1054,2022-02-19,2025-02-18,Active
+AST00053,Laptop,Lenovo ThinkPad,Finance,E1055,2021-04-27,2024-04-26,Active
+AST00054,Laptop,HP ProBook,Finance,E1056,2022-01-19,2025-01-18,Active
+AST00055,Laptop,HP ProBook,Finance,E1057,2020-09-04,2023-09-04,Active
+AST00056,Laptop,Lenovo ProBook,Finance,E1058,2023-04-29,2026-04-28,Active
+AST00057,Laptop,Dell ProBook,Finance,E1059,2024-03-20,2027-03-20,Active
+AST00058,Laptop,HP XPS,HR,E1060,2020-07-02,2023-07-02,Active
+AST00059,Laptop,Dell MacBook Pro,HR,E1061,2020-10-01,2023-10-01,Active
+AST00060,Laptop,Dell MacBook Pro,HR,E1062,2023-09-21,2026-09-20,Active
+AST00061,Laptop,Lenovo ProBook,HR,E1063,2024-02-11,2027-02-10,Active
+AST00062,Laptop,Apple XPS,HR,E1064,2021-09-13,2024-09-12,Active
+AST00063,Laptop,Apple ThinkPad,HR,E1065,2022-05-02,2025-05-01,Active
+AST00064,Laptop,Dell MacBook Pro,HR,E1066,2022-07-11,2025-07-10,Active
+AST00065,Laptop,Lenovo ThinkPad,HR,E1067,2020-03-17,2023-03-17,Active
+AST00066,Laptop,Apple ThinkPad,HR,E1068,2023-08-04,2026-08-03,Active
+AST00067,Laptop,Apple XPS,HR,E1069,2024-04-16,2027-04-16,Active
+AST00068,Laptop,Lenovo ThinkPad,HR,E1070,2020-06-15,2023-06-15,Active
+AST00069,Laptop,HP XPS,IT,E1072,2022-02-04,2025-02-03,Active
+AST00070,Laptop,Lenovo MacBook Pro,IT,E1073,2021-12-20,2024-12-19,Active
+AST00071,Laptop,HP ThinkPad,IT,E1074,2024-02-25,2027-02-24,Active
+AST00072,Laptop,Lenovo MacBook Pro,IT,E1075,2020-11-08,2023-11-08,Active
+AST00073,Laptop,Apple MacBook Pro,IT,E1076,2024-04-11,2027-04-11,Active
+AST00074,Laptop,Dell MacBook Pro,IT,E1077,2020-03-13,2023-03-13,Active
+AST00075,Laptop,Dell ProBook,IT,E1078,2021-09-20,2024-09-19,Active
+AST00076,Laptop,HP MacBook Pro,IT,E1079,2023-08-16,2026-08-15,Active
+AST00077,Laptop,HP XPS,IT,E1080,2020-08-08,2023-08-08,Active
+AST00078,Laptop,Dell XPS,IT,E1081,2023-02-10,2026-02-09,Active
+AST00079,Laptop,Lenovo ProBook,IT,E1082,2020-07-26,2023-07-26,Active
+AST00080,Laptop,Lenovo XPS,IT,E1083,2023-01-19,2026-01-18,Active
+AST00081,Laptop,Dell XPS,IT,E1084,2020-04-26,2023-04-26,Active
+AST00082,Laptop,Apple XPS,IT,E1085,2025-05-07,2028-05-06,Active
+AST00083,Laptop,Dell XPS,IT,E1086,2022-06-09,2025-06-08,Active
+AST00084,Laptop,Lenovo XPS,Manufacturing,E1087,2022-03-02,2025-03-01,Active
+AST00085,Laptop,Lenovo XPS,Manufacturing,E1088,2023-10-04,2026-10-03,Active
+AST00086,Laptop,Apple MacBook Pro,Manufacturing,E1089,2025-01-29,2028-01-29,Active
+AST00087,Laptop,Apple XPS,Manufacturing,E1090,2025-05-15,2028-05-14,Active
+AST00088,Laptop,Apple ProBook,Manufacturing,E1091,2022-01-24,2025-01-23,Active
+AST00089,Laptop,HP XPS,Manufacturing,E1092,2020-11-24,2023-11-24,Active
+AST00090,Laptop,Dell ProBook,Manufacturing,E1093,2020-02-05,2023-02-04,Active
+AST00091,Laptop,Lenovo ThinkPad,Manufacturing,E1094,2024-03-25,2027-03-25,Active
+AST00092,Laptop,Dell XPS,Manufacturing,E1095,2021-01-01,2024-01-01,Active
+AST00093,Laptop,Dell XPS,Manufacturing,E1096,2020-02-21,2023-02-20,Active
+AST00094,Laptop,Apple MacBook Pro,Manufacturing,E1097,2020-02-22,2023-02-21,Active
+AST00095,Laptop,Lenovo ThinkPad,Manufacturing,E1098,2020-12-03,2023-12-03,Active
+AST00096,Laptop,Dell ThinkPad,Manufacturing,E1099,2020-02-17,2023-02-16,Active
+AST00097,Laptop,Dell MacBook Pro,Manufacturing,E1100,2024-03-06,2027-03-06,Active
+AST00098,Laptop,HP ProBook,Manufacturing,E1101,2020-10-06,2023-10-06,Active
+AST00099,Laptop,Lenovo ThinkPad,Manufacturing,E1102,2023-04-27,2026-04-26,Active
+AST00100,Laptop,HP ThinkPad,Manufacturing,E1103,2021-06-07,2024-06-06,Active
+AST00101,Laptop,HP XPS,Manufacturing,E1104,2020-02-20,2023-02-19,Active
+AST00102,Laptop,Dell XPS,Manufacturing,E1105,2025-05-30,2028-05-29,Active
+AST00103,Laptop,Apple MacBook Pro,Manufacturing,E1106,2022-08-06,2025-08-05,Active
+AST00104,Laptop,Lenovo ProBook,Manufacturing,E1107,2021-03-08,2024-03-07,Active
+AST00105,Laptop,HP MacBook Pro,Manufacturing,E1108,2023-10-02,2026-10-01,Active
+AST00106,Laptop,HP ProBook,Manufacturing,E1109,2020-11-01,2023-11-01,Active
+AST00107,Laptop,Apple ThinkPad,Manufacturing,E1110,2024-01-09,2027-01-08,Active
+AST00108,Laptop,Apple ProBook,Manufacturing,E1111,2021-10-07,2024-10-06,Active
+AST00109,Laptop,HP MacBook Pro,Manufacturing,E1112,2023-07-29,2026-07-28,Active
+AST00110,Laptop,Dell MacBook Pro,Manufacturing,E1113,2024-02-15,2027-02-14,Active
+AST00111,Laptop,Lenovo MacBook Pro,Manufacturing,E1114,2022-08-13,2025-08-12,Active
+AST00112,Laptop,Lenovo ThinkPad,Manufacturing,E1115,2022-11-18,2025-11-17,Active
+AST00113,Laptop,Lenovo ThinkPad,Manufacturing,E1116,2024-03-03,2027-03-03,Active
+AST00114,Laptop,Lenovo ThinkPad,Manufacturing,E1117,2021-10-19,2024-10-18,Active
+AST00115,Laptop,Lenovo XPS,Manufacturing,E1118,2024-07-14,2027-07-14,Active
+AST00116,Laptop,Lenovo ProBook,Manufacturing,E1119,2023-07-25,2026-07-24,Active
+AST00117,Laptop,Lenovo ProBook,Manufacturing,E1120,2021-10-06,2024-10-05,Active
+AST00118,Laptop,Lenovo ThinkPad,Manufacturing,E1121,2025-06-08,2028-06-07,Active
+AST00119,Laptop,Dell XPS,Manufacturing,E1122,2022-05-12,2025-05-11,Active
+AST00120,Laptop,Apple ThinkPad,Manufacturing,E1123,2021-05-06,2024-05-05,Active
+AST00121,Laptop,Lenovo ThinkPad,Manufacturing,E1124,2024-12-27,2027-12-27,Active
+AST00122,Laptop,Lenovo MacBook Pro,Manufacturing,E1125,2020-01-05,2023-01-04,Active
+AST00123,Laptop,Dell MacBook Pro,Manufacturing,E1126,2024-02-05,2027-02-04,Active
+AST00124,Laptop,Lenovo ProBook,Manufacturing,E1127,2024-10-09,2027-10-09,Active
+AST00125,Laptop,Lenovo XPS,Manufacturing,E1128,2025-03-16,2028-03-15,Active
+AST00126,Laptop,HP XPS,Manufacturing,E1129,2024-02-20,2027-02-19,Active
+AST00127,Laptop,Dell MacBook Pro,Manufacturing,E1130,2024-03-08,2027-03-08,Active
+AST00128,Laptop,HP ThinkPad,Manufacturing,E1131,2023-03-31,2026-03-30,Active
+AST00129,Laptop,Apple XPS,Manufacturing,E1132,2024-05-18,2027-05-18,Active
+AST00130,Laptop,Apple ProBook,Manufacturing,E1133,2023-12-03,2026-12-02,Active
+AST00131,Laptop,Lenovo XPS,Manufacturing,E1134,2020-07-25,2023-07-25,Active
+AST00132,Laptop,Dell ProBook,Manufacturing,E1135,2025-05-14,2028-05-13,Active
+AST00133,Laptop,Apple ThinkPad,Manufacturing,E1136,2024-11-12,2027-11-12,Active
+AST00134,Laptop,Lenovo XPS,Manufacturing,E1137,2023-03-19,2026-03-18,Active
+AST00135,Laptop,Lenovo XPS,Manufacturing,E1138,2021-11-11,2024-11-10,Active
+AST00136,Laptop,Lenovo ThinkPad,Manufacturing,E1139,2020-01-14,2023-01-13,Active
+AST00137,Laptop,Apple XPS,Manufacturing,E1140,2025-06-07,2028-06-06,Active
+AST00138,Laptop,Apple ProBook,Manufacturing,E1141,2021-05-04,2024-05-03,Active
+AST00139,Laptop,Lenovo MacBook Pro,Manufacturing,E1142,2024-09-29,2027-09-29,Active
+AST00140,Laptop,Dell XPS,Manufacturing,E1143,2022-04-21,2025-04-20,Active
+AST00141,Laptop,Apple ThinkPad,Manufacturing,E1144,2025-04-23,2028-04-22,Active
+AST00142,Laptop,Lenovo ProBook,Manufacturing,E1145,2025-02-06,2028-02-06,Active
+AST00143,Laptop,Dell ThinkPad,Manufacturing,E1146,2021-12-28,2024-12-27,Active
+AST00144,Laptop,Lenovo ProBook,Manufacturing,E1147,2021-07-20,2024-07-19,Active
+AST00145,Laptop,Apple XPS,Manufacturing,E1148,2021-01-08,2024-01-08,Active
+AST00146,Laptop,Lenovo MacBook Pro,Manufacturing,E1149,2022-01-12,2025-01-11,Active
+AST00147,Laptop,Dell ProBook,Manufacturing,E1150,2023-10-17,2026-10-16,Active
+AST00148,Laptop,Lenovo ThinkPad,Manufacturing,E1151,2025-02-10,2028-02-10,Active
+AST00149,Laptop,Lenovo ProBook,Manufacturing,E1152,2024-12-18,2027-12-18,Active
+AST00150,Laptop,HP MacBook Pro,Manufacturing,E1153,2021-05-07,2024-05-06,Active
+AST00151,Laptop,HP MacBook Pro,Manufacturing,E1155,2023-03-25,2026-03-24,Active
+AST00152,Laptop,HP XPS,Manufacturing,E1156,2023-01-18,2026-01-17,Active
+AST00153,Laptop,HP ProBook,Manufacturing,E1157,2020-03-13,2023-03-13,Active
+AST00154,Laptop,Dell XPS,Manufacturing,E1158,2020-09-09,2023-09-09,Active
+AST00155,Laptop,Lenovo ProBook,Manufacturing,E1159,2021-12-09,2024-12-08,Active
+AST00156,Laptop,Lenovo MacBook Pro,Manufacturing,E1160,2023-07-10,2026-07-09,Active
+AST00157,Laptop,Apple XPS,Manufacturing,E1161,2020-02-23,2023-02-22,Active
+AST00158,Laptop,Lenovo ThinkPad,Manufacturing,E1162,2021-01-19,2024-01-19,Active
+AST00159,Laptop,Apple MacBook Pro,Manufacturing,E1163,2020-02-12,2023-02-11,Active
+AST00160,Laptop,Apple ThinkPad,Manufacturing,E1164,2024-11-10,2027-11-10,Active
+AST00161,Laptop,Dell MacBook Pro,Manufacturing,E1165,2021-09-26,2024-09-25,Active
+AST00162,Laptop,Dell XPS,Manufacturing,E1166,2022-02-08,2025-02-07,Active
+AST00163,Laptop,Lenovo MacBook Pro,Manufacturing,E1167,2024-02-29,2027-02-28,Active
+AST00164,Laptop,HP ProBook,Manufacturing,E1168,2022-07-09,2025-07-08,Active
+AST00165,Laptop,Lenovo XPS,Manufacturing,E1169,2021-06-18,2024-06-17,Active
+AST00166,Laptop,Lenovo ThinkPad,Manufacturing,E1170,2023-07-29,2026-07-28,Active
+AST00167,Laptop,HP ThinkPad,Manufacturing,E1171,2022-05-02,2025-05-01,Active
+AST00168,Laptop,Dell ThinkPad,Manufacturing,E1172,2021-01-30,2024-01-30,Active
+AST00169,Laptop,HP ProBook,Manufacturing,E1173,2020-05-31,2023-05-31,Active
+AST00170,Laptop,Dell ProBook,Manufacturing,E1174,2024-01-11,2027-01-10,Active
+AST00171,Laptop,Dell ThinkPad,Manufacturing,E1175,2020-08-28,2023-08-28,Active
+AST00172,Laptop,Apple MacBook Pro,Manufacturing,E1176,2023-01-16,2026-01-15,Active
+AST00173,Laptop,Dell ProBook,Manufacturing,E1177,2021-01-26,2024-01-26,Active
+AST00174,Laptop,Apple MacBook Pro,Manufacturing,E1178,2025-04-23,2028-04-22,Active
+AST00175,Laptop,Dell MacBook Pro,Manufacturing,E1179,2024-05-21,2027-05-21,Active
+AST00176,Laptop,Apple ProBook,Manufacturing,E1180,2023-02-04,2026-02-03,Active
+AST00177,Laptop,Apple MacBook Pro,Manufacturing,E1181,2023-11-21,2026-11-20,Active
+AST00178,Laptop,Apple XPS,Manufacturing,E1182,2025-04-12,2028-04-11,Active
+AST00179,Laptop,HP ThinkPad,Manufacturing,E1183,2025-03-21,2028-03-20,Active
+AST00180,Laptop,Dell MacBook Pro,Manufacturing,E1184,2025-04-05,2028-04-04,Active
+AST00181,Laptop,Dell ThinkPad,Manufacturing,E1185,2021-10-18,2024-10-17,Active
+AST00182,Laptop,Dell ThinkPad,Manufacturing,E1186,2021-04-06,2024-04-05,Active
+AST00183,Laptop,HP XPS,Manufacturing,E1187,2022-10-01,2025-09-30,Active
+AST00184,Laptop,Dell ProBook,Manufacturing,E1188,2023-05-26,2026-05-25,Active
+AST00185,Laptop,Lenovo ProBook,Manufacturing,E1189,2024-09-26,2027-09-26,Active
+AST00186,Laptop,Lenovo ThinkPad,Manufacturing,E1190,2022-01-07,2025-01-06,Active
+AST00187,Laptop,HP XPS,Manufacturing,E1191,2023-05-05,2026-05-04,Active
+AST00188,Laptop,Lenovo MacBook Pro,Manufacturing,E1192,2022-02-10,2025-02-09,Active
+AST00189,Laptop,HP XPS,Manufacturing,E1193,2023-09-06,2026-09-05,Active
+AST00190,Laptop,Lenovo ThinkPad,Manufacturing,E1194,2021-05-23,2024-05-22,Active
+AST00191,Laptop,Apple ThinkPad,Manufacturing,E1195,2024-10-21,2027-10-21,Active
+AST00192,Laptop,Dell ProBook,Manufacturing,E1196,2022-01-22,2025-01-21,Active
+AST00193,Laptop,Lenovo ThinkPad,Manufacturing,E1197,2024-08-04,2027-08-04,Active
+AST00194,Laptop,Lenovo XPS,Manufacturing,E1198,2023-09-26,2026-09-25,Active
+AST00195,Laptop,Apple ThinkPad,Manufacturing,E1199,2023-03-15,2026-03-14,Active
+AST00196,Laptop,Dell ProBook,Manufacturing,E1200,2024-11-07,2027-11-07,Active
+AST00197,Laptop,HP ThinkPad,Manufacturing,E1201,2021-02-22,2024-02-22,Active
+AST00198,Laptop,HP ProBook,Manufacturing,E1202,2020-03-13,2023-03-13,Active
+AST00199,Laptop,HP MacBook Pro,Manufacturing,E1203,2020-08-16,2023-08-16,Active
+AST00200,Laptop,Apple ProBook,Manufacturing,E1204,2023-09-06,2026-09-05,Active
+AST00201,Laptop,Dell MacBook Pro,Manufacturing,E1205,2024-09-26,2027-09-26,Active
+AST00202,Laptop,Lenovo XPS,Manufacturing,E1206,2021-04-14,2024-04-13,Active
+AST00203,Laptop,Lenovo XPS,Manufacturing,E1207,2023-11-13,2026-11-12,Active
+AST00204,Laptop,Dell XPS,Manufacturing,E1208,2021-12-25,2024-12-24,Active
+AST00205,Laptop,Dell MacBook Pro,Manufacturing,E1209,2020-07-13,2023-07-13,Active
+AST00206,Laptop,Apple ProBook,Manufacturing,E1210,2024-10-03,2027-10-03,Active
+AST00207,Laptop,HP MacBook Pro,Manufacturing,E1211,2021-09-08,2024-09-07,Active
+AST00208,Laptop,Apple ThinkPad,Manufacturing,E1212,2024-06-08,2027-06-08,Active
+AST00209,Laptop,Lenovo ThinkPad,Manufacturing,E1213,2021-08-28,2024-08-27,Active
+AST00210,Laptop,Apple MacBook Pro,Manufacturing,E1214,2022-04-23,2025-04-22,Active
+AST00211,Laptop,Dell XPS,Manufacturing,E1215,2024-04-09,2027-04-09,Active
+AST00212,Laptop,Dell ProBook,Manufacturing,E1216,2023-07-13,2026-07-12,Active
+AST00213,Laptop,Dell ProBook,Manufacturing,E1217,2020-02-02,2023-02-01,Active
+AST00214,Laptop,HP MacBook Pro,Manufacturing,E1218,2023-07-17,2026-07-16,Active
+AST00215,Laptop,Lenovo ProBook,Manufacturing,E1219,2025-01-03,2028-01-03,Active
+AST00216,Laptop,Lenovo MacBook Pro,Manufacturing,E1220,2021-02-19,2024-02-19,Active
+AST00217,Laptop,Lenovo MacBook Pro,Manufacturing,E1221,2021-06-13,2024-06-12,Active
+AST00218,Laptop,HP XPS,Manufacturing,E1222,2021-06-28,2024-06-27,Active
+AST00219,Laptop,Apple XPS,Manufacturing,E1223,2020-11-03,2023-11-03,Active
+AST00220,Laptop,HP ProBook,Manufacturing,E1224,2024-03-04,2027-03-04,Active
+AST00221,Laptop,Apple ProBook,Manufacturing,E1225,2022-06-26,2025-06-25,Active
+AST00222,Laptop,Lenovo ThinkPad,Manufacturing,E1227,2020-01-14,2023-01-13,Active
+AST00223,Laptop,HP XPS,Manufacturing,E1228,2022-06-23,2025-06-22,Active
+AST00224,Laptop,Lenovo MacBook Pro,Manufacturing,E1229,2022-04-19,2025-04-18,Active
+AST00225,Laptop,HP MacBook Pro,Manufacturing,E1230,2021-04-03,2024-04-02,Active
+AST00226,Laptop,Lenovo ThinkPad,Manufacturing,E1231,2021-02-09,2024-02-09,Active
+AST00227,Laptop,Lenovo ProBook,Manufacturing,E1232,2024-10-02,2027-10-02,Active
+AST00228,Laptop,Dell ProBook,Manufacturing,E1233,2023-06-18,2026-06-17,Active
+AST00229,Laptop,Dell ProBook,Manufacturing,E1234,2024-04-05,2027-04-05,Active
+AST00230,Laptop,Lenovo ThinkPad,Manufacturing,E1235,2020-12-11,2023-12-11,Active
+AST00231,Laptop,Dell ThinkPad,Manufacturing,E1236,2020-02-15,2023-02-14,Active
+AST00232,Laptop,Apple MacBook Pro,Manufacturing,E1237,2022-07-09,2025-07-08,Active
+AST00233,Laptop,Dell MacBook Pro,Manufacturing,E1238,2024-06-09,2027-06-09,Active
+AST00234,Laptop,Apple ThinkPad,Manufacturing,E1239,2025-05-23,2028-05-22,Active
+AST00235,Laptop,Lenovo MacBook Pro,Manufacturing,E1240,2022-02-03,2025-02-02,Active
+AST00236,Laptop,Apple XPS,Manufacturing,E1241,2023-01-19,2026-01-18,Active
+AST00237,Laptop,Dell ProBook,Manufacturing,E1242,2021-09-02,2024-09-01,Active
+AST00238,Laptop,Lenovo XPS,Manufacturing,E1243,2020-09-21,2023-09-21,Active
+AST00239,Laptop,Dell MacBook Pro,Manufacturing,E1244,2020-12-23,2023-12-23,Active
+AST00240,Laptop,HP MacBook Pro,Manufacturing,E1245,2025-06-15,2028-06-14,Active
+AST00241,Laptop,HP ProBook,Manufacturing,E1246,2021-06-03,2024-06-02,Active
+AST00242,Laptop,Lenovo ProBook,Procurement,E1247,2023-12-24,2026-12-23,Active
+AST00243,Laptop,Lenovo MacBook Pro,Procurement,E1248,2023-09-12,2026-09-11,Active
+AST00244,Laptop,Dell ThinkPad,Procurement,E1249,2023-02-14,2026-02-13,Active
+AST00245,Laptop,Apple ProBook,Procurement,E1250,2022-06-04,2025-06-03,Active
+AST00246,Laptop,Dell MacBook Pro,Procurement,E1251,2022-06-13,2025-06-12,Active
+AST00247,Laptop,Lenovo ProBook,Procurement,E1252,2022-12-11,2025-12-10,Active
+AST00248,Laptop,HP MacBook Pro,Procurement,E1253,2023-07-20,2026-07-19,Active
+AST00249,Laptop,HP ThinkPad,Procurement,E1254,2024-11-22,2027-11-22,Active
+AST00250,Laptop,Lenovo ProBook,Procurement,E1256,2022-07-13,2025-07-12,Active
+AST00251,Laptop,Lenovo XPS,Procurement,E1257,2021-09-19,2024-09-18,Active
+AST00252,Laptop,Apple ThinkPad,Procurement,E1258,2020-01-07,2023-01-06,Active
+AST00253,Laptop,HP ThinkPad,Procurement,E1259,2024-11-23,2027-11-23,Active
+AST00254,Laptop,Dell MacBook Pro,Procurement,E1260,2024-12-31,2027-12-31,Active
+AST00255,Laptop,HP ThinkPad,Quality,E1261,2020-04-05,2023-04-05,Active
+AST00256,Laptop,Lenovo ThinkPad,Quality,E1262,2023-12-13,2026-12-12,Active
+AST00257,Laptop,Lenovo ThinkPad,Quality,E1263,2025-02-07,2028-02-07,Active
+AST00258,Laptop,Dell XPS,Quality,E1264,2022-10-13,2025-10-12,Active
+AST00259,Laptop,Apple ThinkPad,Quality,E1265,2023-06-13,2026-06-12,Active
+AST00260,Laptop,Lenovo XPS,Quality,E1266,2021-07-22,2024-07-21,Active
+AST00261,Laptop,Apple ThinkPad,Quality,E1267,2025-04-17,2028-04-16,Active
+AST00262,Laptop,Lenovo MacBook Pro,Quality,E1268,2024-07-08,2027-07-08,Active
+AST00263,Laptop,Apple XPS,Quality,E1269,2021-06-18,2024-06-17,Active
+AST00264,Laptop,Apple XPS,Quality,E1270,2023-03-11,2026-03-10,Active
+AST00265,Laptop,Dell ThinkPad,Quality,E1271,2023-03-08,2026-03-07,Active
+AST00266,Laptop,Dell ProBook,Quality,E1272,2020-07-20,2023-07-20,Active
+AST00267,Laptop,Lenovo ThinkPad,Quality,E1273,2020-05-24,2023-05-24,Active
+AST00268,Laptop,HP ProBook,Quality,E1274,2024-09-11,2027-09-11,Active
+AST00269,Laptop,Dell XPS,Quality,E1275,2024-11-04,2027-11-04,Active
+AST00270,Laptop,Lenovo ProBook,Quality,E1276,2024-12-13,2027-12-13,Active
+AST00271,Laptop,HP MacBook Pro,Quality,E1277,2020-12-01,2023-12-01,Active
+AST00272,Laptop,Apple MacBook Pro,Quality,E1278,2024-06-21,2027-06-21,Active
+AST00273,Laptop,HP ThinkPad,Quality,E1279,2020-03-08,2023-03-08,Active
+AST00274,Laptop,HP XPS,Quality,E1280,2020-10-30,2023-10-30,Active
+AST00275,Laptop,Dell ThinkPad,Quality,E1281,2020-07-26,2023-07-26,Active
+AST00276,Laptop,Lenovo ThinkPad,Quality,E1282,2023-09-06,2026-09-05,Active
+AST00277,Laptop,Lenovo XPS,Sales,E1283,2020-12-19,2023-12-19,Active
+AST00278,Laptop,Lenovo XPS,Sales,E1284,2023-03-24,2026-03-23,Active
+AST00279,Laptop,Dell ThinkPad,Sales,E1285,2022-07-09,2025-07-08,Active
+AST00280,Laptop,Apple MacBook Pro,Sales,E1286,2020-06-12,2023-06-12,Active
+AST00281,Laptop,Dell ProBook,Sales,E1287,2023-01-22,2026-01-21,Active
+AST00282,Laptop,Dell ThinkPad,Sales,E1288,2024-08-03,2027-08-03,Active
+AST00283,Laptop,HP XPS,Sales,E1289,2024-08-28,2027-08-28,Active
+AST00284,Laptop,Dell MacBook Pro,Sales,E1290,2022-08-20,2025-08-19,Active
+AST00285,Laptop,Dell ProBook,Sales,E1291,2021-01-20,2024-01-20,Active
+AST00286,Laptop,Dell XPS,Sales,E1292,2021-08-22,2024-08-21,Active
+AST00287,Laptop,HP MacBook Pro,Sales,E1293,2021-01-04,2024-01-04,Active
+AST00288,Laptop,Apple XPS,Sales,E1294,2022-01-03,2025-01-02,Active
+AST00289,Laptop,Lenovo XPS,Sales,E1295,2023-12-22,2026-12-21,Active
+AST00290,Laptop,Lenovo ProBook,Sales,E1296,2024-08-28,2027-08-28,Active
+AST00291,Laptop,Apple ThinkPad,Sales,E1297,2025-04-06,2028-04-05,Active
+AST00292,Laptop,HP ProBook,Sales,E1298,2024-03-31,2027-03-31,Active
+AST00293,Laptop,Apple XPS,Sales,E1299,2020-05-17,2023-05-17,Active
+AST00294,Laptop,Lenovo MacBook Pro,Sales,E1300,2023-11-30,2026-11-29,Active
+AST00295,Laptop,Lenovo MacBook Pro,Sales,E1301,2022-03-14,2025-03-13,Active
+AST00296,Laptop,Dell XPS,Sales,E1302,2022-12-22,2025-12-21,Active
+AST00297,Laptop,Dell MacBook Pro,Sales,E1303,2024-02-17,2027-02-16,Active
+AST00298,Laptop,Lenovo XPS,Sales,E1304,2022-03-11,2025-03-10,Active
+AST00299,Laptop,Dell MacBook Pro,Sales,E1305,2023-07-26,2026-07-25,Active
+AST00300,Laptop,Apple XPS,Sales,E1306,2020-10-24,2023-10-24,Active
+AST00301,Laptop,Dell ThinkPad,Sales,E1307,2020-11-11,2023-11-11,Active
+AST00302,Laptop,Dell ProBook,Sales,E1308,2022-06-08,2025-06-07,Active
+AST00303,Laptop,Dell XPS,Sales,E1309,2022-09-10,2025-09-09,Active
+AST00304,Laptop,Apple ThinkPad,Sales,E1310,2025-04-05,2028-04-04,Active
+AST00305,Laptop,HP ThinkPad,EHS,E1311,2024-12-07,2027-12-07,Active
+AST00306,Laptop,Lenovo XPS,EHS,E1312,2023-05-28,2026-05-27,Active
+AST00307,Laptop,Dell MacBook Pro,EHS,E1313,2021-02-14,2024-02-14,Active
+AST00308,Laptop,Lenovo ProBook,EHS,E1314,2023-12-17,2026-12-16,Active
+AST00309,Laptop,Lenovo XPS,EHS,E1315,2022-02-26,2025-02-25,Active
+AST00310,Laptop,Dell ProBook,EHS,E1316,2024-12-04,2027-12-04,Active
+AST00311,Laptop,Lenovo XPS,Executive,E1317,2024-05-20,2027-05-20,Active
+AST00312,Laptop,Dell ProBook,Executive,E1318,2024-10-18,2027-10-18,Active
+AST00313,Laptop,Lenovo ThinkPad,Executive,E1319,2022-11-28,2025-11-27,Active
+AST00314,Server,Cisco Enterprise,HR,IT,2024-10-21,2029-10-20,Active
+AST00315,Printer,HP Enterprise,Executive,IT,2024-03-24,2029-03-23,Maintenance
+AST00316,Printer,Samsung Enterprise,Procurement,IT,2019-06-02,2024-05-31,Maintenance
+AST00317,Server,Apple Enterprise,Finance,IT,2025-06-17,2030-06-16,Active
+AST00318,Printer,Dell Enterprise,EHS,IT,2025-03-27,2030-03-26,End of Life
+AST00319,Server,Brother Enterprise,Sales,IT,2024-10-28,2029-10-27,End of Life
+AST00320,Server,Samsung Enterprise,Sales,IT,2025-07-22,2030-07-21,Active
+AST00321,UPS,Samsung Enterprise,Sales,IT,2023-10-02,2028-09-30,Active
+AST00322,Printer,Samsung Enterprise,Sales,IT,2025-06-14,2030-06-13,Maintenance
+AST00323,UPS,HP Enterprise,Quality,IT,2024-12-31,2029-12-30,Maintenance
+AST00324,Server,Apple Enterprise,EHS,IT,2020-12-29,2025-12-28,End of Life
+AST00325,UPS,Polycom Enterprise,Executive,IT,2020-08-20,2025-08-19,End of Life
+AST00326,Server,Brother Enterprise,Manufacturing,IT,2019-09-05,2024-09-03,Maintenance
+AST00327,UPS,Dell Enterprise,Quality,IT,2019-12-08,2024-12-06,Maintenance
+AST00328,UPS,HP Enterprise,Finance,IT,2025-07-24,2030-07-23,Maintenance
+AST00329,Server,HP Enterprise,Quality,IT,2025-03-15,2030-03-14,Maintenance
+AST00330,Printer,Apple Enterprise,Manufacturing,IT,2024-06-30,2029-06-29,Maintenance
+AST00331,UPS,HP Enterprise,Manufacturing,IT,2019-08-16,2024-08-14,Maintenance
+AST00332,Printer,Polycom Enterprise,Procurement,IT,2023-07-12,2028-07-10,End of Life
+AST00333,Printer,Brother Enterprise,Manufacturing,IT,2020-02-15,2025-02-13,Active
+AST00334,Network Switch,HP Enterprise,IT,IT,2020-07-29,2025-07-28,Maintenance
+AST00335,Network Switch,Samsung Enterprise,EHS,IT,2022-03-22,2027-03-21,Active
+AST00336,UPS,Polycom Enterprise,Finance,IT,2023-04-17,2028-04-15,Active
+AST00337,Printer,Dell Enterprise,Engineering,IT,2022-12-17,2027-12-16,Active
+AST00338,UPS,Brother Enterprise,Finance,IT,2023-09-27,2028-09-25,Maintenance
+AST00339,Network Switch,Cisco Enterprise,Engineering,IT,2020-08-20,2025-08-19,Active
+AST00340,Printer,Apple Enterprise,Engineering,IT,2021-06-24,2026-06-23,Active
+AST00341,Server,Cisco Enterprise,Sales,IT,2025-01-09,2030-01-08,End of Life
+AST00342,UPS,Dell Enterprise,Executive,IT,2019-07-30,2024-07-28,End of Life
+AST00343,Printer,Lenovo Enterprise,Executive,IT,2021-01-23,2026-01-22,Active
+AST00344,UPS,Brother Enterprise,IT,IT,2020-09-08,2025-09-07,End of Life
+AST00345,Network Switch,HP Enterprise,Engineering,IT,2023-10-11,2028-10-09,Maintenance
+AST00346,UPS,Apple Enterprise,HR,IT,2025-05-04,2030-05-03,Maintenance
+AST00347,Network Switch,Polycom Enterprise,HR,IT,2023-12-28,2028-12-26,Active
+AST00348,Printer,Polycom Enterprise,Procurement,IT,2023-11-07,2028-11-05,End of Life
+AST00349,Server,Brother Enterprise,Executive,IT,2025-07-11,2030-07-10,End of Life
+AST00350,Server,Apple Enterprise,Sales,IT,2021-05-26,2026-05-25,End of Life
+AST00351,Printer,Cisco Enterprise,Procurement,IT,2021-09-17,2026-09-16,Maintenance
+AST00352,Network Switch,Dell Enterprise,Quality,IT,2019-09-06,2024-09-04,Maintenance
+AST00353,UPS,HP Enterprise,Sales,IT,2020-07-22,2025-07-21,Active

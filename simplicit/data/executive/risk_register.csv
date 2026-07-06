@@ -1,0 +1,11 @@
+risk_id,category,description,likelihood,impact,risk_score,owner,mitigation,status
+RSK-001,Supply Chain,Single-source dependency for titanium alloy,4,4,16,VP Operations,Identify secondary supplier,Open
+RSK-002,Financial,Material cost inflation exceeding 10%,4,3,12,CFO,Quarterly repricing clauses with top 5 suppliers,In Progress
+RSK-003,Operational,Line 2 scrap rate trend may require equipment rebuild,3,4,12,VP Manufacturing,Root cause investigation underway,In Progress
+RSK-004,HR,Talent attrition in engineering; two key PMs at risk,4,3,12,CHRO,Retention bonus program under review,Open
+RSK-005,Sales,Q2 forecast miss may indicate demand softening,3,4,12,VP Sales,Accelerate pipeline development; add 2 reps,In Progress
+RSK-006,IT,ERP system end-of-support in 18 months,3,3,9,CIO,Modernization project CAP-002 in progress,In Progress
+RSK-007,Regulatory,OSHA inspection scheduled Q3 2026,2,4,8,EHS Director,Pre-audit self-inspection completed,Mitigated
+RSK-008,Customer,Top customer Apex Aerospace contract renewal due Aug 2026,3,5,15,VP Sales,Contract negotiation initiated,Open
+RSK-009,Financial,Capex overrun risk on CNC upgrade project,2,3,6,CFO,Weekly project reviews instituted,Mitigated
+RSK-010,Cybersecurity,Phishing attack surface post-remote-work expansion,3,4,12,CIO,MFA deployed; awareness training Q2 2026,In Progress

@@ -1,0 +1,9 @@
+project_id,name,dept,approved_budget,spent_to_date,pct_spent,status
+CAP-001,CNC Machine Upgrade - Plant A,Manufacturing,850000,575174,67.7,Planning
+CAP-002,ERP System Modernization,IT,1200000,359156,29.9,Planning
+CAP-003,Roof Replacement - Plant B,Facilities,380000,259662,68.3,Planning
+CAP-004,Precision Measurement Lab,Quality,420000,177594,42.3,Completed
+CAP-005,Conveyor System Replacement,Manufacturing,290000,122565,42.3,In Progress
+CAP-006,HVAC Upgrade - HQ,Facilities,175000,78248,44.7,Completed
+CAP-007,Solar Panel Installation - Plant A,EHS,650000,157110,24.2,Completed
+CAP-008,Warehouse Management System,Procurement,310000,116296,37.5,Completed

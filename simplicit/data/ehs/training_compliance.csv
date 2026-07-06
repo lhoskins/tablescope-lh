@@ -1,0 +1,101 @@
+dept,training_type,required_count,completed_count,pct_complete,due_date
+Engineering,OSHA 10-Hour,25,25,100.0,2026-09-30
+Engineering,OSHA 30-Hour,25,23,92.0,2026-07-30
+Engineering,Forklift,25,19,76.0,2026-09-30
+Engineering,Hazmat,25,21,84.0,2026-08-30
+Engineering,Fire Safety,42,40,95.2,2026-12-30
+Engineering,PPE,42,33,78.6,2026-11-30
+Engineering,Lockout Tagout,25,22,88.0,2026-11-30
+Engineering,Confined Space,25,22,88.0,2026-08-30
+Engineering,First Aid/CPR,25,23,92.0,2026-06-30
+Engineering,Emergency Response,42,38,90.5,2026-09-30
+Finance,OSHA 10-Hour,10,9,90.0,2026-08-30
+Finance,OSHA 30-Hour,10,10,100.0,2026-10-30
+Finance,Forklift,10,7,70.0,2026-12-30
+Finance,Hazmat,10,9,90.0,2026-12-30
+Finance,Fire Safety,18,15,83.3,2026-10-30
+Finance,PPE,18,14,77.8,2026-10-30
+Finance,Lockout Tagout,10,10,100.0,2026-09-30
+Finance,Confined Space,10,9,90.0,2026-11-30
+Finance,First Aid/CPR,10,7,70.0,2026-12-30
+Finance,Emergency Response,18,15,83.3,2026-07-30
+HR,OSHA 10-Hour,7,6,85.7,2026-11-30
+HR,OSHA 30-Hour,7,7,100.0,2026-06-30
+HR,Forklift,7,6,85.7,2026-11-30
+HR,Hazmat,7,6,85.7,2026-07-30
+HR,Fire Safety,12,10,83.3,2026-06-30
+HR,PPE,12,10,83.3,2026-06-30
+HR,Lockout Tagout,7,5,71.4,2026-12-30
+HR,Confined Space,7,6,85.7,2026-11-30
+HR,First Aid/CPR,7,5,71.4,2026-12-30
+HR,Emergency Response,12,12,100.0,2026-06-30
+IT,OSHA 10-Hour,9,6,66.7,2026-06-30
+IT,OSHA 30-Hour,9,8,88.9,2026-08-30
+IT,Forklift,9,7,77.8,2026-07-30
+IT,Hazmat,9,7,77.8,2026-07-30
+IT,Fire Safety,15,12,80.0,2026-12-30
+IT,PPE,15,15,100.0,2026-06-30
+IT,Lockout Tagout,9,8,88.9,2026-07-30
+IT,Confined Space,9,6,66.7,2026-08-30
+IT,First Aid/CPR,9,6,66.7,2026-09-30
+IT,Emergency Response,15,15,100.0,2026-07-30
+Manufacturing,OSHA 10-Hour,96,94,97.9,2026-10-30
+Manufacturing,OSHA 30-Hour,96,82,85.4,2026-07-30
+Manufacturing,Forklift,96,88,91.7,2026-08-30
+Manufacturing,Hazmat,96,78,81.2,2026-06-30
+Manufacturing,Fire Safety,160,150,93.8,2026-06-30
+Manufacturing,PPE,160,152,95.0,2026-08-30
+Manufacturing,Lockout Tagout,96,85,88.5,2026-09-30
+Manufacturing,Confined Space,96,72,75.0,2026-10-30
+Manufacturing,First Aid/CPR,96,72,75.0,2026-07-30
+Manufacturing,Emergency Response,160,141,88.1,2026-06-30
+Procurement,OSHA 10-Hour,8,8,100.0,2026-08-30
+Procurement,OSHA 30-Hour,8,8,100.0,2026-06-30
+Procurement,Forklift,8,8,100.0,2026-07-30
+Procurement,Hazmat,8,6,75.0,2026-07-30
+Procurement,Fire Safety,14,10,71.4,2026-07-30
+Procurement,PPE,14,14,100.0,2026-07-30
+Procurement,Lockout Tagout,8,7,87.5,2026-11-30
+Procurement,Confined Space,8,6,75.0,2026-12-30
+Procurement,First Aid/CPR,8,7,87.5,2026-11-30
+Procurement,Emergency Response,14,13,92.9,2026-07-30
+Quality,OSHA 10-Hour,13,9,69.2,2026-11-30
+Quality,OSHA 30-Hour,13,12,92.3,2026-07-30
+Quality,Forklift,13,9,69.2,2026-06-30
+Quality,Hazmat,13,11,84.6,2026-12-30
+Quality,Fire Safety,22,21,95.5,2026-12-30
+Quality,PPE,22,21,95.5,2026-09-30
+Quality,Lockout Tagout,13,12,92.3,2026-12-30
+Quality,Confined Space,13,12,92.3,2026-11-30
+Quality,First Aid/CPR,13,10,76.9,2026-07-30
+Quality,Emergency Response,22,20,90.9,2026-12-30
+Sales,OSHA 10-Hour,16,15,93.8,2026-08-30
+Sales,OSHA 30-Hour,16,16,100.0,2026-07-30
+Sales,Forklift,16,15,93.8,2026-07-30
+Sales,Hazmat,16,12,75.0,2026-12-30
+Sales,Fire Safety,28,22,78.6,2026-11-30
+Sales,PPE,28,27,96.4,2026-12-30
+Sales,Lockout Tagout,16,12,75.0,2026-10-30
+Sales,Confined Space,16,12,75.0,2026-07-30
+Sales,First Aid/CPR,16,12,75.0,2026-12-30
+Sales,Emergency Response,28,24,85.7,2026-10-30
+EHS,OSHA 10-Hour,3,3,100.0,2026-12-30
+EHS,OSHA 30-Hour,3,3,100.0,2026-07-30
+EHS,Forklift,3,3,100.0,2026-07-30
+EHS,Hazmat,3,3,100.0,2026-06-30
+EHS,Fire Safety,6,6,100.0,2026-08-30
+EHS,PPE,6,5,83.3,2026-12-30
+EHS,Lockout Tagout,3,3,100.0,2026-08-30
+EHS,Confined Space,3,3,100.0,2026-06-30
+EHS,First Aid/CPR,3,3,100.0,2026-12-30
+EHS,Emergency Response,6,6,100.0,2026-09-30
+Executive,OSHA 10-Hour,2,1,50.0,2026-07-30
+Executive,OSHA 30-Hour,2,1,50.0,2026-10-30
+Executive,Forklift,2,1,50.0,2026-11-30
+Executive,Hazmat,2,1,50.0,2026-07-30
+Executive,Fire Safety,3,2,66.7,2026-10-30
+Executive,PPE,3,2,66.7,2026-12-30
+Executive,Lockout Tagout,2,1,50.0,2026-09-30
+Executive,Confined Space,2,2,100.0,2026-11-30
+Executive,First Aid/CPR,2,1,50.0,2026-06-30
+Executive,Emergency Response,3,2,66.7,2026-12-30

@@ -1,0 +1,121 @@
+incident_id,date,type,dept,severity,recordable,days_lost,corrective_action
+INC0001,2023-10-30,Recordable Injury,HR,Low,Y,0,CA issued 2023-11-01
+INC0002,2024-05-05,First Aid,Procurement,Medium,N,0,CA issued 2024-05-11
+INC0003,2025-10-14,Security,Engineering,Medium,N,0,CA issued 2025-10-17
+INC0004,2026-06-07,Near Miss,Engineering,Medium,N,0,CA issued 2026-06-13
+INC0005,2023-05-13,Environmental,EHS,High,N,0,CA issued 2023-05-17
+INC0006,2023-11-07,Near Miss,Procurement,Medium,N,0,CA issued 2023-11-14
+INC0007,2025-06-22,First Aid,Sales,Medium,N,0,CA issued 2025-06-27
+INC0008,2025-10-30,First Aid,Engineering,Low,N,0,CA issued 2025-11-04
+INC0009,2024-06-04,Lost Time Injury,Sales,Medium,Y,20,CA issued 2024-06-06
+INC0010,2023-01-04,Property Damage,Quality,Low,N,0,CA issued 2023-01-06
+INC0011,2023-09-24,Recordable Injury,Executive,Medium,Y,0,CA issued 2023-09-29
+INC0012,2025-02-08,First Aid,Executive,Low,N,0,CA issued 2025-02-15
+INC0013,2024-05-11,First Aid,Engineering,High,N,0,CA issued 2024-05-15
+INC0014,2023-05-15,Recordable Injury,Sales,High,Y,0,CA issued 2023-05-18
+INC0015,2023-01-17,Near Miss,Manufacturing,Medium,N,0,CA issued 2023-01-23
+INC0016,2023-04-25,Near Miss,EHS,High,N,0,CA issued 2023-04-26
+INC0017,2023-06-30,First Aid,Procurement,Low,N,0,CA issued 2023-07-01
+INC0018,2023-01-22,Lost Time Injury,Procurement,Medium,Y,7,CA issued 2023-01-28
+INC0019,2024-01-25,First Aid,EHS,Medium,N,0,CA issued 2024-01-28
+INC0020,2024-01-12,First Aid,Manufacturing,Low,N,0,CA issued 2024-01-13
+INC0021,2025-06-23,Environmental,Sales,Low,N,0,CA issued 2025-06-27
+INC0022,2023-02-27,Near Miss,IT,Medium,N,0,CA issued 2023-03-01
+INC0023,2025-01-05,First Aid,Finance,Medium,N,0,CA issued 2025-01-11
+INC0024,2025-02-26,Recordable Injury,IT,Medium,Y,0,CA issued 2025-03-04
+INC0025,2025-01-19,Near Miss,Quality,Medium,N,0,CA issued 2025-01-26
+INC0026,2026-04-29,Near Miss,Engineering,Medium,N,0,CA issued 2026-05-02
+INC0027,2024-01-12,First Aid,Engineering,High,N,0,CA issued 2024-01-15
+INC0028,2023-01-15,Near Miss,Executive,High,N,0,CA issued 2023-01-22
+INC0029,2024-10-02,Recordable Injury,EHS,Medium,Y,0,CA issued 2024-10-03
+INC0030,2025-11-08,Recordable Injury,HR,Low,Y,0,CA issued 2025-11-11
+INC0031,2024-09-21,Property Damage,Manufacturing,Low,N,0,CA issued 2024-09-28
+INC0032,2024-04-24,First Aid,Executive,Low,N,0,CA issued 2024-04-27
+INC0033,2023-06-04,Near Miss,Quality,Low,N,0,CA issued 2023-06-11
+INC0034,2026-04-08,First Aid,IT,Medium,N,0,CA issued 2026-04-15
+INC0035,2025-10-23,Near Miss,Quality,Critical,N,0,CA issued 2025-10-25
+INC0036,2026-01-08,First Aid,HR,High,N,0,CA issued 2026-01-09
+INC0037,2023-03-29,Near Miss,Procurement,Medium,N,0,CA issued 2023-04-03
+INC0038,2023-03-08,Near Miss,Procurement,Low,N,0,CA issued 2023-03-15
+INC0039,2025-08-03,Near Miss,Manufacturing,High,N,0,CA issued 2025-08-10
+INC0040,2023-06-23,Lost Time Injury,Manufacturing,Medium,Y,5,CA issued 2023-06-30
+INC0041,2024-03-04,Lost Time Injury,Procurement,Low,Y,29,CA issued 2024-03-09
+INC0042,2024-10-26,First Aid,Procurement,Medium,N,0,CA issued 2024-10-30
+INC0043,2024-03-03,Recordable Injury,Sales,Low,Y,0,CA issued 2024-03-06
+INC0044,2023-12-11,Recordable Injury,EHS,Low,Y,0,CA issued 2023-12-14
+INC0045,2024-12-27,Near Miss,Quality,Critical,N,0,CA issued 2024-12-29
+INC0046,2025-02-06,Lost Time Injury,Manufacturing,Medium,Y,4,CA issued 2025-02-13
+INC0047,2024-05-01,Lost Time Injury,Executive,Low,Y,26,CA issued 2024-05-08
+INC0048,2025-01-08,Environmental,Quality,High,N,0,CA issued 2025-01-13
+INC0049,2023-09-07,First Aid,Engineering,Low,N,0,CA issued 2023-09-11
+INC0050,2023-05-07,Near Miss,Executive,Medium,N,0,CA issued 2023-05-12
+INC0051,2025-10-28,Recordable Injury,IT,Low,Y,0,CA issued 2025-11-01
+INC0052,2024-03-26,Property Damage,Procurement,Low,N,0,CA issued 2024-04-01
+INC0053,2024-01-11,First Aid,IT,Medium,N,0,CA issued 2024-01-15
+INC0054,2024-08-02,Recordable Injury,Finance,High,Y,0,CA issued 2024-08-03
+INC0055,2025-12-24,First Aid,EHS,Medium,N,0,CA issued 2025-12-29
+INC0056,2023-02-04,First Aid,EHS,Medium,N,0,CA issued 2023-02-11
+INC0057,2024-08-04,Near Miss,Engineering,Medium,N,0,CA issued 2024-08-11
+INC0058,2023-12-10,First Aid,EHS,Low,N,0,CA issued 2023-12-14
+INC0059,2025-11-11,Near Miss,IT,High,N,0,CA issued 2025-11-12
+INC0060,2024-03-09,Near Miss,Engineering,Low,N,0,CA issued 2024-03-11
+INC0061,2025-07-16,Lost Time Injury,Procurement,Low,Y,21,CA issued 2025-07-19
+INC0062,2023-03-28,Property Damage,IT,Low,N,0,CA issued 2023-03-30
+INC0063,2024-06-01,Lost Time Injury,Quality,Low,Y,4,CA issued 2024-06-04
+INC0064,2025-07-31,First Aid,Engineering,Low,N,0,CA issued 2025-08-07
+INC0065,2025-05-02,Environmental,IT,Medium,N,0,CA issued 2025-05-04
+INC0066,2025-10-19,Near Miss,Procurement,Medium,N,0,CA issued 2025-10-24
+INC0067,2024-10-16,Near Miss,Finance,Low,N,0,CA issued 2024-10-23
+INC0068,2024-08-14,First Aid,Finance,Low,N,0,CA issued 2024-08-19
+INC0069,2024-02-26,Near Miss,Engineering,High,N,0,CA issued 2024-03-04
+INC0070,2025-03-12,Environmental,HR,Low,N,0,CA issued 2025-03-18
+INC0071,2024-10-10,Property Damage,Finance,Low,N,0,CA issued 2024-10-14
+INC0072,2025-09-14,Recordable Injury,Sales,Medium,Y,0,CA issued 2025-09-19
+INC0073,2024-10-04,Near Miss,Sales,Critical,N,0,CA issued 2024-10-10
+INC0074,2023-03-06,Near Miss,HR,Critical,N,0,CA issued 2023-03-08
+INC0075,2024-10-22,Lost Time Injury,Sales,High,Y,3,CA issued 2024-10-29
+INC0076,2025-10-07,First Aid,Manufacturing,Low,N,0,CA issued 2025-10-14
+INC0077,2026-01-24,Recordable Injury,Executive,Low,Y,0,CA issued 2026-01-26
+INC0078,2024-02-12,Lost Time Injury,Quality,High,Y,8,CA issued 2024-02-13
+INC0079,2024-09-23,Recordable Injury,Sales,Medium,Y,0,CA issued 2024-09-29
+INC0080,2023-02-08,First Aid,Procurement,Low,N,0,CA issued 2023-02-12
+INC0081,2026-06-17,First Aid,Sales,Low,N,0,CA issued 2026-06-19
+INC0082,2026-03-28,Lost Time Injury,EHS,High,Y,28,CA issued 2026-03-30
+INC0083,2023-05-25,Recordable Injury,Procurement,Low,Y,0,CA issued 2023-05-30
+INC0084,2025-10-28,Property Damage,Finance,Low,N,0,CA issued 2025-11-02
+INC0085,2026-05-09,First Aid,Finance,High,N,0,CA issued 2026-05-13
+INC0086,2023-11-16,Recordable Injury,Manufacturing,Medium,Y,0,CA issued 2023-11-19
+INC0087,2023-05-25,First Aid,Finance,High,N,0,CA issued 2023-05-27
+INC0088,2025-09-27,Near Miss,EHS,Low,N,0,CA issued 2025-10-03
+INC0089,2024-07-30,Recordable Injury,IT,Medium,Y,0,CA issued 2024-07-31
+INC0090,2024-10-12,Recordable Injury,HR,High,Y,0,CA issued 2024-10-18
+INC0091,2025-07-21,Recordable Injury,IT,Low,Y,0,CA issued 2025-07-26
+INC0092,2023-08-26,Property Damage,Quality,Low,N,0,CA issued 2023-08-29
+INC0093,2024-07-22,First Aid,EHS,Low,N,0,CA issued 2024-07-23
+INC0094,2025-04-20,Near Miss,Procurement,Medium,N,0,CA issued 2025-04-27
+INC0095,2023-09-26,Recordable Injury,Procurement,Medium,Y,0,CA issued 2023-10-01
+INC0096,2025-03-19,Near Miss,Engineering,Low,N,0,CA issued 2025-03-26
+INC0097,2026-05-03,Near Miss,IT,Medium,N,0,CA issued 2026-05-10
+INC0098,2023-02-14,Near Miss,EHS,High,N,0,CA issued 2023-02-16
+INC0099,2023-10-19,Near Miss,EHS,Low,N,0,CA issued 2023-10-22
+INC0100,2024-11-20,Lost Time Injury,Manufacturing,Medium,Y,7,CA issued 2024-11-25
+INC0101,2025-08-17,First Aid,Sales,High,N,0,CA issued 2025-08-20
+INC0102,2023-11-03,Lost Time Injury,Quality,High,Y,5,CA issued 2023-11-07
+INC0103,2023-06-25,Environmental,HR,Low,N,0,CA issued 2023-06-26
+INC0104,2023-09-01,First Aid,Procurement,Low,N,0,CA issued 2023-09-08
+INC0105,2023-03-30,Recordable Injury,Procurement,Low,Y,0,CA issued 2023-03-31
+INC0106,2024-05-11,Near Miss,Executive,Medium,N,0,CA issued 2024-05-16
+INC0107,2025-03-14,Lost Time Injury,Quality,Medium,Y,6,CA issued 2025-03-17
+INC0108,2026-06-08,First Aid,Sales,Medium,N,0,CA issued 2026-06-09
+INC0109,2024-03-23,Near Miss,Finance,Low,N,0,CA issued 2024-03-26
+INC0110,2025-01-05,First Aid,Manufacturing,Medium,N,0,CA issued 2025-01-07
+INC0111,2023-08-14,First Aid,Executive,High,N,0,CA issued 2023-08-17
+INC0112,2025-09-20,First Aid,Manufacturing,Medium,N,0,CA issued 2025-09-21
+INC0113,2026-03-09,Recordable Injury,Manufacturing,Low,Y,0,CA issued 2026-03-16
+INC0114,2026-03-22,Near Miss,Sales,Low,N,0,CA issued 2026-03-27
+INC0115,2023-10-28,Recordable Injury,Executive,Low,Y,0,CA issued 2023-11-02
+INC0116,2025-12-07,First Aid,Finance,Medium,N,0,CA issued 2025-12-14
+INC0117,2023-08-10,Property Damage,Sales,High,N,0,CA issued 2023-08-17
+INC0118,2023-04-28,Lost Time Injury,EHS,Medium,Y,20,CA issued 2023-05-03
+INC0119,2023-01-26,Near Miss,Engineering,Low,N,0,CA issued 2023-01-28
+INC0120,2023-03-08,Property Damage,Procurement,Low,N,0,CA issued 2023-03-12

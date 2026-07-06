@@ -1,0 +1,321 @@
+emp_id,name,dept,title,hire_date,status,salary,manager_id,location
+E1000,Kevin Davis,Engineering,Engineering Director,2015-12-09,Active,84100.0,,Columbus HQ
+E1001,Robert Baker,Engineering,Engineering Manager,2023-02-19,Active,102400.0,E1000,Columbus HQ
+E1002,Jennifer Wilson,Engineering,Engineering Manager,2018-09-20,Terminated,87900.0,E1002,Columbus HQ
+E1003,George Wright,Engineering,Engineering Manager,2021-04-15,Active,127600.0,E1000,Columbus HQ
+E1004,Ronald Hernandez,Engineering,Sr Engineering Associate,2021-06-09,Active,137200.0,E1000,Columbus HQ
+E1005,Jennifer Harris,Engineering,Engineering Specialist,2016-06-28,Active,92200.0,E1003,Columbus HQ
+E1006,Andrew Davis,Engineering,Sr Engineering Associate,2021-02-18,Active,115900.0,E1001,Columbus HQ
+E1007,Melissa Jones,Engineering,Engineering Analyst,2015-11-08,Active,139000.0,E1000,Columbus HQ
+E1008,Anthony Moore,Engineering,Engineering Analyst,2022-11-27,Active,99100.0,E1002,Columbus HQ
+E1009,George Baker,Engineering,Engineering Analyst,2025-02-20,Active,116300.0,E1001,Columbus HQ
+E1010,Ashley Harris,Engineering,Engineering Specialist,2019-11-23,Active,119500.0,E1001,Columbus HQ
+E1011,David Lee,Engineering,Sr Engineering Associate,2021-05-03,Active,136300.0,E1001,Columbus HQ
+E1012,Carol Young,Engineering,Sr Engineering Associate,2021-11-15,Active,84100.0,E1003,Columbus HQ
+E1013,Donna Sanchez,Engineering,Engineering Specialist,2020-04-05,Active,80900.0,E1000,Columbus HQ
+E1014,Patricia Green,Engineering,Engineering Coordinator,2017-11-14,Active,100000.0,E1002,Columbus HQ
+E1015,Emily Smith,Engineering,Sr Engineering Associate,2025-12-04,Active,119300.0,E1002,Columbus HQ
+E1016,Linda Jackson,Engineering,Sr Engineering Associate,2021-03-15,Terminated,121900.0,E1001,Columbus HQ
+E1017,Paul Miller,Engineering,Engineering Analyst,2025-05-27,Active,116500.0,E1001,Columbus HQ
+E1018,Betty Carter,Engineering,Sr Engineering Associate,2017-09-25,Active,134700.0,E1003,Columbus HQ
+E1019,Maria Davis,Engineering,Engineering Specialist,2020-05-08,Active,132100.0,E1000,Columbus HQ
+E1020,Edward Young,Engineering,Engineering Analyst,2016-09-25,Active,117900.0,E1002,Columbus HQ
+E1021,Kimberly Hill,Engineering,Sr Engineering Associate,2021-04-18,Active,119800.0,E1003,Columbus HQ
+E1022,Brian Adams,Engineering,Engineering Specialist,2020-08-17,Active,91100.0,E1002,Columbus HQ
+E1023,Maria Nguyen,Engineering,Engineering Specialist,2023-04-19,Active,89300.0,E1000,Columbus HQ
+E1024,Thomas Jones,Engineering,Engineering Coordinator,2015-06-03,Active,93100.0,E1001,Columbus HQ
+E1025,Andrew Rodriguez,Engineering,Engineering Coordinator,2024-10-16,Active,90800.0,E1003,Columbus HQ
+E1026,Richard Miller,Engineering,Engineering Specialist,2016-11-14,Active,101700.0,E1000,Columbus HQ
+E1027,Sarah Sanchez,Engineering,Engineering Analyst,2020-02-08,Active,109900.0,E1003,Columbus HQ
+E1028,Barbara Moore,Engineering,Engineering Specialist,2022-04-28,Active,103800.0,E1000,Columbus HQ
+E1029,Carol Wright,Engineering,Engineering Coordinator,2015-02-25,Active,85800.0,E1003,Columbus HQ
+E1030,Susan Sanchez,Engineering,Engineering Coordinator,2015-03-13,Terminated,100400.0,E1002,Columbus HQ
+E1031,Sandra Hall,Engineering,Engineering Analyst,2023-11-23,Active,106600.0,E1002,Columbus HQ
+E1032,Susan Brown,Engineering,Sr Engineering Associate,2024-12-18,Active,79000.0,E1000,Columbus HQ
+E1033,Sarah Nguyen,Engineering,Engineering Specialist,2022-09-28,Active,78700.0,E1001,Columbus HQ
+E1034,Michael Hill,Engineering,Engineering Analyst,2016-11-28,Active,82800.0,E1000,Columbus HQ
+E1035,Michelle Garcia,Engineering,Sr Engineering Associate,2021-11-19,Active,95600.0,E1001,Columbus HQ
+E1036,Brian Rivera,Engineering,Sr Engineering Associate,2020-04-09,Active,118700.0,E1003,Columbus HQ
+E1037,Daniel Carter,Engineering,Engineering Specialist,2016-01-15,Active,111600.0,E1000,Columbus HQ
+E1038,Andrew Wilson,Engineering,Engineering Specialist,2023-05-05,Active,135700.0,E1001,Columbus HQ
+E1039,Betty Jackson,Engineering,Engineering Specialist,2017-08-27,Active,94700.0,E1002,Columbus HQ
+E1040,Brian Miller,Engineering,Engineering Analyst,2017-05-04,Active,123300.0,E1002,Columbus HQ
+E1041,Christopher Hill,Engineering,Sr Engineering Associate,2018-12-11,Active,116200.0,E1003,Columbus HQ
+E1042,Charles Brown,Finance,Finance Director,2016-11-14,Active,67400.0,,Columbus HQ
+E1043,Lisa Roberts,Finance,Finance Manager,2017-11-09,Active,89300.0,E1043,Columbus HQ
+E1044,Linda Jones,Finance,Finance Manager,2017-09-02,Active,97000.0,E1042,Columbus HQ
+E1045,Sandra Rodriguez,Finance,Finance Manager,2015-05-12,Active,108800.0,E1042,Columbus HQ
+E1046,Matthew Wilson,Finance,Finance Coordinator,2025-04-22,Active,70700.0,E1043,Columbus HQ
+E1047,Jessica Hernandez,Finance,Finance Coordinator,2017-07-01,Active,115800.0,E1043,Columbus HQ
+E1048,Karen Hernandez,Finance,Finance Analyst,2016-07-28,Active,90900.0,E1045,Columbus HQ
+E1049,Matthew Martin,Finance,Sr Finance Associate,2018-04-01,Active,86900.0,E1042,Columbus HQ
+E1050,Stephanie Moore,Finance,Sr Finance Associate,2020-11-17,Active,119000.0,E1042,Columbus HQ
+E1051,Linda Taylor,Finance,Sr Finance Associate,2017-10-09,Active,97800.0,E1044,Columbus HQ
+E1052,Sandra Hill,Finance,Finance Analyst,2023-02-13,Active,114500.0,E1044,Columbus HQ
+E1053,David Rivera,Finance,Finance Analyst,2021-01-17,Active,94600.0,E1044,Columbus HQ
+E1054,Sandra Jones,Finance,Finance Specialist,2025-06-20,Active,82300.0,E1044,Columbus HQ
+E1055,Paul Martin,Finance,Sr Finance Associate,2025-07-11,Active,87100.0,E1043,Columbus HQ
+E1056,Richard Clark,Finance,Finance Analyst,2025-07-22,Active,106100.0,E1044,Columbus HQ
+E1057,Margaret Scott,Finance,Sr Finance Associate,2015-05-10,Active,108200.0,E1045,Columbus HQ
+E1058,Donald Lewis,Finance,Finance Analyst,2025-04-17,Active,91000.0,E1042,Columbus HQ
+E1059,Christopher Allen,Finance,Finance Analyst,2025-11-20,Active,83400.0,E1044,Columbus HQ
+E1060,Thomas Gonzalez,HR,HR Director,2017-01-02,Active,76400.0,,Columbus HQ
+E1061,Stephanie Jones,HR,HR Manager,2022-07-21,Active,87300.0,E1061,Columbus HQ
+E1062,Dorothy Sanchez,HR,HR Manager,2018-03-21,Active,95200.0,E1060,Columbus HQ
+E1063,Stephanie Ramirez,HR,HR Manager,2018-03-26,Active,78300.0,E1060,Columbus HQ
+E1064,Emily Thomas,HR,Sr HR Associate,2016-08-05,Active,85000.0,E1063,Columbus HQ
+E1065,Michelle Campbell,HR,HR Coordinator,2023-07-27,Active,95800.0,E1061,Columbus HQ
+E1066,Deborah Walker,HR,HR Coordinator,2022-05-25,Active,83700.0,E1061,Columbus HQ
+E1067,Karen Lewis,HR,HR Specialist,2016-12-10,Active,70100.0,E1061,Columbus HQ
+E1068,Patricia Anderson,HR,HR Coordinator,2021-12-05,Active,57900.0,E1062,Columbus HQ
+E1069,Andrew Robinson,HR,HR Specialist,2021-01-07,Active,72500.0,E1063,Columbus HQ
+E1070,Steven Smith,HR,HR Coordinator,2020-05-25,Active,95100.0,E1061,Columbus HQ
+E1071,Dorothy Anderson,HR,HR Coordinator,2019-07-16,Terminated,70100.0,E1061,Columbus HQ
+E1072,Ashley Rodriguez,IT,IT Director,2024-09-01,Active,119400.0,,Columbus HQ
+E1073,Donna Torres,IT,IT Manager,2025-01-03,Active,103600.0,E1072,Columbus HQ
+E1074,Ashley Lopez,IT,IT Manager,2015-05-13,Active,92300.0,E1073,Columbus HQ
+E1075,Ronald Harris,IT,IT Manager,2019-07-09,Active,93200.0,E1072,Columbus HQ
+E1076,Matthew Anderson,IT,IT Specialist,2025-02-25,Active,122400.0,E1072,Columbus HQ
+E1077,Jessica Gonzalez,IT,IT Specialist,2015-10-05,Active,93400.0,E1073,Columbus HQ
+E1078,Ashley Hall,IT,IT Specialist,2019-06-06,Active,122800.0,E1073,Columbus HQ
+E1079,Nancy Miller,IT,IT Coordinator,2024-01-10,Active,99500.0,E1075,Columbus HQ
+E1080,Melissa Gonzalez,IT,Sr IT Associate,2016-10-23,Active,79600.0,E1072,Columbus HQ
+E1081,Kenneth Williams,IT,Sr IT Associate,2020-09-14,Active,69100.0,E1072,Columbus HQ
+E1082,Mark Young,IT,IT Analyst,2016-07-12,Active,114700.0,E1075,Columbus HQ
+E1083,Barbara Campbell,IT,IT Coordinator,2023-11-09,Active,102000.0,E1075,Columbus HQ
+E1084,Sandra Campbell,IT,IT Specialist,2024-05-11,Active,116100.0,E1074,Columbus HQ
+E1085,Donald Thomas,IT,IT Coordinator,2022-10-20,Active,85200.0,E1074,Columbus HQ
+E1086,Barbara Young,IT,Sr IT Associate,2018-06-26,Active,81800.0,E1072,Columbus HQ
+E1087,Kimberly Gonzalez,Manufacturing,Manufacturing Director,2016-04-24,Active,68600.0,,Plant A - Columbus
+E1088,George Walker,Manufacturing,Manufacturing Manager,2025-12-16,Active,63500.0,E1087,Plant A - Columbus
+E1089,Christopher Anderson,Manufacturing,Manufacturing Manager,2021-12-08,Active,69900.0,E1089,Plant B - Dayton
+E1090,Kimberly Thompson,Manufacturing,Manufacturing Manager,2021-12-18,Active,75700.0,E1089,Plant B - Dayton
+E1091,Charles Anderson,Manufacturing,Manufacturing Analyst,2016-12-07,Active,77700.0,E1088,Plant A - Columbus
+E1092,Karen Campbell,Manufacturing,Manufacturing Specialist,2024-09-20,Active,55600.0,E1089,Plant A - Columbus
+E1093,Thomas White,Manufacturing,Manufacturing Specialist,2017-05-01,Active,48100.0,E1089,Plant A - Columbus
+E1094,George Rodriguez,Manufacturing,Sr Manufacturing Associate,2025-08-04,Active,83900.0,E1090,Plant B - Dayton
+E1095,Donald Perez,Manufacturing,Manufacturing Specialist,2017-01-09,Active,64900.0,E1090,Plant B - Dayton
+E1096,Michael Torres,Manufacturing,Sr Manufacturing Associate,2025-11-02,Active,49300.0,E1088,Plant A - Columbus
+E1097,Linda Scott,Manufacturing,Manufacturing Coordinator,2021-10-20,Active,52800.0,E1090,Plant B - Dayton
+E1098,Nancy Nguyen,Manufacturing,Manufacturing Specialist,2021-05-19,Active,71300.0,E1088,Plant A - Columbus
+E1099,Charles Nelson,Manufacturing,Manufacturing Specialist,2016-03-08,Active,45600.0,E1090,Plant B - Dayton
+E1100,George Hill,Manufacturing,Manufacturing Coordinator,2022-05-02,Active,75900.0,E1088,Plant A - Columbus
+E1101,Charles Green,Manufacturing,Manufacturing Coordinator,2024-11-26,Active,86800.0,E1088,Plant A - Columbus
+E1102,Carol Martinez,Manufacturing,Sr Manufacturing Associate,2019-03-03,Active,80000.0,E1087,Plant B - Dayton
+E1103,Nancy Hall,Manufacturing,Manufacturing Specialist,2021-05-17,Active,63000.0,E1089,Plant B - Dayton
+E1104,Joshua Taylor,Manufacturing,Manufacturing Specialist,2015-02-08,Active,82100.0,E1087,Plant B - Dayton
+E1105,Ronald Carter,Manufacturing,Manufacturing Analyst,2017-08-17,Active,86000.0,E1090,Plant B - Dayton
+E1106,Jennifer Walker,Manufacturing,Manufacturing Analyst,2020-07-11,Active,47000.0,E1090,Plant B - Dayton
+E1107,George Young,Manufacturing,Manufacturing Coordinator,2019-11-13,Active,68400.0,E1089,Plant A - Columbus
+E1108,Charles Lee,Manufacturing,Manufacturing Coordinator,2016-07-28,Active,89400.0,E1087,Plant B - Dayton
+E1109,Richard King,Manufacturing,Manufacturing Specialist,2020-10-25,Active,63200.0,E1089,Plant A - Columbus
+E1110,Emily Rodriguez,Manufacturing,Manufacturing Analyst,2019-08-23,Active,43400.0,E1089,Plant A - Columbus
+E1111,Emily Clark,Manufacturing,Manufacturing Specialist,2016-04-27,Active,64100.0,E1090,Plant A - Columbus
+E1112,Melissa Jackson,Manufacturing,Manufacturing Coordinator,2023-12-09,Active,61900.0,E1088,Plant B - Dayton
+E1113,Ashley Scott,Manufacturing,Manufacturing Analyst,2017-07-07,Active,66400.0,E1089,Plant A - Columbus
+E1114,Stephanie Clark,Manufacturing,Sr Manufacturing Associate,2020-09-09,Active,55600.0,E1088,Plant B - Dayton
+E1115,Donald Wright,Manufacturing,Manufacturing Coordinator,2022-06-11,Active,68100.0,E1088,Plant B - Dayton
+E1116,George Thomas,Manufacturing,Manufacturing Coordinator,2024-07-08,Active,83100.0,E1089,Plant A - Columbus
+E1117,Melissa Harris,Manufacturing,Manufacturing Coordinator,2021-11-26,Active,89100.0,E1088,Plant A - Columbus
+E1118,Paul Nguyen,Manufacturing,Manufacturing Coordinator,2020-02-28,Active,46800.0,E1088,Plant A - Columbus
+E1119,Mark Adams,Manufacturing,Manufacturing Coordinator,2017-02-16,Active,54700.0,E1089,Plant A - Columbus
+E1120,Amanda Wright,Manufacturing,Manufacturing Specialist,2021-06-21,Active,78500.0,E1088,Plant A - Columbus
+E1121,Kevin Baker,Manufacturing,Manufacturing Specialist,2019-04-24,Active,89000.0,E1088,Plant B - Dayton
+E1122,George Martin,Manufacturing,Sr Manufacturing Associate,2015-01-11,Active,56100.0,E1088,Plant B - Dayton
+E1123,Jessica King,Manufacturing,Manufacturing Specialist,2021-10-22,Active,50200.0,E1088,Plant B - Dayton
+E1124,Dorothy Nguyen,Manufacturing,Manufacturing Specialist,2017-04-15,Active,64100.0,E1089,Plant B - Dayton
+E1125,John Jones,Manufacturing,Sr Manufacturing Associate,2022-06-19,Active,88200.0,E1089,Plant B - Dayton
+E1126,Richard Harris,Manufacturing,Sr Manufacturing Associate,2022-02-08,Active,59200.0,E1087,Plant B - Dayton
+E1127,Brian Sanchez,Manufacturing,Manufacturing Specialist,2019-01-19,Active,79400.0,E1089,Plant B - Dayton
+E1128,Stephanie Anderson,Manufacturing,Sr Manufacturing Associate,2024-06-08,Active,72600.0,E1087,Plant A - Columbus
+E1129,Kevin Adams,Manufacturing,Manufacturing Analyst,2015-05-26,Active,69800.0,E1089,Plant A - Columbus
+E1130,Daniel Mitchell,Manufacturing,Sr Manufacturing Associate,2021-03-07,Active,67900.0,E1088,Plant B - Dayton
+E1131,Charles Walker,Manufacturing,Manufacturing Specialist,2019-12-28,Active,47500.0,E1088,Plant A - Columbus
+E1132,Amanda Campbell,Manufacturing,Sr Manufacturing Associate,2025-07-28,Active,80600.0,E1090,Plant A - Columbus
+E1133,James Taylor,Manufacturing,Sr Manufacturing Associate,2023-02-15,Active,59700.0,E1089,Plant B - Dayton
+E1134,Thomas Walker,Manufacturing,Manufacturing Specialist,2015-10-18,Active,71300.0,E1089,Plant B - Dayton
+E1135,Carol Clark,Manufacturing,Manufacturing Coordinator,2016-03-02,Active,56600.0,E1087,Plant A - Columbus
+E1136,Jessica Wright,Manufacturing,Manufacturing Coordinator,2017-07-15,Active,87600.0,E1090,Plant A - Columbus
+E1137,Carol Miller,Manufacturing,Sr Manufacturing Associate,2022-10-14,Active,55400.0,E1090,Plant A - Columbus
+E1138,Betty Miller,Manufacturing,Sr Manufacturing Associate,2025-06-18,Active,85300.0,E1090,Plant A - Columbus
+E1139,Karen Gonzalez,Manufacturing,Manufacturing Specialist,2016-08-03,Active,72800.0,E1089,Plant A - Columbus
+E1140,Jessica Rodriguez,Manufacturing,Manufacturing Analyst,2024-04-03,Active,81800.0,E1088,Plant A - Columbus
+E1141,Patricia Hill,Manufacturing,Sr Manufacturing Associate,2015-05-28,Active,89400.0,E1087,Plant A - Columbus
+E1142,Brian Johnson,Manufacturing,Sr Manufacturing Associate,2017-01-12,Active,53400.0,E1088,Plant A - Columbus
+E1143,William Mitchell,Manufacturing,Sr Manufacturing Associate,2021-09-04,Active,64900.0,E1090,Plant A - Columbus
+E1144,Paul Anderson,Manufacturing,Sr Manufacturing Associate,2024-01-24,Active,79600.0,E1087,Plant B - Dayton
+E1145,Sarah Walker,Manufacturing,Manufacturing Coordinator,2021-07-22,Active,76200.0,E1087,Plant A - Columbus
+E1146,Daniel Hill,Manufacturing,Sr Manufacturing Associate,2017-02-05,Active,72400.0,E1089,Plant B - Dayton
+E1147,Ashley Allen,Manufacturing,Manufacturing Specialist,2024-07-04,Active,80100.0,E1090,Plant A - Columbus
+E1148,Donald Anderson,Manufacturing,Manufacturing Specialist,2021-06-27,Active,62000.0,E1090,Plant B - Dayton
+E1149,Daniel Nelson,Manufacturing,Manufacturing Specialist,2019-06-05,Active,64800.0,E1087,Plant A - Columbus
+E1150,Sandra Miller,Manufacturing,Sr Manufacturing Associate,2020-03-18,Active,87900.0,E1090,Plant A - Columbus
+E1151,Matthew Nelson,Manufacturing,Sr Manufacturing Associate,2021-12-02,Active,70800.0,E1088,Plant A - Columbus
+E1152,Patricia Nelson,Manufacturing,Sr Manufacturing Associate,2022-04-28,Active,82600.0,E1089,Plant A - Columbus
+E1153,Kenneth Anderson,Manufacturing,Manufacturing Specialist,2021-09-25,Active,71500.0,E1087,Plant B - Dayton
+E1154,George Carter,Manufacturing,Manufacturing Coordinator,2019-06-12,Terminated,83800.0,E1088,Plant A - Columbus
+E1155,Deborah Green,Manufacturing,Manufacturing Coordinator,2015-02-24,Active,60100.0,E1088,Plant B - Dayton
+E1156,Betty Martin,Manufacturing,Manufacturing Analyst,2020-10-20,Active,44500.0,E1087,Plant A - Columbus
+E1157,Brian Ramirez,Manufacturing,Manufacturing Specialist,2022-10-15,Active,52300.0,E1090,Plant B - Dayton
+E1158,Amanda Baker,Manufacturing,Manufacturing Specialist,2024-08-17,Active,74000.0,E1090,Plant A - Columbus
+E1159,Joshua Brown,Manufacturing,Sr Manufacturing Associate,2015-04-10,Active,78800.0,E1089,Plant B - Dayton
+E1160,Linda Smith,Manufacturing,Manufacturing Analyst,2022-12-14,Active,60200.0,E1087,Plant B - Dayton
+E1161,Margaret Mitchell,Manufacturing,Sr Manufacturing Associate,2015-07-01,Active,45700.0,E1090,Plant B - Dayton
+E1162,Melissa Green,Manufacturing,Manufacturing Analyst,2021-05-04,Active,88400.0,E1089,Plant B - Dayton
+E1163,Jennifer Ramirez,Manufacturing,Manufacturing Coordinator,2016-04-14,Active,67200.0,E1089,Plant B - Dayton
+E1164,Thomas Perez,Manufacturing,Manufacturing Analyst,2017-02-17,Active,67500.0,E1089,Plant B - Dayton
+E1165,Edward Adams,Manufacturing,Manufacturing Analyst,2017-04-04,Active,51500.0,E1088,Plant A - Columbus
+E1166,Stephanie Green,Manufacturing,Sr Manufacturing Associate,2022-08-25,Active,69800.0,E1088,Plant B - Dayton
+E1167,Donald Jones,Manufacturing,Manufacturing Specialist,2022-08-21,Active,55200.0,E1087,Plant B - Dayton
+E1168,Nancy Robinson,Manufacturing,Manufacturing Specialist,2022-01-02,Active,55800.0,E1090,Plant B - Dayton
+E1169,Donna Scott,Manufacturing,Manufacturing Coordinator,2015-08-26,Active,51000.0,E1087,Plant A - Columbus
+E1170,Donald Miller,Manufacturing,Manufacturing Analyst,2020-12-03,Active,50300.0,E1090,Plant B - Dayton
+E1171,Kimberly King,Manufacturing,Sr Manufacturing Associate,2024-03-12,Active,59900.0,E1090,Plant B - Dayton
+E1172,Stephanie Perez,Manufacturing,Sr Manufacturing Associate,2025-10-02,Active,79900.0,E1089,Plant A - Columbus
+E1173,Robert Scott,Manufacturing,Manufacturing Analyst,2025-07-10,Active,54100.0,E1087,Plant B - Dayton
+E1174,Donna Nelson,Manufacturing,Manufacturing Coordinator,2017-06-10,Active,75500.0,E1087,Plant A - Columbus
+E1175,Nancy Scott,Manufacturing,Manufacturing Specialist,2021-11-26,Active,48100.0,E1089,Plant B - Dayton
+E1176,Maria White,Manufacturing,Manufacturing Analyst,2019-03-07,Active,78800.0,E1088,Plant A - Columbus
+E1177,Patricia Jones,Manufacturing,Manufacturing Specialist,2019-02-17,Active,82100.0,E1088,Plant B - Dayton
+E1178,Joshua Harris,Manufacturing,Manufacturing Analyst,2017-03-06,Active,79000.0,E1087,Plant B - Dayton
+E1179,Mark White,Manufacturing,Sr Manufacturing Associate,2025-12-08,Active,88500.0,E1088,Plant B - Dayton
+E1180,Andrew Thomas,Manufacturing,Manufacturing Coordinator,2019-08-27,Active,74600.0,E1089,Plant B - Dayton
+E1181,Stephanie Harris,Manufacturing,Manufacturing Analyst,2023-09-14,Active,88400.0,E1089,Plant A - Columbus
+E1182,Sarah Adams,Manufacturing,Manufacturing Specialist,2022-06-18,Active,76100.0,E1087,Plant B - Dayton
+E1183,Paul Martinez,Manufacturing,Manufacturing Specialist,2021-02-08,Active,84500.0,E1087,Plant B - Dayton
+E1184,Margaret Allen,Manufacturing,Manufacturing Specialist,2020-04-13,Active,60000.0,E1087,Plant B - Dayton
+E1185,Melissa Adams,Manufacturing,Manufacturing Coordinator,2020-03-05,Active,86000.0,E1090,Plant A - Columbus
+E1186,Donald Flores,Manufacturing,Manufacturing Coordinator,2015-02-01,Active,82100.0,E1089,Plant A - Columbus
+E1187,Jessica Martin,Manufacturing,Manufacturing Coordinator,2016-01-08,Active,80100.0,E1087,Plant A - Columbus
+E1188,Dorothy Hill,Manufacturing,Manufacturing Analyst,2023-01-21,Active,66700.0,E1089,Plant A - Columbus
+E1189,Sandra Smith,Manufacturing,Manufacturing Analyst,2024-06-08,Active,69400.0,E1089,Plant A - Columbus
+E1190,Michael King,Manufacturing,Manufacturing Specialist,2023-09-26,Active,89400.0,E1090,Plant B - Dayton
+E1191,David Green,Manufacturing,Manufacturing Specialist,2021-06-09,Active,59100.0,E1088,Plant B - Dayton
+E1192,Edward Nelson,Manufacturing,Sr Manufacturing Associate,2025-02-25,Active,69900.0,E1087,Plant A - Columbus
+E1193,Matthew Wright,Manufacturing,Manufacturing Coordinator,2020-11-06,Active,74900.0,E1088,Plant A - Columbus
+E1194,Michael Rivera,Manufacturing,Manufacturing Specialist,2022-01-10,Active,80000.0,E1089,Plant B - Dayton
+E1195,Paul Sanchez,Manufacturing,Manufacturing Analyst,2023-08-09,Active,43800.0,E1089,Plant B - Dayton
+E1196,Stephanie Brown,Manufacturing,Sr Manufacturing Associate,2025-06-09,Active,48000.0,E1090,Plant B - Dayton
+E1197,Deborah Lewis,Manufacturing,Sr Manufacturing Associate,2021-06-06,Active,65900.0,E1090,Plant A - Columbus
+E1198,Joshua Lopez,Manufacturing,Sr Manufacturing Associate,2023-05-11,Active,46900.0,E1089,Plant B - Dayton
+E1199,Donald Hill,Manufacturing,Sr Manufacturing Associate,2021-03-23,Active,63500.0,E1089,Plant B - Dayton
+E1200,Kevin Brown,Manufacturing,Manufacturing Analyst,2016-11-21,Active,66600.0,E1088,Plant A - Columbus
+E1201,Joshua Baker,Manufacturing,Sr Manufacturing Associate,2022-01-05,Active,79400.0,E1090,Plant B - Dayton
+E1202,Joshua Martinez,Manufacturing,Manufacturing Specialist,2025-08-12,Active,59900.0,E1089,Plant A - Columbus
+E1203,Margaret Lee,Manufacturing,Manufacturing Specialist,2025-05-08,Active,88100.0,E1090,Plant A - Columbus
+E1204,Kimberly Harris,Manufacturing,Manufacturing Coordinator,2023-02-09,Active,79200.0,E1089,Plant A - Columbus
+E1205,Richard Davis,Manufacturing,Manufacturing Specialist,2017-02-15,Active,76200.0,E1089,Plant B - Dayton
+E1206,Emily Wright,Manufacturing,Manufacturing Analyst,2019-05-28,Active,76100.0,E1088,Plant B - Dayton
+E1207,Linda Gonzalez,Manufacturing,Sr Manufacturing Associate,2017-04-26,Active,59300.0,E1088,Plant B - Dayton
+E1208,Michael Martin,Manufacturing,Manufacturing Coordinator,2021-12-24,Active,61700.0,E1088,Plant A - Columbus
+E1209,Daniel Adams,Manufacturing,Manufacturing Analyst,2016-08-15,Active,58500.0,E1090,Plant A - Columbus
+E1210,Paul Brown,Manufacturing,Manufacturing Analyst,2016-09-05,Active,49800.0,E1089,Plant B - Dayton
+E1211,Jennifer Taylor,Manufacturing,Manufacturing Specialist,2018-11-18,Active,72000.0,E1088,Plant A - Columbus
+E1212,John Nelson,Manufacturing,Manufacturing Specialist,2024-12-20,Active,58200.0,E1087,Plant A - Columbus
+E1213,David Adams,Manufacturing,Manufacturing Coordinator,2024-05-21,Active,52100.0,E1090,Plant A - Columbus
+E1214,Kevin Wright,Manufacturing,Manufacturing Coordinator,2019-11-10,Active,80600.0,E1090,Plant B - Dayton
+E1215,Michael Hall,Manufacturing,Sr Manufacturing Associate,2015-03-15,Active,64300.0,E1089,Plant A - Columbus
+E1216,Melissa Lee,Manufacturing,Manufacturing Specialist,2020-07-05,Active,66700.0,E1088,Plant B - Dayton
+E1217,Ashley Davis,Manufacturing,Manufacturing Coordinator,2019-08-08,Active,44400.0,E1088,Plant B - Dayton
+E1218,John Lee,Manufacturing,Manufacturing Analyst,2024-12-11,Active,51100.0,E1090,Plant B - Dayton
+E1219,Dorothy Martin,Manufacturing,Manufacturing Analyst,2022-01-03,Active,66300.0,E1089,Plant A - Columbus
+E1220,Sarah Brown,Manufacturing,Manufacturing Coordinator,2019-08-20,Active,73400.0,E1087,Plant B - Dayton
+E1221,Robert Ramirez,Manufacturing,Manufacturing Specialist,2017-05-24,Active,61400.0,E1087,Plant B - Dayton
+E1222,Kenneth Scott,Manufacturing,Manufacturing Coordinator,2018-06-18,Active,60500.0,E1087,Plant B - Dayton
+E1223,William Miller,Manufacturing,Sr Manufacturing Associate,2021-06-26,Active,68800.0,E1088,Plant A - Columbus
+E1224,Joshua Allen,Manufacturing,Sr Manufacturing Associate,2021-09-02,Active,48600.0,E1090,Plant B - Dayton
+E1225,Paul Rodriguez,Manufacturing,Sr Manufacturing Associate,2020-10-11,Active,89500.0,E1090,Plant B - Dayton
+E1226,Melissa Torres,Manufacturing,Manufacturing Specialist,2019-08-27,Terminated,57900.0,E1089,Plant B - Dayton
+E1227,Edward Hall,Manufacturing,Manufacturing Analyst,2025-01-20,Active,64800.0,E1090,Plant A - Columbus
+E1228,John King,Manufacturing,Manufacturing Coordinator,2025-12-20,Active,79200.0,E1088,Plant A - Columbus
+E1229,David Torres,Manufacturing,Manufacturing Coordinator,2016-04-01,Active,62100.0,E1090,Plant A - Columbus
+E1230,Paul Roberts,Manufacturing,Manufacturing Specialist,2024-08-28,Active,82700.0,E1088,Plant A - Columbus
+E1231,Emily Lee,Manufacturing,Manufacturing Analyst,2025-08-17,Active,60100.0,E1089,Plant B - Dayton
+E1232,Andrew Thompson,Manufacturing,Sr Manufacturing Associate,2025-12-22,Active,72900.0,E1088,Plant B - Dayton
+E1233,Jessica Moore,Manufacturing,Sr Manufacturing Associate,2023-05-08,Active,87200.0,E1088,Plant B - Dayton
+E1234,George Rivera,Manufacturing,Sr Manufacturing Associate,2022-06-16,Active,86800.0,E1087,Plant B - Dayton
+E1235,Kenneth Baker,Manufacturing,Manufacturing Analyst,2023-07-13,Active,81300.0,E1087,Plant B - Dayton
+E1236,Christopher Rivera,Manufacturing,Manufacturing Analyst,2016-06-15,Active,77900.0,E1089,Plant A - Columbus
+E1237,Emily Hall,Manufacturing,Manufacturing Analyst,2019-03-04,Active,70200.0,E1088,Plant A - Columbus
+E1238,Kevin Anderson,Manufacturing,Manufacturing Analyst,2015-02-14,Active,64700.0,E1088,Plant A - Columbus
+E1239,Steven Walker,Manufacturing,Sr Manufacturing Associate,2025-04-25,Active,88300.0,E1087,Plant B - Dayton
+E1240,Stephanie Garcia,Manufacturing,Manufacturing Specialist,2025-10-08,Active,67700.0,E1090,Plant A - Columbus
+E1241,Barbara Williams,Manufacturing,Sr Manufacturing Associate,2021-08-06,Active,88200.0,E1087,Plant A - Columbus
+E1242,Nancy Torres,Manufacturing,Manufacturing Coordinator,2024-02-11,Active,55700.0,E1090,Plant A - Columbus
+E1243,Linda Perez,Manufacturing,Manufacturing Specialist,2017-12-15,Active,76500.0,E1089,Plant B - Dayton
+E1244,Ronald Gonzalez,Manufacturing,Manufacturing Coordinator,2017-10-28,Active,61500.0,E1087,Plant B - Dayton
+E1245,Margaret Nelson,Manufacturing,Manufacturing Specialist,2016-03-05,Active,86900.0,E1090,Plant B - Dayton
+E1246,Jessica Lewis,Manufacturing,Sr Manufacturing Associate,2019-06-10,Active,69500.0,E1088,Plant B - Dayton
+E1247,Sarah Nelson,Procurement,Procurement Director,2016-08-10,Active,93700.0,,Columbus HQ
+E1248,Melissa Roberts,Procurement,Procurement Manager,2019-12-04,Active,106900.0,E1248,Columbus HQ
+E1249,Michelle Anderson,Procurement,Procurement Manager,2018-03-16,Active,96900.0,E1249,Columbus HQ
+E1250,Betty Clark,Procurement,Procurement Manager,2023-08-25,Active,86000.0,E1248,Columbus HQ
+E1251,Ronald Thomas,Procurement,Procurement Coordinator,2025-10-28,Active,98900.0,E1249,Columbus HQ
+E1252,Linda Brown,Procurement,Procurement Analyst,2023-09-07,Active,87800.0,E1248,Columbus HQ
+E1253,Daniel King,Procurement,Procurement Specialist,2022-02-22,Active,88300.0,E1250,Columbus HQ
+E1254,Sarah Robinson,Procurement,Procurement Coordinator,2017-09-14,Active,61000.0,E1249,Columbus HQ
+E1255,Edward Johnson,Procurement,Procurement Specialist,2021-05-27,Terminated,69300.0,E1247,Columbus HQ
+E1256,Sandra Thompson,Procurement,Procurement Coordinator,2016-09-02,Active,61600.0,E1247,Columbus HQ
+E1257,Christopher Clark,Procurement,Procurement Coordinator,2017-03-25,Active,95900.0,E1249,Columbus HQ
+E1258,Anthony Lewis,Procurement,Procurement Analyst,2021-07-03,Active,92400.0,E1249,Columbus HQ
+E1259,Linda Lopez,Procurement,Procurement Analyst,2023-07-17,Active,64600.0,E1247,Columbus HQ
+E1260,Ronald Johnson,Procurement,Procurement Coordinator,2019-08-22,Active,80100.0,E1248,Columbus HQ
+E1261,Jessica Robinson,Quality,Quality Director,2020-03-09,Active,99400.0,,Plant A - Columbus
+E1262,David Nelson,Quality,Quality Manager,2021-10-25,Active,100000.0,E1261,Plant A - Columbus
+E1263,Michael Miller,Quality,Quality Manager,2024-01-15,Active,86900.0,E1261,Columbus HQ
+E1264,Jessica Mitchell,Quality,Quality Manager,2015-07-15,Active,69800.0,E1262,Plant A - Columbus
+E1265,Paul Jackson,Quality,Sr Quality Associate,2018-12-19,Active,86900.0,E1263,Plant A - Columbus
+E1266,Kimberly Anderson,Quality,Quality Analyst,2021-05-09,Active,102700.0,E1264,Columbus HQ
+E1267,Emily Young,Quality,Sr Quality Associate,2015-06-21,Active,95400.0,E1264,Columbus HQ
+E1268,Mark Martinez,Quality,Quality Analyst,2019-07-06,Active,81300.0,E1262,Plant B - Dayton
+E1269,Ashley Brown,Quality,Quality Analyst,2023-07-14,Active,85100.0,E1262,Plant B - Dayton
+E1270,Charles Wilson,Quality,Quality Specialist,2020-11-03,Active,98100.0,E1262,Columbus HQ
+E1271,Sarah Moore,Quality,Quality Analyst,2021-11-20,Active,99300.0,E1262,Columbus HQ
+E1272,Steven Wilson,Quality,Quality Specialist,2020-05-01,Active,68600.0,E1264,Columbus HQ
+E1273,Jessica Hall,Quality,Quality Analyst,2024-12-07,Active,77800.0,E1263,Columbus HQ
+E1274,Stephanie Jackson,Quality,Sr Quality Associate,2021-08-18,Active,73900.0,E1264,Columbus HQ
+E1275,Ashley Miller,Quality,Quality Analyst,2022-06-07,Active,78600.0,E1262,Columbus HQ
+E1276,Maria Taylor,Quality,Sr Quality Associate,2023-10-19,Active,92400.0,E1262,Plant A - Columbus
+E1277,Lisa Anderson,Quality,Sr Quality Associate,2021-10-27,Active,84800.0,E1264,Plant B - Dayton
+E1278,Deborah Young,Quality,Quality Coordinator,2022-03-24,Active,67600.0,E1261,Plant A - Columbus
+E1279,Kimberly Williams,Quality,Quality Analyst,2016-11-02,Active,78600.0,E1262,Plant A - Columbus
+E1280,James Wilson,Quality,Quality Coordinator,2023-08-12,Active,62700.0,E1264,Columbus HQ
+E1281,Maria Smith,Quality,Sr Quality Associate,2023-09-14,Active,60500.0,E1263,Columbus HQ
+E1282,Maria Allen,Quality,Quality Analyst,2025-07-26,Active,102300.0,E1261,Plant A - Columbus
+E1283,Kimberly Martinez,Sales,Sales Director,2018-04-20,Active,117100.0,,Columbus HQ
+E1284,Karen Sanchez,Sales,Sales Manager,2016-06-13,Active,77000.0,E1283,Columbus HQ
+E1285,Nancy Baker,Sales,Sales Manager,2016-11-28,Active,62200.0,E1284,Columbus HQ
+E1286,Anthony Harris,Sales,Sales Manager,2023-08-02,Active,104600.0,E1284,Columbus HQ
+E1287,Jennifer Young,Sales,Sales Specialist,2021-11-26,Active,128400.0,E1283,Columbus HQ
+E1288,Thomas Wilson,Sales,Sales Specialist,2024-08-09,Active,63300.0,E1285,Columbus HQ
+E1289,Andrew Torres,Sales,Sr Sales Associate,2025-01-06,Active,125000.0,E1283,Columbus HQ
+E1290,Susan Nguyen,Sales,Sales Analyst,2017-12-27,Active,65400.0,E1284,Columbus HQ
+E1291,Kenneth Harris,Sales,Sales Analyst,2025-09-11,Active,86900.0,E1283,Columbus HQ
+E1292,Paul Mitchell,Sales,Sr Sales Associate,2020-01-04,Active,118700.0,E1286,Columbus HQ
+E1293,Stephanie Lee,Sales,Sales Analyst,2015-11-09,Active,91500.0,E1285,Columbus HQ
+E1294,Emily Harris,Sales,Sr Sales Associate,2021-03-22,Active,86600.0,E1284,Columbus HQ
+E1295,Jennifer Moore,Sales,Sales Coordinator,2017-07-23,Active,70800.0,E1285,Columbus HQ
+E1296,Jennifer Smith,Sales,Sales Specialist,2019-08-12,Active,67200.0,E1284,Columbus HQ
+E1297,Sandra Lewis,Sales,Sales Specialist,2023-09-17,Active,88600.0,E1283,Columbus HQ
+E1298,Matthew Scott,Sales,Sales Specialist,2016-10-20,Active,120500.0,E1285,Columbus HQ
+E1299,Mark Harris,Sales,Sales Analyst,2016-12-18,Active,128500.0,E1286,Columbus HQ
+E1300,John Rodriguez,Sales,Sales Coordinator,2019-05-09,Active,64400.0,E1285,Columbus HQ
+E1301,Mark Martin,Sales,Sales Coordinator,2022-02-12,Active,77300.0,E1284,Columbus HQ
+E1302,William Martin,Sales,Sr Sales Associate,2015-07-11,Active,86600.0,E1286,Columbus HQ
+E1303,Lisa Ramirez,Sales,Sales Analyst,2025-10-05,Active,81000.0,E1286,Columbus HQ
+E1304,Daniel Lopez,Sales,Sales Analyst,2021-06-10,Active,104300.0,E1285,Columbus HQ
+E1305,Margaret White,Sales,Sales Specialist,2016-10-07,Active,98200.0,E1286,Columbus HQ
+E1306,Melissa Wilson,Sales,Sales Coordinator,2022-05-27,Active,117300.0,E1286,Columbus HQ
+E1307,William Green,Sales,Sales Coordinator,2019-04-09,Active,110100.0,E1283,Columbus HQ
+E1308,Steven Nguyen,Sales,Sales Coordinator,2021-09-17,Active,120900.0,E1283,Columbus HQ
+E1309,Betty Hall,Sales,Sales Specialist,2023-10-21,Active,124000.0,E1284,Columbus HQ
+E1310,Brian Nelson,Sales,Sales Coordinator,2020-03-21,Active,99400.0,E1285,Columbus HQ
+E1311,James Miller,EHS,EHS Director,2019-04-17,Active,81400.0,,Plant B - Dayton
+E1312,Donald White,EHS,EHS Manager,2021-08-25,Active,87000.0,E1312,Columbus HQ
+E1313,Maria Walker,EHS,EHS Manager,2016-05-14,Active,61600.0,E1311,Plant B - Dayton
+E1314,Lisa Robinson,EHS,EHS Manager,2018-09-16,Active,62100.0,E1314,Plant B - Dayton
+E1315,Daniel Jones,EHS,Sr EHS Associate,2019-01-26,Active,58900.0,E1311,Plant B - Dayton
+E1316,Amanda Hernandez,EHS,EHS Coordinator,2018-09-06,Active,71900.0,E1312,Plant A - Columbus
+E1317,Margaret Green,Executive,VP Sales,2017-03-21,Active,171400.0,,Columbus HQ
+E1318,Richard Lewis,Executive,CFO,2024-07-13,Active,120600.0,,Columbus HQ
+E1319,Susan Moore,Executive,COO,2016-10-04,Active,189800.0,,Columbus HQ

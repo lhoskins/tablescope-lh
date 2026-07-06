@@ -1,0 +1,26 @@
+supplier_id,name,category,lead_time_days,payment_terms,preferred
+SUP001,Acme Metal Supply,MRO,41,2/10 Net 30,Y
+SUP002,Brightline Components,Packaging,11,2/10 Net 30,N
+SUP003,Cascade Alloys,Raw Materials,55,2/10 Net 30,Y
+SUP004,Delta Fasteners,Services,40,Net 60,N
+SUP005,Eagle Plastics,Tooling,53,Net 45,N
+SUP006,Fortis Chemical,Tooling,58,Net 60,Y
+SUP007,Greenfield Bearings,Tooling,38,Net 60,N
+SUP008,Harbor Steel,Chemicals,30,Net 60,Y
+SUP009,Ironside Materials,Services,17,Net 30,Y
+SUP010,Juniper Coatings,Chemicals,20,Net 30,Y
+SUP011,Keystone Tooling,Tooling,32,Net 60,Y
+SUP012,Lighthouse Polymers,Packaging,54,2/10 Net 30,N
+SUP013,Meridian Lubricants,Services,7,Net 60,Y
+SUP014,Northstar Castings,Packaging,31,2/10 Net 30,Y
+SUP015,Orion Forgings,Chemicals,8,Net 60,Y
+SUP016,Pinnacle Wire,Raw Materials,15,Net 30,N
+SUP017,Quantum Adhesives,Services,43,Net 45,Y
+SUP018,Redwood Gaskets,Services,33,2/10 Net 30,N
+SUP019,Sierra Springs,Raw Materials,28,Net 60,Y
+SUP020,Titan Seals,MRO,16,2/10 Net 30,N
+SUP021,Universal Bearings,MRO,46,2/10 Net 30,N
+SUP022,Vantage Abrasives,MRO,21,2/10 Net 30,N
+SUP023,Westfield Tubes,Services,56,Net 30,Y
+SUP024,Xcel Composites,MRO,25,Net 45,N
+SUP025,Yellowstone Valves,Chemicals,30,Net 30,Y

@@ -1,0 +1,301 @@
+ncr_id,date,line_id,product_id,defect_type,qty_affected,disposition,cost_impact
+NCR0001,2024-10-05,L3,P012,Documentation Error,15,Use As-Is,5047.38
+NCR0002,2025-07-18,L1,P008,Assembly Error,36,Pending Review,11312.86
+NCR0003,2024-07-14,L1,P009,Other,19,Scrap,8081.85
+NCR0004,2024-12-12,L1,P007,Dimensional Out-of-Spec,19,Pending Review,2818.66
+NCR0005,2026-05-01,L3,P002,Dimensional Out-of-Spec,17,Scrap,1279.89
+NCR0006,2025-04-12,L3,P015,Assembly Error,27,Return to Supplier,11036.36
+NCR0007,2025-05-26,L3,P006,Documentation Error,19,Use As-Is,7880.93
+NCR0008,2024-04-26,L4,P013,Assembly Error,15,Return to Supplier,3771.29
+NCR0009,2025-06-06,L3,P006,Contamination,39,Pending Review,11989.67
+NCR0010,2023-04-04,L2,P015,Other,15,Rework,2255.51
+NCR0011,2024-04-22,L1,P007,Assembly Error,28,Use As-Is,3006.01
+NCR0012,2025-11-11,L3,P009,Documentation Error,40,Return to Supplier,12761.31
+NCR0013,2023-07-18,L3,P009,Contamination,25,Rework,10708.89
+NCR0014,2025-04-07,L2,P001,Documentation Error,22,Use As-Is,5930.34
+NCR0015,2024-02-28,L2,P002,Documentation Error,6,Rework,1947.05
+NCR0016,2023-06-08,L2,P014,Dimensional Out-of-Spec,23,Return to Supplier,5085.14
+NCR0017,2023-01-10,L2,P008,Surface Finish,32,Use As-Is,8178.36
+NCR0018,2024-09-20,L4,P008,Surface Finish,37,Rework,14203.09
+NCR0019,2024-04-09,L1,P002,Contamination,31,Return to Supplier,11546.35
+NCR0020,2026-02-15,L2,P009,Material Defect,11,Pending Review,2007.95
+NCR0021,2024-07-13,L2,P012,Other,8,Use As-Is,984.3
+NCR0022,2025-10-11,L3,P005,Assembly Error,1,Use As-Is,265.11
+NCR0023,2023-02-26,L4,P003,Contamination,13,Return to Supplier,3933.62
+NCR0024,2023-08-02,L4,P008,Assembly Error,23,Pending Review,4837.67
+NCR0025,2026-03-16,L1,P015,Surface Finish,25,Use As-Is,2043.52
+NCR0026,2024-06-21,L2,P009,Dimensional Out-of-Spec,22,Pending Review,1794.47
+NCR0027,2024-10-09,L3,P010,Documentation Error,22,Rework,3685.41
+NCR0028,2024-08-15,L1,P009,Assembly Error,24,Rework,10667.03
+NCR0029,2024-09-29,L3,P007,Other,1,Scrap,55.34
+NCR0030,2025-07-13,L1,P015,Dimensional Out-of-Spec,25,Use As-Is,3490.59
+NCR0031,2024-09-18,L3,P008,Documentation Error,14,Use As-Is,6715.74
+NCR0032,2024-01-03,L1,P007,Contamination,7,Scrap,2783.51
+NCR0033,2024-07-19,L4,P005,Dimensional Out-of-Spec,7,Use As-Is,1384.02
+NCR0034,2025-08-28,L2,P015,Contamination,13,Use As-Is,3135.63
+NCR0035,2023-01-15,L1,P011,Assembly Error,13,Pending Review,1905.07
+NCR0036,2023-05-21,L1,P002,Contamination,40,Use As-Is,1104.95
+NCR0037,2025-09-13,L1,P002,Material Defect,20,Pending Review,8722.89
+NCR0038,2025-01-04,L1,P012,Documentation Error,18,Use As-Is,5220.02
+NCR0039,2024-10-31,L2,P004,Assembly Error,35,Pending Review,8619.91
+NCR0040,2023-03-16,L4,P007,Documentation Error,12,Scrap,3547.43
+NCR0041,2025-11-25,L1,P015,Contamination,35,Pending Review,4971.57
+NCR0042,2023-05-21,L4,P003,Other,35,Return to Supplier,5826.62
+NCR0043,2023-12-14,L2,P010,Dimensional Out-of-Spec,2,Return to Supplier,799.09
+NCR0044,2023-02-05,L3,P006,Dimensional Out-of-Spec,25,Rework,3758.51
+NCR0045,2023-02-14,L1,P005,Material Defect,25,Scrap,8264.07
+NCR0046,2026-06-03,L1,P009,Assembly Error,33,Rework,2080.91
+NCR0047,2024-03-08,L1,P011,Other,2,Return to Supplier,211.39
+NCR0048,2024-05-04,L2,P004,Other,30,Return to Supplier,3252.64
+NCR0049,2024-03-30,L4,P001,Material Defect,40,Rework,16599.34
+NCR0050,2023-10-27,L4,P001,Material Defect,3,Return to Supplier,528.11
+NCR0051,2024-04-23,L3,P003,Surface Finish,14,Return to Supplier,2435.35
+NCR0052,2025-01-19,L3,P013,Other,38,Use As-Is,4512.27
+NCR0053,2024-03-04,L4,P014,Material Defect,13,Scrap,4872.85
+NCR0054,2024-02-03,L3,P005,Surface Finish,40,Return to Supplier,11690.78
+NCR0055,2023-05-02,L4,P010,Contamination,4,Pending Review,1401.33
+NCR0056,2025-07-27,L2,P001,Documentation Error,30,Use As-Is,4234.29
+NCR0057,2023-07-03,L3,P014,Assembly Error,16,Use As-Is,1233.23
+NCR0058,2023-07-06,L1,P002,Documentation Error,39,Rework,11886.91
+NCR0059,2025-06-08,L3,P001,Documentation Error,27,Rework,4489.13
+NCR0060,2025-01-08,L3,P001,Assembly Error,12,Rework,2636.98
+NCR0061,2026-01-10,L2,P005,Surface Finish,11,Use As-Is,1222.64
+NCR0062,2025-08-05,L2,P006,Contamination,35,Use As-Is,11166.96
+NCR0063,2025-01-22,L2,P011,Assembly Error,10,Use As-Is,1733.48
+NCR0064,2025-09-22,L3,P010,Assembly Error,12,Return to Supplier,3556.82
+NCR0065,2024-12-28,L4,P003,Contamination,24,Pending Review,4036.36
+NCR0066,2026-06-19,L3,P004,Assembly Error,28,Return to Supplier,3271.54
+NCR0067,2025-04-15,L4,P001,Surface Finish,23,Scrap,8658.96
+NCR0068,2023-01-07,L1,P002,Surface Finish,11,Rework,913.74
+NCR0069,2025-11-22,L4,P011,Other,23,Use As-Is,8800.76
+NCR0070,2024-01-01,L1,P009,Surface Finish,20,Use As-Is,3113.91
+NCR0071,2024-08-13,L3,P009,Contamination,30,Rework,4688.55
+NCR0072,2026-06-20,L4,P009,Documentation Error,34,Rework,15864.94
+NCR0073,2025-01-11,L2,P004,Dimensional Out-of-Spec,24,Pending Review,10074.13
+NCR0074,2024-01-29,L3,P006,Surface Finish,16,Scrap,7184.73
+NCR0075,2024-12-21,L1,P005,Other,32,Return to Supplier,3649.29
+NCR0076,2025-05-10,L1,P012,Contamination,28,Pending Review,12839.37
+NCR0077,2023-11-07,L3,P006,Assembly Error,31,Use As-Is,2213.8
+NCR0078,2025-04-30,L1,P011,Dimensional Out-of-Spec,2,Scrap,546.44
+NCR0079,2024-03-12,L1,P002,Documentation Error,11,Rework,1173.45
+NCR0080,2024-03-05,L3,P002,Other,24,Return to Supplier,1764.18
+NCR0081,2026-05-06,L2,P015,Material Defect,34,Scrap,9443.38
+NCR0082,2024-06-20,L2,P004,Documentation Error,11,Rework,2323.47
+NCR0083,2025-04-24,L2,P006,Surface Finish,8,Return to Supplier,1273.7
+NCR0084,2023-08-06,L3,P002,Other,3,Pending Review,439.01
+NCR0085,2025-03-15,L4,P008,Contamination,35,Pending Review,14600.32
+NCR0086,2023-03-08,L1,P013,Contamination,8,Scrap,2525.48
+NCR0087,2024-03-02,L2,P003,Surface Finish,28,Rework,7537.98
+NCR0088,2025-03-16,L2,P005,Assembly Error,22,Pending Review,4106.86
+NCR0089,2023-03-25,L2,P014,Documentation Error,13,Pending Review,4567.62
+NCR0090,2024-01-21,L1,P014,Material Defect,3,Return to Supplier,1271.27
+NCR0091,2023-06-19,L4,P012,Contamination,16,Scrap,1681.2
+NCR0092,2024-12-26,L3,P008,Contamination,22,Return to Supplier,3938.85
+NCR0093,2025-06-14,L2,P003,Surface Finish,25,Use As-Is,700.04
+NCR0094,2025-05-29,L3,P010,Surface Finish,2,Scrap,948.58
+NCR0095,2026-06-28,L4,P002,Contamination,33,Use As-Is,9939.62
+NCR0096,2023-01-26,L4,P010,Assembly Error,36,Pending Review,8051.95
+NCR0097,2026-03-16,L2,P011,Dimensional Out-of-Spec,7,Pending Review,3355.48
+NCR0098,2024-08-17,L4,P003,Surface Finish,18,Scrap,3634.08
+NCR0099,2026-05-10,L1,P002,Material Defect,3,Use As-Is,268.86
+NCR0100,2023-08-20,L4,P007,Surface Finish,21,Return to Supplier,5490.85
+NCR0101,2024-03-07,L3,P015,Assembly Error,14,Scrap,1641.2
+NCR0102,2023-09-25,L4,P009,Assembly Error,27,Pending Review,12502.91
+NCR0103,2025-01-25,L3,P007,Surface Finish,14,Scrap,793.34
+NCR0104,2023-05-02,L4,P013,Dimensional Out-of-Spec,23,Use As-Is,9608.72
+NCR0105,2026-06-15,L3,P010,Assembly Error,30,Use As-Is,3572.07
+NCR0106,2024-08-17,L2,P006,Assembly Error,6,Return to Supplier,199.7
+NCR0107,2023-05-16,L1,P011,Other,14,Rework,4683.67
+NCR0108,2025-08-02,L3,P009,Documentation Error,37,Pending Review,7900.59
+NCR0109,2026-03-30,L3,P008,Contamination,36,Rework,7174.26
+NCR0110,2024-11-10,L3,P003,Surface Finish,14,Scrap,1979.77
+NCR0111,2024-06-20,L3,P002,Surface Finish,22,Use As-Is,2222.35
+NCR0112,2026-01-27,L4,P011,Other,3,Scrap,654.12
+NCR0113,2026-07-03,L1,P005,Dimensional Out-of-Spec,36,Pending Review,1629.07
+NCR0114,2026-06-21,L1,P005,Documentation Error,21,Scrap,1711.06
+NCR0115,2024-08-20,L1,P009,Material Defect,23,Scrap,8816.79
+NCR0116,2023-06-12,L2,P005,Documentation Error,18,Rework,4374.64
+NCR0117,2026-05-16,L4,P005,Dimensional Out-of-Spec,15,Rework,5723.06
+NCR0118,2023-12-18,L4,P006,Documentation Error,20,Use As-Is,4615.34
+NCR0119,2024-03-24,L2,P010,Documentation Error,19,Return to Supplier,3419.24
+NCR0120,2023-01-27,L3,P009,Dimensional Out-of-Spec,9,Return to Supplier,1263.1
+NCR0121,2024-08-02,L3,P004,Contamination,9,Return to Supplier,1729.55
+NCR0122,2025-12-17,L3,P014,Assembly Error,12,Pending Review,2769.04
+NCR0123,2023-12-29,L1,P011,Contamination,37,Scrap,2573.1
+NCR0124,2023-12-05,L2,P013,Assembly Error,20,Return to Supplier,7628.43
+NCR0125,2023-09-09,L3,P009,Dimensional Out-of-Spec,11,Pending Review,4175.62
+NCR0126,2025-09-26,L1,P013,Other,11,Return to Supplier,315.09
+NCR0127,2026-04-17,L1,P004,Material Defect,39,Scrap,8699.79
+NCR0128,2024-10-13,L1,P011,Surface Finish,5,Rework,1192.39
+NCR0129,2023-08-29,L4,P014,Material Defect,4,Rework,346.2
+NCR0130,2024-05-04,L4,P009,Assembly Error,39,Scrap,9385.38
+NCR0131,2024-09-23,L2,P015,Material Defect,30,Pending Review,11169.63
+NCR0132,2025-08-01,L2,P002,Assembly Error,24,Rework,2765.57
+NCR0133,2023-03-14,L1,P004,Dimensional Out-of-Spec,21,Scrap,2726.64
+NCR0134,2024-02-13,L2,P010,Other,22,Return to Supplier,10070.18
+NCR0135,2024-07-10,L4,P002,Surface Finish,17,Rework,7511.82
+NCR0136,2023-05-24,L1,P007,Contamination,23,Rework,1531.91
+NCR0137,2026-06-03,L3,P012,Material Defect,35,Rework,12827.69
+NCR0138,2023-10-16,L4,P006,Material Defect,28,Rework,3216.12
+NCR0139,2023-02-06,L1,P011,Material Defect,14,Pending Review,4439.74
+NCR0140,2023-08-29,L2,P007,Documentation Error,5,Use As-Is,934.41
+NCR0141,2024-02-06,L4,P004,Assembly Error,28,Use As-Is,7020.82
+NCR0142,2025-05-07,L2,P015,Material Defect,22,Use As-Is,1385.53
+NCR0143,2023-12-12,L2,P003,Surface Finish,33,Rework,12159.32
+NCR0144,2024-10-27,L2,P006,Documentation Error,20,Rework,5154.78
+NCR0145,2026-05-04,L4,P012,Material Defect,40,Pending Review,11339.89
+NCR0146,2025-04-12,L3,P009,Surface Finish,29,Rework,6742.92
+NCR0147,2024-12-10,L2,P008,Dimensional Out-of-Spec,8,Return to Supplier,2635.25
+NCR0148,2024-08-25,L1,P003,Surface Finish,28,Scrap,4374.52
+NCR0149,2024-10-24,L3,P005,Assembly Error,3,Pending Review,287.34
+NCR0150,2024-02-23,L1,P001,Dimensional Out-of-Spec,29,Return to Supplier,12468.21
+NCR0151,2024-02-08,L2,P004,Documentation Error,32,Use As-Is,10036.78
+NCR0152,2026-03-15,L1,P001,Documentation Error,17,Use As-Is,1215.55
+NCR0153,2023-09-14,L4,P004,Other,39,Return to Supplier,12128.36
+NCR0154,2024-09-01,L2,P012,Dimensional Out-of-Spec,30,Rework,13479.47
+NCR0155,2025-04-11,L3,P004,Assembly Error,21,Return to Supplier,9517.62
+NCR0156,2025-05-06,L4,P008,Documentation Error,40,Use As-Is,18403.73
+NCR0157,2025-03-09,L4,P009,Assembly Error,12,Rework,2409.75
+NCR0158,2023-01-10,L1,P003,Assembly Error,15,Pending Review,1781.79
+NCR0159,2026-02-22,L2,P001,Surface Finish,7,Return to Supplier,2818.11
+NCR0160,2025-09-18,L1,P002,Material Defect,39,Pending Review,11030.6
+NCR0161,2024-08-02,L1,P005,Documentation Error,35,Return to Supplier,6477.96
+NCR0162,2024-12-27,L4,P012,Dimensional Out-of-Spec,8,Rework,3747.81
+NCR0163,2026-01-20,L3,P012,Surface Finish,38,Return to Supplier,17350.4
+NCR0164,2023-03-01,L4,P014,Surface Finish,33,Pending Review,14048.31
+NCR0165,2025-07-27,L3,P013,Dimensional Out-of-Spec,26,Scrap,1497.4
+NCR0166,2026-03-04,L4,P015,Material Defect,25,Pending Review,1420.51
+NCR0167,2023-12-14,L2,P008,Contamination,11,Pending Review,3937.25
+NCR0168,2023-04-05,L3,P001,Surface Finish,3,Scrap,653.16
+NCR0169,2024-03-31,L3,P014,Documentation Error,31,Scrap,11166.3
+NCR0170,2023-06-10,L2,P004,Dimensional Out-of-Spec,4,Rework,349.92
+NCR0171,2024-04-24,L3,P012,Other,37,Scrap,14938.42
+NCR0172,2023-10-13,L2,P003,Surface Finish,3,Scrap,709.31
+NCR0173,2024-02-24,L2,P003,Surface Finish,24,Rework,8636.85
+NCR0174,2026-03-26,L3,P002,Surface Finish,5,Pending Review,365.16
+NCR0175,2026-04-08,L4,P004,Contamination,31,Return to Supplier,13742.41
+NCR0176,2026-05-17,L2,P008,Contamination,30,Rework,6073.8
+NCR0177,2024-05-18,L4,P012,Material Defect,1,Rework,313.84
+NCR0178,2023-09-24,L4,P005,Material Defect,27,Use As-Is,4717.19
+NCR0179,2025-11-08,L4,P004,Dimensional Out-of-Spec,22,Return to Supplier,5149.69
+NCR0180,2023-11-14,L1,P005,Documentation Error,25,Pending Review,6629.14
+NCR0181,2024-09-03,L1,P008,Surface Finish,38,Scrap,9694.22
+NCR0182,2023-12-21,L1,P013,Dimensional Out-of-Spec,5,Pending Review,599.31
+NCR0183,2024-07-10,L2,P005,Dimensional Out-of-Spec,14,Pending Review,4076.53
+NCR0184,2026-01-30,L1,P011,Assembly Error,5,Pending Review,1719.21
+NCR0185,2025-04-20,L2,P006,Dimensional Out-of-Spec,13,Return to Supplier,450.07
+NCR0186,2024-07-26,L3,P005,Surface Finish,4,Rework,1679.78
+NCR0187,2025-06-22,L1,P009,Documentation Error,38,Scrap,3821.73
+NCR0188,2023-10-18,L3,P002,Other,17,Return to Supplier,6320.52
+NCR0189,2023-06-27,L4,P011,Assembly Error,38,Rework,4634.56
+NCR0190,2024-07-13,L1,P013,Material Defect,34,Scrap,12312.92
+NCR0191,2025-05-26,L2,P002,Surface Finish,9,Return to Supplier,1209.96
+NCR0192,2023-01-29,L3,P005,Dimensional Out-of-Spec,31,Scrap,10816.69
+NCR0193,2024-05-12,L4,P003,Assembly Error,27,Use As-Is,12065.65
+NCR0194,2026-05-15,L3,P003,Material Defect,8,Pending Review,2816.15
+NCR0195,2024-03-06,L3,P004,Material Defect,6,Return to Supplier,2340.76
+NCR0196,2025-11-24,L1,P013,Other,8,Use As-Is,1697.38
+NCR0197,2025-06-07,L4,P008,Dimensional Out-of-Spec,33,Rework,4949.61
+NCR0198,2023-12-16,L1,P015,Surface Finish,7,Pending Review,2646.72
+NCR0199,2023-07-26,L3,P015,Other,34,Use As-Is,12798.51
+NCR0200,2023-09-05,L1,P002,Dimensional Out-of-Spec,36,Scrap,6921.92
+NCR0201,2023-07-12,L3,P004,Other,25,Use As-Is,1144.18
+NCR0202,2024-05-26,L3,P009,Surface Finish,38,Pending Review,17750.12
+NCR0203,2026-04-27,L1,P001,Contamination,7,Scrap,2673.92
+NCR0204,2023-10-15,L2,P013,Dimensional Out-of-Spec,22,Return to Supplier,4842.28
+NCR0205,2025-10-11,L4,P008,Dimensional Out-of-Spec,26,Return to Supplier,1230.44
+NCR0206,2026-02-22,L2,P011,Contamination,30,Pending Review,7966.43
+NCR0207,2024-07-16,L4,P013,Assembly Error,33,Scrap,12408.66
+NCR0208,2026-01-21,L1,P009,Surface Finish,40,Use As-Is,4617.39
+NCR0209,2025-10-18,L4,P002,Dimensional Out-of-Spec,3,Use As-Is,550.14
+NCR0210,2025-08-29,L2,P009,Dimensional Out-of-Spec,1,Rework,475.39
+NCR0211,2025-11-25,L2,P012,Dimensional Out-of-Spec,7,Use As-Is,861.59
+NCR0212,2025-11-12,L2,P014,Dimensional Out-of-Spec,20,Use As-Is,6224.53
+NCR0213,2024-04-24,L1,P005,Assembly Error,18,Pending Review,6676.41
+NCR0214,2025-08-09,L3,P010,Assembly Error,10,Rework,3873.65
+NCR0215,2024-09-07,L1,P010,Assembly Error,2,Return to Supplier,896.11
+NCR0216,2025-12-13,L2,P001,Dimensional Out-of-Spec,16,Use As-Is,2414.8
+NCR0217,2023-08-01,L3,P004,Documentation Error,6,Scrap,1969.87
+NCR0218,2024-03-15,L1,P014,Assembly Error,29,Scrap,10965.09
+NCR0219,2025-09-03,L1,P002,Assembly Error,25,Return to Supplier,8619.82
+NCR0220,2026-02-13,L3,P012,Contamination,27,Rework,4493.27
+NCR0221,2023-03-05,L4,P013,Contamination,9,Scrap,2399.16
+NCR0222,2025-11-14,L1,P007,Contamination,35,Rework,7073.55
+NCR0223,2024-04-08,L3,P001,Material Defect,17,Use As-Is,7361.61
+NCR0224,2025-06-19,L2,P008,Surface Finish,20,Scrap,5036.02
+NCR0225,2024-03-31,L4,P007,Surface Finish,13,Scrap,4170.49
+NCR0226,2026-04-08,L1,P011,Material Defect,27,Pending Review,768.48
+NCR0227,2024-08-26,L1,P003,Other,31,Rework,11150.74
+NCR0228,2023-05-20,L1,P012,Other,5,Return to Supplier,1123.45
+NCR0229,2025-05-17,L4,P003,Dimensional Out-of-Spec,16,Pending Review,6353.22
+NCR0230,2025-01-13,L2,P005,Documentation Error,23,Scrap,5949.8
+NCR0231,2024-09-16,L4,P015,Material Defect,3,Return to Supplier,1138.35
+NCR0232,2023-06-30,L2,P006,Assembly Error,27,Use As-Is,4577.08
+NCR0233,2023-07-26,L4,P007,Assembly Error,21,Scrap,4299.62
+NCR0234,2024-11-17,L4,P014,Dimensional Out-of-Spec,8,Rework,3734.94
+NCR0235,2023-03-21,L4,P012,Documentation Error,2,Scrap,145.16
+NCR0236,2024-11-22,L2,P008,Documentation Error,24,Pending Review,6820.89
+NCR0237,2024-01-16,L4,P014,Material Defect,12,Rework,2274.01
+NCR0238,2024-12-07,L4,P001,Documentation Error,27,Rework,1635.46
+NCR0239,2024-01-20,L3,P009,Documentation Error,39,Use As-Is,15137.24
+NCR0240,2026-01-01,L1,P009,Assembly Error,34,Pending Review,7313.23
+NCR0241,2024-01-27,L1,P003,Surface Finish,17,Pending Review,2004.13
+NCR0242,2026-05-19,L4,P003,Other,35,Scrap,6825.31
+NCR0243,2023-01-07,L1,P010,Contamination,16,Pending Review,1994.31
+NCR0244,2024-03-20,L1,P001,Dimensional Out-of-Spec,37,Rework,1155.48
+NCR0245,2025-09-30,L4,P014,Documentation Error,23,Pending Review,6374.13
+NCR0246,2023-02-02,L1,P006,Assembly Error,20,Use As-Is,885.67
+NCR0247,2023-01-01,L2,P008,Dimensional Out-of-Spec,23,Pending Review,5285.34
+NCR0248,2023-04-06,L3,P011,Assembly Error,40,Pending Review,2024.78
+NCR0249,2026-02-28,L1,P007,Contamination,18,Scrap,3651.56
+NCR0250,2026-05-03,L1,P013,Contamination,34,Return to Supplier,12685.21
+NCR0251,2024-06-30,L2,P010,Assembly Error,25,Scrap,2138.81
+NCR0252,2025-04-25,L2,P011,Assembly Error,25,Scrap,11471.99
+NCR0253,2025-07-21,L4,P007,Documentation Error,21,Pending Review,2294.74
+NCR0254,2024-09-04,L2,P006,Other,25,Use As-Is,7709.16
+NCR0255,2026-01-11,L4,P002,Documentation Error,35,Use As-Is,9541.27
+NCR0256,2023-07-17,L2,P003,Other,17,Return to Supplier,2961.21
+NCR0257,2025-08-25,L1,P009,Other,24,Return to Supplier,1016.84
+NCR0258,2024-11-22,L3,P003,Material Defect,3,Use As-Is,514.68
+NCR0259,2025-12-30,L1,P013,Other,35,Pending Review,12704.08
+NCR0260,2025-12-27,L4,P010,Documentation Error,29,Use As-Is,7541.47
+NCR0261,2023-02-21,L1,P002,Contamination,15,Rework,6429.77
+NCR0262,2025-12-12,L4,P005,Other,4,Scrap,897.59
+NCR0263,2024-09-03,L2,P005,Other,2,Pending Review,142.12
+NCR0264,2026-01-06,L3,P015,Documentation Error,14,Rework,3866.92
+NCR0265,2026-01-22,L1,P007,Surface Finish,20,Use As-Is,651.52
+NCR0266,2025-08-30,L4,P014,Assembly Error,13,Rework,5029.9
+NCR0267,2024-03-17,L4,P004,Surface Finish,11,Scrap,2685.02
+NCR0268,2025-10-24,L1,P013,Material Defect,16,Use As-Is,2626.29
+NCR0269,2025-03-23,L3,P003,Other,16,Scrap,7419.36
+NCR0270,2023-03-28,L3,P007,Contamination,19,Return to Supplier,8759.63
+NCR0271,2023-07-28,L4,P011,Surface Finish,30,Scrap,11699.69
+NCR0272,2025-08-25,L1,P012,Other,37,Pending Review,11369.29
+NCR0273,2026-06-04,L3,P002,Assembly Error,26,Scrap,5925.18
+NCR0274,2026-05-07,L3,P001,Surface Finish,8,Use As-Is,537.33
+NCR0275,2025-04-07,L2,P007,Surface Finish,21,Scrap,5134.69
+NCR0276,2023-04-27,L1,P006,Assembly Error,10,Pending Review,2646.36
+NCR0277,2024-12-04,L3,P001,Other,2,Use As-Is,71.81
+NCR0278,2024-09-01,L3,P014,Other,5,Return to Supplier,908.47
+NCR0279,2024-05-02,L1,P015,Surface Finish,24,Return to Supplier,8539.6
+NCR0280,2025-02-02,L4,P015,Other,10,Rework,3898.85
+NCR0281,2023-02-14,L2,P009,Contamination,8,Rework,1841.65
+NCR0282,2026-02-23,L2,P006,Surface Finish,37,Return to Supplier,12718.4
+NCR0283,2023-03-01,L1,P012,Assembly Error,15,Scrap,4757.12
+NCR0284,2025-07-23,L2,P004,Surface Finish,1,Use As-Is,330.66
+NCR0285,2025-11-29,L2,P008,Assembly Error,10,Use As-Is,1284.79
+NCR0286,2025-05-11,L4,P005,Assembly Error,31,Return to Supplier,9397.88
+NCR0287,2026-01-21,L3,P005,Dimensional Out-of-Spec,14,Use As-Is,5641.93
+NCR0288,2025-10-31,L3,P009,Contamination,10,Pending Review,2154.5
+NCR0289,2026-02-01,L1,P008,Other,32,Use As-Is,7225.44
+NCR0290,2025-06-14,L3,P012,Assembly Error,34,Pending Review,6090.65
+NCR0291,2025-01-31,L4,P013,Documentation Error,20,Pending Review,3836.85
+NCR0292,2024-01-03,L3,P004,Material Defect,9,Return to Supplier,2061.37
+NCR0293,2026-01-07,L2,P006,Dimensional Out-of-Spec,40,Return to Supplier,13165.39
+NCR0294,2024-12-09,L2,P008,Surface Finish,12,Use As-Is,3941.96
+NCR0295,2023-08-09,L1,P009,Assembly Error,36,Rework,8548.16
+NCR0296,2024-06-15,L1,P015,Assembly Error,18,Return to Supplier,2781.27
+NCR0297,2025-06-22,L3,P013,Surface Finish,29,Pending Review,13138.36
+NCR0298,2025-07-01,L1,P009,Contamination,2,Return to Supplier,225.87
+NCR0299,2024-01-02,L4,P007,Dimensional Out-of-Spec,32,Return to Supplier,13520.67
+NCR0300,2026-01-09,L4,P013,Material Defect,29,Rework,9534.22

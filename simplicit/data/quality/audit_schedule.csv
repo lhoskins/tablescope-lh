@@ -1,0 +1,61 @@
+audit_id,date,dept,type,auditor,findings_count,status
+AUD0001,2025-01-10,Engineering,Supplier,Steven Wright,5,Completed
+AUD0002,2026-02-18,HR,Internal,Margaret Wilson,2,Completed
+AUD0003,2026-02-21,Finance,System,Edward Sanchez,5,Completed
+AUD0004,2025-04-27,IT,Internal,William Jones,5,Completed
+AUD0005,2025-03-15,IT,System,Michelle Allen,10,Overdue
+AUD0006,2025-02-18,Quality,System,Sandra Lee,8,Scheduled
+AUD0007,2025-09-17,Quality,Internal,Robert Young,6,Scheduled
+AUD0008,2025-12-25,IT,System,Mark Robinson,9,Scheduled
+AUD0009,2025-04-20,Procurement,Supplier,George Hernandez,11,In Progress
+AUD0010,2026-02-01,Finance,External,Charles Harris,4,Completed
+AUD0011,2025-12-09,Executive,Supplier,Melissa Young,2,Overdue
+AUD0012,2025-07-20,Finance,Process,William Smith,5,In Progress
+AUD0013,2025-06-12,Sales,Internal,Carol Garcia,12,Scheduled
+AUD0014,2025-03-03,Finance,Supplier,Joshua King,2,Scheduled
+AUD0015,2025-02-02,EHS,Supplier,Donald Baker,11,Completed
+AUD0016,2025-12-07,Sales,Process,Jessica Jackson,5,In Progress
+AUD0017,2025-06-03,HR,External,Joshua Jones,8,In Progress
+AUD0018,2025-05-11,Finance,System,Kevin Thomas,10,Overdue
+AUD0019,2026-02-04,Manufacturing,System,Kimberly Thomas,9,Completed
+AUD0020,2026-06-10,Engineering,System,Karen Harris,10,Overdue
+AUD0021,2025-07-31,Executive,Process,Daniel Allen,2,Completed
+AUD0022,2025-12-09,HR,Process,Robert Adams,6,In Progress
+AUD0023,2026-04-23,HR,Supplier,Nancy Sanchez,0,Completed
+AUD0024,2025-12-23,EHS,System,Anthony Sanchez,9,Scheduled
+AUD0025,2025-11-01,EHS,External,Sarah Clark,7,In Progress
+AUD0026,2026-03-12,Quality,Supplier,Paul Wright,4,Overdue
+AUD0027,2025-07-01,Manufacturing,Supplier,Anthony Thomas,4,Scheduled
+AUD0028,2025-05-26,EHS,Supplier,William Baker,11,Scheduled
+AUD0029,2025-06-26,Manufacturing,System,Jessica Baker,7,Scheduled
+AUD0030,2026-06-13,Finance,External,William Williams,1,In Progress
+AUD0031,2025-03-17,Finance,External,Carol Baker,5,Completed
+AUD0032,2025-03-22,Quality,System,Karen Williams,3,Completed
+AUD0033,2025-10-25,Quality,Supplier,John Anderson,1,Overdue
+AUD0034,2025-01-09,EHS,Process,Dorothy Walker,0,Completed
+AUD0035,2025-03-21,Engineering,Internal,Susan Lopez,9,In Progress
+AUD0036,2026-03-18,Sales,External,Christopher Carter,0,Overdue
+AUD0037,2026-06-06,Manufacturing,External,John Ramirez,11,Overdue
+AUD0038,2025-09-20,Manufacturing,Process,Karen Green,8,In Progress
+AUD0039,2025-03-21,Engineering,External,William Wilson,12,In Progress
+AUD0040,2025-12-29,Manufacturing,External,Donald Rivera,12,Overdue
+AUD0041,2026-05-08,Engineering,Supplier,Emily Perez,3,In Progress
+AUD0042,2025-03-21,Quality,Supplier,Ronald Perez,9,Overdue
+AUD0043,2025-06-02,Manufacturing,External,Jennifer Rodriguez,2,Scheduled
+AUD0044,2025-06-02,Procurement,System,Paul Flores,5,In Progress
+AUD0045,2025-06-22,IT,Internal,Linda Moore,11,Scheduled
+AUD0046,2025-05-11,Procurement,Process,Maria Nelson,12,Overdue
+AUD0047,2026-04-07,Sales,Process,Michelle Rivera,0,In Progress
+AUD0048,2025-11-04,Procurement,Supplier,Joshua Lewis,4,Scheduled
+AUD0049,2025-04-16,Finance,Supplier,Ronald Hall,3,Overdue
+AUD0050,2026-06-24,IT,Internal,Amanda Williams,7,In Progress
+AUD0051,2025-11-02,Quality,Supplier,Edward Ramirez,2,In Progress
+AUD0052,2025-10-14,EHS,Supplier,Betty Allen,6,In Progress
+AUD0053,2025-04-12,Engineering,System,James Gonzalez,12,Completed
+AUD0054,2025-12-20,Sales,External,Anthony Gonzalez,8,In Progress
+AUD0055,2026-04-30,Engineering,External,Dorothy Green,5,Scheduled
+AUD0056,2025-06-08,Manufacturing,External,Linda Mitchell,6,Scheduled
+AUD0057,2025-06-27,EHS,Process,Emily Johnson,3,Overdue
+AUD0058,2025-09-13,Quality,Supplier,Kenneth Young,6,Scheduled
+AUD0059,2026-01-23,Executive,Supplier,Donna Rivera,10,Scheduled
+AUD0060,2025-04-30,Quality,Supplier,Thomas Mitchell,9,In Progress

@@ -1,0 +1,151 @@
+inspection_id,date,area,inspector,findings_count,critical_findings,status
+EHSI0001,2025-05-14,Roof Access,Donna Perez,14,0,Closed
+EHSI0002,2025-05-23,Electrical Room,Sandra Davis,10,3,Open
+EHSI0003,2024-03-23,Loading Dock,Edward Taylor,14,3,Closed
+EHSI0004,2024-04-20,Chemical Storage,Donald Jackson,11,3,Open
+EHSI0005,2026-06-29,Lab,Kimberly Lopez,15,2,Closed
+EHSI0006,2025-06-29,HQ Office,Paul Smith,2,0,Open
+EHSI0007,2024-07-04,Parking Lot,Karen Nelson,11,2,Closed
+EHSI0008,2024-11-20,Chemical Storage,John Harris,14,1,Closed
+EHSI0009,2024-02-05,Loading Dock,Kevin Torres,14,0,Open
+EHSI0010,2024-07-21,Loading Dock,Betty Martinez,3,0,Closed
+EHSI0011,2024-11-14,Chemical Storage,Sandra Taylor,1,1,Closed
+EHSI0012,2024-10-13,HQ Office,Kenneth Brown,6,0,Open
+EHSI0013,2025-06-24,Chemical Storage,Robert Martinez,5,3,In Progress
+EHSI0014,2024-09-18,Lab,Donna Rodriguez,14,1,Closed
+EHSI0015,2026-02-28,Roof Access,David Hill,7,1,Closed
+EHSI0016,2024-05-04,Lab,Jennifer Baker,2,0,Open
+EHSI0017,2026-05-08,Roof Access,Robert Thompson,4,1,In Progress
+EHSI0018,2024-09-17,Plant B Floor,Jennifer Wright,4,2,Closed
+EHSI0019,2025-12-10,HQ Office,Jessica Davis,9,1,In Progress
+EHSI0020,2024-12-02,Warehouse,John Flores,6,0,Closed
+EHSI0021,2024-12-25,Warehouse,Christopher Johnson,15,0,In Progress
+EHSI0022,2025-03-29,Loading Dock,Andrew White,3,0,Closed
+EHSI0023,2024-08-22,Roof Access,Carol Moore,12,1,In Progress
+EHSI0024,2026-05-14,Warehouse,Linda Walker,3,3,In Progress
+EHSI0025,2025-07-20,Lab,Steven Ramirez,10,1,Closed
+EHSI0026,2024-06-15,Parking Lot,Daniel Davis,8,3,In Progress
+EHSI0027,2024-06-05,Roof Access,George Nelson,12,0,Closed
+EHSI0028,2025-12-03,Roof Access,Christopher Hernandez,12,1,In Progress
+EHSI0029,2025-09-18,Warehouse,Michelle Davis,1,0,Closed
+EHSI0030,2024-05-04,Parking Lot,Jennifer Miller,1,0,Open
+EHSI0031,2024-04-13,Loading Dock,Maria Jackson,15,0,In Progress
+EHSI0032,2025-05-23,Roof Access,Nancy Allen,15,1,Open
+EHSI0033,2025-01-17,Roof Access,Edward Smith,4,0,Open
+EHSI0034,2024-02-17,Lab,Steven Roberts,15,1,Open
+EHSI0035,2025-10-05,Warehouse,Linda Ramirez,2,1,Open
+EHSI0036,2025-08-15,Plant A Floor,Donald Walker,10,0,Open
+EHSI0037,2025-08-18,Electrical Room,Dorothy Mitchell,12,3,Closed
+EHSI0038,2024-03-08,Plant A Floor,Margaret Moore,12,3,In Progress
+EHSI0039,2024-12-12,Loading Dock,Brian Rodriguez,9,2,Closed
+EHSI0040,2024-12-15,Lab,Deborah Allen,1,1,In Progress
+EHSI0041,2025-02-17,Warehouse,Paul Ramirez,9,2,In Progress
+EHSI0042,2026-02-04,Plant B Floor,Barbara Clark,9,2,Closed
+EHSI0043,2026-06-24,Electrical Room,Mark Lewis,5,3,Open
+EHSI0044,2024-04-21,HQ Office,Daniel Moore,10,2,Open
+EHSI0045,2025-12-12,HQ Office,Jennifer Garcia,14,1,Open
+EHSI0046,2025-01-23,Parking Lot,Betty Johnson,3,3,Closed
+EHSI0047,2024-08-07,Parking Lot,Amanda Perez,9,2,Closed
+EHSI0048,2026-02-03,Plant B Floor,James Jackson,15,3,Closed
+EHSI0049,2025-10-30,Electrical Room,Nancy Lopez,12,1,Closed
+EHSI0050,2024-07-06,Lab,Barbara King,6,2,In Progress
+EHSI0051,2025-10-15,Plant A Floor,Lisa Rodriguez,15,0,Closed
+EHSI0052,2024-03-25,HQ Office,Steven Lopez,6,3,Closed
+EHSI0053,2025-06-30,Parking Lot,Barbara Miller,12,0,Open
+EHSI0054,2025-10-04,Parking Lot,Paul Robinson,8,0,Closed
+EHSI0055,2024-06-07,Chemical Storage,Kevin Martin,13,0,Closed
+EHSI0056,2024-04-29,Electrical Room,William Walker,5,0,Closed
+EHSI0057,2025-04-10,HQ Office,David Johnson,6,1,Closed
+EHSI0058,2024-04-07,Electrical Room,Emily Flores,3,1,Closed
+EHSI0059,2024-06-08,Parking Lot,James Hernandez,15,2,In Progress
+EHSI0060,2024-07-17,HQ Office,Jessica Lee,7,2,In Progress
+EHSI0061,2025-10-07,Lab,Sandra Thomas,8,2,In Progress
+EHSI0062,2024-08-07,Plant A Floor,Donna Jones,9,3,Closed
+EHSI0063,2026-02-04,Chemical Storage,Daniel Ramirez,3,2,Open
+EHSI0064,2024-07-17,Loading Dock,Steven Adams,13,0,Closed
+EHSI0065,2026-02-22,Loading Dock,William Lee,3,0,In Progress
+EHSI0066,2024-09-23,Parking Lot,Donna Nguyen,12,2,Open
+EHSI0067,2024-07-23,Roof Access,Jennifer Lewis,7,2,Closed
+EHSI0068,2025-07-14,Parking Lot,Karen Nguyen,11,1,In Progress
+EHSI0069,2026-03-24,Parking Lot,Deborah Moore,8,0,In Progress
+EHSI0070,2025-04-08,Roof Access,Michelle Lewis,14,1,Open
+EHSI0071,2025-06-07,Roof Access,Ashley Mitchell,0,0,Open
+EHSI0072,2024-10-31,Loading Dock,Anthony Taylor,0,0,Open
+EHSI0073,2025-06-24,Roof Access,Jessica Ramirez,15,0,Open
+EHSI0074,2025-06-05,Chemical Storage,Patricia Moore,10,3,Closed
+EHSI0075,2024-06-14,Loading Dock,John Adams,3,3,Open
+EHSI0076,2025-12-10,Parking Lot,Sarah King,2,0,Open
+EHSI0077,2026-03-03,Parking Lot,Carol Lee,10,2,Open
+EHSI0078,2024-03-26,HQ Office,Linda Hall,2,2,Closed
+EHSI0079,2025-08-13,Warehouse,Richard Thomas,9,3,In Progress
+EHSI0080,2024-04-19,HQ Office,Donald Clark,15,2,In Progress
+EHSI0081,2024-02-16,Roof Access,Maria Harris,3,3,In Progress
+EHSI0082,2025-10-20,Warehouse,Richard Robinson,1,1,Open
+EHSI0083,2025-12-02,Electrical Room,Thomas Hill,3,1,In Progress
+EHSI0084,2025-09-16,Plant B Floor,Susan Clark,13,2,Closed
+EHSI0085,2025-03-16,Lab,Sarah Thompson,5,3,Closed
+EHSI0086,2026-01-05,Plant B Floor,Donna Williams,10,1,In Progress
+EHSI0087,2024-06-19,Plant B Floor,Barbara Lee,12,3,In Progress
+EHSI0088,2026-03-13,Loading Dock,Dorothy Clark,8,0,Open
+EHSI0089,2025-06-03,Roof Access,Jessica Perez,7,0,Closed
+EHSI0090,2025-03-06,Roof Access,Donna Robinson,1,0,In Progress
+EHSI0091,2024-09-17,Electrical Room,Karen Taylor,1,1,In Progress
+EHSI0092,2025-12-08,Chemical Storage,Jessica Taylor,4,2,In Progress
+EHSI0093,2026-06-29,Loading Dock,Mark Wright,12,2,Open
+EHSI0094,2024-01-06,Plant A Floor,Brian Flores,4,1,Closed
+EHSI0095,2025-03-08,Chemical Storage,Richard Jones,8,3,In Progress
+EHSI0096,2026-01-14,Lab,Lisa Torres,15,2,Closed
+EHSI0097,2024-05-16,HQ Office,Susan Anderson,15,2,Closed
+EHSI0098,2025-11-05,Parking Lot,Christopher Thomas,3,1,In Progress
+EHSI0099,2026-06-09,Warehouse,Ashley Perez,15,0,Open
+EHSI0100,2025-02-05,Roof Access,Anthony Adams,13,2,In Progress
+EHSI0101,2024-04-16,Electrical Room,Emily Hill,6,2,Open
+EHSI0102,2024-08-28,Electrical Room,Margaret Garcia,4,3,Closed
+EHSI0103,2024-08-10,Plant B Floor,Ashley Martinez,8,0,Open
+EHSI0104,2024-12-12,Chemical Storage,Steven Martin,3,1,In Progress
+EHSI0105,2024-05-01,HQ Office,Nancy Ramirez,11,1,In Progress
+EHSI0106,2024-02-23,Lab,Kevin King,12,1,Open
+EHSI0107,2025-06-23,Loading Dock,Stephanie Sanchez,10,2,Open
+EHSI0108,2025-09-17,Plant A Floor,Sarah Rivera,7,3,Closed
+EHSI0109,2025-07-14,Chemical Storage,Stephanie Smith,8,1,Closed
+EHSI0110,2024-04-10,HQ Office,Susan Allen,15,3,Open
+EHSI0111,2024-02-02,Plant B Floor,Linda Thomas,14,2,Closed
+EHSI0112,2025-07-26,Roof Access,Donna Clark,13,2,In Progress
+EHSI0113,2025-07-24,Warehouse,Barbara Brown,3,0,Open
+EHSI0114,2024-06-16,Plant B Floor,Emily Garcia,8,0,Closed
+EHSI0115,2025-09-19,Warehouse,Michael Martinez,10,2,Closed
+EHSI0116,2025-10-11,Loading Dock,James Hall,13,3,Open
+EHSI0117,2026-06-01,Loading Dock,Emily Miller,9,0,Closed
+EHSI0118,2024-03-12,Parking Lot,Ashley Rivera,3,2,Open
+EHSI0119,2025-03-05,Warehouse,Charles Williams,1,1,Closed
+EHSI0120,2026-04-06,Plant A Floor,David Thompson,2,0,Closed
+EHSI0121,2024-07-09,Warehouse,Barbara Lewis,7,2,In Progress
+EHSI0122,2024-04-26,Warehouse,Linda Clark,5,1,Closed
+EHSI0123,2024-05-01,Lab,Deborah Hall,13,1,In Progress
+EHSI0124,2024-03-08,Loading Dock,Christopher Jackson,14,2,Open
+EHSI0125,2025-10-27,Chemical Storage,Robert Lee,7,1,Closed
+EHSI0126,2024-02-20,HQ Office,Nancy Young,4,1,Closed
+EHSI0127,2025-02-09,Roof Access,Jennifer Scott,15,1,Closed
+EHSI0128,2024-12-28,Roof Access,Sarah Wilson,2,0,In Progress
+EHSI0129,2024-12-25,Parking Lot,Paul Green,14,3,Closed
+EHSI0130,2024-04-12,Roof Access,Michelle Adams,14,3,Open
+EHSI0131,2025-09-22,Lab,Thomas Torres,6,3,Closed
+EHSI0132,2026-01-25,HQ Office,Maria Rodriguez,10,3,Open
+EHSI0133,2024-07-29,Plant B Floor,Sarah Martin,10,1,In Progress
+EHSI0134,2024-04-08,Electrical Room,Kimberly Green,3,2,Open
+EHSI0135,2024-09-05,Plant B Floor,Susan King,7,1,Closed
+EHSI0136,2024-07-22,Warehouse,Daniel Hall,9,1,In Progress
+EHSI0137,2025-12-09,Lab,Richard Young,4,2,In Progress
+EHSI0138,2026-04-03,Loading Dock,Robert Robinson,3,0,Closed
+EHSI0139,2024-07-09,Plant A Floor,Jessica Adams,10,0,Open
+EHSI0140,2026-03-15,Loading Dock,David Mitchell,2,1,Closed
+EHSI0141,2024-01-27,Electrical Room,William Davis,7,3,Open
+EHSI0142,2025-06-24,Lab,David Moore,0,0,Open
+EHSI0143,2026-05-12,Loading Dock,Carol Allen,2,0,Open
+EHSI0144,2024-03-12,Plant A Floor,Anthony Martinez,3,1,Closed
+EHSI0145,2024-10-21,Chemical Storage,Michael Nelson,2,2,Closed
+EHSI0146,2026-03-09,Plant B Floor,Lisa Johnson,13,2,In Progress
+EHSI0147,2025-09-19,Chemical Storage,Anthony King,11,3,Open
+EHSI0148,2024-03-16,Warehouse,Michael Perez,7,2,Open
+EHSI0149,2026-05-03,Plant B Floor,Charles Nguyen,5,1,Open
+EHSI0150,2025-09-11,HQ Office,Susan White,4,1,In Progress

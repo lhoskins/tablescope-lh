@@ -1,0 +1,9 @@
+grade,title,salary_min,salary_mid,salary_max
+G1,Manufacturing Associate,35000,42000,52000
+G2,Manufacturing Technician,42000,52000,65000
+G3,Senior Technician / Specialist,55000,67000,82000
+G4,Team Lead / Coordinator,65000,80000,98000
+G5,Manager / Analyst,78000,95000,118000
+G6,Senior Manager / Senior Analyst,95000,118000,145000
+G7,Director,118000,145000,180000
+G8,VP / Executive,150000,200000,270000

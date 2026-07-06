@@ -1,0 +1,9 @@
+project_id,name,type,start_date,planned_end,actual_end,budget,spent,pct_spent,status,lead_engineer
+EPRJ-001,Next-Gen Aerospace Bracket,New Product,2025-01-15,2026-03-31,,380000,222200.0,58.5,On Track,Darnell Washington
+EPRJ-002,Automotive Seal Redesign,Redesign,2025-03-01,2025-12-31,,175000,145900.0,83.3,On Track,Marcus Ellsworth
+EPRJ-003,Line 2 Process Optimization,Process Improvement,2025-06-01,2026-06-30,,220000,228400.0,103.8,Over Budget,Darnell Washington
+EPRJ-004,Defense Connector Qualification,New Product,2025-09-01,2026-09-30,,310000,185800.0,59.9,On Track,Chen Wei
+EPRJ-005,Medical Implant Prototype,New Product,2026-01-01,2026-12-31,,450000,336400.0,74.8,On Track,Dana Kovacs
+EPRJ-006,ERP CAD Integration,IT/Engineering,2025-04-01,2025-10-31,2025-10-31,95000,77700.0,81.8,On Track,Chen Wei
+EPRJ-007,Titanium Alloy Study,R&D,2026-02-01,2026-08-31,,180000,211600.0,117.6,Over Budget,Tobias Brennan
+EPRJ-008,Customer Portal Integration,Sales Enablement,2025-11-01,2026-04-30,2026-04-30,140000,61500.0,43.9,On Track,Samantha Torres

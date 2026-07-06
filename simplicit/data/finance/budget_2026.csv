@@ -1,0 +1,132 @@
+dept,account_id,account_name,Q1_budget,Q2_budget,Q3_budget,Q4_budget
+Engineering,6000,Cost of Goods Sold,768503,763679,750317,762816
+Engineering,6100,Direct Materials,320930,312549,310939,310519
+Engineering,6200,Direct Labor,226254,231223,229995,224984
+Engineering,6300,Manufacturing Overhead,127639,123607,126615,125158
+Engineering,7000,Salaries & Benefits,247029,251992,254455,253269
+Engineering,7100,Travel & Entertainment,37354,38151,37788,37269
+Engineering,7200,Professional Services,62332,63147,62803,62978
+Engineering,7300,Facilities,75327,74599,76931,76377
+Engineering,7400,Depreciation,50903,49646,50317,51313
+Engineering,7500,IT & Software,37640,38536,37814,38325
+Engineering,7600,Marketing,38108,37630,37575,38101
+Engineering,8000,Research & Development,37649,37275,37241,38531
+Engineering,9000,Capital Expenditure,64150,63306,62854,64254
+Finance,6000,Cost of Goods Sold,255551,251415,255591,249677
+Finance,6100,Direct Materials,105519,104888,106385,105682
+Finance,6200,Direct Labor,75836,76021,75181,74198
+Finance,6300,Manufacturing Overhead,42798,41343,42017,42001
+Finance,7000,Salaries & Benefits,83944,83332,82809,83111
+Finance,7100,Travel & Entertainment,12784,12757,12503,12503
+Finance,7200,Professional Services,20932,21201,20898,20708
+Finance,7300,Facilities,24807,24784,25493,25132
+Finance,7400,Depreciation,16634,16960,16703,16704
+Finance,7500,IT & Software,12638,12435,12837,12681
+Finance,7600,Marketing,12487,12491,12760,12734
+Finance,8000,Research & Development,12399,12706,12597,12447
+Finance,9000,Capital Expenditure,21042,21026,20969,20582
+HR,6000,Cost of Goods Sold,190275,186985,186924,190339
+HR,6100,Direct Materials,79660,78751,79897,79715
+HR,6200,Direct Labor,57208,56764,56195,57384
+HR,6300,Manufacturing Overhead,31546,32121,31380,31961
+HR,7000,Salaries & Benefits,61786,63874,63798,64242
+HR,7100,Travel & Entertainment,9330,9322,9593,9379
+HR,7200,Professional Services,15849,15611,15940,15552
+HR,7300,Facilities,19175,18612,18825,18757
+HR,7400,Depreciation,12723,12614,12350,12825
+HR,7500,IT & Software,9449,9299,9537,9591
+HR,7600,Marketing,9407,9634,9338,9285
+HR,8000,Research & Development,9525,9301,9430,9574
+HR,9000,Capital Expenditure,15827,16010,15466,15491
+IT,6000,Cost of Goods Sold,312178,320523,311344,320279
+IT,6100,Direct Materials,131118,129238,129186,132247
+IT,6200,Direct Labor,95436,94839,94374,95075
+IT,6300,Manufacturing Overhead,52321,53089,51670,52774
+IT,7000,Salaries & Benefits,104529,106795,106094,106848
+IT,7100,Travel & Entertainment,15866,15824,15908,15467
+IT,7200,Professional Services,26258,25828,26405,26613
+IT,7300,Facilities,31672,31905,31284,31329
+IT,7400,Depreciation,20588,20681,20753,20948
+IT,7500,IT & Software,15576,15769,15880,15449
+IT,7600,Marketing,16016,15787,15861,15962
+IT,8000,Research & Development,15764,15437,15522,15730
+IT,9000,Capital Expenditure,26523,26476,26216,26718
+Manufacturing,6000,Cost of Goods Sold,2976316,2966845,3047014,2976955
+Manufacturing,6100,Direct Materials,1265825,1283988,1242593,1279845
+Manufacturing,6200,Direct Labor,913617,920957,910396,924903
+Manufacturing,6300,Manufacturing Overhead,498986,503807,496352,497911
+Manufacturing,7000,Salaries & Benefits,1001502,996980,1005880,1004743
+Manufacturing,7100,Travel & Entertainment,153397,153617,148218,153004
+Manufacturing,7200,Professional Services,252474,253751,254180,250653
+Manufacturing,7300,Facilities,300609,306841,302406,296530
+Manufacturing,7400,Depreciation,202820,202964,199932,204006
+Manufacturing,7500,IT & Software,148992,153476,154006,149157
+Manufacturing,7600,Marketing,153161,150539,148406,154184
+Manufacturing,8000,Research & Development,151820,152793,151511,153298
+Manufacturing,9000,Capital Expenditure,249577,253677,247161,255033
+Procurement,6000,Cost of Goods Sold,190378,187915,188523,190437
+Procurement,6100,Direct Materials,77950,79852,80055,78324
+Procurement,6200,Direct Labor,57264,57556,55888,56296
+Procurement,6300,Manufacturing Overhead,31797,31927,31997,31908
+Procurement,7000,Salaries & Benefits,62719,61751,64078,62288
+Procurement,7100,Travel & Entertainment,9399,9631,9622,9506
+Procurement,7200,Professional Services,15918,15997,15534,15970
+Procurement,7300,Facilities,19053,19047,18991,19176
+Procurement,7400,Depreciation,12639,12493,12779,12602
+Procurement,7500,IT & Software,9344,9265,9606,9540
+Procurement,7600,Marketing,9488,9567,9569,9381
+Procurement,8000,Research & Development,9347,9317,9400,9288
+Procurement,9000,Capital Expenditure,15735,15665,15944,15782
+Quality,6000,Cost of Goods Sold,376309,374837,381219,374145
+Quality,6100,Direct Materials,158557,160245,159784,155816
+Quality,6200,Direct Labor,113627,111556,112610,114852
+Quality,6300,Manufacturing Overhead,63959,62436,62997,62394
+Quality,7000,Salaries & Benefits,128488,125953,127614,126429
+Quality,7100,Travel & Entertainment,18843,19247,18764,18709
+Quality,7200,Professional Services,31295,31808,32022,31010
+Quality,7300,Facilities,37870,37159,37723,37789
+Quality,7400,Depreciation,25510,24831,25293,25467
+Quality,7500,IT & Software,18898,18596,18796,18639
+Quality,7600,Marketing,19168,19005,19098,19136
+Quality,8000,Research & Development,18871,18694,18812,18638
+Quality,9000,Capital Expenditure,31861,31418,31800,32118
+Sales,5000,Revenue,1061411,1046760,1048428,1034937
+Sales,6000,Cost of Goods Sold,626424,628527,618088,622530
+Sales,6100,Direct Materials,265933,262120,261047,265708
+Sales,6200,Direct Labor,190926,188854,192742,190910
+Sales,6300,Manufacturing Overhead,104921,105935,103809,104944
+Sales,7000,Salaries & Benefits,208378,207717,205934,207360
+Sales,7100,Travel & Entertainment,31427,31905,31929,31504
+Sales,7200,Professional Services,52131,52414,51830,51555
+Sales,7300,Facilities,63158,62577,63682,62734
+Sales,7400,Depreciation,42047,42809,42661,41472
+Sales,7500,IT & Software,31520,31248,30928,31395
+Sales,7600,Marketing,31186,30883,31692,31345
+Sales,8000,Research & Development,31131,31473,30955,31922
+Sales,9000,Capital Expenditure,51884,52160,52976,53480
+EHS,6000,Cost of Goods Sold,125500,125585,124177,126523
+EHS,6100,Direct Materials,51908,52561,52966,53205
+EHS,6200,Direct Labor,37962,37659,38060,37090
+EHS,6300,Manufacturing Overhead,20801,21352,21020,20910
+EHS,7000,Salaries & Benefits,42301,41456,42326,42471
+EHS,7100,Travel & Entertainment,6370,6239,6261,6180
+EHS,7200,Professional Services,10510,10640,10614,10489
+EHS,7300,Facilities,12639,12722,12830,12513
+EHS,7400,Depreciation,8519,8376,8318,8235
+EHS,7500,IT & Software,6222,6339,6255,6287
+EHS,7600,Marketing,6360,6300,6396,6300
+EHS,8000,Research & Development,6259,6238,6284,6193
+EHS,9000,Capital Expenditure,10586,10302,10639,10511
+Executive,6000,Cost of Goods Sold,434776,435372,435885,439279
+Executive,6100,Direct Materials,186229,183422,181591,180513
+Executive,6200,Direct Labor,130586,134648,130433,130201
+Executive,6300,Manufacturing Overhead,74269,74488,74471,73945
+Executive,7000,Salaries & Benefits,146942,147628,149756,144687
+Executive,7100,Travel & Entertainment,21754,22296,21748,22388
+Executive,7200,Professional Services,36562,36440,37246,36609
+Executive,7300,Facilities,44194,43275,43528,43401
+Executive,7400,Depreciation,29312,29492,29056,29819
+Executive,7500,IT & Software,21767,21635,21768,21973
+Executive,7600,Marketing,22457,22111,22094,21693
+Executive,8000,Research & Development,22473,21844,22208,21846
+Executive,9000,Capital Expenditure,37233,36104,36818,37291

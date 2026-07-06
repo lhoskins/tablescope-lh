@@ -1,0 +1,121 @@
+ecr_id,project_id,date,type,description,status,cost_impact
+ECR0001,EPRJ-005,2025-07-05,Supplier Change,ECR for EPRJ-005: drawing update required,Under Review,2100.0
+ECR0002,EPRJ-003,2024-04-18,Process Change,ECR for EPRJ-003: process change required,Implemented,32900.0
+ECR0003,EPRJ-008,2025-04-27,Design Change,ECR for EPRJ-008: process change required,Open,9000.0
+ECR0004,EPRJ-004,2026-02-26,Design Change,ECR for EPRJ-004: material substitution required,Approved,-1700.0
+ECR0005,EPRJ-007,2025-01-17,Drawing Update,ECR for EPRJ-007: process change required,Rejected,-2300.0
+ECR0006,EPRJ-007,2025-12-07,Supplier Change,ECR for EPRJ-007: drawing update required,Approved,32300.0
+ECR0007,EPRJ-005,2025-05-05,Design Change,ECR for EPRJ-005: material substitution required,Approved,39200.0
+ECR0008,EPRJ-002,2024-06-18,Material Substitution,ECR for EPRJ-002: supplier change required,Under Review,12000.0
+ECR0009,EPRJ-005,2026-06-03,Design Change,ECR for EPRJ-005: drawing update required,Approved,36600.0
+ECR0010,EPRJ-008,2026-04-26,Supplier Change,ECR for EPRJ-008: supplier change required,Rejected,39900.0
+ECR0011,EPRJ-007,2026-05-09,Drawing Update,ECR for EPRJ-007: material substitution required,Open,14100.0
+ECR0012,EPRJ-007,2026-04-17,Design Change,ECR for EPRJ-007: material substitution required,Implemented,19900.0
+ECR0013,EPRJ-004,2024-08-07,Drawing Update,ECR for EPRJ-004: drawing update required,Rejected,43900.0
+ECR0014,EPRJ-005,2024-11-14,Design Change,ECR for EPRJ-005: supplier change required,Approved,37300.0
+ECR0015,EPRJ-004,2025-08-22,Design Change,ECR for EPRJ-004: design change required,Implemented,18500.0
+ECR0016,EPRJ-003,2025-12-22,Design Change,ECR for EPRJ-003: material substitution required,Approved,-2300.0
+ECR0017,EPRJ-001,2025-09-29,Process Change,ECR for EPRJ-001: supplier change required,Under Review,31800.0
+ECR0018,EPRJ-008,2026-01-23,Drawing Update,ECR for EPRJ-008: material substitution required,Under Review,29200.0
+ECR0019,EPRJ-001,2024-08-04,Design Change,ECR for EPRJ-001: drawing update required,Rejected,-1000.0
+ECR0020,EPRJ-007,2024-10-15,Process Change,ECR for EPRJ-007: design change required,Implemented,40100.0
+ECR0021,EPRJ-005,2025-05-01,Supplier Change,ECR for EPRJ-005: drawing update required,Implemented,20400.0
+ECR0022,EPRJ-008,2025-06-22,Process Change,ECR for EPRJ-008: process change required,Implemented,22500.0
+ECR0023,EPRJ-008,2025-09-26,Process Change,ECR for EPRJ-008: drawing update required,Implemented,31600.0
+ECR0024,EPRJ-008,2024-03-28,Supplier Change,ECR for EPRJ-008: design change required,Rejected,-100.0
+ECR0025,EPRJ-005,2025-03-02,Supplier Change,ECR for EPRJ-005: design change required,Rejected,-1600.0
+ECR0026,EPRJ-003,2026-03-30,Supplier Change,ECR for EPRJ-003: process change required,Open,6300.0
+ECR0027,EPRJ-001,2025-07-05,Material Substitution,ECR for EPRJ-001: material substitution required,Rejected,38000.0
+ECR0028,EPRJ-007,2025-02-05,Drawing Update,ECR for EPRJ-007: supplier change required,Implemented,21000.0
+ECR0029,EPRJ-005,2024-05-29,Material Substitution,ECR for EPRJ-005: material substitution required,Rejected,-4100.0
+ECR0030,EPRJ-006,2024-03-02,Design Change,ECR for EPRJ-006: process change required,Under Review,27100.0
+ECR0031,EPRJ-005,2024-04-06,Material Substitution,ECR for EPRJ-005: design change required,Rejected,-200.0
+ECR0032,EPRJ-007,2025-01-17,Material Substitution,ECR for EPRJ-007: material substitution required,Approved,37200.0
+ECR0033,EPRJ-003,2026-05-09,Supplier Change,ECR for EPRJ-003: process change required,Rejected,23100.0
+ECR0034,EPRJ-007,2024-02-24,Supplier Change,ECR for EPRJ-007: drawing update required,Open,7400.0
+ECR0035,EPRJ-001,2025-07-06,Supplier Change,ECR for EPRJ-001: material substitution required,Implemented,8500.0
+ECR0036,EPRJ-008,2024-02-25,Process Change,ECR for EPRJ-008: material substitution required,Implemented,10100.0
+ECR0037,EPRJ-007,2025-07-09,Design Change,ECR for EPRJ-007: material substitution required,Implemented,17200.0
+ECR0038,EPRJ-008,2025-02-25,Material Substitution,ECR for EPRJ-008: design change required,Under Review,19500.0
+ECR0039,EPRJ-006,2024-11-03,Drawing Update,ECR for EPRJ-006: design change required,Approved,26600.0
+ECR0040,EPRJ-004,2026-05-21,Material Substitution,ECR for EPRJ-004: supplier change required,Under Review,1000.0
+ECR0041,EPRJ-005,2025-07-25,Supplier Change,ECR for EPRJ-005: supplier change required,Approved,36200.0
+ECR0042,EPRJ-004,2024-03-08,Design Change,ECR for EPRJ-004: design change required,Implemented,3900.0
+ECR0043,EPRJ-006,2025-08-13,Process Change,ECR for EPRJ-006: design change required,Open,41100.0
+ECR0044,EPRJ-003,2024-10-13,Drawing Update,ECR for EPRJ-003: design change required,Under Review,200.0
+ECR0045,EPRJ-007,2026-01-03,Material Substitution,ECR for EPRJ-007: drawing update required,Under Review,7600.0
+ECR0046,EPRJ-004,2024-03-20,Material Substitution,ECR for EPRJ-004: process change required,Open,5200.0
+ECR0047,EPRJ-005,2026-06-24,Design Change,ECR for EPRJ-005: supplier change required,Implemented,26300.0
+ECR0048,EPRJ-008,2026-06-11,Material Substitution,ECR for EPRJ-008: design change required,Rejected,36300.0
+ECR0049,EPRJ-008,2025-09-12,Process Change,ECR for EPRJ-008: material substitution required,Implemented,37700.0
+ECR0050,EPRJ-003,2024-04-10,Design Change,ECR for EPRJ-003: drawing update required,Under Review,-3200.0
+ECR0051,EPRJ-008,2024-09-30,Material Substitution,ECR for EPRJ-008: design change required,Approved,22100.0
+ECR0052,EPRJ-002,2025-05-06,Design Change,ECR for EPRJ-002: drawing update required,Implemented,33300.0
+ECR0053,EPRJ-007,2024-08-29,Material Substitution,ECR for EPRJ-007: process change required,Open,-1000.0
+ECR0054,EPRJ-005,2025-08-23,Design Change,ECR for EPRJ-005: supplier change required,Rejected,14500.0
+ECR0055,EPRJ-006,2024-04-04,Drawing Update,ECR for EPRJ-006: material substitution required,Rejected,25500.0
+ECR0056,EPRJ-002,2024-10-09,Design Change,ECR for EPRJ-002: drawing update required,Approved,12500.0
+ECR0057,EPRJ-007,2026-03-08,Material Substitution,ECR for EPRJ-007: material substitution required,Rejected,20400.0
+ECR0058,EPRJ-006,2025-12-14,Drawing Update,ECR for EPRJ-006: design change required,Rejected,32500.0
+ECR0059,EPRJ-002,2024-07-01,Supplier Change,ECR for EPRJ-002: supplier change required,Under Review,-1700.0
+ECR0060,EPRJ-002,2025-05-19,Drawing Update,ECR for EPRJ-002: design change required,Rejected,14000.0
+ECR0061,EPRJ-001,2024-01-02,Drawing Update,ECR for EPRJ-001: supplier change required,Rejected,1300.0
+ECR0062,EPRJ-003,2026-01-24,Process Change,ECR for EPRJ-003: material substitution required,Rejected,8800.0
+ECR0063,EPRJ-005,2024-07-19,Design Change,ECR for EPRJ-005: material substitution required,Implemented,-5000.0
+ECR0064,EPRJ-008,2025-05-27,Design Change,ECR for EPRJ-008: drawing update required,Approved,26900.0
+ECR0065,EPRJ-007,2024-12-14,Process Change,ECR for EPRJ-007: supplier change required,Open,36700.0
+ECR0066,EPRJ-007,2025-07-09,Process Change,ECR for EPRJ-007: supplier change required,Implemented,27300.0
+ECR0067,EPRJ-008,2025-12-14,Material Substitution,ECR for EPRJ-008: material substitution required,Open,8600.0
+ECR0068,EPRJ-004,2026-01-09,Material Substitution,ECR for EPRJ-004: drawing update required,Implemented,24100.0
+ECR0069,EPRJ-007,2025-05-28,Material Substitution,ECR for EPRJ-007: drawing update required,Approved,18500.0
+ECR0070,EPRJ-006,2026-01-25,Supplier Change,ECR for EPRJ-006: process change required,Approved,34600.0
+ECR0071,EPRJ-006,2025-05-10,Drawing Update,ECR for EPRJ-006: process change required,Under Review,30300.0
+ECR0072,EPRJ-001,2025-08-16,Drawing Update,ECR for EPRJ-001: process change required,Under Review,2200.0
+ECR0073,EPRJ-001,2025-06-01,Material Substitution,ECR for EPRJ-001: material substitution required,Under Review,600.0
+ECR0074,EPRJ-006,2025-04-16,Process Change,ECR for EPRJ-006: design change required,Under Review,13500.0
+ECR0075,EPRJ-003,2025-03-07,Material Substitution,ECR for EPRJ-003: process change required,Open,14700.0
+ECR0076,EPRJ-005,2026-05-08,Process Change,ECR for EPRJ-005: drawing update required,Under Review,40300.0
+ECR0077,EPRJ-002,2024-10-20,Material Substitution,ECR for EPRJ-002: drawing update required,Rejected,33500.0
+ECR0078,EPRJ-003,2024-05-28,Process Change,ECR for EPRJ-003: drawing update required,Rejected,35400.0
+ECR0079,EPRJ-007,2024-01-03,Supplier Change,ECR for EPRJ-007: material substitution required,Implemented,5100.0
+ECR0080,EPRJ-001,2025-05-07,Design Change,ECR for EPRJ-001: design change required,Under Review,43100.0
+ECR0081,EPRJ-005,2024-11-19,Supplier Change,ECR for EPRJ-005: drawing update required,Approved,21300.0
+ECR0082,EPRJ-002,2025-10-06,Supplier Change,ECR for EPRJ-002: material substitution required,Implemented,18000.0
+ECR0083,EPRJ-007,2025-09-19,Material Substitution,ECR for EPRJ-007: material substitution required,Implemented,18900.0
+ECR0084,EPRJ-004,2024-09-08,Material Substitution,ECR for EPRJ-004: supplier change required,Rejected,20300.0
+ECR0085,EPRJ-007,2025-07-21,Supplier Change,ECR for EPRJ-007: drawing update required,Implemented,20600.0
+ECR0086,EPRJ-003,2024-12-19,Drawing Update,ECR for EPRJ-003: material substitution required,Implemented,20600.0
+ECR0087,EPRJ-007,2025-07-05,Drawing Update,ECR for EPRJ-007: process change required,Under Review,100.0
+ECR0088,EPRJ-003,2024-09-12,Drawing Update,ECR for EPRJ-003: supplier change required,Implemented,11600.0
+ECR0089,EPRJ-004,2025-05-06,Drawing Update,ECR for EPRJ-004: material substitution required,Approved,22200.0
+ECR0090,EPRJ-003,2024-04-26,Supplier Change,ECR for EPRJ-003: design change required,Rejected,24000.0
+ECR0091,EPRJ-005,2025-09-03,Material Substitution,ECR for EPRJ-005: material substitution required,Approved,15200.0
+ECR0092,EPRJ-003,2025-08-31,Supplier Change,ECR for EPRJ-003: process change required,Open,40400.0
+ECR0093,EPRJ-007,2025-04-19,Material Substitution,ECR for EPRJ-007: drawing update required,Rejected,2700.0
+ECR0094,EPRJ-003,2025-07-01,Design Change,ECR for EPRJ-003: drawing update required,Rejected,-600.0
+ECR0095,EPRJ-008,2025-04-12,Drawing Update,ECR for EPRJ-008: supplier change required,Rejected,32100.0
+ECR0096,EPRJ-008,2025-11-17,Supplier Change,ECR for EPRJ-008: drawing update required,Open,30600.0
+ECR0097,EPRJ-002,2025-09-15,Supplier Change,ECR for EPRJ-002: drawing update required,Approved,-2700.0
+ECR0098,EPRJ-007,2025-05-28,Supplier Change,ECR for EPRJ-007: supplier change required,Under Review,42500.0
+ECR0099,EPRJ-004,2024-02-03,Drawing Update,ECR for EPRJ-004: process change required,Open,13100.0
+ECR0100,EPRJ-007,2024-06-10,Material Substitution,ECR for EPRJ-007: drawing update required,Open,43700.0
+ECR0101,EPRJ-001,2025-12-27,Material Substitution,ECR for EPRJ-001: process change required,Implemented,6800.0
+ECR0102,EPRJ-008,2025-05-25,Process Change,ECR for EPRJ-008: design change required,Implemented,4400.0
+ECR0103,EPRJ-005,2026-03-09,Supplier Change,ECR for EPRJ-005: supplier change required,Rejected,25300.0
+ECR0104,EPRJ-007,2024-03-24,Supplier Change,ECR for EPRJ-007: process change required,Open,5600.0
+ECR0105,EPRJ-007,2024-08-31,Drawing Update,ECR for EPRJ-007: material substitution required,Approved,42200.0
+ECR0106,EPRJ-008,2025-02-16,Supplier Change,ECR for EPRJ-008: supplier change required,Approved,37400.0
+ECR0107,EPRJ-008,2026-02-22,Drawing Update,ECR for EPRJ-008: supplier change required,Approved,2400.0
+ECR0108,EPRJ-001,2024-01-12,Supplier Change,ECR for EPRJ-001: process change required,Under Review,18300.0
+ECR0109,EPRJ-006,2025-06-21,Design Change,ECR for EPRJ-006: design change required,Implemented,33700.0
+ECR0110,EPRJ-007,2025-03-20,Supplier Change,ECR for EPRJ-007: material substitution required,Approved,40000.0
+ECR0111,EPRJ-006,2025-12-07,Process Change,ECR for EPRJ-006: design change required,Approved,-4200.0
+ECR0112,EPRJ-001,2024-11-13,Drawing Update,ECR for EPRJ-001: material substitution required,Approved,20200.0
+ECR0113,EPRJ-008,2025-01-18,Process Change,ECR for EPRJ-008: process change required,Under Review,8700.0
+ECR0114,EPRJ-007,2026-05-11,Supplier Change,ECR for EPRJ-007: drawing update required,Open,9700.0
+ECR0115,EPRJ-001,2025-05-14,Supplier Change,ECR for EPRJ-001: supplier change required,Rejected,20000.0
+ECR0116,EPRJ-008,2024-05-25,Material Substitution,ECR for EPRJ-008: drawing update required,Approved,2500.0
+ECR0117,EPRJ-007,2026-01-17,Process Change,ECR for EPRJ-007: material substitution required,Under Review,28700.0
+ECR0118,EPRJ-001,2024-01-11,Design Change,ECR for EPRJ-001: material substitution required,Rejected,2400.0
+ECR0119,EPRJ-006,2026-01-29,Drawing Update,ECR for EPRJ-006: drawing update required,Implemented,-2000.0
+ECR0120,EPRJ-008,2026-02-21,Drawing Update,ECR for EPRJ-008: supplier change required,Under Review,39600.0

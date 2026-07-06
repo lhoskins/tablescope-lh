@@ -1,0 +1,775 @@
+month,kpi_name,category,target,actual,unit,status
+2023-01-01,Revenue,Financial,3.8,3.84,$M,Green
+2023-01-01,Gross Margin %,Financial,38.0,37.63,%,Green
+2023-01-01,EBITDA %,Financial,14.0,13.5,%,Green
+2023-01-01,OEE,Manufacturing,82.0,83.73,%,Green
+2023-01-01,Scrap Rate,Manufacturing,2.5,2.63,%,Green
+2023-01-01,On-Time Delivery,Manufacturing,95.0,91.84,%,Yellow
+2023-01-01,Headcount,HR,320,337.17,count,Green
+2023-01-01,Voluntary Turnover Rate,HR,8.0,7.57,%,Yellow
+2023-01-01,Open Positions,HR,12,11.56,count,Green
+2023-01-01,NPS,Sales,52,51.71,score,Green
+2023-01-01,Bookings,Sales,4.2,4.47,$M,Green
+2023-01-01,Pipeline Coverage,Sales,3.0,3.13,ratio,Green
+2023-01-01,First Pass Yield,Quality,97.0,94.41,%,Green
+2023-01-01,Customer PPM,Quality,250,233.78,ppm,Yellow
+2023-01-01,OSHA Recordable Rate,EHS,1.5,1.46,rate,Green
+2023-01-01,Days Since Last Recordable,EHS,90,94.16,days,Green
+2023-01-01,IT Ticket Avg Resolution,IT,18.0,17.84,hrs,Green
+2023-01-01,Capex Spend vs Plan,Finance,95.0,101.0,%,Green
+2023-02-01,Revenue,Financial,3.8,3.98,$M,Green
+2023-02-01,Gross Margin %,Financial,38.0,39.36,%,Green
+2023-02-01,EBITDA %,Financial,14.0,14.96,%,Green
+2023-02-01,OEE,Manufacturing,82.0,77.94,%,Yellow
+2023-02-01,Scrap Rate,Manufacturing,2.5,2.49,%,Green
+2023-02-01,On-Time Delivery,Manufacturing,95.0,91.53,%,Yellow
+2023-02-01,Headcount,HR,320,307.3,count,Green
+2023-02-01,Voluntary Turnover Rate,HR,8.0,7.37,%,Yellow
+2023-02-01,Open Positions,HR,12,11.8,count,Green
+2023-02-01,NPS,Sales,52,52.13,score,Green
+2023-02-01,Bookings,Sales,4.2,4.47,$M,Green
+2023-02-01,Pipeline Coverage,Sales,3.0,2.77,ratio,Yellow
+2023-02-01,First Pass Yield,Quality,97.0,98.83,%,Green
+2023-02-01,Customer PPM,Quality,250,256.58,ppm,Green
+2023-02-01,OSHA Recordable Rate,EHS,1.5,1.47,rate,Green
+2023-02-01,Days Since Last Recordable,EHS,90,94.34,days,Green
+2023-02-01,IT Ticket Avg Resolution,IT,18.0,17.39,hrs,Green
+2023-02-01,Capex Spend vs Plan,Finance,95.0,93.96,%,Green
+2023-03-01,Revenue,Financial,3.8,3.71,$M,Green
+2023-03-01,Gross Margin %,Financial,38.0,39.42,%,Green
+2023-03-01,EBITDA %,Financial,14.0,15.02,%,Green
+2023-03-01,OEE,Manufacturing,82.0,85.73,%,Green
+2023-03-01,Scrap Rate,Manufacturing,2.5,2.45,%,Green
+2023-03-01,On-Time Delivery,Manufacturing,95.0,99.03,%,Green
+2023-03-01,Headcount,HR,320,316.03,count,Green
+2023-03-01,Voluntary Turnover Rate,HR,8.0,8.57,%,Green
+2023-03-01,Open Positions,HR,12,11.98,count,Green
+2023-03-01,NPS,Sales,52,51.92,score,Green
+2023-03-01,Bookings,Sales,4.2,4.2,$M,Green
+2023-03-01,Pipeline Coverage,Sales,3.0,3.1,ratio,Green
+2023-03-01,First Pass Yield,Quality,97.0,99.48,%,Green
+2023-03-01,Customer PPM,Quality,250,236.28,ppm,Yellow
+2023-03-01,OSHA Recordable Rate,EHS,1.5,1.41,rate,Yellow
+2023-03-01,Days Since Last Recordable,EHS,90,86.69,days,Yellow
+2023-03-01,IT Ticket Avg Resolution,IT,18.0,18.39,hrs,Green
+2023-03-01,Capex Spend vs Plan,Finance,95.0,92.33,%,Green
+2023-04-01,Revenue,Financial,3.8,3.74,$M,Green
+2023-04-01,Gross Margin %,Financial,38.0,37.21,%,Green
+2023-04-01,EBITDA %,Financial,14.0,13.12,%,Yellow
+2023-04-01,OEE,Manufacturing,82.0,82.71,%,Green
+2023-04-01,Scrap Rate,Manufacturing,2.5,2.3,%,Yellow
+2023-04-01,On-Time Delivery,Manufacturing,95.0,90.94,%,Yellow
+2023-04-01,Headcount,HR,320,336.45,count,Green
+2023-04-01,Voluntary Turnover Rate,HR,8.0,8.15,%,Green
+2023-04-01,Open Positions,HR,12,11.46,count,Green
+2023-04-01,NPS,Sales,52,52.31,score,Green
+2023-04-01,Bookings,Sales,4.2,4.03,$M,Green
+2023-04-01,Pipeline Coverage,Sales,3.0,2.77,ratio,Yellow
+2023-04-01,First Pass Yield,Quality,97.0,92.61,%,Yellow
+2023-04-01,Customer PPM,Quality,250,236.57,ppm,Yellow
+2023-04-01,OSHA Recordable Rate,EHS,1.5,1.61,rate,Green
+2023-04-01,Days Since Last Recordable,EHS,90,90.06,days,Green
+2023-04-01,IT Ticket Avg Resolution,IT,18.0,18.81,hrs,Green
+2023-04-01,Capex Spend vs Plan,Finance,95.0,90.46,%,Green
+2023-05-01,Revenue,Financial,3.8,3.71,$M,Green
+2023-05-01,Gross Margin %,Financial,38.0,37.24,%,Green
+2023-05-01,EBITDA %,Financial,14.0,13.74,%,Green
+2023-05-01,OEE,Manufacturing,82.0,79.54,%,Green
+2023-05-01,Scrap Rate,Manufacturing,2.5,2.54,%,Green
+2023-05-01,On-Time Delivery,Manufacturing,95.0,98.26,%,Green
+2023-05-01,Headcount,HR,320,327.68,count,Green
+2023-05-01,Voluntary Turnover Rate,HR,8.0,7.84,%,Green
+2023-05-01,Open Positions,HR,12,12.14,count,Green
+2023-05-01,NPS,Sales,52,52.26,score,Green
+2023-05-01,Bookings,Sales,4.2,4.49,$M,Green
+2023-05-01,Pipeline Coverage,Sales,3.0,2.9,ratio,Green
+2023-05-01,First Pass Yield,Quality,97.0,98.09,%,Green
+2023-05-01,Customer PPM,Quality,250,230.76,ppm,Yellow
+2023-05-01,OSHA Recordable Rate,EHS,1.5,1.47,rate,Green
+2023-05-01,Days Since Last Recordable,EHS,90,89.16,days,Green
+2023-05-01,IT Ticket Avg Resolution,IT,18.0,19.28,hrs,Green
+2023-05-01,Capex Spend vs Plan,Finance,95.0,92.13,%,Green
+2023-06-01,Revenue,Financial,3.8,3.93,$M,Green
+2023-06-01,Gross Margin %,Financial,38.0,36.35,%,Yellow
+2023-06-01,EBITDA %,Financial,14.0,13.92,%,Green
+2023-06-01,OEE,Manufacturing,82.0,81.88,%,Green
+2023-06-01,Scrap Rate,Manufacturing,2.5,2.53,%,Green
+2023-06-01,On-Time Delivery,Manufacturing,95.0,96.85,%,Green
+2023-06-01,Headcount,HR,320,344.7,count,Green
+2023-06-01,Voluntary Turnover Rate,HR,8.0,7.38,%,Yellow
+2023-06-01,Open Positions,HR,12,11.3,count,Yellow
+2023-06-01,NPS,Sales,52,52.02,score,Green
+2023-06-01,Bookings,Sales,4.2,4.5,$M,Green
+2023-06-01,Pipeline Coverage,Sales,3.0,2.89,ratio,Green
+2023-06-01,First Pass Yield,Quality,97.0,101.72,%,Green
+2023-06-01,Customer PPM,Quality,250,235.07,ppm,Yellow
+2023-06-01,OSHA Recordable Rate,EHS,1.5,1.51,rate,Green
+2023-06-01,Days Since Last Recordable,EHS,90,92.75,days,Green
+2023-06-01,IT Ticket Avg Resolution,IT,18.0,17.52,hrs,Green
+2023-06-01,Capex Spend vs Plan,Finance,95.0,98.88,%,Green
+2023-07-01,Revenue,Financial,3.8,3.94,$M,Green
+2023-07-01,Gross Margin %,Financial,38.0,37.91,%,Green
+2023-07-01,EBITDA %,Financial,14.0,14.76,%,Green
+2023-07-01,OEE,Manufacturing,82.0,84.58,%,Green
+2023-07-01,Scrap Rate,Manufacturing,2.5,2.63,%,Green
+2023-07-01,On-Time Delivery,Manufacturing,95.0,96.69,%,Green
+2023-07-01,Headcount,HR,320,301.65,count,Yellow
+2023-07-01,Voluntary Turnover Rate,HR,8.0,8.06,%,Green
+2023-07-01,Open Positions,HR,12,11.42,count,Green
+2023-07-01,NPS,Sales,52,51.94,score,Green
+2023-07-01,Bookings,Sales,4.2,4.25,$M,Green
+2023-07-01,Pipeline Coverage,Sales,3.0,2.89,ratio,Green
+2023-07-01,First Pass Yield,Quality,97.0,92.44,%,Yellow
+2023-07-01,Customer PPM,Quality,250,232.09,ppm,Yellow
+2023-07-01,OSHA Recordable Rate,EHS,1.5,1.4,rate,Yellow
+2023-07-01,Days Since Last Recordable,EHS,90,93.46,days,Green
+2023-07-01,IT Ticket Avg Resolution,IT,18.0,17.51,hrs,Green
+2023-07-01,Capex Spend vs Plan,Finance,95.0,95.46,%,Green
+2023-08-01,Revenue,Financial,3.8,3.95,$M,Green
+2023-08-01,Gross Margin %,Financial,38.0,39.64,%,Green
+2023-08-01,EBITDA %,Financial,14.0,13.94,%,Green
+2023-08-01,OEE,Manufacturing,82.0,78.31,%,Yellow
+2023-08-01,Scrap Rate,Manufacturing,2.5,2.68,%,Green
+2023-08-01,On-Time Delivery,Manufacturing,95.0,97.12,%,Green
+2023-08-01,Headcount,HR,320,336.95,count,Green
+2023-08-01,Voluntary Turnover Rate,HR,8.0,8.52,%,Green
+2023-08-01,Open Positions,HR,12,12.21,count,Green
+2023-08-01,NPS,Sales,52,50.98,score,Green
+2023-08-01,Bookings,Sales,4.2,3.95,$M,Yellow
+2023-08-01,Pipeline Coverage,Sales,3.0,3.08,ratio,Green
+2023-08-01,First Pass Yield,Quality,97.0,100.25,%,Green
+2023-08-01,Customer PPM,Quality,250,234.6,ppm,Yellow
+2023-08-01,OSHA Recordable Rate,EHS,1.5,1.48,rate,Green
+2023-08-01,Days Since Last Recordable,EHS,90,89.16,days,Green
+2023-08-01,IT Ticket Avg Resolution,IT,18.0,18.53,hrs,Green
+2023-08-01,Capex Spend vs Plan,Finance,95.0,96.63,%,Green
+2023-09-01,Revenue,Financial,3.8,3.67,$M,Yellow
+2023-09-01,Gross Margin %,Financial,38.0,38.0,%,Green
+2023-09-01,EBITDA %,Financial,14.0,14.14,%,Green
+2023-09-01,OEE,Manufacturing,82.0,82.68,%,Green
+2023-09-01,Scrap Rate,Manufacturing,2.5,2.48,%,Green
+2023-09-01,On-Time Delivery,Manufacturing,95.0,97.98,%,Green
+2023-09-01,Headcount,HR,320,306.38,count,Green
+2023-09-01,Voluntary Turnover Rate,HR,8.0,7.74,%,Green
+2023-09-01,Open Positions,HR,12,12.71,count,Green
+2023-09-01,NPS,Sales,52,51.06,score,Green
+2023-09-01,Bookings,Sales,4.2,4.15,$M,Green
+2023-09-01,Pipeline Coverage,Sales,3.0,3.19,ratio,Green
+2023-09-01,First Pass Yield,Quality,97.0,100.43,%,Green
+2023-09-01,Customer PPM,Quality,250,248.95,ppm,Green
+2023-09-01,OSHA Recordable Rate,EHS,1.5,1.41,rate,Yellow
+2023-09-01,Days Since Last Recordable,EHS,90,93.52,days,Green
+2023-09-01,IT Ticket Avg Resolution,IT,18.0,17.13,hrs,Green
+2023-09-01,Capex Spend vs Plan,Finance,95.0,88.69,%,Yellow
+2023-10-01,Revenue,Financial,3.8,3.66,$M,Yellow
+2023-10-01,Gross Margin %,Financial,38.0,39.76,%,Green
+2023-10-01,EBITDA %,Financial,14.0,13.78,%,Green
+2023-10-01,OEE,Manufacturing,82.0,80.85,%,Green
+2023-10-01,Scrap Rate,Manufacturing,2.5,2.7,%,Green
+2023-10-01,On-Time Delivery,Manufacturing,95.0,95.89,%,Green
+2023-10-01,Headcount,HR,320,322.4,count,Green
+2023-10-01,Voluntary Turnover Rate,HR,8.0,7.76,%,Green
+2023-10-01,Open Positions,HR,12,11.65,count,Green
+2023-10-01,NPS,Sales,52,50.02,score,Yellow
+2023-10-01,Bookings,Sales,4.2,3.88,$M,Yellow
+2023-10-01,Pipeline Coverage,Sales,3.0,2.8,ratio,Yellow
+2023-10-01,First Pass Yield,Quality,97.0,95.73,%,Green
+2023-10-01,Customer PPM,Quality,250,242.34,ppm,Green
+2023-10-01,OSHA Recordable Rate,EHS,1.5,1.47,rate,Green
+2023-10-01,Days Since Last Recordable,EHS,90,87.12,days,Yellow
+2023-10-01,IT Ticket Avg Resolution,IT,18.0,19.4,hrs,Green
+2023-10-01,Capex Spend vs Plan,Finance,95.0,94.85,%,Green
+2023-11-01,Revenue,Financial,3.8,3.79,$M,Green
+2023-11-01,Gross Margin %,Financial,38.0,38.27,%,Green
+2023-11-01,EBITDA %,Financial,14.0,14.09,%,Green
+2023-11-01,OEE,Manufacturing,82.0,82.09,%,Green
+2023-11-01,Scrap Rate,Manufacturing,2.5,2.32,%,Yellow
+2023-11-01,On-Time Delivery,Manufacturing,95.0,90.79,%,Yellow
+2023-11-01,Headcount,HR,320,335.49,count,Green
+2023-11-01,Voluntary Turnover Rate,HR,8.0,8.39,%,Green
+2023-11-01,Open Positions,HR,12,11.47,count,Green
+2023-11-01,NPS,Sales,52,53.85,score,Green
+2023-11-01,Bookings,Sales,4.2,4.21,$M,Green
+2023-11-01,Pipeline Coverage,Sales,3.0,3.17,ratio,Green
+2023-11-01,First Pass Yield,Quality,97.0,99.53,%,Green
+2023-11-01,Customer PPM,Quality,250,247.67,ppm,Green
+2023-11-01,OSHA Recordable Rate,EHS,1.5,1.51,rate,Green
+2023-11-01,Days Since Last Recordable,EHS,90,90.7,days,Green
+2023-11-01,IT Ticket Avg Resolution,IT,18.0,17.67,hrs,Green
+2023-11-01,Capex Spend vs Plan,Finance,95.0,88.43,%,Yellow
+2023-12-01,Revenue,Financial,3.8,3.81,$M,Green
+2023-12-01,Gross Margin %,Financial,38.0,39.42,%,Green
+2023-12-01,EBITDA %,Financial,14.0,13.41,%,Green
+2023-12-01,OEE,Manufacturing,82.0,79.13,%,Yellow
+2023-12-01,Scrap Rate,Manufacturing,2.5,2.65,%,Green
+2023-12-01,On-Time Delivery,Manufacturing,95.0,91.51,%,Yellow
+2023-12-01,Headcount,HR,320,328.47,count,Green
+2023-12-01,Voluntary Turnover Rate,HR,8.0,8.13,%,Green
+2023-12-01,Open Positions,HR,12,11.24,count,Yellow
+2023-12-01,NPS,Sales,52,51.32,score,Green
+2023-12-01,Bookings,Sales,4.2,4.42,$M,Green
+2023-12-01,Pipeline Coverage,Sales,3.0,2.98,ratio,Green
+2023-12-01,First Pass Yield,Quality,97.0,93.69,%,Yellow
+2023-12-01,Customer PPM,Quality,250,267.66,ppm,Green
+2023-12-01,OSHA Recordable Rate,EHS,1.5,1.42,rate,Yellow
+2023-12-01,Days Since Last Recordable,EHS,90,91.82,days,Green
+2023-12-01,IT Ticket Avg Resolution,IT,18.0,17.72,hrs,Green
+2023-12-01,Capex Spend vs Plan,Finance,95.0,87.96,%,Yellow
+2024-01-01,Revenue,Financial,3.8,3.78,$M,Green
+2024-01-01,Gross Margin %,Financial,38.0,37.46,%,Green
+2024-01-01,EBITDA %,Financial,14.0,13.2,%,Yellow
+2024-01-01,OEE,Manufacturing,82.0,83.01,%,Green
+2024-01-01,Scrap Rate,Manufacturing,2.5,2.59,%,Green
+2024-01-01,On-Time Delivery,Manufacturing,95.0,95.29,%,Green
+2024-01-01,Headcount,HR,320,334.3,count,Green
+2024-01-01,Voluntary Turnover Rate,HR,8.0,7.62,%,Green
+2024-01-01,Open Positions,HR,12,11.16,count,Yellow
+2024-01-01,NPS,Sales,52,54.1,score,Green
+2024-01-01,Bookings,Sales,4.2,4.25,$M,Green
+2024-01-01,Pipeline Coverage,Sales,3.0,3.06,ratio,Green
+2024-01-01,First Pass Yield,Quality,97.0,93.47,%,Yellow
+2024-01-01,Customer PPM,Quality,250,235.96,ppm,Yellow
+2024-01-01,OSHA Recordable Rate,EHS,1.5,1.45,rate,Green
+2024-01-01,Days Since Last Recordable,EHS,90,87.2,days,Yellow
+2024-01-01,IT Ticket Avg Resolution,IT,18.0,18.35,hrs,Green
+2024-01-01,Capex Spend vs Plan,Finance,95.0,98.92,%,Green
+2024-02-01,Revenue,Financial,3.8,3.62,$M,Yellow
+2024-02-01,Gross Margin %,Financial,38.0,37.69,%,Green
+2024-02-01,EBITDA %,Financial,14.0,14.46,%,Green
+2024-02-01,OEE,Manufacturing,82.0,80.12,%,Green
+2024-02-01,Scrap Rate,Manufacturing,2.5,2.43,%,Green
+2024-02-01,On-Time Delivery,Manufacturing,95.0,96.86,%,Green
+2024-02-01,Headcount,HR,320,319.17,count,Green
+2024-02-01,Voluntary Turnover Rate,HR,8.0,7.92,%,Green
+2024-02-01,Open Positions,HR,12,11.71,count,Green
+2024-02-01,NPS,Sales,52,50.42,score,Yellow
+2024-02-01,Bookings,Sales,4.2,3.95,$M,Yellow
+2024-02-01,Pipeline Coverage,Sales,3.0,3.21,ratio,Green
+2024-02-01,First Pass Yield,Quality,97.0,94.19,%,Green
+2024-02-01,Customer PPM,Quality,250,259.79,ppm,Green
+2024-02-01,OSHA Recordable Rate,EHS,1.5,1.58,rate,Green
+2024-02-01,Days Since Last Recordable,EHS,90,90.52,days,Green
+2024-02-01,IT Ticket Avg Resolution,IT,18.0,17.94,hrs,Green
+2024-02-01,Capex Spend vs Plan,Finance,95.0,94.12,%,Green
+2024-03-01,Revenue,Financial,3.8,3.71,$M,Green
+2024-03-01,Gross Margin %,Financial,38.0,37.89,%,Green
+2024-03-01,EBITDA %,Financial,14.0,13.34,%,Green
+2024-03-01,OEE,Manufacturing,82.0,82.73,%,Green
+2024-03-01,Scrap Rate,Manufacturing,2.5,2.59,%,Green
+2024-03-01,On-Time Delivery,Manufacturing,95.0,96.17,%,Green
+2024-03-01,Headcount,HR,320,300.65,count,Yellow
+2024-03-01,Voluntary Turnover Rate,HR,8.0,8.32,%,Green
+2024-03-01,Open Positions,HR,12,11.12,count,Yellow
+2024-03-01,NPS,Sales,52,52.11,score,Green
+2024-03-01,Bookings,Sales,4.2,4.42,$M,Green
+2024-03-01,Pipeline Coverage,Sales,3.0,2.99,ratio,Green
+2024-03-01,First Pass Yield,Quality,97.0,92.26,%,Yellow
+2024-03-01,Customer PPM,Quality,250,267.24,ppm,Green
+2024-03-01,OSHA Recordable Rate,EHS,1.5,1.43,rate,Green
+2024-03-01,Days Since Last Recordable,EHS,90,86.55,days,Yellow
+2024-03-01,IT Ticket Avg Resolution,IT,18.0,18.26,hrs,Green
+2024-03-01,Capex Spend vs Plan,Finance,95.0,97.11,%,Green
+2024-04-01,Revenue,Financial,3.8,3.89,$M,Green
+2024-04-01,Gross Margin %,Financial,38.0,39.13,%,Green
+2024-04-01,EBITDA %,Financial,14.0,13.42,%,Green
+2024-04-01,OEE,Manufacturing,82.0,78.6,%,Yellow
+2024-04-01,Scrap Rate,Manufacturing,2.5,2.51,%,Green
+2024-04-01,On-Time Delivery,Manufacturing,95.0,99.36,%,Green
+2024-04-01,Headcount,HR,320,332.95,count,Green
+2024-04-01,Voluntary Turnover Rate,HR,8.0,8.47,%,Green
+2024-04-01,Open Positions,HR,12,11.9,count,Green
+2024-04-01,NPS,Sales,52,51.63,score,Green
+2024-04-01,Bookings,Sales,4.2,4.32,$M,Green
+2024-04-01,Pipeline Coverage,Sales,3.0,3.19,ratio,Green
+2024-04-01,First Pass Yield,Quality,97.0,100.38,%,Green
+2024-04-01,Customer PPM,Quality,250,269.0,ppm,Green
+2024-04-01,OSHA Recordable Rate,EHS,1.5,1.47,rate,Green
+2024-04-01,Days Since Last Recordable,EHS,90,86.05,days,Yellow
+2024-04-01,IT Ticket Avg Resolution,IT,18.0,16.84,hrs,Yellow
+2024-04-01,Capex Spend vs Plan,Finance,95.0,93.5,%,Green
+2024-05-01,Revenue,Financial,3.8,3.71,$M,Green
+2024-05-01,Gross Margin %,Financial,38.0,37.39,%,Green
+2024-05-01,EBITDA %,Financial,14.0,14.13,%,Green
+2024-05-01,OEE,Manufacturing,82.0,78.6,%,Yellow
+2024-05-01,Scrap Rate,Manufacturing,2.5,2.42,%,Green
+2024-05-01,On-Time Delivery,Manufacturing,95.0,93.72,%,Green
+2024-05-01,Headcount,HR,320,318.74,count,Green
+2024-05-01,Voluntary Turnover Rate,HR,8.0,8.33,%,Green
+2024-05-01,Open Positions,HR,12,11.51,count,Green
+2024-05-01,NPS,Sales,52,51.52,score,Green
+2024-05-01,Bookings,Sales,4.2,4.23,$M,Green
+2024-05-01,Pipeline Coverage,Sales,3.0,3.05,ratio,Green
+2024-05-01,First Pass Yield,Quality,97.0,97.47,%,Green
+2024-05-01,Customer PPM,Quality,250,242.04,ppm,Green
+2024-05-01,OSHA Recordable Rate,EHS,1.5,1.38,rate,Yellow
+2024-05-01,Days Since Last Recordable,EHS,90,92.66,days,Green
+2024-05-01,IT Ticket Avg Resolution,IT,18.0,19.11,hrs,Green
+2024-05-01,Capex Spend vs Plan,Finance,95.0,90.36,%,Green
+2024-06-01,Revenue,Financial,3.8,3.98,$M,Green
+2024-06-01,Gross Margin %,Financial,38.0,36.94,%,Green
+2024-06-01,EBITDA %,Financial,14.0,13.6,%,Green
+2024-06-01,OEE,Manufacturing,82.0,82.74,%,Green
+2024-06-01,Scrap Rate,Manufacturing,2.5,2.59,%,Green
+2024-06-01,On-Time Delivery,Manufacturing,95.0,92.11,%,Yellow
+2024-06-01,Headcount,HR,320,317.39,count,Green
+2024-06-01,Voluntary Turnover Rate,HR,8.0,7.37,%,Yellow
+2024-06-01,Open Positions,HR,12,12.74,count,Green
+2024-06-01,NPS,Sales,52,53.07,score,Green
+2024-06-01,Bookings,Sales,4.2,4.33,$M,Green
+2024-06-01,Pipeline Coverage,Sales,3.0,3.15,ratio,Green
+2024-06-01,First Pass Yield,Quality,97.0,92.3,%,Yellow
+2024-06-01,Customer PPM,Quality,250,255.44,ppm,Green
+2024-06-01,OSHA Recordable Rate,EHS,1.5,1.55,rate,Green
+2024-06-01,Days Since Last Recordable,EHS,90,94.15,days,Green
+2024-06-01,IT Ticket Avg Resolution,IT,18.0,19.01,hrs,Green
+2024-06-01,Capex Spend vs Plan,Finance,95.0,87.43,%,Yellow
+2024-07-01,Revenue,Financial,3.8,3.68,$M,Yellow
+2024-07-01,Gross Margin %,Financial,38.0,36.64,%,Yellow
+2024-07-01,EBITDA %,Financial,14.0,13.69,%,Green
+2024-07-01,OEE,Manufacturing,82.0,81.93,%,Green
+2024-07-01,Scrap Rate,Manufacturing,2.5,2.4,%,Green
+2024-07-01,On-Time Delivery,Manufacturing,95.0,98.0,%,Green
+2024-07-01,Headcount,HR,320,318.15,count,Green
+2024-07-01,Voluntary Turnover Rate,HR,8.0,7.42,%,Yellow
+2024-07-01,Open Positions,HR,12,12.58,count,Green
+2024-07-01,NPS,Sales,52,53.86,score,Green
+2024-07-01,Bookings,Sales,4.2,3.92,$M,Yellow
+2024-07-01,Pipeline Coverage,Sales,3.0,2.95,ratio,Green
+2024-07-01,First Pass Yield,Quality,97.0,99.97,%,Green
+2024-07-01,Customer PPM,Quality,250,267.47,ppm,Green
+2024-07-01,OSHA Recordable Rate,EHS,1.5,1.56,rate,Green
+2024-07-01,Days Since Last Recordable,EHS,90,86.27,days,Yellow
+2024-07-01,IT Ticket Avg Resolution,IT,18.0,17.23,hrs,Green
+2024-07-01,Capex Spend vs Plan,Finance,95.0,99.72,%,Green
+2024-08-01,Revenue,Financial,3.8,3.7,$M,Green
+2024-08-01,Gross Margin %,Financial,38.0,36.72,%,Yellow
+2024-08-01,EBITDA %,Financial,14.0,15.1,%,Green
+2024-08-01,OEE,Manufacturing,82.0,79.21,%,Yellow
+2024-08-01,Scrap Rate,Manufacturing,2.5,2.44,%,Green
+2024-08-01,On-Time Delivery,Manufacturing,95.0,93.15,%,Green
+2024-08-01,Headcount,HR,320,304.58,count,Green
+2024-08-01,Voluntary Turnover Rate,HR,8.0,7.99,%,Green
+2024-08-01,Open Positions,HR,12,12.79,count,Green
+2024-08-01,NPS,Sales,52,51.06,score,Green
+2024-08-01,Bookings,Sales,4.2,4.41,$M,Green
+2024-08-01,Pipeline Coverage,Sales,3.0,3.1,ratio,Green
+2024-08-01,First Pass Yield,Quality,97.0,95.4,%,Green
+2024-08-01,Customer PPM,Quality,250,231.5,ppm,Yellow
+2024-08-01,OSHA Recordable Rate,EHS,1.5,1.41,rate,Yellow
+2024-08-01,Days Since Last Recordable,EHS,90,89.78,days,Green
+2024-08-01,IT Ticket Avg Resolution,IT,18.0,17.46,hrs,Green
+2024-08-01,Capex Spend vs Plan,Finance,95.0,88.92,%,Yellow
+2024-09-01,Revenue,Financial,3.8,3.68,$M,Yellow
+2024-09-01,Gross Margin %,Financial,38.0,39.32,%,Green
+2024-09-01,EBITDA %,Financial,14.0,13.37,%,Green
+2024-09-01,OEE,Manufacturing,82.0,82.07,%,Green
+2024-09-01,Scrap Rate,Manufacturing,2.5,2.4,%,Green
+2024-09-01,On-Time Delivery,Manufacturing,95.0,95.8,%,Green
+2024-09-01,Headcount,HR,320,314.0,count,Green
+2024-09-01,Voluntary Turnover Rate,HR,8.0,7.6,%,Green
+2024-09-01,Open Positions,HR,12,12.87,count,Green
+2024-09-01,NPS,Sales,52,50.58,score,Green
+2024-09-01,Bookings,Sales,4.2,4.28,$M,Green
+2024-09-01,Pipeline Coverage,Sales,3.0,2.99,ratio,Green
+2024-09-01,First Pass Yield,Quality,97.0,94.85,%,Green
+2024-09-01,Customer PPM,Quality,250,267.88,ppm,Green
+2024-09-01,OSHA Recordable Rate,EHS,1.5,1.58,rate,Green
+2024-09-01,Days Since Last Recordable,EHS,90,87.46,days,Green
+2024-09-01,IT Ticket Avg Resolution,IT,18.0,17.79,hrs,Green
+2024-09-01,Capex Spend vs Plan,Finance,95.0,98.59,%,Green
+2024-10-01,Revenue,Financial,3.8,3.88,$M,Green
+2024-10-01,Gross Margin %,Financial,38.0,38.37,%,Green
+2024-10-01,EBITDA %,Financial,14.0,14.2,%,Green
+2024-10-01,OEE,Manufacturing,82.0,83.62,%,Green
+2024-10-01,Scrap Rate,Manufacturing,2.5,2.62,%,Green
+2024-10-01,On-Time Delivery,Manufacturing,95.0,95.78,%,Green
+2024-10-01,Headcount,HR,320,324.12,count,Green
+2024-10-01,Voluntary Turnover Rate,HR,8.0,7.46,%,Yellow
+2024-10-01,Open Positions,HR,12,11.71,count,Green
+2024-10-01,NPS,Sales,52,49.9,score,Yellow
+2024-10-01,Bookings,Sales,4.2,4.29,$M,Green
+2024-10-01,Pipeline Coverage,Sales,3.0,3.12,ratio,Green
+2024-10-01,First Pass Yield,Quality,97.0,92.83,%,Yellow
+2024-10-01,Customer PPM,Quality,250,264.53,ppm,Green
+2024-10-01,OSHA Recordable Rate,EHS,1.5,1.6,rate,Green
+2024-10-01,Days Since Last Recordable,EHS,90,90.28,days,Green
+2024-10-01,IT Ticket Avg Resolution,IT,18.0,16.78,hrs,Yellow
+2024-10-01,Capex Spend vs Plan,Finance,95.0,98.91,%,Green
+2024-11-01,Revenue,Financial,3.8,3.92,$M,Green
+2024-11-01,Gross Margin %,Financial,38.0,36.86,%,Green
+2024-11-01,EBITDA %,Financial,14.0,14.81,%,Green
+2024-11-01,OEE,Manufacturing,82.0,82.62,%,Green
+2024-11-01,Scrap Rate,Manufacturing,2.5,2.56,%,Green
+2024-11-01,On-Time Delivery,Manufacturing,95.0,93.69,%,Green
+2024-11-01,Headcount,HR,320,328.22,count,Green
+2024-11-01,Voluntary Turnover Rate,HR,8.0,8.35,%,Green
+2024-11-01,Open Positions,HR,12,12.28,count,Green
+2024-11-01,NPS,Sales,52,50.45,score,Green
+2024-11-01,Bookings,Sales,4.2,4.44,$M,Green
+2024-11-01,Pipeline Coverage,Sales,3.0,2.79,ratio,Yellow
+2024-11-01,First Pass Yield,Quality,97.0,98.14,%,Green
+2024-11-01,Customer PPM,Quality,250,252.34,ppm,Green
+2024-11-01,OSHA Recordable Rate,EHS,1.5,1.54,rate,Green
+2024-11-01,Days Since Last Recordable,EHS,90,87.64,days,Green
+2024-11-01,IT Ticket Avg Resolution,IT,18.0,16.99,hrs,Yellow
+2024-11-01,Capex Spend vs Plan,Finance,95.0,91.58,%,Green
+2024-12-01,Revenue,Financial,3.8,3.84,$M,Green
+2024-12-01,Gross Margin %,Financial,38.0,36.13,%,Yellow
+2024-12-01,EBITDA %,Financial,14.0,13.06,%,Yellow
+2024-12-01,OEE,Manufacturing,82.0,85.72,%,Green
+2024-12-01,Scrap Rate,Manufacturing,2.5,2.37,%,Yellow
+2024-12-01,On-Time Delivery,Manufacturing,95.0,97.17,%,Green
+2024-12-01,Headcount,HR,320,321.66,count,Green
+2024-12-01,Voluntary Turnover Rate,HR,8.0,7.38,%,Yellow
+2024-12-01,Open Positions,HR,12,12.44,count,Green
+2024-12-01,NPS,Sales,52,51.57,score,Green
+2024-12-01,Bookings,Sales,4.2,4.43,$M,Green
+2024-12-01,Pipeline Coverage,Sales,3.0,3.2,ratio,Green
+2024-12-01,First Pass Yield,Quality,97.0,93.33,%,Yellow
+2024-12-01,Customer PPM,Quality,250,255.03,ppm,Green
+2024-12-01,OSHA Recordable Rate,EHS,1.5,1.49,rate,Green
+2024-12-01,Days Since Last Recordable,EHS,90,89.61,days,Green
+2024-12-01,IT Ticket Avg Resolution,IT,18.0,18.26,hrs,Green
+2024-12-01,Capex Spend vs Plan,Finance,95.0,90.62,%,Green
+2025-01-01,Revenue,Financial,3.8,3.93,$M,Green
+2025-01-01,Gross Margin %,Financial,38.0,36.8,%,Yellow
+2025-01-01,EBITDA %,Financial,14.0,13.78,%,Green
+2025-01-01,OEE,Manufacturing,82.0,83.0,%,Green
+2025-01-01,Scrap Rate,Manufacturing,2.5,2.46,%,Green
+2025-01-01,On-Time Delivery,Manufacturing,95.0,92.78,%,Green
+2025-01-01,Headcount,HR,320,338.56,count,Green
+2025-01-01,Voluntary Turnover Rate,HR,8.0,8.58,%,Green
+2025-01-01,Open Positions,HR,12,12.81,count,Green
+2025-01-01,NPS,Sales,52,51.65,score,Green
+2025-01-01,Bookings,Sales,4.2,4.38,$M,Green
+2025-01-01,Pipeline Coverage,Sales,3.0,3.06,ratio,Green
+2025-01-01,First Pass Yield,Quality,97.0,97.61,%,Green
+2025-01-01,Customer PPM,Quality,250,246.47,ppm,Green
+2025-01-01,OSHA Recordable Rate,EHS,1.5,1.38,rate,Yellow
+2025-01-01,Days Since Last Recordable,EHS,90,87.16,days,Yellow
+2025-01-01,IT Ticket Avg Resolution,IT,18.0,17.77,hrs,Green
+2025-01-01,Capex Spend vs Plan,Finance,95.0,96.07,%,Green
+2025-02-01,Revenue,Financial,3.8,3.84,$M,Green
+2025-02-01,Gross Margin %,Financial,38.0,39.26,%,Green
+2025-02-01,EBITDA %,Financial,14.0,12.96,%,Yellow
+2025-02-01,OEE,Manufacturing,82.0,80.45,%,Green
+2025-02-01,Scrap Rate,Manufacturing,2.5,2.46,%,Green
+2025-02-01,On-Time Delivery,Manufacturing,95.0,99.45,%,Green
+2025-02-01,Headcount,HR,320,334.88,count,Green
+2025-02-01,Voluntary Turnover Rate,HR,8.0,8.31,%,Green
+2025-02-01,Open Positions,HR,12,12.23,count,Green
+2025-02-01,NPS,Sales,52,51.0,score,Green
+2025-02-01,Bookings,Sales,4.2,4.36,$M,Green
+2025-02-01,Pipeline Coverage,Sales,3.0,2.85,ratio,Green
+2025-02-01,First Pass Yield,Quality,97.0,97.39,%,Green
+2025-02-01,Customer PPM,Quality,250,265.89,ppm,Green
+2025-02-01,OSHA Recordable Rate,EHS,1.5,1.59,rate,Green
+2025-02-01,Days Since Last Recordable,EHS,90,86.89,days,Yellow
+2025-02-01,IT Ticket Avg Resolution,IT,18.0,17.61,hrs,Green
+2025-02-01,Capex Spend vs Plan,Finance,95.0,99.9,%,Green
+2025-03-01,Revenue,Financial,3.8,3.75,$M,Green
+2025-03-01,Gross Margin %,Financial,38.0,39.11,%,Green
+2025-03-01,EBITDA %,Financial,14.0,14.52,%,Green
+2025-03-01,OEE,Manufacturing,82.0,82.77,%,Green
+2025-03-01,Scrap Rate,Manufacturing,2.5,2.49,%,Green
+2025-03-01,On-Time Delivery,Manufacturing,95.0,95.35,%,Green
+2025-03-01,Headcount,HR,320,337.5,count,Green
+2025-03-01,Voluntary Turnover Rate,HR,8.0,7.56,%,Yellow
+2025-03-01,Open Positions,HR,12,11.92,count,Green
+2025-03-01,NPS,Sales,52,50.36,score,Yellow
+2025-03-01,Bookings,Sales,4.2,4.02,$M,Green
+2025-03-01,Pipeline Coverage,Sales,3.0,3.06,ratio,Green
+2025-03-01,First Pass Yield,Quality,97.0,92.37,%,Yellow
+2025-03-01,Customer PPM,Quality,250,245.76,ppm,Green
+2025-03-01,OSHA Recordable Rate,EHS,1.5,1.38,rate,Yellow
+2025-03-01,Days Since Last Recordable,EHS,90,94.39,days,Green
+2025-03-01,IT Ticket Avg Resolution,IT,18.0,18.25,hrs,Green
+2025-03-01,Capex Spend vs Plan,Finance,95.0,90.88,%,Green
+2025-04-01,Revenue,Financial,3.8,3.77,$M,Green
+2025-04-01,Gross Margin %,Financial,38.0,39.31,%,Green
+2025-04-01,EBITDA %,Financial,14.0,13.14,%,Yellow
+2025-04-01,OEE,Manufacturing,82.0,79.38,%,Yellow
+2025-04-01,Scrap Rate,Manufacturing,2.5,2.63,%,Green
+2025-04-01,On-Time Delivery,Manufacturing,95.0,93.06,%,Green
+2025-04-01,Headcount,HR,320,328.43,count,Green
+2025-04-01,Voluntary Turnover Rate,HR,8.0,8.32,%,Green
+2025-04-01,Open Positions,HR,12,11.44,count,Green
+2025-04-01,NPS,Sales,52,54.5,score,Green
+2025-04-01,Bookings,Sales,4.2,3.93,$M,Yellow
+2025-04-01,Pipeline Coverage,Sales,3.0,2.99,ratio,Green
+2025-04-01,First Pass Yield,Quality,97.0,92.19,%,Yellow
+2025-04-01,Customer PPM,Quality,250,256.92,ppm,Green
+2025-04-01,OSHA Recordable Rate,EHS,1.5,1.5,rate,Green
+2025-04-01,Days Since Last Recordable,EHS,90,87.3,days,Green
+2025-04-01,IT Ticket Avg Resolution,IT,18.0,18.0,hrs,Green
+2025-04-01,Capex Spend vs Plan,Finance,95.0,94.7,%,Green
+2025-05-01,Revenue,Financial,3.8,3.85,$M,Green
+2025-05-01,Gross Margin %,Financial,38.0,38.08,%,Green
+2025-05-01,EBITDA %,Financial,14.0,13.55,%,Green
+2025-05-01,OEE,Manufacturing,82.0,80.05,%,Green
+2025-05-01,Scrap Rate,Manufacturing,2.5,2.63,%,Green
+2025-05-01,On-Time Delivery,Manufacturing,95.0,92.83,%,Green
+2025-05-01,Headcount,HR,320,341.78,count,Green
+2025-05-01,Voluntary Turnover Rate,HR,8.0,7.42,%,Yellow
+2025-05-01,Open Positions,HR,12,12.08,count,Green
+2025-05-01,NPS,Sales,52,53.82,score,Green
+2025-05-01,Bookings,Sales,4.2,4.4,$M,Green
+2025-05-01,Pipeline Coverage,Sales,3.0,3.11,ratio,Green
+2025-05-01,First Pass Yield,Quality,97.0,96.94,%,Green
+2025-05-01,Customer PPM,Quality,250,251.25,ppm,Green
+2025-05-01,OSHA Recordable Rate,EHS,1.5,1.43,rate,Green
+2025-05-01,Days Since Last Recordable,EHS,90,91.79,days,Green
+2025-05-01,IT Ticket Avg Resolution,IT,18.0,18.54,hrs,Green
+2025-05-01,Capex Spend vs Plan,Finance,95.0,91.19,%,Green
+2025-06-01,Revenue,Financial,3.8,3.88,$M,Green
+2025-06-01,Gross Margin %,Financial,38.0,36.39,%,Yellow
+2025-06-01,EBITDA %,Financial,14.0,13.21,%,Yellow
+2025-06-01,OEE,Manufacturing,82.0,81.08,%,Green
+2025-06-01,Scrap Rate,Manufacturing,2.5,2.42,%,Green
+2025-06-01,On-Time Delivery,Manufacturing,95.0,93.33,%,Green
+2025-06-01,Headcount,HR,320,328.09,count,Green
+2025-06-01,Voluntary Turnover Rate,HR,8.0,7.68,%,Green
+2025-06-01,Open Positions,HR,12,11.42,count,Green
+2025-06-01,NPS,Sales,52,52.02,score,Green
+2025-06-01,Bookings,Sales,4.2,4.41,$M,Green
+2025-06-01,Pipeline Coverage,Sales,3.0,2.77,ratio,Yellow
+2025-06-01,First Pass Yield,Quality,97.0,101.43,%,Green
+2025-06-01,Customer PPM,Quality,250,243.87,ppm,Green
+2025-06-01,OSHA Recordable Rate,EHS,1.5,1.39,rate,Yellow
+2025-06-01,Days Since Last Recordable,EHS,90,90.45,days,Green
+2025-06-01,IT Ticket Avg Resolution,IT,18.0,17.03,hrs,Yellow
+2025-06-01,Capex Spend vs Plan,Finance,95.0,89.63,%,Yellow
+2025-07-01,Revenue,Financial,3.8,3.9,$M,Green
+2025-07-01,Gross Margin %,Financial,38.0,39.39,%,Green
+2025-07-01,EBITDA %,Financial,14.0,14.5,%,Green
+2025-07-01,OEE,Manufacturing,82.0,85.35,%,Green
+2025-07-01,Scrap Rate,Manufacturing,2.5,2.65,%,Green
+2025-07-01,On-Time Delivery,Manufacturing,95.0,91.9,%,Yellow
+2025-07-01,Headcount,HR,320,303.66,count,Yellow
+2025-07-01,Voluntary Turnover Rate,HR,8.0,7.37,%,Yellow
+2025-07-01,Open Positions,HR,12,12.54,count,Green
+2025-07-01,NPS,Sales,52,53.65,score,Green
+2025-07-01,Bookings,Sales,4.2,4.21,$M,Green
+2025-07-01,Pipeline Coverage,Sales,3.0,3.22,ratio,Green
+2025-07-01,First Pass Yield,Quality,97.0,98.31,%,Green
+2025-07-01,Customer PPM,Quality,250,265.58,ppm,Green
+2025-07-01,OSHA Recordable Rate,EHS,1.5,1.5,rate,Green
+2025-07-01,Days Since Last Recordable,EHS,90,90.67,days,Green
+2025-07-01,IT Ticket Avg Resolution,IT,18.0,18.09,hrs,Green
+2025-07-01,Capex Spend vs Plan,Finance,95.0,91.43,%,Green
+2025-08-01,Revenue,Financial,3.8,3.64,$M,Yellow
+2025-08-01,Gross Margin %,Financial,38.0,36.63,%,Yellow
+2025-08-01,EBITDA %,Financial,14.0,13.42,%,Green
+2025-08-01,OEE,Manufacturing,82.0,84.11,%,Green
+2025-08-01,Scrap Rate,Manufacturing,2.5,2.43,%,Green
+2025-08-01,On-Time Delivery,Manufacturing,95.0,97.41,%,Green
+2025-08-01,Headcount,HR,320,320.51,count,Green
+2025-08-01,Voluntary Turnover Rate,HR,8.0,7.71,%,Green
+2025-08-01,Open Positions,HR,12,12.84,count,Green
+2025-08-01,NPS,Sales,52,49.53,score,Yellow
+2025-08-01,Bookings,Sales,4.2,4.25,$M,Green
+2025-08-01,Pipeline Coverage,Sales,3.0,3.22,ratio,Green
+2025-08-01,First Pass Yield,Quality,97.0,94.19,%,Green
+2025-08-01,Customer PPM,Quality,250,236.07,ppm,Yellow
+2025-08-01,OSHA Recordable Rate,EHS,1.5,1.48,rate,Green
+2025-08-01,Days Since Last Recordable,EHS,90,85.68,days,Yellow
+2025-08-01,IT Ticket Avg Resolution,IT,18.0,17.16,hrs,Green
+2025-08-01,Capex Spend vs Plan,Finance,95.0,101.95,%,Green
+2025-09-01,Revenue,Financial,3.8,3.91,$M,Green
+2025-09-01,Gross Margin %,Financial,38.0,38.24,%,Green
+2025-09-01,EBITDA %,Financial,14.0,15.09,%,Green
+2025-09-01,OEE,Manufacturing,82.0,85.49,%,Green
+2025-09-01,Scrap Rate,Manufacturing,2.5,2.62,%,Green
+2025-09-01,On-Time Delivery,Manufacturing,95.0,95.0,%,Green
+2025-09-01,Headcount,HR,320,296.34,count,Yellow
+2025-09-01,Voluntary Turnover Rate,HR,8.0,7.69,%,Green
+2025-09-01,Open Positions,HR,12,11.45,count,Green
+2025-09-01,NPS,Sales,52,52.65,score,Green
+2025-09-01,Bookings,Sales,4.2,4.11,$M,Green
+2025-09-01,Pipeline Coverage,Sales,3.0,2.92,ratio,Green
+2025-09-01,First Pass Yield,Quality,97.0,92.76,%,Yellow
+2025-09-01,Customer PPM,Quality,250,254.53,ppm,Green
+2025-09-01,OSHA Recordable Rate,EHS,1.5,1.5,rate,Green
+2025-09-01,Days Since Last Recordable,EHS,90,89.13,days,Green
+2025-09-01,IT Ticket Avg Resolution,IT,18.0,17.24,hrs,Green
+2025-09-01,Capex Spend vs Plan,Finance,95.0,89.11,%,Yellow
+2025-10-01,Revenue,Financial,3.8,3.87,$M,Green
+2025-10-01,Gross Margin %,Financial,38.0,37.33,%,Green
+2025-10-01,EBITDA %,Financial,14.0,15.07,%,Green
+2025-10-01,OEE,Manufacturing,82.0,84.47,%,Green
+2025-10-01,Scrap Rate,Manufacturing,2.5,2.3,%,Yellow
+2025-10-01,On-Time Delivery,Manufacturing,95.0,94.54,%,Green
+2025-10-01,Headcount,HR,320,324.33,count,Green
+2025-10-01,Voluntary Turnover Rate,HR,8.0,8.37,%,Green
+2025-10-01,Open Positions,HR,12,11.61,count,Green
+2025-10-01,NPS,Sales,52,51.35,score,Green
+2025-10-01,Bookings,Sales,4.2,4.43,$M,Green
+2025-10-01,Pipeline Coverage,Sales,3.0,2.77,ratio,Yellow
+2025-10-01,First Pass Yield,Quality,97.0,96.75,%,Green
+2025-10-01,Customer PPM,Quality,250,268.33,ppm,Green
+2025-10-01,OSHA Recordable Rate,EHS,1.5,1.41,rate,Yellow
+2025-10-01,Days Since Last Recordable,EHS,90,92.91,days,Green
+2025-10-01,IT Ticket Avg Resolution,IT,18.0,17.53,hrs,Green
+2025-10-01,Capex Spend vs Plan,Finance,95.0,96.84,%,Green
+2025-11-01,Revenue,Financial,3.8,3.94,$M,Green
+2025-11-01,Gross Margin %,Financial,38.0,37.85,%,Green
+2025-11-01,EBITDA %,Financial,14.0,13.42,%,Green
+2025-11-01,OEE,Manufacturing,82.0,80.78,%,Green
+2025-11-01,Scrap Rate,Manufacturing,2.5,2.57,%,Green
+2025-11-01,On-Time Delivery,Manufacturing,95.0,92.7,%,Green
+2025-11-01,Headcount,HR,320,296.68,count,Yellow
+2025-11-01,Voluntary Turnover Rate,HR,8.0,8.62,%,Green
+2025-11-01,Open Positions,HR,12,12.59,count,Green
+2025-11-01,NPS,Sales,52,54.58,score,Green
+2025-11-01,Bookings,Sales,4.2,4.3,$M,Green
+2025-11-01,Pipeline Coverage,Sales,3.0,3.07,ratio,Green
+2025-11-01,First Pass Yield,Quality,97.0,101.82,%,Green
+2025-11-01,Customer PPM,Quality,250,262.73,ppm,Green
+2025-11-01,OSHA Recordable Rate,EHS,1.5,1.6,rate,Green
+2025-11-01,Days Since Last Recordable,EHS,90,91.3,days,Green
+2025-11-01,IT Ticket Avg Resolution,IT,18.0,18.52,hrs,Green
+2025-11-01,Capex Spend vs Plan,Finance,95.0,98.64,%,Green
+2025-12-01,Revenue,Financial,3.8,3.98,$M,Green
+2025-12-01,Gross Margin %,Financial,38.0,36.85,%,Yellow
+2025-12-01,EBITDA %,Financial,14.0,14.49,%,Green
+2025-12-01,OEE,Manufacturing,82.0,85.06,%,Green
+2025-12-01,Scrap Rate,Manufacturing,2.5,2.46,%,Green
+2025-12-01,On-Time Delivery,Manufacturing,95.0,97.38,%,Green
+2025-12-01,Headcount,HR,320,333.99,count,Green
+2025-12-01,Voluntary Turnover Rate,HR,8.0,8.47,%,Green
+2025-12-01,Open Positions,HR,12,11.51,count,Green
+2025-12-01,NPS,Sales,52,53.2,score,Green
+2025-12-01,Bookings,Sales,4.2,4.28,$M,Green
+2025-12-01,Pipeline Coverage,Sales,3.0,2.84,ratio,Yellow
+2025-12-01,First Pass Yield,Quality,97.0,100.9,%,Green
+2025-12-01,Customer PPM,Quality,250,249.96,ppm,Green
+2025-12-01,OSHA Recordable Rate,EHS,1.5,1.4,rate,Yellow
+2025-12-01,Days Since Last Recordable,EHS,90,93.72,days,Green
+2025-12-01,IT Ticket Avg Resolution,IT,18.0,17.92,hrs,Green
+2025-12-01,Capex Spend vs Plan,Finance,95.0,95.66,%,Green
+2026-01-01,Revenue,Financial,3.8,3.92,$M,Green
+2026-01-01,Gross Margin %,Financial,38.0,37.6,%,Green
+2026-01-01,EBITDA %,Financial,14.0,13.44,%,Green
+2026-01-01,OEE,Manufacturing,82.0,80.44,%,Green
+2026-01-01,Scrap Rate,Manufacturing,2.5,2.45,%,Green
+2026-01-01,On-Time Delivery,Manufacturing,95.0,96.35,%,Green
+2026-01-01,Headcount,HR,320,315.22,count,Green
+2026-01-01,Voluntary Turnover Rate,HR,8.0,14.7,%,Red
+2026-01-01,Open Positions,HR,12,12.09,count,Green
+2026-01-01,NPS,Sales,52,54.17,score,Green
+2026-01-01,Bookings,Sales,4.2,4.21,$M,Green
+2026-01-01,Pipeline Coverage,Sales,3.0,2.84,ratio,Yellow
+2026-01-01,First Pass Yield,Quality,97.0,99.41,%,Green
+2026-01-01,Customer PPM,Quality,250,250.01,ppm,Green
+2026-01-01,OSHA Recordable Rate,EHS,1.5,1.55,rate,Green
+2026-01-01,Days Since Last Recordable,EHS,90,86.49,days,Yellow
+2026-01-01,IT Ticket Avg Resolution,IT,18.0,17.94,hrs,Green
+2026-01-01,Capex Spend vs Plan,Finance,95.0,100.8,%,Green
+2026-02-01,Revenue,Financial,3.8,3.89,$M,Green
+2026-02-01,Gross Margin %,Financial,38.0,36.49,%,Yellow
+2026-02-01,EBITDA %,Financial,14.0,14.48,%,Green
+2026-02-01,OEE,Manufacturing,82.0,81.35,%,Green
+2026-02-01,Scrap Rate,Manufacturing,2.5,2.46,%,Green
+2026-02-01,On-Time Delivery,Manufacturing,95.0,99.28,%,Green
+2026-02-01,Headcount,HR,320,305.99,count,Green
+2026-02-01,Voluntary Turnover Rate,HR,8.0,17.38,%,Red
+2026-02-01,Open Positions,HR,12,12.82,count,Green
+2026-02-01,NPS,Sales,52,51.98,score,Green
+2026-02-01,Bookings,Sales,4.2,4.39,$M,Green
+2026-02-01,Pipeline Coverage,Sales,3.0,3.07,ratio,Green
+2026-02-01,First Pass Yield,Quality,97.0,99.2,%,Green
+2026-02-01,Customer PPM,Quality,250,243.47,ppm,Green
+2026-02-01,OSHA Recordable Rate,EHS,1.5,1.47,rate,Green
+2026-02-01,Days Since Last Recordable,EHS,90,91.9,days,Green
+2026-02-01,IT Ticket Avg Resolution,IT,18.0,16.86,hrs,Yellow
+2026-02-01,Capex Spend vs Plan,Finance,95.0,91.55,%,Green
+2026-03-01,Revenue,Financial,3.8,3.64,$M,Yellow
+2026-03-01,Gross Margin %,Financial,38.0,37.16,%,Green
+2026-03-01,EBITDA %,Financial,14.0,14.94,%,Green
+2026-03-01,OEE,Manufacturing,82.0,83.63,%,Green
+2026-03-01,Scrap Rate,Manufacturing,2.5,4.17,%,Red
+2026-03-01,On-Time Delivery,Manufacturing,95.0,90.97,%,Yellow
+2026-03-01,Headcount,HR,320,310.06,count,Green
+2026-03-01,Voluntary Turnover Rate,HR,8.0,12.12,%,Red
+2026-03-01,Open Positions,HR,12,11.63,count,Green
+2026-03-01,NPS,Sales,52,50.57,score,Green
+2026-03-01,Bookings,Sales,4.2,4.3,$M,Green
+2026-03-01,Pipeline Coverage,Sales,3.0,2.84,ratio,Yellow
+2026-03-01,First Pass Yield,Quality,97.0,99.92,%,Green
+2026-03-01,Customer PPM,Quality,250,260.89,ppm,Green
+2026-03-01,OSHA Recordable Rate,EHS,1.5,1.4,rate,Yellow
+2026-03-01,Days Since Last Recordable,EHS,90,91.9,days,Green
+2026-03-01,IT Ticket Avg Resolution,IT,18.0,16.8,hrs,Yellow
+2026-03-01,Capex Spend vs Plan,Finance,95.0,87.54,%,Yellow
+2026-04-01,Revenue,Financial,3.8,3.65,$M,Yellow
+2026-04-01,Gross Margin %,Financial,38.0,36.56,%,Yellow
+2026-04-01,EBITDA %,Financial,14.0,12.94,%,Yellow
+2026-04-01,OEE,Manufacturing,82.0,78.18,%,Yellow
+2026-04-01,Scrap Rate,Manufacturing,2.5,3.88,%,Red
+2026-04-01,On-Time Delivery,Manufacturing,95.0,93.18,%,Green
+2026-04-01,Headcount,HR,320,303.14,count,Yellow
+2026-04-01,Voluntary Turnover Rate,HR,8.0,8.05,%,Green
+2026-04-01,Open Positions,HR,12,11.85,count,Green
+2026-04-01,NPS,Sales,52,54.36,score,Green
+2026-04-01,Bookings,Sales,4.2,3.57,$M,Red
+2026-04-01,Pipeline Coverage,Sales,3.0,3.11,ratio,Green
+2026-04-01,First Pass Yield,Quality,97.0,92.49,%,Yellow
+2026-04-01,Customer PPM,Quality,250,259.91,ppm,Green
+2026-04-01,OSHA Recordable Rate,EHS,1.5,1.41,rate,Yellow
+2026-04-01,Days Since Last Recordable,EHS,90,91.2,days,Green
+2026-04-01,IT Ticket Avg Resolution,IT,18.0,17.7,hrs,Green
+2026-04-01,Capex Spend vs Plan,Finance,95.0,90.84,%,Green
+2026-05-01,Revenue,Financial,3.8,3.74,$M,Green
+2026-05-01,Gross Margin %,Financial,38.0,36.48,%,Yellow
+2026-05-01,EBITDA %,Financial,14.0,13.98,%,Green
+2026-05-01,OEE,Manufacturing,82.0,79.07,%,Yellow
+2026-05-01,Scrap Rate,Manufacturing,2.5,3.74,%,Red
+2026-05-01,On-Time Delivery,Manufacturing,95.0,96.98,%,Green
+2026-05-01,Headcount,HR,320,312.69,count,Green
+2026-05-01,Voluntary Turnover Rate,HR,8.0,7.89,%,Green
+2026-05-01,Open Positions,HR,12,12.65,count,Green
+2026-05-01,NPS,Sales,52,50.22,score,Yellow
+2026-05-01,Bookings,Sales,4.2,3.57,$M,Red
+2026-05-01,Pipeline Coverage,Sales,3.0,3.03,ratio,Green
+2026-05-01,First Pass Yield,Quality,97.0,98.85,%,Green
+2026-05-01,Customer PPM,Quality,250,263.74,ppm,Green
+2026-05-01,OSHA Recordable Rate,EHS,1.5,1.6,rate,Green
+2026-05-01,Days Since Last Recordable,EHS,90,93.21,days,Green
+2026-05-01,IT Ticket Avg Resolution,IT,18.0,17.59,hrs,Green
+2026-05-01,Capex Spend vs Plan,Finance,95.0,94.98,%,Green
+2026-06-01,Revenue,Financial,3.8,3.67,$M,Yellow
+2026-06-01,Gross Margin %,Financial,38.0,37.51,%,Green
+2026-06-01,EBITDA %,Financial,14.0,13.15,%,Yellow
+2026-06-01,OEE,Manufacturing,82.0,78.6,%,Yellow
+2026-06-01,Scrap Rate,Manufacturing,2.5,3.53,%,Red
+2026-06-01,On-Time Delivery,Manufacturing,95.0,99.73,%,Green
+2026-06-01,Headcount,HR,320,316.31,count,Green
+2026-06-01,Voluntary Turnover Rate,HR,8.0,13.69,%,Red
+2026-06-01,Open Positions,HR,12,12.16,count,Green
+2026-06-01,NPS,Sales,52,51.87,score,Green
+2026-06-01,Bookings,Sales,4.2,3.67,$M,Red
+2026-06-01,Pipeline Coverage,Sales,3.0,2.97,ratio,Green
+2026-06-01,First Pass Yield,Quality,97.0,93.33,%,Yellow
+2026-06-01,Customer PPM,Quality,250,237.07,ppm,Yellow
+2026-06-01,OSHA Recordable Rate,EHS,1.5,1.41,rate,Yellow
+2026-06-01,Days Since Last Recordable,EHS,90,92.85,days,Green
+2026-06-01,IT Ticket Avg Resolution,IT,18.0,17.72,hrs,Green
+2026-06-01,Capex Spend vs Plan,Finance,95.0,94.08,%,Green
+2026-07-01,Revenue,Financial,3.8,3.74,$M,Green
+2026-07-01,Gross Margin %,Financial,38.0,39.27,%,Green
+2026-07-01,EBITDA %,Financial,14.0,14.37,%,Green
+2026-07-01,OEE,Manufacturing,82.0,81.53,%,Green
+2026-07-01,Scrap Rate,Manufacturing,2.5,4.57,%,Red
+2026-07-01,On-Time Delivery,Manufacturing,95.0,97.12,%,Green
+2026-07-01,Headcount,HR,320,299.71,count,Yellow
+2026-07-01,Voluntary Turnover Rate,HR,8.0,8.24,%,Green
+2026-07-01,Open Positions,HR,12,11.4,count,Green
+2026-07-01,NPS,Sales,52,51.39,score,Green
+2026-07-01,Bookings,Sales,4.2,4.12,$M,Green
+2026-07-01,Pipeline Coverage,Sales,3.0,3.18,ratio,Green
+2026-07-01,First Pass Yield,Quality,97.0,93.04,%,Yellow
+2026-07-01,Customer PPM,Quality,250,236.57,ppm,Yellow
+2026-07-01,OSHA Recordable Rate,EHS,1.5,1.47,rate,Green
+2026-07-01,Days Since Last Recordable,EHS,90,88.52,days,Green
+2026-07-01,IT Ticket Avg Resolution,IT,18.0,16.95,hrs,Yellow
+2026-07-01,Capex Spend vs Plan,Finance,95.0,96.62,%,Green

@@ -1,0 +1,51 @@
+customer_id,name,industry,region,tier,ytd_revenue
+CUS001,Apex Aerospace LLC,Aerospace,Midwest,Platinum,125900.0
+CUS002,Bolt Dynamics Inc,Automotive,Northeast,Platinum,2334600.0
+CUS003,Cascade Defense Systems,Defense,Southeast,Platinum,2483600.0
+CUS004,Delta Precision Works,Medical,West,Platinum,1098900.0
+CUS005,Eagle Components Corp,Industrial,Southwest,Platinum,2358900.0
+CUS006,Fortis Automotive,Aerospace,Midwest,Platinum,300600.0
+CUS007,Greenfield Industries,Automotive,Northeast,Platinum,2361000.0
+CUS008,Harbor Medical Devices,Defense,Southeast,Platinum,1418800.0
+CUS009,Ironclad Manufacturing,Medical,West,Platinum,1570100.0
+CUS010,Juniper Industrial,Industrial,Southwest,Platinum,356500.0
+CUS011,Keystone Fabricators,Aerospace,Midwest,Platinum,2347300.0
+CUS012,Lighthouse Defense,Automotive,Northeast,Platinum,2353400.0
+CUS013,Meridian Automotive Parts,Defense,Southeast,Platinum,2076800.0
+CUS014,Northstar Aerospace,Medical,West,Gold,1385700.0
+CUS015,Orion Systems Group,Industrial,Southwest,Gold,2433300.0
+CUS016,Pinnacle Tools,Aerospace,Midwest,Gold,2050300.0
+CUS017,Quantum Precision Inc,Automotive,Northeast,Gold,1640100.0
+CUS018,Redwood Industrial,Defense,Southeast,Gold,2150400.0
+CUS019,Sierra Aerospace,Medical,West,Gold,1035600.0
+CUS020,Titan Defense Solutions,Industrial,Southwest,Gold,372700.0
+CUS021,Universal Components,Aerospace,Midwest,Gold,60600.0
+CUS022,Vantage Medical,Automotive,Northeast,Gold,1211000.0
+CUS023,Westfield Manufacturing,Defense,Southeast,Gold,943000.0
+CUS024,Xcel Automotive,Medical,West,Gold,1588500.0
+CUS025,Yellowstone Industrial,Industrial,Southwest,Gold,56800.0
+CUS026,Zenith Precision,Aerospace,Midwest,Gold,1558400.0
+CUS027,Atlas Defense Corp,Automotive,Northeast,Silver,1052100.0
+CUS028,Bravo Components,Defense,Southeast,Silver,2344300.0
+CUS029,Centurion Aerospace,Medical,West,Silver,1105000.0
+CUS030,Diamond Industrial,Industrial,Southwest,Silver,866400.0
+CUS031,Ember Medical,Aerospace,Midwest,Silver,1226700.0
+CUS032,Falcon Automotive,Automotive,Northeast,Silver,1906400.0
+CUS033,Galaxy Manufacturing,Defense,Southeast,Silver,1646500.0
+CUS034,Helix Defense,Medical,West,Silver,1844700.0
+CUS035,Indus Precision,Industrial,Southwest,Silver,2410800.0
+CUS036,Journey Components,Aerospace,Midwest,Silver,761400.0
+CUS037,Kinetic Industrial,Automotive,Northeast,Silver,2124200.0
+CUS038,Liberty Medical,Defense,Southeast,Silver,808600.0
+CUS039,Maverick Aerospace,Medical,West,Silver,1998700.0
+CUS040,Nova Automotive,Industrial,Southwest,Bronze,803000.0
+CUS041,Omega Defense,Aerospace,Midwest,Bronze,681200.0
+CUS042,Pioneer Industrial,Automotive,Northeast,Bronze,1791500.0
+CUS043,Quartz Precision,Defense,Southeast,Bronze,829100.0
+CUS044,Ranger Components,Medical,West,Bronze,2412700.0
+CUS045,Stellar Medical,Industrial,Southwest,Bronze,1658800.0
+CUS046,Triumph Automotive,Aerospace,Midwest,Bronze,1231300.0
+CUS047,Union Aerospace,Automotive,Northeast,Bronze,1565700.0
+CUS048,Viking Defense,Defense,Southeast,Bronze,2133500.0
+CUS049,Warp Industrial,Medical,West,Bronze,287500.0
+CUS050,Zephyr Components,Industrial,Southwest,Bronze,177000.0

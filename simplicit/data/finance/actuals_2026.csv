@@ -1,0 +1,787 @@
+dept,account_id,account_name,month,actual
+Engineering,6000,Cost of Goods Sold,2026-01-01,250755
+Engineering,6000,Cost of Goods Sold,2026-02-01,261665
+Engineering,6000,Cost of Goods Sold,2026-03-01,258539
+Engineering,6000,Cost of Goods Sold,2026-04-01,262624
+Engineering,6000,Cost of Goods Sold,2026-05-01,259717
+Engineering,6000,Cost of Goods Sold,2026-06-01,241426
+Engineering,6100,Direct Materials,2026-01-01,109450
+Engineering,6100,Direct Materials,2026-02-01,115272
+Engineering,6100,Direct Materials,2026-03-01,116670
+Engineering,6100,Direct Materials,2026-04-01,117130
+Engineering,6100,Direct Materials,2026-05-01,116278
+Engineering,6100,Direct Materials,2026-06-01,117354
+Engineering,6200,Direct Labor,2026-01-01,74022
+Engineering,6200,Direct Labor,2026-02-01,73319
+Engineering,6200,Direct Labor,2026-03-01,73217
+Engineering,6200,Direct Labor,2026-04-01,78134
+Engineering,6200,Direct Labor,2026-05-01,73208
+Engineering,6200,Direct Labor,2026-06-01,78751
+Engineering,6300,Manufacturing Overhead,2026-01-01,41482
+Engineering,6300,Manufacturing Overhead,2026-02-01,40840
+Engineering,6300,Manufacturing Overhead,2026-03-01,40375
+Engineering,6300,Manufacturing Overhead,2026-04-01,43295
+Engineering,6300,Manufacturing Overhead,2026-05-01,40572
+Engineering,6300,Manufacturing Overhead,2026-06-01,41070
+Engineering,7000,Salaries & Benefits,2026-01-01,83526
+Engineering,7000,Salaries & Benefits,2026-02-01,88023
+Engineering,7000,Salaries & Benefits,2026-03-01,87493
+Engineering,7000,Salaries & Benefits,2026-04-01,79845
+Engineering,7000,Salaries & Benefits,2026-05-01,81667
+Engineering,7000,Salaries & Benefits,2026-06-01,84528
+Engineering,7100,Travel & Entertainment,2026-01-01,12904
+Engineering,7100,Travel & Entertainment,2026-02-01,12923
+Engineering,7100,Travel & Entertainment,2026-03-01,12380
+Engineering,7100,Travel & Entertainment,2026-04-01,12047
+Engineering,7100,Travel & Entertainment,2026-05-01,13080
+Engineering,7100,Travel & Entertainment,2026-06-01,12746
+Engineering,7200,Professional Services,2026-01-01,21237
+Engineering,7200,Professional Services,2026-02-01,22022
+Engineering,7200,Professional Services,2026-03-01,20633
+Engineering,7200,Professional Services,2026-04-01,21418
+Engineering,7200,Professional Services,2026-05-01,20410
+Engineering,7200,Professional Services,2026-06-01,21220
+Engineering,7300,Facilities,2026-01-01,24261
+Engineering,7300,Facilities,2026-02-01,25706
+Engineering,7300,Facilities,2026-03-01,26438
+Engineering,7300,Facilities,2026-04-01,25183
+Engineering,7300,Facilities,2026-05-01,25303
+Engineering,7300,Facilities,2026-06-01,24159
+Engineering,7400,Depreciation,2026-01-01,17463
+Engineering,7400,Depreciation,2026-02-01,16158
+Engineering,7400,Depreciation,2026-03-01,16611
+Engineering,7400,Depreciation,2026-04-01,16545
+Engineering,7400,Depreciation,2026-05-01,16040
+Engineering,7400,Depreciation,2026-06-01,17598
+Engineering,7500,IT & Software,2026-01-01,12680
+Engineering,7500,IT & Software,2026-02-01,12511
+Engineering,7500,IT & Software,2026-03-01,12128
+Engineering,7500,IT & Software,2026-04-01,12512
+Engineering,7500,IT & Software,2026-05-01,12499
+Engineering,7500,IT & Software,2026-06-01,12468
+Engineering,7600,Marketing,2026-01-01,12387
+Engineering,7600,Marketing,2026-02-01,12186
+Engineering,7600,Marketing,2026-03-01,13057
+Engineering,7600,Marketing,2026-04-01,12667
+Engineering,7600,Marketing,2026-05-01,12353
+Engineering,7600,Marketing,2026-06-01,13201
+Engineering,8000,Research & Development,2026-01-01,12711
+Engineering,8000,Research & Development,2026-02-01,12304
+Engineering,8000,Research & Development,2026-03-01,12914
+Engineering,8000,Research & Development,2026-04-01,12709
+Engineering,8000,Research & Development,2026-05-01,11999
+Engineering,8000,Research & Development,2026-06-01,12881
+Engineering,9000,Capital Expenditure,2026-01-01,21012
+Engineering,9000,Capital Expenditure,2026-02-01,21097
+Engineering,9000,Capital Expenditure,2026-03-01,20583
+Engineering,9000,Capital Expenditure,2026-04-01,19956
+Engineering,9000,Capital Expenditure,2026-05-01,21521
+Engineering,9000,Capital Expenditure,2026-06-01,22037
+Finance,6000,Cost of Goods Sold,2026-01-01,86130
+Finance,6000,Cost of Goods Sold,2026-02-01,86910
+Finance,6000,Cost of Goods Sold,2026-03-01,79982
+Finance,6000,Cost of Goods Sold,2026-04-01,80175
+Finance,6000,Cost of Goods Sold,2026-05-01,79886
+Finance,6000,Cost of Goods Sold,2026-06-01,85805
+Finance,6100,Direct Materials,2026-01-01,33611
+Finance,6100,Direct Materials,2026-02-01,39144
+Finance,6100,Direct Materials,2026-03-01,38982
+Finance,6100,Direct Materials,2026-04-01,38633
+Finance,6100,Direct Materials,2026-05-01,38032
+Finance,6100,Direct Materials,2026-06-01,38880
+Finance,6200,Direct Labor,2026-01-01,26218
+Finance,6200,Direct Labor,2026-02-01,25897
+Finance,6200,Direct Labor,2026-03-01,26320
+Finance,6200,Direct Labor,2026-04-01,26163
+Finance,6200,Direct Labor,2026-05-01,24540
+Finance,6200,Direct Labor,2026-06-01,24022
+Finance,6300,Manufacturing Overhead,2026-01-01,13663
+Finance,6300,Manufacturing Overhead,2026-02-01,14101
+Finance,6300,Manufacturing Overhead,2026-03-01,13348
+Finance,6300,Manufacturing Overhead,2026-04-01,13615
+Finance,6300,Manufacturing Overhead,2026-05-01,14558
+Finance,6300,Manufacturing Overhead,2026-06-01,13788
+Finance,7000,Salaries & Benefits,2026-01-01,27139
+Finance,7000,Salaries & Benefits,2026-02-01,27178
+Finance,7000,Salaries & Benefits,2026-03-01,26618
+Finance,7000,Salaries & Benefits,2026-04-01,27070
+Finance,7000,Salaries & Benefits,2026-05-01,27601
+Finance,7000,Salaries & Benefits,2026-06-01,26714
+Finance,7100,Travel & Entertainment,2026-01-01,4330
+Finance,7100,Travel & Entertainment,2026-02-01,4370
+Finance,7100,Travel & Entertainment,2026-03-01,4328
+Finance,7100,Travel & Entertainment,2026-04-01,4135
+Finance,7100,Travel & Entertainment,2026-05-01,4399
+Finance,7100,Travel & Entertainment,2026-06-01,4038
+Finance,7200,Professional Services,2026-01-01,7269
+Finance,7200,Professional Services,2026-02-01,6808
+Finance,7200,Professional Services,2026-03-01,6886
+Finance,7200,Professional Services,2026-04-01,6880
+Finance,7200,Professional Services,2026-05-01,7153
+Finance,7200,Professional Services,2026-06-01,7278
+Finance,7300,Facilities,2026-01-01,8170
+Finance,7300,Facilities,2026-02-01,8320
+Finance,7300,Facilities,2026-03-01,8404
+Finance,7300,Facilities,2026-04-01,8446
+Finance,7300,Facilities,2026-05-01,8451
+Finance,7300,Facilities,2026-06-01,8564
+Finance,7400,Depreciation,2026-01-01,5437
+Finance,7400,Depreciation,2026-02-01,5428
+Finance,7400,Depreciation,2026-03-01,5754
+Finance,7400,Depreciation,2026-04-01,5428
+Finance,7400,Depreciation,2026-05-01,5411
+Finance,7400,Depreciation,2026-06-01,5796
+Finance,7500,IT & Software,2026-01-01,4156
+Finance,7500,IT & Software,2026-02-01,4059
+Finance,7500,IT & Software,2026-03-01,4169
+Finance,7500,IT & Software,2026-04-01,3993
+Finance,7500,IT & Software,2026-05-01,4216
+Finance,7500,IT & Software,2026-06-01,4136
+Finance,7600,Marketing,2026-01-01,4304
+Finance,7600,Marketing,2026-02-01,4216
+Finance,7600,Marketing,2026-03-01,4261
+Finance,7600,Marketing,2026-04-01,4041
+Finance,7600,Marketing,2026-05-01,4339
+Finance,7600,Marketing,2026-06-01,4321
+Finance,8000,Research & Development,2026-01-01,4306
+Finance,8000,Research & Development,2026-02-01,4028
+Finance,8000,Research & Development,2026-03-01,4359
+Finance,8000,Research & Development,2026-04-01,4014
+Finance,8000,Research & Development,2026-05-01,4318
+Finance,8000,Research & Development,2026-06-01,4306
+Finance,9000,Capital Expenditure,2026-01-01,6925
+Finance,9000,Capital Expenditure,2026-02-01,7285
+Finance,9000,Capital Expenditure,2026-03-01,7078
+Finance,9000,Capital Expenditure,2026-04-01,7080
+Finance,9000,Capital Expenditure,2026-05-01,7316
+Finance,9000,Capital Expenditure,2026-06-01,6733
+HR,6000,Cost of Goods Sold,2026-01-01,61379
+HR,6000,Cost of Goods Sold,2026-02-01,62977
+HR,6000,Cost of Goods Sold,2026-03-01,61098
+HR,6000,Cost of Goods Sold,2026-04-01,62881
+HR,6000,Cost of Goods Sold,2026-05-01,61797
+HR,6000,Cost of Goods Sold,2026-06-01,62192
+HR,6100,Direct Materials,2026-01-01,25358
+HR,6100,Direct Materials,2026-02-01,29302
+HR,6100,Direct Materials,2026-03-01,28753
+HR,6100,Direct Materials,2026-04-01,28975
+HR,6100,Direct Materials,2026-05-01,29260
+HR,6100,Direct Materials,2026-06-01,29023
+HR,6200,Direct Labor,2026-01-01,19025
+HR,6200,Direct Labor,2026-02-01,19659
+HR,6200,Direct Labor,2026-03-01,18601
+HR,6200,Direct Labor,2026-04-01,19819
+HR,6200,Direct Labor,2026-05-01,18140
+HR,6200,Direct Labor,2026-06-01,18205
+HR,6300,Manufacturing Overhead,2026-01-01,10390
+HR,6300,Manufacturing Overhead,2026-02-01,10055
+HR,6300,Manufacturing Overhead,2026-03-01,10216
+HR,6300,Manufacturing Overhead,2026-04-01,10481
+HR,6300,Manufacturing Overhead,2026-05-01,10219
+HR,6300,Manufacturing Overhead,2026-06-01,10396
+HR,7000,Salaries & Benefits,2026-01-01,21933
+HR,7000,Salaries & Benefits,2026-02-01,21745
+HR,7000,Salaries & Benefits,2026-03-01,20526
+HR,7000,Salaries & Benefits,2026-04-01,20619
+HR,7000,Salaries & Benefits,2026-05-01,21352
+HR,7000,Salaries & Benefits,2026-06-01,21018
+HR,7100,Travel & Entertainment,2026-01-01,3282
+HR,7100,Travel & Entertainment,2026-02-01,3072
+HR,7100,Travel & Entertainment,2026-03-01,3025
+HR,7100,Travel & Entertainment,2026-04-01,3278
+HR,7100,Travel & Entertainment,2026-05-01,3213
+HR,7100,Travel & Entertainment,2026-06-01,3273
+HR,7200,Professional Services,2026-01-01,5211
+HR,7200,Professional Services,2026-02-01,5223
+HR,7200,Professional Services,2026-03-01,5390
+HR,7200,Professional Services,2026-04-01,5001
+HR,7200,Professional Services,2026-05-01,5287
+HR,7200,Professional Services,2026-06-01,5071
+HR,7300,Facilities,2026-01-01,6452
+HR,7300,Facilities,2026-02-01,6321
+HR,7300,Facilities,2026-03-01,6154
+HR,7300,Facilities,2026-04-01,6536
+HR,7300,Facilities,2026-05-01,6155
+HR,7300,Facilities,2026-06-01,6105
+HR,7400,Depreciation,2026-01-01,4286
+HR,7400,Depreciation,2026-02-01,4016
+HR,7400,Depreciation,2026-03-01,4280
+HR,7400,Depreciation,2026-04-01,4351
+HR,7400,Depreciation,2026-05-01,4139
+HR,7400,Depreciation,2026-06-01,4123
+HR,7500,IT & Software,2026-01-01,3078
+HR,7500,IT & Software,2026-02-01,3219
+HR,7500,IT & Software,2026-03-01,3036
+HR,7500,IT & Software,2026-04-01,3176
+HR,7500,IT & Software,2026-05-01,3026
+HR,7500,IT & Software,2026-06-01,3067
+HR,7600,Marketing,2026-01-01,3258
+HR,7600,Marketing,2026-02-01,3155
+HR,7600,Marketing,2026-03-01,3132
+HR,7600,Marketing,2026-04-01,3281
+HR,7600,Marketing,2026-05-01,3138
+HR,7600,Marketing,2026-06-01,3036
+HR,8000,Research & Development,2026-01-01,3139
+HR,8000,Research & Development,2026-02-01,3299
+HR,8000,Research & Development,2026-03-01,3110
+HR,8000,Research & Development,2026-04-01,3226
+HR,8000,Research & Development,2026-05-01,3263
+HR,8000,Research & Development,2026-06-01,3041
+HR,9000,Capital Expenditure,2026-01-01,5037
+HR,9000,Capital Expenditure,2026-02-01,5274
+HR,9000,Capital Expenditure,2026-03-01,5359
+HR,9000,Capital Expenditure,2026-04-01,5121
+HR,9000,Capital Expenditure,2026-05-01,5406
+HR,9000,Capital Expenditure,2026-06-01,5156
+IT,6000,Cost of Goods Sold,2026-01-01,109534
+IT,6000,Cost of Goods Sold,2026-02-01,108058
+IT,6000,Cost of Goods Sold,2026-03-01,105952
+IT,6000,Cost of Goods Sold,2026-04-01,107478
+IT,6000,Cost of Goods Sold,2026-05-01,109926
+IT,6000,Cost of Goods Sold,2026-06-01,102926
+IT,6100,Direct Materials,2026-01-01,43937
+IT,6100,Direct Materials,2026-02-01,48112
+IT,6100,Direct Materials,2026-03-01,48005
+IT,6100,Direct Materials,2026-04-01,48360
+IT,6100,Direct Materials,2026-05-01,48702
+IT,6100,Direct Materials,2026-06-01,47597
+IT,6200,Direct Labor,2026-01-01,30583
+IT,6200,Direct Labor,2026-02-01,30664
+IT,6200,Direct Labor,2026-03-01,30461
+IT,6200,Direct Labor,2026-04-01,31782
+IT,6200,Direct Labor,2026-05-01,31683
+IT,6200,Direct Labor,2026-06-01,31041
+IT,6300,Manufacturing Overhead,2026-01-01,17251
+IT,6300,Manufacturing Overhead,2026-02-01,17706
+IT,6300,Manufacturing Overhead,2026-03-01,16725
+IT,6300,Manufacturing Overhead,2026-04-01,17221
+IT,6300,Manufacturing Overhead,2026-05-01,17879
+IT,6300,Manufacturing Overhead,2026-06-01,17790
+IT,7000,Salaries & Benefits,2026-01-01,36610
+IT,7000,Salaries & Benefits,2026-02-01,34212
+IT,7000,Salaries & Benefits,2026-03-01,36342
+IT,7000,Salaries & Benefits,2026-04-01,34417
+IT,7000,Salaries & Benefits,2026-05-01,35012
+IT,7000,Salaries & Benefits,2026-06-01,35995
+IT,7100,Travel & Entertainment,2026-01-01,5374
+IT,7100,Travel & Entertainment,2026-02-01,5266
+IT,7100,Travel & Entertainment,2026-03-01,5423
+IT,7100,Travel & Entertainment,2026-04-01,5272
+IT,7100,Travel & Entertainment,2026-05-01,5498
+IT,7100,Travel & Entertainment,2026-06-01,5156
+IT,7200,Professional Services,2026-01-01,8695
+IT,7200,Professional Services,2026-02-01,9007
+IT,7200,Professional Services,2026-03-01,8431
+IT,7200,Professional Services,2026-04-01,9002
+IT,7200,Professional Services,2026-05-01,8328
+IT,7200,Professional Services,2026-06-01,8757
+IT,7300,Facilities,2026-01-01,10393
+IT,7300,Facilities,2026-02-01,10107
+IT,7300,Facilities,2026-03-01,10589
+IT,7300,Facilities,2026-04-01,10152
+IT,7300,Facilities,2026-05-01,10295
+IT,7300,Facilities,2026-06-01,10203
+IT,7400,Depreciation,2026-01-01,7196
+IT,7400,Depreciation,2026-02-01,7262
+IT,7400,Depreciation,2026-03-01,7166
+IT,7400,Depreciation,2026-04-01,6706
+IT,7400,Depreciation,2026-05-01,7060
+IT,7400,Depreciation,2026-06-01,6768
+IT,7500,IT & Software,2026-01-01,5071
+IT,7500,IT & Software,2026-02-01,5084
+IT,7500,IT & Software,2026-03-01,5171
+IT,7500,IT & Software,2026-04-01,5384
+IT,7500,IT & Software,2026-05-01,5267
+IT,7500,IT & Software,2026-06-01,5173
+IT,7600,Marketing,2026-01-01,5405
+IT,7600,Marketing,2026-02-01,5478
+IT,7600,Marketing,2026-03-01,5201
+IT,7600,Marketing,2026-04-01,5385
+IT,7600,Marketing,2026-05-01,5507
+IT,7600,Marketing,2026-06-01,5222
+IT,8000,Research & Development,2026-01-01,5278
+IT,8000,Research & Development,2026-02-01,5087
+IT,8000,Research & Development,2026-03-01,5387
+IT,8000,Research & Development,2026-04-01,5450
+IT,8000,Research & Development,2026-05-01,5327
+IT,8000,Research & Development,2026-06-01,5035
+IT,9000,Capital Expenditure,2026-01-01,9140
+IT,9000,Capital Expenditure,2026-02-01,9006
+IT,9000,Capital Expenditure,2026-03-01,8527
+IT,9000,Capital Expenditure,2026-04-01,8552
+IT,9000,Capital Expenditure,2026-05-01,8564
+IT,9000,Capital Expenditure,2026-06-01,8814
+Manufacturing,6000,Cost of Goods Sold,2026-01-01,1017477
+Manufacturing,6000,Cost of Goods Sold,2026-02-01,1037037
+Manufacturing,6000,Cost of Goods Sold,2026-03-01,1018633
+Manufacturing,6000,Cost of Goods Sold,2026-04-01,1023637
+Manufacturing,6000,Cost of Goods Sold,2026-05-01,997357
+Manufacturing,6000,Cost of Goods Sold,2026-06-01,1041413
+Manufacturing,6100,Direct Materials,2026-01-01,417622
+Manufacturing,6100,Direct Materials,2026-02-01,455858
+Manufacturing,6100,Direct Materials,2026-03-01,460295
+Manufacturing,6100,Direct Materials,2026-04-01,458006
+Manufacturing,6100,Direct Materials,2026-05-01,467562
+Manufacturing,6100,Direct Materials,2026-06-01,459357
+Manufacturing,6200,Direct Labor,2026-01-01,312656
+Manufacturing,6200,Direct Labor,2026-02-01,316397
+Manufacturing,6200,Direct Labor,2026-03-01,298206
+Manufacturing,6200,Direct Labor,2026-04-01,293153
+Manufacturing,6200,Direct Labor,2026-05-01,289299
+Manufacturing,6200,Direct Labor,2026-06-01,312559
+Manufacturing,6300,Manufacturing Overhead,2026-01-01,170470
+Manufacturing,6300,Manufacturing Overhead,2026-02-01,159915
+Manufacturing,6300,Manufacturing Overhead,2026-03-01,163491
+Manufacturing,6300,Manufacturing Overhead,2026-04-01,160858
+Manufacturing,6300,Manufacturing Overhead,2026-05-01,171987
+Manufacturing,6300,Manufacturing Overhead,2026-06-01,161018
+Manufacturing,7000,Salaries & Benefits,2026-01-01,326579
+Manufacturing,7000,Salaries & Benefits,2026-02-01,331657
+Manufacturing,7000,Salaries & Benefits,2026-03-01,325947
+Manufacturing,7000,Salaries & Benefits,2026-04-01,340005
+Manufacturing,7000,Salaries & Benefits,2026-05-01,323718
+Manufacturing,7000,Salaries & Benefits,2026-06-01,329209
+Manufacturing,7100,Travel & Entertainment,2026-01-01,50217
+Manufacturing,7100,Travel & Entertainment,2026-02-01,48318
+Manufacturing,7100,Travel & Entertainment,2026-03-01,50863
+Manufacturing,7100,Travel & Entertainment,2026-04-01,49807
+Manufacturing,7100,Travel & Entertainment,2026-05-01,47909
+Manufacturing,7100,Travel & Entertainment,2026-06-01,48116
+Manufacturing,7200,Professional Services,2026-01-01,87907
+Manufacturing,7200,Professional Services,2026-02-01,87627
+Manufacturing,7200,Professional Services,2026-03-01,81006
+Manufacturing,7200,Professional Services,2026-04-01,83881
+Manufacturing,7200,Professional Services,2026-05-01,80113
+Manufacturing,7200,Professional Services,2026-06-01,83160
+Manufacturing,7300,Facilities,2026-01-01,99794
+Manufacturing,7300,Facilities,2026-02-01,105069
+Manufacturing,7300,Facilities,2026-03-01,103303
+Manufacturing,7300,Facilities,2026-04-01,104136
+Manufacturing,7300,Facilities,2026-05-01,96313
+Manufacturing,7300,Facilities,2026-06-01,105594
+Manufacturing,7400,Depreciation,2026-01-01,69688
+Manufacturing,7400,Depreciation,2026-02-01,66467
+Manufacturing,7400,Depreciation,2026-03-01,65308
+Manufacturing,7400,Depreciation,2026-04-01,67373
+Manufacturing,7400,Depreciation,2026-05-01,70153
+Manufacturing,7400,Depreciation,2026-06-01,63909
+Manufacturing,7500,IT & Software,2026-01-01,50765
+Manufacturing,7500,IT & Software,2026-02-01,49030
+Manufacturing,7500,IT & Software,2026-03-01,48754
+Manufacturing,7500,IT & Software,2026-04-01,49248
+Manufacturing,7500,IT & Software,2026-05-01,48334
+Manufacturing,7500,IT & Software,2026-06-01,52044
+Manufacturing,7600,Marketing,2026-01-01,51202
+Manufacturing,7600,Marketing,2026-02-01,52201
+Manufacturing,7600,Marketing,2026-03-01,51273
+Manufacturing,7600,Marketing,2026-04-01,48916
+Manufacturing,7600,Marketing,2026-05-01,52251
+Manufacturing,7600,Marketing,2026-06-01,48879
+Manufacturing,8000,Research & Development,2026-01-01,49948
+Manufacturing,8000,Research & Development,2026-02-01,47943
+Manufacturing,8000,Research & Development,2026-03-01,52602
+Manufacturing,8000,Research & Development,2026-04-01,50991
+Manufacturing,8000,Research & Development,2026-05-01,49307
+Manufacturing,8000,Research & Development,2026-06-01,48349
+Manufacturing,9000,Capital Expenditure,2026-01-01,83456
+Manufacturing,9000,Capital Expenditure,2026-02-01,80953
+Manufacturing,9000,Capital Expenditure,2026-03-01,81480
+Manufacturing,9000,Capital Expenditure,2026-04-01,80633
+Manufacturing,9000,Capital Expenditure,2026-05-01,82731
+Manufacturing,9000,Capital Expenditure,2026-06-01,87359
+Procurement,6000,Cost of Goods Sold,2026-01-01,61663
+Procurement,6000,Cost of Goods Sold,2026-02-01,65617
+Procurement,6000,Cost of Goods Sold,2026-03-01,61089
+Procurement,6000,Cost of Goods Sold,2026-04-01,60976
+Procurement,6000,Cost of Goods Sold,2026-05-01,62810
+Procurement,6000,Cost of Goods Sold,2026-06-01,65487
+Procurement,6100,Direct Materials,2026-01-01,26311
+Procurement,6100,Direct Materials,2026-02-01,28850
+Procurement,6100,Direct Materials,2026-03-01,28791
+Procurement,6100,Direct Materials,2026-04-01,29315
+Procurement,6100,Direct Materials,2026-05-01,28383
+Procurement,6100,Direct Materials,2026-06-01,29252
+Procurement,6200,Direct Labor,2026-01-01,18349
+Procurement,6200,Direct Labor,2026-02-01,18429
+Procurement,6200,Direct Labor,2026-03-01,18507
+Procurement,6200,Direct Labor,2026-04-01,19134
+Procurement,6200,Direct Labor,2026-05-01,18040
+Procurement,6200,Direct Labor,2026-06-01,18479
+Procurement,6300,Manufacturing Overhead,2026-01-01,10425
+Procurement,6300,Manufacturing Overhead,2026-02-01,10048
+Procurement,6300,Manufacturing Overhead,2026-03-01,10319
+Procurement,6300,Manufacturing Overhead,2026-04-01,10332
+Procurement,6300,Manufacturing Overhead,2026-05-01,10512
+Procurement,6300,Manufacturing Overhead,2026-06-01,10438
+Procurement,7000,Salaries & Benefits,2026-01-01,22046
+Procurement,7000,Salaries & Benefits,2026-02-01,21705
+Procurement,7000,Salaries & Benefits,2026-03-01,20988
+Procurement,7000,Salaries & Benefits,2026-04-01,21243
+Procurement,7000,Salaries & Benefits,2026-05-01,20346
+Procurement,7000,Salaries & Benefits,2026-06-01,20580
+Procurement,7100,Travel & Entertainment,2026-01-01,3050
+Procurement,7100,Travel & Entertainment,2026-02-01,3270
+Procurement,7100,Travel & Entertainment,2026-03-01,3083
+Procurement,7100,Travel & Entertainment,2026-04-01,3062
+Procurement,7100,Travel & Entertainment,2026-05-01,3089
+Procurement,7100,Travel & Entertainment,2026-06-01,3236
+Procurement,7200,Professional Services,2026-01-01,5028
+Procurement,7200,Professional Services,2026-02-01,5248
+Procurement,7200,Professional Services,2026-03-01,5102
+Procurement,7200,Professional Services,2026-04-01,5169
+Procurement,7200,Professional Services,2026-05-01,5397
+Procurement,7200,Professional Services,2026-06-01,5405
+Procurement,7300,Facilities,2026-01-01,6301
+Procurement,7300,Facilities,2026-02-01,6230
+Procurement,7300,Facilities,2026-03-01,6146
+Procurement,7300,Facilities,2026-04-01,6344
+Procurement,7300,Facilities,2026-05-01,6613
+Procurement,7300,Facilities,2026-06-01,6089
+Procurement,7400,Depreciation,2026-01-01,4357
+Procurement,7400,Depreciation,2026-02-01,4315
+Procurement,7400,Depreciation,2026-03-01,4145
+Procurement,7400,Depreciation,2026-04-01,4085
+Procurement,7400,Depreciation,2026-05-01,4344
+Procurement,7400,Depreciation,2026-06-01,4047
+Procurement,7500,IT & Software,2026-01-01,3169
+Procurement,7500,IT & Software,2026-02-01,3006
+Procurement,7500,IT & Software,2026-03-01,3209
+Procurement,7500,IT & Software,2026-04-01,3047
+Procurement,7500,IT & Software,2026-05-01,3155
+Procurement,7500,IT & Software,2026-06-01,3224
+Procurement,7600,Marketing,2026-01-01,3076
+Procurement,7600,Marketing,2026-02-01,3198
+Procurement,7600,Marketing,2026-03-01,3301
+Procurement,7600,Marketing,2026-04-01,2994
+Procurement,7600,Marketing,2026-05-01,3099
+Procurement,7600,Marketing,2026-06-01,3150
+Procurement,8000,Research & Development,2026-01-01,3099
+Procurement,8000,Research & Development,2026-02-01,3271
+Procurement,8000,Research & Development,2026-03-01,3144
+Procurement,8000,Research & Development,2026-04-01,3290
+Procurement,8000,Research & Development,2026-05-01,3047
+Procurement,8000,Research & Development,2026-06-01,3116
+Procurement,9000,Capital Expenditure,2026-01-01,5134
+Procurement,9000,Capital Expenditure,2026-02-01,5156
+Procurement,9000,Capital Expenditure,2026-03-01,5297
+Procurement,9000,Capital Expenditure,2026-04-01,4996
+Procurement,9000,Capital Expenditure,2026-05-01,5406
+Procurement,9000,Capital Expenditure,2026-06-01,5293
+Quality,6000,Cost of Goods Sold,2026-01-01,122477
+Quality,6000,Cost of Goods Sold,2026-02-01,126424
+Quality,6000,Cost of Goods Sold,2026-03-01,122999
+Quality,6000,Cost of Goods Sold,2026-04-01,125084
+Quality,6000,Cost of Goods Sold,2026-05-01,123540
+Quality,6000,Cost of Goods Sold,2026-06-01,130365
+Quality,6100,Direct Materials,2026-01-01,53209
+Quality,6100,Direct Materials,2026-02-01,58248
+Quality,6100,Direct Materials,2026-03-01,57317
+Quality,6100,Direct Materials,2026-04-01,57657
+Quality,6100,Direct Materials,2026-05-01,58708
+Quality,6100,Direct Materials,2026-06-01,57797
+Quality,6200,Direct Labor,2026-01-01,36953
+Quality,6200,Direct Labor,2026-02-01,37638
+Quality,6200,Direct Labor,2026-03-01,37408
+Quality,6200,Direct Labor,2026-04-01,37328
+Quality,6200,Direct Labor,2026-05-01,37960
+Quality,6200,Direct Labor,2026-06-01,37616
+Quality,6300,Manufacturing Overhead,2026-01-01,21319
+Quality,6300,Manufacturing Overhead,2026-02-01,21748
+Quality,6300,Manufacturing Overhead,2026-03-01,21795
+Quality,6300,Manufacturing Overhead,2026-04-01,20488
+Quality,6300,Manufacturing Overhead,2026-05-01,20820
+Quality,6300,Manufacturing Overhead,2026-06-01,20931
+Quality,7000,Salaries & Benefits,2026-01-01,42754
+Quality,7000,Salaries & Benefits,2026-02-01,41528
+Quality,7000,Salaries & Benefits,2026-03-01,40882
+Quality,7000,Salaries & Benefits,2026-04-01,42225
+Quality,7000,Salaries & Benefits,2026-05-01,43298
+Quality,7000,Salaries & Benefits,2026-06-01,43952
+Quality,7100,Travel & Entertainment,2026-01-01,6027
+Quality,7100,Travel & Entertainment,2026-02-01,6400
+Quality,7100,Travel & Entertainment,2026-03-01,6541
+Quality,7100,Travel & Entertainment,2026-04-01,6040
+Quality,7100,Travel & Entertainment,2026-05-01,6220
+Quality,7100,Travel & Entertainment,2026-06-01,6311
+Quality,7200,Professional Services,2026-01-01,10614
+Quality,7200,Professional Services,2026-02-01,10010
+Quality,7200,Professional Services,2026-03-01,10038
+Quality,7200,Professional Services,2026-04-01,10450
+Quality,7200,Professional Services,2026-05-01,10946
+Quality,7200,Professional Services,2026-06-01,10150
+Quality,7300,Facilities,2026-01-01,13032
+Quality,7300,Facilities,2026-02-01,11984
+Quality,7300,Facilities,2026-03-01,12621
+Quality,7300,Facilities,2026-04-01,12391
+Quality,7300,Facilities,2026-05-01,12849
+Quality,7300,Facilities,2026-06-01,12789
+Quality,7400,Depreciation,2026-01-01,8684
+Quality,7400,Depreciation,2026-02-01,8303
+Quality,7400,Depreciation,2026-03-01,8224
+Quality,7400,Depreciation,2026-04-01,8178
+Quality,7400,Depreciation,2026-05-01,8326
+Quality,7400,Depreciation,2026-06-01,8721
+Quality,7500,IT & Software,2026-01-01,6006
+Quality,7500,IT & Software,2026-02-01,6552
+Quality,7500,IT & Software,2026-03-01,6129
+Quality,7500,IT & Software,2026-04-01,6141
+Quality,7500,IT & Software,2026-05-01,6153
+Quality,7500,IT & Software,2026-06-01,6253
+Quality,7600,Marketing,2026-01-01,6306
+Quality,7600,Marketing,2026-02-01,6118
+Quality,7600,Marketing,2026-03-01,6235
+Quality,7600,Marketing,2026-04-01,6391
+Quality,7600,Marketing,2026-05-01,6404
+Quality,7600,Marketing,2026-06-01,5999
+Quality,8000,Research & Development,2026-01-01,6240
+Quality,8000,Research & Development,2026-02-01,6427
+Quality,8000,Research & Development,2026-03-01,6544
+Quality,8000,Research & Development,2026-04-01,6061
+Quality,8000,Research & Development,2026-05-01,6573
+Quality,8000,Research & Development,2026-06-01,6100
+Quality,9000,Capital Expenditure,2026-01-01,10168
+Quality,9000,Capital Expenditure,2026-02-01,10406
+Quality,9000,Capital Expenditure,2026-03-01,10876
+Quality,9000,Capital Expenditure,2026-04-01,10932
+Quality,9000,Capital Expenditure,2026-05-01,10649
+Quality,9000,Capital Expenditure,2026-06-01,10790
+Sales,5000,Revenue,2026-01-01,354001
+Sales,5000,Revenue,2026-02-01,359488
+Sales,5000,Revenue,2026-03-01,348324
+Sales,5000,Revenue,2026-04-01,355146
+Sales,5000,Revenue,2026-05-01,347582
+Sales,5000,Revenue,2026-06-01,340131
+Sales,6000,Cost of Goods Sold,2026-01-01,215458
+Sales,6000,Cost of Goods Sold,2026-02-01,213701
+Sales,6000,Cost of Goods Sold,2026-03-01,216475
+Sales,6000,Cost of Goods Sold,2026-04-01,200481
+Sales,6000,Cost of Goods Sold,2026-05-01,209385
+Sales,6000,Cost of Goods Sold,2026-06-01,203810
+Sales,6100,Direct Materials,2026-01-01,86754
+Sales,6100,Direct Materials,2026-02-01,95566
+Sales,6100,Direct Materials,2026-03-01,97346
+Sales,6100,Direct Materials,2026-04-01,96937
+Sales,6100,Direct Materials,2026-05-01,96928
+Sales,6100,Direct Materials,2026-06-01,97540
+Sales,6200,Direct Labor,2026-01-01,63023
+Sales,6200,Direct Labor,2026-02-01,62884
+Sales,6200,Direct Labor,2026-03-01,62369
+Sales,6200,Direct Labor,2026-04-01,64524
+Sales,6200,Direct Labor,2026-05-01,61834
+Sales,6200,Direct Labor,2026-06-01,66114
+Sales,6300,Manufacturing Overhead,2026-01-01,34379
+Sales,6300,Manufacturing Overhead,2026-02-01,33327
+Sales,6300,Manufacturing Overhead,2026-03-01,35598
+Sales,6300,Manufacturing Overhead,2026-04-01,34309
+Sales,6300,Manufacturing Overhead,2026-05-01,33733
+Sales,6300,Manufacturing Overhead,2026-06-01,36150
+Sales,7000,Salaries & Benefits,2026-01-01,71361
+Sales,7000,Salaries & Benefits,2026-02-01,66911
+Sales,7000,Salaries & Benefits,2026-03-01,71035
+Sales,7000,Salaries & Benefits,2026-04-01,70427
+Sales,7000,Salaries & Benefits,2026-05-01,71855
+Sales,7000,Salaries & Benefits,2026-06-01,71854
+Sales,7100,Travel & Entertainment,2026-01-01,10547
+Sales,7100,Travel & Entertainment,2026-02-01,10397
+Sales,7100,Travel & Entertainment,2026-03-01,10734
+Sales,7100,Travel & Entertainment,2026-04-01,10006
+Sales,7100,Travel & Entertainment,2026-05-01,10385
+Sales,7100,Travel & Entertainment,2026-06-01,10171
+Sales,7200,Professional Services,2026-01-01,16732
+Sales,7200,Professional Services,2026-02-01,16747
+Sales,7200,Professional Services,2026-03-01,17960
+Sales,7200,Professional Services,2026-04-01,17636
+Sales,7200,Professional Services,2026-05-01,18309
+Sales,7200,Professional Services,2026-06-01,18194
+Sales,7300,Facilities,2026-01-01,19981
+Sales,7300,Facilities,2026-02-01,20352
+Sales,7300,Facilities,2026-03-01,21650
+Sales,7300,Facilities,2026-04-01,21171
+Sales,7300,Facilities,2026-05-01,21560
+Sales,7300,Facilities,2026-06-01,21019
+Sales,7400,Depreciation,2026-01-01,14162
+Sales,7400,Depreciation,2026-02-01,14242
+Sales,7400,Depreciation,2026-03-01,14093
+Sales,7400,Depreciation,2026-04-01,14051
+Sales,7400,Depreciation,2026-05-01,13524
+Sales,7400,Depreciation,2026-06-01,13468
+Sales,7500,IT & Software,2026-01-01,10137
+Sales,7500,IT & Software,2026-02-01,10713
+Sales,7500,IT & Software,2026-03-01,10989
+Sales,7500,IT & Software,2026-04-01,10783
+Sales,7500,IT & Software,2026-05-01,10786
+Sales,7500,IT & Software,2026-06-01,10220
+Sales,7600,Marketing,2026-01-01,10070
+Sales,7600,Marketing,2026-02-01,10749
+Sales,7600,Marketing,2026-03-01,10943
+Sales,7600,Marketing,2026-04-01,10536
+Sales,7600,Marketing,2026-05-01,10838
+Sales,7600,Marketing,2026-06-01,10298
+Sales,8000,Research & Development,2026-01-01,10251
+Sales,8000,Research & Development,2026-02-01,10400
+Sales,8000,Research & Development,2026-03-01,10282
+Sales,8000,Research & Development,2026-04-01,10007
+Sales,8000,Research & Development,2026-05-01,10729
+Sales,8000,Research & Development,2026-06-01,10596
+Sales,9000,Capital Expenditure,2026-01-01,17827
+Sales,9000,Capital Expenditure,2026-02-01,17789
+Sales,9000,Capital Expenditure,2026-03-01,18327
+Sales,9000,Capital Expenditure,2026-04-01,16777
+Sales,9000,Capital Expenditure,2026-05-01,17974
+Sales,9000,Capital Expenditure,2026-06-01,18301
+EHS,6000,Cost of Goods Sold,2026-01-01,41170
+EHS,6000,Cost of Goods Sold,2026-02-01,44056
+EHS,6000,Cost of Goods Sold,2026-03-01,42426
+EHS,6000,Cost of Goods Sold,2026-04-01,39981
+EHS,6000,Cost of Goods Sold,2026-05-01,41086
+EHS,6000,Cost of Goods Sold,2026-06-01,43155
+EHS,6100,Direct Materials,2026-01-01,17693
+EHS,6100,Direct Materials,2026-02-01,19193
+EHS,6100,Direct Materials,2026-03-01,18919
+EHS,6100,Direct Materials,2026-04-01,19166
+EHS,6100,Direct Materials,2026-05-01,19026
+EHS,6100,Direct Materials,2026-06-01,19332
+EHS,6200,Direct Labor,2026-01-01,13003
+EHS,6200,Direct Labor,2026-02-01,12523
+EHS,6200,Direct Labor,2026-03-01,11973
+EHS,6200,Direct Labor,2026-04-01,12296
+EHS,6200,Direct Labor,2026-05-01,12735
+EHS,6200,Direct Labor,2026-06-01,12175
+EHS,6300,Manufacturing Overhead,2026-01-01,7350
+EHS,6300,Manufacturing Overhead,2026-02-01,6812
+EHS,6300,Manufacturing Overhead,2026-03-01,7289
+EHS,6300,Manufacturing Overhead,2026-04-01,7170
+EHS,6300,Manufacturing Overhead,2026-05-01,6845
+EHS,6300,Manufacturing Overhead,2026-06-01,7200
+EHS,7000,Salaries & Benefits,2026-01-01,14436
+EHS,7000,Salaries & Benefits,2026-02-01,14276
+EHS,7000,Salaries & Benefits,2026-03-01,14396
+EHS,7000,Salaries & Benefits,2026-04-01,14271
+EHS,7000,Salaries & Benefits,2026-05-01,14451
+EHS,7000,Salaries & Benefits,2026-06-01,13405
+EHS,7100,Travel & Entertainment,2026-01-01,2147
+EHS,7100,Travel & Entertainment,2026-02-01,2018
+EHS,7100,Travel & Entertainment,2026-03-01,2094
+EHS,7100,Travel & Entertainment,2026-04-01,2176
+EHS,7100,Travel & Entertainment,2026-05-01,1996
+EHS,7100,Travel & Entertainment,2026-06-01,2128
+EHS,7200,Professional Services,2026-01-01,3659
+EHS,7200,Professional Services,2026-02-01,3420
+EHS,7200,Professional Services,2026-03-01,3403
+EHS,7200,Professional Services,2026-04-01,3365
+EHS,7200,Professional Services,2026-05-01,3634
+EHS,7200,Professional Services,2026-06-01,3510
+EHS,7300,Facilities,2026-01-01,4353
+EHS,7300,Facilities,2026-02-01,4309
+EHS,7300,Facilities,2026-03-01,4377
+EHS,7300,Facilities,2026-04-01,4033
+EHS,7300,Facilities,2026-05-01,4263
+EHS,7300,Facilities,2026-06-01,4096
+EHS,7400,Depreciation,2026-01-01,2876
+EHS,7400,Depreciation,2026-02-01,2918
+EHS,7400,Depreciation,2026-03-01,2844
+EHS,7400,Depreciation,2026-04-01,2912
+EHS,7400,Depreciation,2026-05-01,2843
+EHS,7400,Depreciation,2026-06-01,2686
+EHS,7500,IT & Software,2026-01-01,1995
+EHS,7500,IT & Software,2026-02-01,2192
+EHS,7500,IT & Software,2026-03-01,2158
+EHS,7500,IT & Software,2026-04-01,2019
+EHS,7500,IT & Software,2026-05-01,2006
+EHS,7500,IT & Software,2026-06-01,2121
+EHS,7600,Marketing,2026-01-01,2028
+EHS,7600,Marketing,2026-02-01,2127
+EHS,7600,Marketing,2026-03-01,2004
+EHS,7600,Marketing,2026-04-01,2180
+EHS,7600,Marketing,2026-05-01,2038
+EHS,7600,Marketing,2026-06-01,2103
+EHS,8000,Research & Development,2026-01-01,2108
+EHS,8000,Research & Development,2026-02-01,2104
+EHS,8000,Research & Development,2026-03-01,2184
+EHS,8000,Research & Development,2026-04-01,2197
+EHS,8000,Research & Development,2026-05-01,2009
+EHS,8000,Research & Development,2026-06-01,2028
+EHS,9000,Capital Expenditure,2026-01-01,3378
+EHS,9000,Capital Expenditure,2026-02-01,3383
+EHS,9000,Capital Expenditure,2026-03-01,3656
+EHS,9000,Capital Expenditure,2026-04-01,3518
+EHS,9000,Capital Expenditure,2026-05-01,3553
+EHS,9000,Capital Expenditure,2026-06-01,3595
+Executive,6000,Cost of Goods Sold,2026-01-01,151894
+Executive,6000,Cost of Goods Sold,2026-02-01,152034
+Executive,6000,Cost of Goods Sold,2026-03-01,144446
+Executive,6000,Cost of Goods Sold,2026-04-01,153564
+Executive,6000,Cost of Goods Sold,2026-05-01,149360
+Executive,6000,Cost of Goods Sold,2026-06-01,139933
+Executive,6100,Direct Materials,2026-01-01,59090
+Executive,6100,Direct Materials,2026-02-01,67394
+Executive,6100,Direct Materials,2026-03-01,67570
+Executive,6100,Direct Materials,2026-04-01,66980
+Executive,6100,Direct Materials,2026-05-01,67534
+Executive,6100,Direct Materials,2026-06-01,67722
+Executive,6200,Direct Labor,2026-01-01,43954
+Executive,6200,Direct Labor,2026-02-01,43110
+Executive,6200,Direct Labor,2026-03-01,42227
+Executive,6200,Direct Labor,2026-04-01,44276
+Executive,6200,Direct Labor,2026-05-01,43760
+Executive,6200,Direct Labor,2026-06-01,44507
+Executive,6300,Manufacturing Overhead,2026-01-01,23550
+Executive,6300,Manufacturing Overhead,2026-02-01,24745
+Executive,6300,Manufacturing Overhead,2026-03-01,25466
+Executive,6300,Manufacturing Overhead,2026-04-01,25379
+Executive,6300,Manufacturing Overhead,2026-05-01,23695
+Executive,6300,Manufacturing Overhead,2026-06-01,24432
+Executive,7000,Salaries & Benefits,2026-01-01,48470
+Executive,7000,Salaries & Benefits,2026-02-01,46626
+Executive,7000,Salaries & Benefits,2026-03-01,46712
+Executive,7000,Salaries & Benefits,2026-04-01,47204
+Executive,7000,Salaries & Benefits,2026-05-01,46632
+Executive,7000,Salaries & Benefits,2026-06-01,49612
+Executive,7100,Travel & Entertainment,2026-01-01,7318
+Executive,7100,Travel & Entertainment,2026-02-01,7450
+Executive,7100,Travel & Entertainment,2026-03-01,7574
+Executive,7100,Travel & Entertainment,2026-04-01,7713
+Executive,7100,Travel & Entertainment,2026-05-01,7292
+Executive,7100,Travel & Entertainment,2026-06-01,7477
+Executive,7200,Professional Services,2026-01-01,12718
+Executive,7200,Professional Services,2026-02-01,11981
+Executive,7200,Professional Services,2026-03-01,11905
+Executive,7200,Professional Services,2026-04-01,12621
+Executive,7200,Professional Services,2026-05-01,12105
+Executive,7200,Professional Services,2026-06-01,12435
+Executive,7300,Facilities,2026-01-01,14909
+Executive,7300,Facilities,2026-02-01,14456
+Executive,7300,Facilities,2026-03-01,14732
+Executive,7300,Facilities,2026-04-01,15172
+Executive,7300,Facilities,2026-05-01,14677
+Executive,7300,Facilities,2026-06-01,13974
+Executive,7400,Depreciation,2026-01-01,9485
+Executive,7400,Depreciation,2026-02-01,10031
+Executive,7400,Depreciation,2026-03-01,9599
+Executive,7400,Depreciation,2026-04-01,9959
+Executive,7400,Depreciation,2026-05-01,9955
+Executive,7400,Depreciation,2026-06-01,9602
+Executive,7500,IT & Software,2026-01-01,7466
+Executive,7500,IT & Software,2026-02-01,7257
+Executive,7500,IT & Software,2026-03-01,7282
+Executive,7500,IT & Software,2026-04-01,6996
+Executive,7500,IT & Software,2026-05-01,7049
+Executive,7500,IT & Software,2026-06-01,7663
+Executive,7600,Marketing,2026-01-01,7686
+Executive,7600,Marketing,2026-02-01,7320
+Executive,7600,Marketing,2026-03-01,7165
+Executive,7600,Marketing,2026-04-01,7117
+Executive,7600,Marketing,2026-05-01,7651
+Executive,7600,Marketing,2026-06-01,7401
+Executive,8000,Research & Development,2026-01-01,7280
+Executive,8000,Research & Development,2026-02-01,7583
+Executive,8000,Research & Development,2026-03-01,7500
+Executive,8000,Research & Development,2026-04-01,7166
+Executive,8000,Research & Development,2026-05-01,7259
+Executive,8000,Research & Development,2026-06-01,7542
+Executive,9000,Capital Expenditure,2026-01-01,11638
+Executive,9000,Capital Expenditure,2026-02-01,12762
+Executive,9000,Capital Expenditure,2026-03-01,11997
+Executive,9000,Capital Expenditure,2026-04-01,12097
+Executive,9000,Capital Expenditure,2026-05-01,11800
+Executive,9000,Capital Expenditure,2026-06-01,12574
