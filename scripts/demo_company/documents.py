@@ -105,7 +105,7 @@ at the next policy cycle.
 """
         reg.write_text(
             f"docs/policies/{slug}.md", body,
-            department="Policies", project="Policies", artifact_type="Policy",
+            department=owner, project=C.COMPANY_LIBRARY, artifact_type="Policy",
             tags=["policy", "compliance", owner.lower()],
             description=f"{title} (owner: {owner}).")
 
@@ -253,7 +253,7 @@ Tablescope project for {dept_name}.
 """
             reg.write_text(
                 f"docs/procedures/{dept_key}/{slug}.md", body,
-                department="Procedures", project="Procedures",
+                department=dept_key, project=C.COMPANY_LIBRARY,
                 artifact_type="Procedure",
                 tags=["procedure", "sop", dept_name.lower().replace(" & ", "-")],
                 description=f"{title} ({dept_name}).")
@@ -332,7 +332,7 @@ Access-request turnaround elevated for new hires (onboarding bottleneck).
 """
         reg.write_text(
             f"docs/executive/monthly_reviews/{period}_executive_monthly_review.md",
-            body, department="Executive_Reviews", project="Executive Reviews",
+            body, department="Executive", project="Executive",
             artifact_type="Monthly Review",
             tags=["executive", "monthly-review", period],
             description=f"Executive monthly review {period}.")
@@ -380,7 +380,7 @@ Operational Excellence and Supplier Consolidation prioritized for the next quart
 """
         reg.write_text(
             f"docs/executive/quarterly_reviews/{period}_executive_quarterly_review.md",
-            body, department="Executive_Reviews", project="Executive Reviews",
+            body, department="Executive", project="Executive",
             artifact_type="Quarterly Review",
             tags=["executive", "qbr", period.lower()],
             description=f"Executive quarterly review {period}.")

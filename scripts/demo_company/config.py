@@ -72,9 +72,9 @@ class CompanySpec:
 
 # ── Department → project structure ──────────────────────────────────────
 # Tablescope projects are flat (no nesting), so every department is its own
-# project.  Cross-cutting document collections (company policies, procedures,
-# executive reviews) get their own projects too, matching the structure
-# suggested in issue #15.
+# project.  Company-wide policies and procedures are NOT projects — they live
+# in the platform's Company Library (Reference Library, company tier).  Executive
+# review packages are documents belonging to the Executive project.
 @dataclass(frozen=True)
 class Department:
     key: str  # short code used in output folder names
@@ -107,20 +107,34 @@ DEPARTMENTS: list[Department] = [
                "Contracts master, obligations and disputes."),
 ]
 
-# Document-only projects (unstructured content that spans departments).
-DOC_PROJECTS: list[Department] = [
-    Department("Policies", "Policies",
-               "Company-wide policy documents."),
-    Department("Procedures", "Procedures",
-               "Standard operating procedures by department."),
-    Department("Executive_Reviews", "Executive Reviews",
-               "Executive monthly and quarterly review packages."),
-]
+# Company Library (Reference Library, company tier) — where policies and
+# procedures go instead of being their own projects.  Documents are tagged with
+# one of the platform's known domain tags, mapped from the owning department.
+COMPANY_LIBRARY = "Company Library"
+
+LIBRARY_DOMAIN_BY_DEPT: dict[str, str] = {
+    "Executive": "Other",
+    "Finance": "Finance & Accounting",
+    "HR": "HR",
+    "Manufacturing": "Manufacturing & Quality",
+    "Engineering": "Engineering & Product",
+    "Sales": "Marketing & Sales",
+    "Quality": "Manufacturing & Quality",
+    "Procurement": "Supply Chain & Procurement",
+    "IT": "IT & Cybersecurity",
+    "EHS": "ESG",
+    "Legal": "Legal & Compliance",
+    "Legal_Contracts": "Legal & Compliance",
+}
+
+
+def library_domain(department: str) -> str:
+    return LIBRARY_DOMAIN_BY_DEPT.get(department, "Other")
 
 
 def all_projects(spec: CompanySpec) -> list[Department]:
     """Every Tablescope project the installer will create, in order."""
-    return list(DEPARTMENTS) + list(DOC_PROJECTS)
+    return list(DEPARTMENTS)
 
 
 # ── Calendar helpers ────────────────────────────────────────────────────

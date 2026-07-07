@@ -155,6 +155,7 @@ class DemoImporter:
         self._projects: dict[str, int] = {}
         self._datasource_views: set[str] = set()
         self._assets_by_project: dict[int, set[str]] = {}
+        self._library_titles: set[str] = set()
 
     def _log(self, msg: str) -> None:
         if self.verbose:
@@ -201,6 +202,17 @@ class DemoImporter:
                     self._datasource_views.add(ds["viewName"])
         except ApiError:
             pass
+        try:
+            res = self.c.get("/api/reference-library/documents?tier=company")
+            if isinstance(res, dict):
+                docs = res.get("documents") or res.get("items")
+            else:
+                docs = res
+            for d in docs or []:
+                if isinstance(d, dict) and d.get("title"):
+                    self._library_titles.add(str(d["title"]).strip().lower())
+        except ApiError:
+            pass
 
     def _assets_for(self, pid: int) -> set[str]:
         if pid in self._assets_by_project:
@@ -239,6 +251,14 @@ class DemoImporter:
 
     def _process(self, a: dict) -> None:
         rel = a["path"]
+        if a.get("target") == "library":
+            path = self.root / rel
+            if not path.exists():
+                self.report.failed += 1
+                self.report.failures.append(f"{rel}: file not found")
+                return
+            self._upload_library(a, path, path.name)
+            return
         proj_name = a["destination_project"]
         pid = self._projects.get(proj_name)
         if pid is None:
@@ -255,6 +275,63 @@ class DemoImporter:
             self._upload_csv(a, pid, path, filename)
         else:
             self._upload_doc(a, pid, path, filename)
+
+    def _doc_title(self, path: Path) -> str:
+        return path.stem.replace("_", " ").replace("-", " ").title()
+
+    def _refresh_library_titles(self) -> None:
+        try:
+            res = self.c.get("/api/reference-library/documents?tier=company")
+            if isinstance(res, dict):
+                docs = res.get("documents") or res.get("items")
+            else:
+                docs = res
+            for d in docs or []:
+                if isinstance(d, dict) and d.get("title"):
+                    self._library_titles.add(str(d["title"]).strip().lower())
+        except ApiError:
+            pass
+
+    def _upload_library(self, a: dict, path: Path, filename: str) -> None:
+        title = self._doc_title(path)
+        if title.lower() in self._library_titles:
+            self.report.skipped += 1
+            self._log(f"  = skip (in library): {a['path']}")
+            return
+        if self.dry_run:
+            self.report.created += 1
+            self._log(f"  + would upload → Company Library: {a['path']}")
+            return
+        ctype = mimetypes.guess_type(filename)[0] or "text/markdown"
+        try:
+            self.c.post_multipart(
+                "/api/reference-library/documents",
+                fields={"tier": "company", "title": title,
+                        "domain_tag": a.get("domain_tag") or "Other",
+                        "applicability_tag": "Company-specific"},
+                file_field="file", filename=filename,
+                file_bytes=path.read_bytes(), content_type=ctype)
+        except ApiError as e:
+            msg = str(e)
+            if "→ 409" in msg or ": 409" in msg:
+                self._library_titles.add(title.lower())
+                self.report.skipped += 1
+                self._log(f"  = skip (duplicate in library): {a['path']}")
+                return
+            # The reference-library create endpoint can persist the document and
+            # still return 5xx (a background-processing error surfaces after the
+            # DB commit). Verify by title before treating it as a real failure.
+            if "→ 5" in msg or ": 5" in msg:
+                self._refresh_library_titles()
+                if title.lower() in self._library_titles:
+                    self.report.created += 1
+                    self._log(f"  + uploaded → Company Library: {a['path']}"
+                              " (saved; server returned 5xx during AI processing)")
+                    return
+            raise
+        self._library_titles.add(title.lower())
+        self.report.created += 1
+        self._log(f"  + uploaded → Company Library: {a['path']} (AI processing)")
 
     def _upload_csv(self, a: dict, pid: int, path: Path, filename: str) -> None:
         view = compute_view_name(filename)

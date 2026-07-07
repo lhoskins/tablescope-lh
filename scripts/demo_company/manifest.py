@@ -13,8 +13,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import CompanySpec, all_projects
+from .config import COMPANY_LIBRARY, CompanySpec, all_projects, library_domain
 from .io_utils import Registry
+
+# Artifact types that belong in the Company Library (Reference Library, company
+# tier) rather than a project.
+LIBRARY_TYPES = {"Policy", "Procedure"}
 
 # Sample subset (Phase 3 of issue #15): a few CSVs + a couple of documents.
 SAMPLE_PATHS = {
@@ -50,10 +54,15 @@ def build_manifest(reg: Registry, spec: CompanySpec, owner_email: str) -> str:
     for a in reg.artifacts:
         if a.artifact_type == "Documentation":
             continue  # README / dictionaries / answer key stay on disk only
+        is_library = a.artifact_type in LIBRARY_TYPES
         lines.append(f"  - path: {_yaml_quote(a.rel_path)}")
         lines.append(f"    kind: {a.kind}")
         lines.append(f"    department: {_yaml_quote(a.department)}")
-        lines.append(f"    destination_project: {_yaml_quote(a.project)}")
+        lines.append(f"    target: {'library' if is_library else 'project'}")
+        dest = COMPANY_LIBRARY if is_library else a.project
+        lines.append(f"    destination_project: {_yaml_quote(dest)}")
+        if is_library:
+            lines.append(f"    domain_tag: {_yaml_quote(library_domain(a.department))}")
         lines.append(f"    artifact_type: {_yaml_quote(a.artifact_type)}")
         lines.append(f"    tags: [{', '.join(_yaml_quote(t) for t in a.tags)}]")
         lines.append(f"    rows: {a.rows}")

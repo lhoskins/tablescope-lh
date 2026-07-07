@@ -24,7 +24,9 @@ sys.path.insert(0, str(SCRIPTS))
 from demo_company import config as C  # noqa: E402
 from demo_company.datasets import generate_datasets  # noqa: E402
 from demo_company.dimensions import build_dimensions  # noqa: E402
+from demo_company.documents import generate_documents  # noqa: E402
 from demo_company.io_utils import Registry  # noqa: E402
+from demo_company.manifest import build_manifest, load_manifest  # noqa: E402
 
 
 def _generate(tmp: Path) -> tuple[Registry, object]:
@@ -95,6 +97,44 @@ def test_planted_scenarios(tmp_path):
     scards = {r["SupplierID"]: r for r in
               _read(tmp_path, "data/Quality/quality_supplier_scorecards.csv")}
     assert float(scards[sc.defect_supplier_id]["DefectPPM"]) > 2000
+
+
+def test_policies_procedures_go_to_company_library(tmp_path):
+    spec = C.CompanySpec()
+    dims = build_dimensions(spec)
+    reg = Registry(tmp_path)
+    generate_datasets(reg, dims)
+    generate_documents(reg, dims)
+    build_manifest(reg, spec, "owner@example.com")
+    man = load_manifest(tmp_path / "manifest.yaml")
+
+    project_names = {p["name"] for p in man["projects"]}
+    # The doc-only projects no longer exist.
+    assert "Policies" not in project_names
+    assert "Procedures" not in project_names
+    assert "Executive Reviews" not in project_names
+    assert "Executive" in project_names
+
+    by_type: dict[str, set[str]] = {}
+    for a in man["artifacts"]:
+        by_type.setdefault(a["artifact_type"], set()).add(a.get("target"))
+
+    # Policies and procedures target the Company Library; everything else a project.
+    assert by_type["Policy"] == {"library"}
+    assert by_type["Procedure"] == {"library"}
+    assert by_type["Monthly Review"] == {"project"}
+    assert by_type["Quarterly Review"] == {"project"}
+
+    lib = [a for a in man["artifacts"] if a.get("target") == "library"]
+    assert lib, "no library artifacts"
+    for a in lib:
+        assert a["destination_project"] == C.COMPANY_LIBRARY
+        assert a["domain_tag"] in C.LIBRARY_DOMAIN_BY_DEPT.values()
+
+    # Executive reviews are documents in the Executive project.
+    reviews = [a for a in man["artifacts"]
+               if a["artifact_type"] in ("Monthly Review", "Quarterly Review")]
+    assert reviews and all(a["destination_project"] == "Executive" for a in reviews)
 
 
 if __name__ == "__main__":
