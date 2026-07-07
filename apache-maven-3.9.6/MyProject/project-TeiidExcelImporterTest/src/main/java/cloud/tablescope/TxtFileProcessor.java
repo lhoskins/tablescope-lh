@@ -10,18 +10,50 @@ public class TxtFileProcessor {
     // Store mapping of original column names to transformed names
     private Map<String, String> columnNameMapping = new HashMap<>();
     
-    // SQL Reserved Keywords (comprehensive list)
+    // Teiid SQL reserved words. Any column name matching one of these (case
+    // insensitively) must be double-quoted in the generated DDL/SQL, otherwise
+    // Teiid fails to parse the VDB and the entire VDB is marked FAILED. This is
+    // the full Teiid reserved-word set (Teiid reference guide), not a subset:
+    // an incomplete list previously let words such as FUNCTION and SYSTEM slip
+    // through unquoted and break VDB deployment.
     private static final Set<String> RESERVED_KEYWORDS = new HashSet<>(Arrays.asList(
-        "DATE", "TIME", "TIMESTAMP", "YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND",
-        "SELECT", "FROM", "WHERE", "ORDER", "GROUP", "BY", "HAVING", "LIMIT", "OFFSET",
-        "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TABLE", "VIEW", "INDEX",
-        "JOIN", "INNER", "LEFT", "RIGHT", "OUTER", "CROSS", "ON", "USING",
-        "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "IS", "NULL",
-        "AS", "DISTINCT", "ALL", "ANY", "SOME", "UNION", "INTERSECT", "EXCEPT",
-        "CASE", "WHEN", "THEN", "ELSE", "END",
-        "USER", "ROLE", "GRANT", "REVOKE", "COMMIT", "ROLLBACK",
-        "PRIMARY", "FOREIGN", "KEY", "REFERENCES", "CONSTRAINT", "UNIQUE",
-        "DEFAULT", "CHECK", "CASCADE", "RESTRICT"
+        "ADD", "ALL", "ALLOCATE", "ALTER", "AND", "ANY", "ARE", "ARRAY", "AS",
+        "ASC", "ATOMIC", "AUTHORIZATION", "BEGIN", "BETWEEN", "BIGDECIMAL",
+        "BIGINTEGER", "BINARY", "BLOB", "BOOLEAN", "BOTH", "BREAK", "BY", "BYTE",
+        "CALL", "CALLED", "CASCADED", "CASE", "CAST", "CHAR", "CHARACTER",
+        "CLOB", "CLOSE", "COLLATE", "COLUMN", "COMMIT", "CONNECT", "CONSTRAINT",
+        "CONTINUE", "CONVERT", "CORRESPONDING", "CREATE", "CRITERIA", "CROSS",
+        "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "CURRENT_USER",
+        "CURSOR", "DATE", "DAY", "DEALLOCATE", "DEC", "DECIMAL", "DECLARE",
+        "DEFAULT", "DELETE", "DESC", "DESCRIBE", "DETERMINISTIC", "DISCONNECT",
+        "DISTINCT", "DOUBLE", "DROP", "EACH", "ELSE", "END", "ERROR", "ESCAPE",
+        "EXCEPT", "EXEC", "EXECUTE", "EXISTS", "EXTERNAL", "FALSE", "FETCH",
+        "FILTER", "FLOAT", "FOR", "FOREIGN", "FROM", "FULL", "FUNCTION", "GET",
+        "GLOBAL", "GROUP", "HAVING", "HOUR", "IDENTITY", "IF", "IMMEDIATE", "IN",
+        "INDICATOR", "INNER", "INOUT", "INSENSITIVE", "INSERT", "INTEGER",
+        "INTERSECT", "INTERVAL", "INTO", "IS", "JOIN", "LANGUAGE", "LARGE",
+        "LEADING", "LEAVE", "LEFT", "LIKE", "LIKE_REGEX", "LIMIT", "LOCAL",
+        "LONG", "LOOP", "MAKEDEP", "MAKEIND", "MAKENOTDEP", "MERGE", "METHOD",
+        "MINUTE", "MODIFIES", "MONTH", "NATURAL", "NCHAR", "NCLOB", "NEW", "NO",
+        "NONE", "NOT", "NULL", "OBJECT", "OF", "OFFSET", "OLD", "ON", "ONLY",
+        "OPEN", "OPTION", "OPTIONS", "OR", "ORDER", "OUT", "OUTER", "OVER",
+        "PARAMETER", "PARTITION", "PRECISION", "PREPARE", "PRIMARY", "PROCEDURE",
+        "REAL", "REFERENCES", "RETURN", "RETURNS", "RIGHT", "ROLLBACK", "ROW",
+        "ROWS", "SAVEPOINT", "SCROLL", "SEARCH", "SECOND", "SELECT", "SENSITIVE",
+        "SESSION_USER", "SET", "SHORT", "SIMILAR", "SMALLINT", "SOME", "SPECIFIC",
+        "SQL", "SQLEXCEPTION", "SQLSTATE", "SQLWARNING", "START", "STRING",
+        "SYSTEM", "SYSTEM_USER", "TABLE", "TEMPORARY", "THEN", "TIME",
+        "TIMESTAMP", "TIMEZONE_HOUR", "TIMEZONE_MINUTE", "TO", "TRAILING",
+        "TRANSLATE", "TRIGGER", "TRUE", "UNION", "UNIQUE", "UNKNOWN", "UPDATE",
+        "USER", "USING", "VALUES", "VARBINARY", "VARCHAR", "VARYING", "VIRTUAL",
+        "WHEN", "WHENEVER", "WHERE", "WHILE", "WITH", "WITHOUT", "XML", "XMLAGG",
+        "XMLATTRIBUTES", "XMLBINARY", "XMLCAST", "XMLCOMMENT", "XMLCONCAT",
+        "XMLDOCUMENT", "XMLELEMENT", "XMLEXISTS", "XMLFOREST", "XMLNAMESPACES",
+        "XMLPARSE", "XMLPI", "XMLQUERY", "XMLSERIALIZE", "XMLTABLE", "XMLTEXT",
+        "XMLVALIDATE", "YEAR",
+        // Non-reserved SQL words that are still safer to quote as identifiers.
+        "GRANT", "REVOKE", "ROLE", "INDEX", "VIEW", "CASCADE", "RESTRICT",
+        "CHECK", "KEY"
     ));
     
     /**
