@@ -178,11 +178,17 @@ public class TxtFileProcessor {
         String fileNameWithoutExtension = fileName.substring(0, fileName.lastIndexOf('.'));
         String viewName = fileNameWithoutExtension.replaceAll("\\s+", "_") + "_" + extension.toUpperCase();
         StringBuilder viewDefinition = new StringBuilder();
-        viewDefinition.append("CREATE VIEW ").append(viewName).append(" (\n");
+        // Always quote the view name so a view whose name is (or contains) a
+        // reserved word still parses.
+        viewDefinition.append("CREATE VIEW \"").append(viewName).append("\" (\n");
         for (String columnName : columnNames) {
             // Use the original column name for NAMEINSOURCE
             String sourceColumnName = columnNameMapping.getOrDefault(columnName, columnName);
-            viewDefinition.append(columnName).append(" string(4000) OPTIONS(NAMEINSOURCE '").append(sourceColumnName).append("', UPDATABLE 'FALSE'),\n");
+            // Quote the view column identifier when it is a reserved word or
+            // contains special characters, matching the SELECT/TEXTTABLE clauses
+            // below. Without this an unquoted reserved word (e.g. "Function",
+            // "System") fails DDL parsing and the entire VDB is marked FAILED.
+            viewDefinition.append(quoteIfNeeded(columnName)).append(" string(4000) OPTIONS(NAMEINSOURCE '").append(sourceColumnName).append("', UPDATABLE 'FALSE'),\n");
         }
         viewDefinition.deleteCharAt(viewDefinition.length() - 2); // Remove the last comma
         viewDefinition.append(") AS\n");
