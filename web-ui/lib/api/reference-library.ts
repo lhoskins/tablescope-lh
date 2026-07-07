@@ -29,6 +29,29 @@ export interface ReferenceDocument {
   reasoning?: string | null;
 }
 
+export interface ReferenceVersion {
+  id: number;
+  title: string;
+  versionLabel: string | null;
+  status: string;
+  effectiveDate: string | null;
+  isCurrent: boolean;
+  supersededById: number | null;
+}
+
+export interface ReferenceUsage {
+  projectId: number;
+  projectName: string;
+  assignmentType: string;
+  suggestionStatus: string | null;
+}
+
+export interface ReferenceDocumentDetail {
+  document: ReferenceDocument;
+  versionFamily: ReferenceVersion[];
+  usage: ReferenceUsage[];
+}
+
 export interface ReferenceMeta {
   domains: string[];
   issuers: string[];
@@ -103,6 +126,23 @@ export const referenceLibraryApi = {
 
   updateDocument: (id: number, body: Record<string, unknown>) =>
     apiClient.patch<ReferenceDocument>(`${BASE}/documents/${id}`, body),
+
+  getDocumentDetail: (id: number) =>
+    apiClient.get<ReferenceDocumentDetail>(`${BASE}/documents/${id}/detail`),
+
+  documentDownloadUrl: (id: number) => `${BASE}/documents/${id}/download`,
+
+  downloadDocument: async (id: number, filename: string) => {
+    const res = await apiClient.stream(`${BASE}/documents/${id}/download`);
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
 
   reprocess: (id: number) =>
     apiClient.post<{ status: string }>(`${BASE}/documents/${id}/process`, {}),

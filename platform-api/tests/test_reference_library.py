@@ -99,6 +99,40 @@ async def test_industry_create_and_list(client) -> None:
     assert "NIST SP 800-161" in titles  # industry visible to all tenants
 
 
+async def test_document_detail_returns_family_and_usage(client) -> None:
+    res = await client.post(
+        "/api/reference-library/documents",
+        data={
+            "tier": "company",
+            "title": "Detail Probe Policy",
+            "domain_tag": "Legal & Compliance",
+        },
+        headers=_headers("tenant_admin", tenant_id=1),
+    )
+    assert res.status_code in (200, 201), res.text
+    doc_id = res.json()["id"]
+
+    res = await client.get(
+        f"/api/reference-library/documents/{doc_id}/detail",
+        headers=_headers("viewer", tenant_id=1),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["document"]["id"] == doc_id
+    assert body["document"]["title"] == "Detail Probe Policy"
+    # A lone document is its own single-member version family with no usage yet.
+    assert [v["id"] for v in body["versionFamily"]] == [doc_id]
+    assert body["versionFamily"][0]["isCurrent"] is True
+    assert body["usage"] == []
+
+    # Cross-tenant reads are denied at the data-access layer.
+    res = await client.get(
+        f"/api/reference-library/documents/{doc_id}/detail",
+        headers=_headers("tenant_admin", tenant_id=2),
+    )
+    assert res.status_code in (403, 404)
+
+
 # ── company tier: tenant isolation ───────────────────────────────────────────
 
 

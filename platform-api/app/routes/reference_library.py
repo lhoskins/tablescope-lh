@@ -213,6 +213,90 @@ async def get_document(
     return doc.to_dict()
 
 
+@router.get("/documents/{document_id}/detail")
+async def get_document_detail(
+    document_id: int,
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Full detail for a reference document: metadata + AI summary, its version
+    (supersede) family, and where it is used across projects."""
+    doc = await _get_doc_with_read_access(session, context, document_id)
+
+    # ── version family: walk the supersede lineage in both directions ──
+    family_ids: set[int] = {doc.id}
+    cur: ReferenceDocument | None = doc
+    seen: set[int] = set()
+    while cur is not None and cur.id not in seen:
+        seen.add(cur.id)
+        family_ids.add(cur.id)
+        if cur.superseded_by_id is None:
+            break
+        cur = await session.get(ReferenceDocument, cur.superseded_by_id)
+    for _ in range(10):  # bounded backward expansion over predecessors
+        preds = (
+            await session.scalars(
+                select(ReferenceDocument.id).where(
+                    ReferenceDocument.superseded_by_id.in_(family_ids)
+                )
+            )
+        ).all()
+        new_ids = set(preds) - family_ids
+        if not new_ids:
+            break
+        family_ids |= new_ids
+
+    fam_rows = (
+        await session.scalars(
+            select(ReferenceDocument).where(ReferenceDocument.id.in_(family_ids))
+        )
+    ).all()
+    version_family = sorted(
+        (
+            {
+                "id": d.id,
+                "title": d.title,
+                "versionLabel": d.version_label,
+                "status": d.status,
+                "effectiveDate": d.effective_date.isoformat() if d.effective_date else None,
+                "isCurrent": d.id == doc.id,
+                "supersededById": d.superseded_by_id,
+            }
+            for d in fam_rows
+        ),
+        key=lambda r: (r["effectiveDate"] or "", r["id"]),
+    )
+
+    # ── usage: projects that inherit / use this reference ──
+    usage: list[dict] = []
+    if doc.tier in (TIER_COMPANY, TIER_INDUSTRY):
+        rows = (
+            await session.execute(
+                select(ReferenceDocumentAssignment, Project.name)
+                .join(Project, Project.id == ReferenceDocumentAssignment.project_id)
+                .where(
+                    ReferenceDocumentAssignment.reference_document_id == doc.id,
+                    ReferenceDocumentAssignment.is_active.is_(True),
+                )
+            )
+        ).all()
+        usage = [
+            {
+                "projectId": a.project_id,
+                "projectName": name,
+                "assignmentType": a.assignment_type,
+                "suggestionStatus": a.suggestion_status,
+            }
+            for a, name in rows
+        ]
+
+    return {
+        "document": doc.to_dict(),
+        "versionFamily": version_family,
+        "usage": usage,
+    }
+
+
 @router.get("/documents/{document_id}/download")
 async def download_document(
     document_id: int,
