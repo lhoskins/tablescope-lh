@@ -145,6 +145,13 @@ _PROCEDURES: dict[str, list[tuple[str, str]]] = {
         ("preventive_maintenance_procedure", "Preventive Maintenance Procedure"),
         ("capacity_planning_procedure", "Capacity Planning Procedure"),
     ],
+    "Procurement": [
+        ("supplier_onboarding_procedure", "Supplier Onboarding Procedure"),
+        ("sourcing_and_rfq_procedure", "Sourcing and RFQ Procedure"),
+        ("purchase_order_management_procedure", "Purchase Order Management Procedure"),
+        ("supplier_performance_review_procedure", "Supplier Performance Review Procedure"),
+        ("supplier_risk_management_procedure", "Supplier Risk Management Procedure"),
+    ],
     "Engineering": [
         ("engineering_change_request_procedure", "Engineering Change Request Procedure"),
         ("design_review_procedure", "Design Review Procedure"),
@@ -550,6 +557,22 @@ def _business_ops(reg: Registry, dims: Dimensions, rng: random.Random) -> None:
         "Capacity outlook against the production plan.",
         [("Utilization", "Approaching capacity on key lines."),
          ("Investment", f"Automation case for {sc.scrap_site}.")])
+    # Procurement
+    doc("Procurement", "PROC-001", "supplier-consolidation-analysis",
+        "Supplier Consolidation Analysis",
+        "Analysis of the supplier base and consolidation opportunities.",
+        [("Base", "Long tail of low-spend suppliers identified for consolidation."),
+         ("At-Risk", f"{sc.defect_supplier_name} flagged high risk on quality.")])
+    doc("Procurement", "PROC-002", "material-inflation-report",
+        "Material Inflation Report",
+        f"Direct-material cost inflation concentrated on program {sc.material_cost_program}.",
+        [("Trend", "Price index rising since 2025-10 on key commodities."),
+         ("Impact", f"Unfavorable variance on {sc.material_cost_program}; re-sourcing planned.")])
+    doc("Procurement", "PROC-003", "supplier-late-delivery-report",
+        "Supplier Late Delivery Report",
+        "On-time delivery performance and late-delivery drivers.",
+        [("OTD", f"{sc.defect_supplier_name} below on-time-delivery target."),
+         ("Actions", "Expedite plans and dual-sourcing for critical parts.")])
     # Quality
     doc("Quality", "QA-001", "q2-2026-quality-management-review",
         "Q2 2026 Quality Management Review",
