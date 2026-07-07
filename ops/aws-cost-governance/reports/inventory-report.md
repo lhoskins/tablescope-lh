@@ -1,7 +1,7 @@
 # AWS Resource Inventory Report
 
 - **Account:** `988823366090`
-- **Generated:** 2026-07-07T14:55:04Z
+- **Generated:** 2026-07-07T15:36:01Z
 - **Regions scanned:** us-east-1, us-west-1, us-west-2
 - **Estimated monthly cost (running state):** $744.96
 

@@ -103,7 +103,31 @@ def recommendations_markdown(inv: dict[str, Any], recs: list[dict[str, Any]]) ->
     return "\n".join(out)
 
 
-def before_after_markdown(inv: dict[str, Any], recs: list[dict[str, Any]]) -> str:
+def _billed_history_section(billed: dict[str, Any] | None) -> list[str]:
+    """Render real Cost Explorer history (the billed anomaly) when available."""
+    if not billed or not billed.get("monthlyTrend"):
+        return []
+    trend = billed["monthlyTrend"]
+    baseline_months = [m for m in trend[:-1]] or trend
+    baseline = (round(sum(m["amount"] for m in baseline_months) / len(baseline_months), 2)
+                if baseline_months else 0.0)
+    peak = max(trend, key=lambda m: m["amount"])
+    out = ["## Billed history (AWS Cost Explorer, actual)", "",
+           "| Month | Actual spend (USD) |", "|---|---|"]
+    for m in trend:
+        flag = "  ← anomaly" if m["month"] == peak["month"] and peak["amount"] > baseline * 2 else ""
+        out.append(f"| {m['month']} | ${m['amount']:,.2f}{flag} |")
+    out += ["",
+            f"- Typical monthly baseline (prior months): **${baseline:,.2f}/mo**",
+            f"- Anomalous month **{peak['month']}**: **${peak['amount']:,.2f}** "
+            f"(~{round(peak['amount'] / baseline, 1) if baseline else 0}x baseline)",
+            f"- Month-to-date this month: **${billed.get('monthToDate', 0):,.2f}**, "
+            f"projected **${billed.get('projectedMonth', 0):,.2f}** if left uncontrolled.", ""]
+    return out
+
+
+def before_after_markdown(inv: dict[str, Any], recs: list[dict[str, Any]],
+                          billed: dict[str, Any] | None = None) -> str:
     s = INV.summarize(inv)
     gpu_full = round(sum((i["MonthlyEstimateRunning"] or 0) for i in s["gpuRunning"]), 2)
     gpu_after = round(gpu_full * SCHEDULED_FRACTION, 2)
@@ -119,8 +143,10 @@ def before_after_markdown(inv: dict[str, Any], recs: list[dict[str, Any]]) -> st
     ]
     out = ["# Before vs. After Cost Governance Report", "",
            f"- **Generated:** {C.now_iso()}",
-           f"- **Account:** `{inv['account']}`", "",
-           "| Before | After |", "|---|---|"]
+           f"- **Account:** `{inv['account']}`", ""]
+    out += _billed_history_section(billed)
+    out += ["## Governance controls", "",
+            "| Before | After |", "|---|---|"]
     for b, a in rows:
         out.append(f"| {b} | {a} |")
     out += ["", "## Quantified impact", "",

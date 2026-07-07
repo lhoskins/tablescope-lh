@@ -112,3 +112,22 @@ def test_recommendations_prioritise_gpu():
 
 def test_scheduled_fraction():
     assert 0.38 < optimize.SCHEDULED_FRACTION < 0.39
+
+
+def test_before_after_includes_billed_anomaly():
+    inv = _fake_inventory()
+    recs = optimize.build_recommendations(inv)
+    billed = {
+        "monthToDate": 182.93, "projectedMonth": 1104.58,
+        "monthlyTrend": [
+            {"month": "2026-04", "amount": 59.66},
+            {"month": "2026-05", "amount": 78.09},
+            {"month": "2026-06", "amount": 771.91},
+        ],
+    }
+    md = optimize.before_after_markdown(inv, recs, billed)
+    assert "Billed history" in md
+    assert "771.91" in md
+    assert "anomaly" in md
+    # Without billed data the section is omitted, report still renders.
+    assert "Billed history" not in optimize.before_after_markdown(inv, recs, None)

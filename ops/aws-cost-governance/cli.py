@@ -67,12 +67,21 @@ def cmd_dashboard(args):
                       "projected": data["projectedMonth"]}, indent=2, default=str))
 
 
+def _billed():
+    """Best-effort real Cost Explorer history; None if CE is unavailable."""
+    try:
+        return dashboard.collect()
+    except Exception:
+        return None
+
+
 def cmd_optimize(args):
     inv = _load_or_scan(args.regions)
     recs = optimize.build_recommendations(inv)
     common.write_json("optimization.json", recs)
     common.write_text("optimization-report.md", optimize.recommendations_markdown(inv, recs))
-    common.write_text("before-after-report.md", optimize.before_after_markdown(inv, recs))
+    common.write_text("before-after-report.md",
+                      optimize.before_after_markdown(inv, recs, _billed()))
     print(optimize.recommendations_markdown(inv, recs))
 
 
@@ -99,7 +108,7 @@ def cmd_all(args):
         GPU_REGION, _gpu_ids(inv), dry_run=not args.apply)["action"])
     recs = optimize.build_recommendations(inv)
     common.write_text("optimization-report.md", optimize.recommendations_markdown(inv, recs))
-    common.write_text("before-after-report.md", optimize.before_after_markdown(inv, recs))
+    common.write_text("before-after-report.md", optimize.before_after_markdown(inv, recs, data))
     print("schedule(deploy, DISABLED):",
           schedule.deploy(GPU_REGION, enabled=False, dry_run=not args.apply)["action"])
     print("NOTE: run `schedule enable` to activate GPU start/stop.")
