@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-07-07T14:54:05Z",
+  "source": "inventory-estimate (Cost Explorer access denied)",
+  "note": "An error occurred (AccessDeniedException) when calling the GetCostAndUsage operation: User: arn:aws:iam::988823366090:user/devin-terraform is not authorized to perform: ce:GetCostAndUsage on resource: arn:aws:ce:us-east-1:988823366090:/GetCostAndUsage because no identity-based policy allows the ce:GetCostAndUsage action",
+  "monthToDate": 744.96,
+  "projectedMonth": 744.96,
+  "byService": [
+    {
+      "service": "EC2 compute",
+      "amount": 656.71
+    },
+    {
+      "service": "EBS volumes",
+      "amount": 55.4
+    },
+    {
+      "service": "NAT gateways",
+      "amount": 32.85
+    }
+  ],
+  "topDrivers": [
+    {
+      "service": "EC2 compute",
+      "amount": 656.71
+    },
+    {
+      "service": "EBS volumes",
+      "amount": 55.4
+    },
+    {
+      "service": "NAT gateways",
+      "amount": 32.85
+    }
+  ],
+  "daily": [],
+  "monthlyTrend": []
+}

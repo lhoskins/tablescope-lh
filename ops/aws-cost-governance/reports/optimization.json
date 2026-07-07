@@ -1,0 +1,42 @@
+[
+  {
+    "resource": "i-0d938409d1b57ff12",
+    "region": "us-west-2",
+    "type": "g6.xlarge",
+    "recommendation": "Stop idle / schedule GPU (weekday 07:00-20:00 PT + idle shutdown)",
+    "estMonthlySavings": 360.2,
+    "estAnnualSavings": 4322.4,
+    "confidence": "High",
+    "risk": "Low (AutoStop tag + manual wake available)"
+  },
+  {
+    "resource": "nat-0a12c47e33d1a36e1",
+    "region": "us-west-2",
+    "type": "NAT Gateway",
+    "recommendation": "Confirm workloads still require NAT; delete if not",
+    "estMonthlySavings": 32.85,
+    "estAnnualSavings": 394.2,
+    "confidence": "Low",
+    "risk": "High if private subnets need egress"
+  },
+  {
+    "resource": "i-0d1ae6093692f8889",
+    "region": "us-west-1",
+    "type": "t3.large",
+    "recommendation": "Consider 1-yr Compute Savings Plan for always-on host",
+    "estMonthlySavings": 18.22,
+    "estAnnualSavings": 218.64,
+    "confidence": "Medium",
+    "risk": "Low; commitment reduces flexibility"
+  },
+  {
+    "resource": "i-0399e2ee5e37a2c4f",
+    "region": "us-west-1",
+    "type": "t2.micro",
+    "recommendation": "Consider 1-yr Compute Savings Plan for always-on host",
+    "estMonthlySavings": 2.54,
+    "estAnnualSavings": 30.48,
+    "confidence": "Medium",
+    "risk": "Low; commitment reduces flexibility"
+  }
+]
