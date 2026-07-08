@@ -49,11 +49,13 @@ from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
 from app.services.presentation_engine import (
-    describe as describe_presentation,
-)
-from app.services.presentation_engine import (
+    PresentationMode,
     mode_for_ask_and_run,
 )
+from app.services.presentation_engine import (
+    describe as describe_presentation,
+)
+from app.services.response_envelope import ResponseEnvelope
 from app.services.visualization_engine import ChartType, select_visualization
 
 logger = logging.getLogger(__name__)
@@ -2498,11 +2500,13 @@ async def _ask_and_run_core(
 
 
 def _attach_presentation(response: dict[str, Any]) -> None:
-    """Stamp the shared ``presentation`` descriptor onto a response. Fail-closed.
+    """Stamp the shared ``presentation`` descriptor + ``ResponseEnvelope``.
 
-    Non-breaking metadata: ``{mode, sections}`` from the one section registry so
-    the UI can render the correct section set from a single contract instead of
-    sniffing this surface's bespoke schema. Never raises.
+    Non-breaking, fail-closed. ``presentation`` is the ``{mode, sections}``
+    descriptor from the one section registry; ``envelope`` is the shared
+    :class:`ResponseEnvelope` — the ask-and-run pilot for the M4 fast-follow,
+    emitting the surface's data under the unified contract so the frontend can
+    read one shape. Existing fields are left untouched. Never raises.
     """
     try:
         mode = mode_for_ask_and_run(
@@ -2510,8 +2514,41 @@ def _attach_presentation(response: dict[str, Any]) -> None:
             has_method_envelope=response.get("analyticalMethod") is not None,
         )
         response["presentation"] = describe_presentation(mode)
+        response["envelope"] = _build_ask_and_run_envelope(response, mode)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Presentation engine hook failed: %s", exc)
+
+
+def _build_ask_and_run_envelope(
+    response: dict[str, Any], mode: PresentationMode
+) -> dict[str, Any]:
+    """Map an ask-and-run response dict onto the shared ``ResponseEnvelope``.
+
+    The prose explanation is the answer for a conversational fallback and the
+    (executive) summary for an executed result; None fields are dropped.
+    """
+    explanation = response.get("explanation") or None
+    is_prose = mode is PresentationMode.CONVERSATIONAL
+    # A prose answer renders no chart/grid/SQL — don't carry those fields even
+    # if the fallback stamped a default table visualization.
+    data = None if is_prose else response
+    envelope = ResponseEnvelope.build(
+        mode,
+        status=response.get("status"),
+        answer=explanation if is_prose else None,
+        summary=explanation if not is_prose else None,
+        executive_summary=(
+            explanation if mode is PresentationMode.HYBRID else None
+        ),
+        sql=(data or {}).get("sql") or None,
+        columns=(data or {}).get("columns") or None,
+        rows=(data or {}).get("rows") or None,
+        chart=(data or {}).get("suggestedVisualization") or None,
+        method_envelope=response.get("analyticalMethod"),
+        sources=response.get("dataSourcesUsed") or None,
+        intent=response.get("intent"),
+    )
+    return envelope.model_dump(exclude_none=True)
 
 
 def _classify_intent_safe(

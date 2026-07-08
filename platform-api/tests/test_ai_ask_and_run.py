@@ -223,6 +223,13 @@ async def test_ask_and_run_falls_back_to_prose_when_no_source(
     # A prose fallback presents as the conversational mode (no forced chart).
     assert body["presentation"]["mode"] == "conversational"
     assert "chart" not in body["presentation"]["sections"]
+    # Envelope: prose maps `explanation` -> `answer`, carries no chart/columns.
+    env = body["envelope"]
+    assert env["mode"] == "conversational"
+    assert env["answer"] == body["explanation"]
+    assert "summary" not in env
+    assert "chart" not in env
+    assert "columns" not in env
 
 
 async def test_ask_and_run_success_attaches_intent_metadata(
@@ -258,6 +265,46 @@ async def test_ask_and_run_success_attaches_intent_metadata(
     assert body["presentation"]["mode"] == "structured"
     assert "chart" in body["presentation"]["sections"]
     assert "show_sql" in body["presentation"]["sections"]
+    # M4 fast-follow pilot: the surface emits a unified ResponseEnvelope.
+    env = body["envelope"]
+    assert env["mode"] == "structured"
+    assert env["sections"] == body["presentation"]["sections"]
+    assert env["sql"] == body["sql"]
+    assert env["columns"] == body["columns"]
+    assert env["rows"] == body["rows"]
+    assert env["chart"] == body["suggestedVisualization"]
+    assert env["intent"] == body["intent"]
+    # A structured result is not prose — no `answer` field.
+    assert "answer" not in env
+
+
+def test_build_ask_and_run_envelope_hybrid_maps_executive_summary():
+    """Hybrid: the prose becomes the executive summary and the method envelope
+    + drivers ride the unified contract (M4 fast-follow mapping)."""
+    from app.services.presentation_engine import PresentationMode
+
+    response = {
+        "status": "success",
+        "explanation": "Late shipments concentrate in two carriers.",
+        "sql": "SELECT carrier, late FROM q",
+        "columns": ["carrier", "late"],
+        "rows": [{"carrier": "A", "late": 9}],
+        "suggestedVisualization": {"type": "bar"},
+        "analyticalMethod": {"method": "neg_binomial", "n": 42},
+        "dataSourcesUsed": ["shipments"],
+        "intent": {"responseMode": "structured_data"},
+    }
+    env = ai_proxy._build_ask_and_run_envelope(
+        response, PresentationMode.HYBRID
+    )
+    assert env["mode"] == "hybrid"
+    assert "method_envelope" in env["sections"]
+    assert env["executive_summary"] == response["explanation"]
+    assert env["summary"] == response["explanation"]
+    assert env["method_envelope"] == response["analyticalMethod"]
+    assert env["sources"] == ["shipments"]
+    # Hybrid is data-backed, not a prose answer.
+    assert "answer" not in env
 
 
 async def test_intent_classification_never_forces_hard_failure(
