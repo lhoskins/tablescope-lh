@@ -72,7 +72,7 @@ from app.models.schemas import (
 from app.services import context_builder, llm_client, vector_store
 from app.services.context_builder import ContextBuildError
 from app.services.kg_context import format_knowledge_graph_context
-from app.services.prompt_loader import load_prompt_reference
+from app.services.prompt_loader import load_prompt_reference, shared_policy_block
 from app.services.sql_validator import SQLValidationError, validate_sql
 
 logger = logging.getLogger(__name__)
@@ -270,7 +270,13 @@ async def ask(req: AskRequest) -> AskResponse:
     # 3. Send ONLY allowed context to LLM
     context_text = context_builder.context_to_prompt_text(ctx)
     history_text = _format_conversation_history(req.history)
-    prompt = f"{context_text}\n\n{history_text}User question: {req.question}"
+    policy_block = shared_policy_block(
+        "response_best_practices.md", "document_intelligence_best_practices.md"
+    )
+    prompt = (
+        f"{policy_block}{context_text}\n\n{history_text}"
+        f"User question: {req.question}"
+    )
 
     answer = await llm_client.generate(
         prompt=prompt,
@@ -695,6 +701,10 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
     if kg_block:
         context_text = f"{context_text}\n\n{kg_block}"
 
+    sql_policy = shared_policy_block("sql_generation_best_practices.md")
+    if sql_policy:
+        context_text = f"{sql_policy}{context_text}"
+
     # Determine allowed tables
     allowed_tables = req.allowed_tables
     if not allowed_tables:
@@ -885,10 +895,13 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     )
 
     best_practices = load_prompt_reference("dashboard_best_practices.md")
-    best_practices_block = (
+    dashboard_block = (
         f"Dashboard Best Practices (authoritative policy):\n{best_practices}\n\n"
         if best_practices
         else ""
+    )
+    best_practices_block = dashboard_block + shared_policy_block(
+        "response_best_practices.md", "visualization_best_practices.md"
     )
 
     kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
@@ -1086,10 +1099,13 @@ async def suggest_dashboards_multi(
     )
 
     best_practices = load_prompt_reference("dashboard_best_practices.md")
-    best_practices_block = (
+    dashboard_block = (
         f"Dashboard Best Practices (authoritative policy):\n{best_practices}\n\n"
         if best_practices
         else ""
+    )
+    best_practices_block = dashboard_block + shared_policy_block(
+        "response_best_practices.md", "visualization_best_practices.md"
     )
 
     kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
@@ -2005,11 +2021,14 @@ async def knowledge_graph_insights(
         )
 
     best_practices = load_prompt_reference("knowledge_graph_insight_best_practices.md")
-    best_practices_block = (
+    kg_bp_block = (
         f"Knowledge Graph Insight Best Practices (authoritative policy):\n"
         f"{best_practices}\n\n"
         if best_practices
         else ""
+    )
+    best_practices_block = kg_bp_block + shared_policy_block(
+        "response_best_practices.md"
     )
 
     center = req.center or {}
@@ -2195,10 +2214,16 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
     verify_signature(req.model_dump(exclude={"signature"}), req.signature)
 
     best_practices = load_prompt_reference("project_insight_best_practices.md")
-    best_practices_block = (
+    project_bp_block = (
         f"Project Insight Best Practices (authoritative policy):\n{best_practices}\n\n"
         if best_practices
         else ""
+    )
+    best_practices_block = project_bp_block + shared_policy_block(
+        "response_best_practices.md",
+        "visualization_best_practices.md",
+        "hybrid_intelligence_best_practices.md",
+        "analytical_method_best_practices.md",
     )
 
     project = req.project or {}
@@ -2531,7 +2556,8 @@ async def profile_document(req: DocumentProfileRequest):
     for c in req.chunks[:5]:
         chunk_text += f"\n--- Chunk {c.get('chunk_index', 0)} ---\n{c.get('text', '')[:1500]}\n"
 
-    prompt = f"""You are a document analyst. Analyze this document and return a JSON profile.
+    doc_policy = shared_policy_block("document_intelligence_best_practices.md")
+    prompt = f"""{doc_policy}You are a document analyst. Analyze this document and return a JSON profile.
 
 File: {req.filename}
 Type: {req.asset_type}
