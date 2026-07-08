@@ -27,6 +27,7 @@ import {
   ResultChart,
   ResultTable,
 } from "@/components/ai/ai-result-view";
+import { ResponsePresenter } from "@/components/ai/ResponsePresenter";
 
 export function AIQuestionResultModal({
   open,
@@ -176,53 +177,60 @@ export function AIQuestionResultModal({
                 />
               )}
 
-              {isTextAnswer && result?.explanation && (
-                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-primary">
-                  {result.explanation}
-                </p>
-              )}
-
-              {isDataAnswer && result?.explanation && (
-                <p className="mb-3 text-[13px] text-ink-secondary">
-                  {result.explanation}
-                </p>
-              )}
-
-              {isDataAnswer && (
-                <ResultChart
-                  columns={result.columns}
-                  rows={result.rows}
-                  viz={result.suggestedVisualization}
-                />
-              )}
-
-              {isDataAnswer && (
-                <ResultTable
-                  columns={result.columns}
-                  rows={result.rows}
-                />
-              )}
-
-              {sql && (
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowSql((v) => !v)}
-                    className="flex items-center gap-1 text-[12px] text-ink-tertiary hover:text-ink-secondary"
-                  >
-                    {showSql ? (
-                      <IconChevronDown size={14} />
-                    ) : (
-                      <IconChevronRight size={14} />
-                    )}
-                    {showSql ? "Hide SQL" : "Show SQL"}
-                  </button>
-                  {showSql && (
-                    <pre className="mt-1.5 overflow-auto rounded-md bg-bg-secondary p-2.5 text-[11px] leading-relaxed text-ink-primary">
-                      {sql}
-                    </pre>
+              {success && result?.envelope ? (
+                // M4: render the unified contract from the section registry.
+                <ResponsePresenter envelope={result.envelope} />
+              ) : (
+                <>
+                  {isTextAnswer && result?.explanation && (
+                    <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-primary">
+                      {result.explanation}
+                    </p>
                   )}
-                </div>
+
+                  {isDataAnswer && result?.explanation && (
+                    <p className="mb-3 text-[13px] text-ink-secondary">
+                      {result.explanation}
+                    </p>
+                  )}
+
+                  {isDataAnswer && (
+                    <ResultChart
+                      columns={result.columns}
+                      rows={result.rows}
+                      viz={result.suggestedVisualization}
+                    />
+                  )}
+
+                  {isDataAnswer && (
+                    <ResultTable
+                      columns={result.columns}
+                      rows={result.rows}
+                    />
+                  )}
+
+                  {sql && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowSql((v) => !v)}
+                        className="flex items-center gap-1 text-[12px] text-ink-tertiary hover:text-ink-secondary"
+                      >
+                        {showSql ? (
+                          <IconChevronDown size={14} />
+                        ) : (
+                          <IconChevronRight size={14} />
+                        )}
+                        {showSql ? "Hide SQL" : "Show SQL"}
+                      </button>
+                      {showSql && (
+                        <pre className="mt-1.5 overflow-auto rounded-md bg-bg-secondary p-2.5 text-[11px] leading-relaxed text-ink-primary">
+                          {sql}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}

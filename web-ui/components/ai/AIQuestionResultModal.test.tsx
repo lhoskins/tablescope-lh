@@ -75,6 +75,34 @@ describe("AIQuestionResultModal", () => {
     expect(await screen.findByText(/SELECT supplier, defects/)).toBeTruthy();
   });
 
+  it("renders from the unified envelope when present (M4)", async () => {
+    askAndRun.mockResolvedValue({
+      ...SUCCESS,
+      presentation: {
+        mode: "structured",
+        sections: ["summary", "chart", "grid", "show_sql"],
+      },
+      envelope: {
+        mode: "structured",
+        sections: ["summary", "chart", "grid", "show_sql"],
+        summary: "Computed from the quality table.",
+        sql: "SELECT supplier, defects FROM q",
+        columns: ["supplier", "defects"],
+        rows: [{ supplier: "A", defects: 3 }],
+        chart: { type: "bar", xField: "supplier", yField: "defects" },
+      },
+    });
+    renderModal();
+    // The presenter (not the legacy inline body) renders the result.
+    const presenter = await screen.findByTestId("response-presenter");
+    expect(presenter.dataset.mode).toBe("structured");
+    expect(screen.getByText("Computed from the quality table.")).toBeTruthy();
+    expect(screen.getByText("A")).toBeTruthy();
+    expect(screen.queryByText(/SELECT supplier/)).toBeNull();
+    fireEvent.click(screen.getByText("Show SQL"));
+    expect(await screen.findByText(/SELECT supplier, defects/)).toBeTruthy();
+  });
+
   it("renders a prose answer (no table) for a text fallback answer", async () => {
     askAndRun.mockResolvedValue({
       ...SUCCESS,
