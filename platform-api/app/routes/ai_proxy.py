@@ -46,6 +46,7 @@ from app.services.auto_scope import _get_or_create_ai_scope_set
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
+from app.services.visualization_engine import ChartType, select_visualization
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -2077,26 +2078,27 @@ async def ai_generate_and_save_query(
     }
 
 
-def _is_numeric_value(value: Any) -> bool:
-    if isinstance(value, bool):
-        return False
-    if isinstance(value, int | float):
-        return True
-    if isinstance(value, str):
-        try:
-            float(value.replace(",", "").strip())
-            return True
-        except (ValueError, AttributeError):
-            return False
-    return False
-
-
-def _looks_like_time_column(name: str) -> bool:
-    lowered = name.lower()
-    return any(
-        token in lowered
-        for token in ("date", "time", "month", "year", "day", "week", "quarter")
-    )
+# The ask-and-run mini-renderer (``web-ui/.../ai-result-view.tsx``) draws a
+# subset of the full chart vocabulary. Map the Visualization Engine's decision
+# onto what this surface can render, so the decision stays unified while the
+# rendered output never exceeds this surface's capability. Charts this surface
+# cannot shape meaningfully (scatter) degrade to a table rather than a
+# misleading bar.
+_ASK_AND_RUN_SURFACE: dict[ChartType, str] = {
+    ChartType.KPI: "kpi",
+    ChartType.TABLE: "table",
+    ChartType.LINE: "line",
+    ChartType.AREA: "line",
+    ChartType.BAR: "bar",
+    ChartType.PIE: "pie",
+    ChartType.COMBO: "line",
+    ChartType.SCATTER: "table",
+    ChartType.RADAR: "bar",
+    ChartType.TREEMAP: "bar",
+    ChartType.FUNNEL: "bar",
+    ChartType.SANKEY: "bar",
+    ChartType.RADIAL_BAR: "bar",
+}
 
 
 def _suggest_visualization(
@@ -2104,33 +2106,27 @@ def _suggest_visualization(
 ) -> dict[str, Any]:
     """Pick a sensible default chart for a result set (deterministic).
 
-    - single numeric cell -> kpi
-    - a time column + a numeric column -> line
-    - a categorical column + a numeric column -> bar
-    - otherwise -> table
+    Delegates the decision to the single Universal Visualization Engine
+    (``app.services.visualization_engine``) so ask-and-run, Home cards, and
+    dashboards all agree on the same chart for the same shape, then maps the
+    engine's decision onto the subset this surface can render.
     """
     if not columns or not rows:
         return {"type": "table"}
 
-    sample = rows[0]
-    numeric_cols = [
-        c
-        for c in columns
-        if any(_is_numeric_value(r.get(c)) for r in rows[:20])
-    ]
-    non_numeric_cols = [c for c in columns if c not in numeric_cols]
+    decision = select_visualization(columns, rows)
+    surface_type = _ASK_AND_RUN_SURFACE.get(decision.chart_type, "table")
 
-    if len(rows) == 1 and len(columns) == 1 and _is_numeric_value(sample.get(columns[0])):
-        return {"type": "kpi", "metricField": columns[0]}
-
-    if numeric_cols and non_numeric_cols:
-        y_field = numeric_cols[0]
-        time_cols = [c for c in non_numeric_cols if _looks_like_time_column(c)]
-        if time_cols:
-            return {"type": "line", "xField": time_cols[0], "yField": y_field}
-        return {"type": "bar", "xField": non_numeric_cols[0], "yField": y_field}
-
-    return {"type": "table"}
+    if surface_type == "table":
+        return {"type": "table"}
+    if surface_type == "kpi":
+        return {"type": "kpi", "metricField": decision.y_field or columns[0]}
+    fallback_y = columns[1] if len(columns) > 1 else columns[0]
+    return {
+        "type": surface_type,
+        "xField": decision.x_field or columns[0],
+        "yField": decision.y_field or fallback_y,
+    }
 
 
 _LIMIT_RE = re.compile(r"\blimit\s+\d+\s*$", re.IGNORECASE)
