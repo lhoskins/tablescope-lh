@@ -698,12 +698,14 @@ async def ask(
     # A request for a summary of the user's queries is answered directly from
     # the database (authorization-correct, no AI-server dependency).
     if _is_query_summary_request(req.question):
-        return {
+        response = {
             "answer": await _build_query_summary(session, context),
             "model_used": "tablescope-direct",
             "request_id": "",
             "context_summary": {},
         }
+        _attach_ask_envelope(response)
+        return response
 
     payload = {
         "tenant_id": context.tenant_id,
@@ -715,7 +717,9 @@ async def ask(
         "include_dashboard_context": req.include_dashboard_context,
         "history": [],
     }
-    return await _forward_to_ai("/ai/ask", payload)
+    response = await _forward_to_ai("/ai/ask", payload)
+    _attach_ask_envelope(response)
+    return response
 
 
 class RoutePromptRequest(BaseModel):
@@ -2517,6 +2521,29 @@ def _attach_presentation(response: dict[str, Any]) -> None:
         response["envelope"] = _build_ask_and_run_envelope(response, mode)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Presentation engine hook failed: %s", exc)
+
+
+def _attach_ask_envelope(response: dict[str, Any]) -> None:
+    """Stamp the conversational ``presentation`` descriptor + ``ResponseEnvelope``
+    on an ``/ask`` chat response.
+
+    The conversational surface always returns a prose ``answer``; this maps it
+    onto the shared contract (``mode="conversational"``, ``prose_answer`` section)
+    so the frontend can render it through the same ``ResponsePresenter`` as every
+    other migrated surface. Additive, fail-closed — never raises, existing fields
+    untouched.
+    """
+    try:
+        if not isinstance(response, dict):
+            return
+        mode = PresentationMode.CONVERSATIONAL
+        response["presentation"] = describe_presentation(mode)
+        response["envelope"] = ResponseEnvelope.build(
+            mode,
+            answer=response.get("answer") or None,
+        ).model_dump(exclude_none=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Presentation engine hook (ask) failed: %s", exc)
 
 
 def _build_ask_and_run_envelope(
