@@ -7,6 +7,10 @@ export interface SuggestedVisualization {
   xField?: string;
   yField?: string;
   metricField?: string;
+  /** Engine-chosen variant, e.g. "horizontal_bar" for many categories. */
+  chartStyle?: string;
+  /** Rank by the measure and keep only the top N categories when set. */
+  topN?: number;
 }
 
 export type AiActionStatus =
