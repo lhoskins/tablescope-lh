@@ -13,6 +13,7 @@ import {
   IconShieldLock,
   IconDatabaseShare,
   IconPhoto,
+  IconMathFunction,
   IconUserCircle,
   IconLogout,
   IconLayoutSidebarLeftCollapse,
@@ -193,6 +194,12 @@ export function Sidebar({
           label: "Branding",
           href: "/admin/branding",
           icon: IconPhoto,
+        },
+        {
+          key: "admin-analytical-methods",
+          label: "Analytical Methods",
+          href: "/admin/analytical-methods",
+          icon: IconMathFunction,
         },
       ]
     : [];
