@@ -660,3 +660,14 @@ async def test_generate_query_preview_success(
     assert body["title"] == "Monthly Revenue"
     assert body["suggestedVisualization"]["type"] == "line"
     assert body["rows"][0]["revenue"] == 10
+
+    # M4 fast-follow: an executed preview is a structured result carrying the
+    # shared ResponseEnvelope so the modal renders via the ResponsePresenter.
+    assert body["presentation"]["mode"] == "structured"
+    env = body["envelope"]
+    assert env["mode"] == "structured"
+    assert env["sections"] == body["presentation"]["sections"]
+    assert env["sql"] == "SELECT month, revenue FROM q"
+    assert env["columns"] == ["month", "revenue"]
+    assert env["rows"][0]["revenue"] == 10
+    assert env["chart"]["type"] == "line"

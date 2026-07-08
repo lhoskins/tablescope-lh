@@ -22,6 +22,7 @@ import {
   ResultChart,
   ResultTable,
 } from "@/components/ai/ai-result-view";
+import { ResponsePresenter } from "@/components/ai/ResponsePresenter";
 
 /**
  * Generate + execute a recommended query and preview it before saving.
@@ -205,37 +206,45 @@ export function GenerateQueryPreviewModal({
                 </div>
               )}
 
-              {success && (
-                <ResultChart
-                  columns={result.columns}
-                  rows={result.rows}
-                  viz={result.suggestedVisualization}
-                />
-              )}
-              {success && (
-                <ResultTable columns={result.columns} rows={result.rows} />
-              )}
-
-              {sql && (
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowSql((v) => !v)}
-                    className="flex items-center gap-1 text-[12px] text-ink-tertiary hover:text-ink-secondary"
-                  >
-                    {showSql ? (
-                      <IconChevronDown size={14} />
-                    ) : (
-                      <IconChevronRight size={14} />
-                    )}
-                    {showSql ? "Hide SQL" : "Show SQL"}
-                  </button>
-                  {showSql && (
-                    <pre className="mt-1.5 overflow-auto rounded-md bg-bg-secondary p-2.5 text-[11px] leading-relaxed text-ink-primary">
-                      {sql}
-                    </pre>
+              {success && result.envelope ? (
+                // M4: render the unified contract via the shared presenter
+                // (chart + grid + Show SQL come from envelope.sections).
+                <ResponsePresenter envelope={result.envelope} />
+              ) : (
+                <>
+                  {success && (
+                    <ResultChart
+                      columns={result.columns}
+                      rows={result.rows}
+                      viz={result.suggestedVisualization}
+                    />
                   )}
-                </div>
+                  {success && (
+                    <ResultTable columns={result.columns} rows={result.rows} />
+                  )}
+
+                  {sql && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowSql((v) => !v)}
+                        className="flex items-center gap-1 text-[12px] text-ink-tertiary hover:text-ink-secondary"
+                      >
+                        {showSql ? (
+                          <IconChevronDown size={14} />
+                        ) : (
+                          <IconChevronRight size={14} />
+                        )}
+                        {showSql ? "Hide SQL" : "Show SQL"}
+                      </button>
+                      {showSql && (
+                        <pre className="mt-1.5 overflow-auto rounded-md bg-bg-secondary p-2.5 text-[11px] leading-relaxed text-ink-primary">
+                          {sql}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}

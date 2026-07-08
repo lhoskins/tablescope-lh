@@ -87,6 +87,37 @@ describe("GenerateQueryPreviewModal", () => {
     );
   });
 
+  it("renders the preview through the shared presenter when an envelope is present (M4)", async () => {
+    generateQueryPreview.mockResolvedValue({
+      ...PREVIEW,
+      presentation: {
+        mode: "structured",
+        sections: ["summary", "chart", "grid", "show_sql"],
+      },
+      envelope: {
+        mode: "structured",
+        sections: ["summary", "chart", "grid", "show_sql"],
+        summary: "Two suppliers ship late most often.",
+        sql: PREVIEW.sql,
+        columns: PREVIEW.columns,
+        rows: PREVIEW.rows,
+        chart: PREVIEW.suggestedVisualization,
+      },
+    });
+    renderModal();
+
+    // The presenter (not the legacy inline body) renders the result.
+    const presenter = await screen.findByTestId("response-presenter");
+    expect(presenter.dataset.mode).toBe("structured");
+    expect(screen.getByText("Two suppliers ship late most often.")).toBeTruthy();
+    // SQL is hidden until toggled, and the toggle lives inside the presenter.
+    expect(screen.queryByText(/SELECT supplier, late/)).toBeNull();
+    fireEvent.click(screen.getByText("Show SQL"));
+    expect(await screen.findByText(/SELECT supplier, late/)).toBeTruthy();
+    // Save Query action still works from the footer.
+    expect(screen.getByRole("button", { name: /save query/i })).toBeTruthy();
+  });
+
   it("shows an inline error when generation fails", async () => {
     generateQueryPreview.mockResolvedValue({
       ...PREVIEW,
