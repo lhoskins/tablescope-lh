@@ -15,6 +15,19 @@ function formatBytes(n: number | null): string | null {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+type AITag = { tag_key?: string; display_name?: string; confidence?: number };
+type AIKpi = {
+  kpi_key?: string;
+  display_name?: string;
+  confidence?: number;
+  reason?: string;
+};
+type AIEntity = { entity_type?: string; name?: string; evidence?: string };
+
+function pct(v: number | undefined): string | null {
+  return typeof v === "number" ? `${Math.round(v * 100)}%` : null;
+}
+
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   if (value == null || value === "") return null;
   return (
@@ -85,6 +98,31 @@ export function ReferenceDetailDrawer({
       setBusy(false);
     }
   }
+
+  async function remove() {
+    if (!doc) return;
+    if (!window.confirm(`Delete "${doc.title}"? This cannot be undone.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await referenceLibraryApi.deleteDocument(doc.id);
+      onChanged?.();
+      onClose();
+    } catch {
+      setError("Could not delete document.");
+      setBusy(false);
+    }
+  }
+
+  const meta = (doc?.aiMetadata ?? {}) as Record<string, unknown>;
+  const tags = (meta.tags ?? []) as AITag[];
+  const kpis = (meta.recommended_kpis ?? []) as AIKpi[];
+  const entities = (meta.entities ?? []) as AIEntity[];
+  const questions = (meta.suggested_questions ?? []) as string[];
+  const docType =
+    typeof meta.document_type === "string" ? meta.document_type : null;
+  const businessDomain =
+    typeof meta.business_domain === "string" ? meta.business_domain : null;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -173,6 +211,108 @@ export function ReferenceDetailDrawer({
               )}
             </div>
 
+            {(docType || businessDomain) && (
+              <div className="flex flex-wrap gap-6">
+                {docType && (
+                  <Field label="Type" value={docType.replace(/_/g, " ")} />
+                )}
+                {businessDomain && (
+                  <Field
+                    label="Domain"
+                    value={businessDomain.replace(/_/g, " ")}
+                  />
+                )}
+              </div>
+            )}
+
+            {tags.length > 0 && (
+              <div>
+                <h4 className="mb-1 text-[11px] font-semibold uppercase text-ink-tertiary">
+                  Tags
+                </h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {tags.map((t, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1 rounded-full bg-bg-secondary px-2 py-0.5 text-[12px] text-ink-secondary"
+                    >
+                      {t.display_name || t.tag_key}
+                      {pct(t.confidence) && (
+                        <span className="text-ink-tertiary">
+                          {pct(t.confidence)}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {kpis.length > 0 && (
+              <div>
+                <h4 className="mb-1 text-[11px] font-semibold uppercase text-ink-tertiary">
+                  KPIs
+                </h4>
+                <ul className="space-y-1 text-[13px] text-ink-secondary">
+                  {kpis.map((k, i) => (
+                    <li key={i}>
+                      <span className="text-ink-primary">
+                        {k.display_name || k.kpi_key}
+                      </span>
+                      {pct(k.confidence) && (
+                        <span className="text-ink-tertiary">
+                          {" "}
+                          {pct(k.confidence)}
+                        </span>
+                      )}
+                      {k.reason && (
+                        <span className="text-ink-tertiary"> — {k.reason}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {entities.length > 0 && (
+              <div>
+                <h4 className="mb-1 text-[11px] font-semibold uppercase text-ink-tertiary">
+                  Entities
+                </h4>
+                <ul className="space-y-1 text-[13px] text-ink-secondary">
+                  {entities.map((e, i) => (
+                    <li key={i} className="flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-ink-tertiary">
+                        {e.entity_type}
+                      </span>
+                      <span className="text-ink-primary">{e.name}</span>
+                      {e.evidence && (
+                        <span className="truncate italic text-ink-tertiary">
+                          &ldquo;{e.evidence}&rdquo;
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {questions.length > 0 && (
+              <div>
+                <h4 className="mb-1 text-[11px] font-semibold uppercase text-ink-tertiary">
+                  Suggested questions
+                </h4>
+                <ul className="space-y-1 text-[13px] text-ink-secondary">
+                  {questions.map((q, i) => (
+                    <li key={i} className="flex items-start gap-1.5">
+                      <span className="text-ink-tertiary">•</span>
+                      {q}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {detail.versionFamily.length > 1 && (
               <div>
                 <h4 className="mb-1 text-[11px] font-semibold uppercase text-ink-tertiary">
@@ -248,6 +388,16 @@ export function ReferenceDetailDrawer({
                   {busy || doc.status === "processing"
                     ? "Reprocessing…"
                     : "Reprocess AI summary"}
+                </button>
+              )}
+              {canWrite && (
+                <button
+                  type="button"
+                  onClick={() => void remove()}
+                  disabled={busy}
+                  className="ml-auto rounded-md bg-danger/10 px-3 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/20 disabled:opacity-50"
+                >
+                  Delete
                 </button>
               )}
             </div>

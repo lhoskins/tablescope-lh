@@ -529,6 +529,42 @@ async def reprocess_document(
     return {"status": "processing"}
 
 
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: int,
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Delete a reference document (and its stored file). Write-permission +
+    tenant/project scoped. Assignment rows cascade; supersede links reset."""
+    doc = await session.get(ReferenceDocument, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Reference document not found")
+    if not await can_write_tier(session, context, doc.tier, doc.project_id):
+        raise HTTPException(status_code=403, detail="Not permitted to delete this document")
+    if doc.tier == TIER_COMPANY and doc.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=403, detail="Not in this tenant")
+
+    for path in (doc.file_path, doc.extracted_text_path):
+        if path:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove file %s for reference doc %s", path, doc.id)
+
+    _audit(
+        session,
+        context,
+        event_type="reference_library_delete",
+        title=doc.title,
+        project_id=doc.project_id,
+        documents=[doc.id],
+    )
+    await session.delete(doc)
+    await session.commit()
+    return {"status": "deleted"}
+
+
 @router.post("/documents/{document_id}/supersede")
 async def supersede_document(
     document_id: int,

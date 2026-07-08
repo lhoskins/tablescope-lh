@@ -20,6 +20,7 @@ export interface ReferenceDocument {
   fileSizeBytes: number | null;
   originalFilename: string | null;
   aiSummary: string | null;
+  aiMetadata?: Record<string, unknown> | null;
   aiErrorMessage: string | null;
   inheritDefault: boolean;
   createdAt: string | null;
@@ -146,6 +147,9 @@ export const referenceLibraryApi = {
 
   reprocess: (id: number) =>
     apiClient.post<{ status: string }>(`${BASE}/documents/${id}/process`, {}),
+
+  deleteDocument: (id: number) =>
+    apiClient.delete<{ status: string }>(`${BASE}/documents/${id}`),
 
   companyLibrary: () =>
     apiClient.get<{

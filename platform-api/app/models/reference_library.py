@@ -90,6 +90,10 @@ class ReferenceDocument(TimestampMixin, Base):
     original_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Full per-document AI profile (document_type, business_domain, tags, kpis,
+    # entities, suggested_questions, …) — same shape as ProjectAsset.ai_metadata.
+    # Never carries a document_family block: families are project-scoped only.
+    ai_metadata: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
     extracted_text_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -123,6 +127,7 @@ class ReferenceDocument(TimestampMixin, Base):
             "fileSizeBytes": self.file_size_bytes,
             "originalFilename": self.original_filename,
             "aiSummary": self.ai_summary,
+            "aiMetadata": self.ai_metadata or {},
             "aiErrorMessage": self.ai_error_message,
             "inheritDefault": self.inherit_default,
             "uploadedBy": self.uploaded_by,
