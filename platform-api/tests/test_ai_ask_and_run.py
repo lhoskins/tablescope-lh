@@ -220,6 +220,9 @@ async def test_ask_and_run_falls_back_to_prose_when_no_source(
     assert "port congestion" in body["explanation"]
     assert body["sql"] == ""
     assert body["rows"] == []
+    # A prose fallback presents as the conversational mode (no forced chart).
+    assert body["presentation"]["mode"] == "conversational"
+    assert "chart" not in body["presentation"]["sections"]
 
 
 async def test_ask_and_run_success_attaches_intent_metadata(
@@ -246,10 +249,15 @@ async def test_ask_and_run_success_attaches_intent_metadata(
         headers=headers,
     )
     assert r.status_code == 200
-    intent = r.json()["intent"]
+    body = r.json()
+    intent = body["intent"]
     assert intent["responseMode"] == "structured_data"
     assert intent["requiresSql"] is True
     assert 0.0 <= intent["confidence"] <= 1.0
+    # Shared presentation descriptor (M4): an executed result is `structured`.
+    assert body["presentation"]["mode"] == "structured"
+    assert "chart" in body["presentation"]["sections"]
+    assert "show_sql" in body["presentation"]["sections"]
 
 
 async def test_intent_classification_never_forces_hard_failure(

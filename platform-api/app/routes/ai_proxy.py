@@ -48,6 +48,12 @@ from app.services.intent_engine import IntentDecision, classify_intent
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
+from app.services.presentation_engine import (
+    describe as describe_presentation,
+)
+from app.services.presentation_engine import (
+    mode_for_ask_and_run,
+)
 from app.services.visualization_engine import ChartType, select_visualization
 
 logger = logging.getLogger(__name__)
@@ -2487,7 +2493,25 @@ async def _ask_and_run_core(
         session, context, question, columns, rows, response,
         intent_hint=decision.analysis_intent if decision else None,
     )
+    _attach_presentation(response)
     return response
+
+
+def _attach_presentation(response: dict[str, Any]) -> None:
+    """Stamp the shared ``presentation`` descriptor onto a response. Fail-closed.
+
+    Non-breaking metadata: ``{mode, sections}`` from the one section registry so
+    the UI can render the correct section set from a single contract instead of
+    sniffing this surface's bespoke schema. Never raises.
+    """
+    try:
+        mode = mode_for_ask_and_run(
+            answer_type=response.get("answerType"),
+            has_method_envelope=response.get("analyticalMethod") is not None,
+        )
+        response["presentation"] = describe_presentation(mode)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Presentation engine hook failed: %s", exc)
 
 
 def _classify_intent_safe(
@@ -2610,7 +2634,7 @@ async def ai_ask_and_run(
             context, project_id=req.project_id, question=req.question
         )
         if prose:
-            return {
+            prose_result = {
                 "question": req.question,
                 "sql": "",
                 "columns": [],
@@ -2622,6 +2646,8 @@ async def ai_ask_and_run(
                 "answerType": "text",
                 "error": None,
             }
+            _attach_presentation(prose_result)
+            return prose_result
     return result
 
 
