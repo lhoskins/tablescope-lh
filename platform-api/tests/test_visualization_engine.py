@@ -108,6 +108,26 @@ def test_many_categories_is_horizontal_bar() -> None:
     assert d.chart_style == "horizontal_bar"
 
 
+def test_high_cardinality_bar_is_ranked_and_capped() -> None:
+    # The #2 scenario: an asset count per employee across many employees. A
+    # vertical bar would overlap dozens of ticks — the engine flips it to a
+    # horizontal bar and asks the surface to rank + keep only the top N.
+    rows = [{"AssignedTo": f"EMP-1000{i:02d}", "AssetCount": (i % 4) + 1} for i in range(30)]
+    d = select_visualization(["AssignedTo", "AssetCount"], rows)
+    assert d.chart_type is ChartType.BAR
+    assert d.chart_style == "horizontal_bar"
+    assert d.top_n == 12
+    assert d.to_dict()["topN"] == 12
+
+
+def test_moderate_categories_not_capped() -> None:
+    rows = [{"plant": f"Plant {i}", "units": i} for i in range(7)]
+    d = select_visualization(["plant", "units"], rows)
+    assert d.chart_type is ChartType.BAR
+    assert d.top_n is None
+    assert "topN" not in d.to_dict()
+
+
 def test_few_categories_is_plain_bar() -> None:
     rows = [{"plant": p, "units": u} for p, u in [("A", 5), ("B", 8), ("C", 3)]]
     d = select_visualization(["plant", "units"], rows)

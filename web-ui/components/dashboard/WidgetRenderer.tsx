@@ -337,12 +337,33 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
     height: 50,
   };
 
-  const barXAxisProps = {
-    ...commonAxisProps,
-    interval: 0 as const,
-    tick: { fontSize: 11, fill: "#334155" },
-    height: 40,
+  // A vertical bar's x-axis overlaps once there are many categories, so past a
+  // threshold we angle the labels, let recharts thin them out, and truncate long
+  // text. (High-cardinality bars are also flipped to horizontal upstream; this
+  // keeps any that slip through readable.)
+  const barCategoryCount = chartData.length;
+  const barManyCategories = barCategoryCount > 8;
+  const truncateTick = (v: unknown) => {
+    const s = String(v ?? "");
+    return s.length > 16 ? `${s.slice(0, 15)}…` : s;
   };
+  const barXAxisProps = barManyCategories
+    ? {
+        ...commonAxisProps,
+        interval: "preserveStartEnd" as const,
+        angle: -35,
+        textAnchor: "end" as const,
+        tick: { fontSize: 10, fill: "#334155" },
+        height: 66,
+        tickFormatter: truncateTick,
+      }
+    : {
+        ...commonAxisProps,
+        interval: 0 as const,
+        tick: { fontSize: 11, fill: "#334155" },
+        height: 40,
+        tickFormatter: truncateTick,
+      };
 
   const yAxisProps = {
     ...commonAxisProps,
@@ -475,7 +496,7 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
               {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={!barHorizontal} horizontal={barHorizontal} />}
               {tiny ? null : barHorizontal ? (
                 <>
-                  <YAxis type="category" dataKey={xKey} {...commonAxisProps} width={100}>
+                  <YAxis type="category" dataKey={xKey} {...commonAxisProps} width={110} tickFormatter={truncateTick}>
                     <Label value={barXLabel} angle={-90} position="insideLeft" offset={-5} style={{ fontSize: 10, fill: "#64748b", textAnchor: "middle" }} />
                   </YAxis>
                   <XAxis type="number" {...commonAxisProps} tickFormatter={fmtAxis}>

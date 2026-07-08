@@ -2136,11 +2136,18 @@ def _suggest_visualization(
     if surface_type == "kpi":
         return {"type": "kpi", "metricField": decision.y_field or columns[0]}
     fallback_y = columns[1] if len(columns) > 1 else columns[0]
-    return {
+    viz: dict[str, Any] = {
         "type": surface_type,
         "xField": decision.x_field or columns[0],
         "yField": decision.y_field or fallback_y,
     }
+    # Carry the engine's readability decision so the surface renders a horizontal,
+    # top-N-ranked bar for many categories instead of an unreadable vertical wall.
+    if decision.chart_style:
+        viz["chartStyle"] = decision.chart_style
+    if decision.top_n is not None:
+        viz["topN"] = decision.top_n
+    return viz
 
 
 _LIMIT_RE = re.compile(r"\blimit\s+\d+\s*$", re.IGNORECASE)

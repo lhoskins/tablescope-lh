@@ -46,8 +46,7 @@ export function buildChart(
 
   const xField = viz.xField ?? columns[0];
   const yField = viz.yField ?? columns[1] ?? columns[0];
-  const series = rows
-    .slice(0, 25)
+  let series = rows
     .map((r) => ({
       label: String(r[xField] ?? ""),
       value: toNumber(r[yField]) ?? 0,
@@ -56,7 +55,21 @@ export function buildChart(
   if (!series.length) return null;
 
   const type = viz.type === "pie" ? "pie" : viz.type === "line" ? "line" : "bar";
-  return { type, data: { series }, seriesLabels: { value: yField } };
+
+  // Bars with many categories are ranked by the measure and capped to the top N
+  // (the engine's decision) so the chart shows the leaders instead of an
+  // unreadable wall of ticks; the full result stays in the table below.
+  if (type === "bar") {
+    const cap = viz.topN ?? 25;
+    if (series.length > cap) {
+      series = [...series].sort((a, b) => b.value - a.value).slice(0, cap);
+    }
+  } else {
+    series = series.slice(0, 25);
+  }
+
+  const subtype = viz.chartStyle || undefined;
+  return { type, subtype, data: { series }, seriesLabels: { value: yField } };
 }
 
 export function ResultChart({

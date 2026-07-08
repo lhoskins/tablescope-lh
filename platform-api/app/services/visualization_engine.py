@@ -71,6 +71,10 @@ class VizDecision:
     y_field: str | None = None
     y2_field: str | None = None
     value_format: ValueFormat = "number"
+    #: When set, the surface should rank rows by the measure (desc) and keep
+    #: only the top ``top_n`` — a chart with too many categories is unreadable,
+    #: so the engine caps it rather than plotting dozens of overlapping ticks.
+    top_n: int | None = None
     reason: str = ""
     confidence: float = 0.5
 
@@ -88,6 +92,8 @@ class VizDecision:
             out["yField"] = self.y_field
         if self.y2_field is not None:
             out["y2Field"] = self.y2_field
+        if self.top_n is not None:
+            out["topN"] = self.top_n
         return out
 
 
@@ -129,6 +135,15 @@ _COUNT_COL_RE = re.compile(
     r"(?i)\b(count|qty|quantity|units?|number|orders?|shipments?|items?|"
     r"records?|inspections?|defects?)\b"
 )
+
+#: Above this many distinct categories (or when labels are id-like) a vertical
+#: bar's x-axis ticks overlap, so the engine flips it to a horizontal bar whose
+#: category labels stack readably down the y-axis.
+_HORIZONTAL_BAR_THRESHOLD = 5
+#: A bar with more categories than this is ranked by the measure and capped to
+#: the top N — dozens of bars are unreadable and bury the story; the surface
+#: still shows the full result in its data table beneath the chart.
+_BAR_RANK_CAP = 12
 
 
 def _to_float(value: Any) -> float | None:
@@ -269,6 +284,45 @@ def detect_value_format(name: str, values: list[Any]) -> ValueFormat:
     return "number"
 
 
+def _categorical_bar(
+    label_col: str,
+    value_col: str,
+    vfmt: ValueFormat,
+    label_card: int,
+    labels: list[str],
+    *,
+    confidence: float,
+) -> VizDecision:
+    """Bar decision for a category comparison, made readable for many categories.
+
+    Many distinct or id-like categories flip to a horizontal bar (labels stack
+    down the y-axis); beyond :data:`_BAR_RANK_CAP` the decision also asks the
+    surface to rank by the measure and keep only the top N, so the chart shows
+    the leaders instead of an unreadable wall of ticks.
+    """
+    many = label_card > _HORIZONTAL_BAR_THRESHOLD or _looks_like_id_labels(labels)
+    top_n = _BAR_RANK_CAP if label_card > _BAR_RANK_CAP else None
+    if top_n is not None:
+        reason = (
+            f"{label_card} categories — ranked top {top_n} as a horizontal bar "
+            "so the axis stays readable."
+        )
+    elif many:
+        reason = "Several categories — horizontal bar for readable labels."
+    else:
+        reason = "Category comparison."
+    return VizDecision(
+        ChartType.BAR,
+        chart_style="horizontal_bar" if many else "",
+        x_field=label_col,
+        y_field=value_col,
+        value_format=vfmt,
+        top_n=top_n,
+        reason=reason,
+        confidence=confidence,
+    )
+
+
 def _looks_like_share(label_col: str, cardinality: int, all_positive: bool) -> bool:
     if not (3 <= cardinality <= 8) or not all_positive:
         return False
@@ -402,20 +456,12 @@ def select_visualization(
             confidence=0.7,
         )
 
-    # 6) Categorical comparison -> bar (horizontal for many/id-like labels).
+    # 6) Categorical comparison -> bar. Many/id-like categories rank + cap and go
+    #    horizontal so the axis stays readable (see ``_categorical_bar``).
     if label_col is not None:
         labels = [str(v) for v in _column_values(dict_rows, label_col, limit=50)]
-        style = ""
-        if label_card > 5 or _looks_like_id_labels(labels):
-            style = "horizontal_bar"
-        return VizDecision(
-            ChartType.BAR,
-            chart_style=style,
-            x_field=label_col,
-            y_field=value_col,
-            value_format=vfmt,
-            reason="Category comparison.",
-            confidence=0.65,
+        return _categorical_bar(
+            label_col, value_col, vfmt, label_card, labels, confidence=0.65
         )
 
     # 7) Fallback.
@@ -516,9 +562,11 @@ def _hint_if_supported(
             value_format=vfmt, reason=f"Explicit {hint} request.", confidence=0.55,
         )
     if hint == "bar" and label_col is not None:
-        return VizDecision(
-            ChartType.BAR, x_field=label_col, y_field=value_col,
-            value_format=vfmt, reason="Explicit category comparison.", confidence=0.6,
+        # The hint path only carries the shape (not raw label values), so
+        # id-like detection is skipped here; the cardinality rule still ranks
+        # and flips many-category bars to horizontal.
+        return _categorical_bar(
+            label_col, value_col, vfmt, label_card, [], confidence=0.6
         )
     return None
 

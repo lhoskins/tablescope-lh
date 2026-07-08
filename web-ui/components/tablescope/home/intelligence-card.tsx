@@ -119,8 +119,18 @@ function InsightChartView({ chart }: { chart: InsightChart }) {
     };
   }
 
+  // Horizontal bars stack their category labels down the y-axis, so give each
+  // bar vertical room instead of cramming them into a fixed 180px box.
+  const isHorizontalBar =
+    chart.type === "bar" &&
+    (chart.subtype === "horizontal_bar" ||
+      chart.subtype === "stacked_horizontal");
+  const height = isHorizontalBar
+    ? Math.min(520, Math.max(180, rows.length * 28 + 48))
+    : 180;
+
   return (
-    <div className="h-[180px] w-full">
+    <div className="w-full" style={{ height }}>
       <WidgetRenderer widget={widget} data={rows} />
     </div>
   );
