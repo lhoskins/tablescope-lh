@@ -38,7 +38,9 @@ from app.models.reference_library import (
     ReferenceDocument,
 )
 from app.services.evidence_severity import gate_severity
+from app.services.presentation_engine import PresentationMode
 from app.services.prompt_loader import load_prompt_reference
+from app.services.response_envelope import attach_envelope
 from app.services.visualization_engine import select_visualization
 
 logger = logging.getLogger(__name__)
@@ -468,6 +470,16 @@ def _card(
         for key, value in metadata.items():
             if value not in (None, "", [], {}):
                 card[key] = value
+    # M4 fast-follow (contract-only): stamp the shared ResponseEnvelope so a
+    # Home card also emits the unified contract. The card keeps its bespoke
+    # renderer; this is additive metadata (fail-closed) the UI ignores.
+    attach_envelope(
+        card,
+        PresentationMode.HYBRID,
+        executive_summary=summary,
+        chart=chart,
+        sources=[*(tables or []), *(documents or [])] or None,
+    )
     return card
 
 
