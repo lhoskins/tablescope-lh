@@ -1,0 +1,5325 @@
+[
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Row count and column count",
+    "condition": "Determine dataset size and dimensionality"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Duplicate-row detection",
+    "condition": "Identify repeated records"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Duplicate-key detection",
+    "condition": "Detect possible primary-key problems"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Data-type inference",
+    "condition": "Classify numeric, categorical, ordinal, boolean, datetime, text, identifier"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Cardinality analysis",
+    "condition": "Count distinct values and uniqueness ratio"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Constant-column detection",
+    "condition": "Find columns containing only one value"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Near-zero variance detection",
+    "condition": "Find features with little predictive information"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Sparse-column detection",
+    "condition": "Identify fields dominated by missing or zero values"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Date-range and time-frequency inference",
+    "condition": "Determine temporal coverage and likely daily, weekly, monthly, or irregular frequency"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Class-balance analysis",
+    "condition": "Detect imbalanced binary or multiclass outcomes"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Dataset-level profiling",
+    "method": "Data leakage screening",
+    "condition": "Detect fields that reveal the target or future information"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of central tendency",
+    "method": "Arithmetic mean"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of central tendency",
+    "method": "Weighted mean"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of central tendency",
+    "method": "Median"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of central tendency",
+    "method": "Mode"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of central tendency",
+    "method": "Geometric mean"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of central tendency",
+    "method": "Harmonic mean"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of central tendency",
+    "method": "Trimmed mean"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of central tendency",
+    "method": "Winsorized mean"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Minimum and maximum"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Range"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Variance"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Standard deviation"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Standard error"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Interquartile range"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Median absolute deviation"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Mean absolute deviation"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Coefficient of variation"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Percentiles and quantiles"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Quantile range"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Measures of dispersion",
+    "method": "Gini mean difference"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Skewness"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Kurtosis"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Moments"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "L-moments"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Empirical cumulative distribution"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Frequency distribution"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Relative frequency"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Entropy"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Concentration measures"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Zero-inflation rate"
+  },
+  {
+    "category": "Data Profiling and Descriptive Statistics",
+    "subcategory": "Distribution shape",
+    "method": "Tail-heaviness indicators"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missingness diagnostics",
+    "method": "Missing count and percentage",
+    "condition": "Basic completeness measurement"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missingness diagnostics",
+    "method": "Missingness pattern matrix",
+    "condition": "Identify fields missing together"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missingness diagnostics",
+    "method": "Missingness correlation",
+    "condition": "Detect relationships between missing indicators"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missingness diagnostics",
+    "method": "MCAR assessment",
+    "condition": "Evaluate whether values are Missing Completely at Random"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missingness diagnostics",
+    "method": "MAR reasoning",
+    "condition": "Evaluate whether missingness is related to observed fields"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missingness diagnostics",
+    "method": "MNAR warning",
+    "condition": "Flag possible Missing Not at Random conditions"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missingness diagnostics",
+    "method": "Little\u2019s MCAR test",
+    "condition": "Formal MCAR assessment"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missingness diagnostics",
+    "method": "Complete-case impact analysis",
+    "condition": "Compare retained versus excluded records"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Listwise deletion"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Pairwise deletion"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Constant-value replacement"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Mean imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Median imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Mode imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Group-wise imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Forward fill"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Backward fill"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Linear interpolation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Time interpolation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Spline interpolation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Nearest-neighbor imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "K-nearest-neighbor imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Regression imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Multiple imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "MICE: Multiple Imputation by Chained Equations"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Expectation-maximization imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Iterative imputation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Missing-indicator features"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Missing-data method used"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Number and percentage of affected observations"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Whether imputation occurred before or within validation"
+  },
+  {
+    "category": "Missing-Data Analysis and Treatment",
+    "subcategory": "Missing-value treatment",
+    "method": "Whether conclusions materially changed under an alternate treatment"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Standard z-score"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Modified z-score"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "IQR/Tukey fences"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Median absolute deviation"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Grubbs\u2019 test"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Dixon\u2019s Q test"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Generalized extreme Studentized deviate test"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Hampel identifier"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Percentile clipping"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Winsorization"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Univariate outlier methods",
+    "method": "Extreme-value analysis"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Mahalanobis distance"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Robust covariance"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Minimum covariance determinant"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Isolation Forest"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Local Outlier Factor"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "One-Class SVM"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Elliptic Envelope"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "K-nearest-neighbor anomaly score"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Density-based anomaly detection"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Autoencoder reconstruction error"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Robust PCA anomaly detection"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Multivariate anomaly methods",
+    "method": "Cluster-distance anomaly detection"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Regression influence diagnostics",
+    "method": "Standardized residuals"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Regression influence diagnostics",
+    "method": "Studentized residuals"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Regression influence diagnostics",
+    "method": "Leverage"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Regression influence diagnostics",
+    "method": "Hat values"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Regression influence diagnostics",
+    "method": "Cook\u2019s distance"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Regression influence diagnostics",
+    "method": "DFFITS"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Regression influence diagnostics",
+    "method": "DFBETAS"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Regression influence diagnostics",
+    "method": "Covariance ratio"
+  },
+  {
+    "category": "Outlier, Anomaly, and Influence Detection",
+    "subcategory": "Regression influence diagnostics",
+    "method": "Influence plots"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Normal/Gaussian"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Lognormal"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Student\u2019s t"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Chi-square"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "F distribution"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Uniform"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Exponential"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Gamma"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Beta"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Weibull"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Pareto"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Generalized Pareto"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Generalized extreme value"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Logistic"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Laplace"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Cauchy"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Rayleigh"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Triangular"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Gumbel"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Birnbaum\u2013Saunders/fatigue-life"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Inverse Gaussian"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Johnson distributions"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Skew-normal"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common continuous distributions",
+    "method": "Mixture distributions"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Bernoulli"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Binomial"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Beta-binomial"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Multinomial"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Poisson"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Negative binomial"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Geometric"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Hypergeometric"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Negative hypergeometric"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Poisson-binomial"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Zero-inflated Poisson"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Zero-inflated negative binomial"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Hurdle distributions"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Common discrete distributions",
+    "method": "Zipf and power-law distributions"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Distribution-estimation methods",
+    "method": "Maximum likelihood estimation"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Distribution-estimation methods",
+    "method": "Method of moments"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Distribution-estimation methods",
+    "method": "L-moments"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Distribution-estimation methods",
+    "method": "Bayesian parameter estimation"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Distribution-estimation methods",
+    "method": "Empirical distribution"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Distribution-estimation methods",
+    "method": "Histogram density"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Distribution-estimation methods",
+    "method": "Kernel density estimation"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Distribution-estimation methods",
+    "method": "Gaussian mixture modeling"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Distribution-estimation methods",
+    "method": "Quantile estimation"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Kolmogorov\u2013Smirnov test"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Anderson\u2013Darling test"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Cram\u00e9r\u2013von Mises test"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Chi-square goodness-of-fit test"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Shapiro\u2013Wilk test"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "D\u2019Agostino\u2013Pearson normality test"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Jarque\u2013Bera test"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Lilliefors test"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Probability plots"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Q\u2013Q plots"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "P\u2013P plots"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Akaike information criterion"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Corrected AIC"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Bayesian information criterion"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Likelihood-ratio comparison"
+  },
+  {
+    "category": "Distribution Analysis and Distribution Fitting",
+    "subcategory": "Goodness-of-fit methods",
+    "method": "Cross-validated likelihood"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Pearson correlation",
+    "condition": "Continuous, approximately linear relationship; limited influential outliers"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Spearman rank correlation",
+    "condition": "Ordinal or continuous; monotonic; non-normal or outlier-prone"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Kendall\u2019s tau",
+    "condition": "Ordinal, small samples, many ties, monotonic relationships"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Point-biserial correlation",
+    "condition": "One continuous variable and one true binary variable"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Distance correlation",
+    "condition": "Nonlinear dependence"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Mutual information",
+    "condition": "General linear or nonlinear dependence"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Partial correlation",
+    "condition": "Relationship after controlling for other variables"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Semi-partial correlation",
+    "condition": "Unique contribution of one variable"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Canonical correlation",
+    "condition": "Relationship between two variable sets"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Repeated-measures correlation",
+    "condition": "Repeated observations from the same entities"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Intraclass correlation",
+    "condition": "Reliability or similarity within groups"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-numeric",
+    "method": "Biweight midcorrelation",
+    "condition": "Robust correlation under outliers"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Chi-square test of independence"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Fisher\u2019s exact test"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Barnard\u2019s exact test"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Boschloo\u2019s exact test"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Phi coefficient"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Cram\u00e9r\u2019s V"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Contingency coefficient"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Odds ratio"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Relative risk"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Yule\u2019s Q"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Tschuprow\u2019s T"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Goodman\u2013Kruskal lambda"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Theil\u2019s U"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Cohen\u2019s kappa"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Weighted kappa"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "McNemar\u2019s test"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Categorical-to-categorical",
+    "method": "Cochran\u2019s Q test"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-categorical",
+    "method": "Correlation ratio/eta squared"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-categorical",
+    "method": "ANOVA"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-categorical",
+    "method": "Welch ANOVA"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-categorical",
+    "method": "Kruskal\u2013Wallis test"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-categorical",
+    "method": "Mann\u2013Whitney U test"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-categorical",
+    "method": "Biserial correlation"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Numeric-to-categorical",
+    "method": "Polyserial correlation"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Ordinal and latent-variable association",
+    "method": "Polychoric correlation"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Ordinal and latent-variable association",
+    "method": "Tetrachoric correlation"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Ordinal and latent-variable association",
+    "method": "Somers\u2019 D"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Ordinal and latent-variable association",
+    "method": "Goodman\u2013Kruskal gamma"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Ordinal and latent-variable association",
+    "method": "Kendall tau-b"
+  },
+  {
+    "category": "Correlation and Association Analysis",
+    "subcategory": "Ordinal and latent-variable association",
+    "method": "Kendall tau-c"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "One-sample tests",
+    "method": "One-sample t-test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "One-sample tests",
+    "method": "One-sample proportion test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "One-sample tests",
+    "method": "Exact binomial test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "One-sample tests",
+    "method": "One-sample Wilcoxon signed-rank test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "One-sample tests",
+    "method": "Sign test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "One-sample tests",
+    "method": "One-sample Kolmogorov\u2013Smirnov test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "One-sample tests",
+    "method": "Chi-square variance test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Student\u2019s independent t-test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Welch\u2019s t-test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Two-proportion z-test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "F-test for variance"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Mann\u2013Whitney U test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Brunner\u2013Munzel test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Kolmogorov\u2013Smirnov two-sample test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Mood\u2019s median test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Permutation test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Bootstrap comparison"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Yuen\u2019s trimmed-mean test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Levene\u2019s test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Brown\u2013Forsythe test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Two independent samples",
+    "method": "Fligner\u2013Killeen test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Paired samples",
+    "method": "Paired t-test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Paired samples",
+    "method": "Wilcoxon signed-rank test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Paired samples",
+    "method": "McNemar\u2019s test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Paired samples",
+    "method": "Paired permutation test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Three or more independent groups",
+    "method": "One-way ANOVA"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Three or more independent groups",
+    "method": "Welch ANOVA"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Three or more independent groups",
+    "method": "Kruskal\u2013Wallis test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Three or more independent groups",
+    "method": "Permutation ANOVA"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Repeated measurements",
+    "method": "Repeated-measures ANOVA"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Repeated measurements",
+    "method": "Friedman test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Repeated measurements",
+    "method": "Cochran\u2019s Q test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Repeated measurements",
+    "method": "Mixed-effects models"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Repeated measurements",
+    "method": "Generalized estimating equations"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Tukey HSD"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Games\u2013Howell"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Dunnett\u2019s test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Scheff\u00e9 test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Bonferroni-adjusted comparisons"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Holm-adjusted comparisons"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Dunn\u2019s test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Conover test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Nemenyi test"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Post-hoc comparisons",
+    "method": "Pairwise permutation tests"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Equivalence and non-inferiority",
+    "method": "Two one-sided tests"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Equivalence and non-inferiority",
+    "method": "Equivalence test for means"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Equivalence and non-inferiority",
+    "method": "Equivalence test for proportions"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Equivalence and non-inferiority",
+    "method": "Non-inferiority tests"
+  },
+  {
+    "category": "Statistical Significance Testing",
+    "subcategory": "Equivalence and non-inferiority",
+    "method": "Minimal-effect testing"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Mean difference"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Standardized mean difference"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Cohen\u2019s d"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Hedges\u2019 g"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Glass\u2019s delta"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Cohen\u2019s f"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Eta squared"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Partial eta squared"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Omega squared"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Epsilon squared"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Rank-biserial correlation"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Cliff\u2019s delta"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Common-language effect size"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Risk difference"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Relative risk"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Odds ratio"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Number needed to treat"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Phi coefficient"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Cram\u00e9r\u2019s V"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Cohen\u2019s h"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Cohen\u2019s kappa"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Weighted kappa"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "R\u00b2"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Adjusted R\u00b2"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Partial R\u00b2"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Pseudo-R\u00b2"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Standardized coefficients"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Marginal effects"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Elasticities"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Incremental/deviance explained"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Likelihood-ratio effect"
+  },
+  {
+    "category": "Effect Size and Practical Significance",
+    "subcategory": null,
+    "method": "Variable importance"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Bonferroni correction"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "\u0160id\u00e1k correction"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Holm procedure"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Holm\u2013\u0160id\u00e1k"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Hochberg procedure"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Hommel procedure"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Benjamini\u2013Hochberg false-discovery rate"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Benjamini\u2013Yekutieli"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Storey q-values"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Westfall\u2013Young permutation adjustment"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Family-wise error-rate control"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "False-discovery-rate control"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Number of tests performed"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Original p-value"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Adjusted p-value"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Correction method"
+  },
+  {
+    "category": "Multiple-Testing Control",
+    "subcategory": null,
+    "method": "Whether the conclusion survived adjustment"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Simple linear regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Multiple linear regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Polynomial regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Weighted least squares"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Generalized least squares"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Feasible generalized least squares"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Orthogonal distance regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Nonlinear least squares"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Quantile regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Median regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Spline regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Piecewise/segmented regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Generalized additive models"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Standard continuous-outcome regression",
+    "method": "Multivariate multiple regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Robust regression",
+    "method": "Huber regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Robust regression",
+    "method": "Theil\u2013Sen regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Robust regression",
+    "method": "RANSAC regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Robust regression",
+    "method": "Least absolute deviations"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Robust regression",
+    "method": "Least trimmed squares"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Robust regression",
+    "method": "M-estimation"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Robust regression",
+    "method": "MM-estimation"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Robust regression",
+    "method": "Robust covariance regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Ridge regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Lasso"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Elastic Net"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Adaptive Lasso"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Group Lasso"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Sparse-group Lasso"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Bayesian Ridge"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Automatic relevance determination"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Principal-component regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regularized regression",
+    "method": "Partial least squares regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Outcome",
+    "condition": "Typical method"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Binary",
+    "condition": "Binary logistic regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Multiclass nominal",
+    "condition": "Multinomial logistic regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Ordered categories",
+    "condition": "Ordinal logistic/probit regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Count",
+    "condition": "Poisson regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Overdispersed count",
+    "condition": "Negative-binomial regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Excess zeros",
+    "condition": "Zero-inflated or hurdle model"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Proportion",
+    "condition": "Binomial or beta regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Positive skewed continuous",
+    "condition": "Gamma regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Duration/event time",
+    "condition": "Survival regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Repeated observations",
+    "condition": "GEE or mixed-effects GLM"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Probit regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Complementary log-log regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Quasi-Poisson regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Tweedie regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Beta-binomial regression"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Generalized linear models",
+    "method": "Multilevel generalized linear models"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Residual analysis"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Q\u2013Q residual analysis"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Linearity assessment"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Homoscedasticity assessment"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Breusch\u2013Pagan test"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "White test"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Durbin\u2013Watson statistic"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Ljung\u2013Box test"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Variance inflation factor"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Condition number"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Influence diagnostics"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Specification-error tests"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Ramsey RESET test"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Calibration assessment"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Cross-validation"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Prediction intervals"
+  },
+  {
+    "category": "Regression Methods",
+    "subcategory": "Regression diagnostics",
+    "method": "Confidence intervals"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Logistic regression"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Multinomial logistic regression"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Ordinal logistic regression"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Linear discriminant analysis"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Quadratic discriminant analysis"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Naive Bayes"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Gaussian"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Multinomial"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Bernoulli"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Complement"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Categorical"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Decision tree"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Interpretable baseline classifiers",
+    "method": "Rule-based classifier"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "K-nearest neighbors"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Support vector machine"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Kernel SVM"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Random Forest"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Extra Trees"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Gradient Boosting"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "AdaBoost"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Histogram gradient boosting"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "XGBoost"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "LightGBM"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "CatBoost"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Neural networks"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Stacking"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Voting classifiers"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Bagging"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Advanced classifiers",
+    "method": "Error-correcting output codes"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Class weighting"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Threshold adjustment"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Random undersampling"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Random oversampling"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "SMOTE"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Borderline-SMOTE"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "ADASYN"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Tomek links"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Edited nearest neighbors"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Balanced Random Forest"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Cost-sensitive learning"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Imbalanced-class techniques",
+    "method": "Focal loss"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Confusion matrix"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Accuracy"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Balanced accuracy"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Precision"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Recall/sensitivity"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Specificity"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "F1 and F-beta"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Matthews correlation coefficient"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Cohen\u2019s kappa"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "ROC curve"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "ROC AUC"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Precision-recall curve"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Average precision"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Log loss"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Brier score"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Calibration curve"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Lift"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Gain"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Top-k accuracy"
+  },
+  {
+    "category": "Classification Methods",
+    "subcategory": "Classification evaluation",
+    "method": "Expected calibration error"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Frequency detection"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Missing-period detection"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Irregular-spacing detection"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Time-zone consistency"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Duplicate timestamp detection"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Trend-strength measurement"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Seasonal-strength measurement"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Autocorrelation"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Partial autocorrelation"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Lag analysis"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Rolling statistics"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Time-series profiling",
+    "method": "Expanding-window statistics"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Stationarity and structural tests",
+    "method": "Augmented Dickey\u2013Fuller"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Stationarity and structural tests",
+    "method": "KPSS test"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Stationarity and structural tests",
+    "method": "Phillips\u2013Perron test"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Stationarity and structural tests",
+    "method": "Zivot\u2013Andrews test"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Stationarity and structural tests",
+    "method": "Seasonal unit-root tests"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Stationarity and structural tests",
+    "method": "Chow structural-break test"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Stationarity and structural tests",
+    "method": "CUSUM test"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Stationarity and structural tests",
+    "method": "Bai\u2013Perron multiple-break tests"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Classical additive decomposition"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Classical multiplicative decomposition"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "STL decomposition"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "MSTL for multiple seasonality"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Moving averages"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Weighted moving averages"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Exponentially weighted moving average"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Simple exponential smoothing"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Holt linear trend"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Holt damped trend"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Holt\u2013Winters additive"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Holt\u2013Winters multiplicative"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "LOESS smoothing"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Savitzky\u2013Golay smoothing"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "State-space smoothing"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Decomposition and smoothing",
+    "method": "Kalman filtering"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Naive forecast"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Seasonal naive"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Drift forecast"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Moving-average forecast"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Exponential smoothing/ETS"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "AR"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "MA"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "ARMA"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "ARIMA"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "SARIMA"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "ARIMAX/SARIMAX"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Dynamic regression"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Unobserved-components models"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Structural time-series models"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Theta method"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Croston method"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "SBA and TSB intermittent-demand models"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Prophet-style additive models"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Vector autoregression"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Vector error-correction models"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Dynamic factor models"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Gaussian-process forecasting"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Gradient-boosting forecasting"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Random-Forest forecasting"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Neural autoregression"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "LSTM/GRU"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Temporal convolutional networks"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecasting models",
+    "method": "Transformer-based forecasting"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Mann\u2013Kendall trend test"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Seasonal Mann\u2013Kendall"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Sen\u2019s slope"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "OLS time slope"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Cox\u2013Stuart trend test"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Seasonal subseries analysis"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Canova\u2013Hansen seasonality test"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Autocorrelation-based seasonality detection"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Spectral analysis"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Periodogram"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Trend and seasonality tests",
+    "method": "Fourier analysis"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "MAE"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "MSE"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "RMSE"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "Median absolute error"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "MAPE"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "Symmetric MAPE"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "WAPE"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "MASE"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "RMSSE"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "Mean directional accuracy"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "Pinball loss"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "Prediction-interval coverage"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "Winkler score"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "Rolling-origin validation"
+  },
+  {
+    "category": "Time-Series Analysis and Forecasting",
+    "subcategory": "Forecast evaluation",
+    "method": "Time-series cross-validation"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Period-over-period delta"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Percentage change"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Indexed change"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Rolling z-score"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Seasonal residual anomaly"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Control-chart signal"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "CUSUM"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "EWMA change detection"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Page\u2013Hinkley test"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Bayesian online change-point detection"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "PELT change-point detection"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Binary segmentation"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Window-based change detection"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Kernel change-point detection"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Structural-break regression"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Difference-in-differences"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Interrupted time-series analysis"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Synthetic control"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Event-study analysis"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Normal variation"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Statistical anomaly"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Persistent level shift"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Trend change"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Seasonal effect"
+  },
+  {
+    "category": "Change Detection and Anomaly Detection Over Time",
+    "subcategory": null,
+    "method": "Isolated data-quality issue"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Partitioning methods",
+    "method": "K-means"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Partitioning methods",
+    "method": "K-medoids/PAM"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Partitioning methods",
+    "method": "Mini-batch K-means"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Partitioning methods",
+    "method": "Fuzzy C-means"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Partitioning methods",
+    "method": "K-modes"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Partitioning methods",
+    "method": "K-prototypes"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Hierarchical methods",
+    "method": "Agglomerative clustering"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Hierarchical methods",
+    "method": "Divisive clustering"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Hierarchical methods",
+    "method": "Ward linkage"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Hierarchical methods",
+    "method": "Single linkage"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Hierarchical methods",
+    "method": "Complete linkage"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Hierarchical methods",
+    "method": "Average linkage"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Hierarchical methods",
+    "method": "BIRCH"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Density and graph methods",
+    "method": "DBSCAN"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Density and graph methods",
+    "method": "HDBSCAN"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Density and graph methods",
+    "method": "OPTICS"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Density and graph methods",
+    "method": "Mean Shift"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Density and graph methods",
+    "method": "Spectral clustering"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Density and graph methods",
+    "method": "Affinity propagation"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Density and graph methods",
+    "method": "Community detection"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Density and graph methods",
+    "method": "Louvain"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Density and graph methods",
+    "method": "Leiden"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Model-based clustering",
+    "method": "Gaussian mixture models"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Model-based clustering",
+    "method": "Bayesian Gaussian mixtures"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Model-based clustering",
+    "method": "Latent class analysis"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Model-based clustering",
+    "method": "Hidden Markov models"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Model-based clustering",
+    "method": "Mixture of regressions"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Cluster evaluation",
+    "method": "Silhouette score"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Cluster evaluation",
+    "method": "Calinski\u2013Harabasz index"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Cluster evaluation",
+    "method": "Davies\u2013Bouldin index"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Cluster evaluation",
+    "method": "Gap statistic"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Cluster evaluation",
+    "method": "Dunn index"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Cluster evaluation",
+    "method": "Adjusted Rand index"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Cluster evaluation",
+    "method": "Normalized mutual information"
+  },
+  {
+    "category": "Clustering and Segmentation",
+    "subcategory": "Cluster evaluation",
+    "method": "Cluster stability via resampling"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Principal component analysis"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Sparse PCA"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Kernel PCA"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Incremental PCA"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Factor analysis"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Exploratory factor analysis"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Confirmatory factor analysis"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Independent component analysis"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Nonnegative matrix factorization"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Truncated singular-value decomposition"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Correspondence analysis"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Multiple correspondence analysis"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Canonical correlation analysis"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Partial least squares"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Multidimensional scaling"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Isomap"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Locally linear embedding"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "t-SNE"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "UMAP"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Autoencoders"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Variational autoencoders"
+  },
+  {
+    "category": "Dimensionality Reduction and Latent Structure",
+    "subcategory": null,
+    "method": "Latent semantic analysis"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Variance threshold"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Correlation filtering"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Mutual information"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Chi-square feature selection"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "ANOVA F-test"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Information gain"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Fisher score"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "ReliefF"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Minimum redundancy\u2013maximum relevance"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Forward selection"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Backward elimination"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Stepwise selection"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Recursive feature elimination"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Sequential feature selection"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Genetic-algorithm selection"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Lasso selection"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Elastic Net selection"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Tree importance"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Gradient-boosting importance"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Regularized logistic selection"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Permutation importance"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Partial dependence"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Individual conditional expectation"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Accumulated local effects"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "SHAP values"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "LIME"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Counterfactual explanations"
+  },
+  {
+    "category": "Feature Selection and Feature Importance",
+    "subcategory": null,
+    "method": "Sensitivity analysis"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Randomized controlled experiment"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "A/B test"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Multivariate experiment"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Factorial experiment"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Cluster-randomized experiment"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Sequential experiment"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Multi-armed bandit"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Covariate adjustment"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Propensity-score matching"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Propensity-score weighting"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Inverse-probability weighting"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Doubly robust estimation"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Difference-in-differences"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Synthetic control"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Regression discontinuity"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Instrumental variables"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Fixed-effects panel regression"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Event-study models"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Interrupted time series"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Matching and stratification"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Causal forests"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Double/debiased machine learning"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Targeted maximum likelihood estimation"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Mediation analysis"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Structural equation modeling"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "Directed acyclic graph adjustment"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "\u201cAssociated with\u201d"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "\u201cPredictive of\u201d"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "\u201cCandidate driver\u201d"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "\u201cConsistent with\u201d"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "\u201cMay help explain\u201d"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "\u201cCaused\u201d"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "\u201cLed to\u201d"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "\u201cResulted in\u201d"
+  },
+  {
+    "category": "Causal and Quasi-Causal Analysis",
+    "subcategory": null,
+    "method": "\u201cBecause of\u201d"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Completely randomized design"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Randomized-block design"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Latin-square design"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Full factorial design"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Fractional factorial design"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Plackett\u2013Burman screening design"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Response-surface methodology"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Central composite design"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Box\u2013Behnken design"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Taguchi designs"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Mixture designs"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Split-plot designs"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Repeated-measures designs"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Sequential designs"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Adaptive experiments"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Power analysis"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Sample-size calculation"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Bayesian optimization"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Grid search"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Random search"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Evolutionary optimization"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Multi-objective optimization"
+  },
+  {
+    "category": "Experimental Design and Optimization",
+    "subcategory": null,
+    "method": "Constrained optimization"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Individuals chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Moving-range chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "X-bar chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "R chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "S chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "p chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "np chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "c chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "u chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "EWMA chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "CUSUM chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Multivariate Hotelling T\u00b2 chart"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Laney p-prime and u-prime charts"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Rare-event charts"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Cp"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Cpk"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Pp"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Ppk"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Cpm"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Sigma level"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Defects per million opportunities"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Yield"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Rolled throughput yield"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "First-pass yield"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Measurement-system analysis"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Gauge R&R"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Attribute agreement analysis"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Pareto analysis"
+  },
+  {
+    "category": "Process Control and Quality Analysis",
+    "subcategory": null,
+    "method": "Acceptance sampling"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Kaplan\u2013Meier estimator"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Nelson\u2013Aalen estimator"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Life tables"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Log-rank test"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Cox proportional-hazards model"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Accelerated failure-time models"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Parametric survival models"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Competing-risks analysis"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Cumulative-incidence functions"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Fine\u2013Gray model"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Recurrent-event models"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Frailty models"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Time-varying covariates"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Restricted mean survival time"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Hazard-rate estimation"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Weibull reliability analysis"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Exponential reliability analysis"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Lognormal life models"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Mean time between failures"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Mean time to repair"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Availability analysis"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Reliability block diagrams"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Fault-tree analysis"
+  },
+  {
+    "category": "Reliability, Survival, and Event-Time Analysis",
+    "subcategory": null,
+    "method": "Failure-mode and effects analysis"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Fixed-effects regression"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Random-effects regression"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Mixed-effects models"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Random intercepts"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Random slopes"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Multilevel models"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Hierarchical linear models"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Hierarchical generalized linear models"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Generalized estimating equations"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Cluster-robust standard errors"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Repeated-measures ANOVA"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Panel unit-root tests"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Panel cointegration"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Difference-in-differences"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Dynamic panel models"
+  },
+  {
+    "category": "Panel, Hierarchical, and Repeated-Measures Methods",
+    "subcategory": null,
+    "method": "Spatial panel models"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Multivariate analysis of variance"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Multivariate analysis of covariance"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Hotelling\u2019s T\u00b2"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Discriminant analysis"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Canonical correlation"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Principal component analysis"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Factor analysis"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Partial least squares"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Multivariate regression"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Multivariate time series"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Vector autoregression"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Vector error correction"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Structural equation modeling"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Path analysis"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Latent class analysis"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Latent growth models"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Copula models"
+  },
+  {
+    "category": "Multivariate Statistical Analysis",
+    "subcategory": null,
+    "method": "Multivariate control charts"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Tokenization"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Sentence segmentation"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Stop-word handling"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Stemming"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Lemmatization"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "N-grams"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Phrase extraction"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Named-entity recognition"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Language detection"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Duplicate and near-duplicate detection"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Term frequency"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "TF\u2013IDF"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "BM25"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Keyword extraction"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "RAKE"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "TextRank"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Topic modeling"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "LDA"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "NMF topics"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "BERTopic"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Document clustering"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Semantic similarity"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Embedding similarity"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Sentiment analysis"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Emotion classification"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Intent classification"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Document classification"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Entity and relationship extraction"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Summarization"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Contradiction detection"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Entailment analysis"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Document change comparison"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Precision at k"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Recall at k"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Mean reciprocal rank"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Mean average precision"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Normalized discounted cumulative gain"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Hit rate"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Answer-groundedness"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Citation coverage"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Retrieval relevance"
+  },
+  {
+    "category": "Text, Document, and Semantic Analytics",
+    "subcategory": null,
+    "method": "Hallucination rate"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Degree centrality"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "In-degree and out-degree"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Weighted degree"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Betweenness centrality"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Closeness centrality"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Eigenvector centrality"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "PageRank"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Katz centrality"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "HITS hubs and authorities"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Clustering coefficient"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Graph density"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Assortativity"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Reciprocity"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Connected components"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Strongly connected components"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Shortest path"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "All-pairs shortest paths"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Reachability"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Path enumeration"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Dependency analysis"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Cycle detection"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Minimum spanning tree"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Maximum flow/minimum cut"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Link prediction"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Common neighbors"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Jaccard link score"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Adamic\u2013Adar score"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Preferential attachment"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Louvain community detection"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Leiden community detection"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Label propagation"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Spectral community detection"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Node2Vec"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "DeepWalk"
+  },
+  {
+    "category": "Graph and Network Analysis",
+    "subcategory": null,
+    "method": "Graph neural-network embeddings"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Distance calculations"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Nearest-neighbor analysis"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Point-in-polygon"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Spatial joins"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Kernel density maps"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Moran\u2019s I"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Local Moran\u2019s I"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Geary\u2019s C"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Getis\u2013Ord Gi*"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Spatial autocorrelation"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Spatial lag models"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Spatial error models"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Geographically weighted regression"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Kriging"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Variograms"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Spatial clustering"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Hotspot analysis"
+  },
+  {
+    "category": "Geospatial and Spatial Statistics",
+    "subcategory": null,
+    "method": "Spatial scan statistics"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Bootstrap"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Stratified bootstrap"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Cluster bootstrap"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Block bootstrap"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Moving-block bootstrap"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Stationary bootstrap"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Jackknife"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Permutation tests"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Randomization tests"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Monte Carlo simulation"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Quasi-Monte Carlo"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Latin hypercube sampling"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Bayesian posterior simulation"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Sensitivity analysis"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Scenario analysis"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Stress testing"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Prediction intervals"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Confidence intervals"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Tolerance intervals"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Conformal prediction"
+  },
+  {
+    "category": "Resampling, Simulation, and Uncertainty",
+    "subcategory": null,
+    "method": "Probabilistic forecasts"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayesian linear regression"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayesian logistic regression"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayesian generalized linear models"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayesian hierarchical models"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayesian time-series models"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayesian structural time series"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayesian change-point detection"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayesian A/B testing"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayesian networks"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Markov chain Monte Carlo"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Hamiltonian Monte Carlo"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Variational inference"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Approximate Bayesian computation"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Posterior predictive checks"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Bayes factors"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Credible intervals"
+  },
+  {
+    "category": "Bayesian Methods",
+    "subcategory": null,
+    "method": "Prior-sensitivity analysis"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Holdout validation"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Train/validation/test split"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "K-fold cross-validation"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Stratified K-fold"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Grouped K-fold"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Leave-one-out"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Leave-p-out"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Repeated cross-validation"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Nested cross-validation"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Rolling-window validation"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Expanding-window validation"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Bootstrap validation"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Out-of-time validation"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Out-of-group validation"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Cross-validated error"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Log likelihood"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "AIC"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "AICc"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "BIC"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Deviance information criterion"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "WAIC"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Likelihood-ratio tests"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Adjusted R\u00b2"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Mallows\u2019 Cp"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Prediction error"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Calibration"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Parsimony"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Stability"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Business cost"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Grid search"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Random search"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Successive halving"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Bayesian optimization"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Hyperband"
+  },
+  {
+    "category": "Model Validation and Selection",
+    "subcategory": null,
+    "method": "Evolutionary optimization"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Population stability index"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Characteristic stability index"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Kolmogorov\u2013Smirnov drift"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Jensen\u2013Shannon divergence"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Kullback\u2013Leibler divergence"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Wasserstein distance"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Chi-square distribution shift"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Maximum mean discrepancy"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Feature drift"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Target drift"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Concept drift"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Prediction drift"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Calibration drift"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Performance decay"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "ADWIN"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "DDM"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "EDDM"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Page\u2013Hinkley"
+  },
+  {
+    "category": "Model Monitoring and Drift",
+    "subcategory": null,
+    "method": "Champion/challenger comparison"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Describe one numeric field",
+    "condition": "Numeric"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Compare numeric value with target",
+    "condition": "Numeric + fixed target"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Compare two independent groups",
+    "condition": "Numeric + binary group"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Compare paired periods/entities",
+    "condition": "Paired numeric"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Compare 3+ groups",
+    "condition": "Numeric + categorical group"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Compare category rates",
+    "condition": "Categorical contingency table"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Relationship between two numeric fields",
+    "condition": "Linear, low-outlier"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Monotonic non-normal relationship",
+    "condition": "Numeric/ordinal"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Binary outcome explanation",
+    "condition": "Binary target"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Count outcome",
+    "condition": "Count target"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Zero-heavy count",
+    "condition": "Count + excess zeros"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Continuous prediction",
+    "condition": "Numeric target"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Classification",
+    "condition": "Categorical target"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Rank entities",
+    "condition": "Dimension + measure"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Detect trend",
+    "condition": "Ordered time"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Trend with seasonality",
+    "condition": "Regular time series"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Forecast",
+    "condition": "Sufficient ordered history"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Detect unusual period",
+    "condition": "Time series"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Explain change",
+    "condition": "Outcome + candidate drivers"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Find segments",
+    "condition": "Multiple features"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Reduce dimensions",
+    "condition": "Many correlated numeric fields"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Analyze event duration",
+    "condition": "Censored time-to-event"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Evaluate policy/intervention",
+    "condition": "Before/after + comparison group"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Analyze nested records",
+    "condition": "Repeated/grouped data"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Analyze text themes",
+    "condition": "Documents"
+  },
+  {
+    "category": "Recommended Tablescope Method-Selection Matrix",
+    "subcategory": null,
+    "method": "Analyze entity network",
+    "condition": "Graph"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Data profiling"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Missing-data analysis"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Descriptive statistics"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Outlier detection"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Distribution shape and normality"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Pearson, Spearman, and Kendall correlation"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Linear, robust, logistic, Poisson, and negative-binomial regression"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "t-tests, Welch tests, Mann\u2013Whitney, Wilcoxon"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "ANOVA, Welch ANOVA, Kruskal\u2013Wallis"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Chi-square and Fisher exact"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Effect sizes"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Confidence intervals"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Multiple-testing correction"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Trend slope"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Mann\u2013Kendall and Sen\u2019s slope"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "STL decomposition"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Basic change-point detection"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Regression diagnostics"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Structured assumption reporting"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "NumPy"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "pandas"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "SciPy"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Statsmodels"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "scikit-learn"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Mixed-effects models"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "GEE"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Survival analysis"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Panel analysis"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Intermittent-demand forecasting"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Clustering and segmentation"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "PCA and factor analysis"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Process-control methods"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Feature importance and SHAP"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Causal/quasi-experimental methods"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Reliability analysis"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Graph analytics"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Text analytics evaluation"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Bayesian models"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Deep-learning forecasting"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Graph neural networks"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Causal forests"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Double machine learning"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Conformal prediction"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Spatial statistics"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "Advanced anomaly ensembles"
+  },
+  {
+    "category": "Recommended Implementation Tiers",
+    "subcategory": null,
+    "method": "AutoML and automated tuning"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "Why the method was selected"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "Which alternatives were rejected"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "Which assumptions were tested"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "What preprocessing was applied"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "How much data was excluded or imputed"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "Effect magnitude"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "Confidence or uncertainty"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "Practical significance"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "Statistical significance"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "Stability and sensitivity"
+  },
+  {
+    "category": "Recommended Architecture Principle",
+    "subcategory": null,
+    "method": "Limitations on causal interpretation"
+  }
+]

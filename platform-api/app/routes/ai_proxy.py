@@ -40,6 +40,8 @@ from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
+from app.services.analytical_method_engine import analyze as analyze_methods
+from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
 from app.services.auto_scope import _get_or_create_ai_scope_set
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
@@ -2469,7 +2471,7 @@ async def _ask_and_run_core(
     columns = result.get("columns", [])
     rows = result.get("rows", [])[:max_rows]
     used = _detect_datasource(sql, allowed_tables)
-    return {
+    response: dict[str, Any] = {
         "question": question,
         "sql": sql,
         "columns": columns,
@@ -2480,6 +2482,41 @@ async def _ask_and_run_core(
         "status": "success",
         "error": None,
     }
+    await _attach_analytical_envelope(session, context, question, columns, rows, response)
+    return response
+
+
+async def _attach_analytical_envelope(
+    session: AsyncSession,
+    context: RequestContext,
+    question: str,
+    columns: list[str],
+    rows: list[Any],
+    response: dict[str, Any],
+) -> None:
+    """Run the governed Analytical Method Engine over the result set.
+
+    Feature-flagged and fail-closed. In ``readonly`` mode it computes + logs the
+    method envelope but never alters the response; in ``hybrid`` it also attaches
+    ``analyticalMethod``. ``off`` (default) skips entirely. Tablescope — not the
+    LLM — selects the method here.
+    """
+    mode = get_engine_mode()
+    if mode == EngineMode.OFF:
+        return
+    try:
+        envelope = await analyze_methods(
+            session,
+            tenant_id=context.tenant_id,
+            columns=columns,
+            rows=rows,
+            question=question,
+        )
+    except Exception as exc:
+        logger.warning("Analytical method engine hook failed: %s", exc)
+        return
+    if envelope and mode == EngineMode.HYBRID:
+        response["analyticalMethod"] = envelope
 
 
 async def _forward_prose_answer(

@@ -1,0 +1,56 @@
+"""Minimal deterministic analysis-intent inference.
+
+A lightweight, keyword+profile heuristic — NOT the LLM. This is intentionally
+conservative: it returns a single analysisIntent the selector understands, or
+``None`` when nothing statistical is clearly requested (the engine then no-ops).
+The full Intent Engine is a later milestone; this keeps M1 self-contained.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+_KEYWORDS: list[tuple[str, str]] = [
+    (r"\b(correlat|relationship|associat|related to|vs\.?|versus|driver)\b", "relationship_numeric"),
+    (r"\b(trend|over time|increasing|decreasing|growth|declin)\b", "detect_trend"),
+    (r"\b(seasonal|seasonality|cycle)\b", "trend_seasonality"),
+    (r"\b(compare|difference between|differ|higher than|lower than|vs group)\b", "compare_two_groups"),
+    (r"\b(across|among|between groups|by (category|segment|region|type))\b", "compare_multiple_groups"),
+    (r"\b(rate|proportion|share).*(differ|compare|between)\b", "compare_category_rates"),
+    (r"\b(predict|drivers of|explain|what affects|impact of|factors)\b", "continuous_prediction"),
+    (r"\b(normal|distribution|distributed)\b", "normality"),
+    (r"\b(describe|summary|summarize|statistics of|average|mean|median)\b", "describe_numeric"),
+]
+
+
+def infer_intent(question: str, profile: dict[str, Any]) -> str | None:
+    q = (question or "").lower()
+    numeric = profile.get("numeric_columns", [])
+    plain_numeric = [c for c in numeric if c not in profile.get("binary_columns", [])]
+    categorical = profile.get("categorical_columns", [])
+    has_time = profile.get("has_time_structure")
+
+    for pattern, intent in _KEYWORDS:
+        if re.search(pattern, q):
+            # Reconcile keyword with data shape where it obviously conflicts.
+            if intent == "relationship_numeric" and len(plain_numeric) < 2:
+                continue
+            if intent in ("detect_trend", "trend_seasonality") and not has_time:
+                continue
+            if intent == "compare_multiple_groups" and not categorical:
+                intent = "compare_two_groups"
+            if intent == "compare_two_groups" and not (categorical or profile.get("binary_columns")):
+                continue
+            return intent
+
+    # Fall back to shape-driven defaults.
+    if has_time and plain_numeric:
+        return "detect_trend"
+    if len(plain_numeric) >= 2:
+        return "relationship_numeric"
+    if plain_numeric and categorical:
+        return "compare_multiple_groups"
+    if plain_numeric:
+        return "describe_numeric"
+    return None
