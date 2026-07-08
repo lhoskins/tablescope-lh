@@ -64,9 +64,47 @@ def test_judge_keeps_strong_widget() -> None:
 
 def test_correct_widget_converts_oversized_pie() -> None:
     widget = {"type": "pie", "label_column": "Supplier", "value_column": "Spend"}
-    rows = [{"Supplier": f"S{i}", "Spend": i} for i in range(10)]
+    rows = [{"Supplier": f"S{i}", "Spend": i + 1} for i in range(10)]
     ap._correct_widget_chart(widget, ["Supplier", "Spend"], rows)
     assert widget["type"] == "horizontal_bar"
+
+
+def test_correct_widget_preserves_valid_bar_variant() -> None:
+    # A waterfall is a valid bar variant; on a category shape the engine agrees
+    # on the bar family, so the richer planner subtype is left untouched.
+    widget = {"type": "waterfall", "label_column": "Stage", "value_column": "Delta"}
+    rows = [{"Stage": s, "Delta": v} for s, v in [("A", 5), ("B", 8), ("C", 3)]]
+    ap._correct_widget_chart(widget, ["Stage", "Delta"], rows)
+    assert widget["type"] == "waterfall"
+
+
+def test_correct_widget_preserves_time_series_line() -> None:
+    widget = {"type": "line", "label_column": "Month", "value_column": "Sales"}
+    rows = [{"Month": f"2026-{m:02d}", "Sales": m * 10} for m in range(1, 7)]
+    ap._correct_widget_chart(widget, ["Month", "Sales"], rows)
+    assert widget["type"] == "line"
+
+
+def test_correct_widget_fixes_line_over_non_time_categories() -> None:
+    # The LLM asked for a line over plain categories (no time) — corrected to a
+    # renderable category chart rather than a misleading trend line.
+    widget = {"type": "line", "label_column": "Plant", "value_column": "Units"}
+    rows = [{"Plant": p, "Units": u} for p, u in [("A", 5), ("B", 8), ("C", 3)]]
+    ap._correct_widget_chart(widget, ["Plant", "Units"], rows)
+    assert widget["type"] == "bar"
+
+
+def test_correct_widget_keeps_kpi_widget() -> None:
+    widget = {"type": "kpi", "value_column": "Total"}
+    rows = [{"Region": "N", "Total": 3}, {"Region": "S", "Total": 5}]
+    ap._correct_widget_chart(widget, ["Region", "Total"], rows)
+    assert widget["type"] == "kpi"
+
+
+def test_correct_widget_leaves_narrative_untouched() -> None:
+    widget = {"type": "none"}
+    ap._correct_widget_chart(widget, [], [])
+    assert widget["type"] == "none"
 
 
 def test_build_join_metadata_from_relationship_plan() -> None:

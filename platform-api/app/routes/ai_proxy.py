@@ -3559,7 +3559,6 @@ def _build_join_metadata(widget: dict[str, Any]) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 _TIME_SERIES_TYPES = frozenset({"line", "area", "dual_line"})
-_PART_TO_WHOLE_TYPES = frozenset({"pie", "donut"})
 _NARRATIVE_TYPES = frozenset({"narrative_insight", "none", "narrative"})
 
 
@@ -3597,30 +3596,76 @@ def _judge_widget(
     return True, ""
 
 
+# Engine chart family -> planner-vocabulary type understood by _CHART_TYPE_MAP.
+_ENGINE_TO_PLANNER: dict[ChartType, str] = {
+    ChartType.KPI: "kpi",
+    ChartType.TABLE: "table",
+    ChartType.LINE: "line",
+    ChartType.AREA: "area",
+    ChartType.COMBO: "dual_line",
+    ChartType.PIE: "pie",
+    ChartType.SCATTER: "scatter",
+    ChartType.RADAR: "radar",
+    ChartType.RADIAL_BAR: "gauge",
+    ChartType.TREEMAP: "treemap",
+    ChartType.FUNNEL: "funnel",
+    ChartType.SANKEY: "table",
+    ChartType.BAR: "bar",
+}
+
+# Visually interchangeable families: when the engine's decision lands in the same
+# group as the planner's family, the planner's (richer) type/subtype is left
+# untouched — so valid variants (waterfall, stacked_bar, biaxial_line, gauge, …)
+# survive. Only a shape-mismatched choice is rewritten. Keys are dashboard
+# WidgetTypes; values are engine ChartType values considered compatible.
+_FAMILY_GROUPS: dict[str, frozenset[str]] = {
+    "bar": frozenset({"bar"}),
+    "line": frozenset({"line", "area", "combo"}),
+    "area": frozenset({"line", "area", "combo"}),
+    "combo": frozenset({"line", "area", "combo"}),
+    "pie": frozenset({"pie"}),
+    "scatter": frozenset({"scatter"}),
+    "radar": frozenset({"radar"}),
+    "radial_bar": frozenset({"radial_bar"}),
+    "treemap": frozenset({"treemap"}),
+    "funnel": frozenset({"funnel"}),
+    "sankey": frozenset({"sankey"}),
+}
+
+
 def _correct_widget_chart(
     widget: dict[str, Any], columns: list[str], rows: list[dict[str, Any]]
 ) -> None:
-    """Apply safe in-place chart-type corrections after execution.
+    """Validate the LLM's chart choice against the executed data shape.
 
-    - pie/donut with > 8 slices → horizontal_bar (ranking, not part-to-whole).
-    - vertical bar with long category labels (or many bars) → horizontal_bar.
+    Delegates the shape decision to the one Universal Visualization Engine
+    (the same authority Home cards and ask-and-run use). When the engine's
+    family agrees with the planner's family, the planner's (richer) type +
+    subtype is preserved; only a shape-mismatched choice — e.g. a pie with
+    many slices, or a line over non-time categories — is rewritten in place to
+    the engine's renderable family. KPI / table / narrative widgets are
+    container choices, not chart-shape ones, and are left as the planner set
+    them.
     """
     wtype = str(widget.get("type", "bar")).lower()
-
-    if wtype in _PART_TO_WHOLE_TYPES and len(rows) > 8:
-        widget["type"] = "horizontal_bar"
+    if wtype in _NARRATIVE_TYPES or not rows or not columns:
         return
 
-    if wtype in ("bar", "vertical_bar"):
-        lcol = widget.get("label_column") or widget.get("x_column") or ""
-        col_map = {_norm_col(c): c for c in columns}
-        actual = col_map.get(_norm_col(lcol))
-        if actual:
-            labels = [str(r.get(actual, "")) for r in rows[:20]]
-            if labels:
-                avg_len = sum(len(x) for x in labels) / len(labels)
-                if avg_len > 16 or len(rows) > 8:
-                    widget["type"] = "horizontal_bar"
+    widget_family = _map_widget_visual(wtype)[0]
+    if widget_family in ("kpi", "table"):
+        return
+
+    decision = select_visualization(columns, rows, intent_hint=wtype)
+    compatible = decision.chart_type.value in _FAMILY_GROUPS.get(
+        widget_family, frozenset({widget_family})
+    )
+    if compatible:
+        return
+
+    corrected = _ENGINE_TO_PLANNER.get(decision.chart_type, "bar")
+    if decision.chart_type is ChartType.BAR and decision.chart_style == "horizontal_bar":
+        corrected = "horizontal_bar"
+    widget["type"] = corrected
 
 
 def _pack_grid(widgets_config: list[dict[str, Any]]) -> None:

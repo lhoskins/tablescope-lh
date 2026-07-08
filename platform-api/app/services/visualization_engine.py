@@ -382,13 +382,15 @@ def select_visualization(
         )
 
     # 4) Honour a valid explicit hint the shape supports.
-    forced = _hint_if_supported(hint, shape, label_col, value_col, vfmt)
+    all_positive = all((f := _to_float(v)) is None or f >= 0 for v in values)
+    label_card = _dimension_cardinality(shape, label_col)
+    forced = _hint_if_supported(
+        hint, shape, label_col, value_col, vfmt, label_card, all_positive
+    )
     if forced is not None:
         return forced
 
     # 5) Part-of-a-whole -> pie/donut.
-    all_positive = all((f := _to_float(v)) is None or f >= 0 for v in values)
-    label_card = _dimension_cardinality(shape, label_col)
     if label_col is not None and _looks_like_share(label_col, label_card, all_positive):
         return VizDecision(
             ChartType.PIE,
@@ -486,21 +488,22 @@ def _hint_if_supported(
     label_col: str | None,
     value_col: str,
     vfmt: ValueFormat,
+    label_card: int,
+    all_positive: bool,
 ) -> VizDecision | None:
     """Return a decision for an explicit hint when the shape supports it.
 
-    ``combo``/``scatter`` need two measures and are resolved earlier in the main
-    flow; ``kpi``/``table`` are shape decisions, not honoured as hints here.
+    Trend families (``line``/``area``/``combo``) and ``scatter`` are resolved by
+    the shape/time logic in the main flow, not forced by a hint — so a ``line``
+    hint on non-time data still corrects to a category chart. ``kpi``/``table``
+    are shape decisions, not honoured as hints.
     """
-    if hint is None or hint in ("combo", "scatter", "kpi", "table"):
+    if hint is None or hint in ("line", "area", "combo", "scatter", "kpi", "table"):
         return None
-    if hint in ("line", "area") and label_col is not None:
-        return VizDecision(
-            ChartType.LINE if hint == "line" else ChartType.AREA,
-            x_field=label_col, y_field=value_col, value_format=vfmt,
-            reason=f"Explicit {hint} over ordered categories.", confidence=0.55,
-        )
-    if hint == "pie" and label_col is not None:
+    # Honour a pie/donut request only when the shape is a genuine part-of-whole
+    # (a few positive slices); otherwise fall through so an oversized/negative
+    # "pie" corrects to a ranking bar.
+    if hint == "pie" and label_col is not None and all_positive and 2 <= label_card <= 8:
         return VizDecision(
             ChartType.PIE, chart_style="donut", x_field=label_col, y_field=value_col,
             value_format=vfmt, reason="Explicit share breakdown.", confidence=0.6,
