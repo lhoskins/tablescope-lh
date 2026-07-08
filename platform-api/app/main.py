@@ -99,6 +99,12 @@ async def _seed_reference_catalogs() -> None:
         logger.info("Reference library starter catalog seed: %s", ref_stats)
     except Exception as exc:
         logger.warning("Reference library seed failed: %s", exc)
+    try:
+        from scripts.seed_analytical_catalog import seed_analytical_catalog
+        method_stats = await seed_analytical_catalog()
+        logger.info("Analytical method catalog seed: %s", method_stats)
+    except Exception as exc:
+        logger.warning("Analytical method catalog seed failed: %s", exc)
 
 
 @asynccontextmanager

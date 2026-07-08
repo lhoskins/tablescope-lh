@@ -19,6 +19,14 @@ from app.models.ai_reference_catalog import (
     TenantCustomTag,
     TenantReferenceCatalog,
 )
+from app.models.analytical_method_catalog import (
+    AnalyticalMethod,
+    AnalyticalSharedPolicy,
+    MethodCatalog,
+    MethodCatalogAuditLog,
+    MethodCatalogVersion,
+    MethodSelectionMatrix,
+)
 from app.models.audit_event import AuditEvent
 from app.models.base import Base
 from app.models.billing import (
@@ -92,6 +100,12 @@ __all__ = [
     "TenantCustomKPI",
     "TenantCustomTag",
     "TenantReferenceCatalog",
+    "AnalyticalMethod",
+    "AnalyticalSharedPolicy",
+    "MethodCatalog",
+    "MethodCatalogAuditLog",
+    "MethodCatalogVersion",
+    "MethodSelectionMatrix",
     "Base",
     "BillingCustomer",
     "BillingEvent",
