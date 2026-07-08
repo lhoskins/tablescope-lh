@@ -43,7 +43,7 @@ async def _active_version_id(session: AsyncSession) -> int | None:
     version = await session.get(MethodCatalogVersion, catalog.active_version_id)
     if version is None or version.status != STATUS_ACTIVE:
         return None
-    return version.id
+    return int(version.id)
 
 
 async def get_active_registry(session: AsyncSession) -> dict[str, Any] | None:
@@ -81,7 +81,7 @@ async def get_active_registry(session: AsyncSession) -> dict[str, Any] | None:
     registry = {
         "version_id": version_id,
         "methods": {m.method_id: m.to_dict() for m in methods},
-        "matrix": [row.to_dict() for row in sorted(matrix, key=lambda r: -r.priority)],
+        "matrix": [row.to_dict() for row in sorted(matrix, key=lambda r: -int(r.priority))],
         "policies": {p.policy_key: p.to_dict() for p in policies},
     }
     _cache[version_id] = registry

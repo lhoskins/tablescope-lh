@@ -146,7 +146,7 @@ async def seed_analytical_catalog() -> dict[str, int]:
             )
             stats["matrix"] += 1
 
-        version.method_count = stats["methods"]
+        version.method_count = stats["methods"]  # type: ignore[assignment]
         catalog.active_version_id = version.id
         # Version itself is active so the registry can read it; only active
         # methods within it are executed.
