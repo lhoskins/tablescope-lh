@@ -2809,7 +2809,7 @@ async def ai_generate_query_preview(
     columns = result.get("columns", [])
     rows = result.get("rows", [])[: req.max_rows]
     used = _detect_datasource(sql, allowed_tables)
-    return {
+    response: dict[str, Any] = {
         "title": title,
         "description": req.description or "",
         "sql": sql,
@@ -2821,6 +2821,11 @@ async def ai_generate_query_preview(
         "status": "success",
         "error": None,
     }
+    # M4 fast-follow: an executed preview is a structured result — stamp the
+    # shared ResponseEnvelope so the modal renders via the same ResponsePresenter
+    # as ask-and-run. Additive/fail-closed (same helper as ask-and-run).
+    _attach_presentation(response)
+    return response
 
 
 @router.post("/actions/generate-and-save-dashboard")

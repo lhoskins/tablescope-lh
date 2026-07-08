@@ -116,6 +116,9 @@ export interface GenerateQueryPreviewResult {
   errorDetails?: AiErrorDetails;
   message?: string;
   suggestedSources?: SuggestedSource[];
+  // M4: shared presentation descriptor + unified envelope (additive).
+  presentation?: PresentationDescriptor;
+  envelope?: ResponseEnvelope;
 }
 
 export interface SaveQueryResult {
