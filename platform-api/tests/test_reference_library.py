@@ -98,6 +98,19 @@ async def test_industry_create_and_list(client) -> None:
     titles = [d["title"] for d in res.json()["documents"]]
     assert "NIST SP 800-161" in titles  # industry visible to all tenants
 
+    # M4 fast-follow (contract-only): the single-document GET also emits the
+    # shared ResponseEnvelope (document mode), additively, keeping the bespoke
+    # profile drawer renderer.
+    res = await client.get(
+        f"/api/reference-library/documents/{created['id']}",
+        headers=_headers("viewer", tenant_id=99),
+    )
+    assert res.status_code == 200, res.text
+    doc = res.json()
+    assert doc["presentation"]["mode"] == "document"
+    assert doc["envelope"]["mode"] == "document"
+    assert doc["envelope"]["sections"] == doc["presentation"]["sections"]
+
 
 # ── company tier: tenant isolation ───────────────────────────────────────────
 

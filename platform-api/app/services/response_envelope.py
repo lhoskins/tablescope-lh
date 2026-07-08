@@ -12,6 +12,7 @@ from :mod:`app.services.presentation_engine`, the single section registry.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -20,6 +21,8 @@ from app.services.presentation_engine import (
     PresentationMode,
     describe,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ResponseEnvelope(BaseModel):
@@ -72,3 +75,25 @@ class ResponseEnvelope(BaseModel):
         payload["mode"] = mode.value
         payload["sections"] = describe(mode)["sections"]
         return cls(**payload)
+
+
+def attach_envelope(
+    response: dict[str, Any], mode: PresentationMode, **fields: Any
+) -> None:
+    """Additively stamp ``presentation`` + ``envelope`` on a response dict.
+
+    Used by surfaces that keep their bespoke frontend renderer but still emit
+    the shared contract (Home intelligence cards, document profiles). It never
+    replaces existing keys and is *fail-closed*: a registry/model error logs and
+    skips rather than breaking the surface, so a consumer that ignores the
+    envelope is unaffected.
+    """
+    try:
+        if not isinstance(response, dict):
+            return
+        response["presentation"] = describe(mode)
+        response["envelope"] = ResponseEnvelope.build(mode, **fields).model_dump(
+            exclude_none=True
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Presentation envelope stamp failed (%s): %s", mode, exc)

@@ -54,6 +54,15 @@ async def test_risk_sla_breach_detected() -> None:
     assert card["severity"] in {"urgent", "critical"}
     assert card["chart"]["type"] == "bar"
     assert "shipments" in card["sources"]["tables"]
+    # M4 fast-follow (contract-only): every card also emits the shared
+    # ResponseEnvelope, additively, while keeping its bespoke card renderer.
+    assert card["presentation"]["mode"] == "hybrid"
+    env = card["envelope"]
+    assert env["mode"] == "hybrid"
+    assert env["sections"] == card["presentation"]["sections"]
+    assert env["executive_summary"] == card["summary"]
+    assert env["chart"] == card["chart"]
+    assert "shipments" in env["sources"]
 
 
 async def test_risk_sla_skipped_without_lead_time_column() -> None:

@@ -41,6 +41,7 @@ from app.models.reference_library import (
     ReferenceDocumentAssignment,
 )
 from app.services import reference_library_ai_client as suggest_client
+from app.services.presentation_engine import PresentationMode
 from app.services.reference_library_processing import (
     EXT_TO_FILE_TYPE,
     EXTRACTABLE_EXTENSIONS,
@@ -54,6 +55,7 @@ from app.services.reference_library_service import (
     find_duplicate_in_tier,
     normalize_domain_tag,
 )
+from app.services.response_envelope import attach_envelope
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/reference-library", tags=["reference-library"])
@@ -210,7 +212,16 @@ async def get_document(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     doc = await _get_doc_with_read_access(session, context, document_id)
-    return doc.to_dict()
+    payload = doc.to_dict()
+    # M4 fast-follow (contract-only): stamp the shared ResponseEnvelope so a
+    # reference document also emits the unified contract (fail-closed, additive).
+    attach_envelope(
+        payload,
+        PresentationMode.DOCUMENT,
+        summary=doc.ai_summary or None,
+        status=doc.status or None,
+    )
+    return payload
 
 
 @router.get("/documents/{document_id}/download")
