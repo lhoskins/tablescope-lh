@@ -39,6 +39,41 @@ class CheckoutService:
         self._session = session
         self._stripe = stripe or StripeBillingService()
 
+    async def check_slug_availability(self, slug: str) -> tuple[bool, str | None]:
+        """Return ``(available, reason)`` for a candidate tenant slug.
+
+        A slug is unavailable when an ACTIVE tenant already owns it or a
+        non-terminal provisioning request is already using it. Mirrors the
+        uniqueness checks enforced in :meth:`create_checkout_session`.
+        """
+        from app.schemas.billing import _SLUG_RE
+
+        normalized = (slug or "").strip().lower()
+        if len(normalized) < 2 or not _SLUG_RE.match(normalized):
+            return False, "Slug must be at least 2 lowercase letters, numbers, or hyphens."
+
+        existing_tenant = await self._session.scalar(
+            select(Tenant).where(
+                Tenant.slug == normalized,
+                Tenant.is_active.is_(True),
+            )
+        )
+        if existing_tenant is not None:
+            return False, "That workspace URL is already taken."
+
+        existing_req = await self._session.scalar(
+            select(TenantProvisioningRequest).where(
+                TenantProvisioningRequest.tenant_slug == normalized,
+                TenantProvisioningRequest.status.in_(
+                    ["payment_confirmed", "provisioning", "provisioned"]
+                ),
+            )
+        )
+        if existing_req is not None:
+            return False, "That workspace URL is already taken."
+
+        return True, None
+
     async def create_checkout_session(
         self, payload: CheckoutSessionRequest
     ) -> tuple[str, int]:
@@ -61,10 +96,14 @@ class CheckoutService:
                 f"tier {payload.tier_key!r} has no {payload.billing_interval} price configured"
             )
 
-        # Slug uniqueness: reject if a tenant already owns it, or a non-terminal
-        # provisioning request is already using it.
+        # Slug uniqueness: reject only if an ACTIVE tenant already owns it, or a
+        # non-terminal provisioning request is already using it. A deleted or
+        # deactivated tenant frees its slug for reuse.
         existing_tenant = await self._session.scalar(
-            select(Tenant).where(Tenant.slug == payload.tenant_slug)
+            select(Tenant).where(
+                Tenant.slug == payload.tenant_slug,
+                Tenant.is_active.is_(True),
+            )
         )
         if existing_tenant is not None:
             raise SlugTakenError(f"tenant slug {payload.tenant_slug!r} is taken")
@@ -95,6 +134,11 @@ class CheckoutService:
             tenant_admin_email=payload.tenant_admin_email,
             tenant_admin_first_name=payload.tenant_admin_first_name,
             tenant_admin_last_name=payload.tenant_admin_last_name,
+            tenant_admin_phone=payload.tenant_admin_phone,
+            company_street=payload.company_street,
+            company_city=payload.company_city,
+            company_state=payload.company_state,
+            company_postal_code=payload.company_postal_code,
             region=payload.region,
             status="pending_payment",
             data_plane_status="not_required" if not tier.requires_data_plane else "pending",
@@ -104,6 +148,8 @@ class CheckoutService:
         self._session.add(req)
         await self._session.flush()
 
+        # Only safe, non-sensitive identifiers go into Stripe metadata — never
+        # the mailing address or billing email.
         metadata = {
             "tablescope_tier_key": tier.tier_key,
             "tenant_slug": payload.tenant_slug,
@@ -111,6 +157,7 @@ class CheckoutService:
             "tenant_admin_email": payload.tenant_admin_email,
             "tenant_admin_first_name": payload.tenant_admin_first_name or "",
             "tenant_admin_last_name": payload.tenant_admin_last_name or "",
+            "tenant_admin_phone": payload.tenant_admin_phone or "",
             "provisioning_request_id": str(req.id),
             "source": "tablescope_pricing",
         }

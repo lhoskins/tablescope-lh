@@ -37,10 +37,22 @@ from app.models.reference_library import (
     TIER_PROJECT,
     ReferenceDocument,
 )
+from app.services.evidence_severity import gate_severity
+from app.services.prompt_loader import load_prompt_reference
 
 logger = logging.getLogger(__name__)
 
 ALL_PROMPT_TYPES = ["risk_sla", "risk_expiry", "trend_spend", "opportunity_supplier"]
+
+# Authoritative methodology for richer Home cards (insight-first, KPI-aware,
+# evidence-gated joins). Loaded once and used to ground generation.
+HOME_BEST_PRACTICES_FILE = "home_insight_best_practices.md"
+
+
+def home_best_practices() -> str:
+    """Return the Home Insight best-practices reference text (cached)."""
+    return load_prompt_reference(HOME_BEST_PRACTICES_FILE)
+
 
 _PROJECT_COLORS = [
     "#185FA5", "#0F6E56", "#7A4FB5", "#B5642F", "#2F7DB5", "#9A2F5E",
@@ -217,6 +229,156 @@ def _find_table(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Entity & relationship discovery (insight-first methodology)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Business entities a Home insight may reason about (per the Home Insight
+# best-practices reference). Used to recognise which columns name an entity.
+_ENTITY_KEYWORDS = [
+    "supplier", "vendor", "customer", "client", "product", "order", "invoice",
+    "facility", "location", "region", "employee", "asset", "ticket", "part",
+    "material", "contract", "department", "project", "item", "sku", "account",
+    "warehouse", "carrier", "plant", "site",
+]
+
+# Suffixes that mark a column as a join/identity key rather than a measure.
+_KEY_SUFFIXES = ["id", "code", "number", "no", "key", "sku"]
+
+
+def _is_join_key(col: str) -> bool:
+    """A column whose name looks like an identity/foreign key.
+
+    Used as join evidence: an exact key-name shared by two tables is a strong
+    relationship signal (best-practices §Multi-Table Relationship Policy).
+    """
+    n = _norm(col)
+    if not n or n in {"id", "no"}:
+        # Bare "id"/"no" are too generic to match across unrelated tables.
+        return any(kw in n for kw in _ENTITY_KEYWORDS) and len(n) > 2
+    if any(n.endswith(s) for s in _KEY_SUFFIXES):
+        return True
+    return any(kw in n for kw in _ENTITY_KEYWORDS) and any(
+        s in n for s in _KEY_SUFFIXES
+    )
+
+
+def detect_entities(tables: list[TableInfo]) -> dict[str, list[str]]:
+    """Map each table view to the candidate entity columns it contains."""
+    out: dict[str, list[str]] = {}
+    for t in tables:
+        ents = [
+            c
+            for c in t.column_names
+            if any(kw in _norm(c) for kw in _ENTITY_KEYWORDS)
+        ]
+        if ents:
+            out[t.view_name] = ents
+    return out
+
+
+def find_relationship_candidates(tables: list[TableInfo]) -> list[dict[str, Any]]:
+    """Discover evidence-backed join candidates between table pairs.
+
+    Evidence today is an exact key-name match (e.g. both tables expose a
+    ``SupplierID`` column). Each candidate carries the relationship metadata the
+    planner and card config expect. Name-only matches with no key shape are
+    deliberately excluded so unrelated tables are never joined.
+    """
+    by_key: dict[str, list[tuple[TableInfo, str]]] = {}
+    for t in tables:
+        for c in t.column_names:
+            if _is_join_key(c):
+                by_key.setdefault(_norm(c), []).append((t, c))
+
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
+    for occ in by_key.values():
+        for i in range(len(occ)):
+            for j in range(i + 1, len(occ)):
+                (lt, lc), (rt, rc) = occ[i], occ[j]
+                if lt.view_name == rt.view_name:
+                    continue
+                pair = (*sorted([lt.view_name, rt.view_name]), _norm(lc))
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                candidates.append(
+                    {
+                        "left_table": lt.view_name,
+                        "right_table": rt.view_name,
+                        "left_join_key": lc,
+                        "right_join_key": rc,
+                        "relationship_type": "unknown",
+                        "join_confidence": 0.6,
+                        "confidence_reason": f"exact key-name match on '{lc}'",
+                        "row_multiplication_risk": "medium",
+                    }
+                )
+    return candidates
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Severity calibration, ranking & dedup
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Severity values the Home UI renders (an unknown value falls back to "info"
+# client-side, but we normalise here so cards stay calibrated).
+_ALLOWED_SEVERITIES = (
+    "critical", "urgent", "warning", "watch", "opportunity", "info",
+)
+_SEVERITY_RANK = {
+    "critical": 6, "urgent": 5, "warning": 4, "watch": 3,
+    "opportunity": 3, "info": 1,
+}
+
+
+def _normalize_severity(value: Any) -> str:
+    v = str(value or "").strip().lower()
+    return v if v in _ALLOWED_SEVERITIES else "info"
+
+
+def _card_priority(card: dict[str, Any]) -> float:
+    """Score a card for ranking: severity first, then evidence strength."""
+    score = _SEVERITY_RANK.get(card.get("severity", "info"), 1) * 10.0
+    conf = card.get("confidenceScore")
+    score += (float(conf) if isinstance(conf, int | float) else 0.5) * 3.0
+    if card.get("chart"):
+        score += 1.0
+    if card.get("kpiReferences") or card.get("referenceDocuments"):
+        score += 2.0
+    if card.get("relationshipMetadata"):
+        score += 1.0
+    pri = card.get("priorityScore")
+    if isinstance(pri, int | float) and pri > 0:
+        return float(pri)
+    return score
+
+
+def _dedupe_key(card: dict[str, Any]) -> tuple[Any, ...]:
+    itype = str(card.get("insightType", "")).split("_", 1)[0]
+    tables = tuple(sorted(card.get("sources", {}).get("tables", [])))
+    title = _norm(str(card.get("title", "")))[:40]
+    return (card.get("projectId"), itype, tables, title)
+
+
+def rank_and_dedupe_cards(
+    cards: list[dict[str, Any]], *, max_cards: int = 8
+) -> list[dict[str, Any]]:
+    """Return the strongest, de-duplicated cards (best-practices §Insight
+    Selection / §Card Ranking). Duplicates that share project + insight type +
+    source tables + title are collapsed to the highest-scoring one."""
+    seen: set[tuple[Any, ...]] = set()
+    unique: list[dict[str, Any]] = []
+    for c in sorted(cards, key=_card_priority, reverse=True):
+        key = _dedupe_key(c)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(c)
+    return unique[:max_cards]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Date parsing for expiry scan
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -282,8 +444,9 @@ def _card(
     callout: dict | None = None,
     tables: list[str] | None = None,
     documents: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
         "projectId": str(project.id),
         "projectName": project.name,
@@ -297,6 +460,14 @@ def _card(
         "sources": {"tables": tables or [], "documents": documents or []},
         "executedAt": _now_iso(),
     }
+    # Backward-compatible optional metadata (confidenceScore, priorityScore,
+    # insightMethod, validation, relationshipMetadata, ...). The frontend
+    # ignores unknown keys, so this never affects the existing card layout.
+    if metadata:
+        for key, value in metadata.items():
+            if value not in (None, "", [], {}):
+                card[key] = value
+    return card
 
 
 # Type signature for the Teiid query runner injected by the route layer.
@@ -485,6 +656,15 @@ async def _risk_sla(
     return _card(
         project, "risk_sla", severity, title, summary,
         chart=chart, callout=callout, tables=[table.view_name],
+        metadata={
+            "sourceContext": {
+                "metric": lead_col,
+                "periodColumn": period_col,
+                "sourceColumns": [
+                    c for c in (lead_col, period_col, supplier_col) if c
+                ],
+            }
+        },
     )
 
 
@@ -611,6 +791,15 @@ async def _trend_spend(
     return _card(
         project, "trend_spend", severity, title, summary,
         chart=chart, tables=[table.view_name],
+        metadata={
+            "sourceContext": {
+                "metric": amount_col,
+                "periodColumn": period_col,
+                "sourceColumns": [
+                    c for c in (amount_col, budget_col, period_col) if c
+                ],
+            }
+        },
     )
 
 
@@ -659,6 +848,14 @@ async def _opportunity_supplier(
         project, "opportunity_supplier", "opportunity",
         f"{len(top)} top-performing suppliers identified", summary,
         callout=callout, tables=[table.view_name],
+        metadata={
+            "sourceContext": {
+                "metric": metric_col,
+                "sourceColumns": [
+                    c for c in (supplier_col, metric_col) if c
+                ],
+            }
+        },
     )
 
 
@@ -752,6 +949,29 @@ def _is_period_label(values: list[str]) -> bool:
         return False
     hits = sum(1 for v in values if _PERIOD_RE.match(str(v)))
     return hits >= max(3, int(len(values) * 0.6))
+
+
+_DIMENSION_COL_RE = re.compile(
+    r"(?i)\b(period|month|year|quarter|week|date|day|fiscal)\b"
+)
+
+
+def _dimension_columns(columns: list[str], label_hint: str) -> set[str]:
+    """Columns that are axis/dimension labels, not headline metrics.
+
+    Keeps a grouped period/category column (e.g. a "Period" holding a year) out
+    of single-row KPI tiles, where a bare year like 2026 would misleadingly
+    format as "2.0K". Excludes the planner's stated label column plus any column
+    whose name reads like a time dimension.
+    """
+    skip: set[str] = set()
+    hint = (label_hint or "").strip().lower()
+    for c in columns:
+        if hint and c.lower() == hint:
+            skip.add(c)
+        elif _DIMENSION_COL_RE.search(c):
+            skip.add(c)
+    return skip
 
 
 def _looks_like_share(label_col: str, series: list[dict[str, Any]]) -> bool:
@@ -926,12 +1146,16 @@ def _build_chart(
 
     # Single-row result with one or more numeric columns -> KPI tiles. This also
     # covers a single headline number, which reads better as a tile than a bar.
+    # Exclude the grouped dimension/period column (e.g. a "Period" year) so it is
+    # never shown as a headline number — a bare year like 2026 would otherwise
+    # format as a meaningless "2.0K" tile.
     if len(rows) == 1:
         row = rows[0]
+        skip = _dimension_columns(columns, label_hint)
         kpis = [
             {"value": _fmt_num(v), "label": col}
             for col in columns
-            if (v := _to_float(row.get(col))) is not None
+            if col not in skip and (v := _to_float(row.get(col))) is not None
         ]
         if kpis:
             return {"type": "kpi_grid", "title": title, "data": {"kpis": kpis[:6]}}
@@ -988,6 +1212,172 @@ def _fmt_num(v: float) -> str:
     return f"{v:.2f}"
 
 
+# ── Dashboard readability + explanation layer ────────────────────────────────
+# Deterministic, data-grounded helpers that make a generated dashboard readable:
+# they pick sensible value formats, rank/limit categorical bars, switch ID-like
+# category charts to horizontal bars, and derive plain-English explanations from
+# the *executed* results (never LLM prose, never placeholder text).
+
+_PCT_COL_RE = re.compile(
+    r"(?i)\b(rate|pct|percent|percentage|ratio|share|on[_ -]?time|utiliz\w*|"
+    r"defect[_ ]?rate|yield|compliance)\b"
+)
+_CURRENCY_COL_RE = re.compile(
+    r"(?i)\b(revenue|cost|spend|spending|price|amount|sales|value|budget|usd|"
+    r"dollars?)\b"
+)
+_COUNT_COL_RE = re.compile(
+    r"(?i)\b(count|qty|quantity|units?|number|orders?|shipments?|items?|"
+    r"records?|inspections?|defects?)\b"
+)
+# Labels that read like IDs/codes (suppliers, SKUs, part numbers) get jumbled on
+# a vertical x-axis, so those charts read better as horizontal bars.
+_ID_LABEL_RE = re.compile(
+    r"(?i)(sup|sku|id|code|part|item|vendor|customer|prod)[-_ ]?\w*\d"
+)
+
+
+def _detect_value_format(value_label: str, series: list[dict[str, Any]]) -> str:
+    """Classify a metric's format: ``percent`` | ``currency`` | ``count`` | ``number``."""
+    name = value_label or ""
+    if _PCT_COL_RE.search(name):
+        return "percent"
+    if _CURRENCY_COL_RE.search(name):
+        return "currency"
+    if _COUNT_COL_RE.search(name):
+        return "count"
+    values = [
+        s["value"]
+        for s in series
+        if isinstance(s.get("value"), int | float)
+    ]
+    # Fractions in [0,1] (that aren't all 0/1) read as percentages.
+    if (
+        values
+        and all(0.0 <= v <= 1.0 for v in values)
+        and any(v not in (0.0, 1.0) for v in values)
+    ):
+        return "percent"
+    return "number"
+
+
+def _fmt_value(v: float, fmt: str) -> str:
+    """Format a single metric value for display per its detected format."""
+    if fmt == "percent":
+        pct = v * 100 if abs(v) <= 1.0 else v
+        return f"{pct:.1f}%"
+    if fmt == "currency":
+        return f"${_fmt_num(v)}"
+    if fmt == "count":
+        return f"{int(round(v)):,}"
+    return _fmt_num(v)
+
+
+def _looks_like_id_labels(labels: list[str]) -> bool:
+    """True when most labels are ID/code-like (jumble on a vertical axis)."""
+    if not labels:
+        return False
+    idish = sum(
+        1
+        for lbl in labels
+        if _ID_LABEL_RE.search(lbl)
+        or len(lbl) >= 12
+        or any(ch.isdigit() for ch in lbl)
+    )
+    return idish >= max(1, int(len(labels) * 0.5))
+
+
+def enhance_bar_readability(chart: dict[str, Any]) -> dict[str, Any]:
+    """Rank a categorical bar chart highest-first, cap at Top 10, go horizontal.
+
+    Only plain ``bar`` charts are touched — time-series lines, KPI grids, donuts
+    and two-metric charts keep their shape. Returns the (mutated) chart.
+    """
+    if chart.get("type") != "bar":
+        return chart
+    series = chart.get("data", {}).get("series") or []
+    if len(series) < 2:
+        return chart
+    ranked = sorted(
+        series, key=lambda s: s.get("value") or 0, reverse=True
+    )[:10]
+    chart["data"]["series"] = ranked
+    labels = [str(s.get("label", "")) for s in ranked]
+    if len(ranked) > 5 or _looks_like_id_labels(labels):
+        chart["subtype"] = "horizontal_bar"
+    return chart
+
+
+def build_widget_explanation(
+    chart: dict[str, Any], value_label: str, fmt: str
+) -> str:
+    """Derive a 1-2 sentence explanation from the executed data.
+
+    Grounded in the real series/KPIs - states what the chart shows, what stands
+    out, and what to do next. Returns "" when there is nothing to describe (the
+    caller omits an explanation rather than showing a placeholder).
+    """
+    ctype = chart.get("type")
+    if ctype == "kpi_grid":
+        kpis = chart.get("data", {}).get("kpis") or []
+        if not kpis:
+            return ""
+        parts = ", ".join(f"{k['label']} is {k['value']}" for k in kpis[:3])
+        return f"Current headline figures: {parts}."
+    series = chart.get("data", {}).get("series") or []
+    if not series:
+        return ""
+    metric = value_label or "the metric"
+    if ctype == "line":
+        first, last = series[0], series[-1]
+        fv = first.get("value") or 0
+        lv = last.get("value") or 0
+        direction = (
+            "increased" if lv > fv else "decreased" if lv < fv else "held steady"
+        )
+        return (
+            f"{metric} {direction} from {_fmt_value(fv, fmt)} "
+            f"({first.get('label')}) to {_fmt_value(lv, fmt)} "
+            f"({last.get('label')}). Watch whether the trend continues."
+        )
+    top = max(series, key=lambda s: s.get("value") or 0)
+    return (
+        f"{top.get('label')} leads on {metric} at "
+        f"{_fmt_value(top.get('value') or 0, fmt)} across the {len(series)} "
+        f"shown. Review the highest-ranked items first."
+    )
+
+
+def build_dashboard_narrative(
+    widgets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build an executive summary, key findings and actions from the widgets.
+
+    Everything is derived from each widget's already-computed explanation and
+    ranked series, so the narrative always matches what the charts actually show.
+    """
+    findings: list[str] = []
+    actions: list[str] = []
+    for w in widgets:
+        exp = (w.get("explanation") or "").strip()
+        if exp:
+            findings.append(exp.split(". ")[0].rstrip(".") + ".")
+        chart = w.get("chart") or {}
+        series = chart.get("data", {}).get("series") or []
+        if chart.get("type") == "bar" and series:
+            top = max(series, key=lambda s: s.get("value") or 0)
+            actions.append(
+                f'Investigate {top.get("label")} in "{w.get("title")}".'
+            )
+    base = f"This dashboard summarizes {len(widgets)} analyses of the project's data."
+    summary = f"{base} {findings[0]}" if findings else base
+    return {
+        "summary": summary,
+        "keyFindings": findings[:5],
+        "recommendedActions": actions[:5],
+    }
+
+
 async def run_ai_intelligence(
     project: Project,
     ctx: ProjectContext,
@@ -1042,9 +1432,24 @@ async def run_ai_intelligence(
                 str(t) for t in (d.ai_metadata.get("tags") or [])
                 if isinstance(t, str | int | float)
             ],
+            # Distinguish governed Reference Library standards from the
+            # project's own uploaded assets so the planner can ground risk
+            # and compliance findings in them and cite them explicitly.
+            "source": (
+                "reference_library"
+                if d.ai_metadata.get("reference_tier")
+                else "project"
+            ),
+            "tier": str(d.ai_metadata.get("reference_tier") or ""),
+            "issuing_body": str(d.ai_metadata.get("issuing_body") or ""),
         }
         for d in ctx.documents
     ]
+
+    # Evidence-backed join candidates (best-practices §Multi-Table
+    # Relationship Policy). When present, the planner is allowed to propose
+    # validated two-table insights; otherwise it stays single-table.
+    relationship_hints = find_relationship_candidates(ctx.tables)
 
     analyses = await ai.plan(
         tenant_id=tenant_id,
@@ -1053,6 +1458,7 @@ async def run_ai_intelligence(
         allowed_tables=allowed_tables,
         documents=documents,
         table_schema=table_schema,
+        relationship_hints=relationship_hints,
         max_analyses=max_analyses,
         granularity=granularity,
     )
@@ -1062,6 +1468,12 @@ async def run_ai_intelligence(
         return []  # AI reachable but found nothing worth surfacing
 
     doc_by_title = {d.title: d for d in ctx.documents}
+    # Index relationship hints by the table pair so multi-table cards can carry
+    # the join metadata that backs them.
+    hint_by_pair: dict[frozenset[str], dict[str, Any]] = {
+        frozenset({h["left_table"], h["right_table"]}): h
+        for h in relationship_hints
+    }
 
     # Execute each analysis against real data; gather interpret inputs.
     executed: list[dict[str, Any]] = []
@@ -1174,6 +1586,12 @@ async def run_ai_intelligence(
         if res:
             interpreted.update(res)
 
+    # Reference Library docs are authoritative guidance, not project evidence —
+    # used below to cap reference-only findings to watch severity.
+    reference_titles = {
+        d.title for d in ctx.documents if d.ai_metadata.get("reference_tier")
+    }
+
     cards: list[dict[str, Any]] = []
     for item in executed:
         a = item["analysis"]
@@ -1183,9 +1601,9 @@ async def run_ai_intelligence(
         category = a.get("category", "trend")
         if category not in ("risk", "trend", "opportunity", "relationship"):
             category = "trend"
-        severity = ins.get("severity") or a.get("severity_hint") or "info"
-        if severity not in ("critical", "urgent", "watch", "opportunity", "info"):
-            severity = "info"
+        severity = _normalize_severity(
+            ins.get("severity") or a.get("severity_hint") or "info"
+        )
         title = ins.get("title") or a.get("title") or "Insight"
         summary = ins.get("summary") or a.get("rationale") or ""
         if not summary:
@@ -1206,6 +1624,7 @@ async def run_ai_intelligence(
         chart = None
         tables: list[str] = []
         documents_used: list[str] = []
+        validation: dict[str, Any] = {}
         if result is not None:
             chart = _build_chart(
                 a.get("chart_type", "bar"),
@@ -1216,8 +1635,80 @@ async def run_ai_intelligence(
                 a.get("value_column_2", ""),
             )
             tables = _tables_in_sql(a.get("sql", ""), ctx.tables)
+            rows = result.get("rows", [])
+            value_col = a.get("value_column", "")
+            non_null = (
+                sum(1 for r in rows if _to_float(r.get(value_col)) is not None)
+                if value_col
+                else 0
+            )
+            validation = {
+                "executionStatus": "success",
+                "rowCount": len(rows),
+                "columnsReturned": list(result.get("columns", [])),
+                "nonNullMetricCount": non_null,
+            }
         else:
             documents_used = list(a.get("source_documents") or [])
+
+        # Optional, backward-compatible metadata grounded in how the card was
+        # produced (best-practices §Feedback / §Card Rendering).
+        is_multi_table = len(tables) >= 2
+        uses_reference = bool(documents_used) and any(
+            d.ai_metadata.get("reference_tier")
+            for d in ctx.documents
+            if d.title in documents_used
+        )
+        if is_multi_table:
+            method = "relationship"
+        elif uses_reference:
+            method = "reference_backed"
+        elif result is None:
+            method = "reference_backed" if documents_used else "llm_planned"
+        else:
+            method = "llm_planned"
+
+        # A risk/warning/critical finding needs project-specific evidence
+        # (executed data or a project document). When grounded only in
+        # Reference Library guidance, cap it to watch severity.
+        project_docs = [t for t in documents_used if t not in reference_titles]
+        has_project_evidence = result is not None or bool(project_docs)
+        severity = gate_severity(severity, has_project_evidence=has_project_evidence)
+
+        relationship_meta = None
+        if is_multi_table:
+            relationship_meta = hint_by_pair.get(frozenset(tables[:2]))
+
+        confidence = ins.get("confidence")
+        if not isinstance(confidence, int | float):
+            # Derive a coarse confidence from evidence: data-backed with several
+            # rows is more trustworthy than a thin or document-only finding.
+            confidence = 0.5
+            if validation.get("rowCount", 0) >= 3:
+                confidence = 0.75
+            if relationship_meta:
+                confidence = min(confidence, relationship_meta["join_confidence"])
+
+        metadata: dict[str, Any] = {
+            "insightMethod": method,
+            "confidenceScore": round(float(confidence), 2),
+            "validation": validation,
+            "referenceDocuments": documents_used if uses_reference else [],
+            "relationshipMetadata": {
+                "leftTable": relationship_meta["left_table"],
+                "rightTable": relationship_meta["right_table"],
+                "leftJoinKey": relationship_meta["left_join_key"],
+                "rightJoinKey": relationship_meta["right_join_key"],
+                "relationshipType": relationship_meta["relationship_type"],
+                "joinConfidence": relationship_meta["join_confidence"],
+                "confidenceReason": relationship_meta["confidence_reason"],
+                "rowMultiplicationRisk": relationship_meta[
+                    "row_multiplication_risk"
+                ],
+            }
+            if relationship_meta
+            else {},
+        }
 
         cards.append(
             _card(
@@ -1230,10 +1721,13 @@ async def run_ai_intelligence(
                 callout=callout,
                 tables=tables,
                 documents=documents_used,
+                metadata=metadata,
             )
         )
 
-    return cards
+    # Rank by severity + evidence strength and drop duplicates, returning the
+    # strongest few (best-practices §Insight Selection / §Card Ranking).
+    return rank_and_dedupe_cards(cards)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -228,6 +228,34 @@ async def upload_file(
         existing.archived_at = None
     await session.commit()
 
+    # Auto-create a saved query named after this data source (project uploads
+    # only). Best-effort: never fail the upload if query creation has issues.
+    if resolved_project_id is not None:
+        try:
+            from app.services.auto_query import ensure_datasource_query
+
+            col_names = [
+                c["name"]
+                for c in (column_types or [])
+                if isinstance(c, dict) and c.get("name")
+            ]
+            await ensure_datasource_query(
+                session,
+                project_id=resolved_project_id,
+                owner_id=user.id,
+                display_name=file.filename,
+                view_name=view_name,
+                columns=col_names,
+            )
+            await session.commit()
+        except Exception as exc:  # non-fatal
+            logger.warning(
+                "Auto-create query for %s failed (non-fatal): %s",
+                view_name,
+                exc,
+            )
+            await session.rollback()
+
     return {
         "path": f"/opt/wildfly/teiidfiles/customers/{tenant.id}/{user.id}/uploads/{filename}",
         "size": len(content),

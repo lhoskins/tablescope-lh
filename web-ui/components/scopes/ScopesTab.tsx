@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { apiClient } from "@/lib/api-client";
+import { useNotifyScopesChanged } from "@/lib/ui/scope-refresh";
 
 type QueryScopeRow = {
   id: number;
@@ -28,6 +29,7 @@ export function ScopesTab({ projectId }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
+  const notifyScopesChanged = useNotifyScopesChanged();
 
   // Manual creation state
   const [showCreate, setShowCreate] = useState(false);
@@ -102,6 +104,7 @@ export function ScopesTab({ projectId }: Props) {
     try {
       await apiClient.delete(`/api/query-scopes/${scopeId}`);
       setScopes((prev) => prev.filter((s) => s.id !== scopeId));
+      notifyScopesChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete scope");
     } finally {
@@ -128,6 +131,7 @@ export function ScopesTab({ projectId }: Props) {
       setSourceFields([]);
       setTargetFields([]);
       await loadData();
+      notifyScopesChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create scope");
     } finally {

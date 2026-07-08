@@ -6,22 +6,22 @@ import {
   IconAlertTriangle,
   IconChevronDown,
   IconChevronRight,
-  IconPlus,
 } from "@tabler/icons-react";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/cn";
 import {
+  sourceExistingKey,
   useBuilderStore,
   type ExistingProjectSource,
   type ProjectAssignment,
-  type SessionSource,
 } from "@/lib/stores/data-source-builder-store";
 import {
   listProjectDataSources,
   type ProjectDataSourceRow,
 } from "@/lib/api/data-source-builder";
 import { connectorIcon } from "./util";
+import { flattenCreated } from "./flatten";
 
 function rowToExisting(row: ProjectDataSourceRow): ExistingProjectSource {
   const isDb = row.id != null && row.dbType != null;
@@ -36,32 +36,41 @@ function rowToExisting(row: ProjectDataSourceRow): ExistingProjectSource {
   };
 }
 
-function sessionAddRows(sources: SessionSource[]) {
-  return sources
-    .map((source) => {
-      const tableNames = source.isFileUpload
-        ? source.tables.map((t) => t.tableName)
-        : source.tables.filter((t) => t.state === "adding").map((t) => t.tableName);
-      return { source, tableNames };
-    })
-    .filter((x) => x.tableNames.length > 0);
-}
-
 export function ProjectCard({ project }: { project: ProjectAssignment }) {
   const sources = useBuilderStore((s) => s.sources);
   const toggleProject = useBuilderStore((s) => s.toggleProject);
   const markSourceForRemoval = useBuilderStore((s) => s.markSourceForRemoval);
   const undoRemoval = useBuilderStore((s) => s.undoRemoval);
   const setProjectExisting = useBuilderStore((s) => s.setProjectExisting);
-  const updateScope = useBuilderStore((s) => s.updateScope);
 
   const [confirmToggleOff, setConfirmToggleOff] = useState(false);
-  const [addingScope, setAddingScope] = useState(false);
-  const [scopeName, setScopeName] = useState("");
 
-  const adding = useMemo(() => sessionAddRows(sources), [sources]);
-  const hasPendingAdds = adding.length > 0;
+  const createdKeys = useBuilderStore((s) => s.createdKeys);
+  // Split the selected sources into net-new adds vs. ones already assigned to
+  // this project (the latter are surfaced as a notice and skipped on apply).
+  const { selectedItems, duplicateItems } = useMemo(() => {
+    const alreadyInProject = new Set(
+      project.existingSources.map((e) => e.sourceKey),
+    );
+    const dupSourceIds = new Set(
+      sources
+        .filter((s) => {
+          const key = sourceExistingKey(s);
+          return key !== null && alreadyInProject.has(key);
+        })
+        .map((s) => s.id),
+    );
+    const selected = flattenCreated(sources, createdKeys).filter(
+      (i) => i.selected,
+    );
+    return {
+      selectedItems: selected.filter((i) => !dupSourceIds.has(i.sourceId)),
+      duplicateItems: selected.filter((i) => dupSourceIds.has(i.sourceId)),
+    };
+  }, [sources, createdKeys, project.existingSources]);
+  const hasPendingAdds = selectedItems.length > 0;
   const expanded = project.isToggled;
+  const selectedCount = selectedItems.length;
 
   const { data: existingRows } = useQuery({
     queryKey: ["builder", "project-datasources", project.projectId],
@@ -122,6 +131,16 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
             </span>
           </span>
         </button>
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+            project.isToggled
+              ? "bg-brand-100 text-brand-700"
+              : "bg-bg-tertiary text-ink-tertiary",
+          )}
+        >
+          {project.isToggled ? selectedCount : 0} selected
+        </span>
         <button
           type="button"
           role="switch"
@@ -151,23 +170,50 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
                 Adding
               </p>
               <div className="space-y-1.5">
-                {adding.map(({ source, tableNames }) => {
-                  const Icon = connectorIcon(source.sourceType);
+                {selectedItems.map((item) => {
+                  const Icon = connectorIcon(item.sourceType);
                   return (
                     <div
-                      key={source.id}
+                      key={item.key}
                       className="flex items-center gap-2.5 rounded-md border border-brand-500/40 bg-brand-50/40 px-3 py-2"
                     >
                       <Icon size={15} className="shrink-0 text-brand-700" />
                       <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-brand-700">
-                        {source.displayName}
+                        {item.name}
                       </span>
                       <span className="text-caption text-ink-tertiary">
-                        {source.isFileUpload
-                          ? `1 file · ${source.fileMetadata?.rows ?? 0} rows`
-                          : `${tableNames.length} tables · AI on`}
+                        {item.typeLabel}
                       </span>
                       <Badge tone="brand">Pending</Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SELECTED BUT ALREADY ASSIGNED — notify, don't duplicate */}
+          {duplicateItems.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1 text-caption font-semibold uppercase tracking-wide text-warning">
+                <IconAlertTriangle size={13} />
+                Already in this project
+              </p>
+              <div className="space-y-1.5">
+                {duplicateItems.map((item) => {
+                  const Icon = connectorIcon(item.sourceType);
+                  return (
+                    <div
+                      key={item.key}
+                      className="flex items-center gap-2.5 rounded-md border border-warning/40 bg-warning-bg/40 px-3 py-2"
+                    >
+                      <Icon size={15} className="shrink-0 text-warning" />
+                      <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-ink-secondary">
+                        {item.name}
+                      </span>
+                      <span className="text-caption text-ink-tertiary">
+                        Skipped — won&apos;t be duplicated
+                      </span>
                     </div>
                   );
                 })}
@@ -249,56 +295,6 @@ export function ProjectCard({ project }: { project: ProjectAssignment }) {
               </p>
             </div>
           )}
-
-          {/* SCOPE PILLS */}
-          <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <span className="text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
-              Scopes:
-            </span>
-            {project.scopeIds.map((scope) => (
-              <span
-                key={scope}
-                className="rounded-full bg-brand-500 px-2 py-0.5 text-[11px] font-medium text-white"
-              >
-                {scope}
-              </span>
-            ))}
-            {addingScope ? (
-              <input
-                autoFocus
-                value={scopeName}
-                onChange={(e) => setScopeName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && scopeName.trim()) {
-                    updateScope(project.projectId, [
-                      ...project.scopeIds,
-                      scopeName.trim(),
-                    ]);
-                    setScopeName("");
-                    setAddingScope(false);
-                  }
-                  if (e.key === "Escape") {
-                    setAddingScope(false);
-                    setScopeName("");
-                  }
-                }}
-                onBlur={() => {
-                  setAddingScope(false);
-                  setScopeName("");
-                }}
-                placeholder="Scope name"
-                className="h-6 rounded-full border border-line-secondary px-2 text-[11px] focus:border-brand-500 focus:outline-none"
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => setAddingScope(true)}
-                className="flex items-center gap-0.5 rounded-full border border-dashed border-line-secondary px-2 py-0.5 text-[11px] text-ink-secondary hover:border-brand-500 hover:text-brand-700"
-              >
-                <IconPlus size={11} /> Add scope
-              </button>
-            )}
-          </div>
         </div>
       )}
 

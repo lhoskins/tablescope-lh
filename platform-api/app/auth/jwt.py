@@ -35,6 +35,7 @@ class TokenClaims(BaseModel):
     org_id: int | None = None
     role: str = "viewer"
     permissions: list[str] = Field(default_factory=list)
+    aal: str | None = None
     iss: str | None = None
     aud: str | None = None
     iat: int | None = None

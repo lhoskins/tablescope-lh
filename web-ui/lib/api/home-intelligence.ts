@@ -7,6 +7,7 @@ import { apiClient } from "@/lib/api-client";
 export type InsightSeverity =
   | "critical"
   | "urgent"
+  | "warning"
   | "watch"
   | "opportunity"
   | "info";
@@ -69,6 +70,29 @@ export interface InsightCard {
   callout: InsightCallout | null;
   sources: { tables: string[]; documents: string[] };
   executedAt: string;
+  // Optional, backward-compatible metadata emitted by the insight-first
+  // pipeline. The UI does not require these and ignores them when absent.
+  insightMethod?: string;
+  confidenceScore?: number;
+  priorityScore?: number;
+  validation?: {
+    executionStatus?: string;
+    rowCount?: number;
+    columnsReturned?: string[];
+    nonNullMetricCount?: number;
+  };
+  referenceDocuments?: string[];
+  kpiReferences?: string[];
+  relationshipMetadata?: {
+    leftTable?: string;
+    rightTable?: string;
+    leftJoinKey?: string;
+    rightJoinKey?: string;
+    relationshipType?: string;
+    joinConfidence?: number;
+    confidenceReason?: string;
+    rowMultiplicationRisk?: string;
+  };
 }
 
 export interface ProjectResult {
@@ -295,6 +319,11 @@ export function suggestQueries(
 
 export interface DashboardWidgetSuggestion {
   title: string;
+  subtitle?: string;
+  /** Plain-English, data-grounded explanation of what the chart shows. */
+  explanation?: string;
+  /** Value format for the metric: percent | currency | count | number. */
+  format?: string;
   chartType: string;
   chart: InsightChart;
   sql: string;
@@ -304,6 +333,9 @@ export interface DashboardWidgetSuggestion {
 
 export interface DashboardSuggestion {
   title: string;
+  summary?: string;
+  keyFindings?: string[];
+  recommendedActions?: string[];
   widgets: DashboardWidgetSuggestion[];
 }
 
@@ -320,6 +352,16 @@ export function suggestDashboards(
   return apiClient.post("/api/ai/home/dashboard-suggestions", {
     granularity,
     max_per_project: 6,
+  });
+}
+
+export function generateProjectDashboard(
+  projectId: number,
+  maxWidgets = 6,
+): Promise<DashboardSuggestionsProject> {
+  return apiClient.post("/api/ai/home/project-dashboard", {
+    project_id: projectId,
+    max_widgets: maxWidgets,
   });
 }
 
@@ -344,10 +386,14 @@ export function saveQuerySuggestion(body: {
 export function saveDashboardSuggestion(body: {
   project_id: number;
   title: string;
+  summary?: string;
+  keyFindings?: string[];
+  recommendedActions?: string[];
   widgets: {
     title: string;
     sql: string;
     chartType: string;
+    explanation?: string;
     labelColumn?: string;
     valueColumn?: string;
   }[];

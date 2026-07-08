@@ -201,6 +201,65 @@ describe("data-source-builder-store", () => {
     expect(removing[0].source.name).toBe("logistics_db");
   });
 
+  it("syncExisting marks backend sources as created and dedups", () => {
+    const store = useBuilderStore.getState();
+    store.addSource(fileSource()); // a session-created (non-existing) source
+    const existing: SessionSource[] = [
+      dbSource({ id: "existing-db-7", existing: true, backendId: 7 }),
+      fileSource({
+        id: "existing-file-3",
+        existing: true,
+        viewName: "sales_csv",
+      }),
+    ];
+    store.syncExisting(existing);
+    const s = useBuilderStore.getState();
+    // session source preserved + 2 existing added
+    expect(s.sources).toHaveLength(3);
+    // existing sources are marked created so they show in the Active list
+    expect(s.createdKeys).toContain("existing-file-3");
+    expect(s.createdKeys).toContain("existing-db-7::orders");
+
+    // re-syncing with the same id does not duplicate
+    store.syncExisting(existing);
+    expect(useBuilderStore.getState().sources).toHaveLength(3);
+
+    // dropping one from the backend removes it (and its created key)
+    store.syncExisting([existing[0]]);
+    const s2 = useBuilderStore.getState();
+    expect(s2.sources.filter((x) => x.existing)).toHaveLength(1);
+    expect(s2.createdKeys).not.toContain("existing-file-3");
+  });
+
+  it("getPendingChanges skips sources already assigned to the project", () => {
+    const store = useBuilderStore.getState();
+    // An existing file already in the project + a new file not in it.
+    store.addSource(
+      fileSource({ id: "existing-file-3", existing: true, viewName: "sales_csv" }),
+    );
+    store.addSource(fileSource()); // forecast_csv, not in project
+    store.markCreated(["existing-file-3", "file-1"]);
+    store.setProjects([
+      project({
+        isToggled: true,
+        existingSources: [
+          {
+            sourceKey: "file:sales_csv",
+            kind: "file",
+            viewName: "sales_csv",
+            name: "sales.csv",
+            tableCount: 1,
+            aiOn: true,
+          },
+        ],
+      }),
+    ]);
+    const { adding } = useBuilderStore.getState().getPendingChanges();
+    // Only the new file is queued; the already-assigned one is skipped.
+    expect(adding).toHaveLength(1);
+    expect(adding[0].source.id).toBe("file-1");
+  });
+
   it("reset clears everything", () => {
     const store = useBuilderStore.getState();
     store.addSource(dbSource());

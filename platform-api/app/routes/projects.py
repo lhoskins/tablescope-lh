@@ -8,7 +8,9 @@ members. Shared projects are visible to all active members.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, or_, select
@@ -29,7 +31,9 @@ from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.project_asset import ProjectAsset
+from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
+from app.models.scope_set import ScopeSet
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.project import (
@@ -146,7 +150,15 @@ async def list_project_summaries(
         )
         return {pid: count for pid, count in result.all()}
 
-    query_counts = await _grouped_counts(SavedQuery)
+    query_result = await session.execute(
+        select(SavedQuery.project_id, func.count())
+        .where(
+            SavedQuery.project_id.in_(ids),
+            SavedQuery.is_archived.is_(False),
+        )
+        .group_by(SavedQuery.project_id)
+    )
+    query_counts = {pid: count for pid, count in query_result.all()}
     dashboard_counts = await _grouped_counts(Dashboard)
     asset_counts = await _grouped_counts(ProjectAsset)
     member_counts = await _grouped_counts(ProjectMember)
@@ -288,6 +300,29 @@ def _shared_by(
     return user_names.get(item_owner_id, "Shared")
 
 
+def _owner(
+    project: _ProjectMeta | None,
+    item_owner_id: int | None,
+    user_names: dict[int, str],
+) -> tuple[int | None, str]:
+    """Resolve the actual owner/creator (id, name) of an item.
+
+    Falls back to the project owner when the item has no explicit owner.
+    """
+    owner_id = item_owner_id
+    if owner_id is None and project is not None:
+        owner_id = project.owner_id
+    name = user_names.get(owner_id, "—") if owner_id is not None else "—"
+    return owner_id, name
+
+
+def _query_origin(query: SavedQuery) -> tuple[str, str]:
+    """Normalize a saved query's origin into (key, human label)."""
+    if query.ai_generated:
+        return "ai_generated", "AI Generated"
+    return "manual", "Manual"
+
+
 @router.get("/dashboards-all")
 async def list_all_dashboards(
     session: AsyncSession = Depends(get_db),
@@ -316,6 +351,12 @@ async def list_all_dashboards(
             "sharedBy": _shared_by(
                 projects.get(d.project_id), d.owner_id, user_names
             ),
+            "ownerId": _owner(
+                projects.get(d.project_id), d.owner_id, user_names
+            )[0],
+            "ownerName": _owner(
+                projects.get(d.project_id), d.owner_id, user_names
+            )[1],
             "createdAt": d.created_at.isoformat() if d.created_at else None,
         }
         for d in rows
@@ -401,6 +442,85 @@ async def list_all_datasources(
     return out
 
 
+@router.get("/my-datasources")
+async def list_my_datasources(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[dict]:
+    """All data sources the caller has created, irrespective of project.
+
+    Powers the Data Source Builder's "Active Data Sources" list so previously
+    created sources (files + database tables) show up after a refresh and can
+    be reviewed / reassigned. Scoped to the caller's own sources.
+    """
+    projects, _ = await _home_context(session, context)
+
+    file_rows = list(
+        await session.scalars(
+            select(FileSourceMeta)
+            .where(
+                FileSourceMeta.tenant_id == context.tenant_id,
+                FileSourceMeta.owner_id == context.user_id,
+                FileSourceMeta.archived.is_(False),
+            )
+            .order_by(FileSourceMeta.created_at.desc())
+        )
+    )
+    db_rows = list(
+        await session.scalars(
+            select(DatabaseDataSource)
+            .where(
+                DatabaseDataSource.tenant_id == context.tenant_id,
+                DatabaseDataSource.created_by == context.user_id,
+                DatabaseDataSource.status == "active",
+                DatabaseDataSource.archived.is_(False),
+            )
+            .options(selectinload(DatabaseDataSource.columns))
+            .order_by(DatabaseDataSource.created_at.desc())
+        )
+    )
+
+    def _project_name(pid: int | None) -> str | None:
+        if pid is None:
+            return None
+        meta = projects.get(pid)
+        return meta.name if meta else None
+
+    out: list[dict] = []
+    for f in file_rows:
+        out.append(
+            {
+                "id": f.id,
+                "kind": "file",
+                "name": f.file_name,
+                "viewName": f.view_name,
+                "projectId": f.project_id,
+                "projectName": _project_name(f.project_id),
+                "columns": len(f.column_types or []),
+                "sourceFormat": f.source_format,
+                "createdAt": f.created_at.isoformat() if f.created_at else None,
+            }
+        )
+    for d in db_rows:
+        out.append(
+            {
+                "id": d.id,
+                "kind": "database",
+                "name": d.display_name,
+                "viewName": d.teiid_view_name,
+                "projectId": d.project_id,
+                "projectName": _project_name(d.project_id),
+                "columns": len(d.columns or []),
+                "dbType": d.db_type,
+                "schemaName": d.schema_name,
+                "tableName": d.table_name,
+                "createdAt": d.created_at.isoformat() if d.created_at else None,
+            }
+        )
+    out.sort(key=lambda r: r["createdAt"] or "", reverse=True)
+    return out
+
+
 @router.get("/documents-all")
 async def list_all_documents(
     session: AsyncSession = Depends(get_db),
@@ -428,6 +548,12 @@ async def list_all_documents(
             "sharedBy": _shared_by(
                 projects.get(a.project_id), a.owner_user_id, user_names
             ),
+            "ownerId": _owner(
+                projects.get(a.project_id), a.owner_user_id, user_names
+            )[0],
+            "ownerName": _owner(
+                projects.get(a.project_id), a.owner_user_id, user_names
+            )[1],
             "createdAt": a.created_at.isoformat() if a.created_at else None,
         }
         for a in rows
@@ -814,6 +940,19 @@ async def add_datasources_to_project(
                 )
                 session.add(meta)
             meta.project_id = project_id
+            await session.flush()
+            await _auto_create_query(
+                session,
+                project_id=project_id,
+                owner_id=context.user_id,
+                display_name=meta.file_name or view_name,
+                view_name=view_name,
+                columns=[
+                    c["name"]
+                    for c in (meta.column_types or [])
+                    if isinstance(c, dict) and c.get("name")
+                ],
+            )
             added += 1
         elif kind == "db":
             ds_id = item.get("id")
@@ -825,10 +964,46 @@ async def add_datasources_to_project(
             if ds.created_by != context.user_id and context.role != "admin":
                 continue
             ds.project_id = project_id
+            await session.flush()
+            await _auto_create_query(
+                session,
+                project_id=project_id,
+                owner_id=context.user_id,
+                display_name=ds.display_name or ds.teiid_view_name,
+                view_name=ds.teiid_view_name,
+                columns=None,
+            )
             added += 1
 
     await session.commit()
     return {"status": "ok", "added": added}
+
+
+async def _auto_create_query(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    owner_id: int | None,
+    display_name: str,
+    view_name: str,
+    columns: list[str] | None,
+) -> None:
+    """Best-effort auto-create of a saved query for a data source."""
+    try:
+        from app.services.auto_query import ensure_datasource_query
+
+        await ensure_datasource_query(
+            session,
+            project_id=project_id,
+            owner_id=owner_id,
+            display_name=display_name,
+            view_name=view_name,
+            columns=columns,
+        )
+    except Exception as exc:  # non-fatal
+        logger.warning(
+            "Auto-create query for %s failed (non-fatal): %s", view_name, exc
+        )
 
 
 # Standard Teiid runtime types offered in the column-type editor (item 5).
@@ -1363,16 +1538,76 @@ def _move_shared_files_to_user(*, tenant_id: int, user_id: int) -> None:
 @router.get("/{project_id}/queries", response_model=list[SavedQueryRead])
 async def list_saved_queries(
     project_id: int,
+    include_archived: bool = Query(default=False),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[SavedQueryRead]:
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Project not found")
-    rows = await session.scalars(
-        select(SavedQuery).where(SavedQuery.project_id == project_id).order_by(SavedQuery.created_at.desc())
+    stmt = select(SavedQuery).where(SavedQuery.project_id == project_id)
+    if not include_archived:
+        stmt = stmt.where(SavedQuery.is_archived.is_(False))
+    rows = list(
+        await session.scalars(stmt.order_by(SavedQuery.created_at.desc()))
     )
-    return [SavedQueryRead.model_validate(q) for q in rows]
+
+    # Owner names for the "Owner" column.
+    users = list(
+        await session.scalars(
+            select(User).where(User.tenant_id == context.tenant_id)
+        )
+    )
+    user_names = {u.id: _user_label(u) for u in users}
+
+    # Active-scope participation: an enabled scope whose parent set is enabled
+    # (or has no parent set) AND that has a target table. Only the *source* of
+    # such a scope gets the scope icon (outgoing); a table that is only a
+    # target has an incoming scope but no icon.
+    scope_rows = (
+        await session.execute(
+            select(QueryScope.query_id, QueryScope.target_query_id)
+            .outerjoin(ScopeSet, QueryScope.scope_set_id == ScopeSet.id)
+            .where(
+                QueryScope.project_id == project_id,
+                QueryScope.enabled.is_(True),
+                QueryScope.target_query_id.is_not(None),
+                or_(
+                    QueryScope.scope_set_id.is_(None),
+                    ScopeSet.enabled.is_(True),
+                ),
+            )
+        )
+    ).all()
+    outgoing_counts: dict[int, int] = {}
+    incoming_counts: dict[int, int] = {}
+    for source_id, target_id in scope_rows:
+        if source_id is not None:
+            outgoing_counts[source_id] = outgoing_counts.get(source_id, 0) + 1
+        if target_id is not None:
+            incoming_counts[target_id] = incoming_counts.get(target_id, 0) + 1
+
+    results: list[SavedQueryRead] = []
+    for q in rows:
+        read = SavedQueryRead.model_validate(q)
+        read.owner_name = (
+            user_names.get(q.owner_id) if q.owner_id is not None else None
+        )
+        read.origin, read.origin_label = _query_origin(q)
+        read.source_name = q.left_datasource or (
+            "AI Generated" if q.ai_generated else None
+        )
+        outgoing = outgoing_counts.get(q.id, 0)
+        incoming = incoming_counts.get(q.id, 0)
+        read.outgoing_scope_count = outgoing
+        read.has_outgoing_scope = outgoing > 0
+        read.incoming_scope_count = incoming
+        read.has_incoming_scope = incoming > 0
+        # Backward-compat aggregate.
+        read.active_scope_count = outgoing + incoming
+        read.has_active_scope = read.active_scope_count > 0
+        results.append(read)
+    return results
 
 
 @router.post("/{project_id}/queries", response_model=SavedQueryRead,
@@ -1403,7 +1638,9 @@ async def create_saved_query(
     session.add(query)
     await session.commit()
     await session.refresh(query)
-    return SavedQueryRead.model_validate(query)
+    read = SavedQueryRead.model_validate(query)
+    read.origin, read.origin_label = _query_origin(query)
+    return read
 
 
 @router.put("/{project_id}/queries/{query_id}", response_model=SavedQueryRead)
@@ -1444,7 +1681,130 @@ async def update_saved_query(
 
     await session.commit()
     await session.refresh(query)
-    return SavedQueryRead.model_validate(query)
+    read = SavedQueryRead.model_validate(query)
+    read.origin, read.origin_label = _query_origin(query)
+    return read
+
+
+@router.post(
+    "/{project_id}/queries/{query_id}/archive",
+    response_model=SavedQueryRead,
+)
+async def archive_saved_query(
+    project_id: int,
+    query_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> SavedQueryRead:
+    """Archive a query. It stays executable but is hidden from normal lists."""
+    query = await session.get(SavedQuery, query_id)
+    if query is None or query.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Query not found")
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+    query.is_archived = True
+    query.archived_at = datetime.now(UTC)
+    query.archived_by = context.user_id
+    await session.commit()
+    await session.refresh(query)
+    read = SavedQueryRead.model_validate(query)
+    read.origin, read.origin_label = _query_origin(query)
+    return read
+
+
+@router.post(
+    "/{project_id}/queries/{query_id}/restore",
+    response_model=SavedQueryRead,
+)
+async def restore_saved_query(
+    project_id: int,
+    query_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> SavedQueryRead:
+    """Restore an archived query back to the active list."""
+    query = await session.get(SavedQuery, query_id)
+    if query is None or query.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Query not found")
+    project = await session.get(Project, project_id)
+    if project is None or project.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+    query.is_archived = False
+    query.archived_at = None
+    query.archived_by = None
+    await session.commit()
+    await session.refresh(query)
+    read = SavedQueryRead.model_validate(query)
+    read.origin, read.origin_label = _query_origin(query)
+    return read
+
+
+async def _query_dependencies(
+    session: AsyncSession, query: SavedQuery
+) -> dict[str, Any]:
+    """Blocking dependencies for a saved query.
+
+    Delete is refused while any exist. Returns per-kind counts plus an
+    ``items`` list of ``{"type", "name"}`` descriptors so the caller can render
+    a specific dependency warning (e.g. "Dashboard: Executive KPI Dashboard").
+    """
+    items: list[dict[str, str]] = []
+
+    # Scopes: this query feeds another (source) or is fed by another (target).
+    # Name each by the counterpart table on the scope so the warning is concrete.
+    source_scopes = list(
+        await session.scalars(
+            select(QueryScope).where(QueryScope.query_id == query.id)
+        )
+    )
+    target_scopes = list(
+        await session.scalars(
+            select(QueryScope).where(QueryScope.target_query_id == query.id)
+        )
+    )
+    for sc in source_scopes:
+        items.append({
+            "type": "Scope",
+            "name": f"→ {sc.target_table or 'linked table'}",
+        })
+    for sc in target_scopes:
+        items.append({
+            "type": "Scope",
+            "name": f"{sc.source_table or 'linked table'} →",
+        })
+
+    # Dashboards whose widget config references this query id.
+    dashboards = list(
+        await session.scalars(
+            select(Dashboard).where(Dashboard.project_id == query.project_id)
+        )
+    )
+    dashboard_refs = 0
+    for dash in dashboards:
+        config = dash.config if isinstance(dash.config, dict) else {}
+        widgets = config.get("widgets")
+        if not isinstance(widgets, list):
+            continue
+        for widget in widgets:
+            if not isinstance(widget, dict):
+                continue
+            source = widget.get("dataSource")
+            if (
+                isinstance(source, dict)
+                and source.get("kind") == "query"
+                and source.get("queryId") == query.id
+            ):
+                dashboard_refs += 1
+                items.append({"type": "Dashboard", "name": dash.name})
+                break
+
+    return {
+        "dashboards": dashboard_refs,
+        "scopes_source": len(source_scopes),
+        "scopes_target": len(target_scopes),
+        "items": items,
+    }
 
 
 @router.delete("/{project_id}/queries/{query_id}")
@@ -1460,6 +1820,27 @@ async def delete_saved_query(
     project = await session.get(Project, project_id)
     if project is None or project.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # A query can only be permanently deleted once archived.
+    if not query.is_archived:
+        raise HTTPException(
+            status_code=409,
+            detail="Query must be archived before it can be deleted.",
+        )
+
+    # And only when it has no remaining dependencies.
+    deps = await _query_dependencies(session, query)
+    items: list[dict[str, str]] = deps["items"]
+    if items:
+        named = "; ".join(f"{d['type']}: {d['name']}" for d in items)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot delete this query — remove these dependencies first: "
+                + named
+            ),
+        )
+
     await session.delete(query)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

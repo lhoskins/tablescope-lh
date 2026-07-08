@@ -17,9 +17,11 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import date, datetime
+from decimal import Decimal
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
 from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,25 @@ def source_identifier(db_type: str, name: str | None) -> str | None:
     if db_type == "oracle" and _SIMPLE_LOWER_IDENT.match(name):
         return name.upper()
     return name
+
+
+def normalize_db_password(value: str | None) -> str | None:
+    """Collapse a blank/whitespace-only DB password to ``None``.
+
+    Some databases (e.g. a MySQL account configured without a password) connect
+    with no password at all.  An empty string must be treated as "no password"
+    so the credential can be omitted from the connection URL and the
+    Teiid/WildFly datasource registration (WildFly rejects ``password=""``).
+    Non-empty passwords are returned verbatim — passwords may legitimately
+    contain leading/trailing spaces, so we only treat all-whitespace as blank.
+    """
+    if value is None:
+        return None
+    if value == "":
+        return None
+    if value.strip() == "":
+        return None
+    return value
 
 
 class DatabaseIntrospectionError(Exception):
@@ -168,16 +189,19 @@ class ConnectionParams:
 def _build_engine(params: ConnectionParams) -> Engine:
     cfg = get_db_type_config(params.db_type)
     user = quote_plus(params.username)
-    pwd = quote_plus(params.password)
+    raw_pwd = normalize_db_password(params.password)
+    # No-password connections must not produce ``user:@host`` — omit the
+    # credential separator entirely so drivers connect without a password.
+    auth = f"{user}:{quote_plus(raw_pwd)}" if raw_pwd is not None else user
     host = params.host
     port = params.resolved_port
     db = quote_plus(params.database_name)
 
     if params.db_type == "oracle":
         # Connect by service name (matches the JDBC thin service-name form).
-        url = f"{cfg.sa_dialect}://{user}:{pwd}@{host}:{port}/?service_name={db}"
+        url = f"{cfg.sa_dialect}://{auth}@{host}:{port}/?service_name={db}"
     else:
-        url = f"{cfg.sa_dialect}://{user}:{pwd}@{host}:{port}/{db}"
+        url = f"{cfg.sa_dialect}://{auth}@{host}:{port}/{db}"
 
     # Connection-timeout argument names differ across DBAPI drivers.
     connect_args: dict = {}
@@ -315,6 +339,51 @@ def list_columns(
         raise
     except Exception as exc:
         logger.warning("DB list_columns failed: %s", exc)
+        raise DatabaseIntrospectionError(_safe_error(exc)) from exc
+    finally:
+        engine.dispose()
+
+
+def _jsonify(value: object) -> object:
+    """Coerce a DBAPI cell value into something JSON-serialisable."""
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, bytes | bytearray):
+        return f"<{len(value)} bytes>"
+    return str(value)
+
+
+def sample_rows(
+    params: ConnectionParams,
+    schema_name: str | None,
+    table_name: str,
+    limit: int = 20,
+) -> dict:
+    """Return a small sample of rows for previewing a table's data.
+
+    Reflects the table so the query works across dialects, then runs a single
+    ``SELECT * ... LIMIT n``. Values are coerced to JSON-friendly types.
+    """
+    limit = max(1, min(limit, 100))
+    engine = _build_engine(params)
+    try:
+        table = Table(
+            table_name,
+            MetaData(),
+            schema=schema_name,
+            autoload_with=engine,
+        )
+        columns = [c.name for c in table.columns]
+        with engine.connect() as conn:
+            result = conn.execute(select(table).limit(limit))
+            rows = [[_jsonify(v) for v in row] for row in result.fetchall()]
+        return {"columns": columns, "rows": rows}
+    except Exception as exc:
+        logger.warning("DB sample_rows failed: %s", exc)
         raise DatabaseIntrospectionError(_safe_error(exc)) from exc
     finally:
         engine.dispose()

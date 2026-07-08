@@ -20,14 +20,24 @@ type User = {
   created_at: string;
 };
 
-const ROLES = ["viewer", "editor", "admin"];
+// Tenant user-management roles (legacy editor/viewer users display as Member).
+const ROLES = ["member", "db_admin", "admin"] as const;
+const ROLE_LABELS: Record<string, string> = {
+  member: "Member",
+  db_admin: "DB Admin",
+  admin: "Admin",
+};
+const roleLabel = (r: string) => ROLE_LABELS[r] ?? "Member";
+// Map any stored role (incl. legacy editor/viewer) onto a tenant role value.
+const toTenantRole = (r: string) =>
+  (ROLES as readonly string[]).includes(r) ? r : "member";
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [role, setRole] = useState("viewer");
+  const [role, setRole] = useState("member");
   const [error, setError] = useState<string | null>(null);
 
   const tenantQuery = useQuery<TenantInfo>({
@@ -54,7 +64,7 @@ export default function UsersPage() {
       setShowCreate(false);
       setEmail("");
       setDisplayName("");
-      setRole("viewer");
+      setRole("member");
       setError(null);
     },
     onError: (err: Error) => setError(err.message),
@@ -169,7 +179,7 @@ export default function UsersPage() {
               >
                 {ROLES.map((r) => (
                   <option key={r} value={r}>
-                    {r.charAt(0).toUpperCase() + r.slice(1)}
+                    {roleLabel(r)}
                   </option>
                 ))}
               </select>
@@ -226,7 +236,7 @@ export default function UsersPage() {
                   </td>
                   <td className="px-4 py-3">
                     <select
-                      value={user.role}
+                      value={toTenantRole(user.role)}
                       onChange={(e) =>
                         updateRoleMutation.mutate({
                           userId: user.id,
@@ -237,7 +247,7 @@ export default function UsersPage() {
                     >
                       {ROLES.map((r) => (
                         <option key={r} value={r}>
-                          {r.charAt(0).toUpperCase() + r.slice(1)}
+                          {roleLabel(r)}
                         </option>
                       ))}
                     </select>

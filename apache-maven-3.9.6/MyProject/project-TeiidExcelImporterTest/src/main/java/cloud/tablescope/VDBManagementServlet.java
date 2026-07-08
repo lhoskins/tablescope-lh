@@ -1346,8 +1346,12 @@ public class VDBManagementServlet extends HttpServlet {
 
         JSONObject body = parseRequestBody(request);
 
+        // password is intentionally NOT required: databases such as MySQL may be
+        // configured with no password, in which case the credential must be
+        // omitted entirely from the WildFly datasource (an empty password is
+        // rejected by the management model).
         String[] required = {"vdb_id", "org_id", "db_type", "translator", "jdbc_url",
-                "username", "password", "model_name", "teiid_table_name",
+                "username", "model_name", "teiid_table_name",
                 "jndi_name", "ds_name", "view_name", "table_name"};
         for (String key : required) {
             if (!body.has(key)) {
@@ -1364,7 +1368,7 @@ public class VDBManagementServlet extends HttpServlet {
         String translator = body.getString("translator");
         String jdbcUrl = body.getString("jdbc_url");
         String username = body.getString("username");
-        String password = body.getString("password");
+        String password = body.optString("password", "");
         String modelName = body.getString("model_name");
         String teiidTableName = body.getString("teiid_table_name");
         String jndiName = body.getString("jndi_name");
@@ -1492,11 +1496,20 @@ public class VDBManagementServlet extends HttpServlet {
 
         String driver = driverNameFor(dbType);
         String escUser = username == null ? "" : username.replace("\\", "\\\\").replace("\"", "\\\"");
-        String escPass = password == null ? "" : password.replace("\\", "\\\\").replace("\"", "\\\"");
         // Quote the connection-url: some JDBC URLs contain ';' and '=' (e.g. SQL
         // Server's "...;databaseName=db"), which the CLI would otherwise parse as
         // command separators / object syntax.
         String escUrl = jdbcUrl == null ? "" : jdbcUrl.replace("\\", "\\\\").replace("\"", "\\\"");
+
+        // WildFly rejects an empty password value ("WFLYCTL0113: '' is an invalid
+        // value for parameter password"). When the source database has no
+        // password (e.g. a MySQL account configured without one), omit the
+        // password parameter entirely rather than sending password="".
+        String passwordParam = "";
+        if (password != null && !password.isEmpty()) {
+            String escPass = password.replace("\\", "\\\\").replace("\"", "\\\"");
+            passwordParam = ", password=\"" + escPass + "\"";
+        }
 
         // Use the server's own CLI (correct version + local auth) to avoid the
         // bundled Teiid admin client building a composite incompatible with the
@@ -1506,7 +1519,7 @@ public class VDBManagementServlet extends HttpServlet {
                 + ", driver-name=" + driver
                 + ", connection-url=\"" + escUrl + "\""
                 + ", user-name=\"" + escUser + "\""
-                + ", password=\"" + escPass + "\""
+                + passwordParam
                 + ", enabled=true)";
 
         log("Creating datasource " + dsName + " with driver " + driver + " via CLI");

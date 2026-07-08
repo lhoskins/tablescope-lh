@@ -1,18 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
-import { IconSparkles, IconPlus, IconSearch, IconTable, IconTrash } from "@tabler/icons-react";
+  IconSparkles,
+  IconSearch,
+  IconTarget,
+  IconPlus,
+  IconArchive,
+  IconArrowBackUp,
+  IconTrash,
+} from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import {
   ContextPanel,
   ContextSection,
 } from "@/components/tablescope/context-panel";
-import { ScopesTab } from "@/components/scopes/ScopesTab";
 import { AddDatasourceModal } from "@/components/datasource/AddDatasourceModal";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +26,7 @@ import { apiClient } from "@/lib/api-client";
 import { timeAgo } from "@/lib/ui/format";
 import {
   useProjectQueries,
+  useProjectArchivedQueries,
   useProjectDataSources,
   type SavedQuery,
 } from "@/lib/ui/use-project-data";
@@ -32,9 +36,8 @@ import {
   QueryBuilderCreate,
 } from "@/components/tablescope/project/detail-views";
 
-type ProjectScoping = { scoping_enabled?: boolean };
 
-type Filter = "all" | "ai" | "manual" | "shared" | "private";
+type Filter = "all" | "ai" | "manual" | "shared" | "private" | "archive";
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
@@ -42,7 +45,13 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "manual", label: "Manual" },
   { key: "shared", label: "Shared" },
   { key: "private", label: "Private" },
+  { key: "archive", label: "Archive" },
 ];
+
+function archivedDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString();
+}
 
 function runtimeLabel(ms: number | null): string {
   if (ms == null) return "—";
@@ -63,47 +72,51 @@ function tablesFor(q: SavedQuery): string {
 export function QueriesScreen({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useProjectQueries(projectId);
+  const { data: archivedData } = useProjectArchivedQueries(projectId);
   const { data: dataSources } = useProjectDataSources(projectId);
   const rows = useMemo(() => data ?? [], [data]);
+  const archivedRows = useMemo(() => archivedData ?? [], [archivedData]);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [tab, setTab] = useState<"queries" | "scopes">("queries");
   const [showAddTable, setShowAddTable] = useState(false);
-  // Multi-select delete mode for the queries list.
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
-  const toggleSelected = useCallback((id: number) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  }, []);
+  const refreshQueries = useCallback(() => {
+    queryClient.invalidateQueries({
+      queryKey: ["project", projectId, "queries"],
+    });
+  }, [queryClient, projectId]);
 
-  const exitSelectMode = useCallback(() => {
-    setSelectMode(false);
-    setSelectedIds([]);
-  }, []);
-
-  const deleteQueriesMutation = useMutation({
-    mutationFn: async (ids: number[]) => {
-      await Promise.all(
-        ids.map((id) =>
-          apiClient.delete(`/api/projects/${projectId}/queries/${id}`),
-        ),
-      );
-    },
+  const restoreMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiClient.post(`/api/projects/${projectId}/queries/${id}/restore`, {}),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["project", projectId, "queries"],
-      });
-      setSelectedIds([]);
-      setSelectMode(false);
+      setArchiveError(null);
+      refreshQueries();
     },
+    onError: (e: Error) => setArchiveError(e.message),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiClient.delete(`/api/projects/${projectId}/queries/${id}`),
+    onSuccess: () => {
+      setArchiveError(null);
+      refreshQueries();
+    },
+    onError: (e: Error) => setArchiveError(e.message),
+  });
+
+  const archiveBusyId =
+    restoreMutation.isPending
+      ? (restoreMutation.variables ?? null)
+      : deleteMutation.isPending
+        ? (deleteMutation.variables ?? null)
+        : null;
 
   // ── Deep-link: open a specific query via ?q=<id> ────────────────────
   useEffect(() => {
@@ -123,6 +136,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSuccess, setAiSuccess] = useState<string | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
 
   const handleGenerateQuery = useCallback(async () => {
     const prompt = aiPrompt.trim();
@@ -130,13 +144,37 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
     setAiLoading(true);
     setAiError(null);
     setAiSuccess(null);
+    setAiSuggestions([]);
     try {
-      const result = await apiClient.post<{ name: string; status: string }>(
-        "/api/ai/actions/generate-and-save-query",
-        { project_id: Number(projectId), prompt },
-      );
+      const result = await apiClient.post<{
+        name?: string;
+        status: string;
+        message?: string;
+        suggested_sources?: string[];
+        selected_sources?: { name: string; reason?: string }[];
+        repaired?: boolean;
+      }>("/api/ai/actions/generate-and-save-query", {
+        project_id: Number(projectId),
+        prompt,
+      });
+      if (result.status === "needs_clarification") {
+        // Friendly clarification — no raw validation error shown to the user.
+        setAiError(
+          result.message ??
+            "I could not match part of your request to an authorized source.",
+        );
+        setAiSuggestions(result.suggested_sources ?? []);
+        return;
+      }
       const verb = result.status === "updated" ? "updated" : "saved";
-      setAiSuccess(`Query ${verb}: ${result.name}`);
+      const sources = result.selected_sources ?? [];
+      let note = `Query ${verb}: ${result.name ?? prompt}`;
+      if (sources.length > 0) {
+        note += ` — AI selected ${sources
+          .map((s) => s.name)
+          .join(", ")}`;
+      }
+      setAiSuccess(note);
       setAiPrompt("");
       queryClient.invalidateQueries({
         queryKey: ["project", projectId, "queries"],
@@ -147,32 +185,6 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       setAiLoading(false);
     }
   }, [aiPrompt, aiLoading, projectId, queryClient]);
-
-  // ── Scope toggle (project scoping) ──────────────────────────────────
-  const { data: projectInfo } = useQuery<ProjectScoping>({
-    queryKey: ["project", projectId, "info"],
-    queryFn: () => apiClient.get<ProjectScoping>(`/api/projects/${projectId}`),
-  });
-  const scopingEnabled = projectInfo?.scoping_enabled ?? false;
-  const toggleScoping = useMutation({
-    mutationFn: async (enabled: boolean) => {
-      const result = await apiClient.put(`/api/projects/${projectId}`, {
-        scoping_enabled: enabled,
-      });
-      if (enabled) {
-        try {
-          await apiClient.post(`/api/ai/project/scope-map/auto-create`, {
-            project_id: Number(projectId),
-          });
-        } catch {
-          /* scoping enabled even if auto-create finds nothing */
-        }
-      }
-      return result;
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["project", projectId, "info"] }),
-  });
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -186,6 +198,30 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
     });
   }, [rows, filter, search]);
 
+  const filteredArchived = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return term
+      ? archivedRows.filter((q) => q.name.toLowerCase().includes(term))
+      : archivedRows;
+  }, [archivedRows, search]);
+
+  const handleRestore = useCallback(
+    (id: number) => restoreMutation.mutate(id),
+    [restoreMutation],
+  );
+  const handleDelete = useCallback(
+    (q: SavedQuery) => {
+      if (
+        window.confirm(
+          `Permanently delete "${q.name}"? This cannot be undone.`,
+        )
+      ) {
+        deleteMutation.mutate(q.id);
+      }
+    },
+    [deleteMutation],
+  );
+
   const selected =
     rows.find((q) => q.id === selectedId) ?? filtered[0] ?? rows[0] ?? null;
   const detailQuery = rows.find((q) => q.id === detailId) ?? null;
@@ -198,49 +234,12 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
     <ProjectShell
       projectId={projectId}
       activeNav="project-queries"
-      breadcrumbLabel="Queries"
+      breadcrumbLabel="Tables"
       actions={
-        <>
-          <button
-            type="button"
-            onClick={() => toggleScoping.mutate(!scopingEnabled)}
-            disabled={toggleScoping.isPending}
-            className="flex items-center gap-2 rounded-md border border-line-secondary px-2.5 py-1.5 text-[12px] font-medium text-ink-secondary hover:bg-bg-secondary disabled:opacity-50"
-            title={scopingEnabled ? "Click to disable scoping" : "Click to enable scoping"}
-          >
-            <span
-              className={cn(
-                "relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
-                scopingEnabled ? "bg-brand-500" : "bg-line-secondary",
-              )}
-            >
-              <span
-                className="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
-                style={{ transform: scopingEnabled ? "translateX(14px)" : "translateX(2px)" }}
-              />
-            </span>
-            {toggleScoping.isPending
-              ? "Updating…"
-              : scopingEnabled
-                ? "Scopes On"
-                : "Scopes Off"}
-          </button>
-          <Button variant="secondary" onClick={() => setShowAddTable(true)}>
-            <IconTable size={14} />
-            New Table
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              setDetailId(null);
-              setEditing(false);
-              setCreating(true);
-            }}
-          >
-            <IconPlus size={14} />
-            New query
-          </Button>
-        </>
+        <Button variant="primary" size="md" onClick={() => setShowAddTable(true)}>
+          <IconPlus size={15} />
+          New Table
+        </Button>
       }
       contextPanel={<QueryPreviewPanel query={detailQuery ?? selected} />}
     >
@@ -259,7 +258,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         <QueryBuilderCreate
           projectId={projectId}
           datasources={dataSources ?? []}
-          backLabel="Queries"
+          backLabel="Tables"
           onBack={() => setCreating(false)}
           onSaved={() => setCreating(false)}
         />
@@ -276,12 +275,13 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
         <QueryResultView
           projectId={projectId}
           query={detailQuery}
-          backLabel="Queries"
+          backLabel="Tables"
           onBack={() => setDetailId(null)}
           onEdit={() => setEditing(true)}
         />
       ) : (
       <div className="space-y-4">
+        {filter !== "archive" && (
         <div className="rounded-lg border border-brand-100 bg-brand-50/40 p-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="flex flex-1 items-center gap-2 rounded-md border border-line-secondary bg-bg-primary px-2.5">
@@ -308,13 +308,30 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           {aiError && (
             <p className="mt-2 text-[12px] text-danger">{aiError}</p>
           )}
+          {aiSuggestions.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-secondary">
+              <span>Related sources:</span>
+              {aiSuggestions.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setAiPrompt((p) => `${p} using ${s}`.trim())}
+                  className="rounded-full border border-line-secondary px-2 py-0.5 font-medium text-ink-primary hover:bg-bg-secondary"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
           {aiSuccess && (
             <p className="mt-2 text-[12px] text-success">{aiSuccess}</p>
           )}
         </div>
+        )}
 
+        {filter !== "archive" && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile label="Total queries" value={rows.length} />
+          <StatTile label="Total tables" value={rows.length} />
           <StatTile
             label="AI-generated"
             value={aiCount}
@@ -327,32 +344,8 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
           />
           <StatTile label="Avg run time" value={avgRuntime(rows)} />
         </div>
+        )}
 
-        <div className="flex items-center gap-1 border-b border-line-tertiary">
-          {([
-            { key: "queries", label: "All Queries" },
-            { key: "scopes", label: "Scopes" },
-          ] as const).map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-[13px] font-medium",
-                tab === t.key
-                  ? "border-brand-500 text-brand-700"
-                  : "border-transparent text-ink-secondary hover:text-ink-primary",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {tab === "scopes" ? (
-          <ScopesTab projectId={Number(projectId)} />
-        ) : (
-        <>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">
             <IconSearch
@@ -362,7 +355,7 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search queries…"
+              placeholder="Search tables…"
               className="h-8 w-full rounded-md border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
             />
           </div>
@@ -381,156 +374,82 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
               {f.label}
             </button>
           ))}
-          <div className="ml-auto flex items-center gap-2">
-            {!selectMode ? (
-              <Button
-                variant="secondary"
-                onClick={() => setSelectMode(true)}
-                disabled={rows.length === 0}
-              >
-                <IconTrash size={14} />
-                Delete
-              </Button>
-            ) : (
-              <>
-                <Button
-                  variant="danger"
-                  onClick={() => {
-                    if (selectedIds.length === 0) return;
-                    if (
-                      typeof window !== "undefined" &&
-                      !window.confirm(
-                        `Delete ${selectedIds.length} quer${
-                          selectedIds.length === 1 ? "y" : "ies"
-                        }? This cannot be undone.`,
-                      )
-                    ) {
-                      return;
-                    }
-                    deleteQueriesMutation.mutate(selectedIds);
-                  }}
-                  disabled={
-                    selectedIds.length === 0 || deleteQueriesMutation.isPending
-                  }
-                >
-                  <IconTrash size={14} />
-                  {deleteQueriesMutation.isPending
-                    ? "Deleting…"
-                    : `Delete selected (${selectedIds.length})`}
-                </Button>
-                <Button variant="secondary" onClick={exitSelectMode}>
-                  Cancel
-                </Button>
-              </>
-            )}
-          </div>
         </div>
 
+        {filter === "archive" ? (
+          <ArchiveCard
+            rows={filteredArchived}
+            error={archiveError}
+            busyId={archiveBusyId}
+            onRestore={handleRestore}
+            onDelete={handleDelete}
+          />
+        ) : (
         <Card>
           <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-            <span className="text-h3 text-ink-primary">All Queries</span>
+            <span className="text-h3 text-ink-primary">All Tables</span>
             <span className="text-small text-ink-tertiary">
-              {filtered.length} total
+              {filtered.length} total tables
             </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b border-line-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
-                  {selectMode && (
-                    <th className="w-10 px-4 py-2 font-medium">
-                      <input
-                        type="checkbox"
-                        aria-label="Select all queries"
-                        checked={
-                          filtered.length > 0 &&
-                          filtered.every((q) => selectedIds.includes(q.id))
-                        }
-                        onChange={(e) =>
-                          setSelectedIds(
-                            e.target.checked
-                              ? filtered.map((q) => q.id)
-                              : [],
-                          )
-                        }
-                      />
-                    </th>
-                  )}
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-4 py-2 font-medium">Source</th>
                   <th className="px-4 py-2 font-medium">Origin</th>
-                  <th className="px-4 py-2 font-medium">Visibility</th>
-                  <th className="px-4 py-2 font-medium">Runs</th>
-                  <th className="px-4 py-2 font-medium">Avg time</th>
+                  <th className="px-4 py-2 font-medium">Owner</th>
                   <th className="px-4 py-2 font-medium">Updated</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((q) => {
                   const active = selected?.id === q.id;
-                  const checked = selectedIds.includes(q.id);
                   return (
                     <tr
                       key={q.id}
                       onClick={() => {
-                        if (selectMode) {
-                          toggleSelected(q.id);
-                          return;
-                        }
                         setSelectedId(q.id);
                         setDetailId(q.id);
                         setEditing(false);
                       }}
                       className={cn(
                         "cursor-pointer border-b border-line-tertiary last:border-0",
-                        selectMode && checked
-                          ? "bg-brand-50/60"
-                          : active && !selectMode
+                        active
                           ? "bg-brand-50/60"
                           : "hover:bg-bg-secondary",
                       )}
                     >
-                      {selectMode && (
-                        <td
-                          className="px-4 py-2.5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            aria-label={`Select query ${q.name}`}
-                            checked={checked}
-                            onChange={() => toggleSelected(q.id)}
-                          />
-                        </td>
-                      )}
                       <td className="px-4 py-2.5">
-                        <span
-                          className={cn(
-                            "font-medium",
-                            active ? "text-brand-700" : "text-ink-primary",
+                        <span className="flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "font-medium",
+                              active ? "text-brand-700" : "text-ink-primary",
+                            )}
+                          >
+                            {q.name}
+                          </span>
+                          {q.has_outgoing_scope && (
+                            <IconTarget
+                              size={14}
+                              className="shrink-0 text-brand-500"
+                              title="This table has an active outgoing scope relationship."
+                            />
                           )}
-                        >
-                          {q.name}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-ink-secondary">
-                        {q.left_datasource ?? "—"}
+                        {q.source_name ?? q.left_datasource ?? "—"}
                       </td>
                       <td className="px-4 py-2.5">
                         <Badge tone={q.ai_generated ? "ai" : "outline"}>
-                          {q.ai_generated ? "AI" : "Manual"}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <Badge tone={q.is_shared ? "success" : "neutral"}>
-                          {q.is_shared ? "Shared" : "Private"}
+                          {q.origin_label}
                         </Badge>
                       </td>
                       <td className="px-4 py-2.5 text-ink-secondary">
-                        {q.run_count}
-                      </td>
-                      <td className="px-4 py-2.5 text-ink-secondary">
-                        {runtimeLabel(q.avg_runtime_ms)}
+                        {q.owner_name ?? "—"}
                       </td>
                       <td className="px-4 py-2.5 text-ink-tertiary">
                         {timeAgo(q.updated_at)}
@@ -543,22 +462,118 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
             {!isLoading && filtered.length === 0 && (
               <div className="px-4 py-12 text-center text-small text-ink-tertiary">
                 {rows.length === 0
-                  ? "No queries yet. Create your first query or generate one with AI."
-                  : "No queries match your filters."}
+                  ? "No tables yet. Create your first table or generate one with AI."
+                  : "No tables match your filters."}
               </div>
             )}
             {isLoading && (
               <div className="px-4 py-12 text-center text-small text-ink-tertiary">
-                Loading queries…
+                Loading tables…
               </div>
             )}
           </div>
         </Card>
-        </>
         )}
       </div>
       )}
     </ProjectShell>
+  );
+}
+
+function ArchiveCard({
+  rows,
+  error,
+  busyId,
+  onRestore,
+  onDelete,
+}: {
+  rows: SavedQuery[];
+  error: string | null;
+  busyId: number | null;
+  onRestore: (id: number) => void;
+  onDelete: (q: SavedQuery) => void;
+}) {
+  return (
+    <Card>
+      <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
+        <span className="flex items-center gap-1.5 text-h3 text-ink-primary">
+          <IconArchive size={16} className="text-ink-tertiary" />
+          Archive
+        </span>
+        <span className="text-small text-ink-tertiary">
+          {rows.length} archived {rows.length === 1 ? "table" : "tables"}
+        </span>
+      </div>
+      {error && (
+        <div className="border-b border-danger/30 bg-danger/5 px-4 py-2.5 text-small text-danger">
+          {error}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-line-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
+              <th className="px-4 py-2 font-medium">Name</th>
+              <th className="px-4 py-2 font-medium">Description</th>
+              <th className="px-4 py-2 font-medium">Archived</th>
+              <th className="px-4 py-2 font-medium">Owner</th>
+              <th className="px-4 py-2 text-right font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((q) => {
+              const busy = busyId === q.id;
+              return (
+                <tr
+                  key={q.id}
+                  className="border-b border-line-tertiary last:border-0"
+                >
+                  <td className="px-4 py-2.5 font-medium text-ink-primary">
+                    {q.name}
+                  </td>
+                  <td className="px-4 py-2.5 text-ink-secondary">
+                    {q.description || "—"}
+                  </td>
+                  <td className="px-4 py-2.5 text-ink-tertiary">
+                    {archivedDate(q.archived_at)}
+                  </td>
+                  <td className="px-4 py-2.5 text-ink-secondary">
+                    {q.owner_name ?? "—"}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => onRestore(q.id)}
+                      >
+                        <IconArrowBackUp size={14} />
+                        Restore
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => onDelete(q)}
+                      >
+                        <IconTrash size={14} />
+                        Delete
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {rows.length === 0 && (
+          <div className="px-4 py-12 text-center text-small text-ink-tertiary">
+            No archived tables. Archive a table to see it here.
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

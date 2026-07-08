@@ -1,10 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, getApiBaseUrl } from "@/lib/api-client";
 import { initials, toAiStatus } from "./format";
 import { accentFor } from "./color";
 import type { CurrentUser, ProjectSummary, TenantSummary } from "./types";
+import type { SuggestedVisualization } from "@/lib/api/ai-actions";
 
 interface CurrentUserResponse {
   user_id: number;
@@ -17,6 +18,8 @@ interface CurrentUserResponse {
   tenant_id: number;
   tenant_name: string;
   tenant_slug: string | null;
+  avatar_url: string | null;
+  company_logo_url: string | null;
 }
 
 interface ProjectSummaryResponse {
@@ -32,13 +35,24 @@ interface ProjectSummaryResponse {
   ai_status: string;
 }
 
+// Tenant vocabulary only: legacy `editor`/`viewer` roles were retired and now
+// display as "Member" so a deleted/legacy role never lingers in the UI.
 const ROLE_LABEL: Record<string, string> = {
   root_admin: "Root Admin",
   tenant_admin: "Admin",
   admin: "Admin",
-  editor: "Editor",
-  viewer: "Viewer",
+  db_admin: "DB Admin",
+  member: "Member",
+  editor: "Member",
+  viewer: "Member",
 };
+
+/** Resolve a relative served URL to an absolute, browser-fetchable URL. */
+function absoluteUrl(url: string | null): string | null {
+  if (!url) return null;
+  if (/^https?:\/\//.test(url)) return url;
+  return `${getApiBaseUrl()}${url}`;
+}
 
 function displayName(u: CurrentUserResponse): string {
   if (u.display_name) return u.display_name;
@@ -61,11 +75,14 @@ export function useCurrentUser() {
           isSuperAdmin: me.is_super_admin,
           tenantName: me.tenant_name,
           initials: initials(name),
+          id: me.user_id,
+          avatarUrl: absoluteUrl(me.avatar_url),
         },
         tenant: {
           name: me.tenant_name,
           slug: me.tenant_slug ?? "",
           initials: initials(me.tenant_name),
+          logoUrl: absoluteUrl(me.company_logo_url),
         },
       };
     },
@@ -95,6 +112,8 @@ export interface HomeDashboardRow {
   projectName: string;
   status: string;
   sharedBy: string;
+  ownerId: number | null;
+  ownerName: string;
   createdAt: string | null;
 }
 
@@ -105,6 +124,8 @@ export interface HomeDocumentRow {
   projectName: string;
   aiStatus: string;
   sharedBy: string;
+  ownerId: number | null;
+  ownerName: string;
   createdAt: string | null;
 }
 
@@ -143,10 +164,21 @@ export function useAllDataSources() {
   });
 }
 
+/** Executed-query result attached to an assistant message (data answers). */
+export interface AiChatMessageData {
+  sql: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  suggestedVisualization: SuggestedVisualization;
+  explanation: string;
+  dataSourcesUsed: string[];
+}
+
 export interface AiChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
+  data?: AiChatMessageData | null;
   createdAt: string | null;
 }
 
@@ -154,6 +186,8 @@ export interface AiConversation {
   id: number;
   title: string;
   projectId: number | null;
+  parentConversationId?: number | null;
+  branchedFromMessageId?: number | null;
   createdAt: string | null;
   updatedAt: string | null;
   messages?: AiChatMessage[];
@@ -192,8 +226,40 @@ export function sendConversationMessage(
   );
 }
 
+export function renameConversation(
+  conversationId: number,
+  title: string,
+): Promise<AiConversation> {
+  return apiClient.put<AiConversation>(
+    `/api/ai/conversations/${conversationId}`,
+    { title },
+  );
+}
+
 export function deleteConversation(conversationId: number): Promise<void> {
   return apiClient.delete<void>(`/api/ai/conversations/${conversationId}`);
+}
+
+export function branchConversation(
+  conversationId: number,
+  messageId?: number | null,
+  title?: string,
+): Promise<AiConversation> {
+  return apiClient.post<AiConversation>(
+    `/api/ai/conversations/${conversationId}/branch`,
+    { message_id: messageId ?? null, title },
+  );
+}
+
+export function deleteProject(projectId: number | string): Promise<void> {
+  return apiClient.delete<void>(`/api/projects/${projectId}`);
+}
+
+export function updateProject(
+  projectId: number | string,
+  payload: { name?: string; is_shared?: boolean },
+): Promise<unknown> {
+  return apiClient.put(`/api/projects/${projectId}`, payload);
 }
 
 export function useProjectSummaries(opts?: { recent?: boolean; limit?: number }) {

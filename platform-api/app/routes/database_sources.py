@@ -27,12 +27,19 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.database_connection import DatabaseConnection
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
+from app.models.database_data_source_assignment import (
+    DatabaseDataSourceAssignment,
+)
 from app.models.project import Project
+from app.models.user import User
 from app.models.user_vdb import UserVDB
+from app.schemas.data_source_assignment import ConnectedSource
 from app.schemas.database_source import (
     ColumnRequest,
     ColumnsResponse,
     CreateDatabaseSourceRequest,
+    PreviewRequest,
+    PreviewResponse,
     SaveConnectionRequest,
     SavedConnectionRead,
     SchemaRequest,
@@ -40,6 +47,7 @@ from app.schemas.database_source import (
     TableRequest,
     TablesResponse,
     TestConnectionResponse,
+    UpdateConnectionRequest,
 )
 from app.services import database_introspection_service as intro
 from app.services.crypto import decrypt_secret, encrypt_secret
@@ -165,6 +173,27 @@ async def list_columns(
     return ColumnsResponse(columns=columns)
 
 
+@router.post("/preview", response_model=PreviewResponse)
+async def preview_table(
+    body: PreviewRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> PreviewResponse:
+    """Return a small sample of rows so the user can review a table's data."""
+    params = await _resolve_params(body, session, context)
+    try:
+        result = await run_in_threadpool(
+            intro.sample_rows,
+            params,
+            body.schema_name,
+            body.table_name,
+            body.limit,
+        )
+    except DatabaseIntrospectionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PreviewResponse(columns=result["columns"], rows=result["rows"])
+
+
 # ── Saved connection profiles (item 5) ──────────────────────────────
 
 
@@ -182,6 +211,85 @@ async def list_saved_connections(
         )
     ).all()
     return [SavedConnectionRead(**r.to_dict()) for r in rows]
+
+
+@router.get("/connected", response_model=list[ConnectedSource])
+async def list_connected_databases(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[ConnectedSource]:
+    """Unified "Connected Databases" list: owned connections + assigned sources.
+
+    Owned items are the caller's saved connection profiles (editable).
+    Assigned items are datasources an Admin/DB Admin shared with the caller;
+    their credentials are never exposed and cannot be edited.
+    """
+    items: list[ConnectedSource] = []
+
+    owned = (
+        await session.scalars(
+            select(DatabaseConnection).where(
+                DatabaseConnection.tenant_id == context.tenant_id,
+                DatabaseConnection.created_by == context.user_id,
+            )
+        )
+    ).all()
+    for c in owned:
+        items.append(
+            ConnectedSource(
+                id=f"owned-{c.id}",
+                source="owned",
+                database_connection_id=c.id,
+                display_name=c.name,
+                db_type=c.db_type,
+                host=c.host,
+                database=c.database_name,
+                read_only=False,
+                can_edit_connection=True,
+                can_select=True,
+            )
+        )
+
+    assignments = (
+        await session.scalars(
+            select(DatabaseDataSourceAssignment).where(
+                DatabaseDataSourceAssignment.tenant_id == context.tenant_id,
+                DatabaseDataSourceAssignment.assigned_user_id
+                == context.user_id,
+                DatabaseDataSourceAssignment.is_active.is_(True),
+            )
+        )
+    ).all()
+    for a in assignments:
+        source = await session.get(
+            DatabaseDataSource, a.database_data_source_id
+        )
+        if source is None or source.archived:
+            continue
+        assigner = (
+            await session.get(User, a.assigned_by) if a.assigned_by else None
+        )
+        assigned_by_name = None
+        if assigner is not None:
+            assigned_by_name = assigner.display_name or assigner.email
+        items.append(
+            ConnectedSource(
+                id=f"assigned-{a.id}",
+                source="assigned",
+                database_data_source_id=a.database_data_source_id,
+                database_connection_id=a.database_connection_id,
+                display_name=a.friendly_name,
+                db_type=source.db_type,
+                host=source.host,
+                database=source.database_name,
+                read_only=a.read_only,
+                assigned_by=assigned_by_name,
+                can_edit_connection=False,
+                can_select=True,
+            )
+        )
+
+    return items
 
 
 @router.post("/connections", response_model=SavedConnectionRead)
@@ -208,11 +316,89 @@ async def create_saved_connection(
         username=params.username,
         password_encrypted=encrypt_secret(params.password) if params.password else None,
         ssl_mode=params.ssl_mode,
+        last_tested_at=datetime.now(UTC),
     )
     session.add(conn)
     await session.commit()
     await session.refresh(conn)
     return SavedConnectionRead(**conn.to_dict())
+
+
+@router.patch("/connections/{connection_id}", response_model=SavedConnectionRead)
+async def update_saved_connection(
+    connection_id: int,
+    body: UpdateConnectionRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> SavedConnectionRead:
+    conn = await session.get(DatabaseConnection, connection_id)
+    if conn is None or conn.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Saved connection not found")
+
+    # Build effective params: body overrides, falling back to stored values.
+    params = ConnectionParams(
+        db_type=body.db_type or conn.db_type,
+        host=body.host or conn.host,
+        port=body.port or conn.port,
+        database_name=body.database_name or conn.database_name,
+        username=body.username or conn.username,
+        password=(
+            body.password
+            or (decrypt_secret(conn.password_encrypted) if conn.password_encrypted else "")
+        ),
+        ssl_mode=body.ssl_mode if body.ssl_mode is not None else conn.ssl_mode,
+    )
+    try:
+        intro.get_db_type_config(params.db_type)
+        await run_in_threadpool(intro.test_connection, params)
+    except DatabaseIntrospectionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if body.name:
+        conn.name = body.name
+    conn.db_type = params.db_type
+    conn.host = params.host
+    conn.port = params.resolved_port
+    conn.database_name = params.database_name
+    conn.username = params.username
+    if body.password:
+        conn.password_encrypted = encrypt_secret(body.password)
+    conn.ssl_mode = params.ssl_mode
+    conn.last_tested_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(conn)
+    return SavedConnectionRead(**conn.to_dict())
+
+
+@router.post(
+    "/connections/{connection_id}/test", response_model=TestConnectionResponse
+)
+async def test_saved_connection(
+    connection_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> TestConnectionResponse:
+    conn = await session.get(DatabaseConnection, connection_id)
+    if conn is None or conn.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Saved connection not found")
+    params = ConnectionParams(
+        db_type=conn.db_type,
+        host=conn.host,
+        port=conn.port,
+        database_name=conn.database_name,
+        username=conn.username,
+        password=(
+            decrypt_secret(conn.password_encrypted) if conn.password_encrypted else ""
+        ),
+        ssl_mode=conn.ssl_mode,
+    )
+    try:
+        await run_in_threadpool(intro.test_connection, params)
+    except DatabaseIntrospectionError as exc:
+        return TestConnectionResponse(success=False, message=str(exc))
+    conn.last_tested_at = datetime.now(UTC)
+    await session.commit()
+    return TestConnectionResponse(success=True, message="Connection successful")
 
 
 @router.delete("/connections/{connection_id}")
@@ -411,10 +597,15 @@ async def create_database_source(
         )
     except TeiidRegistrationError as exc:
         await session.rollback()
+        # Keep the raw WildFly/Teiid error in the logs only; the verbatim CLI
+        # JSON is noisy and unhelpful (and potentially sensitive) for end users.
         logger.error("Teiid registration failed: %s", exc)
         raise HTTPException(
             status_code=502,
-            detail=f"Data source created but could not be made queryable: {exc}",
+            detail=(
+                "Data source registration failed in the query engine. "
+                "Please retry. If the issue continues, contact support."
+            ),
         ) from exc
     finally:
         await reg.aclose()
@@ -422,6 +613,30 @@ async def create_database_source(
     ds.status = "active"
     await session.commit()
     await session.refresh(ds)
+
+    # Auto-create a saved query named after this data source (when attached to a
+    # project). Best-effort: never fail source creation if query creation errors.
+    if ds.project_id is not None:
+        try:
+            from app.services.auto_query import ensure_datasource_query
+
+            col_names = [c["name"] for c in columns if c.get("name")]
+            await ensure_datasource_query(
+                session,
+                project_id=ds.project_id,
+                owner_id=context.user_id,
+                display_name=ds.display_name,
+                view_name=view_name,
+                columns=col_names,
+            )
+            await session.commit()
+        except Exception as exc:  # non-fatal
+            logger.warning(
+                "Auto-create query for %s failed (non-fatal): %s",
+                view_name,
+                exc,
+            )
+            await session.rollback()
 
     return ds.to_dict()
 

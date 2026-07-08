@@ -8,21 +8,36 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.context import RequestContext, get_request_context
+from app.auth.context import RequestContext
+from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
+from app.auth.tenant_roles import to_tenant_role, validate_tenant_role
 from app.config import get_settings
 from app.database import get_db
 from app.models.shared_vdb import SharedVDB
-from app.models.tenant import Tenant
+from app.models.tenant import Tenant, TenantAllowedDomain
 from app.models.tenant_data_plane import TenantDataPlane
 from app.models.user import User
 from app.models.user_vdb import UserVDB
 from app.schemas.tenant import (
+    AllowedDomainCreate,
+    AllowedDomainRead,
+    AllowedDomainsResponse,
+    AllowedDomainsSettingsUpdate,
+    CompanyLogoRead,
     TenantCreate,
     TenantDeleteResponse,
     TenantRead,
@@ -30,8 +45,19 @@ from app.schemas.tenant import (
     UserRead,
     UserUpdate,
 )
+from app.services.allowed_domains import (
+    enforce_allowed_domain,
+    is_valid_domain,
+    normalize_domain,
+)
+from app.services.company_logo_storage import (
+    CompanyLogoValidationError,
+    read_company_logo,
+    store_company_logo,
+    validate_company_logo,
+)
 from app.services.customer_folders import CustomerFolderError, CustomerFolderService
-from app.services.email_service import EmailService, render_user_invite
+from app.services.email_service import EmailService
 from app.services.supabase_auth_service import (
     SupabaseAdminError,
     SupabaseAuthService,
@@ -69,7 +95,7 @@ async def _is_super_admin(session: AsyncSession, context: RequestContext) -> boo
 
 async def _require_user_management(
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
 ) -> RequestContext:
     """User management is an admin duty within a tenant.
 
@@ -90,7 +116,7 @@ async def _require_user_management(
 
 async def _require_root_or_super(
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
 ) -> RequestContext:
     """Platform-level tenant administration: list all tenants, delete any tenant,
     and view any tenant's details / VDB status.
@@ -356,7 +382,7 @@ async def get_tenant_details(
             "id": u.id,
             "email": u.email,
             "display_name": u.display_name,
-            "role": u.role,
+            "role": to_tenant_role(u.role),
             "is_active": u.is_active,
             "created_at": u.created_at.isoformat() if u.created_at else None,
             "vdb": vdb_info,
@@ -386,12 +412,220 @@ async def get_tenant_details(
 @router.get("/me", response_model=TenantRead)
 async def get_my_tenant(
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
 ) -> TenantRead:
     tenant = await session.get(Tenant, context.tenant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
     return TenantRead.model_validate(tenant)
+
+
+# ---------------------------------------------------------------------------
+# Company logo (tenant branding)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/current/logo", response_model=CompanyLogoRead)
+async def get_company_logo(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_membership),
+) -> CompanyLogoRead:
+    """Return the calling tenant's company logo URL (or null when unset).
+
+    Any authenticated member of the tenant may read it.
+    """
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return CompanyLogoRead(logo_url=tenant.logo_url)
+
+
+@router.post("/current/logo", response_model=CompanyLogoRead)
+async def upload_company_logo(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> CompanyLogoRead:
+    """Upload/replace the calling tenant's company logo (admins only).
+
+    The logo is always stored against the caller's own tenant, so an admin can
+    never overwrite another tenant's branding.
+    """
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    content = await file.read()
+    try:
+        ext = validate_company_logo(
+            content=content,
+            content_type=file.content_type,
+            filename=file.filename,
+        )
+    except CompanyLogoValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    file_id = store_company_logo(
+        tenant_id=tenant.id,
+        content=content,
+        ext=ext,
+    )
+    tenant.logo_file_id = file_id
+    # Cache-bust on every upload so the new logo shows immediately.
+    tenant.logo_url = f"/api/tenants/{tenant.id}/logo?v={file_id.split('.')[0]}"
+    await session.commit()
+    await session.refresh(tenant)
+
+    logger.info("Company logo uploaded for tenant %d", tenant.id)
+    return CompanyLogoRead(logo_url=tenant.logo_url)
+
+
+@router.get("/{tenant_id}/logo")
+async def get_company_logo_image(
+    tenant_id: int,
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Serve a tenant's company logo image by opaque URL (no path exposed)."""
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None or not tenant.logo_file_id:
+        raise HTTPException(status_code=404, detail="No logo")
+
+    result = read_company_logo(
+        tenant_id=tenant.id,
+        file_id=tenant.logo_file_id,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="No logo")
+    content, content_type = result
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+def _user_read_tenant(user: User) -> UserRead:
+    """Serialize a user with its role mapped to the tenant vocabulary."""
+    data = UserRead.model_validate(user)
+    return data.model_copy(update={"role": to_tenant_role(data.role)})
+
+
+# ---------------------------------------------------------------------------
+# Allowed Domains (tenant administration)
+# ---------------------------------------------------------------------------
+
+
+async def _allowed_domains_response(
+    session: AsyncSession, tenant: Tenant
+) -> AllowedDomainsResponse:
+    rows = await session.scalars(
+        select(TenantAllowedDomain)
+        .where(TenantAllowedDomain.tenant_id == tenant.id)
+        .order_by(TenantAllowedDomain.domain)
+    )
+    return AllowedDomainsResponse(
+        enabled=tenant.allowed_domains_enabled,
+        domains=[AllowedDomainRead.model_validate(r) for r in rows],
+    )
+
+
+@router.get(
+    "/current/allowed-domains", response_model=AllowedDomainsResponse
+)
+async def get_allowed_domains(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> AllowedDomainsResponse:
+    """Return the calling tenant's Allowed-Domains setting and domain list."""
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return await _allowed_domains_response(session, tenant)
+
+
+@router.put(
+    "/current/allowed-domains/settings", response_model=AllowedDomainsResponse
+)
+async def update_allowed_domains_settings(
+    payload: AllowedDomainsSettingsUpdate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> AllowedDomainsResponse:
+    """Toggle the calling tenant's Allowed-Domains restriction on/off."""
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    tenant.allowed_domains_enabled = payload.enabled
+    await session.commit()
+    await session.refresh(tenant)
+    return await _allowed_domains_response(session, tenant)
+
+
+@router.post(
+    "/current/allowed-domains",
+    response_model=AllowedDomainRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_allowed_domain(
+    payload: AllowedDomainCreate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> AllowedDomainRead:
+    """Add an email domain to the calling tenant's allow-list."""
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    domain = normalize_domain(payload.domain)
+    if not is_valid_domain(domain):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid domain. Use a bare domain like 'boeing.com' (no wildcards).",
+        )
+
+    existing = await session.scalar(
+        select(TenantAllowedDomain).where(
+            TenantAllowedDomain.tenant_id == tenant.id,
+            TenantAllowedDomain.domain == domain,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Domain already on the allow-list.",
+        )
+
+    row = TenantAllowedDomain(
+        tenant_id=tenant.id,
+        domain=domain,
+        is_active=True,
+        created_by=context.user_id,
+    )
+    session.add(row)
+    # Adding a domain expresses intent to restrict access, so turn enforcement on
+    # automatically. Admins can still disable it explicitly to stage domains.
+    tenant.allowed_domains_enabled = True
+    await session.commit()
+    await session.refresh(row)
+    return AllowedDomainRead.model_validate(row)
+
+
+@router.delete(
+    "/current/allowed-domains/{domain_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_allowed_domain(
+    domain_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> Response:
+    """Remove an email domain from the calling tenant's allow-list."""
+    row = await session.get(TenantAllowedDomain, domain_id)
+    if row is None or row.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    await session.delete(row)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -408,6 +642,8 @@ async def create_user(
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot create users in another tenant")
 
+    payload.role = validate_tenant_role(payload.role)
+
     tenant = await session.get(Tenant, tenant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
@@ -418,12 +654,17 @@ async def create_user(
     if existing is not None:
         raise HTTPException(status_code=409, detail="User already exists")
 
+    # Enforce the tenant's Allowed-Domains policy on the invitee's email. The
+    # invitee is a new user (never the owner/admin) so they must match the list.
+    await enforce_allowed_domain(
+        session, tenant_id=tenant_id, email=payload.email, purpose="invite"
+    )
+
     # Supabase is the primary authenticator: create/link a Supabase identity and
     # send a "set your password" invite that lands on the set-password page. No
     # local password is ever stored. If Supabase is unavailable, the user is NOT
     # created (no local fallback).
     settings = get_settings()
-    login_url = f"{settings.app_base_url}/{tenant.slug}"
     setup_url = f"{settings.app_base_url}/{tenant.slug}/set-password"
     supa = SupabaseAuthService()
     try:
@@ -465,6 +706,12 @@ async def create_user(
         await session.rollback()
         raise HTTPException(status_code=409, detail="User already exists") from exc
 
+    # The first user provisioned for a tenant becomes its owner — always exempt
+    # from the Allowed-Domains restriction so an admin can never lock themselves
+    # out. (No-op once an owner is set.)
+    if tenant.owner_user_id is None:
+        tenant.owner_user_id = user.id
+
     CustomerFolderService().ensure_user_folders(
         tenant.slug, user.external_id or str(user.id)
     )
@@ -504,19 +751,23 @@ async def create_user(
     # Send the branded magic-link invite (best-effort; never fails user creation).
     if invite_link is not None:
         try:
-            spec = render_user_invite(
-                company_name=tenant.name,
-                role=payload.role,
-                invite_link=invite_link,
-                login_url=login_url,
-            )
-            await EmailService().send(
-                spec, to=payload.email, template="user_invite"
+            await EmailService().send_transactional_email(
+                to=payload.email,
+                template="user_invitation",
+                variables={
+                    "first_name": payload.display_name or "",
+                    "inviter_name": "A Tablescope administrator",
+                    "workspace_name": tenant.name,
+                    "role_name": payload.role.replace("_", " ").title(),
+                    "invitation_link": invite_link,
+                    "expiration_date": "in 24 hours",
+                },
+                tenant_id=tenant_id,
             )
         except Exception as exc:  # delivery is best-effort
             logger.warning("Failed to send invite email to %s: %s", payload.email, exc)
 
-    return UserRead.model_validate(user)
+    return _user_read_tenant(user)
 
 
 @router.get("/{tenant_id}/users", response_model=list[UserRead])
@@ -528,7 +779,7 @@ async def list_users(
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot list users in another tenant")
     rows = await session.scalars(select(User).where(User.tenant_id == tenant_id).order_by(User.id))
-    return [UserRead.model_validate(u) for u in rows]
+    return [_user_read_tenant(u) for u in rows]
 
 
 @router.put(
@@ -550,7 +801,7 @@ async def update_user(
     if payload.display_name is not None:
         user.display_name = payload.display_name
     if payload.role is not None:
-        user.role = payload.role
+        user.role = validate_tenant_role(payload.role)
     if payload.is_active is not None:
         user.is_active = payload.is_active
     if payload.password is not None:
@@ -558,7 +809,7 @@ async def update_user(
     session.add(user)
     await session.commit()
     await session.refresh(user)
-    return UserRead.model_validate(user)
+    return _user_read_tenant(user)
 
 
 @router.delete(

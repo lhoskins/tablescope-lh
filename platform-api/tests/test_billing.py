@@ -57,9 +57,15 @@ class FakeSupabase(SupabaseAuthService):
 class FakeEmail:
     def __init__(self) -> None:
         self.sent: list[tuple[str, str]] = []
+        self.calls: list[dict] = []
 
-    async def send(self, spec, *, to, template) -> bool:
+    async def send_transactional_email(
+        self, *, to, template, variables, subject=None, reply_to=None
+    ) -> bool:
         self.sent.append((to, template))
+        self.calls.append(
+            {"to": to, "template": template, "variables": variables}
+        )
         return True
 
 
@@ -186,6 +192,38 @@ def test_slug_validation_normalizes_case():
     assert req.tenant_admin_email == "a@b.com"
 
 
+def test_confirm_admin_email_must_match():
+    with pytest.raises(ValueError):
+        CheckoutSessionRequest(
+            tier_key="basic_cloud",
+            company_name="Acme",
+            tenant_slug="acme",
+            tenant_admin_email="root@acme.com",
+            confirm_admin_email="other@acme.com",
+        )
+
+
+def test_confirm_admin_email_match_is_case_insensitive():
+    req = CheckoutSessionRequest(
+        tier_key="basic_cloud",
+        company_name="Acme",
+        tenant_slug="acme",
+        tenant_admin_email="Root@Acme.com",
+        confirm_admin_email="root@acme.COM",
+    )
+    assert req.tenant_admin_email == req.confirm_admin_email == "root@acme.com"
+
+
+def test_tenant_name_defaults_to_company_name():
+    req = CheckoutSessionRequest(
+        tier_key="basic_cloud",
+        company_name="Acme Corp",
+        tenant_slug="acme",
+        tenant_admin_email="root@acme.com",
+    )
+    assert req.tenant_name == "Acme Corp"
+
+
 # --------------------------------------------------------------------------- #
 # Checkout: metadata mapping + slug uniqueness
 # --------------------------------------------------------------------------- #
@@ -218,6 +256,59 @@ async def test_checkout_creates_request_and_metadata(db_session):
 
 
 @pytest.mark.asyncio
+async def test_checkout_persists_phone_and_address(db_session):
+    await _seed_tier(db_session)
+    fake = FakeStripe()
+    svc = CheckoutService(db_session, stripe=fake)
+    _, req_id = await svc.create_checkout_session(
+        CheckoutSessionRequest(
+            tier_key="basic_cloud",
+            company_name="Acme",
+            tenant_slug="acme",
+            tenant_admin_email="root@acme.com",
+            tenant_admin_phone="+15551234567",
+            company_street="1 Main St",
+            company_city="Springfield",
+            company_state="IL",
+            company_postal_code="62701",
+        )
+    )
+    req = await db_session.get(TenantProvisioningRequest, req_id)
+    assert req.tenant_admin_phone == "+15551234567"
+    assert req.company_street == "1 Main St"
+    assert req.company_city == "Springfield"
+    assert req.company_state == "IL"
+    assert req.company_postal_code == "62701"
+    # Phone is safe to include in Stripe metadata; address is not.
+    md = fake.created_sessions[0]
+    assert md["tenant_admin_phone"] == "+15551234567"
+    assert "company_street" not in md
+    assert "company_postal_code" not in md
+
+
+@pytest.mark.asyncio
+async def test_slug_availability_free_and_taken(db_session):
+    svc = CheckoutService(db_session, stripe=FakeStripe())
+    available, reason = await svc.check_slug_availability("brand-new")
+    assert available is True
+    assert reason is None
+
+    db_session.add(Tenant(slug="acme", name="Acme"))
+    await db_session.flush()
+    available, reason = await svc.check_slug_availability("Acme")
+    assert available is False
+    assert reason
+
+
+@pytest.mark.asyncio
+async def test_slug_availability_rejects_malformed(db_session):
+    svc = CheckoutService(db_session, stripe=FakeStripe())
+    available, reason = await svc.check_slug_availability("bad slug!")
+    assert available is False
+    assert reason
+
+
+@pytest.mark.asyncio
 async def test_checkout_rejects_unknown_tier(db_session):
     svc = CheckoutService(db_session, stripe=FakeStripe())
     with pytest.raises(TierNotFoundError):
@@ -242,6 +333,92 @@ async def test_checkout_rejects_taken_slug(db_session):
                 tenant_slug="acme", tenant_admin_email="a@b.com",
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_checkout_allows_slug_of_inactive_tenant(db_session):
+    """A deactivated tenant frees its slug for reuse."""
+    await _seed_tier(db_session)
+    db_session.add(Tenant(slug="acme", name="Acme", is_active=False))
+    await db_session.flush()
+    svc = CheckoutService(db_session, stripe=FakeStripe())
+    url, _ = await svc.create_checkout_session(
+        CheckoutSessionRequest(
+            tier_key="basic_cloud", company_name="A", tenant_name="A",
+            tenant_slug="acme", tenant_admin_email="a@b.com",
+        )
+    )
+    assert url.startswith("https://checkout")
+
+
+@pytest.mark.asyncio
+async def test_checkout_rejects_slug_with_provisioned_request(db_session):
+    """A live provisioning request still reserves the slug."""
+    await _seed_tier(db_session)
+    db_session.add(
+        TenantProvisioningRequest(
+            tier_key="basic_cloud",
+            deployment_mode="shared_cloud",
+            tenant_slug="acme",
+            tenant_admin_email="a@b.com",
+            status="provisioned",
+        )
+    )
+    await db_session.flush()
+    svc = CheckoutService(db_session, stripe=FakeStripe())
+    with pytest.raises(SlugTakenError):
+        await svc.create_checkout_session(
+            CheckoutSessionRequest(
+                tier_key="basic_cloud", company_name="A", tenant_name="A",
+                tenant_slug="acme", tenant_admin_email="a@b.com",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_deleting_tenant_frees_slug_for_reuse(db_session):
+    """Deleting a tenant terminalizes its provisioning request so the slug is
+    reusable for a fresh checkout."""
+    from app.services.tenant_deletion_service import purge_app_tenant
+
+    await _seed_tier(db_session)
+    tenant = Tenant(slug="acme", name="Acme")
+    db_session.add(tenant)
+    await db_session.flush()
+    db_session.add(
+        TenantProvisioningRequest(
+            tenant_id=tenant.id,
+            tier_key="basic_cloud",
+            deployment_mode="shared_cloud",
+            tenant_slug="acme",
+            tenant_admin_email="a@b.com",
+            status="provisioned",
+        )
+    )
+    await db_session.flush()
+
+    await purge_app_tenant(db_session, tenant.id)
+    await db_session.flush()
+
+    # Old request is now terminal (deprovisioned), tenant row gone.
+    req = (
+        await db_session.scalars(
+            select(TenantProvisioningRequest).where(
+                TenantProvisioningRequest.tenant_slug == "acme"
+            )
+        )
+    ).first()
+    assert req.status == "deprovisioned"
+    assert (await db_session.get(Tenant, tenant.id)) is None
+
+    svc = CheckoutService(db_session, stripe=FakeStripe())
+    url, _ = await svc.create_checkout_session(
+        CheckoutSessionRequest(
+            tier_key="basic_cloud", company_name="A", tenant_name="A",
+            tenant_slug="acme", tenant_admin_email="a@b.com",
+        )
+    )
+    assert url.startswith("https://checkout")
 
 
 # --------------------------------------------------------------------------- #
@@ -286,7 +463,52 @@ async def test_provision_basic_cloud(db_session):
     assert membership.role == "tenant_admin"
     binding = await db_session.scalar(select(TenantAuthBinding))
     assert binding.supabase_user_id == "supa-root@acme.com"
-    assert ("root@acme.com", "root_admin_invite") in email.sent
+    assert (
+        "root@acme.com",
+        "workspace_ready_with_password_setup",
+    ) in email.sent
+    # Exactly one onboarding email (no separate workspace-ready + password email).
+    onboarding = [
+        t
+        for _, t in email.sent
+        if t
+        in ("workspace_ready_with_password_setup", "workspace_ready")
+    ]
+    assert len(onboarding) == 1
+    # Issue 5: no default workspace project is auto-created by default.
+    from app.models.project import Project
+
+    projects = (
+        await db_session.scalars(
+            select(Project).where(Project.tenant_id == tenant.id)
+        )
+    ).all()
+    assert projects == []
+
+
+@pytest.mark.asyncio
+async def test_provision_creates_default_project_when_enabled(
+    db_session, monkeypatch
+):
+    """When the opt-in flag is set, a default workspace project is created."""
+    from app.config import get_settings
+    from app.models.project import Project
+
+    settings = get_settings()
+    monkeypatch.setattr(
+        settings, "create_default_project_on_tenant_provisioning", True
+    )
+    req = await _make_request(db_session)
+    await _onboarding(db_session).provision_from_stripe_activation(req.id)
+    tenant = await db_session.scalar(
+        select(Tenant).where(Tenant.slug == "acme")
+    )
+    projects = (
+        await db_session.scalars(
+            select(Project).where(Project.tenant_id == tenant.id)
+        )
+    ).all()
+    assert len(projects) == 1
 
 
 @pytest.mark.asyncio
@@ -320,7 +542,9 @@ async def test_provision_isolated_vpn_awaits_details(db_session):
     assert out.status == "provisioned"
     assert out.data_plane_status == "provisioned"
     assert out.vpn_status == "awaiting_customer_network_details"
-    assert any(t == "vpn_info_required" for _, t in email.sent)
+    assert any(
+        t == "vpn_setup_information_required" for _, t in email.sent
+    )
 
 
 @pytest.mark.asyncio

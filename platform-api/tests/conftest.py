@@ -46,8 +46,7 @@ async def db_session(db_engine) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-@pytest_asyncio.fixture(scope="function")
-async def client(db_engine) -> AsyncIterator[AsyncClient]:
+def _build_app(db_engine, *, enforce_membership: bool):
     get_settings.cache_clear()
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
@@ -62,6 +61,30 @@ async def client(db_engine) -> AsyncIterator[AsyncClient]:
 
     app = create_app()
     app.dependency_overrides[database_module.get_db] = override_get_db
+    if not enforce_membership:
+        # Most route tests mint synthetic tokens without seeding a matching
+        # membership row; bypass the DB-backed membership check so they keep
+        # exercising route/role logic. Tenant-isolation behaviour is covered
+        # explicitly via the ``client_strict`` fixture.
+        from app.auth.context import get_request_context
+        from app.auth.membership import require_membership
+
+        app.dependency_overrides[require_membership] = get_request_context
+    return app
+
+
+@pytest_asyncio.fixture(scope="function")
+async def client(db_engine) -> AsyncIterator[AsyncClient]:
+    app = _build_app(db_engine, enforce_membership=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture(scope="function")
+async def client_strict(db_engine) -> AsyncIterator[AsyncClient]:
+    """Client with real tenant-membership enforcement (no bypass)."""
+    app = _build_app(db_engine, enforce_membership=True)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac

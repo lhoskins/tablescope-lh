@@ -120,5 +120,23 @@ class SavedQueryRead(BaseModel):
     run_count: int = 0
     last_run_at: datetime | None = None
     avg_runtime_ms: int | None = None
+    is_archived: bool = False
+    archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    # Enriched fields for the All Tables view (populated by the list endpoint).
+    owner_name: str | None = None
+    origin: str = "manual"
+    origin_label: str = "Manual"
+    # Display source for the "Source" column — falls back to "AI Generated" for
+    # AI-generated tables that aren't bound to a named datasource.
+    source_name: str | None = None
+    # Outgoing = this table is the source of an active scope pointing at a
+    # target table; only outgoing scopes drive the scope icon. Incoming =
+    # this table is only a target. has_active_scope kept for compatibility.
+    has_outgoing_scope: bool = False
+    outgoing_scope_count: int = 0
+    has_incoming_scope: bool = False
+    incoming_scope_count: int = 0
+    has_active_scope: bool = False
+    active_scope_count: int = 0

@@ -20,6 +20,8 @@ import {
   type Dashboard,
 } from "@/lib/ui/use-project-data";
 import { DashboardDetailView } from "@/components/tablescope/project/detail-views";
+import { AIDashboardSuggestionsModal } from "@/components/tablescope/project/ai-dashboard-suggestions-modal";
+import { useToasts, ToastViewport } from "@/components/ui/toast";
 
 function isPublished(d: Dashboard): boolean {
   return d.status.toLowerCase() === "published";
@@ -44,14 +46,24 @@ function Thumb({ dashboard }: { dashboard: Dashboard }) {
   );
 }
 
-export function DashboardsScreen({ projectId }: { projectId: string }) {
+export function DashboardsScreen({
+  projectId,
+  dashboardId,
+}: {
+  projectId: string;
+  dashboardId?: string;
+}) {
   const { data, isLoading } = useProjectDashboards(projectId);
   const { data: queries } = useProjectQueries(projectId);
   const { data: sources } = useProjectDataSources(projectId);
   const queryClient = useQueryClient();
   const rows = useMemo(() => data ?? [], [data]);
-  const [viewingId, setViewingId] = useState<number | null>(null);
+  const [viewingId, setViewingId] = useState<number | null>(
+    dashboardId ? Number(dashboardId) : null,
+  );
   const viewing = rows.find((d) => d.id === viewingId) ?? null;
+  const [aiOpen, setAiOpen] = useState(false);
+  const { toasts, push, dismiss } = useToasts();
 
   // Id of a freshly-created dashboard that has NOT yet been explicitly saved.
   // While set, the dashboard is an ephemeral draft: closing the editor without
@@ -142,7 +154,7 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
       breadcrumbLabel="Dashboards"
       actions={
         <>
-          <Button variant="secondary">
+          <Button variant="secondary" onClick={() => setAiOpen(true)}>
             <IconSparkles size={14} />
             Generate with AI
           </Button>
@@ -284,6 +296,20 @@ export function DashboardsScreen({ projectId }: { projectId: string }) {
         )}
       </div>
       )}
+      <AIDashboardSuggestionsModal
+        open={aiOpen}
+        projectId={projectId}
+        onClose={() => setAiOpen(false)}
+        onSaved={(id) => {
+          setAiOpen(false);
+          queryClient.invalidateQueries({
+            queryKey: ["project", projectId, "dashboards"],
+          });
+          setViewingId(id);
+        }}
+        notify={push}
+      />
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );
 }

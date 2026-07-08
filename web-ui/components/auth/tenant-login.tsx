@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   exchangeWithSupabase,
   loginWithPassword,
@@ -12,8 +12,25 @@ import {
 } from "@/lib/auth";
 
 export function TenantLogin({ slug }: { slug: string }) {
+  // useSearchParams requires a Suspense boundary during prerender.
+  return (
+    <Suspense>
+      <TenantLoginInner slug={slug} />
+    </Suspense>
+  );
+}
+
+function TenantLoginInner({ slug }: { slug: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const tenantSlug = slug;
+  // Path the user was trying to reach before being bounced to login. Only
+  // same-origin relative paths are honored to avoid open-redirects.
+  const nextParam = searchParams.get("next");
+  const destination =
+    nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
+      ? nextParam
+      : "/";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,7 +47,7 @@ export function TenantLogin({ slug }: { slug: string }) {
       user_id: result.user_id,
       tenant_slug: result.tenant_slug,
     });
-    router.replace("/");
+    router.replace(destination);
   }
 
   // Auto sign-in when arriving from a magic/invite link (token in URL hash).

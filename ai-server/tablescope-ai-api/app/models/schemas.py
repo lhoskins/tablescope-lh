@@ -24,6 +24,10 @@ class AskRequest(AIBaseRequest):
     scope: str = "project"  # project | personal | shared_project
     include_query_history: bool = True
     include_dashboard_context: bool = True
+    # Prior turns of the same conversation (oldest→newest), each
+    # {"role": "user"|"assistant", "content": "..."}. Lets the model resolve
+    # follow-up references ("explain more", "the second option").
+    history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class IndexDocumentRequest(AIBaseRequest):
@@ -56,14 +60,49 @@ class GenerateRelationshipsRequest(AIBaseRequest):
     pass
 
 
+class SourceCatalogEntry(BaseModel):
+    """A project source the AI may use, with its columns + description."""
+    name: str
+    columns: list[str] = Field(default_factory=list)
+    description: str | None = None
+    kind: str = "table"  # "table" (data source view) or "query" (saved query)
+
+
 class GenerateSQLRequest(AIBaseRequest):
     prompt: str
     allowed_tables: list[str] = Field(default_factory=list)
+    source_catalog: list[SourceCatalogEntry] = Field(default_factory=list)
+    # Resolved by the platform-api Project Semantic Source Resolver before this
+    # call: the authorized source(s) and columns the request most likely maps
+    # to. The generator must prefer these unless they cannot answer the prompt.
+    preferred_sources: list[str] = Field(default_factory=list)
+    relevant_columns: list[str] = Field(default_factory=list)
+    # Compact, AI-safe Knowledge Graph summary (risks/gaps/measured KPIs/docs);
+    # steers SQL toward validated business questions, never Reference Library.
+    knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class SuggestDashboardRequest(AIBaseRequest):
     prompt: str = ""
     allowed_tables: list[str] = []
+    knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class SuggestDashboardsMultiRequest(AIBaseRequest):
+    """Ask the planner for several distinct dashboard *plans* (lightweight).
+
+    Unlike :class:`SuggestDashboardRequest` (which yields one fully-specced
+    dashboard with executable SQL), this returns ``desired_count`` higher-level
+    plans the user can pick from; the heavy validation/build happens on save via
+    the existing generate-and-save-dashboard pipeline.
+    """
+
+    prompt: str = ""
+    audience: str = ""
+    desired_count: int = 3
+    allowed_tables: list[str] = []
+    kpis: list[str] = Field(default_factory=list)
+    knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class QueryInfo(BaseModel):
@@ -172,6 +211,12 @@ class IntelligencePlanRequest(AIBaseRequest):
     # [{"table": <view>, "columns": [{"name": <col>, "type": <type>}]}]
     table_schema: list[dict] = Field(default_factory=list)
     documents: list[dict] = Field(default_factory=list)  # [{title, summary, tags}]
+    # Evidence-backed join candidates the platform discovered from scope
+    # metadata / matching keys. Each: {left_table, right_table, left_join_key,
+    # right_join_key, relationship_type, join_confidence, confidence_reason,
+    # row_multiplication_risk}. The planner may only propose multi-table
+    # analyses that are supported by one of these hints.
+    relationship_hints: list[dict] = Field(default_factory=list)
     max_analyses: int = 6
     # 1 = executive/high-level (few, most leveraging) .. 5 = granular (many, detailed)
     granularity: int = 3
@@ -246,6 +291,89 @@ class InterpretedInsight(BaseModel):
 
 class IntelligenceInterpretResponse(BaseModel):
     insights: list[InterpretedInsight] = Field(default_factory=list)
+    request_id: str = ""
+    model_used: str = ""
+
+
+class KnowledgeGraphInsightRequest(AIBaseRequest):
+    """Generate Knowledge-Graph business-insight cards for a selected node.
+
+    The platform supplies the deterministic node-centric neighborhood (the
+    selected center node and its connected nodes/edges); the model reasons over
+    that neighborhood — grounded ONLY in the supplied nodes — and returns
+    AI-Home-style insight cards specific to the graph's related data sources.
+    """
+    lens: str = "insight-first"
+    center: dict = Field(default_factory=dict)  # {graph_key, type, label, summary, display_group}
+    # Connected nodes: [{graph_key, type, label, display_group, relationship,
+    # confidence, direction}]
+    neighbors: list[dict] = Field(default_factory=list)
+    documents: list[dict] = Field(default_factory=list)  # [{title, summary, source}]
+    kpis: list[str] = Field(default_factory=list)
+    max_cards: int = 8
+
+
+class KnowledgeGraphCard(BaseModel):
+    id: str = ""
+    # business_insight | opportunity | risk | warning | gap | recommendation
+    category: str = "business_insight"
+    # critical | urgent | warning | watch | opportunity | info
+    severity: str = "info"
+    title: str = ""
+    summary: str = ""
+    businessQuestion: str = ""
+    businessImpact: str = ""
+    confidence: float = 0.0
+    recommendedAction: str = ""
+    # graph_keys of supporting neighbor nodes (must be from the supplied set)
+    evidenceKeys: list[str] = Field(default_factory=list)
+    sourceDocuments: list[str] = Field(default_factory=list)
+    supportedKpis: list[str] = Field(default_factory=list)
+
+
+class KnowledgeGraphInsightResponse(BaseModel):
+    cards: list[KnowledgeGraphCard] = Field(default_factory=list)
+    request_id: str = ""
+    model_used: str = ""
+
+
+class ProjectInsightRequest(AIBaseRequest):
+    """Generate a project-scoped executive insight report for ONE project.
+
+    The platform supplies the selected project's authorized context (metadata,
+    tables, documents, saved queries, dashboards, KPIs, Knowledge Graph). The
+    model reasons over ONLY this project's context — grounded in the Project
+    Insight Best Practices — and returns the structured Project Insight
+    contract. It must not summarize the tenant or other projects.
+    """
+    project: dict = Field(default_factory=dict)  # {id, name, status}
+    tables: list[dict] = Field(default_factory=list)
+    documents: list[dict] = Field(default_factory=list)
+    queries: list[dict] = Field(default_factory=list)
+    dashboards: list[dict] = Field(default_factory=list)
+    kpis: list[str] = Field(default_factory=list)
+    knowledge_graph_context: dict = Field(default_factory=dict)
+    recent_activity: dict = Field(default_factory=dict)
+
+
+class ProjectInsightExecutiveSummary(BaseModel):
+    summary: str = ""
+    critical: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    opportunities: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
+class ProjectInsightResponse(BaseModel):
+    executiveSummary: ProjectInsightExecutiveSummary = Field(
+        default_factory=ProjectInsightExecutiveSummary
+    )
+    questionsToAsk: list[dict] = Field(default_factory=list)
+    trendDetection: list[dict] = Field(default_factory=list)
+    recommendedDashboards: list[dict] = Field(default_factory=list)
+    recommendedQueries: list[dict] = Field(default_factory=list)
+    recommendedKpis: list[dict] = Field(default_factory=list)
+    insightValidationWorkflow: list[dict] = Field(default_factory=list)
     request_id: str = ""
     model_used: str = ""
 
@@ -338,30 +466,127 @@ class GenerateRelationshipsResponse(BaseModel):
     model_used: str
 
 
+class SelectedSource(BaseModel):
+    """A project source the AI chose, plus why it matched the request."""
+    name: str
+    reason: str = ""
+
+
+class SelectedField(BaseModel):
+    source: str
+    field: str
+    reason: str = ""
+
+
 class GenerateSQLResponse(BaseModel):
     sql: str
     explanation: str
     allowed_tables_used: list[str]
     request_id: str
     model_used: str
+    selected_sources: list[SelectedSource] = Field(default_factory=list)
+    selected_fields: list[SelectedField] = Field(default_factory=list)
+    repaired: bool = False
+    # True when Knowledge Graph context was folded into the generation prompt,
+    # so the platform can persist query metadata (knowledgeGraphContextUsed).
+    knowledge_graph_context_used: bool = False
+
+
+class WidgetValidationExpectations(BaseModel):
+    """What a widget's executed result must satisfy to be saved (judge stage)."""
+    minimum_rows: int = 1
+    required_columns: list[str] = Field(default_factory=list)
+    non_null_columns: list[str] = Field(default_factory=list)
+    chart_requires_multiple_rows: bool = False
+    empty_result_action: str = "drop_widget"
+
+
+class WidgetReferenceLine(BaseModel):
+    label: str = ""
+    value: float | None = None
+    source_document: str = ""
 
 
 class DashboardWidgetSuggestion(BaseModel):
-    type: str  # kpi | bar | line | pie | area | table
+    # Insight-first chart catalog: kpi/kpi_grid | bar | horizontal_bar |
+    # stacked_bar | grouped_bar | line | area | dual_line | pie | donut |
+    # table | pivot_table | heatmap | scatter | bubble | treemap | waterfall |
+    # funnel | gauge | bullet | radar | sparkline_table | narrative_insight
+    type: str
     title: str
+    subtitle: str = ""
+    business_question: str = ""
     sql: str = ""
+    chart_subtype: str = ""
     x_column: str | None = ""
     y_column: str | None = ""
+    label_column: str | None = ""
+    value_column: str | None = ""
+    value_column_2: str | None = ""
+    series_column: str | None = ""
+    target_column: str | None = ""
     aggregation: str | None = ""
+    reference_lines: list[WidgetReferenceLine] = Field(default_factory=list)
+    drilldown_fields: list[str] = Field(default_factory=list)
+    validation_expectations: WidgetValidationExpectations = Field(
+        default_factory=WidgetValidationExpectations
+    )
+    priority_score: int = 0
+    confidence_score: float = 0.0
+    # Optional layout hints from the planner.
+    gridX: int | None = None
+    gridY: int | None = None
+    gridW: int | None = None
+    gridH: int | None = None
 
 
 class DashboardSuggestion(BaseModel):
     title: str
+    description: str = ""
+    business_domain: str = ""
+    intended_audience: str = ""
+    executive_summary: str = ""
     widgets: list[DashboardWidgetSuggestion]
 
 
 class SuggestDashboardResponse(BaseModel):
     suggestions: list[DashboardSuggestion]
+    request_id: str
+    model_used: str
+
+
+class DashboardPlanWidget(BaseModel):
+    """A widget outline within a dashboard plan, including renderable SQL.
+
+    ``sql`` is grounded in the project's real tables so the platform can execute
+    it and return real preview data for the Generate-tab dashboard previews.
+    ``narrative_insight`` / risk / gap widgets carry an empty ``sql``.
+    """
+
+    title: str = ""
+    chart_type: str = ""
+    business_question: str = ""
+    sql: str = ""
+    label_column: str = ""
+    value_column: str = ""
+
+
+class DashboardPlanSuggestion(BaseModel):
+    """A high-level dashboard plan the user can preview and choose to save."""
+
+    title: str
+    description: str = ""
+    business_purpose: str = ""
+    audience: str = ""
+    widgets: list[DashboardPlanWidget] = Field(default_factory=list)
+    kpis: list[str] = Field(default_factory=list)
+    data_sources: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    quality_score: int = 0
+
+
+class SuggestDashboardsMultiResponse(BaseModel):
+    suggestions: list[DashboardPlanSuggestion]
     request_id: str
     model_used: str
 

@@ -5,6 +5,8 @@ import type {
   ProjectSummary,
   TenantSummary,
 } from "@/lib/ui/types";
+import { MfaGate } from "@/components/auth/mfa-gate";
+import { CompanyLogo } from "./company-logo";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -42,6 +44,7 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className="flex h-screen bg-bg-secondary">
+      <MfaGate />
       <Sidebar
         mode={mode}
         activeNav={activeNav}
@@ -52,7 +55,13 @@ export function AppShell({
         counts={counts}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar left={topBarLeft} right={topBarRight} />
+        {/* The company logo stays alone in the header — page/workspace action
+            buttons render in the page toolbar below (see topBarRight), so they
+            no longer share space with the branding. */}
+        <TopBar
+          left={topBarLeft}
+          right={<CompanyLogo url={tenant.logoUrl} name={tenant.name} />}
+        />
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <main className="flex-1 overflow-y-auto">
             <div
@@ -62,6 +71,11 @@ export function AppShell({
                   : "px-5 py-5"
               }
             >
+              {topBarRight && (
+                <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+                  {topBarRight}
+                </div>
+              )}
               {children}
             </div>
           </main>

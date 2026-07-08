@@ -19,6 +19,7 @@ import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 import {
   useProjectGraph,
+  type GraphId,
   type GraphNode,
   type GraphEdge,
 } from "@/lib/ui/use-project-data";
@@ -48,7 +49,7 @@ export function RelationshipMapScreen({ projectId }: { projectId: string }) {
   const nodes = useMemo(() => data?.nodes ?? [], [data]);
   const edges = useMemo(() => data?.edges ?? [], [data]);
   const [filter, setFilter] = useState<Column | "all">("all");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<GraphId | null>(null);
 
   const byColumn = useMemo(() => {
     const map: Record<Column, GraphNode[]> = {

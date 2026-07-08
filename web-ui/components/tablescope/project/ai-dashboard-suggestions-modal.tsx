@@ -1,0 +1,460 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import {
+  IconSparkles,
+  IconX,
+  IconChartBar,
+  IconDatabase,
+} from "@tabler/icons-react";
+import { apiClient } from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { InsightChartBlock } from "@/components/tablescope/home/intelligence-card";
+import type { InsightChart } from "@/lib/api/home-intelligence";
+
+export interface WidgetPreviewData {
+  columns?: string[];
+  rows?: Record<string, unknown>[];
+}
+
+export interface SuggestionWidget {
+  title: string;
+  chartType: string;
+  businessQuestion: string;
+  /** Real chart series built from executing the widget SQL (Home renderer). */
+  chart?: InsightChart | null;
+  /** Raw rows/columns, used to render a table when there is no chart. */
+  previewData?: WidgetPreviewData;
+  /** "valid" | "preview_only" | "narrative" — small indicator only. */
+  status?: string;
+  sql?: string;
+  labelColumn?: string;
+  valueColumn?: string;
+}
+
+export interface KnowledgeGraphContextChips {
+  risks?: string[];
+  opportunities?: string[];
+  gaps?: string[];
+  measuredKpis?: string[];
+  recommendedKpis?: string[];
+  governingDocuments?: string[];
+}
+
+export interface DashboardSuggestion {
+  id: string;
+  title: string;
+  description: string;
+  businessPurpose: string;
+  audience: string;
+  widgets: SuggestionWidget[];
+  kpis: string[];
+  dataSources: string[];
+  confidence: number;
+  qualityScore: number;
+  validationSummary: string;
+  knowledgeGraphContext?: KnowledgeGraphContextChips;
+  savePayload?: Record<string, unknown>;
+}
+
+function WidgetStatusBadge({ status }: { status?: string }) {
+  if (!status || status === "valid") return null;
+  const label = status === "narrative" ? "Insight" : "Preview only";
+  return (
+    <span className="rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] uppercase text-ink-tertiary">
+      {label}
+    </span>
+  );
+}
+
+/** Render a widget's executed result as a compact table (chart fallback). */
+function WidgetTable({ data }: { data?: WidgetPreviewData }) {
+  const columns = data?.columns ?? [];
+  const rows = data?.rows ?? [];
+  if (columns.length === 0 || rows.length === 0) return null;
+  return (
+    <div className="max-h-[180px] overflow-auto">
+      <table className="w-full border-collapse text-[11px]">
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th
+                key={c}
+                className="border-b border-line-tertiary px-1.5 py-1 text-left font-medium text-ink-secondary"
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 8).map((row, ri) => (
+            <tr key={ri}>
+              {columns.map((c) => (
+                <td
+                  key={c}
+                  className="border-b border-line-tertiary/60 px-1.5 py-1 text-ink-primary"
+                >
+                  {row[c] == null ? "" : String(row[c])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Render a single dashboard widget as the user will see it: the real chart
+ * (via the same {@link InsightChartBlock} renderer the Home suggestions and the
+ * dashboard use), a table fallback when there is data but no chart, or a
+ * narrative/insight card when the widget has no measurable data.
+ */
+function DashboardWidgetPreview({ widget }: { widget: SuggestionWidget }) {
+  const hasChart = !!widget.chart;
+  const hasTable =
+    (widget.previewData?.rows?.length ?? 0) > 0 &&
+    (widget.previewData?.columns?.length ?? 0) > 0;
+
+  return (
+    <div className="rounded-md border border-line-secondary bg-bg-primary p-3">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0 text-small font-medium text-ink-primary">
+          {widget.title || widget.businessQuestion || "Untitled widget"}
+        </div>
+        <WidgetStatusBadge status={widget.status} />
+      </div>
+      {hasChart ? (
+        <InsightChartBlock chart={widget.chart as InsightChart} />
+      ) : hasTable ? (
+        <WidgetTable data={widget.previewData} />
+      ) : (
+        <div className="rounded-md bg-bg-secondary/40 p-3 text-[12px] text-ink-secondary">
+          {widget.businessQuestion ||
+            "No measurable data for this widget yet — add a data source that supports this metric."}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const AUDIENCES = ["", "executive", "manager", "analyst", "operational"];
+const AUDIENCE_LABEL: Record<string, string> = {
+  "": "Any audience",
+  executive: "Executive",
+  manager: "Manager",
+  analyst: "Analyst",
+  operational: "Operational",
+};
+
+const KG_CHIP_GROUPS: {
+  key: keyof KnowledgeGraphContextChips;
+  label: string;
+  tone: "danger" | "success" | "warning" | "ai" | "outline" | "neutral";
+}[] = [
+  { key: "risks", label: "Risk", tone: "danger" },
+  { key: "gaps", label: "Gap", tone: "warning" },
+  { key: "opportunities", label: "Opportunity", tone: "success" },
+  { key: "measuredKpis", label: "KPI", tone: "ai" },
+  { key: "recommendedKpis", label: "Rec. KPI", tone: "outline" },
+  { key: "governingDocuments", label: "Doc", tone: "neutral" },
+];
+
+function KnowledgeGraphChips({
+  kg,
+}: {
+  kg?: KnowledgeGraphContextChips;
+}) {
+  if (!kg) return null;
+  const groups = KG_CHIP_GROUPS.map((g) => ({
+    ...g,
+    items: (kg[g.key] ?? []).filter(Boolean),
+  })).filter((g) => g.items.length > 0);
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="mt-3 rounded-md border border-dashed border-line-secondary bg-bg-secondary/30 p-2">
+      <div className="mb-1.5 text-[11px] uppercase text-ink-tertiary">
+        Knowledge Graph context
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {groups.flatMap((g) =>
+          g.items.slice(0, 3).map((item) => (
+            <Badge key={`${g.key}-${item}`} tone={g.tone}>
+              <span className="opacity-70">{g.label}:</span>&nbsp;{item}
+            </Badge>
+          )),
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function AIDashboardSuggestionsModal({
+  open,
+  projectId,
+  onClose,
+  onSaved,
+  notify,
+  initialPrompt,
+  autoGenerate,
+}: {
+  open: boolean;
+  projectId: string;
+  onClose: () => void;
+  onSaved: (dashboardId: number) => void;
+  notify: (message: string, tone?: "success" | "error" | "info") => void;
+  /** Seed the prompt (e.g. from a recommended-dashboard title). */
+  initialPrompt?: string;
+  /** When true with an initialPrompt, generate immediately on open. */
+  autoGenerate?: boolean;
+}) {
+  const [prompt, setPrompt] = useState(initialPrompt ?? "");
+  const [audience, setAudience] = useState("");
+  const [suggestions, setSuggestions] = useState<DashboardSuggestion[]>([]);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const generateMutation = useMutation({
+    mutationFn: () =>
+      apiClient.post<{ suggestions: DashboardSuggestion[] }>(
+        "/api/ai/actions/suggest-dashboards",
+        {
+          project_id: Number(projectId),
+          prompt: prompt.trim() || undefined,
+          audience: audience || undefined,
+          desired_count: 3,
+        },
+      ),
+    onSuccess: (res) => {
+      setSuggestions(res.suggestions ?? []);
+      setError(null);
+      if (!res.suggestions?.length) {
+        setError(
+          "No dashboard suggestions could be generated. Add data sources or try a more specific request.",
+        );
+      }
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  // When opened from a recommendation, seed the prompt and (optionally) kick
+  // off generation once so the user lands directly on a preview.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
+    if (initialPrompt) {
+      setPrompt(initialPrompt);
+      if (autoGenerate) generateMutation.mutate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialPrompt, autoGenerate]);
+
+  const saveMutation = useMutation({
+    mutationFn: (s: DashboardSuggestion) =>
+      apiClient.post<{ dashboard_id: number; dashboard_name: string; dashboard_url?: string }>(
+        "/api/ai/actions/save-dashboard-suggestion",
+        {
+          project_id: Number(projectId),
+          suggestionId: s.id,
+          suggestion: s.savePayload ?? {
+            title: s.title,
+            description: s.description,
+            businessPurpose: s.businessPurpose,
+            audience: s.audience,
+            widgets: s.widgets,
+            kpis: s.kpis,
+            dataSources: s.dataSources,
+          },
+        },
+      ),
+    onSuccess: (res) => {
+      notify(`Saved dashboard "${res.dashboard_name}"`, "success");
+      onSaved(res.dashboard_id);
+    },
+    onError: (err: Error) => notify(err.message, "error"),
+    onSettled: () => setSavingId(null),
+  });
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4">
+      <div className="my-8 w-full max-w-3xl rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-lg">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 text-h2 text-ink-primary">
+              <IconSparkles size={18} className="text-ai" />
+              Generate dashboards with AI
+            </h2>
+            <p className="mt-1 text-small text-ink-tertiary">
+              Describe what you want to monitor (optional) and pick an audience.
+              We&apos;ll suggest at least 3 dashboards grounded in this
+              project&apos;s data.
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="shrink-0 text-ink-tertiary hover:text-ink-primary"
+          >
+            <IconX size={18} />
+          </button>
+        </div>
+
+        <form
+          className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end"
+          onSubmit={(e) => {
+            e.preventDefault();
+            generateMutation.mutate();
+          }}
+        >
+          <div className="flex-1">
+            <label className="mb-1 block text-small font-medium text-ink-secondary">
+              What should these dashboards show?
+            </label>
+            <input
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g. supplier quality and on-time delivery"
+              className="h-9 w-full rounded-md border border-line-secondary bg-bg-primary px-3 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-small font-medium text-ink-secondary">
+              Audience
+            </label>
+            <select
+              value={audience}
+              onChange={(e) => setAudience(e.target.value)}
+              className="h-9 rounded-md border border-line-secondary bg-bg-primary px-3 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
+            >
+              {AUDIENCES.map((a) => (
+                <option key={a} value={a}>
+                  {AUDIENCE_LABEL[a]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={generateMutation.isPending}
+          >
+            <IconSparkles size={14} />
+            {generateMutation.isPending ? "Generating…" : "Generate"}
+          </Button>
+        </form>
+
+        {error && <p className="mt-3 text-small text-red-600">{error}</p>}
+
+        <div className="mt-5 space-y-3">
+          {generateMutation.isPending && (
+            <div className="py-10 text-center text-small text-ink-tertiary">
+              Analyzing project data and drafting dashboard ideas…
+            </div>
+          )}
+
+          {suggestions.map((s) => (
+            <div
+              key={s.id}
+              className="rounded-lg border border-line-secondary bg-bg-primary p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-h3 text-ink-primary">{s.title}</div>
+                  {s.description && (
+                    <div className="mt-0.5 text-small text-ink-secondary">
+                      {s.description}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setSavingId(s.id);
+                    saveMutation.mutate(s);
+                  }}
+                  disabled={savingId !== null}
+                >
+                  {savingId === s.id ? "Saving…" : "Save"}
+                </Button>
+              </div>
+
+              {s.businessPurpose && (
+                <p className="mt-2 text-small text-ink-tertiary">
+                  {s.businessPurpose}
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {s.audience && (
+                  <Badge tone="brand">{AUDIENCE_LABEL[s.audience] ?? s.audience}</Badge>
+                )}
+                <Badge tone="neutral">
+                  <IconChartBar size={12} />
+                  {s.widgets.length} widget{s.widgets.length === 1 ? "" : "s"}
+                </Badge>
+                {s.qualityScore > 0 && (
+                  <Badge tone="success">Quality {s.qualityScore}</Badge>
+                )}
+                {s.confidence > 0 && (
+                  <Badge tone="outline">
+                    {Math.round(s.confidence * 100)}% confidence
+                  </Badge>
+                )}
+              </div>
+
+              {s.widgets.length > 0 && (
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {s.widgets.map((w, i) => (
+                    <DashboardWidgetPreview key={`${s.id}-w-${i}`} widget={w} />
+                  ))}
+                </div>
+              )}
+
+              <KnowledgeGraphChips kg={s.knowledgeGraphContext} />
+
+              {s.kpis.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] uppercase text-ink-tertiary">
+                    KPIs
+                  </span>
+                  {s.kpis.slice(0, 8).map((k) => (
+                    <Badge key={k} tone="ai">
+                      {k}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              {s.dataSources.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] uppercase text-ink-tertiary">
+                    Sources
+                  </span>
+                  {s.dataSources.slice(0, 8).map((d) => (
+                    <Badge key={d} tone="neutral">
+                      <IconDatabase size={12} />
+                      {d}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

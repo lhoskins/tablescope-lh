@@ -13,6 +13,8 @@ access before retrieving vectors or building context.
 
 from __future__ import annotations
 
+import asyncio
+import difflib
 import hashlib
 import hmac
 import json
@@ -23,8 +25,8 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel
-from sqlalchemy import or_, select
+from pydantic import BaseModel, Field
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -36,12 +38,24 @@ from app.models.ai_conversation import AiConversation, AiConversationMessage
 from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
+from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
+from app.services.auto_scope import _get_or_create_ai_scope_set
+from app.services.knowledge_graph_ai_context import (
+    collect_knowledge_graph_ai_context,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
 
 TIMEOUT = httpx.Timeout(300.0, connect=10.0)
+
+# Bounded window of prior conversation turns forwarded to the AI server so
+# follow-up questions resolve against recent context without unbounded prompts.
+CONVERSATION_HISTORY_LIMIT = 20
+
+# Row cap for a data answer rendered inline in the AI Assistant chat.
+CHAT_ANSWER_MAX_ROWS = 100
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +116,100 @@ class AIGenerateAndSaveDashboardRequest(BaseModel):
     prompt: str | None = None
     name: str | None = None
     description: str | None = None
+
+
+class AICardContext(BaseModel):
+    """Source context carried from a Business/Project Insight card.
+
+    Lets the Project Semantic Source Resolver prefer the exact authorized
+    source a card's finding was grounded in, instead of re-inferring it from
+    the plain sentence.
+    """
+    insight_type: str | None = None
+    source_tables: list[str] = Field(default_factory=list)
+    source_columns: list[str] = Field(default_factory=list)
+    metric: str | None = None
+    period_column: str | None = None
+
+    def to_resolver_context(self) -> dict[str, Any]:
+        return {
+            "insightType": self.insight_type,
+            "sourceTables": self.source_tables,
+            "sourceColumns": self.source_columns,
+            "metric": self.metric,
+            "periodColumn": self.period_column,
+        }
+
+
+class AIAskAndRunRequest(BaseModel):
+    """Generate SQL for a natural-language question, execute it, return rows.
+
+    Powers the inline AI Question modal: the user clicks an AI-generated
+    question and sees the answer (results) directly instead of being routed to
+    the AI Assistant chat.
+    """
+    project_id: int
+    question: str
+    source: str | None = None
+    card_context: AICardContext | None = None
+    max_rows: int = 200
+
+
+class AIGenerateQueryPreviewRequest(BaseModel):
+    """Generate + execute a recommended query and return a renderable preview.
+
+    Powers the Recommended Queries "Generate" button: generates SQL from the
+    recommendation's business question, executes it, and returns rows so the
+    user can preview before saving.
+    """
+    project_id: int
+    question: str
+    title: str | None = None
+    description: str | None = None
+    card_context: AICardContext | None = None
+    max_rows: int = 200
+
+
+class AISuggestDashboardsRequest(BaseModel):
+    """Request several dashboard plan suggestions for a project (no save)."""
+    project_id: int
+    prompt: str | None = None
+    audience: str | None = None
+    desired_count: int = 3
+
+
+class AISuggestionWidget(BaseModel):
+    """A single widget carried in a dashboard suggestion's savePayload.
+
+    Previews now carry executable ``sql`` (plus label/value columns), so Save can
+    persist the exact widgets the user previewed instead of re-deriving a plan.
+    """
+    title: str = ""
+    chartType: str = ""
+    businessQuestion: str = ""
+    sql: str = ""
+    labelColumn: str = ""
+    valueColumn: str = ""
+    status: str = ""
+
+
+class AISuggestionPayload(BaseModel):
+    """The selected suggestion the user chose to persist (its savePayload)."""
+    title: str = ""
+    description: str = ""
+    businessPurpose: str = ""
+    audience: str = ""
+    prompt: str = ""
+    widgets: list[AISuggestionWidget] = []
+    kpis: list[str] = []
+    dataSources: list[str] = []
+
+
+class AISaveDashboardSuggestionRequest(BaseModel):
+    """Persist a previewed dashboard suggestion (strict save validation)."""
+    project_id: int
+    suggestionId: str | None = None
+    suggestion: AISuggestionPayload
 
 
 class AICreateScopeRequest(BaseModel):
@@ -223,13 +331,194 @@ async def _check_project_access(
 
 
 def _detect_datasource(sql: str, allowed_tables: list[str]) -> str | None:
-    """Find which datasource view_name is referenced in the generated SQL."""
+    """Find which datasource view_name is referenced in the generated SQL.
+
+    An AI-generated table must never be left with a blank source: a blank
+    ``left_datasource`` makes the All Tables row show no Source and causes a
+    "no datasource associated" error when a query is built from it. When no
+    referenced table can be matched we fall back to the first allowed table so
+    the query still binds to a real, executable datasource.
+    """
     sql_upper = sql.upper()
     for table in allowed_tables:
         # Check for table name in FROM/JOIN clauses (with or without quotes)
         if table.upper() in sql_upper or f'"{table}"'.upper() in sql_upper:
             return table
-    return allowed_tables[0] if len(allowed_tables) == 1 else None
+    return allowed_tables[0] if allowed_tables else None
+
+
+async def _build_source_catalog(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int,
+) -> list[dict[str, Any]]:
+    """Build the AI source catalog (data sources + saved queries) for a project.
+
+    Each entry carries the source name, its known columns, and a short
+    description so the AI server can semantically match the user's request to
+    real project sources instead of inventing table names from the prompt.
+    """
+    catalog: list[dict[str, Any]] = []
+
+    ds_rows = (
+        await session.scalars(
+            select(FileSourceMeta).where(
+                FileSourceMeta.project_id == project_id,
+                FileSourceMeta.tenant_id == tenant_id,
+                FileSourceMeta.archived.is_(False),
+            )
+        )
+    ).all()
+    for ds in ds_rows:
+        columns = [
+            str(c.get("name"))
+            for c in (ds.column_types or [])
+            if isinstance(c, dict) and c.get("name")
+        ]
+        description = ""
+        if isinstance(ds.ai_metadata, dict):
+            description = str(ds.ai_metadata.get("summary") or "")
+        catalog.append(
+            {
+                "name": ds.view_name,
+                "columns": columns,
+                "description": description or None,
+                "kind": "table",
+            }
+        )
+
+    query_rows = (
+        await session.scalars(
+            select(SavedQuery).where(SavedQuery.project_id == project_id)
+        )
+    ).all()
+    for q in query_rows:
+        catalog.append(
+            {
+                "name": q.name,
+                "columns": [],
+                "description": (q.description or "")[:200] or None,
+                "kind": "query",
+            }
+        )
+
+    return catalog
+
+
+def _clarification_response(
+    prompt: str,
+    detail: Any,
+    allowed_tables: list[str],
+) -> dict[str, Any]:
+    """Turn a 422 from the AI server into a friendly, structured response.
+
+    The frontend renders ``message`` + ``suggested_sources`` instead of a raw
+    validation stack trace. The detailed reason stays in server logs.
+    """
+    suggested: list[str] = []
+    reason = ""
+    if isinstance(detail, dict):
+        suggested = list(detail.get("suggested_sources") or [])
+        reason = str(detail.get("reason") or detail.get("message") or "")
+    else:
+        reason = str(detail or "")
+    if not suggested:
+        suggested = _heuristic_rank_sources(prompt, allowed_tables)
+
+    logger.info(
+        "AI query generation needs clarification | reason=%s | suggested=%s",
+        reason, suggested,
+    )
+    message = (
+        "I could not find an authorized table that matches part of your "
+        "request."
+    )
+    if suggested:
+        message += " Try choosing one of these related sources."
+    return {
+        "action": "generate_and_save_query",
+        "status": "needs_clarification",
+        "message": message,
+        "suggested_sources": suggested,
+    }
+
+
+def _heuristic_rank_sources(prompt: str, allowed_tables: list[str]) -> list[str]:
+    """Rank authorized sources by normalized/fuzzy match with the prompt."""
+    scored = sorted(
+        ((_score_source_match(prompt, t), t) for t in allowed_tables),
+        key=lambda x: (-x[0], x[1]),
+    )
+    ranked = [t for score, t in scored if score > 0]
+    return (ranked or allowed_tables)[:5]
+
+
+# ---------------------------------------------------------------------------
+# Fuzzy source-name matching
+#
+# Users refer to a data source by a partial or suffix-insensitive name
+# ("fin_gl_chart_of_accounts", "chart of accounts") when the physical source is
+# "fin_gl_chart_of_accounts_CSV". Normalize both sides and score the match so a
+# confident single match is auto-selected and ambiguous matches ask the user.
+# ---------------------------------------------------------------------------
+
+_SOURCE_SUFFIX_RE = re.compile(
+    r"(_csv|_xlsx|_xls|_json|_parquet|_tsv|_table|_tbl|_view)$", re.IGNORECASE
+)
+
+
+def _strip_source_suffix(name: str) -> str:
+    return _SOURCE_SUFFIX_RE.sub("", (name or "").strip())
+
+
+def _normalize_source_name(name: str) -> str:
+    """Lowercase, drop a file-format suffix, and collapse separators to spaces."""
+    text = _strip_source_suffix((name or "").lower())
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _score_source_match(request: str, source: str) -> int:
+    """Score how well ``request`` refers to authorized ``source`` (0-100)."""
+    req = (request or "").strip().lower()
+    src = (source or "").strip().lower()
+    if not req or not src:
+        return 0
+    if req == src:
+        return 100
+    req_n = _normalize_source_name(request)
+    src_n = _normalize_source_name(source)
+    if req_n and req_n == src_n:
+        return 95
+    if req == _strip_source_suffix(src).lower():
+        return 92
+    req_tokens = [t for t in req_n.split() if t]
+    src_tokens = set(t for t in src_n.split() if t)
+    if req_tokens and set(req_tokens).issubset(src_tokens):
+        return 80
+    if req_n and src_n and difflib.SequenceMatcher(None, req_n, src_n).ratio() >= 0.85:
+        return 70
+    if req_n and req_n in src_n:
+        return 60
+    return 0
+
+
+def _resolve_prompt_source(
+    prompt: str, allowed_tables: list[str]
+) -> tuple[list[str], list[str]]:
+    """Return ``(strong, close)`` source matches for a table-name-like prompt.
+
+    ``strong`` are confident matches (score ≥ 90); ``close`` are plausible but
+    ambiguous ones (60 ≤ score < 90). Both are ordered best-first.
+    """
+    scored = sorted(
+        ((_score_source_match(prompt, t), t) for t in allowed_tables),
+        key=lambda x: (-x[0], x[1]),
+    )
+    strong = [t for s, t in scored if s >= 90]
+    close = [t for s, t in scored if 60 <= s < 90]
+    return strong, close
 
 
 def _heuristic_sql(prompt: str, allowed_tables: list[str]) -> str:
@@ -255,6 +544,132 @@ def _heuristic_sql(prompt: str, allowed_tables: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Query-summary intent
+#
+# "Can you give me a summary of my queries?" is answered directly from the
+# database rather than the AI server: the summary is then always
+# authorization-correct (only the caller's accessible queries) and never
+# depends on the AI server being reachable or schema-compatible — which also
+# avoids the "Invalid request signature" failure users saw for this prompt.
+# ---------------------------------------------------------------------------
+
+_QUERY_SUMMARY_PATTERNS = [
+    re.compile(r"\bsummary of (my|all|the) queries\b", re.IGNORECASE),
+    re.compile(
+        r"\b(summarize|summarise|list|show|overview of|recap) "
+        r"(my|all|the) queries\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bhow many queries (do i|have i)\b", re.IGNORECASE),
+]
+
+
+def _is_query_summary_request(question: str) -> bool:
+    """True when the prompt is asking for an overview of the user's queries."""
+    q = (question or "").strip()
+    return any(p.search(q) for p in _QUERY_SUMMARY_PATTERNS)
+
+
+def _plural(n: int, singular: str, plural: str) -> str:
+    return singular if n == 1 else plural
+
+
+async def _build_query_summary(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    include_archived: bool = False,
+) -> str:
+    """Build a friendly, authorization-scoped summary of the user's queries.
+
+    Includes queries in every project the caller can access (private projects
+    they own + shared projects they are an active member of). Archived queries
+    are excluded unless explicitly requested.
+    """
+    member_sub = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == context.user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    projects = list(
+        await session.scalars(
+            select(Project)
+            .where(
+                Project.tenant_id == context.tenant_id,
+                or_(
+                    Project.owner_id == context.user_id,
+                    Project.id.in_(member_sub),
+                ),
+            )
+            .order_by(Project.name)
+        )
+    )
+    if not projects:
+        return (
+            "You don't have access to any projects yet, so there are no "
+            "queries to summarize."
+        )
+
+    ids = [p.id for p in projects]
+    count_stmt = select(SavedQuery.project_id, func.count()).where(
+        SavedQuery.project_id.in_(ids)
+    )
+    if not include_archived:
+        count_stmt = count_stmt.where(SavedQuery.is_archived.is_(False))
+    count_stmt = count_stmt.group_by(SavedQuery.project_id)
+    counts = {pid: c for pid, c in (await session.execute(count_stmt)).all()}
+
+    total = sum(counts.values())
+    private = [
+        (p, counts.get(p.id, 0)) for p in projects if not p.is_shared
+    ]
+    shared = [(p, counts.get(p.id, 0)) for p in projects if p.is_shared]
+
+    lines: list[str] = []
+    if total == 0:
+        lines.append(
+            "You don't have any "
+            + ("" if include_archived else "active ")
+            + "queries yet across your "
+            + f"{len(projects)} accessible "
+            + _plural(len(projects), "project", "projects")
+            + "."
+        )
+        return "\n".join(lines)
+
+    scope_word = "" if include_archived else "active "
+    lines.append(
+        f"You currently have {total} {scope_word}"
+        f"{_plural(total, 'query', 'queries')} across your "
+        f"{len(projects)} accessible "
+        f"{_plural(len(projects), 'project', 'projects')}."
+    )
+
+    def _section(heading: str, rows: list[tuple[Project, int]]) -> None:
+        with_queries = [(p, c) for p, c in rows if c > 0]
+        if not with_queries:
+            return
+        lines.append("")
+        lines.append(f"{heading}:")
+        for p, c in with_queries:
+            lines.append(f"- {p.name}: {c} {_plural(c, 'query', 'queries')}")
+
+    _section("Private projects", private)
+    _section("Shared projects", shared)
+
+    lines.append("")
+    if include_archived:
+        lines.append(
+            "This summary includes archived queries as requested."
+        )
+    else:
+        lines.append(
+            "All queries listed are active and available for execution. "
+            "Archived queries are not included."
+        )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # AI Proxy endpoints
 # ---------------------------------------------------------------------------
 
@@ -267,6 +682,16 @@ async def ask(
     """Ask Tablescope AI a question about the active project."""
     await _check_project_access(session, context, req.project_id)
 
+    # A request for a summary of the user's queries is answered directly from
+    # the database (authorization-correct, no AI-server dependency).
+    if _is_query_summary_request(req.question):
+        return {
+            "answer": await _build_query_summary(session, context),
+            "model_used": "tablescope-direct",
+            "request_id": "",
+            "context_summary": {},
+        }
+
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
@@ -275,6 +700,7 @@ async def ask(
         "scope": req.scope,
         "include_query_history": req.include_query_history,
         "include_dashboard_context": req.include_dashboard_context,
+        "history": [],
     }
     return await _forward_to_ai("/ai/ask", payload)
 
@@ -329,6 +755,59 @@ async def route_prompt(
     return RoutePromptResponse(route="/projects/new", prefilled=prompt)
 
 
+async def _kg_context(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    *,
+    max_items: int = 20,
+) -> dict[str, Any]:
+    """Collect the project's Knowledge Graph context for AI generation.
+
+    Best-effort: a graph that fails to load must never block dashboard/query
+    generation, so any error yields an empty context block.
+    """
+    try:
+        return await collect_knowledge_graph_ai_context(
+            session,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            user_id=context.user_id,
+            max_items=max_items,
+        )
+    except Exception:  # context is optional enrichment
+        logger.exception(
+            "Failed to collect Knowledge Graph context for project %s", project_id,
+        )
+        return {}
+
+
+def _kg_context_chips(kg: dict[str, Any]) -> dict[str, Any]:
+    """Compact, chip-friendly KG summary for dashboard preview cards.
+
+    Returns short title lists (not full objects) the frontend renders as chips.
+    """
+    def _titles(key: str, cap: int = 4) -> list[str]:
+        items = kg.get(key) or []
+        out: list[str] = []
+        for it in items:
+            title = str((it or {}).get("title") or "").strip()
+            if title and title not in out:
+                out.append(title)
+            if len(out) >= cap:
+                break
+        return out
+
+    return {
+        "risks": _titles("risks"),
+        "opportunities": _titles("opportunities"),
+        "gaps": _titles("gaps"),
+        "measuredKpis": _titles("measured_kpis"),
+        "recommendedKpis": _titles("recommended_kpis"),
+        "governingDocuments": _titles("governing_documents"),
+    }
+
+
 @router.post("/query/generate")
 async def generate_sql(
     req: AIGenerateSQLRequest,
@@ -349,12 +828,24 @@ async def generate_sql(
         ds_result = await session.execute(ds_stmt)
         allowed_tables = [ds.view_name for ds in ds_result.scalars()]
 
+    source_catalog = await _build_source_catalog(
+        session, tenant_id=context.tenant_id, project_id=req.project_id
+    )
+
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
         "prompt": req.prompt,
         "allowed_tables": allowed_tables,
+        "source_catalog": source_catalog,
+        "preferred_sources": [],
+        "relevant_columns": [],
+        # All query AI generation includes Knowledge Graph context so SQL targets
+        # the risks/gaps/KPIs the graph surfaces (never Reference Library docs).
+        "knowledge_graph_context": await _kg_context(
+            session, context, req.project_id,
+        ),
     }
     return await _forward_to_ai("/ai/query/generate", payload)
 
@@ -603,7 +1094,6 @@ async def _ai_analyze_and_create_scopes(
     """
     import asyncio
 
-    from app.models.query_scope import QueryScope
     from app.routes.query import _resolve_vdb_database
     from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
@@ -873,6 +1363,7 @@ async def _ai_analyze_and_create_scopes(
 
     relationships: list[dict[str, Any]] = []
     scopes_created = 0
+    ai_set = None
     for s in validated_scopes:
         key = (s["source_query_id"], s["source_field"],
                s["target_query_id"], s["target_field"])
@@ -893,13 +1384,28 @@ async def _ai_analyze_and_create_scopes(
             relationships.append(rel)
             continue
 
+        # Group AI-discovered scopes under the project's "AI Generated Scopes"
+        # set so they surface (with a count + toggle) in the new Scopes UI.
+        if ai_set is None:
+            ai_set = await _get_or_create_ai_scope_set(
+                session,
+                tenant_id=context.tenant_id,
+                project_id=project_id,
+                user_id=context.user_id,
+            )
         scope = QueryScope(
             tenant_id=context.tenant_id,
             project_id=project_id,
+            scope_set_id=ai_set.id,
             query_id=s["source_query_id"],
             source_field=s["source_field"],
+            source_table=s["source_query_name"],
             target_query_id=s["target_query_id"],
             target_field=s["target_field"],
+            target_table=s["target_query_name"],
+            confidence_score=s.get("confidence"),
+            created_by_ai=True,
+            enabled=ai_set.enabled,
             created_by=context.user_id,
         )
         session.add(scope)
@@ -968,10 +1474,25 @@ async def suggest_dashboard(
     """Suggest dashboard widgets based on project data."""
     await _check_project_access(session, context, req.project_id)
 
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == req.project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
+        "prompt": "",
+        "allowed_tables": allowed_tables,
+        # Knowledge Graph context steers suggestions toward validated
+        # risks/gaps/measured KPIs and governing documents.
+        "knowledge_graph_context": await _kg_context(
+            session, context, req.project_id,
+        ),
     }
     return await _forward_to_ai("/ai/dashboard/suggest", payload)
 
@@ -1280,6 +1801,7 @@ async def ai_save_query(
         description=req.description or "",
         sql_text=req.sql_text,
         left_datasource=left_datasource,
+        ai_generated=True,
     )
     session.add(query)
     await session.commit()
@@ -1298,6 +1820,35 @@ async def ai_save_query(
     }
 
 
+# Leading intent verb the user may type in the "Generate with AI" box, e.g.
+# "generate table supplier performance" or "build query top vendors". Both the
+# table and query phrasings must reach the SAME read-only query-generation flow;
+# stripping the verb also stops the model from reading "table" as a DDL/CREATE
+# request (which the SQL validator rejects — the source of the earlier
+# "authorization error" on `generate table …`).
+_GENERATION_INTENT_PATTERN = re.compile(
+    r"^\s*(?:please\s+)?(?:generate|create|build|make)\s+(table|query)\b[:\s-]*",
+    re.IGNORECASE,
+)
+
+
+def normalize_ai_generation_intent(prompt: str) -> tuple[str, str]:
+    """Normalize an AI generation prompt into ``(intent, cleaned_prompt)``.
+
+    ``intent`` is ``"table"`` or ``"query"`` (defaults to ``"query"``). Both
+    intents use the same authorized, read-only query-generation path — the only
+    difference is a hint appended to the prompt. The recognised leading verb is
+    stripped so the remaining text describes the desired data, not a DDL action.
+    """
+    text = prompt or ""
+    match = _GENERATION_INTENT_PATTERN.match(text)
+    if not match:
+        return "query", text.strip()
+    intent = match.group(1).lower()
+    remainder = text[match.end():].strip()
+    return intent, remainder or text.strip()
+
+
 @router.post("/actions/generate-and-save-query")
 async def ai_generate_and_save_query(
     req: AIGenerateAndSaveQueryRequest,
@@ -1312,6 +1863,11 @@ async def ai_generate_and_save_query(
     existing query is updated in place instead of creating a new one.
     """
     project = await _check_project_access(session, context, req.project_id)
+
+    # Normalize "generate/create/build table|query …" so both phrasings hit this
+    # same authorized flow and the model treats the request as a read-only query
+    # rather than a table (DDL) creation.
+    gen_intent, base_prompt = normalize_ai_generation_intent(req.prompt)
 
     # Resolve allowed tables from project datasources if not provided
     allowed_tables = req.allowed_tables
@@ -1362,29 +1918,80 @@ async def ai_generate_and_save_query(
             )
 
     # Step 1: Call AI server to generate SQL
-    prompt_text = req.prompt
+    prompt_text = base_prompt
     if existing_query and existing_query.sql_text:
         # Include the existing SQL so the AI can modify it
         prompt_text = (
-            f"{req.prompt}\n\n"
+            f"{base_prompt}\n\n"
             f"Here is the current SQL for the query \"{existing_query.name}\":\n"
             f"{existing_query.sql_text}\n\n"
             f"Please modify this SQL according to the request above. "
             f"Return ONLY the modified SQL."
         )
+    elif gen_intent == "table":
+        # A "generate table" request still resolves to a single read-only
+        # SELECT that materializes the table — never CREATE/DDL.
+        prompt_text = (
+            f"{base_prompt}\n\n"
+            "Return a single read-only SELECT query that produces this table. "
+            "Do not emit CREATE TABLE, DDL, or any write statement."
+        )
 
-    payload = {
-        "tenant_id": context.tenant_id,
-        "user_id": context.user_id,
-        "project_id": req.project_id,
-        "prompt": prompt_text,
-        "allowed_tables": allowed_tables,
-    }
+    # Fuzzy source match: when the prompt is essentially a source name given
+    # without its physical suffix ("fin_gl_chart_of_accounts" for
+    # "fin_gl_chart_of_accounts_CSV"), resolve it directly. A single confident
+    # match is auto-selected; several plausible matches ask the user to choose.
     ai_result: dict[str, Any] = {}
+    generated_sql = ""
+    if not existing_query and allowed_tables:
+        strong, close = _resolve_prompt_source(base_prompt, allowed_tables)
+        if len(strong) == 1 and not close:
+            matched = strong[0]
+            generated_sql = f'SELECT * FROM "{matched}" LIMIT 100'
+            ai_result = {
+                "explanation": (
+                    f'Matched your request to authorized source "{matched}".'
+                ),
+                "model_used": "source-match",
+            }
+        elif len(strong) > 1 or (not strong and len(close) > 1):
+            return {
+                "action": "generate_and_save_query",
+                "status": "needs_clarification",
+                "message": (
+                    "I found multiple matching sources. Which one should I use?"
+                ),
+                "suggested_sources": (strong or close)[:5],
+            }
+
     try:
-        ai_result = await _forward_to_ai("/ai/query/generate", payload)
-        generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
+        if not generated_sql:  # not resolved by fuzzy source match
+            source_catalog = await _build_source_catalog(
+                session, tenant_id=context.tenant_id, project_id=req.project_id
+            )
+            payload = {
+                "tenant_id": context.tenant_id,
+                "user_id": context.user_id,
+                "project_id": req.project_id,
+                "prompt": prompt_text,
+                "allowed_tables": allowed_tables,
+                "source_catalog": source_catalog,
+                "preferred_sources": [],
+                "relevant_columns": [],
+                # Knowledge Graph context steers generated SQL toward validated
+                # risks/gaps/measured KPIs surfaced by the graph.
+                "knowledge_graph_context": await _kg_context(
+                    session, context, req.project_id,
+                ),
+            }
+            ai_result = await _forward_to_ai("/ai/query/generate", payload)
+            generated_sql = ai_result.get("sql", "").rstrip().rstrip(";")
     except HTTPException as exc:
+        # A 422 means the AI generated SQL that could not be validated/repaired
+        # (e.g. it could not map the request to an authorized source). Surface a
+        # friendly, structured clarification instead of a raw validation error.
+        if exc.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY:
+            return _clarification_response(req.prompt, exc.detail, allowed_tables)
         # The local AI server is optional/may be offline. Rather than failing
         # the action outright, fall back to a deterministic query built from
         # the prompt + the project's available tables.
@@ -1433,8 +2040,9 @@ async def ai_generate_and_save_query(
             "sql_text": existing_query.sql_text,
         }
 
-    # Step 2: Derive a name if not provided
-    name = req.name or _shorten_ai_name(req.prompt)
+    # Step 2: Derive a name if not provided (from the cleaned prompt, so the
+    # "generate table"/"generate query" verb isn't baked into the table name).
+    name = req.name or _shorten_ai_name(base_prompt)
 
     # Step 3: Save as new query
     query = SavedQuery(
@@ -1444,6 +2052,7 @@ async def ai_generate_and_save_query(
         description=req.description or req.prompt,
         sql_text=generated_sql,
         left_datasource=left_datasource,
+        ai_generated=True,
     )
     session.add(query)
     await session.commit()
@@ -1461,6 +2070,601 @@ async def ai_generate_and_save_query(
         "sql_text": generated_sql,
         "explanation": ai_result.get("explanation", ""),
         "model_used": ai_result.get("model_used", ""),
+        "selected_sources": ai_result.get("selected_sources", []),
+        "repaired": ai_result.get("repaired", False),
+    }
+
+
+def _is_numeric_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int | float):
+        return True
+    if isinstance(value, str):
+        try:
+            float(value.replace(",", "").strip())
+            return True
+        except (ValueError, AttributeError):
+            return False
+    return False
+
+
+def _looks_like_time_column(name: str) -> bool:
+    lowered = name.lower()
+    return any(
+        token in lowered
+        for token in ("date", "time", "month", "year", "day", "week", "quarter")
+    )
+
+
+def _suggest_visualization(
+    columns: list[str], rows: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Pick a sensible default chart for a result set (deterministic).
+
+    - single numeric cell -> kpi
+    - a time column + a numeric column -> line
+    - a categorical column + a numeric column -> bar
+    - otherwise -> table
+    """
+    if not columns or not rows:
+        return {"type": "table"}
+
+    sample = rows[0]
+    numeric_cols = [
+        c
+        for c in columns
+        if any(_is_numeric_value(r.get(c)) for r in rows[:20])
+    ]
+    non_numeric_cols = [c for c in columns if c not in numeric_cols]
+
+    if len(rows) == 1 and len(columns) == 1 and _is_numeric_value(sample.get(columns[0])):
+        return {"type": "kpi", "metricField": columns[0]}
+
+    if numeric_cols and non_numeric_cols:
+        y_field = numeric_cols[0]
+        time_cols = [c for c in non_numeric_cols if _looks_like_time_column(c)]
+        if time_cols:
+            return {"type": "line", "xField": time_cols[0], "yField": y_field}
+        return {"type": "bar", "xField": non_numeric_cols[0], "yField": y_field}
+
+    return {"type": "table"}
+
+
+_LIMIT_RE = re.compile(r"\blimit\s+\d+\s*$", re.IGNORECASE)
+
+
+def _apply_row_limit(sql: str, max_rows: int) -> str:
+    """Ensure a preview query is bounded so it never runs unbounded."""
+    trimmed = sql.strip().rstrip(";").rstrip()
+    if _LIMIT_RE.search(trimmed):
+        return trimmed
+    return f"{trimmed} LIMIT {max_rows}"
+
+
+async def _execute_project_sql(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    sql: str,
+) -> dict[str, Any]:
+    """Execute SQL against the project's VDB and return ``{columns, rows}``."""
+    from app.routes.query import (
+        _auto_cast_aggregates,
+        _resolve_vdb_database,
+        _run_sql,
+    )
+    from app.services.tenant_teiid_resolver import TenantTeiidResolver
+
+    database = await _resolve_vdb_database(
+        session=session, context=context, project_id=project_id
+    )
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    return await _run_sql(
+        database=database,
+        sql=_auto_cast_aggregates(sql),
+        teiid_host=endpoint.pg_host,
+        teiid_port=endpoint.pg_port,
+    )
+
+
+async def _project_table_schema(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int,
+) -> list[dict[str, Any]]:
+    """Build the exact per-source column schema for SQL repair.
+
+    Shape: ``[{"table": view, "columns": [{"name", "type"}]}]`` — the same
+    contract the AI server's ``fix-sql`` endpoint consumes so it can rewrite a
+    rejected query using real columns/types (never invented ones).
+    """
+    rows = (
+        await session.scalars(
+            select(FileSourceMeta).where(
+                FileSourceMeta.project_id == project_id,
+                FileSourceMeta.tenant_id == tenant_id,
+                FileSourceMeta.archived.is_(False),
+            )
+        )
+    ).all()
+    schema: list[dict[str, Any]] = []
+    for ds in rows:
+        columns = [
+            {"name": str(c.get("name")), "type": str(c.get("type") or "")}
+            for c in (ds.column_types or [])
+            if isinstance(c, dict) and c.get("name")
+        ]
+        schema.append({"table": ds.view_name, "columns": columns})
+    return schema
+
+
+async def _execute_with_repair(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    sql: str,
+    allowed_tables: list[str],
+    max_rows: int,
+    table_schema: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str, str]:
+    """Execute SQL; on an engine error, repair via the AI using the exact
+    Teiid error + real schema, then re-run.
+
+    Closes the same self-repair loop the dashboard path uses so Teiid quirks
+    (unsupported functions like DATEDIFF, un-CAST string arithmetic, alias/
+    GROUP BY mistakes) heal automatically instead of surfacing as a dead-end
+    error. Returns ``(result_or_none, final_sql, last_error)``.
+    """
+    from app.services import ai_intelligence_client as ai
+
+    current = sql
+    last_error = ""
+    for attempt in range(3):
+        bounded = _apply_row_limit(current, max_rows)
+        try:
+            result = await _execute_project_sql(
+                session, context, project_id, bounded
+            )
+            return result, current, ""
+        except HTTPException as exc:
+            last_error = str(exc.detail)
+            if attempt >= 2:
+                break
+            fixed = await ai.fix_sql(
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=project_id,
+                sql=current,
+                error=last_error,
+                allowed_tables=allowed_tables,
+                table_schema=table_schema,
+            )
+            normalized = (fixed or "").strip().rstrip(";")
+            if (
+                not normalized
+                or normalized == current.strip().rstrip(";")
+                or not _is_read_only_select(normalized)
+            ):
+                break
+            current = normalized
+    return None, current, last_error
+
+
+_READONLY_START_RE = re.compile(r"^(?:SELECT|WITH)\b", re.IGNORECASE)
+_LEADING_SQL_COMMENT_RE = re.compile(
+    r"^(?:\s*(?:--[^\n]*\n|/\*.*?\*/))+", re.DOTALL
+)
+
+
+def _is_read_only_select(sql: str) -> bool:
+    """True only for a single read-only statement (defense-in-depth vs prose).
+
+    The AI server already strips prose, but this guard guarantees natural-language
+    text is never forwarded to Teiid as SQL even if the AI server misbehaves.
+    """
+    body = _LEADING_SQL_COMMENT_RE.sub("", (sql or "").strip()).lstrip()
+    return bool(_READONLY_START_RE.match(body))
+
+
+def _ai_generation_error(exc: HTTPException) -> tuple[str, dict[str, Any]]:
+    """Translate an AI-server generation failure into a friendly message + details.
+
+    Returns ``(message, details)`` where ``message`` is safe to show a user and
+    ``details`` carries expandable technical context (matched sources, validation
+    error) — never a raw dict repr or stack trace.
+    """
+    friendly = "We could not safely build a query for this question."
+    details: dict[str, Any] = {}
+    detail = exc.detail
+    if isinstance(detail, dict):
+        message = detail.get("message")
+        if message:
+            friendly = str(message)
+        if detail.get("reason"):
+            details["validationError"] = str(detail["reason"])
+        sources = detail.get("suggested_sources")
+        if isinstance(sources, list) and sources:
+            details["matchedSources"] = [
+                (s.get("name") if isinstance(s, dict) else str(s))
+                for s in sources
+            ]
+    elif isinstance(detail, str) and detail:
+        details["validationError"] = detail
+    return friendly, details
+
+
+async def _generate_sql_for_question(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    question: str,
+    *,
+    preferred_sources: list[str] | None = None,
+    relevant_columns: list[str] | None = None,
+) -> dict[str, Any]:
+    """Generate SQL for a natural-language question via the AI server.
+
+    Returns the raw AI result dict (``sql``/``explanation``/``selected_sources``)
+    plus the resolved ``allowed_tables``. Raises HTTPException on failure so the
+    caller can convert it into a structured, non-fatal modal error.
+
+    ``preferred_sources``/``relevant_columns`` come from the Project Semantic
+    Source Resolver and steer the model toward the authorized source the
+    request maps to.
+    """
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
+    source_catalog = await _build_source_catalog(
+        session, tenant_id=context.tenant_id, project_id=project_id
+    )
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": project_id,
+        "prompt": question,
+        "allowed_tables": allowed_tables,
+        "source_catalog": source_catalog,
+        "preferred_sources": preferred_sources or [],
+        "relevant_columns": relevant_columns or [],
+        "knowledge_graph_context": await _kg_context(
+            session, context, project_id
+        ),
+    }
+    ai_result = await _forward_to_ai("/ai/query/generate", payload)
+    ai_result["_allowed_tables"] = allowed_tables
+    return ai_result
+
+
+async def _resolve_action_sources(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    question: str,
+    intent: str,
+    source: str | None = None,
+    card_context: AICardContext | None = None,
+) -> Any:
+    """Run the Project Semantic Source Resolver for one AI action.
+
+    A user-picked ``source`` (e.g. chosen from a prior clarification) is treated
+    as an authorized card source so the resolver locks onto it.
+    """
+    from app.services.project_source_resolver import resolve_project_source
+
+    ctx: dict[str, Any] = (
+        card_context.to_resolver_context() if card_context else {}
+    )
+    if source:
+        ctx = {**ctx, "sourceTables": [source]}
+    return await resolve_project_source(
+        session,
+        tenant_id=context.tenant_id,
+        project_id=project_id,
+        question=question,
+        intent=intent,
+        card_context=ctx or None,
+    )
+
+
+async def _ask_and_run_core(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    question: str,
+    max_rows: int,
+    source: str | None = None,
+    card_context: Any | None = None,
+) -> dict[str, Any]:
+    """Resolve a source, generate SQL, execute it, and return the result dict.
+
+    Shared by the ask-and-run action endpoint and the AI Assistant chat so both
+    ground answers on real executed data. Never raises on a generation/execution
+    failure — returns a structured ``status`` with SQL + error instead.
+    """
+    resolver = await _resolve_action_sources(
+        session, context,
+        project_id=project_id,
+        question=question,
+        intent="question_answer",
+        source=source,
+        card_context=card_context,
+    )
+
+    try:
+        ai_result = await _generate_sql_for_question(
+            session, context, project_id, question,
+            preferred_sources=resolver.preferred_sources,
+            relevant_columns=resolver.relevant_columns,
+        )
+    except HTTPException as exc:
+        friendly, details = _ai_generation_error(exc)
+        return {
+            "question": question,
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": "",
+            "dataSourcesUsed": [],
+            "status": "generation_error",
+            "error": friendly,
+            "errorDetails": details,
+        }
+
+    allowed_tables = ai_result.pop("_allowed_tables", [])
+    sql = (ai_result.get("sql") or "").strip().rstrip(";")
+    if not sql or not _is_read_only_select(sql):
+        return {
+            "question": question,
+            "sql": sql if sql else "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": ai_result.get("explanation", ""),
+            "dataSourcesUsed": [],
+            "status": "generation_error",
+            "error": "We could not safely build a query for this question.",
+            "errorDetails": {"sql": sql} if sql else {},
+        }
+
+    table_schema = await _project_table_schema(
+        session, tenant_id=context.tenant_id, project_id=project_id
+    )
+    result, sql, exec_error = await _execute_with_repair(
+        session, context,
+        project_id=project_id,
+        sql=sql,
+        allowed_tables=allowed_tables,
+        max_rows=max_rows,
+        table_schema=table_schema,
+    )
+    if result is None:
+        return {
+            "question": question,
+            "sql": sql,
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": ai_result.get("explanation", ""),
+            "dataSourcesUsed": [_detect_datasource(sql, allowed_tables) or ""],
+            "status": "execution_error",
+            "error": "We could not run this query against the project's data.",
+            "errorDetails": {
+                "sql": sql,
+                "executionError": exec_error,
+            },
+        }
+
+    columns = result.get("columns", [])
+    rows = result.get("rows", [])[:max_rows]
+    used = _detect_datasource(sql, allowed_tables)
+    return {
+        "question": question,
+        "sql": sql,
+        "columns": columns,
+        "rows": rows,
+        "suggestedVisualization": _suggest_visualization(columns, rows),
+        "explanation": ai_result.get("explanation", ""),
+        "dataSourcesUsed": [used] if used else [],
+        "status": "success",
+        "error": None,
+    }
+
+
+async def _forward_prose_answer(
+    context: RequestContext,
+    *,
+    project_id: int,
+    question: str,
+    history: list[dict[str, str]] | None = None,
+) -> str:
+    """Free-text answer from the AI server's documents + knowledge-graph path.
+
+    Used as a fallback for analytical/document questions that don't map to a
+    single SQL source, so they get a real answer instead of a hard error.
+    """
+    try:
+        result = await _forward_to_ai("/ai/ask", {
+            "tenant_id": context.tenant_id,
+            "user_id": context.user_id,
+            "project_id": project_id,
+            "question": question,
+            "scope": "project",
+            "include_query_history": True,
+            "include_dashboard_context": True,
+            "history": history or [],
+        })
+    except HTTPException:
+        return ""
+    return str(result.get("answer") or "").strip()
+
+
+@router.post("/actions/ask-and-run")
+async def ai_ask_and_run(
+    req: AIAskAndRunRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate SQL for a question, execute it, and return the results.
+
+    Never raises on a generation/execution failure: returns a structured
+    ``status`` (``success`` / ``generation_error`` / ``execution_error``) with
+    the SQL (when available) and an error message so the modal can render an
+    inline error and reveal the SQL instead of navigating away.
+
+    When the question can't be grounded on a data source (``generation_error``
+    from source resolution), fall back to the free-text documents/knowledge-graph
+    answer — the same path the AI Assistant uses — so analytical questions are
+    answered as prose instead of showing a "couldn't match a source" error.
+    """
+    await _check_project_access(session, context, req.project_id)
+    result = await _ask_and_run_core(
+        session, context,
+        project_id=req.project_id,
+        question=req.question,
+        max_rows=req.max_rows,
+        source=req.source,
+        card_context=req.card_context,
+    )
+    if result.get("status") == "success":
+        result["answerType"] = "data"
+        return result
+    if result.get("status") == "generation_error":
+        prose = await _forward_prose_answer(
+            context, project_id=req.project_id, question=req.question
+        )
+        if prose:
+            return {
+                "question": req.question,
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "suggestedVisualization": {"type": "table"},
+                "explanation": prose,
+                "dataSourcesUsed": [],
+                "status": "success",
+                "answerType": "text",
+                "error": None,
+            }
+    return result
+
+
+@router.post("/actions/generate-query-preview")
+async def ai_generate_query_preview(
+    req: AIGenerateQueryPreviewRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate + execute a recommended query and return a preview.
+
+    Same generation/execution path as ask-and-run, but returns query metadata
+    (title/description) so the Recommended Queries modal can preview then save.
+    Non-fatal: returns a structured ``status`` on failure.
+    """
+    await _check_project_access(session, context, req.project_id)
+    title = req.title or _shorten_ai_name(req.question)
+
+    resolver = await _resolve_action_sources(
+        session, context,
+        project_id=req.project_id,
+        question=req.question,
+        intent="recommended_query",
+        card_context=req.card_context,
+    )
+
+    try:
+        ai_result = await _generate_sql_for_question(
+            session, context, req.project_id, req.question,
+            preferred_sources=resolver.preferred_sources,
+            relevant_columns=resolver.relevant_columns,
+        )
+    except HTTPException as exc:
+        friendly, details = _ai_generation_error(exc)
+        return {
+            "title": title,
+            "description": req.description or "",
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "dataSourcesUsed": [],
+            "explanation": "",
+            "status": "generation_error",
+            "error": friendly,
+            "errorDetails": details,
+        }
+
+    allowed_tables = ai_result.pop("_allowed_tables", [])
+    sql = (ai_result.get("sql") or "").strip().rstrip(";")
+    if not sql or not _is_read_only_select(sql):
+        return {
+            "title": title,
+            "description": req.description or "",
+            "sql": sql if sql else "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "dataSourcesUsed": [],
+            "explanation": ai_result.get("explanation", ""),
+            "status": "generation_error",
+            "error": "We could not safely build a query for this recommendation.",
+            "errorDetails": {"sql": sql} if sql else {},
+        }
+
+    table_schema = await _project_table_schema(
+        session, tenant_id=context.tenant_id, project_id=req.project_id
+    )
+    result, sql, exec_error = await _execute_with_repair(
+        session, context,
+        project_id=req.project_id,
+        sql=sql,
+        allowed_tables=allowed_tables,
+        max_rows=req.max_rows,
+        table_schema=table_schema,
+    )
+    if result is None:
+        return {
+            "title": title,
+            "description": req.description or "",
+            "sql": sql,
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "dataSourcesUsed": [_detect_datasource(sql, allowed_tables) or ""],
+            "explanation": ai_result.get("explanation", ""),
+            "status": "execution_error",
+            "error": "We could not run this query against the project's data.",
+            "errorDetails": {
+                "sql": sql,
+                "executionError": exec_error,
+            },
+        }
+
+    columns = result.get("columns", [])
+    rows = result.get("rows", [])[: req.max_rows]
+    used = _detect_datasource(sql, allowed_tables)
+    return {
+        "title": title,
+        "description": req.description or "",
+        "sql": sql,
+        "columns": columns,
+        "rows": rows,
+        "suggestedVisualization": _suggest_visualization(columns, rows),
+        "dataSourcesUsed": [used] if used else [],
+        "explanation": ai_result.get("explanation", ""),
+        "status": "success",
+        "error": None,
     }
 
 
@@ -1490,28 +2694,18 @@ async def ai_generate_and_save_dashboard(
     ds_result = await session.execute(ds_stmt)
     allowed_tables = [ds.view_name for ds in ds_result.scalars()]
 
-    # Step 1: Call AI server for dashboard suggestion
-    # Inject layout instructions into the prompt so the AI server includes
-    # them even if the AI server itself hasn't been updated with the latest prompt.
-    layout_instructions = (
-        "\n\nIMPORTANT: For each widget, also include layout fields: "
-        "gridX (0-11), gridY (row position), gridW (width 1-12), gridH (height). "
-        "Choose chart type carefully based on the data: "
-        "kpi (gridW=3,gridH=2) for single metrics, "
-        "bar (gridW=6,gridH=4) for category comparisons, "
-        "line (gridW=6-8,gridH=4) for time trends, "
-        "pie (gridW=4-6,gridH=4) for proportions, "
-        "table (gridW=12,gridH=5) for detailed data. "
-        "Place KPIs across the top row. Create a varied, balanced layout with 4-8 widgets. "
-        "Do NOT use the same chart type for every widget."
-    )
-    effective_prompt = (req.prompt or "") + layout_instructions
+    # Step 1 — Plan: ask the AI server for an insight-first dashboard plan.
     payload = {
         "tenant_id": context.tenant_id,
         "user_id": context.user_id,
         "project_id": req.project_id,
-        "prompt": effective_prompt,
+        "prompt": req.prompt or "",
         "allowed_tables": allowed_tables,
+        # Knowledge Graph context steers the plan toward validated risks, gaps,
+        # measured/recommended KPIs, and governing documents.
+        "knowledge_graph_context": await _kg_context(
+            session, context, req.project_id,
+        ),
     }
     ai_result = await _forward_to_ai("/ai/dashboard/suggest", payload)
     suggestions = ai_result.get("suggestions", [])
@@ -1522,7 +2716,6 @@ async def ai_generate_and_save_dashboard(
             detail="AI could not generate dashboard suggestions",
         )
 
-    # Take the first suggestion (or the one matching the prompt best)
     suggestion = suggestions[0]
     if req.name:
         dashboard_title = req.name
@@ -1530,32 +2723,182 @@ async def ai_generate_and_save_dashboard(
         dashboard_title = _shorten_ai_name(req.prompt)
     else:
         dashboard_title = suggestion.get("title", "AI - Dashboard")
-    widget_defs = suggestion.get("widgets", [])
 
-    # Step 2 & 3: For each widget, reuse or create a SavedQuery and build widget config
+    widget_defs = list(suggestion.get("widgets", []))
+    # Highest-priority widgets first (executive reading path top-left → bottom-right).
+    widget_defs.sort(key=lambda w: float(w.get("priority_score") or 0), reverse=True)
+
+    # Step 2 — Judge: execute each widget's SQL and keep only the strong ones.
+    from app.routes.query import (
+        _auto_cast_aggregates,
+        _resolve_vdb_database,
+        _run_sql,
+    )
+    from app.services.tenant_teiid_resolver import TenantTeiidResolver
+
+    judge_available = True
+    teiid_host: str | None = None
+    teiid_port: int | None = None
+    vdb_database: str | None = None
+    try:
+        vdb_database = await _resolve_vdb_database(
+            session=session, context=context, project_id=req.project_id
+        )
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+        teiid_host, teiid_port = endpoint.pg_host, endpoint.pg_port
+    except Exception as exc:
+        # No live VDB (data not materialised yet, or Teiid unavailable): skip the
+        # execution-based judge rather than blocking dashboard creation.
+        judge_available = False
+        logger.warning("Dashboard judge skipped (no VDB): %s", exc)
+
+    kept_defs: list[dict[str, Any]] = []
+    dropped_widgets: list[dict[str, str]] = []
+    # Widgets kept despite a failed/empty validation run, so the dashboard still
+    # saves; they render with an inline "needs attention" state the user can fix.
+    flagged_widgets: list[dict[str, str]] = []
+    repair_count = 0
+
+    for w in widget_defs:
+        title = str(w.get("title", "untitled"))
+        wtype = str(w.get("type", "bar")).lower()
+        widget_sql = (w.get("sql", "") or "").strip().rstrip(";")
+
+        # Narrative / no-SQL findings cannot be rendered as a dashboard chart.
+        if not widget_sql or wtype in _NARRATIVE_TYPES:
+            dropped_widgets.append(
+                {"title": title, "reason": "narrative finding (no chart)"}
+            )
+            continue
+
+        validation: dict[str, Any] = {
+            "execution_status": "skipped",
+            "row_count": 0,
+            "columns_returned": [],
+            "non_null_metric_count": 0,
+            "chart_type_original": wtype,
+            "chart_type_final": wtype,
+            "sql_original": widget_sql,
+            "sql_final": widget_sql,
+            "warnings": [],
+            "drop_reason": "",
+        }
+
+        if judge_available and vdb_database:
+            try:
+                result = await _run_sql(
+                    database=vdb_database,
+                    sql=_auto_cast_aggregates(widget_sql),
+                    teiid_host=teiid_host,
+                    teiid_port=teiid_port,
+                )
+            except Exception as exc:
+                # A failed validation run must not silently delete a widget the
+                # user previewed and chose to save. Keep it, flag it, and let the
+                # dashboard render an inline error the user can repair.
+                logger.warning(
+                    "AI dashboard widget flagged (kept) | title=%s reason=%s sql=%s",
+                    title, "query failed to execute", widget_sql,
+                )
+                logger.debug("Widget %r SQL error: %s", title, exc)
+                validation.update(
+                    {
+                        "execution_status": "error",
+                        "warnings": ["query failed to execute"],
+                        "error": str(exc)[:500],
+                    }
+                )
+                flagged_widgets.append(
+                    {"title": title, "reason": "query failed to execute"}
+                )
+                w["_validation"] = validation
+                kept_defs.append(w)
+                continue
+            cols = result.get("columns", [])
+            rows = result.get("rows", [])
+            keep, reason = _judge_widget(w, cols, rows)
+            if not keep:
+                # Weak/empty result: keep but flag rather than dropping, so the
+                # previewed dashboard is still created.
+                logger.info(
+                    "AI dashboard widget flagged (kept) | title=%s reason=%s "
+                    "row_count=%d columns=%s",
+                    title, reason, len(rows), cols,
+                )
+                validation.update(
+                    {
+                        "execution_status": "weak",
+                        "row_count": len(rows),
+                        "columns_returned": cols,
+                        "warnings": [reason],
+                    }
+                )
+                flagged_widgets.append({"title": title, "reason": reason})
+                w["_validation"] = validation
+                kept_defs.append(w)
+                continue
+            _correct_widget_chart(w, cols, rows)
+            final_type = str(w.get("type", wtype)).lower()
+            if final_type != wtype:
+                repair_count += 1
+            vcol = w.get("value_column") or w.get("y_column") or ""
+            non_null = 0
+            if vcol:
+                col_map = {_norm_col(c): c for c in cols}
+                actual = col_map.get(_norm_col(vcol))
+                if actual:
+                    non_null = sum(1 for r in rows if r.get(actual) is not None)
+            validation.update(
+                {
+                    "execution_status": "success",
+                    "row_count": len(rows),
+                    "columns_returned": cols,
+                    "non_null_metric_count": non_null,
+                    "chart_type_final": final_type,
+                }
+            )
+
+        w["_validation"] = validation
+        kept_defs.append(w)
+
+    # Minimum-save rule: a dashboard needs at least one chartable widget. Widgets
+    # whose validation query fails or returns weak data are kept (and flagged),
+    # so the only widgets that count as unsavable are narrative/no-SQL findings.
+    if len(kept_defs) < 1:
+        detail = (
+            "This suggestion has no chartable widgets to build a dashboard."
+        )
+        if dropped_widgets:
+            detail += " Skipped: " + "; ".join(
+                f"{d['title']} ({d['reason']})" for d in dropped_widgets[:6]
+            )
+        detail += (
+            " Try a more specific request, or add data sources that support the "
+            "metrics you want to see."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail
+        )
+
+    # Step 3 — Build: for each surviving widget, reuse or create a SavedQuery.
     widgets_config: list[dict[str, Any]] = []
     created_queries: list[int] = []
     reused_queries: list[int] = []
 
-    # Pre-fetch all existing saved queries for this project to check for duplicates
     existing_queries_result = await session.scalars(
         select(SavedQuery).where(SavedQuery.project_id == project.id)
     )
     existing_queries = list(existing_queries_result)
 
-    import re as _re
-
     def _normalize_sql(sql: str) -> str:
         """Normalize SQL for comparison — collapse whitespace and lowercase."""
-        return _re.sub(r"\s+", " ", sql.strip().rstrip(";").lower())
+        return re.sub(r"\s+", " ", sql.strip().rstrip(";").lower())
 
-    # Build lookup: normalized_sql → SavedQuery
     sql_to_query: dict[str, SavedQuery] = {}
     for eq in existing_queries:
         if eq.sql_text:
             sql_to_query[_normalize_sql(eq.sql_text)] = eq
 
-    # Existing queries with SQL, sent to the dedicated query-match endpoint.
     existing_with_sql = [eq for eq in existing_queries if eq.sql_text]
 
     async def _find_matching_query(widget_sql: str, widget_title: str) -> SavedQuery | None:
@@ -1587,102 +2930,135 @@ async def ai_generate_and_save_dashboard(
             logger.warning("AI query matching failed, will create new query")
         return None
 
-    for idx, w in enumerate(widget_defs):
-        widget_sql = (w.get("sql", "") or "").rstrip().rstrip(";")
-        widget_title = w.get("title", f"Widget {idx + 1}")
-        widget_type = w.get("type", "bar")
-        x_col = w.get("x_column") or ""
-        y_col = w.get("y_column") or ""
-        aggregation = w.get("aggregation") or "count"
+    for idx, w in enumerate(kept_defs):
+        widget_sql = (w.get("sql", "") or "").strip().rstrip(";")
+        widget_title = str(w.get("title", f"Widget {idx + 1}"))
+        widget_type = str(w.get("type", "bar"))
+        aggregation = (w.get("aggregation") or "count").lower()
+        x_col = w.get("label_column") or w.get("x_column") or ""
+        y_col = w.get("value_column") or w.get("y_column") or ""
+        y2_col = w.get("value_column_2") or ""
 
-        data_source: dict[str, Any] = {"kind": "custom_sql", "customSql": ""}
-        if widget_sql:
-            # Tier 1: exact normalized SQL match (instant)
-            norm_sql = _normalize_sql(widget_sql)
-            existing = sql_to_query.get(norm_sql)
+        # Tier 1: exact normalized SQL match.
+        norm_sql = _normalize_sql(widget_sql)
+        existing = sql_to_query.get(norm_sql)
+        # Tier 2: AI semantic equivalence match.
+        if not existing:
+            existing = await _find_matching_query(widget_sql, widget_title)
+        # Tier 3: name-based match.
+        if not existing:
+            candidate_name = f"AI - {widget_title}".lower().strip()
+            for eq in existing_queries:
+                if eq.name and eq.name.lower().strip() == candidate_name:
+                    existing = eq
+                    break
 
-            # Tier 2: AI semantic match (checks if purpose/result is the same)
-            if not existing:
-                existing = await _find_matching_query(widget_sql, widget_title)
+        if existing:
+            reused_queries.append(existing.id)
+            data_source: dict[str, Any] = {"kind": "query", "queryId": existing.id}
+        else:
+            left_ds = _detect_datasource(widget_sql, allowed_tables)
+            query = SavedQuery(
+                project_id=project.id,
+                owner_id=context.user_id,
+                name=f"AI - {widget_title}",
+                description=str(w.get("business_question") or ""),
+                sql_text=widget_sql,
+                left_datasource=left_ds,
+                ai_generated=True,
+            )
+            session.add(query)
+            await session.flush()
+            created_queries.append(query.id)
+            data_source = {"kind": "query", "queryId": query.id}
+            sql_to_query[norm_sql] = query
+            existing_queries.append(query)
 
-            # Tier 3: name-based match — if a query with the same name exists,
-            # reuse it to avoid duplicate-named queries in the project
-            if not existing:
-                candidate_name = f"AI - {widget_title}".lower().strip()
-                for eq in existing_queries:
-                    if eq.name and eq.name.lower().strip() == candidate_name:
-                        existing = eq
-                        logger.info(
-                            "Name-match: reusing query %d (%s) for widget: %s",
-                            eq.id, eq.name, widget_title,
-                        )
-                        break
+        base_type, subtype = _map_widget_visual(widget_type)
+        default_w = {"kpi": 3, "table": 12, "pie": 5}.get(base_type, 6)
+        default_h = {"kpi": 2, "table": 5}.get(base_type, 4)
+        grid_w = int(w.get("gridW") or w.get("grid_w") or default_w)
+        grid_h = int(w.get("gridH") or w.get("grid_h") or default_h)
 
-            if existing:
-                reused_queries.append(existing.id)
-                data_source = {"kind": "query", "queryId": existing.id}
-                logger.info(
-                    "Reusing existing query %d (%s) for dashboard widget: %s",
-                    existing.id, existing.name, widget_title,
-                )
-            else:
-                # No match — create a new SavedQuery
-                left_ds = _detect_datasource(widget_sql, allowed_tables)
-                query = SavedQuery(
-                    project_id=project.id,
-                    owner_id=context.user_id,
-                    name=f"AI - {widget_title}",
-                    description="",
-                    sql_text=widget_sql,
-                    left_datasource=left_ds,
-                )
-                session.add(query)
-                await session.flush()
-                created_queries.append(query.id)
-                data_source = {"kind": "query", "queryId": query.id}
-                sql_to_query[norm_sql] = query
-                # Also add to existing_queries so AI can match subsequent widgets
-                existing_queries.append(query)
-
-        mapped_type = _map_chart_type(widget_type)
-
-        # Use AI-suggested layout or fall back to sensible defaults
-        ai_grid_w = w.get("gridW") or w.get("grid_w")
-        ai_grid_h = w.get("gridH") or w.get("grid_h")
-        ai_grid_x = w.get("gridX") or w.get("grid_x")
-        ai_grid_y = w.get("gridY") or w.get("grid_y")
-
-        # Default sizing by chart type if AI didn't specify
-        default_w = {"kpi": 3, "table": 12, "pie": 4}.get(mapped_type, 6)
-        default_h = {"kpi": 2, "table": 5}.get(mapped_type, 4)
-        grid_w = int(ai_grid_w) if ai_grid_w is not None else default_w
-        grid_h = int(ai_grid_h) if ai_grid_h is not None else default_h
-        grid_x = int(ai_grid_x) if ai_grid_x is not None else (idx % 2) * 6
-        grid_y = int(ai_grid_y) if ai_grid_y is not None else (idx // 2) * 4
-
-        # Clamp to valid grid bounds
-        grid_w = max(2, min(12, grid_w))
-        grid_h = max(1, min(8, grid_h))
-        grid_x = max(0, min(11, grid_x))
-
-        widgets_config.append({
+        widget_conf: dict[str, Any] = {
             "id": f"ai_widget_{idx}",
             "title": widget_title,
-            "type": mapped_type,
-            "chartSubtype": _map_chart_subtype(widget_type),
+            "type": base_type,
+            "chartSubtype": subtype,
+            # Preserve the planner's richer chart type so the UI can render it
+            # natively later even though it maps to a base type for now.
+            "aiChartType": widget_type,
             "dataSource": data_source,
             "xColumn": x_col,
             "yColumn": y_col,
-            "aggregation": aggregation.lower() if aggregation else "count",
+            "aggregation": (
+                aggregation
+                if aggregation in ("sum", "avg", "count", "min", "max")
+                else "count"
+            ),
             "sortBy": "x_asc",
             "filters": [],
-            "colSpan": grid_w,
             "position": idx,
-            "gridX": grid_x,
-            "gridY": grid_y,
             "gridW": grid_w,
             "gridH": grid_h,
-        })
+        }
+        if y2_col:
+            widget_conf["y2Column"] = y2_col
+
+        # Per-widget execution validation metadata captured by the judge.
+        validation_meta = w.get("_validation")
+        if isinstance(validation_meta, dict):
+            widget_conf["validation"] = validation_meta
+
+        # Join-quality metadata when the widget uses a multi-table join.
+        join_meta = _build_join_metadata(w)
+        if join_meta is not None:
+            widget_conf["joinMetadata"] = join_meta
+
+        # Carry reference lines (thresholds/SLAs) the planner grounded in docs.
+        ref_lines: list[dict[str, Any]] = []
+        for rl in (w.get("reference_lines") or []):
+            value = rl.get("value") if isinstance(rl, dict) else None
+            if value is None:
+                continue
+            try:
+                ref_lines.append(
+                    {
+                        "axis": "y",
+                        "value": float(value),
+                        "label": (rl.get("label") or rl.get("source_document") or ""),
+                    }
+                )
+            except (TypeError, ValueError):
+                continue
+        if ref_lines:
+            widget_conf["visualizationOptions"] = {"referenceLines": ref_lines}
+
+        widgets_config.append(widget_conf)
+
+    # Lay widgets out on the 12-column grid in priority order.
+    _pack_grid(widgets_config)
+
+    # Dashboard-level validation summary (doc §11). A simple quality score:
+    # fraction of generated widgets that survived validation.
+    approved_count = len(widgets_config)
+    dropped_count = len(dropped_widgets)
+    total_generated = approved_count + dropped_count
+    quality_score = (
+        round(approved_count / total_generated, 2) if total_generated else 0.0
+    )
+    validation_summary = (
+        f"approved={approved_count} dropped={dropped_count} "
+        f"repaired={repair_count} quality={quality_score}"
+    )
+    rejected_insights = list(suggestion.get("rejected_insights", []))
+
+    logger.info(
+        "AI dashboard validation | dashboard=%s approved=%d dropped=%d "
+        "repaired=%d quality=%s",
+        dashboard_title, approved_count, dropped_count, repair_count,
+        quality_score,
+    )
 
     # Step 4: Create the Dashboard
     dashboard = Dashboard(
@@ -1690,13 +3066,29 @@ async def ai_generate_and_save_dashboard(
         owner_id=context.user_id,
         tenant_id=context.tenant_id,
         name=dashboard_title,
-        description=req.description or req.prompt or "",
+        description=(
+            req.description
+            or suggestion.get("executive_summary")
+            or req.prompt
+            or ""
+        ),
         status="draft",
         config={
             "widgets": widgets_config,
             "filters": [],
             "layout": "grid",
             "ai_generated": True,
+            "generation_pipeline_version": "insight_first_v1",
+            "business_domain": suggestion.get("business_domain", ""),
+            "intended_audience": suggestion.get("intended_audience", ""),
+            "executive_summary": suggestion.get("executive_summary", ""),
+            "dashboard_quality_score": quality_score,
+            "approved_widget_count": approved_count,
+            "dropped_widget_count": dropped_count,
+            "flagged_widget_count": len(flagged_widgets),
+            "repair_count": repair_count,
+            "rejected_insights": rejected_insights,
+            "validation_summary": validation_summary,
         },
     )
     session.add(dashboard)
@@ -1705,9 +3097,10 @@ async def ai_generate_and_save_dashboard(
 
     logger.info(
         "AI action: generate_and_save_dashboard | dashboard_id=%d widgets=%d "
-        "queries_created=%d queries_reused=%d project=%d tenant=%d user=%d",
-        dashboard.id, len(widgets_config), len(created_queries),
-        len(reused_queries), project.id, context.tenant_id, context.user_id,
+        "dropped=%d queries_created=%d queries_reused=%d project=%d tenant=%d user=%d",
+        dashboard.id, len(widgets_config), len(dropped_widgets),
+        len(created_queries), len(reused_queries), project.id,
+        context.tenant_id, context.user_id,
     )
     return {
         "action": "generate_and_save_dashboard",
@@ -1715,40 +3108,511 @@ async def ai_generate_and_save_dashboard(
         "dashboard_id": dashboard.id,
         "dashboard_name": dashboard_title,
         "widgets_created": len(widgets_config),
+        "widgets_dropped": dropped_widgets,
+        "widgets_flagged": flagged_widgets,
         "queries_created": created_queries,
         "queries_reused": reused_queries,
         "model_used": ai_result.get("model_used", ""),
     }
 
 
-def _map_chart_type(ai_type: str) -> str:
-    """Map AI-suggested chart types to the dashboard widget chart type."""
-    mapping = {
-        "kpi": "kpi",
-        "bar": "bar",
-        "line": "line",
-        "pie": "pie",
-        "area": "area",
-        "table": "table",
-        "donut": "pie",
-        "scatter": "line",
+@router.post("/actions/suggest-dashboards")
+async def ai_suggest_dashboards(
+    req: AISuggestDashboardsRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Return >= 3 dashboard plan suggestions for a project (insight-first).
+
+    Mirrors the Home "New Dashboard Suggestions" flow on the Dashboard page.
+    These are previews only — nothing is saved. The user saves a chosen plan via
+    the existing ``/actions/generate-and-save-dashboard`` pipeline, which runs the
+    full SQL validation/judge and drops empty widgets.
+    """
+    await _check_project_access(session, context, req.project_id)
+
+    # Allowed tables = the project's real datasources (reference docs excluded).
+    ds_stmt = select(FileSourceMeta).where(
+        FileSourceMeta.project_id == req.project_id,
+        FileSourceMeta.tenant_id == context.tenant_id,
+        FileSourceMeta.archived.is_(False),
+    )
+    ds_result = await session.execute(ds_stmt)
+    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
+    # Real KPI names from the project graph (never invented).
+    from app.models.ai_project_graph import AIProjectGraphNode
+
+    kpi_rows = (
+        await session.scalars(
+            select(AIProjectGraphNode.name).where(
+                AIProjectGraphNode.tenant_id == context.tenant_id,
+                AIProjectGraphNode.project_id == req.project_id,
+                AIProjectGraphNode.is_active.is_(True),
+                AIProjectGraphNode.node_type.in_(("kpi", "metric")),
+            )
+        )
+    ).all()
+    kpis = [k for k in kpi_rows if k]
+
+    kg_context = await _kg_context(session, context, req.project_id)
+
+    desired = max(3, int(req.desired_count or 3))
+    payload = {
+        "tenant_id": context.tenant_id,
+        "user_id": context.user_id,
+        "project_id": req.project_id,
+        "prompt": req.prompt or "",
+        "audience": req.audience or "",
+        "desired_count": desired,
+        "allowed_tables": allowed_tables,
+        "kpis": kpis,
+        # Steer each preview toward the graph's risks/gaps/KPIs/governing docs.
+        "knowledge_graph_context": kg_context,
     }
-    return mapping.get(ai_type.lower(), "bar")
+    ai_result = await _forward_to_ai("/ai/dashboard/suggest-multi", payload)
+    raw_suggestions = ai_result.get("suggestions", []) or []
+
+    # Compact, chip-friendly KG summary the FE renders on each preview card.
+    kg_chips = _kg_context_chips(kg_context)
+
+    # A runner bound to this project's VDB so each widget's SQL is executed and
+    # turned into real, renderable chart series (same as the Home dashboard
+    # suggestions). Previews are best-effort: a widget that fails or returns no
+    # rows is still returned (status != "valid") so the preview never collapses.
+    from app.routes.home_intelligence import _make_runner
+
+    runner = _make_runner(session, context, req.project_id)
+
+    suggestions: list[dict[str, Any]] = []
+    for idx, s in enumerate(raw_suggestions):
+        if not isinstance(s, dict):
+            continue
+        widgets = await _render_preview_widgets(runner, s.get("widgets", []))
+        # Only surface allowed tables as data sources (defence in depth).
+        data_sources = [
+            str(d) for d in s.get("data_sources", []) if str(d) in allowed_tables
+        ]
+        title = str(s.get("title") or "AI Dashboard")
+        description = str(s.get("description", ""))
+        business_purpose = str(s.get("business_purpose", ""))
+        audience = str(s.get("audience") or req.audience or "")
+        kpi_names = [str(k) for k in s.get("kpis", []) if k]
+        # savePayload is echoed back verbatim on Save so the save stage persists
+        # *this* selected suggestion (its real widget SQL) rather than
+        # re-deriving a plan from scratch.
+        save_payload = {
+            "title": title,
+            "description": description,
+            "businessPurpose": business_purpose,
+            "audience": audience,
+            "prompt": _suggestion_save_prompt(
+                title, business_purpose, description, widgets, kpi_names
+            ),
+            "widgets": widgets,
+            "kpis": kpi_names,
+            "dataSources": data_sources,
+        }
+        suggestions.append(
+            {
+                "id": f"suggestion-{idx + 1}",
+                "title": title,
+                "description": description,
+                "businessPurpose": business_purpose,
+                "audience": audience,
+                "widgets": widgets,
+                "kpis": kpi_names,
+                "dataSources": data_sources,
+                "confidence": float(s.get("confidence") or 0.0),
+                "qualityScore": int(s.get("quality_score") or 0),
+                "validationSummary": "",
+                "knowledgeGraphContext": kg_chips,
+                "savePayload": save_payload,
+            }
+        )
+
+    logger.info(
+        "AI action: suggest_dashboards | count=%d project=%d tenant=%d user=%d",
+        len(suggestions), req.project_id, context.tenant_id, context.user_id,
+    )
+    preview_note = (
+        ""
+        if suggestions
+        else (
+            "Tablescope could not build full dashboard previews from the current "
+            "data. Refine the request or add more data sources, then try again."
+        )
+    )
+    return {
+        "action": "suggest_dashboards",
+        "suggestions": suggestions,
+        "previewNote": preview_note,
+        "model_used": ai_result.get("model_used", ""),
+    }
+
+
+async def _render_preview_widgets(
+    runner: Any, raw_widgets: list[Any]
+) -> list[dict[str, Any]]:
+    """Execute each plan widget's SQL and attach real, renderable chart data.
+
+    Mirrors the Home "New Dashboard Suggestions" flow: the AI returns widget SQL
+    grounded in the project's real tables, we run it against the project VDB and
+    build a ``{label, value}`` chart series the FE renders with the same widget
+    renderer the dashboard uses. Best-effort and side-effect free — a widget that
+    has no SQL (narrative/risk/gap), fails to execute, or returns no rows is still
+    returned with a non-``valid`` status so the preview never collapses to a
+    "not enough strong widgets" error.
+    """
+    from app.services import home_intelligence as hi
+
+    async def render(w: Any) -> dict[str, Any] | None:
+        if not isinstance(w, dict):
+            return None
+        title = str(w.get("title", ""))
+        chart_type = str(w.get("chart_type") or w.get("type") or "")
+        business_question = str(w.get("business_question", ""))
+        sql = (w.get("sql") or "").strip()
+        label_col = str(w.get("label_column", ""))
+        value_col = str(w.get("value_column", ""))
+        widget: dict[str, Any] = {
+            "title": title,
+            "chartType": chart_type,
+            "businessQuestion": business_question,
+            "sql": sql,
+            "labelColumn": label_col,
+            "valueColumn": value_col,
+            "chart": None,
+            "previewData": {"columns": [], "rows": []},
+            "status": "narrative" if not sql else "preview_only",
+        }
+        if not sql:
+            return widget
+        result = await hi._safe_query(runner, sql)
+        if result and result.get("rows"):
+            widget["previewData"] = {
+                "columns": list(result.get("columns", [])),
+                "rows": list(result.get("rows", []))[:100],
+            }
+            widget["status"] = "valid"
+            chart = hi._build_chart(
+                chart_type or "bar", title, result, label_col, value_col
+            )
+            if chart:
+                widget["chart"] = chart
+        return widget
+
+    rendered = await asyncio.gather(
+        *(render(w) for w in raw_widgets if isinstance(w, dict))
+    )
+    return [w for w in rendered if w]
+
+
+def _suggestion_save_prompt(
+    title: str,
+    business_purpose: str,
+    description: str,
+    widgets: list[dict[str, Any]],
+    kpis: list[str],
+) -> str:
+    """Build a focused prompt that pins the strict save stage to a chosen plan."""
+    parts: list[str] = [p for p in (title, business_purpose, description) if p]
+    for w in widgets:
+        label = str(w.get("title") or "")
+        question = str(w.get("businessQuestion") or "")
+        if label or question:
+            parts.append(": ".join(p for p in (label, question) if p))
+    if kpis:
+        parts.append("KPIs to cover: " + ", ".join(kpis))
+    return ". ".join(parts)
+
+
+@router.post("/actions/save-dashboard-suggestion")
+async def ai_save_dashboard_suggestion(
+    req: AISaveDashboardSuggestionRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Persist a previewed dashboard suggestion using strict save validation.
+
+    Preview (``/actions/suggest-dashboards``) never persists and never raises the
+    strict "needed 2, got N" error. Saving is a separate stage:
+
+    * When the previewed suggestion carries executable widget SQL (the normal
+      path now), persist exactly those widgets — each SQL is saved as a project
+      query and referenced from the dashboard config — so the saved dashboard
+      matches what the user previewed.
+    * Otherwise fall back to the strict generate-and-save pipeline, which
+      re-derives a plan from the prompt and drops widgets that fail to execute.
+    """
+    s = req.suggestion
+
+    # Persist the previewed widgets directly when they carry runnable SQL.
+    sql_widgets = [w for w in s.widgets if (w.sql or "").strip()]
+    if sql_widgets:
+        from app.routes.home_intelligence import (
+            SaveDashboardRequest,
+            SaveDashboardWidget,
+            home_save_dashboard,
+        )
+
+        saved = await home_save_dashboard(
+            SaveDashboardRequest(
+                project_id=req.project_id,
+                title=s.title or "AI Dashboard",
+                widgets=[
+                    SaveDashboardWidget(
+                        title=w.title or "Widget",
+                        sql=w.sql,
+                        chartType=w.chartType or "bar",
+                        labelColumn=w.labelColumn or None,
+                        valueColumn=w.valueColumn or None,
+                    )
+                    for w in sql_widgets
+                ],
+            ),
+            session=session,
+            context=context,
+        )
+        dashboard_id = saved.get("dashboard_id")
+        saved["action"] = "save_dashboard_suggestion"
+        saved["suggestion_id"] = req.suggestionId
+        saved["dashboard_name"] = saved.get("name")
+        if dashboard_id is not None:
+            saved["dashboard_url"] = (
+                f"/projects/{req.project_id}/dashboards/{dashboard_id}"
+            )
+        logger.info(
+            "AI action: save_dashboard_suggestion (direct) | dashboard_id=%s "
+            "suggestion=%s widgets=%d project=%d tenant=%d user=%d",
+            dashboard_id, req.suggestionId, len(sql_widgets), req.project_id,
+            context.tenant_id, context.user_id,
+        )
+        return saved
+
+    prompt = s.prompt or _suggestion_save_prompt(
+        s.title,
+        s.businessPurpose,
+        s.description,
+        [w.model_dump() for w in s.widgets],
+        list(s.kpis),
+    )
+    saved = await ai_generate_and_save_dashboard(
+        AIGenerateAndSaveDashboardRequest(
+            project_id=req.project_id,
+            prompt=prompt or None,
+            name=s.title or None,
+            description=s.description or None,
+        ),
+        session=session,
+        context=context,
+    )
+    dashboard_id = saved.get("dashboard_id")
+    saved["action"] = "save_dashboard_suggestion"
+    saved["suggestion_id"] = req.suggestionId
+    if dashboard_id is not None:
+        saved["dashboard_url"] = (
+            f"/projects/{req.project_id}/dashboards/{dashboard_id}"
+        )
+    logger.info(
+        "AI action: save_dashboard_suggestion | dashboard_id=%s suggestion=%s "
+        "project=%d tenant=%d user=%d",
+        dashboard_id, req.suggestionId, req.project_id,
+        context.tenant_id, context.user_id,
+    )
+    return saved
+
+
+# Insight-first chart catalog → (dashboard WidgetType, ChartSubtype).
+# The planner may request a rich type (horizontal_bar, dual_line, waterfall,
+# bubble, …); the dashboard renderer expresses these as a base type plus a
+# subtype, so map every planner type down to a supported pair.
+_CHART_TYPE_MAP: dict[str, tuple[str, str]] = {
+    "kpi": ("kpi", "kpi"),
+    "kpi_grid": ("kpi", "kpi"),
+    "bar": ("bar", "column"),
+    "vertical_bar": ("bar", "column"),
+    "horizontal_bar": ("bar", "horizontal_bar"),
+    "stacked_bar": ("bar", "stacked_bar"),
+    "grouped_bar": ("bar", "grouped_bar"),
+    "waterfall": ("bar", "waterfall"),
+    "bullet": ("bar", "horizontal_bar"),
+    "line": ("line", ""),
+    "dual_line": ("line", "biaxial_line"),
+    "area": ("area", ""),
+    "pie": ("pie", ""),
+    "donut": ("pie", "donut"),
+    "gauge": ("pie", "gauge"),
+    "table": ("table", ""),
+    "pivot_table": ("table", ""),
+    "sparkline_table": ("table", ""),
+    "heatmap": ("table", ""),
+    "scatter": ("scatter", ""),
+    "bubble": ("scatter", "bubble"),
+    "treemap": ("treemap", ""),
+    "funnel": ("funnel", ""),
+    "radar": ("radar", ""),
+}
+
+
+def _map_widget_visual(ai_type: str) -> tuple[str, str]:
+    """Map a planner chart type to a (WidgetType, ChartSubtype) pair."""
+    return _CHART_TYPE_MAP.get((ai_type or "").lower(), ("bar", "column"))
+
+
+def _map_chart_type(ai_type: str) -> str:
+    """Map an AI-suggested chart type to the dashboard widget chart type."""
+    return _map_widget_visual(ai_type)[0]
 
 
 def _map_chart_subtype(ai_type: str) -> str:
-    """Map AI-suggested type to a chart subtype."""
-    mapping = {
-        "kpi": "kpi",
-        "bar": "column",
-        "line": "straight",
-        "pie": "pie",
-        "donut": "donut",
-        "area": "area",
-        "table": "table",
-        "scatter": "straight",
-    }
-    return mapping.get(ai_type.lower(), "column")
+    """Map an AI-suggested type to a chart subtype."""
+    return _map_widget_visual(ai_type)[1]
+
+
+def _build_join_metadata(widget: dict[str, Any]) -> dict[str, Any] | None:
+    """Build join-quality metadata for a widget when it uses a join.
+
+    Prefers the planner's ``relationship_plan``. If that is absent but the SQL
+    contains a JOIN, emit best-effort metadata and flag it so the gap is
+    visible. Returns None when the widget is single-table.
+    """
+    plan = widget.get("relationship_plan")
+    sql = (widget.get("sql", "") or "")
+    has_join = re.search(r"\bjoin\b", sql, re.IGNORECASE) is not None
+
+    if isinstance(plan, dict) and (plan.get("requires_join") or has_join):
+        return {
+            "requiresJoin": bool(plan.get("requires_join") or has_join),
+            "leftTable": str(plan.get("left_table") or ""),
+            "rightTable": str(plan.get("right_table") or ""),
+            "leftJoinKey": str(plan.get("left_join_key") or ""),
+            "rightJoinKey": str(plan.get("right_join_key") or ""),
+            "relationshipType": str(plan.get("relationship_type") or "unknown"),
+            "joinConfidence": plan.get("join_confidence"),
+            "confidenceReason": str(plan.get("confidence_reason") or ""),
+            "rowMultiplicationRisk": str(plan.get("row_multiplication_risk") or ""),
+            "validated": False,
+            "matchRate": None,
+            "rowMultiplicationRatio": None,
+        }
+
+    if has_join:
+        logger.warning(
+            "AI dashboard widget %r uses a JOIN with no relationship_plan; "
+            "emitting best-effort join metadata",
+            widget.get("title", "untitled"),
+        )
+        return {
+            "requiresJoin": True,
+            "leftTable": "",
+            "rightTable": "",
+            "leftJoinKey": "",
+            "rightJoinKey": "",
+            "relationshipType": "unknown",
+            "joinConfidence": None,
+            "confidenceReason": "inferred from SQL JOIN (no planner metadata)",
+            "rowMultiplicationRisk": "unknown",
+            "validated": False,
+            "matchRate": None,
+            "rowMultiplicationRatio": None,
+        }
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Dashboard widget judge (executes each widget's SQL, drops empty/weak ones)
+# ---------------------------------------------------------------------------
+
+_TIME_SERIES_TYPES = frozenset({"line", "area", "dual_line"})
+_PART_TO_WHOLE_TYPES = frozenset({"pie", "donut"})
+_NARRATIVE_TYPES = frozenset({"narrative_insight", "none", "narrative"})
+
+
+def _norm_col(name: str) -> str:
+    return (name or "").strip().strip('"').lower()
+
+
+def _judge_widget(
+    widget: dict[str, Any], columns: list[str], rows: list[dict[str, Any]]
+) -> tuple[bool, str]:
+    """Decide whether an executed widget should be kept.
+
+    Returns ``(keep, reason)``; ``reason`` explains the drop when ``keep`` is
+    False. Mirrors the doc's judge rules: drop empty results, drop when the
+    configured value column is missing/all-null, and drop time-series widgets
+    with fewer than 3 periods.
+    """
+    wtype = str(widget.get("type", "bar")).lower()
+
+    if not rows:
+        return False, "returned no rows"
+
+    vcol = widget.get("value_column") or widget.get("y_column") or ""
+    if vcol:
+        col_map = {_norm_col(c): c for c in columns}
+        actual = col_map.get(_norm_col(vcol))
+        if actual is None:
+            return False, f"value column '{vcol}' missing from result"
+        if all(r.get(actual) is None for r in rows):
+            return False, f"value column '{vcol}' is entirely null"
+
+    if wtype in _TIME_SERIES_TYPES and len(rows) < 3:
+        return False, f"time-series needs >= 3 periods (got {len(rows)})"
+
+    return True, ""
+
+
+def _correct_widget_chart(
+    widget: dict[str, Any], columns: list[str], rows: list[dict[str, Any]]
+) -> None:
+    """Apply safe in-place chart-type corrections after execution.
+
+    - pie/donut with > 8 slices → horizontal_bar (ranking, not part-to-whole).
+    - vertical bar with long category labels (or many bars) → horizontal_bar.
+    """
+    wtype = str(widget.get("type", "bar")).lower()
+
+    if wtype in _PART_TO_WHOLE_TYPES and len(rows) > 8:
+        widget["type"] = "horizontal_bar"
+        return
+
+    if wtype in ("bar", "vertical_bar"):
+        lcol = widget.get("label_column") or widget.get("x_column") or ""
+        col_map = {_norm_col(c): c for c in columns}
+        actual = col_map.get(_norm_col(lcol))
+        if actual:
+            labels = [str(r.get(actual, "")) for r in rows[:20]]
+            if labels:
+                avg_len = sum(len(x) for x in labels) / len(labels)
+                if avg_len > 16 or len(rows) > 8:
+                    widget["type"] = "horizontal_bar"
+
+
+def _pack_grid(widgets_config: list[dict[str, Any]]) -> None:
+    """Lay widgets out left-to-right on a 12-column grid in priority order.
+
+    KPI tiles are placed first across the top row; remaining widgets flow in a
+    simple row-packing reading path. Mutates each widget's gridX/gridY/colSpan.
+    """
+    cursor_x = 0
+    cursor_y = 0
+    row_h = 0
+    for w in widgets_config:
+        gw = max(2, min(12, int(w.get("gridW") or 6)))
+        gh = max(1, min(8, int(w.get("gridH") or 4)))
+        if cursor_x + gw > 12:
+            cursor_x = 0
+            cursor_y += row_h
+            row_h = 0
+        w["gridX"] = cursor_x
+        w["gridY"] = cursor_y
+        w["gridW"] = gw
+        w["gridH"] = gh
+        w["colSpan"] = gw
+        cursor_x += gw
+        row_h = max(row_h, gh)
 
 
 # ---------------------------------------------------------------------------
@@ -1775,8 +3639,29 @@ def _message_dict(m: AiConversationMessage) -> dict[str, Any]:
         "id": m.id,
         "role": m.role,
         "content": m.content,
+        "data": m.data,
         "createdAt": m.created_at.isoformat() if m.created_at else None,
     }
+
+
+def _chat_answer_text(question: str, run: dict[str, Any]) -> str:
+    """Short natural-language answer for an executed chat query.
+
+    Prefers the generator's plain-English explanation; otherwise states the
+    single scalar result (KPI-style questions) or how many rows were returned.
+    The full result table + chart are attached separately as structured data.
+    """
+    explanation = (run.get("explanation") or "").strip()
+    columns = run.get("columns") or []
+    rows = run.get("rows") or []
+    if not rows:
+        return explanation or "The query ran but returned no rows."
+    if len(rows) == 1 and len(columns) == 1:
+        value = rows[0].get(columns[0])
+        scalar = f"{columns[0]}: {value}"
+        return f"{explanation}\n\n{scalar}".strip() if explanation else scalar
+    summary = f"Here are the results ({len(rows)} rows)."
+    return f"{explanation}\n\n{summary}".strip() if explanation else summary
 
 
 def _conversation_dict(
@@ -1786,6 +3671,8 @@ def _conversation_dict(
         "id": c.id,
         "title": c.title,
         "projectId": c.project_id,
+        "parentConversationId": c.parent_conversation_id,
+        "branchedFromMessageId": c.branched_from_message_id,
         "createdAt": c.created_at.isoformat() if c.created_at else None,
         "updatedAt": c.updated_at.isoformat() if c.updated_at else None,
     }
@@ -1935,6 +3822,15 @@ async def add_conversation_message(
         session, context, conversation_id, with_messages=True
     )
 
+    # Prior turns (oldest→newest) so the AI can resolve follow-up references
+    # like "explain more" or "the second option" without the user restating
+    # context. Captured before the new user message is appended.
+    history = [
+        {"role": m.role, "content": m.content}
+        for m in convo.messages[-CONVERSATION_HISTORY_LIMIT:]
+        if (m.content or "").strip()
+    ]
+
     # Resolve the project used to scope the AI answer.
     project_id = req.project_id or convo.project_id
     if project_id is not None:
@@ -1954,31 +3850,52 @@ async def add_conversation_message(
     session.add(user_msg)
 
     answer: str
-    if project_id is None:
+    answer_data: dict[str, Any] | None = None
+    if _is_query_summary_request(question):
+        # Answered directly from the DB across all accessible projects — no
+        # AI-server call, so it never fails with a signature error and always
+        # reflects the caller's real authorized queries.
+        answer = await _build_query_summary(session, context)
+    elif project_id is None:
         answer = (
             "I couldn't find a project to ground my answer. Create a project "
             "with data first, then ask again."
         )
     else:
-        try:
-            payload = {
-                "tenant_id": context.tenant_id,
-                "user_id": context.user_id,
-                "project_id": project_id,
-                "question": question,
-                "scope": "project",
-                "include_query_history": True,
-                "include_dashboard_context": True,
+        # Answer data questions the same way the Project Insight page does:
+        # auto-resolve the source, generate + execute SQL, and return the real
+        # result (rows + suggested chart) rather than printing SQL. If the
+        # question isn't a data question the source can ground (e.g. a document
+        # or summary request), fall back to the free-text AI answer.
+        run = await _ask_and_run_core(
+            session, context,
+            project_id=project_id,
+            question=question,
+            max_rows=CHAT_ANSWER_MAX_ROWS,
+        )
+        if run.get("status") == "success":
+            answer = _chat_answer_text(question, run)
+            answer_data = {
+                "sql": run.get("sql", ""),
+                "columns": run.get("columns", []),
+                "rows": run.get("rows", []),
+                "suggestedVisualization": run.get(
+                    "suggestedVisualization", {"type": "table"}
+                ),
+                "explanation": run.get("explanation", ""),
+                "dataSourcesUsed": run.get("dataSourcesUsed", []),
             }
-            result = await _forward_to_ai("/ai/ask", payload)
-            answer = str(result.get("answer") or "").strip() or (
-                "The AI returned an empty response."
-            )
-        except HTTPException as e:
-            answer = f"Sorry — I couldn't answer that. {e.detail}"
+        else:
+            answer = await _forward_prose_answer(
+                context,
+                project_id=project_id,
+                question=question,
+                history=history,
+            ) or "The AI returned an empty response."
 
     assistant_msg = AiConversationMessage(
-        conversation_id=convo.id, role="assistant", content=answer
+        conversation_id=convo.id, role="assistant", content=answer,
+        data=answer_data,
     )
     session.add(assistant_msg)
     await session.commit()
@@ -1996,7 +3913,82 @@ async def add_conversation_message(
     except Exception:
         pass  # best-effort — don't block the response
 
+    # Expire the (stale, empty) messages collection so the re-query below
+    # actually reloads it with the just-appended user/assistant pair — without
+    # this the identity-mapped object would return its earlier-loaded state.
+    session.expire(convo, ["messages"])
     refreshed = await _get_owned_conversation(
         session, context, conversation_id, with_messages=True
+    )
+    return _conversation_dict(refreshed, include_messages=True)
+
+
+class ConversationBranchCreate(BaseModel):
+    # When omitted, the branch forks from the last message of the source.
+    message_id: int | None = None
+    title: str | None = None
+
+
+@router.post("/conversations/{conversation_id}/branch")
+async def branch_conversation(
+    conversation_id: int,
+    req: ConversationBranchCreate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Fork a new conversation from a point in an existing one.
+
+    Copies every message up to and including ``message_id`` into a fresh
+    conversation that records its parent + the branch point, so the user can
+    explore an alternative direction without disturbing the original thread.
+    """
+    source = await _get_owned_conversation(
+        session, context, conversation_id, with_messages=True
+    )
+    if req.message_id is None:
+        # Branch from the tail of the thread.
+        if not source.messages:
+            raise HTTPException(
+                status_code=400, detail="Cannot branch an empty conversation"
+            )
+        branch_point: AiConversationMessage = source.messages[-1]
+    else:
+        found: AiConversationMessage | None = None
+        for _m in source.messages:
+            if _m.id == req.message_id:
+                found = _m
+                break
+        if found is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Branch message not found in conversation",
+            )
+        branch_point = found
+
+    title = (req.title or "").strip() or f"Branch of {source.title}"
+    branch = AiConversation(
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=source.project_id,
+        title=title[:255],
+        parent_conversation_id=source.id,
+        branched_from_message_id=branch_point.id,
+    )
+    session.add(branch)
+    await session.flush()
+
+    for m in source.messages:
+        session.add(
+            AiConversationMessage(
+                conversation_id=branch.id, role=m.role, content=m.content,
+                data=m.data,
+            )
+        )
+        if m.id == branch_point.id:
+            break
+
+    await session.commit()
+    refreshed = await _get_owned_conversation(
+        session, context, branch.id, with_messages=True
     )
     return _conversation_dict(refreshed, include_messages=True)

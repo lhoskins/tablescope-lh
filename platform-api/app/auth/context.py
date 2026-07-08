@@ -36,6 +36,11 @@ class RequestContext:
     def permissions(self) -> list[str]:
         return self.claims.permissions
 
+    @property
+    def aal(self) -> str | None:
+        """Supabase assurance level carried through the first-party token."""
+        return self.claims.aal
+
     def has_permission(self, permission: str) -> bool:
         return permission in self.permissions
 

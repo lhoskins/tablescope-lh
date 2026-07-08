@@ -1,0 +1,80 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { IconHelpCircle } from "@tabler/icons-react";
+import { AppShell } from "@/components/tablescope/app-shell";
+import { StatusDot } from "@/components/tablescope/status-dot";
+import { Button } from "@/components/ui/button";
+import { HeroSearch } from "@/components/tablescope/home/hero-search";
+import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
+import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
+import { getUserMeta } from "@/lib/auth";
+import { greeting } from "@/lib/ui/format";
+import {
+  useCurrentUser,
+  useProjectSummaries,
+} from "@/lib/ui/use-shell-data";
+import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
+
+const FALLBACK_USER: CurrentUser = {
+  name: "",
+  email: "",
+  role: "",
+  tenantName: "",
+  initials: "··",
+};
+const FALLBACK_TENANT: TenantSummary = {
+  name: "Tablescope",
+  slug: "",
+  initials: "TS",
+};
+
+export default function BusinessInsightPage() {
+  const router = useRouter();
+  const { data: identity } = useCurrentUser();
+  const { data: allProjects } = useProjectSummaries();
+
+  useEffect(() => {
+    if (!getUserMeta()) router.replace("/login");
+  }, [router]);
+
+  const user = identity?.user ?? FALLBACK_USER;
+  const tenant = identity?.tenant ?? FALLBACK_TENANT;
+
+  return (
+    <AppShell
+      mode="home"
+      activeNav="business-insight"
+      tenant={tenant}
+      user={user}
+      counts={{ projects: allProjects?.length }}
+      topBarLeft={
+        <span className="text-[15px] text-ink-secondary">
+          {user.name ? greeting(user.name) : "Business Insight"}
+        </span>
+      }
+      topBarRight={
+        <>
+          <StatusDot tone="online" className="mr-1" />
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={() => router.push("/help")}
+          >
+            <IconHelpCircle size={15} />
+            Help
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-10 py-6">
+        <div className="mx-auto w-full max-w-content space-y-6">
+          <HeroSearch />
+          <HomeAiSuggestions />
+        </div>
+        <IntelligenceFeed />
+      </div>
+    </AppShell>
+  );
+}

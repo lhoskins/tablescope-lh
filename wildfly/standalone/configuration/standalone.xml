@@ -470,6 +470,16 @@
                         <connection-definition class-name="org.teiid.resource.adapter.file.FileManagedConnectionFactory" jndi-name="java:/excelDS" enabled="true" use-java-context="true" pool-name="excelDS">
                             <config-property name="AllowParentPaths">true</config-property>
                             <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                            <pool>
+                                <min-pool-size>0</min-pool-size>
+                                <max-pool-size>250</max-pool-size>
+                                <prefill>false</prefill>
+                                <flush-strategy>IdleConnections</flush-strategy>
+                            </pool>
+                            <timeout>
+                                <blocking-timeout-millis>10000</blocking-timeout-millis>
+                                <idle-timeout-minutes>3</idle-timeout-minutes>
+                            </timeout>
                         </connection-definition>
                     </connection-definitions>
                 </resource-adapter>
@@ -480,6 +490,16 @@
                         <connection-definition class-name="org.teiid.resource.adapter.file.FileManagedConnectionFactory" jndi-name="java:/fileDS" enabled="true" use-java-context="true" pool-name="teiid-file-ds">
                             <config-property name="AllowParentPaths">true</config-property>
                             <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                            <pool>
+                                <min-pool-size>0</min-pool-size>
+                                <max-pool-size>250</max-pool-size>
+                                <prefill>false</prefill>
+                                <flush-strategy>IdleConnections</flush-strategy>
+                            </pool>
+                            <timeout>
+                                <blocking-timeout-millis>10000</blocking-timeout-millis>
+                                <idle-timeout-minutes>3</idle-timeout-minutes>
+                            </timeout>
                         </connection-definition>
                     </connection-definitions>
                 </resource-adapter>
@@ -489,6 +509,16 @@
                         <connection-definition class-name="org.teiid.resource.adapter.file.FileManagedConnectionFactory" jndi-name="java:/excelTestDS" enabled="true" use-java-context="true" pool-name="excelTestDS">
                             <config-property name="AllowParentPaths">true</config-property>
                             <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                            <pool>
+                                <min-pool-size>0</min-pool-size>
+                                <max-pool-size>250</max-pool-size>
+                                <prefill>false</prefill>
+                                <flush-strategy>IdleConnections</flush-strategy>
+                            </pool>
+                            <timeout>
+                                <blocking-timeout-millis>10000</blocking-timeout-millis>
+                                <idle-timeout-minutes>3</idle-timeout-minutes>
+                            </timeout>
                         </connection-definition>
                     </connection-definitions>
                 </resource-adapter>
@@ -499,6 +529,16 @@
                         <connection-definition class-name="org.teiid.resource.adapter.file.FileManagedConnectionFactory" jndi-name="java:/fileTestDS" enabled="true" use-java-context="true" pool-name="teiid-fileTest-ds">
                             <config-property name="AllowParentPaths">true</config-property>
                             <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                            <pool>
+                                <min-pool-size>0</min-pool-size>
+                                <max-pool-size>250</max-pool-size>
+                                <prefill>false</prefill>
+                                <flush-strategy>IdleConnections</flush-strategy>
+                            </pool>
+                            <timeout>
+                                <blocking-timeout-millis>10000</blocking-timeout-millis>
+                                <idle-timeout-minutes>3</idle-timeout-minutes>
+                            </timeout>
                         </connection-definition>
                     </connection-definitions>
                 </resource-adapter>

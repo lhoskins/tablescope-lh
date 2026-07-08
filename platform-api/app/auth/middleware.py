@@ -14,6 +14,7 @@ whether anonymous access is acceptable.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
@@ -34,15 +35,23 @@ _ANONYMOUS_PATH_PREFIXES = (
     "/redoc",
     "/api/auth/login",
     "/api/auth/exchange",
+    "/api/auth/hooks/send-sms",
     "/api/billing/catalog",
+    "/api/billing/tenant-slug-availability",
     "/api/billing/checkout/session",
     "/api/billing/stripe/webhook",
     "/api/provisioning/status",
 )
 
+# Avatars are served by opaque URL for <img> tags (which cannot send a bearer
+# token); reads are anonymous, uploads remain authenticated.
+_ANONYMOUS_PATH_RE = re.compile(r"^/api/users/\d+/avatar/?$")
+
 
 def _is_anonymous_path(path: str) -> bool:
-    return any(path.startswith(prefix) for prefix in _ANONYMOUS_PATH_PREFIXES)
+    if any(path.startswith(prefix) for prefix in _ANONYMOUS_PATH_PREFIXES):
+        return True
+    return bool(_ANONYMOUS_PATH_RE.match(path))
 
 
 def _synthesize_service_claims(api_key: str) -> TokenClaims:
@@ -92,7 +101,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
             except AuthError as exc:
                 logger.info("Rejected JWT: %s", exc)
                 return JSONResponse(
-                    {"detail": "Invalid or expired token"},
+                    {
+                        "detail": (
+                            "Your session has expired. Please sign in again."
+                        ),
+                        "error": "SESSION_EXPIRED",
+                        "code": "SESSION_EXPIRED",
+                    },
                     status_code=401,
                 )
             request.state.context = RequestContext(claims=claims, is_service=False)

@@ -38,12 +38,21 @@ from app.models.data_source_ai_profile import (
 )
 from app.models.database_connection import DatabaseConnection
 from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
+from app.models.database_data_source_assignment import (
+    DatabaseDataSourceAssignment,
+)
 from app.models.file_source_meta import FileSourceMeta
 from app.models.grid_preference import GridPreference
 from app.models.intelligence_snapshot import IntelligenceSnapshot
+from app.models.knowledge_graph_snapshot import AIProjectGraphSnapshot
+from app.models.mfa_phone_factor import MfaPhoneFactor
+from app.models.mfa_sms_event import MfaSmsEvent
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_asset import ProjectAsset
+from app.models.project_insight_acknowledgement import (
+    ProjectInsightAcknowledgement,
+)
 from app.models.query_scope import QueryScope
 from app.models.reference_library import (
     ReferenceAdditionRequest,
@@ -55,8 +64,10 @@ from app.models.reference_library import (
 from app.models.report import Report
 from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.saved_query import SavedQuery
+from app.models.scope_canvas_layout import ScopeCanvasLayout
+from app.models.scope_set import ScopeSet
 from app.models.shared_vdb import SharedVDB
-from app.models.tenant import Tenant
+from app.models.tenant import Tenant, TenantAllowedDomain
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
 from app.models.tenant_membership import TenantAuthBinding, TenantMembership
 from app.models.user import User
@@ -69,6 +80,8 @@ __all__ = [
     "AiConversationMessage",
     "AuditEvent",
     "Report",
+    "ScopeCanvasLayout",
+    "ScopeSet",
     "AIAssetKPI",
     "AIAssetKPISuggestion",
     "AIAssetTag",
@@ -94,12 +107,17 @@ __all__ = [
     "DatabaseConnection",
     "DataSourceColumn",
     "DatabaseDataSource",
+    "DatabaseDataSourceAssignment",
     "FileSourceMeta",
     "GridPreference",
     "IntelligenceSnapshot",
+    "AIProjectGraphSnapshot",
+    "MfaPhoneFactor",
+    "MfaSmsEvent",
     "OrganizationVDB",
     "Project",
     "ProjectAsset",
+    "ProjectInsightAcknowledgement",
     "ProjectMember",
     "QueryScope",
     "ReferenceAdditionRequest",
@@ -111,6 +129,7 @@ __all__ = [
     "SavedQuery",
     "SharedVDB",
     "Tenant",
+    "TenantAllowedDomain",
     "TenantDataPlane",
     "TenantSecretRef",
     "TenantAuthBinding",

@@ -9,10 +9,12 @@ Every endpoint:
 6. Updates last_activity for idle shutdown
 """
 
+import difflib
 import json
 import logging
 import re
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -43,20 +45,34 @@ from app.models.schemas import (
     IntelligencePlanRequest,
     IntelligencePlanResponse,
     InterpretedInsight,
+    KnowledgeGraphCard,
+    KnowledgeGraphInsightRequest,
+    KnowledgeGraphInsightResponse,
     MatchQueryRequest,
     MatchQueryResponse,
     PlannedAnalysis,
+    ProjectInsightExecutiveSummary,
+    ProjectInsightRequest,
+    ProjectInsightResponse,
     ReferenceSuggestRequest,
     ReferenceSuggestResponse,
     ReferenceSummarizeRequest,
     ReferenceSummarizeResponse,
     RelationshipSuggestion,
     ScopeSuggestion,
+    SelectedSource,
+    SourceCatalogEntry,
+    DashboardPlanSuggestion,
+    DashboardPlanWidget,
     SuggestDashboardRequest,
     SuggestDashboardResponse,
+    SuggestDashboardsMultiRequest,
+    SuggestDashboardsMultiResponse,
 )
 from app.services import context_builder, llm_client, vector_store
 from app.services.context_builder import ContextBuildError
+from app.services.kg_context import format_knowledge_graph_context
+from app.services.prompt_loader import load_prompt_reference
 from app.services.sql_validator import SQLValidationError, validate_sql
 
 logger = logging.getLogger(__name__)
@@ -136,6 +152,50 @@ def _clean_sql(raw: str) -> str:
     return sql
 
 
+# A CTE starts with ``WITH <name> AS (`` — matching that (rather than a bare
+# ``WITH``) avoids treating the word "with" inside prose as the start of SQL.
+_WITH_CTE_RE = re.compile(r"\bWITH\s+\"?\w+\"?\s+AS\s*\(", re.IGNORECASE)
+_SELECT_RE = re.compile(r"\bSELECT\b", re.IGNORECASE)
+
+
+def _extract_sql(raw: str) -> str:
+    """Extract a single clean, read-only SQL statement from a model response.
+
+    Models sometimes wrap SQL in markdown, prefix it with prose ("To calculate
+    the defect rate ..."), or append an explanation after the query. Any of that
+    reaching Teiid raises a parser error (``TEIID31100 ... Encountered "To ..."``),
+    so this strips everything before the first ``SELECT``/``WITH`` statement and
+    everything after the first complete statement. Returns "" when the response
+    contains no SQL statement, so the caller can ask for clarification instead of
+    executing prose.
+    """
+    if not raw:
+        return ""
+    text = raw.strip()
+    # Prefer a fenced ```sql block when present; keep the fenced body only.
+    if "```" in text:
+        for seg in text.split("```"):
+            candidate = seg.strip()
+            if candidate.lower().startswith("sql"):
+                candidate = candidate[3:].strip()
+            if _SELECT_RE.search(candidate) or _WITH_CTE_RE.search(candidate):
+                text = candidate
+                break
+    starts = [
+        m.start()
+        for m in (_SELECT_RE.search(text), _WITH_CTE_RE.search(text))
+        if m
+    ]
+    if not starts:
+        return ""
+    text = text[min(starts):]
+    # Keep only the first statement — drop trailing statements/prose.
+    semicolon = text.find(";")
+    if semicolon != -1:
+        text = text[:semicolon]
+    return _fix_teiid_group_by(text.strip()).strip()
+
+
 SYSTEM_PROMPT = (
     "You are Tablescope AI, an assistant for the user's active project.\n"
     "Answer using ONLY the provided context package (project metadata/tables, "
@@ -154,7 +214,33 @@ SYSTEM_PROMPT = (
     "\n"
     "If the context is insufficient to answer, say specifically what additional "
     "project data or document would be needed. Do not invent facts.\n"
+    "\n"
+    "Use the prior messages in this conversation to interpret follow-up "
+    "questions. If the user says \"that\", \"it\", \"the second option\", "
+    "\"explain more\", or \"continue\", resolve the reference from the "
+    "conversation history above rather than asking them to restate it.\n"
 )
+
+
+# Cap history sent to the model so long conversations stay within budget.
+_MAX_HISTORY_TURNS = 20
+
+
+def _format_conversation_history(history: list[dict[str, Any]]) -> str:
+    """Render prior conversation turns into a prompt block (oldest→newest)."""
+    if not history:
+        return ""
+    lines: list[str] = []
+    for msg in history[-_MAX_HISTORY_TURNS:]:
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            continue
+        role = str(msg.get("role") or "user").lower()
+        speaker = "User" if role == "user" else "Assistant"
+        lines.append(f"{speaker}: {content}")
+    if not lines:
+        return ""
+    return "Conversation so far:\n" + "\n".join(lines) + "\n\n"
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -183,7 +269,8 @@ async def ask(req: AskRequest) -> AskResponse:
 
     # 3. Send ONLY allowed context to LLM
     context_text = context_builder.context_to_prompt_text(ctx)
-    prompt = f"{context_text}\n\nUser question: {req.question}"
+    history_text = _format_conversation_history(req.history)
+    prompt = f"{context_text}\n\n{history_text}User question: {req.question}"
 
     answer = await llm_client.generate(
         prompt=prompt,
@@ -414,9 +501,174 @@ async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateR
     )
 
 
+def _needs_clarification(sql: str) -> bool:
+    return "NEED_CLARIFICATION" in (sql or "").upper()
+
+
+def _referenced_tables(sql: str) -> list[str]:
+    """Table identifiers referenced in FROM/JOIN clauses of the SQL."""
+    return re.findall(r"(?:FROM|JOIN)\s+\"?(\w+)\"?(?![\w(])", sql or "", re.IGNORECASE)
+
+
+_SOURCE_SUFFIX_RE = re.compile(
+    r"(_csv|_xlsx|_xls|_json|_parquet|_tsv|_table|_tbl|_view)$", re.IGNORECASE
+)
+
+
+def normalize_source_name(name: str) -> str:
+    """Lowercase, drop a file-format suffix, and collapse separators to spaces.
+
+    Lets ``fin_gl_chart_of_accounts`` / ``chart of accounts`` match the physical
+    source ``fin_gl_chart_of_accounts_CSV`` even without the exact suffix.
+    """
+    text = _SOURCE_SUFFIX_RE.sub("", (name or "").strip().lower())
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _score_source_match(request: str, source: str) -> int:
+    """Score how well ``request`` refers to authorized ``source`` (0–100)."""
+    req = (request or "").strip().lower()
+    src = (source or "").strip().lower()
+    if not req or not src:
+        return 0
+    if req == src:
+        return 100
+    req_n = normalize_source_name(request)
+    src_n = normalize_source_name(source)
+    if req_n and req_n == src_n:
+        return 95
+    if req == _SOURCE_SUFFIX_RE.sub("", src):
+        return 92
+    req_tokens = [t for t in req_n.split() if t]
+    src_tokens = {t for t in src_n.split() if t}
+    if req_tokens and set(req_tokens).issubset(src_tokens):
+        return 80
+    if req_n and src_n and difflib.SequenceMatcher(None, req_n, src_n).ratio() >= 0.85:
+        return 70
+    if req_n and req_n in src_n:
+        return 60
+    return 0
+
+
+def _catalog_table_columns(
+    catalog: list[SourceCatalogEntry] | None,
+) -> dict[str, list[str]]:
+    """Extract ``{source name: real columns}`` for table-kind catalog entries.
+
+    Feeds column-level validation so hallucinated column names (e.g.
+    ``DefectRate`` when the real column is ``DefectQty``) are caught and sent
+    back through the repair pass. Saved queries and sources without a known
+    column list are skipped.
+    """
+    result: dict[str, list[str]] = {}
+    for entry in catalog or []:
+        if entry.kind == "query":
+            continue
+        if entry.name and entry.columns:
+            result[entry.name] = list(entry.columns)
+    return result
+
+
+def _remap_tables_to_authorized(
+    sql: str,
+    allowed_tables: list[str],
+    preferred_sources: list[str] | None = None,
+) -> str:
+    """Rewrite FROM/JOIN table references to their best-matching authorized source.
+
+    The model frequently drops a source's file-format suffix — writing
+    ``SUP_Quality_Inspections`` for the authorized ``SUP_Quality_Inspections_CSV`` —
+    which then fails validation as an "unauthorized table reference". Deterministically
+    remap each unauthorized identifier to the closest authorized table (using the same
+    normalized/fuzzy scoring as source suggestions) so valid SQL is not rejected on a
+    cosmetic name mismatch.
+
+    When the semantic resolver has already auto-selected the source for this
+    request (``preferred_sources``) and the model instead invents a table name
+    with no confident fuzzy match (e.g. ``transactions``), the unknown reference
+    is remapped to that single resolved source rather than left to fail. This is
+    data-driven — it reuses the resolver's decision, not a hard-coded table — and
+    only applies when exactly one source was resolved, so legitimate multi-table
+    joins are never collapsed.
+    """
+    if not sql or not allowed_tables:
+        return sql
+    allowed_upper = {t.upper() for t in allowed_tables}
+    # A single resolved source is a safe force-remap target for invented names.
+    forced: str | None = None
+    if preferred_sources:
+        resolved = [s for s in preferred_sources if s.upper() in allowed_upper]
+        if len(set(s.upper() for s in resolved)) == 1:
+            forced = resolved[0]
+    remapped = sql
+    for ref in set(_referenced_tables(sql)):
+        if ref.upper() in allowed_upper:
+            continue
+        best_score = 0
+        best: str | None = None
+        for table in allowed_tables:
+            score = _score_source_match(ref, table)
+            if score > best_score:
+                best_score, best = score, table
+        target: str | None = None
+        if best and best_score >= 80:
+            target = best
+        elif forced is not None:
+            target = forced
+        if target and target.upper() != ref.upper():
+            pattern = re.compile(rf'("?)\b{re.escape(ref)}\b("?)')
+            remapped = pattern.sub(
+                lambda m, t=target: f"{m.group(1)}{t}{m.group(2)}", remapped
+            )
+    return remapped
+
+
+def _suggest_sources(prompt: str, allowed_tables: list[str], limit: int = 5) -> list[str]:
+    """Rank authorized sources by normalized/fuzzy match with the user's prompt."""
+    scored = sorted(
+        ((_score_source_match(prompt, t), t) for t in allowed_tables),
+        key=lambda x: (-x[0], x[1]),
+    )
+    ranked = [t for score, t in scored if score > 0]
+    return (ranked or allowed_tables)[:limit]
+
+
+def _selected_sources(
+    prompt: str, sql: str, allowed_tables: list[str]
+) -> list[SelectedSource]:
+    """Sources the generated SQL actually uses, with a short match reason."""
+    allowed_by_upper = {t.upper(): t for t in allowed_tables}
+    seen: set[str] = set()
+    out: list[SelectedSource] = []
+    prompt_tokens = {t for t in re.split(r"[^a-z0-9]+", prompt.lower()) if len(t) > 2}
+    for ref in _referenced_tables(sql):
+        canonical = allowed_by_upper.get(ref.upper())
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        parts = {p for p in re.split(r"[^a-z0-9]+", canonical.lower()) if len(p) > 2}
+        matched = sorted(
+            p for p in parts if any(p in tok or tok in p for tok in prompt_tokens)
+        )
+        reason = (
+            f"Matched '{', '.join(matched)}' in your request"
+            if matched
+            else "Authorized project source"
+        )
+        out.append(SelectedSource(name=canonical, reason=reason))
+    return out
+
+
 @router.post("/query/generate", response_model=GenerateSQLResponse)
 async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
-    """Generate SQL from a natural language prompt."""
+    """Generate SQL from a natural language prompt.
+
+    Pipeline: semantic source discovery → generate → validate → repair (up to
+    2 attempts) → return SQL + the sources the AI selected. If the model cannot
+    map the request to an authorized source it raises 422 with suggested
+    sources so the app can show a friendly clarification.
+    """
     request_id = str(uuid.uuid4())
     verify_signature(req.model_dump(exclude={"signature"}), req.signature)
 
@@ -437,6 +689,12 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
 
     context_text = context_builder.context_to_prompt_text(ctx)
 
+    # Fold in the Knowledge Graph context so generated SQL targets the validated
+    # risks/gaps/measured KPIs the graph surfaces (never Reference Library docs).
+    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+    if kg_block:
+        context_text = f"{context_text}\n\n{kg_block}"
+
     # Determine allowed tables
     allowed_tables = req.allowed_tables
     if not allowed_tables:
@@ -446,42 +704,90 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
             if ds.get("view_name") or ds.get("name")
         ]
 
-    # Generate SQL
-    sql = await llm_client.generate_sql(
+    catalog = req.source_catalog or None
+    table_columns = _catalog_table_columns(catalog)
+
+    def _clarify(reason: str) -> HTTPException:
+        suggestions = _suggest_sources(req.prompt, allowed_tables)
+        logger.warning(
+            "SQL generation needs clarification | tenant=%d project=%d | %s | "
+            "suggested=%s",
+            req.tenant_id, req.project_id, reason, suggestions,
+        )
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "needs_clarification",
+                "message": (
+                    "Could not match part of your request to an authorized "
+                    "project source."
+                ),
+                "reason": reason,
+                "suggested_sources": suggestions,
+            },
+        )
+
+    # Initial generation. Extract a single clean SQL statement so any prose the
+    # model wraps around the query never reaches Teiid.
+    raw = await llm_client.generate_sql(
         prompt=req.prompt,
         context=context_text,
         allowed_tables=allowed_tables,
+        source_catalog=catalog,
+        preferred_sources=req.preferred_sources,
+        relevant_columns=req.relevant_columns,
     )
+    if _needs_clarification(raw):
+        raise _clarify("Model could not find a matching authorized source.")
+    sql = _extract_sql(raw)
+    if not sql:
+        raise _clarify("Model did not return a runnable SQL query.")
 
-    # Clean SQL (remove markdown code blocks, fix Teiid GROUP BY aliases)
-    sql = _clean_sql(sql)
-
-    # Validate generated SQL
-    try:
-        validate_sql(sql, allowed_tables)
-    except SQLValidationError as e:
-        # Re-prompt once with validation feedback
-        sql = await llm_client.generate_sql(
-            prompt=(
-                f"{req.prompt}\n\n"
-                f"IMPORTANT: Your previous SQL was rejected: {e.reason}\n"
-                f"Fix these issues and try again."
-            ),
-            context=context_text,
-            allowed_tables=allowed_tables,
+    repaired = False
+    last_error = ""
+    # Validate, then repair up to 2 times. Remap cosmetic table-name mismatches
+    # (e.g. a dropped ``_CSV`` suffix) to the authorized source before validating
+    # so a valid query is not rejected on a name technicality.
+    for attempt in range(3):
+        sql = _remap_tables_to_authorized(
+            sql, allowed_tables, preferred_sources=req.preferred_sources
         )
-        sql = _clean_sql(sql)
-
-        # Validate again — if it still fails, return the error
         try:
-            validate_sql(sql, allowed_tables)
-        except SQLValidationError as e2:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Generated SQL failed validation: {e2.reason}",
+            validate_sql(sql, allowed_tables, table_columns=table_columns)
+            break
+        except SQLValidationError as e:
+            last_error = e.reason
+            if attempt >= 2:
+                raise _clarify(e.reason)
+            logger.info(
+                "Repairing generated SQL (attempt %d) | error=%s",
+                attempt + 1, e.reason,
             )
+            raw = await llm_client.repair_sql(
+                prompt=req.prompt,
+                context=context_text,
+                allowed_tables=allowed_tables,
+                failed_sql=sql,
+                validation_error=e.reason,
+                source_catalog=catalog,
+                preferred_sources=req.preferred_sources,
+                relevant_columns=req.relevant_columns,
+            )
+            repaired = True
+            if _needs_clarification(raw):
+                raise _clarify(last_error)
+            sql = _extract_sql(raw)
+            if not sql:
+                raise _clarify(last_error or "Model did not return a runnable SQL query.")
+
+    selected = _selected_sources(req.prompt, sql, allowed_tables)
 
     update_activity(req.user_id, req.tenant_id, req.project_id)
+
+    logger.info(
+        "SQL generated | tenant=%d project=%d repaired=%s sources=%s",
+        req.tenant_id, req.project_id, repaired, [s.name for s in selected],
+    )
 
     return GenerateSQLResponse(
         sql=sql,
@@ -489,12 +795,38 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         allowed_tables_used=allowed_tables,
         request_id=request_id,
         model_used=settings.sql_model,
+        selected_sources=selected,
+        repaired=repaired,
+        knowledge_graph_context_used=bool(kg_block),
     )
+
+
+_DASHBOARD_INSIGHT_SYSTEM_PROMPT = (
+    "You are Tablescope AI acting as a senior business analyst, KPI strategist, "
+    "and dashboard designer working inside ONE authorized Tablescope project. "
+    "Your job is NOT to create generic charts from whatever tables exist. First "
+    "reason about what a well-run company in this domain should monitor, where "
+    "risk or opportunity lives, and which insights deserve dashboard placement — "
+    "THEN choose the single best visualization for each insight and write the "
+    "SQL that proves it.\n"
+    "Use ONLY the authorized project context provided in the request (tables, "
+    "columns, saved queries, documents, KPI references, reference-library "
+    "standards, and relationships). Never reference data outside it. Do not "
+    "invent tables, columns, metrics, thresholds, benchmarks, dates, values, or "
+    "documents. If the context cannot support a proposed insight, leave it out. "
+    "Prefer fewer strong, non-empty, decision-grade widgets over many weak ones."
+)
 
 
 @router.post("/dashboard/suggest", response_model=SuggestDashboardResponse)
 async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardResponse:
-    """Suggest dashboard widgets based on project data."""
+    """Suggest dashboard widgets based on project data (insight-first).
+
+    Reasons like a senior analyst over the project's real schema, documents, KPI
+    references, and reference library, then emits chart-ready widget specs with
+    validation expectations and priority/confidence scores. The platform-api
+    judge stage executes each widget's SQL and drops empty/weak ones before save.
+    """
     request_id = str(uuid.uuid4())
     verify_signature(req.model_dump(exclude={"signature"}), req.signature)
 
@@ -528,80 +860,149 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     if req.prompt:
         user_instruction = f"\nUser request: {req.prompt}\n"
 
-    teiid_rules = (
-        "IMPORTANT: This database uses Teiid (not MySQL, not PostgreSQL).\n"
-        "All CSV columns are imported as strings.\n"
-        "- For SUM/AVG/MIN/MAX or arithmetic (*, /, +, -), CAST columns: CAST(col AS double)\n"
-        "- Do NOT use DATE_FORMAT, MONTH(), YEAR() (MySQL). Use FORMATDATE, EXTRACT, DATE_TRUNC.\n"
-        "- For monthly grouping: FORMATDATE(CAST(\"OrderDate\" AS date), 'yyyy-MM')\n"
-        "- Alias columns with safe identifiers (no reserved words like Month).\n"
-        "- GROUP BY must match SELECT expression exactly.\n"
+    chart_catalog = (
+        "Supported chart types — pick the SINGLE best one per insight; never "
+        "default everything to bar:\n"
+        "- kpi / kpi_grid: one or a few executive headline numbers (single-row aggregate).\n"
+        "- bar (vertical): compact category comparisons or period buckets.\n"
+        "- horizontal_bar: ranked categories with long labels — suppliers, customers, products, regions, top-N.\n"
+        "- stacked_bar: category composition over another category or period.\n"
+        "- grouped_bar: side-by-side comparison of 2+ metrics across categories.\n"
+        "- line: trends over time.\n"
+        "- dual_line: two related metrics over the same time axis.\n"
+        "- area: cumulative or volume-over-time.\n"
+        "- pie / donut: true part-to-whole share with 2-8 slices only.\n"
+        "- table / pivot_table: operational detail users can act on.\n"
+        "- heatmap: a metric across two categorical dimensions (intensity).\n"
+        "- scatter / bubble: relationship/correlation between two (or three) metrics.\n"
+        "- treemap: many categories' relative sizes.\n"
+        "- waterfall: bridge analysis / variance decomposition / contribution to change.\n"
+        "- funnel: stage conversion / drop-off.\n"
+        "- gauge / bullet: a metric vs an explicit target, threshold, SLA, or benchmark.\n"
+        "- radar: multi-metric comparison of a few items.\n"
+        "- sparkline_table: many entities each with an inline trend + current value.\n"
+        "- narrative_insight: a document-driven finding better told as prose (no SQL).\n"
     )
+
+    best_practices = load_prompt_reference("dashboard_best_practices.md")
+    best_practices_block = (
+        f"Dashboard Best Practices (authoritative policy):\n{best_practices}\n\n"
+        if best_practices
+        else ""
+    )
+
+    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+    kg_prompt_block = f"{kg_block}\n\n" if kg_block else ""
 
     prompt = (
         f"{context_text}\n\n"
-        f"Allowed tables: {', '.join(allowed_tables)}\n\n"
-        "CRITICAL: Use ONLY the tables listed in 'Allowed tables' above. Do NOT "
-        "invent or assume any other tables (e.g. Sales, Product, Customers) — "
-        "every widget's SQL must reference only those exact table names.\n\n"
-        f"{teiid_rules}\n"
-        f"{user_instruction}"
-        "Based on the available tables and their columns, suggest a dashboard "
-        "with useful widgets. Analyze the data carefully and choose the BEST "
-        "chart type for each metric — do NOT default everything to bar charts.\n\n"
-        "Guidelines for chart type selection:\n"
-        "- kpi: single-number metrics (totals, counts, averages) — use gridW=3 or 4, gridH=2\n"
-        "- bar: comparisons across categories — use gridW=6, gridH=4\n"
-        "- line: trends over time — use gridW=6 or 8, gridH=4\n"
-        "- pie: proportions/shares of a whole (limit to 5-8 slices) — use gridW=4 or 6, gridH=4\n"
-        "- area: cumulative trends or stacked comparisons — use gridW=6, gridH=4\n"
-        "- table: detailed data listings — use gridW=12, gridH=5\n\n"
-        "For each widget provide:\n"
-        "- type: one of kpi, bar, line, pie, area, table\n"
-        "- title: descriptive title\n"
-        "- sql: valid SQL using ONLY the allowed tables with proper CAST for numeric ops\n"
-        "- x_column: the column for the X axis or category\n"
-        "- y_column: the column for the Y axis or value\n"
-        "- aggregation: count, sum, avg, min, max\n"
-        "- gridX: X position on a 12-column grid (0-11)\n"
-        "- gridY: Y position in grid rows\n"
-        "- gridW: width in grid columns (1-12)\n"
-        "- gridH: height in grid rows (2 for kpi, 4-5 for charts)\n\n"
-        "Layout rules:\n"
-        "- Grid is 12 columns wide. Place KPI widgets across the top row.\n"
-        "- Vary the layout — mix sizes, use full-width charts where appropriate.\n"
-        "- Don't place all widgets in the same size or same column arrangement.\n"
-        "- Create a visually balanced dashboard with 4-8 widgets.\n\n"
-        "Return a JSON object with: title (dashboard name) and widgets (array).\n"
-        "Return ONLY the JSON."
+        f"{kg_prompt_block}"
+        f"{best_practices_block}"
+        f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
+        "CRITICAL: every widget's SQL must reference ONLY the allowed tables "
+        "above. Never invent or assume any other table (e.g. Sales, Product, "
+        "Customers).\n\n"
+        f"{_TEIID_SQL_RULES}\n"
+        f"{user_instruction}\n"
+        "Think like a senior business analyst and KPI strategist. Do NOT start "
+        "by making charts. First decide what a well-run company in this domain "
+        "should monitor, where the risk or opportunity is, and which insights "
+        "deserve dashboard placement. THEN, for each insight, choose the single "
+        "chart type that best communicates it and write the SQL that proves it.\n\n"
+        "Grounding rules:\n"
+        "- Use the project's real tables/columns, saved queries, documents, KPI "
+        "references, and reference-library standards shown above as evidence.\n"
+        "- Do NOT invent tables, columns, metrics, thresholds, dates, or values. "
+        "If the context cannot support an insight, leave it out.\n"
+        "- Prefer business impact over chart quantity; prefer fewer strong "
+        "widgets over many weak ones.\n"
+        "- Use reference-library thresholds/SLAs/benchmarks as target lines ONLY "
+        "when the value is explicit in the provided content, and cite the "
+        "document in reference_lines[].source_document.\n"
+        "- For any time-series chart, GROUP BY a sortable STRING period label "
+        "built with FORMATTIMESTAMP — default to month 'yyyy-MM' so a single "
+        "year still shows a trend; use 'yyyy' only across 3+ years. NEVER group "
+        "by a bare numeric year (it collapses to one point and renders as a "
+        "meaningless '2.0K' tile). Put the period first in SELECT, ORDER BY it, "
+        "and only build a trend when >= 3 periods exist — otherwise use a KPI or "
+        "category comparison. When the data spans 2+ years, prefer a "
+        "year-over-year view (month on the axis; year as the series or a "
+        "prior-year value_column_2) so this year is shown against last year.\n"
+        "- Do NOT create a pie/donut unless it is a true part-to-whole with 2-8 "
+        "slices. Do NOT create a KPI unless it is an executive-level number.\n"
+        "- Avoid WHERE filters on guessed values; only filter on values proven "
+        "by the schema/sample context or explicitly requested by the user.\n"
+        "- Do NOT include a widget you expect to return no rows.\n\n"
+        f"{chart_catalog}\n"
+        "SQL rules: read-only, never SELECT *, give every selected expression a "
+        "stable alias, and make label_column / value_column / value_column_2 / "
+        "series_column / target_column EXACTLY match aliases in the SELECT list. "
+        "Query a single allowed table per widget (no JOINs).\n\n"
+        "Layout: 12-column grid. Put the highest-priority executive KPIs in the "
+        "top row, place related charts near each other, give trend/table/heatmap/"
+        "waterfall charts more width (gridW 8-12), and create a clear top-left to "
+        "bottom-right reading path. Aim for 4-8 strong widgets.\n\n"
+        "Return ONLY a JSON object:\n"
+        "{\n"
+        '  "title": "dashboard name",\n'
+        '  "description": "one-line description",\n'
+        '  "business_domain": "",\n'
+        '  "intended_audience": "executive|manager|analyst|operational",\n'
+        '  "executive_summary": "2-3 sentences on what this dashboard answers",\n'
+        '  "widgets": [ {\n'
+        '    "type": "<one chart type from the catalog>",\n'
+        '    "title": "short widget title",\n'
+        '    "subtitle": "",\n'
+        '    "business_question": "the executive question this answers",\n'
+        '    "sql": "SELECT ... (empty for narrative_insight)",\n'
+        '    "label_column": "alias for the category/x axis",\n'
+        '    "value_column": "alias for the primary numeric value",\n'
+        '    "value_column_2": "alias for a 2nd metric (dual_line/scatter/bubble/target) or empty",\n'
+        '    "series_column": "alias that splits series (stacked/grouped) or empty",\n'
+        '    "target_column": "alias holding a target/threshold (gauge/bullet) or empty",\n'
+        '    "x_column": "alias for x (scatter/bubble) or empty",\n'
+        '    "y_column": "alias for y (scatter/bubble) or empty",\n'
+        '    "aggregation": "count|sum|avg|min|max",\n'
+        '    "reference_lines": [ {"label": "", "value": null, "source_document": ""} ],\n'
+        '    "drilldown_fields": [],\n'
+        '    "validation_expectations": {\n'
+        '      "minimum_rows": 1, "required_columns": [], "non_null_columns": [],\n'
+        '      "chart_requires_multiple_rows": false, "empty_result_action": "drop_widget"\n'
+        "    },\n"
+        '    "priority_score": 0,\n'
+        '    "confidence_score": 0.0,\n'
+        '    "gridX": 0, "gridY": 0, "gridW": 6, "gridH": 4\n'
+        "  } ]\n"
+        "}\n\n"
+        "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
+        "prose, no markdown, no code fences. Begin with { and end with }."
     )
 
     raw = await llm_client.generate(
         prompt=prompt,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
         model=settings.sql_model,
         temperature=0.3,
+        # Larger window so the injected dashboard_best_practices reference fits
+        # alongside the project context without truncation.
+        num_ctx=24576,
+        response_format="json",
     )
 
-    suggestions = []
-    try:
-        json_str = raw.strip()
-        if json_str.startswith("```"):
-            json_str = json_str.split("```")[1]
-            if json_str.startswith("json"):
-                json_str = json_str[4:]
-        parsed = json.loads(json_str)
-        if isinstance(parsed, dict):
-            suggestions = [parsed]
-        elif isinstance(parsed, list):
-            suggestions = parsed
-    except (json.JSONDecodeError, KeyError):
+    suggestions: list[dict] = []
+    parsed = _parse_json_response(raw)
+    if isinstance(parsed, dict):
+        suggestions = [parsed]
+    elif isinstance(parsed, list):
+        suggestions = [s for s in parsed if isinstance(s, dict)]
+    else:
         logger.warning("Failed to parse dashboard suggestions: %s", raw[:200])
 
     # Post-process: fix Teiid GROUP BY aliases in each widget's SQL, then drop
     # any widget whose SQL references a table outside the project's allowed set.
     # The LLM occasionally hallucinates generic tables (e.g. "Sales", "Product")
     # that do not belong to this tenant/project; those must never reach the user.
+    # Widgets with no SQL (narrative_insight) are kept — they are document-driven.
     for s in suggestions:
         kept_widgets = []
         for w in s.get("widgets", []):
@@ -617,6 +1018,10 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
                     )
                     continue
             kept_widgets.append(w)
+        # Highest-priority widgets first so the executive reading path is sound.
+        kept_widgets.sort(
+            key=lambda w: float(w.get("priority_score") or 0), reverse=True
+        )
         s["widgets"] = kept_widgets
 
     update_activity(req.user_id, req.tenant_id, req.project_id)
@@ -624,7 +1029,202 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     return SuggestDashboardResponse(
         suggestions=suggestions,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=settings.sql_model,
+    )
+
+
+@router.post(
+    "/dashboard/suggest-multi", response_model=SuggestDashboardsMultiResponse
+)
+async def suggest_dashboards_multi(
+    req: SuggestDashboardsMultiRequest,
+) -> SuggestDashboardsMultiResponse:
+    """Suggest several distinct dashboard *plans* (insight-first, lightweight).
+
+    Returns at least ``desired_count`` plans, each grounded in the project's real
+    tables, KPI references, and reference-library standards. These are previews:
+    the heavy SQL validation/build happens on save via the existing
+    generate-and-save-dashboard pipeline.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+
+    try:
+        ctx = await context_builder.build_context(
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            project_id=req.project_id,
+            scope="project",
+            question="",
+            feature="suggest_dashboard",
+        )
+    except ContextBuildError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied: {e.reason}",
+        )
+
+    context_text = context_builder.context_to_prompt_text(ctx)
+
+    allowed_tables = req.allowed_tables
+    if not allowed_tables:
+        allowed_tables = [
+            ds.get("view_name", ds.get("name", ""))
+            for ds in ctx.allowed_context.get("metadata", [])
+            if ds.get("view_name") or ds.get("name")
+        ]
+
+    desired = max(3, int(req.desired_count or 3))
+    audience_line = (
+        f"Target audience: {req.audience}.\n" if req.audience else ""
+    )
+    user_instruction = f"\nUser request: {req.prompt}\n" if req.prompt else ""
+    kpi_line = (
+        f"Known project KPIs (cover the relevant ones): {', '.join(req.kpis)}\n"
+        if req.kpis
+        else ""
+    )
+
+    best_practices = load_prompt_reference("dashboard_best_practices.md")
+    best_practices_block = (
+        f"Dashboard Best Practices (authoritative policy):\n{best_practices}\n\n"
+        if best_practices
+        else ""
+    )
+
+    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+    kg_prompt_block = f"{kg_block}\n\n" if kg_block else ""
+
+    prompt = (
+        f"{context_text}\n\n"
+        f"{kg_prompt_block}"
+        f"{best_practices_block}"
+        f"Allowed tables (use ONLY these exact names): {', '.join(allowed_tables)}\n\n"
+        f"{audience_line}"
+        f"{kpi_line}"
+        f"{user_instruction}\n"
+        f"Propose {desired} DISTINCT, non-overlapping dashboard PLANS a senior "
+        "analyst would build for this project. Each plan must target a different "
+        "business theme, audience, or decision (e.g. executive overview, supplier "
+        "quality & risk, on-time delivery & operations). Think first about what "
+        "matters; do not just regroup the same charts.\n\n"
+        "Grounding rules:\n"
+        "- Ground every plan in the project's REAL tables, columns, saved "
+        "queries, documents, KPI references, and reference-library standards "
+        "shown above.\n"
+        "- Do NOT invent tables, columns, metrics, KPIs, or data sources. Only "
+        "list data_sources from the allowed tables and kpis from the project's "
+        "real KPI references.\n"
+        "- Reference Library documents are authoritative guidance, NOT data "
+        "sources: never list a reference document as a data source.\n"
+        "- 3-6 widgets per plan. Each chart/table/KPI widget MUST include a "
+        "complete, runnable SQL query grounded in the allowed tables/columns "
+        "above so the dashboard can render real data. Use exact table and column "
+        "names; aggregate where appropriate; add ORDER BY and a small LIMIT "
+        "(<= 12 rows) for ranked/top-N widgets.\n"
+        "- For each widget also name the label_column (category/x axis) and "
+        "value_column (numeric/y axis) from the SELECT list.\n"
+        "- A narrative/risk/gap widget (chart_type 'narrative_insight') has an "
+        "empty sql; use these sparingly and prefer real data widgets.\n\n"
+        f"Return ONLY a JSON object with at least {desired} suggestions:\n"
+        "{\n"
+        '  "suggestions": [ {\n'
+        '    "title": "dashboard name",\n'
+        '    "description": "one-line description",\n'
+        '    "business_purpose": "the decision/question this dashboard drives",\n'
+        '    "audience": "executive|manager|analyst|operational",\n'
+        '    "widgets": [ {"title": "", "chart_type": "<chart type>", '
+        '"business_question": "", "sql": "SELECT ... (empty for '
+        'narrative_insight)", "label_column": "", "value_column": ""} ],\n'
+        '    "kpis": ["kpi names this dashboard covers"],\n'
+        '    "data_sources": ["allowed table names this dashboard uses"],\n'
+        '    "confidence": 0.0,\n'
+        '    "quality_score": 0\n'
+        "  } ]\n"
+        "}\n\n"
+        "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
+        "prose, no markdown, no code fences. Begin with { and end with }."
+    )
+
+    raw = await llm_client.generate(
+        prompt=prompt,
+        system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
+        model=settings.sql_model,
+        temperature=0.4,
+        num_ctx=24576,
+        response_format="json",
+    )
+
+    parsed = _parse_json_response(raw)
+    raw_suggestions: list[dict] = []
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("suggestions"), list):
+            raw_suggestions = [s for s in parsed["suggestions"] if isinstance(s, dict)]
+        else:
+            raw_suggestions = [parsed]
+    elif isinstance(parsed, list):
+        raw_suggestions = [s for s in parsed if isinstance(s, dict)]
+    else:
+        logger.warning("Failed to parse dashboard plans: %s", raw[:200])
+
+    allowed_set = {t.lower() for t in allowed_tables}
+    suggestions: list[DashboardPlanSuggestion] = []
+    for s in raw_suggestions:
+        widgets: list[DashboardPlanWidget] = []
+        for w in s.get("widgets", []):
+            if not isinstance(w, dict):
+                continue
+            sql = (w.get("sql") or "").strip()
+            if sql:
+                # Clean + validate against the allowed tables. Drop widgets whose
+                # SQL references tables outside the project (hallucinated/reference
+                # docs); narrative widgets (empty sql) are always kept.
+                sql = _clean_sql(sql)
+                try:
+                    validate_sql(sql, allowed_tables)
+                except SQLValidationError as e:
+                    logger.warning(
+                        "Dropping multi-suggest widget %r: %s",
+                        w.get("title", "untitled"), e.reason,
+                    )
+                    continue
+            widgets.append(
+                DashboardPlanWidget(
+                    title=str(w.get("title", "")),
+                    chart_type=str(w.get("chart_type") or w.get("type") or ""),
+                    business_question=str(w.get("business_question", "")),
+                    sql=sql,
+                    label_column=str(w.get("label_column", "")),
+                    value_column=str(w.get("value_column", "")),
+                )
+            )
+        # Keep only data sources that are real allowed tables (drop hallucinations
+        # and any reference document the planner may have slipped in).
+        data_sources = [
+            str(d)
+            for d in s.get("data_sources", [])
+            if str(d).lower() in allowed_set
+        ]
+        suggestions.append(
+            DashboardPlanSuggestion(
+                title=str(s.get("title") or "AI Dashboard"),
+                description=str(s.get("description", "")),
+                business_purpose=str(s.get("business_purpose", "")),
+                audience=str(s.get("audience") or req.audience or ""),
+                widgets=widgets,
+                kpis=[str(k) for k in s.get("kpis", []) if k],
+                data_sources=data_sources,
+                confidence=float(s.get("confidence") or 0.0),
+                quality_score=int(s.get("quality_score") or 0),
+            )
+        )
+
+    update_activity(req.user_id, req.tenant_id, req.project_id)
+
+    return SuggestDashboardsMultiResponse(
+        suggestions=suggestions,
+        request_id=request_id,
+        model_used=settings.sql_model,
     )
 
 
@@ -686,6 +1286,53 @@ def _build_schema_lines(table_schema: list[dict]) -> str:
     )
 
 
+def _build_relationship_hint_lines(hints: list[dict]) -> str:
+    """Render verified join candidates the platform discovered.
+
+    Only relationships supplied here (from scope metadata or exact matching
+    keys) may be joined; everything else stays single-table. Returns "" when
+    there is no relationship evidence, which leaves single-table behaviour
+    completely unchanged.
+    """
+    rows: list[str] = []
+    for h in hints:
+        left = h.get("left_table") or ""
+        right = h.get("right_table") or ""
+        lkey = h.get("left_join_key") or ""
+        rkey = h.get("right_join_key") or ""
+        if not (left and right and lkey and rkey):
+            continue
+        rel = h.get("relationship_type") or "unknown"
+        conf = h.get("join_confidence")
+        reason = h.get("confidence_reason") or ""
+        risk = h.get("row_multiplication_risk") or "unknown"
+        conf_str = f"{conf:.2f}" if isinstance(conf, int | float) else "n/a"
+        rows.append(
+            f'  - "{left}"."{lkey}" = "{right}"."{rkey}" '
+            f"(relationship={rel}, confidence={conf_str}, "
+            f"row_multiplication_risk={risk}{f'; {reason}' if reason else ''})"
+        )
+    if not rows:
+        return ""
+    return (
+        "\nRELATIONSHIP EVIDENCE — verified joins you MAY use (exception to the "
+        "single-table rule below):\n" + "\n".join(rows) + "\n"
+        "Multi-table join rules:\n"
+        "- You may JOIN a pair of tables ONLY when the exact pair and keys "
+        "appear in the list above. Never invent a join or join on matching "
+        "names that are not listed here.\n"
+        "- Default to at most TWO tables per analysis. Aggregate the detail/fact "
+        "table to one row per key in a derived step expressed as a single "
+        "GROUP BY before relating it to the master/entity table, so a "
+        "one-to-many join cannot multiply rows.\n"
+        "- Prefer a join only when it produces a genuinely cross-table insight "
+        "(e.g. high-spend suppliers with elevated defect rates, single-source "
+        "dependency, concentration risk). Otherwise stay single-table.\n"
+        "- Skip any join whose row_multiplication_risk is high unless you "
+        "aggregate first.\n"
+    )
+
+
 _TEIID_SQL_RULES = (
     "This database uses Teiid (not MySQL/PostgreSQL). Text-backed (CSV/file) "
     "columns are stored as STRINGS no matter what logical type is shown.\n"
@@ -702,10 +1349,24 @@ _TEIID_SQL_RULES = (
     "numeric sort on a numeric text-backed column, you MUST CAST it: "
     'CAST("col" AS double). Example: SUM(CAST("DefectQty" AS double)) / '
     'NULLIF(SUM(CAST("ReceivedQty" AS double)), 0).\n'
-    "- For date operations on a text-backed column, CAST to date first: "
-    'CAST("OrderDate" AS date).\n'
-    "- Do NOT use DATE_FORMAT/MONTH()/YEAR(). For year/month grouping prefer "
-    'EXTRACT(YEAR FROM CAST("OrderDate" AS date)).\n'
+    "- For date operations on a text-backed column, parse/cast it first: a slash "
+    "date like '1/19/2026' uses PARSETIMESTAMP(\"OrderDate\", 'M/d/yyyy'); an "
+    'ISO date like \'2026-01-19\' uses CAST("OrderDate" AS timestamp).\n'
+    "- To count days/months between two dates, NEVER subtract them "
+    "(date1 - date2 raises TEIID30070) and NEVER wrap a subtraction in "
+    "EXTRACT(DAY FROM ...). Use TIMESTAMPDIFF(SQL_TSI_DAY, <earlier>, <later>), "
+    "parsing text dates first, and CAST the result to double when aggregating "
+    "so it decodes: "
+    "AVG(CAST(TIMESTAMPDIFF(SQL_TSI_DAY, "
+    "PARSETIMESTAMP(\"ShipDate\", 'M/d/yyyy'), "
+    "PARSETIMESTAMP(\"DeliveryDate\", 'M/d/yyyy')) AS double)). "
+    "Also never use DATEDIFF.\n"
+    "- Do NOT use DATE_FORMAT/MONTH()/YEAR(). For a time trend, GROUP BY a "
+    "SORTABLE STRING period label built with FORMATTIMESTAMP, e.g. "
+    "FORMATTIMESTAMP(PARSETIMESTAMP(\"OrderDate\", 'M/d/yyyy'), 'yyyy-MM'). "
+    "Default to month ('yyyy-MM') so a single year still trends; use 'yyyy' only "
+    "across 3+ years. NEVER group a trend by a bare numeric year alone — it "
+    "collapses to one point and renders as a meaningless '2.0K' tile.\n"
     "- Alias columns with a plain identifier or double quotes (e.g. AS Month or "
     'AS "Month") — NEVER single quotes (AS \'Month\' is a syntax error).\n'
     "- Do NOT use CTEs (WITH), subqueries in FROM, or derived tables. Query the "
@@ -781,13 +1442,60 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
 
     doc_lines = ""
     if req.documents:
-        doc_lines = "\nProject documents (title — summary — tags):\n" + "\n".join(
-            f"  - {d.get('title', 'document')}: {(d.get('summary') or '')[:300]}"
-            + (f"  [tags: {', '.join(d.get('tags', []))}]" if d.get("tags") else "")
-            for d in req.documents[:25]
-        )
+        project_docs = [
+            d for d in req.documents if d.get("source") != "reference_library"
+        ]
+        reference_docs = [
+            d for d in req.documents if d.get("source") == "reference_library"
+        ]
+        sections: list[str] = []
+        if project_docs:
+            sections.append(
+                "\nProject documents (title — summary — tags):\n"
+                + "\n".join(
+                    f"  - {d.get('title', 'document')}: "
+                    f"{(d.get('summary') or '')[:300]}"
+                    + (
+                        f"  [tags: {', '.join(d.get('tags', []))}]"
+                        if d.get("tags")
+                        else ""
+                    )
+                    for d in project_docs[:20]
+                )
+            )
+        if reference_docs:
+            sections.append(
+                "\nReference Library — authoritative standards, regulations, "
+                "and governance policies that apply to this project. Treat "
+                "these as the source of truth for compliance requirements, "
+                "thresholds, and best practices. When the project's data can "
+                "be assessed against one of these, propose a finding that "
+                "grounds the risk/opportunity in the standard and ALWAYS put "
+                "the document's exact title in source_documents:\n"
+                + "\n".join(
+                    f"  - {d.get('title', 'document')}"
+                    + (
+                        " ["
+                        + ", ".join(
+                            p
+                            for p in (
+                                d.get("issuing_body") or "",
+                                d.get("tier") or "",
+                            )
+                            if p
+                        )
+                        + "]"
+                        if (d.get("issuing_body") or d.get("tier"))
+                        else ""
+                    )
+                    + f": {(d.get('summary') or '')[:300]}"
+                    for d in reference_docs[:25]
+                )
+            )
+        doc_lines = "".join(sections)
 
     schema_lines = _build_schema_lines(req.table_schema)
+    relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
     teiid_rules = _TEIID_SQL_RULES
 
     # Granularity (1 executive .. 5 granular) steers count + depth + how
@@ -815,7 +1523,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         )
 
     prompt = (
-        f"{context_text}\n{doc_lines}\n{schema_lines}\n\n"
+        f"{context_text}\n{doc_lines}\n{schema_lines}\n{relationship_lines}\n"
         f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
         f"{teiid_rules}\n"
         f"{depth_guidance}\n\n"
@@ -832,9 +1540,10 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "Examples of what counts: a cost metric and a quality metric that used to "
         "track together but no longer do; one category's share of a total "
         "shrinking while another grows; a rate (e.g. defects per unit) drifting "
-        "away from its historical band. The two variables MUST be columns on the "
-        "same table — never propose a relationship across two tables, since "
-        "cross-table JOINs are not permitted.\n"
+        "away from its historical band. By default the two variables should be "
+        "columns on the SAME table. Only relate columns across two tables when "
+        "that exact table pair and join keys appear in the RELATIONSHIP EVIDENCE "
+        "list above — never join on matching names that are not listed there.\n"
         "For each relationship analysis, decide which shape best reveals the "
         "change and choose accordingly:\n"
         "- If both variables are naturally plotted on a shared timeline → use "
@@ -867,13 +1576,26 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "... GROUP BY period' is WRONG because the result then has no time axis. "
         "Write 'SELECT period_expr AS Period, agg_a AS metric_a, agg_b AS "
         "metric_b ... GROUP BY period_expr ORDER BY period_expr'.\n"
-        "2. Derive the period from the date column using the parse that matches "
-        "its EXAMPLE value (see schema): a slash date like '1/19/2026' MUST use "
-        "EXTRACT(YEAR FROM PARSETIMESTAMP(\"DateCol\", 'M/d/yyyy')) — never "
-        "CAST a slash date straight to date, it fails. An ISO value like "
-        "'2026-01-19' uses EXTRACT(YEAR FROM CAST(\"DateCol\" AS date)). "
-        "Use YEAR+MONTH when one year holds too few rows to show a trend. "
-        "Repeat the full expression in GROUP BY (no alias references).\n"
+        "2. Build the period as a SORTABLE STRING label, NOT a bare numeric year "
+        "(a number like 2026 renders as a meaningless '2.0K' tile). Default to "
+        "MONTH granularity 'yyyy-MM' so a single year still shows a real trend; "
+        "use 'yyyy' only when the data clearly spans 3+ distinct years. Derive it "
+        "from the date column using the parse that matches its EXAMPLE value (see "
+        "schema): a slash date like '1/19/2026' MUST use "
+        "FORMATTIMESTAMP(PARSETIMESTAMP(\"DateCol\", 'M/d/yyyy'), 'yyyy-MM') — "
+        "never CAST a slash date straight to date, it fails. An ISO value like "
+        "'2026-01-19' uses FORMATTIMESTAMP(CAST(\"DateCol\" AS timestamp), "
+        "'yyyy-MM'). Repeat the full expression in GROUP BY (no alias references) "
+        "and ORDER BY it so periods are chronological.\n"
+        "2b. A trend needs >= 3 distinct periods. If monthly grouping still "
+        "yields < 3 periods the data is too thin for a trend — use a KPI or a "
+        "category comparison instead of a line.\n"
+        "2c. YEAR-OVER-YEAR: when the data spans 2+ years, compare the latest "
+        "year against the prior year — put the within-year period (month 'MM' or "
+        "'yyyy-MM') on the axis and either split the series by year or add the "
+        "prior-year metric as value_column_2, so 'this year vs last year' is "
+        "visible. With only ONE year of data, do NOT fabricate a prior-year "
+        "comparison; trend by month instead.\n"
         "3. Set label_column to the period alias (e.g. \"Period\"), value_column "
         "to the first metric alias, and value_column_2 to the second metric "
         "alias. All three MUST be aliases that actually appear in your SELECT.\n"
@@ -885,13 +1607,13 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "timestamp), CAST(\"d2\" AS timestamp)).\n"
         "Example (two metrics over time, date column whose example is a slash "
         "date like '1/19/2026'):\n"
-        "SELECT EXTRACT(YEAR FROM PARSETIMESTAMP(\"date_col\", 'M/d/yyyy')) "
-        "AS Period, AVG(CAST(\"metric_a\" AS double)) AS MetricA, "
+        "SELECT FORMATTIMESTAMP(PARSETIMESTAMP(\"date_col\", 'M/d/yyyy'), "
+        "'yyyy-MM') AS Period, AVG(CAST(\"metric_a\" AS double)) AS MetricA, "
         "AVG(CAST(\"metric_b\" AS double)) AS MetricB "
         "FROM \"some_table\" "
-        "GROUP BY EXTRACT(YEAR FROM PARSETIMESTAMP(\"date_col\", 'M/d/yyyy')) "
-        "ORDER BY Period — with label_column=Period, value_column=MetricA, "
-        "value_column_2=MetricB, chart_type=dual_line.\n\n"
+        "GROUP BY FORMATTIMESTAMP(PARSETIMESTAMP(\"date_col\", 'M/d/yyyy'), "
+        "'yyyy-MM') ORDER BY Period — with label_column=Period, "
+        "value_column=MetricA, value_column_2=MetricB, chart_type=dual_line.\n\n"
         "DOCUMENT-GROUNDED RELATIONSHIPS:\n"
         "Relationships are NOT limited to two table columns — also look for how "
         "the project's DATA relates to its DOCUMENTS, and how documents relate to "
@@ -920,7 +1642,8 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "it a document-only narrative finding.\n\n"
         "For data analyses, write a single read-only SQL query that returns a small "
         "result suitable for a chart or KPI (aggregate/group — not raw dumps), "
-        "querying exactly one allowed table with no joins or subqueries. Pick the "
+        "querying a single allowed table (or a verified two-table join from the "
+        "RELATIONSHIP EVIDENCE list) with no other joins or subqueries. Pick the "
         "chart type that BEST represents each result — do NOT default everything "
         "to bar. This is an executive report, so vary the visuals across the full "
         "range below:\n"
@@ -1197,6 +1920,420 @@ async def intelligence_interpret(
 
     return IntelligenceInterpretResponse(
         insights=insights,
+        request_id=request_id,
+        model_used=settings.reasoning_model,
+    )
+
+
+_KG_SYSTEM_PROMPT = (
+    "You are Tablescope AI acting as a senior business analyst reasoning over a "
+    "knowledge graph for ONE project. You are handed a SELECTED node and the "
+    "nodes/edges connected to it (documents, policies, processes, KPIs, data "
+    "sources, queries, dashboards, entities). Your job is to produce business "
+    "insight cards — the same caliber as the AI Home page — but specific to this "
+    "node and the data sources related to it in the graph. Ground every card "
+    "ONLY in the supplied nodes and relationships; never invent a node, "
+    "document, KPI, metric, threshold, or relationship that is not listed. "
+    "Every card must cite the graph_keys of the nodes that support it."
+)
+
+_KG_CATEGORIES = {
+    "business_insight", "opportunity", "risk", "warning", "gap", "recommendation",
+}
+_KG_SEVERITIES = {"critical", "urgent", "warning", "watch", "opportunity", "info"}
+
+
+def _build_kg_neighbor_lines(neighbors: list[dict]) -> str:
+    if not neighbors:
+        return "Connected nodes: (none)\n"
+    by_group: dict[str, list[dict]] = {}
+    for n in neighbors:
+        by_group.setdefault(str(n.get("display_group") or "Related"), []).append(n)
+    lines = ["Connected nodes (grouped), each with its relationship to the selected node:"]
+    for group, items in by_group.items():
+        lines.append(f"\n  {group}:")
+        for n in items[:14]:
+            rel = str(n.get("relationship") or "related_to")
+            direction = str(n.get("direction") or "")
+            arrow = (
+                "selected→node" if direction == "out"
+                else "node→selected" if direction == "in"
+                else "linked"
+            )
+            conf = n.get("confidence")
+            conf_str = f", confidence {conf:.2f}" if isinstance(conf, int | float) and conf else ""
+            label = str(n.get("label") or "")
+            key = str(n.get("graph_key") or "")
+            summary = str(n.get("summary") or "")[:140]
+            lines.append(
+                f"    - [{key}] {label} ({n.get('type', 'node')}) — "
+                f"{rel} [{arrow}]{conf_str}"
+                + (f" — {summary}" if summary else "")
+            )
+    return "\n".join(lines) + "\n"
+
+
+@router.post("/intelligence/knowledge-graph", response_model=KnowledgeGraphInsightResponse)
+async def knowledge_graph_insights(
+    req: KnowledgeGraphInsightRequest,
+) -> KnowledgeGraphInsightResponse:
+    """Generate AI-Home-style business-insight cards for a selected graph node.
+
+    Mirrors the AI Home architecture (deterministic evidence in, AI insight out)
+    but scoped to a single node's graph neighborhood: the platform passes the
+    deterministic node-centric graph and the model reasons over it, grounded in
+    the Knowledge Graph Insight Best Practices, to surface insights specific to
+    the data sources related to that node.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+
+    try:
+        ctx = await context_builder.build_context(
+            tenant_id=req.tenant_id,
+            user_id=req.user_id,
+            project_id=req.project_id,
+            scope="project",
+            question="",
+            feature="knowledge_graph",
+        )
+        context_text = context_builder.context_to_prompt_text(ctx)
+    except ContextBuildError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied: {e.reason}",
+        )
+
+    best_practices = load_prompt_reference("knowledge_graph_insight_best_practices.md")
+    best_practices_block = (
+        f"Knowledge Graph Insight Best Practices (authoritative policy):\n"
+        f"{best_practices}\n\n"
+        if best_practices
+        else ""
+    )
+
+    center = req.center or {}
+    allowed_keys = {
+        str(n.get("graph_key"))
+        for n in req.neighbors
+        if n.get("graph_key")
+    }
+    center_key = str(center.get("graph_key") or "")
+    if center_key:
+        allowed_keys.add(center_key)
+
+    neighbor_lines = _build_kg_neighbor_lines(req.neighbors)
+    doc_lines = ""
+    if req.documents:
+        doc_lines = "\nGoverning / supporting documents:\n" + "\n".join(
+            f"  - {d.get('title', 'document')}: {(d.get('summary') or '')[:240]}"
+            for d in req.documents[:20]
+        )
+    kpi_lines = (
+        "\nKPIs in this neighborhood: " + ", ".join(req.kpis[:30])
+        if req.kpis
+        else ""
+    )
+
+    max_cards = max(1, min(req.max_cards, 8))
+    prompt = (
+        f"{best_practices_block}"
+        f"{context_text}\n\n"
+        f"SELECTED NODE: [{center_key}] {center.get('label', '')} "
+        f"({center.get('type', 'node')}) — {(center.get('summary') or '')[:240]}\n"
+        f"Graph lens: {req.lens}\n\n"
+        f"{neighbor_lines}"
+        f"{doc_lines}"
+        f"{kpi_lines}\n\n"
+        f"Produce up to {max_cards} knowledge-graph business-insight cards for the "
+        "SELECTED node, specific to the data sources, KPIs, queries, dashboards, "
+        "documents, and processes related to it above. Cover a mix of card "
+        "categories where the evidence supports it: business_insight, "
+        "opportunity, risk, warning, gap, recommendation. Rules:\n"
+        "- Ground every card ONLY in the connected nodes listed above. Do NOT "
+        "invent nodes, documents, KPIs, metrics, thresholds, or relationships.\n"
+        "- A 'gap' card is only valid when an authoritative source in the "
+        "neighborhood (a policy, procedure, standard, or governing document) "
+        "implies something should exist that is missing — name that source.\n"
+        "- evidenceKeys MUST be graph_keys copied exactly from the connected "
+        "nodes (or the selected node). Drop any card you cannot ground in at "
+        "least one real graph_key.\n"
+        "- Keep the recommendation and the insight in the flow: when a card "
+        "implies an action, fill recommendedAction.\n"
+        "- confidence is 0..1, reflecting how strongly the evidence supports the "
+        "card.\n\n"
+        "Return ONLY a JSON object: {\"cards\": [ {\n"
+        "  \"id\": \"c1\",\n"
+        "  \"category\": \"business_insight|opportunity|risk|warning|gap|recommendation\",\n"
+        "  \"severity\": \"critical|urgent|warning|watch|opportunity|info\",\n"
+        "  \"title\": \"short headline\",\n"
+        "  \"summary\": \"2-3 sentences, business language, cite the related sources\",\n"
+        "  \"businessQuestion\": \"the question this answers\",\n"
+        "  \"businessImpact\": \"why it matters to the business\",\n"
+        "  \"confidence\": 0.0,\n"
+        "  \"recommendedAction\": \"the next action (empty if none)\",\n"
+        "  \"evidenceKeys\": [\"graph_key\", ...],\n"
+        "  \"sourceDocuments\": [\"document title\", ...],\n"
+        "  \"supportedKpis\": [\"kpi name\", ...]\n"
+        "} ] }\n\n"
+        "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
+        "prose, no markdown, no code fences. Begin with { and end with }."
+    )
+
+    raw = await llm_client.generate(
+        prompt=prompt,
+        system_prompt=_KG_SYSTEM_PROMPT,
+        model=settings.reasoning_model,
+        temperature=0.2,
+        num_ctx=16384,
+        response_format="json",
+    )
+
+    parsed = _parse_json_response(raw)
+    cards: list[KnowledgeGraphCard] = []
+    if parsed and isinstance(parsed.get("cards"), list):
+        for i, c in enumerate(parsed["cards"][:max_cards]):
+            if not isinstance(c, dict):
+                continue
+            category = str(c.get("category", "business_insight")).lower()
+            if category not in _KG_CATEGORIES:
+                category = "business_insight"
+            severity = str(c.get("severity", "info")).lower()
+            if severity not in _KG_SEVERITIES:
+                severity = "info"
+            # Keep only evidence keys that actually exist in the neighborhood —
+            # this is the evidence gate that rejects fabricated grounding.
+            evidence_keys = [
+                str(k) for k in c.get("evidenceKeys", [])
+                if str(k) in allowed_keys
+            ]
+            if not evidence_keys:
+                logger.info("Dropping KG card with no real evidence: %s", c.get("title"))
+                continue
+            try:
+                confidence = float(c.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            title = str(c.get("title", "")).strip()
+            if not title:
+                continue
+            cards.append(
+                KnowledgeGraphCard(
+                    id=str(c.get("id") or f"c{i + 1}"),
+                    category=category,
+                    severity=severity,
+                    title=title,
+                    summary=str(c.get("summary", "")),
+                    businessQuestion=str(c.get("businessQuestion", "")),
+                    businessImpact=str(c.get("businessImpact", "")),
+                    confidence=max(0.0, min(1.0, confidence)),
+                    recommendedAction=str(c.get("recommendedAction", "")),
+                    evidenceKeys=evidence_keys,
+                    sourceDocuments=[
+                        str(d) for d in c.get("sourceDocuments", []) if d
+                    ],
+                    supportedKpis=[str(k) for k in c.get("supportedKpis", []) if k],
+                )
+            )
+    else:
+        logger.warning("Failed to parse KG insight cards: %s", raw[:200])
+
+    update_activity(req.user_id, req.tenant_id, req.project_id)
+    return KnowledgeGraphInsightResponse(
+        cards=cards,
+        request_id=request_id,
+        model_used=settings.reasoning_model,
+    )
+
+
+_PROJECT_INSIGHT_SYSTEM_PROMPT = (
+    "You are the Tablescope Project Insight analyst. You analyze ONE selected "
+    "project and produce concise, evidence-based, business-oriented insight "
+    "scoped only to that project. Never summarize the tenant or other projects. "
+    "Ground every finding in the supplied project context (metadata, tables, "
+    "documents, saved queries, dashboards, KPIs, Knowledge Graph). Do not invent "
+    "data, metrics, thresholds, or relationships. Recommended dashboards, "
+    "queries, and KPIs are suggestions and do not need to already exist. Never "
+    "fabricate KPI values — mark unmeasurable KPIs as missing_data or "
+    "recommended. Return ONLY the requested JSON object."
+)
+
+
+def _lines(items: list[str], limit: int) -> str:
+    picked = [str(i).strip() for i in items if str(i).strip()][:limit]
+    return "\n".join(f"  - {i}" for i in picked) if picked else "  (none)"
+
+
+def _str_list(value: Any, limit: int = 12) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text:
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _dict_list(value: Any, limit: int) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [d for d in value if isinstance(d, dict)][:limit]
+
+
+@router.post("/intelligence/project-insight", response_model=ProjectInsightResponse)
+async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
+    """Generate the project-scoped executive Project Insight report.
+
+    Distinct from Business Insight (tenant-wide): this uses the Project Insight
+    Best Practices prompt and reasons over ONLY the selected project's
+    authorized context. Recommended dashboards/queries/KPIs are AI suggestions.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+
+    best_practices = load_prompt_reference("project_insight_best_practices.md")
+    best_practices_block = (
+        f"Project Insight Best Practices (authoritative policy):\n{best_practices}\n\n"
+        if best_practices
+        else ""
+    )
+
+    project = req.project or {}
+    table_lines = _lines(
+        [
+            f"{t.get('name', '')} ({t.get('kind', 'table')}): "
+            f"{', '.join(str(c) for c in (t.get('columns') or [])[:12])}"
+            for t in req.tables
+            if isinstance(t, dict) and t.get("name")
+        ],
+        40,
+    )
+    doc_lines = _lines(
+        [
+            f"{d.get('title', 'document')}: {(d.get('summary') or '')[:200]}"
+            for d in req.documents
+            if isinstance(d, dict)
+        ],
+        30,
+    )
+    query_lines = _lines(
+        [
+            f"{q.get('name', 'query')}: {(q.get('description') or '')[:160]}"
+            for q in req.queries
+            if isinstance(q, dict)
+        ],
+        30,
+    )
+    dashboard_lines = _lines(
+        [str(d.get("name") or d.get("title") or "") for d in req.dashboards
+         if isinstance(d, dict)],
+        20,
+    )
+    kpi_line = ", ".join(str(k) for k in req.kpis[:30]) if req.kpis else "(none)"
+    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+    kg_block = f"\n{kg_block}\n" if kg_block else ""
+
+    prompt = (
+        f"{best_practices_block}"
+        f"SELECTED PROJECT: {project.get('name', 'this project')} "
+        f"(status: {project.get('status', 'unknown')})\n\n"
+        f"Project tables:\n{table_lines}\n\n"
+        f"Project documents:\n{doc_lines}\n\n"
+        f"Project saved queries:\n{query_lines}\n\n"
+        f"Project dashboards:\n{dashboard_lines}\n\n"
+        f"Project KPIs: {kpi_line}\n"
+        f"{kg_block}\n"
+        "Produce a Project Insight report for the SELECTED project only. Use "
+        "clear business language, be concise, and ground everything in the "
+        "context above. Recommended dashboards/queries/KPIs are suggestions and "
+        "do not need to already exist. Do not fabricate KPI values.\n\n"
+        "Return ONLY a JSON object with EXACTLY these keys. Replace every "
+        "descriptive placeholder below with real, project-specific content "
+        "drawn from the context above — never echo the placeholder text and "
+        "never leave a primary field (question, label, title, name) blank.\n"
+        "{\n"
+        '  "executiveSummary": {\n'
+        '    "summary": "2-4 sentence project status summary",\n'
+        '    "critical": ["short bullet", ...],\n'
+        '    "warnings": ["short bullet", ...],\n'
+        '    "opportunities": ["short bullet", ...],\n'
+        '    "recommendations": ["short bullet", ...]\n'
+        "  },\n"
+        '  "questionsToAsk": [{"id":"q1","question":"<a real, specific question '
+        'about THIS project\'s data>","reason":"<why it matters>",'
+        '"suggestedAction":"ask_project"}],\n'
+        '  "trendDetection": [{"id":"t1","label":"<short descriptive trend name '
+        'derived from the actual trend, e.g. Rising Late Deliveries>",'
+        '"title":"<one-line headline>","description":"<what the trend shows>",'
+        '"possibleCause":"<likely cause>","sourceSummary":"<evidence>",'
+        '"chartLink":"","confidence":0.0}],\n'
+        '  "recommendedDashboards": [{"id":"d1","title":"<specific dashboard '
+        'name>","description":"<what it shows>","reason":"<why>",'
+        '"status":"suggested","confidence":0.0,"backingSignals":[],'
+        '"suggestedWidgets":[],"action":"generate"}],\n'
+        '  "recommendedQueries": [{"id":"rq1","title":"<specific query name>",'
+        '"businessQuestion":"<the question it answers>","reason":"<why>",'
+        '"status":"suggested","confidence":0.0,"backingSignals":[],'
+        '"recommendedTables":[],"recommendedKpis":[],"action":"generate"}],\n'
+        '  "recommendedKpis": [{"id":"k1","name":"<specific KPI name>",'
+        '"description":"<what it measures>","status":"recommended",'
+        '"currentValue":null,"targetValue":null,"unit":"","reason":"<why>",'
+        '"confidence":0.0,"backingSignals":[],"relatedDashboards":[],'
+        '"relatedQueries":[],"relatedDataSources":[]}],\n'
+        '  "insightValidationWorkflow": [{"id":"i1","title":"<specific insight '
+        'title>","type":"risk","priority":"medium","confidence":0.0,'
+        '"status":"new","evidenceSummary":"<evidence>","recommendedAction":""}]\n'
+        "}\n\n"
+        "RULES:\n"
+        "- Provide 3-6 questionsToAsk, each a real question tied to this "
+        "project's tables, documents, queries, or KPIs.\n"
+        "- trendDetection: include a trend only when the context supports it, "
+        "and give it a descriptive label derived from the actual trend (never "
+        "'Trend A' or any generic placeholder).\n"
+        "- Every recommendedDashboards / recommendedQueries / recommendedKpis / "
+        "insightValidationWorkflow item MUST have a concrete title/name; omit "
+        "any item you cannot name specifically rather than emitting a blank.\n"
+        "- Do NOT return items whose question/label/title/name is empty — "
+        "return an empty array for that section instead.\n"
+        "- Do NOT fabricate KPI values; use null when unknown.\n\n"
+        "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
+        "prose, no markdown, no code fences. Begin with { and end with }."
+    )
+
+    raw = await llm_client.generate(
+        prompt=prompt,
+        system_prompt=_PROJECT_INSIGHT_SYSTEM_PROMPT,
+        model=settings.reasoning_model,
+        temperature=0.2,
+        num_ctx=16384,
+        response_format="json",
+    )
+
+    parsed = _parse_json_response(raw) or {}
+    es = parsed.get("executiveSummary")
+    es = es if isinstance(es, dict) else {}
+    executive = ProjectInsightExecutiveSummary(
+        summary=str(es.get("summary", "")).strip(),
+        critical=_str_list(es.get("critical")),
+        warnings=_str_list(es.get("warnings")),
+        opportunities=_str_list(es.get("opportunities")),
+        recommendations=_str_list(es.get("recommendations")),
+    )
+
+    update_activity(req.user_id, req.tenant_id, req.project_id)
+    return ProjectInsightResponse(
+        executiveSummary=executive,
+        questionsToAsk=_dict_list(parsed.get("questionsToAsk"), 8),
+        trendDetection=_dict_list(parsed.get("trendDetection"), 8),
+        recommendedDashboards=_dict_list(parsed.get("recommendedDashboards"), 8),
+        recommendedQueries=_dict_list(parsed.get("recommendedQueries"), 8),
+        recommendedKpis=_dict_list(parsed.get("recommendedKpis"), 12),
+        insightValidationWorkflow=_dict_list(
+            parsed.get("insightValidationWorkflow"), 12
+        ),
         request_id=request_id,
         model_used=settings.reasoning_model,
     )

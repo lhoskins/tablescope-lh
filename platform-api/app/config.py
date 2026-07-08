@@ -96,6 +96,55 @@ class Settings(BaseSettings):
     supabase_database_url: str = ""
     supabase_jwt_secret: str = ""
 
+    # --- Twilio SMS MFA (primary MFA method) ---
+    # Secrets are injected at deploy time (never committed). The API key secret
+    # is rotated separately from the repo. SMS is delivered via the Twilio
+    # Messaging Service SID.
+    twilio_account_sid: str = ""
+    twilio_api_key_sid: str = ""
+    twilio_api_key_secret: str = ""
+    twilio_messaging_service_sid: str = ""
+    # Twilio Verify service (the MFA primitive that generates/validates OTPs).
+    # SMS MFA goes through Twilio Verify directly (no Supabase phone-MFA addon).
+    twilio_verify_service_sid: str = ""
+    # Master switch for aal2 enforcement on admin-tier roles. Defaults OFF so
+    # the feature can ship to production without locking out admins before
+    # Twilio Verify is configured. Flip to true
+    # (env: MFA_ENFORCEMENT_ENABLED=true) once MFA is fully provisioned.
+    mfa_enforcement_enabled: bool = False
+    # MFA cost controls.
+    mfa_sms_resend_cooldown_seconds: int = 60
+    mfa_sms_max_sends_per_window: int = 5
+    mfa_sms_window_seconds: int = 900
+    mfa_sms_max_attempts_per_challenge: int = 5
+    # How long a successful SMS verification keeps the session at aal2 before a
+    # re-challenge is required (minutes). Applied to the verified-factor record
+    # so reloads / re-logins within the window do not re-prompt.
+    mfa_session_ttl_minutes: int = 720
+
+    # Whether tenant provisioning auto-creates a default "<Tenant> Workspace"
+    # project for the new tenant admin. Defaults OFF — admins create their own
+    # workspace after onboarding. Existing projects are never removed.
+    create_default_project_on_tenant_provisioning: bool = False
+
+    @property
+    def twilio_configured(self) -> bool:
+        return bool(
+            self.twilio_account_sid
+            and self.twilio_api_key_sid
+            and self.twilio_api_key_secret
+            and self.twilio_messaging_service_sid
+        )
+
+    @property
+    def twilio_verify_configured(self) -> bool:
+        return bool(
+            self.twilio_account_sid
+            and self.twilio_api_key_sid
+            and self.twilio_api_key_secret
+            and self.twilio_verify_service_sid
+        )
+
     # --- Stripe billing ---
     stripe_mode: Literal["test", "live"] = "test"
     stripe_publishable_key: str = ""
@@ -110,9 +159,26 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_use_tls: bool = True
-    email_from: str = "Tablescope <no-reply@tablescope.cloud>"
-    app_base_url: str = "https://app.tablescope.cloud"
-    support_email: str = "support@tablescope.cloud"
+    email_from: str = Field(
+        default="Tablescope <no-reply@tablescope.cloud>",
+        validation_alias=AliasChoices("EMAIL_FROM", "TABLESCOPE_EMAIL_FROM"),
+    )
+    email_reply_to: str = Field(
+        default="",
+        validation_alias=AliasChoices("EMAIL_REPLY_TO", "TABLESCOPE_EMAIL_REPLY_TO"),
+    )
+    email_logo_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("EMAIL_LOGO_URL", "TABLESCOPE_EMAIL_LOGO_URL"),
+    )
+    app_base_url: str = Field(
+        default="https://app.tablescope.cloud",
+        validation_alias=AliasChoices("APP_BASE_URL", "TABLESCOPE_APP_URL"),
+    )
+    support_email: str = Field(
+        default="support@tablescope.cloud",
+        validation_alias=AliasChoices("SUPPORT_EMAIL", "TABLESCOPE_SUPPORT_EMAIL"),
+    )
 
     @property
     def email_configured(self) -> bool:

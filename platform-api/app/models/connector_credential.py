@@ -12,7 +12,9 @@ never returned to the UI.
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, String, Text
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -41,6 +43,11 @@ class ConnectorCredential(TimestampMixin, Base):
     # instance_url, client_id).  Never contains the password/secret/token.
     config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # When the credential was last verified (on create or via the Test action).
+    last_tested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -51,6 +58,9 @@ class ConnectorCredential(TimestampMixin, Base):
             "has_secret": bool(self.secret_encrypted),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "last_tested_at": (
+                self.last_tested_at.isoformat() if self.last_tested_at else None
+            ),
         }
 
     def __repr__(self) -> str:

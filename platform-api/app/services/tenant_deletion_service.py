@@ -18,9 +18,10 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from sqlalchemy import Delete, delete, select
+from sqlalchemy import Delete, Update, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.billing import TenantProvisioningRequest
 from app.models.connector_credential import ConnectorCredential
 from app.models.dashboard import Dashboard
 from app.models.database_connection import DatabaseConnection
@@ -94,9 +95,25 @@ async def purge_app_tenant(session: AsyncSession, tenant_id: int) -> dict[str, i
     """
     counts: dict[str, int] = {}
 
-    async def _run(name: str, stmt: Delete) -> None:
+    async def _run(name: str, stmt: Delete | Update) -> None:
         res = await session.execute(stmt)
         counts[name] = res.rowcount or 0
+
+    # Free the slug for reuse: a deleted tenant's provisioning request would
+    # otherwise keep the slug "taken" (its tenant_id is SET NULL on delete, but
+    # the row and its blocking status survive). Mark such requests terminal
+    # before the tenant row goes away.
+    await _run(
+        "tenant_provisioning_requests",
+        update(TenantProvisioningRequest)
+        .where(
+            TenantProvisioningRequest.tenant_id == tenant_id,
+            TenantProvisioningRequest.status.in_(
+                ["payment_confirmed", "provisioning", "provisioned"]
+            ),
+        )
+        .values(status="deprovisioned"),
+    )
 
     project_ids = list(
         (

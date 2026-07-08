@@ -12,7 +12,9 @@ is never returned to the UI.
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -40,6 +42,10 @@ class DatabaseConnection(TimestampMixin, Base):
     # Fernet-encrypted password.  Never returned to the UI.
     password_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     ssl_mode: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # When the connection was last verified (on create or via the Test action).
+    last_tested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def to_dict(self) -> dict:
         """Serialize for the UI.  Never includes the password."""
@@ -56,6 +62,10 @@ class DatabaseConnection(TimestampMixin, Base):
             "has_password": bool(self.password_encrypted),
             "ssl_mode": self.ssl_mode,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "last_tested_at": (
+                self.last_tested_at.isoformat() if self.last_tested_at else None
+            ),
         }
 
     def __repr__(self) -> str:

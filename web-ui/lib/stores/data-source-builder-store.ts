@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 /** Connector categories supported by the Data Source Builder. */
 export type SourceType =
@@ -62,6 +63,15 @@ export interface SessionSource {
   backendId?: number;
   /** Sanitized view name used by file sources (the "table"). */
   viewName?: string;
+  /**
+   * True when this source was loaded from the backend (already created in a
+   * previous session). Existing sources are assigned to projects via the
+   * association endpoint rather than re-created, and are previewed through
+   * their Teiid view.
+   */
+  existing?: boolean;
+  /** Project the existing source currently belongs to (for Teiid routing). */
+  projectId?: number | null;
 }
 
 export interface ExistingProjectSource {
@@ -112,12 +122,36 @@ interface BuilderState {
   sources: SessionSource[];
   activeSourceId: string | null;
   projects: ProjectAssignment[];
+  /**
+   * Identifier of the tenant the persisted session belongs to. Used to drop a
+   * stale session when the user switches tenants (localStorage is shared
+   * across tenants on the same origin).
+   */
+  tenantKey: string | null;
+  /** Reset the session if it belongs to a different tenant than `key`. */
+  ensureTenant: (key: string) => void;
+  /**
+   * Keys of data-source items that the user has explicitly created in Step 1.
+   * A key is `sourceId` for a file source or `sourceId::tableName` for a
+   * connected-database table. Items stay listed even when deselected for
+   * assignment in Step 2, so this set is distinct from the per-table state.
+   */
+  createdKeys: string[];
 
   // ── source actions ──
   addSource: (source: SessionSource) => void;
   removeSource: (sourceId: string) => void;
   setActiveSource: (sourceId: string | null) => void;
   hasSource: (predicate: (s: SessionSource) => boolean) => boolean;
+  markCreated: (keys: string[]) => void;
+  unmarkCreated: (key: string) => void;
+  /**
+   * Replace the set of backend-loaded ("existing") sources with `incoming`,
+   * preserving per-table selection for ones already present and leaving
+   * session-created (non-existing) sources untouched. Existing sources are
+   * marked as created so they appear in the Active list.
+   */
+  syncExisting: (incoming: SessionSource[]) => void;
 
   // ── table actions ──
   updateTableState: (
@@ -153,16 +187,86 @@ function selectedTableNames(source: SessionSource): string[] {
     .map((t) => t.tableName);
 }
 
-export const useBuilderStore = create<BuilderState>((set, get) => ({
-  sources: [],
-  activeSourceId: null,
-  projects: [],
+/** createdKeys entry for a source's single created item. */
+function createdKeyOf(source: SessionSource): string {
+  return source.isFileUpload
+    ? source.id
+    : `${source.id}::${source.tables[0]?.tableName ?? ""}`;
+}
+
+/**
+ * The `ExistingProjectSource.sourceKey` this session source would map to once
+ * assigned (`file:<viewName>` / `db:<backendId>`), or null if it can't yet be
+ * matched (e.g. a brand-new connected-DB table not created in the backend).
+ * Used to skip re-adding a source that already exists in the target project.
+ */
+export function sourceExistingKey(source: SessionSource): string | null {
+  if (source.isFileUpload) {
+    return source.viewName ? `file:${source.viewName}` : null;
+  }
+  return source.backendId != null ? `db:${source.backendId}` : null;
+}
+
+export const useBuilderStore = create<BuilderState>()(
+  persist(
+    (set, get) => ({
+      sources: [],
+      activeSourceId: null,
+      projects: [],
+      createdKeys: [],
+      tenantKey: null,
+
+  ensureTenant: (key) =>
+    set((state) =>
+      state.tenantKey === key
+        ? {}
+        : {
+            tenantKey: key,
+            sources: [],
+            activeSourceId: null,
+            projects: [],
+            createdKeys: [],
+          },
+    ),
 
   addSource: (source) =>
     set((state) => ({
       sources: [...state.sources, source],
       activeSourceId: source.id,
     })),
+
+  markCreated: (keys) =>
+    set((state) => ({
+      createdKeys: Array.from(new Set([...state.createdKeys, ...keys])),
+    })),
+
+  unmarkCreated: (key) =>
+    set((state) => ({
+      createdKeys: state.createdKeys.filter((k) => k !== key),
+    })),
+
+  syncExisting: (incoming) =>
+    set((state) => {
+      const prevExisting = new Map(
+        state.sources.filter((s) => s.existing).map((s) => [s.id, s]),
+      );
+      // Preserve the user's per-table selection across refetches.
+      const merged = incoming.map((s) => {
+        const prev = prevExisting.get(s.id);
+        return prev ? { ...s, tables: prev.tables } : s;
+      });
+      const sources = [
+        ...state.sources.filter((s) => !s.existing),
+        ...merged,
+      ];
+      const keptKeys = state.createdKeys.filter(
+        (k) => !k.startsWith("existing-"),
+      );
+      const createdKeys = Array.from(
+        new Set([...keptKeys, ...merged.map(createdKeyOf)]),
+      );
+      return { sources, createdKeys };
+    }),
 
   removeSource: (sourceId) =>
     set((state) => {
@@ -176,7 +280,10 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
         ...p,
         sourcesToRemove: p.sourcesToRemove,
       }));
-      return { sources, activeSourceId, projects };
+      const createdKeys = state.createdKeys.filter(
+        (k) => k !== sourceId && !k.startsWith(`${sourceId}::`),
+      );
+      return { sources, activeSourceId, projects, createdKeys };
     }),
 
   setActiveSource: (sourceId) => set({ activeSourceId: sourceId }),
@@ -299,10 +406,14 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
 
     for (const project of projects) {
       if (project.isToggled) {
+        const alreadyInProject = new Set(
+          project.existingSources.map((e) => e.sourceKey),
+        );
         for (const source of sources) {
-          const tableNames = source.isFileUpload
-            ? source.tables.map((t) => t.tableName)
-            : selectedTableNames(source);
+          // Skip sources already assigned to this project (no duplicates).
+          const existingKey = sourceExistingKey(source);
+          if (existingKey && alreadyInProject.has(existingKey)) continue;
+          const tableNames = selectedTableNames(source);
           if (tableNames.length > 0) {
             adding.push({
               source,
@@ -330,5 +441,25 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
     return { adding, removing };
   },
 
-  reset: () => set({ sources: [], activeSourceId: null, projects: [] }),
-}));
+  reset: () =>
+    set({ sources: [], activeSourceId: null, projects: [], createdKeys: [] }),
+    }),
+    {
+      name: "tablescope-data-source-builder",
+      storage: createJSONStorage(() =>
+        typeof window !== "undefined"
+          ? window.localStorage
+          : (undefined as unknown as Storage),
+      ),
+      // Hydrate manually after mount to avoid SSR/client markup mismatches.
+      skipHydration: true,
+      partialize: (state) => ({
+        sources: state.sources,
+        activeSourceId: state.activeSourceId,
+        projects: state.projects,
+        createdKeys: state.createdKeys,
+        tenantKey: state.tenantKey,
+      }),
+    },
+  ),
+);

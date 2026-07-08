@@ -25,8 +25,15 @@ class TenantRead(BaseModel):
     name: str
     external_id: str | None
     is_active: bool
+    logo_url: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class CompanyLogoRead(BaseModel):
+    """The calling tenant's company logo URL (or null when unset)."""
+
+    logo_url: str | None = None
 
 
 class TenantDeleteResponse(BaseModel):
@@ -43,7 +50,7 @@ _LOOSE_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 class UserCreate(BaseModel):
     email: str
     display_name: str | None = None
-    role: str = "viewer"
+    role: str = "member"
     external_id: str | None = None
     password: str | None = None
 
@@ -75,3 +82,24 @@ class UserRead(BaseModel):
     is_super_admin: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+class AllowedDomainRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    domain: str
+    is_active: bool
+
+
+class AllowedDomainsResponse(BaseModel):
+    enabled: bool
+    domains: list[AllowedDomainRead]
+
+
+class AllowedDomainsSettingsUpdate(BaseModel):
+    enabled: bool
+
+
+class AllowedDomainCreate(BaseModel):
+    domain: str

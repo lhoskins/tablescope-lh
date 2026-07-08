@@ -20,22 +20,13 @@ import {
   type StreamProject,
 } from "@/lib/api/home-intelligence";
 import { useReportBuilder } from "@/lib/stores/report-builder-store";
+import { formatLastUpdated } from "@/lib/format-datetime";
 import { IntelligenceCard, LoadingCard } from "./intelligence-card";
 import { IntelligenceSidebar } from "./intelligence-sidebar";
 import { IntelligenceStrip } from "./intelligence-strip";
 import { ReportBuilderPanel } from "./report-builder-panel";
 
 type Status = "idle" | "streaming" | "complete" | "error";
-
-function timeAgoLabel(date: Date | null): string | null {
-  if (!date) return null;
-  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
-  if (mins < 1) return "Updated just now";
-  if (mins === 1) return "Updated 1m ago";
-  if (mins < 60) return `Updated ${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  return `Updated ${hrs}h ago`;
-}
 
 function Section({
   title,
@@ -56,7 +47,7 @@ function Section({
         <span>{title}</span>
         <span className="text-caption text-ink-tertiary">({cards.length})</span>
       </div>
-      <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {cards.map((card) => (
           <IntelligenceCard key={card.id} card={card} onAddToReport={onAdd} />
         ))}
@@ -213,7 +204,8 @@ export function IntelligenceFeed() {
     (c) =>
       c.insightType.startsWith("risk_") ||
       c.severity === "critical" ||
-      c.severity === "urgent",
+      c.severity === "urgent" ||
+      c.severity === "warning",
   );
   const trends = allInsights.filter(
     (c) => c.insightType.startsWith("trend_") && !risks.includes(c),
@@ -261,7 +253,7 @@ export function IntelligenceFeed() {
         projectCount={projects.length}
         insights={allInsights}
         running={running}
-        lastUpdatedLabel={timeAgoLabel(lastUpdated)}
+        lastUpdatedLabel={formatLastUpdated(lastUpdated)}
         onRefresh={handleRefresh}
         granularity={granularity}
         onGranularityChange={handleGranularity}

@@ -21,24 +21,24 @@ type ProvisioningStatus = {
 
 const STEPS: { key: string; label: string; done: (s: ProvisioningStatus) => boolean }[] = [
   { key: "payment", label: "Payment confirmed", done: (s) => s.status !== "pending_payment" },
-  { key: "tenant", label: "Creating workspace", done: (s) => s.tenant_status === "active" },
+  { key: "tenant", label: "Workspace created", done: (s) => s.tenant_status === "active" },
   {
     key: "admin",
-    label: "Creating root admin",
+    label: "Administrator account created",
     done: (s) => ["membership_created", "invite_sent"].includes(s.root_admin_status),
   },
   {
     key: "dataplane",
-    label: "Provisioning data plane",
+    label: "Data plane provisioned",
     done: (s) =>
       ["provisioned", "shared_cloud_bound", "not_required"].includes(s.data_plane_status),
   },
   {
     key: "invite",
-    label: "Sending invite",
+    label: "Setup email sent",
     done: (s) => s.root_admin_status === "invite_sent",
   },
-  { key: "ready", label: "Ready", done: (s) => s.status === "provisioned" },
+  { key: "ready", label: "Workspace ready", done: (s) => s.status === "provisioned" },
 ];
 
 function SuccessInner() {
@@ -73,15 +73,34 @@ function SuccessInner() {
     };
   }, [sessionId]);
 
+  const provisioned = status?.status === "provisioned";
+  const companyName = status?.company_name?.trim() || "your";
+
   return (
     <main className="mx-auto max-w-lg px-6 py-16">
       <h1 className="mb-2 text-2xl font-semibold text-slate-900">
-        Setting up your workspace
+        {provisioned
+          ? "Your Tablescope workspace is ready"
+          : "Setting up your workspace"}
       </h1>
-      <p className="mb-8 text-sm text-slate-600">
-        Thanks for your payment. We&apos;re provisioning your environment — this can
-        take a few minutes.
-      </p>
+      {provisioned ? (
+        <div className="mb-8 space-y-3 text-sm text-slate-600">
+          <p>
+            Thank you for your payment. Your {companyName} tenant has finished
+            provisioning and your Tablescope workspace is ready.
+          </p>
+          <p>
+            We&apos;ve sent an email to the tenant administrator with
+            instructions to finish setting up the account and create a password.
+          </p>
+          <p>Please check your email to complete setup and sign in.</p>
+        </div>
+      ) : (
+        <p className="mb-8 text-sm text-slate-600">
+          Thanks for your payment. We&apos;re provisioning your Tablescope
+          workspace. This can take a few minutes.
+        </p>
+      )}
 
       {error && (
         <p className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
@@ -116,7 +135,7 @@ function SuccessInner() {
         </p>
       )}
 
-      {status?.status === "provisioned" && (
+      {provisioned && status && (
         <div className="mt-8 space-y-3">
           {status.requires_vpn && status.vpn_status === "awaiting_customer_network_details" && (
             <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -124,17 +143,16 @@ function SuccessInner() {
               connect your network.
             </p>
           )}
-          <div className="flex gap-3">
-            <Link
-              href={`/login?tenant=${status.tenant_slug}`}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-            >
-              Continue to login
-            </Link>
-            <span className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600">
-              Check your email for an invite
-            </span>
-          </div>
+          <Link
+            href={`/login?tenant=${status.tenant_slug}`}
+            className="inline-block rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+          >
+            Go to login
+          </Link>
+          <p className="text-sm text-slate-500">
+            Didn&apos;t receive the email? Check your spam folder or contact
+            Tablescope support.
+          </p>
         </div>
       )}
     </main>

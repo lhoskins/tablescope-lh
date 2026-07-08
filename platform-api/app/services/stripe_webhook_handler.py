@@ -22,11 +22,7 @@ from app.models.billing import (
 )
 from app.models.tenant import Tenant
 from app.services import billing_audit as audit
-from app.services.email_service import (
-    EmailService,
-    render_payment_failed,
-    render_subscription_cancelled,
-)
+from app.services.email_service import EmailService
 from app.services.tenant_onboarding_service import TenantOnboardingService
 
 _PAID_STATUSES = {"paid", "no_payment_required"}
@@ -205,10 +201,10 @@ class StripeWebhookHandler:
                 tenant.is_active = False  # suspend, do NOT delete
                 recipient = await self._recipient_email(req, sub)
                 if recipient:
-                    await self._email.send(
-                        render_subscription_cancelled(company_name=tenant.name),
+                    await self._email.send_transactional_email(
                         to=recipient,
                         template="subscription_cancelled",
+                        variables={"account_name": tenant.name},
                     )
         await self._session.flush()
 
@@ -238,10 +234,17 @@ class StripeWebhookHandler:
             if tenant is not None:
                 recipient = await self._recipient_email(req, sub)
                 if recipient:
-                    await self._email.send(
-                        render_payment_failed(company_name=tenant.name),
+                    from app.config import get_settings
+
+                    await self._email.send_transactional_email(
                         to=recipient,
                         template="payment_failed",
+                        variables={
+                            "account_name": tenant.name,
+                            "billing_portal_link": (
+                                f"{get_settings().app_base_url}/billing"
+                            ),
+                        },
                     )
         await self._session.flush()
 

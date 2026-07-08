@@ -65,6 +65,7 @@ async def plan(
     allowed_tables: list[str],
     documents: list[dict[str, Any]],
     table_schema: list[dict[str, Any]] | None = None,
+    relationship_hints: list[dict[str, Any]] | None = None,
     max_analyses: int = 6,
     granularity: int = 3,
 ) -> list[dict[str, Any]] | None:
@@ -78,6 +79,7 @@ async def plan(
             "allowed_tables": allowed_tables,
             "table_schema": table_schema or [],
             "documents": documents,
+            "relationship_hints": relationship_hints or [],
             "max_analyses": max_analyses,
             "granularity": granularity,
         },
@@ -86,6 +88,83 @@ async def plan(
         return None
     analyses = result.get("analyses")
     return analyses if isinstance(analyses, list) else []
+
+
+async def project_insight(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    project: dict[str, Any],
+    tables: list[dict[str, Any]],
+    documents: list[dict[str, Any]],
+    queries: list[dict[str, Any]],
+    dashboards: list[dict[str, Any]],
+    kpis: list[str],
+    knowledge_graph_context: dict[str, Any] | None = None,
+    recent_activity: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Ask the AI server for the project-scoped Project Insight report.
+
+    Returns the structured contract (executiveSummary, questionsToAsk,
+    trendDetection, recommendedDashboards/Queries/Kpis,
+    insightValidationWorkflow), or ``None`` if the AI server is unavailable so
+    the caller can degrade gracefully.
+    """
+    result = await _post(
+        "/ai/intelligence/project-insight",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "project": project,
+            "tables": tables,
+            "documents": documents,
+            "queries": queries,
+            "dashboards": dashboards,
+            "kpis": kpis,
+            "knowledge_graph_context": knowledge_graph_context or {},
+            "recent_activity": recent_activity or {},
+        },
+    )
+    return result if isinstance(result, dict) else None
+
+
+async def knowledge_graph_cards(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    lens: str,
+    center: dict[str, Any],
+    neighbors: list[dict[str, Any]],
+    documents: list[dict[str, Any]],
+    kpis: list[str],
+    max_cards: int = 8,
+) -> list[dict[str, Any]] | None:
+    """Ask the LLM for Knowledge-Graph insight cards for the selected node.
+
+    Returns the raw card dicts, or ``None`` when the AI server is unavailable so
+    the caller can fall back to the deterministic cards.
+    """
+    result = await _post(
+        "/ai/intelligence/knowledge-graph",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "lens": lens,
+            "center": center,
+            "neighbors": neighbors,
+            "documents": documents,
+            "kpis": kpis,
+            "max_cards": max_cards,
+        },
+    )
+    if result is None:
+        return None
+    cards = result.get("cards")
+    return cards if isinstance(cards, list) else []
 
 
 async def fix_sql(

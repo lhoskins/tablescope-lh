@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
+from app.auth.mfa_errors import MfaRequiredError, mfa_required_handler
 from app.auth.middleware import AuthMiddleware
 from app.config import get_settings
 from app.logging_config import configure_logging
@@ -23,15 +24,19 @@ from app.routes import ai_reference_catalog as ai_reference_catalog_routes
 from app.routes import auth as auth_routes
 from app.routes import billing as billing_routes
 from app.routes import billing_admin as billing_admin_routes
+from app.routes import connectors as connectors_routes
 from app.routes import dashboards as dashboards_routes
+from app.routes import data_source_assignments as data_source_assignments_routes
 from app.routes import database_sources as database_sources_routes
 from app.routes import document_families as document_families_routes
 from app.routes import file_analysis as file_analysis_routes
 from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
 from app.routes import home_intelligence as home_intelligence_routes
+from app.routes import mfa as mfa_routes
 from app.routes import project_assets as project_assets_routes
 from app.routes import project_graph as project_graph_routes
+from app.routes import project_insight as project_insight_routes
 from app.routes import projects as projects_routes
 from app.routes import provisioning as provisioning_routes
 from app.routes import query as query_routes
@@ -40,6 +45,7 @@ from app.routes import reference_library as reference_library_routes
 from app.routes import reference_library_bulk as reference_library_bulk_routes
 from app.routes import reports as reports_routes
 from app.routes import saas_sources as saas_sources_routes
+from app.routes import scope_sets as scope_sets_routes
 from app.routes import scopes as scopes_routes
 from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
@@ -47,6 +53,7 @@ from app.routes import tenant_data_planes as tenant_data_planes_routes
 from app.routes import tenants as tenants_routes
 from app.routes import upload as upload_routes
 from app.routes import user_preferences as user_preferences_routes
+from app.routes import users as users_routes
 from app.services.connection_pool import pool_manager
 
 logger = logging.getLogger(__name__)
@@ -129,6 +136,8 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(AuthMiddleware)
 
+    app.add_exception_handler(MfaRequiredError, mfa_required_handler)
+
     @app.middleware("http")
     async def _add_request_id(request: Request, call_next):
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
@@ -156,10 +165,15 @@ def create_app() -> FastAPI:
     app.include_router(scopes_routes.router, prefix=api_prefix)
     app.include_router(query_routes.router, prefix=api_prefix)
     app.include_router(query_scopes_routes.router, prefix=api_prefix)
+    app.include_router(scope_sets_routes.router, prefix=api_prefix)
     app.include_router(sharing_routes.router, prefix=api_prefix)
     app.include_router(storage_routes.router, prefix=api_prefix)
     app.include_router(database_sources_routes.router, prefix=api_prefix)
+    app.include_router(
+        data_source_assignments_routes.router, prefix=api_prefix
+    )
     app.include_router(saas_sources_routes.router, prefix=api_prefix)
+    app.include_router(connectors_routes.router, prefix=api_prefix)
     app.include_router(grid_preferences_routes.router, prefix=api_prefix)
     app.include_router(upload_routes.router, prefix=api_prefix)
     app.include_router(file_analysis_routes.router, prefix=api_prefix)
@@ -169,6 +183,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_asset_metadata_routes.router, prefix=api_prefix)
     app.include_router(project_assets_routes.router, prefix=api_prefix)
     app.include_router(project_graph_routes.router, prefix=api_prefix)
+    app.include_router(project_insight_routes.router, prefix=api_prefix)
     app.include_router(document_families_routes.router, prefix=api_prefix)
     app.include_router(billing_routes.router, prefix=api_prefix)
     app.include_router(billing_admin_routes.router, prefix=api_prefix)
@@ -178,6 +193,8 @@ def create_app() -> FastAPI:
     app.include_router(reference_library_bulk_routes.router, prefix=api_prefix)
     app.include_router(reports_routes.router, prefix=api_prefix)
     app.include_router(user_preferences_routes.router, prefix=api_prefix)
+    app.include_router(users_routes.router, prefix=api_prefix)
+    app.include_router(mfa_routes.router, prefix=api_prefix)
 
     return app
 

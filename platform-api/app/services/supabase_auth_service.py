@@ -42,6 +42,10 @@ class SupabaseUser:
     email: str
     created: bool = False
     action_link: str | None = None
+    # True once the user has confirmed their email / signed in at least once,
+    # i.e. they already have working credentials and should be routed to
+    # sign-in rather than a set-password flow.
+    confirmed: bool = False
 
 
 class SupabaseAuthService:
@@ -97,7 +101,15 @@ class SupabaseAuthService:
                 return None
             for u in users:
                 if str(u.get("email", "")).strip().lower() == target:
-                    return SupabaseUser(id=u["id"], email=u.get("email", email))
+                    return SupabaseUser(
+                        id=u["id"],
+                        email=u.get("email", email),
+                        confirmed=bool(
+                            u.get("email_confirmed_at")
+                            or u.get("confirmed_at")
+                            or u.get("last_sign_in_at")
+                        ),
+                    )
             if len(users) < 200:
                 return None
             page += 1
@@ -181,6 +193,21 @@ class SupabaseAuthService:
         """
         existing = await self.find_user_by_email(email)
         if existing is not None:
+            # An unconfirmed existing user (e.g. created during a prior, failed
+            # provisioning attempt) still needs to set a password — hand back a
+            # set-password link so retries route to password creation, not a
+            # sign-in page they can't yet use.
+            if not existing.confirmed and redirect_to:
+                try:
+                    existing.action_link = await self.generate_magic_link(
+                        email, redirect_to=redirect_to
+                    )
+                except SupabaseAdminError as exc:
+                    logger.warning(
+                        "could not generate set-password link for existing "
+                        "unconfirmed user: %s",
+                        exc,
+                    )
             return existing
         user = await self.create_user(
             email, first_name=first_name, last_name=last_name

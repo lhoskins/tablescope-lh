@@ -2,28 +2,33 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
 
 from fastapi import Depends, HTTPException, status
 
-from app.auth.context import RequestContext, get_request_context
+from app.auth.context import RequestContext
+from app.auth.membership import require_membership
 
 
 class Role(StrEnum):
     ROOT_ADMIN = "root_admin"
     TENANT_ADMIN = "tenant_admin"
     ADMIN = "admin"
+    DB_ADMIN = "db_admin"
     EDITOR = "editor"
+    MEMBER = "member"
     VIEWER = "viewer"
 
 
 _ROLE_ORDER: dict[Role, int] = {
     Role.VIEWER: 0,
+    Role.MEMBER: 1,
     Role.EDITOR: 1,
-    Role.ADMIN: 2,
-    Role.TENANT_ADMIN: 3,
-    Role.ROOT_ADMIN: 4,
+    Role.DB_ADMIN: 2,
+    Role.ADMIN: 3,
+    Role.TENANT_ADMIN: 4,
+    Role.ROOT_ADMIN: 5,
 }
 
 
@@ -44,10 +49,18 @@ def has_role(actual: str, required: Role) -> bool:
     return _at_least(actual, required)
 
 
-def require_role(required: Role) -> Callable[[RequestContext], RequestContext]:
-    """FastAPI dependency factory enforcing minimum role."""
+def require_role(
+    required: Role,
+) -> Callable[[RequestContext], Awaitable[RequestContext]]:
+    """FastAPI dependency factory enforcing minimum role.
 
-    def _dependency(context: RequestContext = Depends(get_request_context)) -> RequestContext:
+    Membership (active, tenant-scoped) is verified first via
+    :func:`require_membership`, which also pins the effective role from the DB.
+    """
+
+    async def _dependency(
+        context: RequestContext = Depends(require_membership),
+    ) -> RequestContext:
         if context.is_service:
             return context
         if not _at_least(context.role, required):
@@ -60,10 +73,14 @@ def require_role(required: Role) -> Callable[[RequestContext], RequestContext]:
     return _dependency
 
 
-def require_permission(permission: str) -> Callable[[RequestContext], RequestContext]:
+def require_permission(
+    permission: str,
+) -> Callable[[RequestContext], Awaitable[RequestContext]]:
     """FastAPI dependency factory enforcing a specific permission."""
 
-    def _dependency(context: RequestContext = Depends(get_request_context)) -> RequestContext:
+    async def _dependency(
+        context: RequestContext = Depends(require_membership),
+    ) -> RequestContext:
         if context.is_service:
             return context
         if not context.has_permission(permission):

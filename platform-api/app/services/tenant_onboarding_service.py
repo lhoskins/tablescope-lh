@@ -30,11 +30,7 @@ from app.models.tenant_membership import TenantMembership
 from app.models.user import User
 from app.models.user_vdb import UserVDB
 from app.services import billing_audit as audit
-from app.services.email_service import (
-    EmailService,
-    render_root_admin_invite,
-    render_vpn_info_required,
-)
+from app.services.email_service import EmailService
 from app.services.supabase_auth_service import SupabaseAuthService
 from app.services.tenant_provisioning_service import (
     TenantAlreadyExists,
@@ -374,6 +370,14 @@ class TenantOnboardingService:
     async def _ensure_default_project(
         self, req: TenantProvisioningRequest, tenant: Tenant, owner: User
     ) -> None:
+        from app.config import get_settings
+
+        # Off by default: new tenants no longer get an auto-created default
+        # workspace — the admin creates their own after onboarding. Existing
+        # tenant projects are untouched regardless of this flag.
+        if not get_settings().create_default_project_on_tenant_provisioning:
+            return
+
         existing = await self._session.scalar(
             select(Project).where(Project.tenant_id == tenant.id)
         )
@@ -393,35 +397,66 @@ class TenantOnboardingService:
         from app.config import get_settings
 
         settings = get_settings()
-        login_url = f"{settings.app_base_url}/{req.tenant_slug}"
-        tier_display = req.tier_key.replace("_", " ").title()
+        workspace_url = f"{settings.app_base_url}/{req.tenant_slug}"
+        company_name = req.company_name or req.tenant_slug
 
-        invite = render_root_admin_invite(
-            company_name=req.company_name or req.tenant_slug,
-            tier_display=tier_display,
-            invite_link=invite_link,
-            login_url=login_url,
-        )
-        sent = await self._email.send(
-            invite, to=req.tenant_admin_email, template="root_admin_invite"
-        )
+        # Idempotency: the single root-admin onboarding email is sent exactly
+        # once. A replayed webhook or a retry after a mid-provisioning failure
+        # must never send a duplicate.
+        if req.root_admin_email_sent_at is not None:
+            return
+
+        # Single combined onboarding email for the initial tenant admin: the
+        # "workspace ready" message whose primary CTA is "Create your password"
+        # (the set-password link), so the admin never lands on a login page
+        # before having credentials. No separate password-setup email is sent.
+        if invite_link:
+            sent = await self._email.send_transactional_email(
+                to=req.tenant_admin_email,
+                template="workspace_ready_with_password_setup",
+                variables={
+                    "first_name": req.tenant_admin_first_name or "",
+                    "workspace_name": f"{company_name} Workspace",
+                    "tenant_name": company_name,
+                    "admin_email": req.tenant_admin_email,
+                    "workspace_url": workspace_url,
+                    "password_setup_link": invite_link,
+                    "expiration_time": "24 hours",
+                },
+            )
+        else:
+            # Existing Supabase user already has a password — point them to the
+            # workspace instead of a password-setup link.
+            sent = await self._email.send_transactional_email(
+                to=req.tenant_admin_email,
+                template="workspace_ready",
+                variables={
+                    "first_name": req.tenant_admin_first_name or "",
+                    "workspace_name": f"{company_name} Workspace",
+                    "tenant_name": company_name,
+                    "workspace_url": workspace_url,
+                },
+            )
         if sent:
             req.root_admin_status = "invite_sent"
+            req.root_admin_email_sent_at = datetime.now(UTC)
             audit.audit(
                 audit.ROOT_ADMIN_INVITE_SENT,
                 provisioning_request_id=req.id,
                 recipient=req.tenant_admin_email,
             )
 
-        # The root-admin invite above is the single onboarding email (it doubles
-        # as the "workspace ready" + set-password message). Only isolated tiers
-        # that still need network details get a second, action-required email.
+        # Only isolated tiers that still need network details get a second,
+        # action-required email.
         if req.vpn_status == "awaiting_customer_network_details":
             onboarding_url = f"{settings.app_base_url}/onboarding/vpn?request={req.id}"
-            vpn_email = render_vpn_info_required(
-                company_name=req.company_name or req.tenant_slug,
-                onboarding_url=onboarding_url,
-            )
-            await self._email.send(
-                vpn_email, to=req.tenant_admin_email, template="vpn_info_required"
+            await self._email.send_transactional_email(
+                to=req.tenant_admin_email,
+                template="vpn_setup_information_required",
+                variables={
+                    "first_name": req.tenant_admin_first_name or "",
+                    "tenant_name": company_name,
+                    "vpn_information_link": onboarding_url,
+                    "support_contact_email": settings.support_email,
+                },
             )

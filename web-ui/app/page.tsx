@@ -1,18 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { IconHelpCircle } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
-import { HeroSearch } from "@/components/tablescope/home/hero-search";
-import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
-import { RecentProjectsTable } from "@/components/tablescope/home/recent-projects";
-import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
-import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { getUserMeta } from "@/lib/auth";
-import { greeting } from "@/lib/ui/format";
 import {
   useCurrentUser,
   useProjectSummaries,
@@ -35,12 +29,7 @@ const FALLBACK_TENANT: TenantSummary = {
 export default function HomePage() {
   const router = useRouter();
   const { data: identity } = useCurrentUser();
-  const { data: projects, isLoading } = useProjectSummaries({
-    recent: true,
-    limit: 5,
-  });
   const { data: allProjects } = useProjectSummaries();
-  const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
     if (!getUserMeta()) router.replace("/login");
@@ -56,11 +45,6 @@ export default function HomePage() {
       tenant={tenant}
       user={user}
       counts={{ projects: allProjects?.length }}
-      topBarLeft={
-        <span className="text-[15px] text-ink-secondary">
-          {user.name ? greeting(user.name) : "Welcome"}
-        </span>
-      }
       topBarRight={
         <>
           <StatusDot tone="online" className="mr-1" />
@@ -75,19 +59,20 @@ export default function HomePage() {
         </>
       }
     >
-      <div className="space-y-10 py-6">
-        <div className="mx-auto w-full max-w-content space-y-6">
-          <HeroSearch />
-          <HomeAiSuggestions />
-        </div>
-        <IntelligenceFeed />
-        <div className="mx-auto w-full max-w-content">
-          <RecentProjectsTable
-            projects={isLoading ? [] : (projects ?? [])}
-          />
-        </div>
+      <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
+        <h1 className="text-h1 text-ink-primary">Home</h1>
+        <p className="mt-2 max-w-md text-body text-ink-tertiary">
+          This page is reserved for future development. Visit{" "}
+          <button
+            type="button"
+            className="text-brand-700 underline hover:text-brand-800"
+            onClick={() => router.push("/business-insight")}
+          >
+            Business Insight
+          </button>{" "}
+          for AI suggestions and intelligence.
+        </p>
       </div>
-      <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
     </AppShell>
   );
 }

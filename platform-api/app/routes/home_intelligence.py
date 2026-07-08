@@ -380,6 +380,35 @@ class SuggestRequest(BaseModel):
     granularity: int = 3
 
 
+class ProjectDashboardRequest(BaseModel):
+    project_id: int
+    max_widgets: int = 6
+    granularity: int = 3
+
+
+async def _project_for_access(
+    session: AsyncSession, context: RequestContext, project_id: int
+) -> Project:
+    """Fetch one project the caller can access, or raise 404 (tenant-scoped)."""
+    member_sub = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == context.user_id,
+        ProjectMember.is_active.is_(True),
+    )
+    project = await session.scalar(
+        select(Project).where(
+            Project.id == project_id,
+            Project.tenant_id == context.tenant_id,
+            or_(
+                Project.owner_id == context.user_id,
+                Project.id.in_(member_sub),
+            ),
+        )
+    )
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
 async def _plan_analyses(
     session: AsyncSession,
     context: RequestContext,
@@ -548,6 +577,101 @@ async def home_dashboard_suggestions(
     return {"projects": list(results)}
 
 
+@router.post("/home/project-dashboard")
+async def home_project_dashboard(
+    req: ProjectDashboardRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Generate a real, chart-rendered dashboard for ONE project.
+
+    Mirrors the Home "New Dashboard Suggestions" flow (plan → execute real SQL →
+    build renderable chart series) but scoped to a single project, so the Project
+    Insight page can generate a working dashboard instead of a preview. Widgets
+    whose SQL does not execute or returns no rows are dropped (never surfaced as
+    preview-only). Nothing is saved until the user clicks Save.
+    """
+    project = await _project_for_access(session, context, req.project_id)
+    runner = _make_runner(session, context, project.id)
+    widgets: list[dict[str, Any]] = []
+    try:
+        analyses = await _plan_analyses(
+            session,
+            context,
+            project,
+            max_analyses=req.max_widgets,
+            granularity=req.granularity,
+        )
+    except Exception as exc:
+        logger.warning(
+            "project dashboard plan failed for project %s: %s",
+            project.id,
+            exc,
+        )
+        analyses = []
+    for a in analyses:
+        sql = (a.get("sql") or "").strip()
+        if not sql:
+            continue
+        result = await hi._safe_query(runner, sql)
+        if not result or not result.get("rows"):
+            continue
+        chart = hi._build_chart(
+            a.get("chart_type", "bar"),
+            a.get("title", ""),
+            result,
+            a.get("label_column", ""),
+            a.get("value_column", ""),
+        )
+        if not chart:
+            continue
+        value_label = a.get("value_column", "") or ""
+        hi.enhance_bar_readability(chart)
+        fmt = hi._detect_value_format(
+            value_label, chart.get("data", {}).get("series") or []
+        )
+        explanation = hi.build_widget_explanation(chart, value_label, fmt)
+        # Persist the horizontal orientation we chose so the saved dashboard
+        # renders the same readable chart, not a jumbled vertical bar.
+        chart_type_out = (
+            "horizontal_bar"
+            if chart.get("type") == "bar"
+            and chart.get("subtype") == "horizontal_bar"
+            else a.get("chart_type", "bar")
+        )
+        widgets.append(
+            {
+                "title": a.get("title") or "Widget",
+                "subtitle": a.get("rationale") or "",
+                "explanation": explanation,
+                "format": fmt,
+                "chartType": chart_type_out,
+                "chart": chart,
+                "sql": sql,
+                "labelColumn": a.get("label_column", ""),
+                "valueColumn": value_label,
+            }
+        )
+
+    narrative = hi.build_dashboard_narrative(widgets)
+    return {
+        "projectId": str(project.id),
+        "projectName": project.name,
+        "projectColor": hi.project_color(project.id),
+        "dashboard": (
+            {
+                "title": f"{project.name} — AI Dashboard",
+                "summary": narrative["summary"],
+                "keyFindings": narrative["keyFindings"],
+                "recommendedActions": narrative["recommendedActions"],
+                "widgets": widgets,
+            }
+            if widgets
+            else None
+        ),
+    }
+
+
 @router.post("/home/insights")
 async def home_insights(
     req: SuggestRequest,
@@ -593,6 +717,7 @@ class SaveDashboardWidget(BaseModel):
     title: str
     sql: str
     chartType: str = "bar"
+    explanation: str | None = None
     labelColumn: str | None = None
     valueColumn: str | None = None
 
@@ -601,6 +726,9 @@ class SaveDashboardRequest(BaseModel):
     project_id: int
     title: str
     widgets: list[SaveDashboardWidget]
+    summary: str | None = None
+    keyFindings: list[str] = []
+    recommendedActions: list[str] = []
 
 
 @router.post("/home/save-dashboard")
@@ -673,6 +801,7 @@ async def home_save_dashboard(
                 description="",
                 sql_text=sql,
                 left_datasource=_detect_datasource(sql, allowed_tables),
+                ai_generated=True,
             )
             session.add(query)
             await session.flush()
@@ -686,6 +815,7 @@ async def home_save_dashboard(
             {
                 "id": f"ai_widget_{idx}",
                 "title": w.title,
+                "explanation": w.explanation or "",
                 "type": mapped_type,
                 "chartSubtype": _map_chart_subtype(w.chartType),
                 "dataSource": {"kind": "query", "queryId": query_id},
@@ -715,6 +845,9 @@ async def home_save_dashboard(
             "globalFilters": [],
             "layout": "grid",
             "ai_generated": True,
+            "summary": req.summary or "",
+            "keyFindings": req.keyFindings,
+            "recommendedActions": req.recommendedActions,
         },
     )
     session.add(dashboard)

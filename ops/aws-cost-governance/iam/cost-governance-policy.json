@@ -1,0 +1,82 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CostExplorerRead",
+      "Effect": "Allow",
+      "Action": [
+        "ce:GetCostAndUsage",
+        "ce:GetCostForecast",
+        "ce:GetCostAndUsageWithResources",
+        "ce:GetDimensionValues",
+        "ce:GetTags",
+        "ce:GetCostCategories"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Budgets",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:ViewBudget",
+        "budgets:ModifyBudget",
+        "budgets:DescribeBudget*"
+      ],
+      "Resource": "arn:aws:budgets::*:budget/tablescope-*"
+    },
+    {
+      "Sid": "SNSAlerts",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:Subscribe",
+        "sns:ListTopics",
+        "sns:ListSubscriptionsByTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LambdaDeploy",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:GetFunction",
+        "lambda:ListFunctions",
+        "lambda:AddPermission",
+        "lambda:CreateFunctionUrlConfig"
+      ],
+      "Resource": "arn:aws:lambda:*:*:function:tablescope-*"
+    },
+    {
+      "Sid": "SchedulerDeploy",
+      "Effect": "Allow",
+      "Action": [
+        "scheduler:CreateSchedule",
+        "scheduler:UpdateSchedule",
+        "scheduler:GetSchedule",
+        "scheduler:ListSchedules",
+        "scheduler:CreateScheduleGroup",
+        "scheduler:GetScheduleGroup"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IamForCostRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:GetRole",
+        "iam:PutRolePolicy",
+        "iam:PassRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/tablescope-cost-lambda-role",
+        "arn:aws:iam::*:role/tablescope-cost-scheduler-role"
+      ]
+    }
+  ]
+}

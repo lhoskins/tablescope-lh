@@ -67,8 +67,20 @@ export interface SavedQuery {
   run_count: number;
   last_run_at: string | null;
   avg_runtime_ms: number | null;
+  is_archived: boolean;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
+  owner_name: string | null;
+  origin: string;
+  origin_label: string;
+  source_name: string | null;
+  has_outgoing_scope: boolean;
+  outgoing_scope_count: number;
+  has_incoming_scope: boolean;
+  incoming_scope_count: number;
+  has_active_scope: boolean;
+  active_scope_count: number;
 }
 
 export function useProjectQueries(projectId: string) {
@@ -76,6 +88,20 @@ export function useProjectQueries(projectId: string) {
     queryKey: ["project", projectId, "queries"],
     queryFn: () =>
       apiClient.get<SavedQuery[]>(`/api/projects/${projectId}/queries`),
+    enabled: Boolean(projectId),
+  });
+}
+
+/** Archived queries only — powers the Queries "Archive" folder. */
+export function useProjectArchivedQueries(projectId: string) {
+  return useQuery({
+    queryKey: ["project", projectId, "queries", "archived"],
+    queryFn: async () => {
+      const all = await apiClient.get<SavedQuery[]>(
+        `/api/projects/${projectId}/queries?include_archived=true`,
+      );
+      return all.filter((q) => q.is_archived);
+    },
     enabled: Boolean(projectId),
   });
 }
@@ -315,27 +341,172 @@ export function useRemoveProjectMember(projectId: string) {
 
 // ── Relationship graph ───────────────────────────────────────────────
 
+export type GraphId = number | string;
+
 export interface GraphNode {
-  id: number;
+  id: GraphId;
   type: string;
   label: string;
   source_type: string | null;
   source_id: number | null;
   properties: Record<string, unknown>;
+  // Node-centric Knowledge Graph metadata (optional; absent on legacy responses).
+  graphKey?: string;
+  layer?: string;
+  displayGroup?: string;
+  severity?: KnowledgeGraphSeverity;
+  summary?: string;
+  businessValue?: string;
+  businessQuestion?: string;
+  confidence?: number | null;
+  isCenterEligible?: boolean;
+  recommendedLens?: string;
 }
 
+export type RelationshipStrength =
+  | "explicit"
+  | "inferred"
+  | "recommended"
+  | "weak"
+  | "hidden";
+export type ConnectorStyle = "solid" | "dotted" | "dashed" | "hidden";
+
 export interface GraphEdge {
-  id: number;
-  source: number;
-  target: number;
+  id: GraphId;
+  source: GraphId;
+  target: GraphId;
   type: string;
   confidence: number;
   evidence: string;
+  validationStatus?: string;
+  // Relationship evidence classification (connector-style policy). Absent on
+  // legacy responses, in which case the canvas falls back to confidence.
+  relationshipStrength?: RelationshipStrength;
+  connectorStyle?: ConnectorStyle;
+  displayByDefault?: boolean;
+  evidenceBasis?: string;
+  evidenceSummary?: string;
 }
 
 export interface GraphResponse {
   nodes: GraphNode[];
   edges: GraphEdge[];
+}
+
+export type KnowledgeGraphSeverity =
+  | "critical"
+  | "urgent"
+  | "warning"
+  | "watch"
+  | "opportunity"
+  | "info";
+
+export type KnowledgeGraphCardCategory =
+  | "business_insight"
+  | "opportunity"
+  | "risk"
+  | "warning"
+  | "gap"
+  | "recommendation";
+
+export interface KnowledgeGraphInsightCard {
+  id: string;
+  nodeKey: string;
+  category: KnowledgeGraphCardCategory;
+  severity: KnowledgeGraphSeverity;
+  title: string;
+  summary: string;
+  businessQuestion?: string;
+  businessImpact?: string;
+  confidence: number;
+  evidencePath: string[];
+  sourceDocuments: string[];
+  sourceTables: string[];
+  sourceQueries: string[];
+  sourceDashboards: string[];
+  supportedKpis: string[];
+  recommendedAction?: string;
+  traceToEvidence: {
+    nodeIds: GraphId[];
+    edgeIds: GraphId[];
+    nodeKeys?: string[];
+  };
+}
+
+export interface KnowledgeGraphGap {
+  id: string;
+  nodeKey: string;
+  gapType: string;
+  title: string;
+  severity: KnowledgeGraphSeverity;
+  whyItMatters: string;
+  authoritativeSource: string;
+  expectedEvidence: string;
+  missingOrWeakComponent: string;
+  affectedProcesses: string[];
+  affectedKpis: string[];
+  recommendedAction: string;
+  confidence: number;
+}
+
+export interface KnowledgeGraphRecommendation {
+  id: string;
+  nodeKey: string;
+  title: string;
+  summary: string;
+  severity: KnowledgeGraphSeverity;
+  confidence: number;
+}
+
+export interface KnowledgeGraphStats {
+  nodeCount: number;
+  edgeCount: number;
+  cardCount: number;
+  gapCount: number;
+  byDisplayGroup: Record<string, number>;
+}
+
+export interface KnowledgeGraphResponse {
+  centerNode: GraphNode | null;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  insightCards: KnowledgeGraphInsightCard[];
+  gaps: KnowledgeGraphGap[];
+  recommendedActions: KnowledgeGraphRecommendation[];
+  tracePaths: {
+    id: string;
+    fromNodeKey: string;
+    nodeIds: number[];
+    edgeIds: number[];
+  }[];
+  stats: KnowledgeGraphStats;
+  lens?: string;
+  minConfidence?: number;
+  includeInferred?: boolean;
+  pipeline_version?: string;
+  generated_at?: string;
+  /** ISO timestamp of the cached snapshot the payload was built from. */
+  lastUpdated?: string;
+  snapshotId?: number;
+  /** True when served from the cached snapshot (false right after a refresh). */
+  isCached?: boolean;
+}
+
+export interface KnowledgeGraphRefreshResult {
+  lastUpdated: string;
+  snapshotId: number | null;
+  nodeCount: number;
+  edgeCount: number;
+  pipelineVersion: string;
+}
+
+export interface KnowledgeGraphParams {
+  lens?: string;
+  centerNode?: string | null;
+  minConfidence?: number;
+  includeInferred?: boolean;
+  severity?: string;
+  refresh?: boolean;
 }
 
 export function useProjectGraph(projectId: string) {
@@ -344,6 +515,56 @@ export function useProjectGraph(projectId: string) {
     queryFn: () =>
       apiClient.get<GraphResponse>(`/api/projects/${projectId}/graph`),
     enabled: Boolean(projectId),
+  });
+}
+
+/**
+ * Node-centric Insight-First Knowledge Graph. Passing a `lens` (always set by
+ * the Knowledge Graph screen) makes the backend return the enriched payload
+ * with insight cards, gaps, recommendations and trace paths.
+ */
+export function useKnowledgeGraph(
+  projectId: string,
+  params: KnowledgeGraphParams,
+) {
+  const query: Record<string, string> = {
+    lens: params.lens ?? "insight-first",
+    min_confidence: String(params.minConfidence ?? 0.7),
+    include_inferred: String(params.includeInferred ?? false),
+    severity: params.severity ?? "all",
+  };
+  if (params.centerNode) query.center_node = params.centerNode;
+  if (params.refresh) query.refresh = "true";
+  const qs = new URLSearchParams(query).toString();
+
+  return useQuery({
+    queryKey: ["project", projectId, "knowledge-graph", query],
+    queryFn: () =>
+      apiClient.get<KnowledgeGraphResponse>(
+        `/api/projects/${projectId}/graph?${qs}`,
+      ),
+    enabled: Boolean(projectId),
+  });
+}
+
+/**
+ * Manually rebuild the project's Knowledge Graph snapshot, then invalidate the
+ * cached graph query so the canvas re-reads the fresh snapshot. Mirrors the AI
+ * Home refresh: node clicks read the cached snapshot; only this rebuilds it.
+ */
+export function useRefreshKnowledgeGraph(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiClient.post<KnowledgeGraphRefreshResult>(
+        `/api/projects/${projectId}/graph/refresh`,
+        {},
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({
+        queryKey: ["project", projectId, "knowledge-graph"],
+      });
+    },
   });
 }
 

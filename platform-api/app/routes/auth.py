@@ -15,8 +15,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.clerk import verify_external_token
-from app.auth.context import RequestContext, get_request_context
+from app.auth.context import RequestContext
 from app.auth.jwt import AuthError, create_access_token
+from app.auth.membership import require_membership
 from app.config import get_settings
 from app.database import get_db
 from app.models.tenant import Tenant
@@ -27,6 +28,8 @@ from app.schemas.auth import (
     CurrentUserResponse,
     DirectLoginRequest,
 )
+from app.services.allowed_domains import enforce_allowed_domain
+from app.services.mfa_phone_service import mfa_aal_for_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -35,7 +38,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.get("/me", response_model=CurrentUserResponse)
 async def get_current_user(
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
 ) -> CurrentUserResponse:
     """Return the authenticated caller's identity and tenant for the app shell."""
     user = await session.get(User, context.user_id)
@@ -53,6 +56,8 @@ async def get_current_user(
         tenant_id=user.tenant_id,
         tenant_name=tenant.name if tenant else "",
         tenant_slug=tenant.slug if tenant else None,
+        avatar_url=user.avatar_url,
+        company_logo_url=tenant.logo_url if tenant else None,
     )
 
 
@@ -103,11 +108,30 @@ async def exchange_token(
                 detail=f"No platform-api user linked to external id {external_user_id}",
             )
 
+    # A deactivated/blocked membership must not be able to obtain a token.
+    if not user.is_active or (user.status or "active") != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your access to this tenant is inactive",
+        )
+
+    await enforce_allowed_domain(
+        session,
+        tenant_id=user.tenant_id,
+        email=user.email,
+        user_id=user.id,
+        purpose="access",
+    )
+
+    # Derive the assurance level from the user's verified-phone record: aal2
+    # while a recent SMS verification window is open, else aal1. This lets a
+    # reload / re-login inside the window skip the SMS challenge.
     access_token = create_access_token(
         sub=external_user_id,
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
+        extra_claims={"aal": await mfa_aal_for_user(session, user.id)},
     )
     tenant = await session.get(Tenant, user.tenant_id)
     return AuthTokenResponse(
@@ -140,11 +164,20 @@ async def direct_login(
     if user is None or not user.verify_password(payload.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    await enforce_allowed_domain(
+        session,
+        tenant_id=user.tenant_id,
+        email=user.email,
+        user_id=user.id,
+        purpose="access",
+    )
+
     access_token = create_access_token(
         sub=user.external_id or str(user.id),
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
+        extra_claims={"aal": await mfa_aal_for_user(session, user.id)},
     )
     login_tenant = await session.get(Tenant, user.tenant_id)
     return AuthTokenResponse(

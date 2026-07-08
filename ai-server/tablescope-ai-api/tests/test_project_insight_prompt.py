@@ -1,0 +1,55 @@
+"""Tests for the Project Insight best-practices reference file.
+
+Kept free of router imports so it runs without the optional vector-store deps
+(qdrant). The Project Insight endpoint must load THIS project-scoped prompt —
+not the tenant-wide Business/Home Insight prompt. Run from the
+``tablescope-ai-api`` directory: ``pytest -q``.
+"""
+
+from __future__ import annotations
+
+from app.services.prompt_loader import PROMPTS_DIR, load_prompt_reference
+
+
+def test_project_insight_best_practices_file_exists() -> None:
+    assert (PROMPTS_DIR / "project_insight_best_practices.md").exists()
+
+
+def test_project_insight_best_practices_has_key_sections() -> None:
+    text = load_prompt_reference("project_insight_best_practices.md")
+    assert text
+    assert "Project Insight Best Practices" in text
+    assert "Executive Project Summary" in text
+    assert "Insight Validation Workflow" in text
+    assert "Recommended Dashboards" in text
+
+
+def test_project_insight_prompt_is_project_scoped_not_business() -> None:
+    """The prompt must scope to ONE project and distinguish Business Insight."""
+    text = load_prompt_reference("project_insight_best_practices.md")
+    assert "Difference Between Business Insight and Project Insight" in text
+    # V1 validation workflow: Reviewed/Acknowledged only — no Approve/Reject.
+    lowered = text.lower()
+    assert "reviewed" in lowered
+    assert "acknowledged" in lowered
+
+
+def test_project_insight_prompt_requires_source_context() -> None:
+    """The unified resolver approach: every actionable output carries source
+    context and the prompt forbids hard-coded SQL templates."""
+    text = load_prompt_reference("project_insight_best_practices.md")
+    assert "Source Context Requirement" in text
+    lowered = text.lower()
+    assert "sourcecolumns" in lowered
+    assert "sourcetables" in lowered
+    # No prompt guidance should encourage SQL templates.
+    assert "never emit hard-coded or business-specific sql templates" in lowered
+    assert "resolver" in lowered
+
+
+def test_project_insight_prompt_has_no_placeholder_trend_label() -> None:
+    """The trend example must not seed the literal 'Trend A' placeholder, which
+    weaker models echo verbatim instead of deriving a real trend name."""
+    text = load_prompt_reference("project_insight_best_practices.md")
+    assert '"label": "Trend A"' not in text
+    assert "derived from the actual trend" in text

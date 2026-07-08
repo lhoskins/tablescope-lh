@@ -46,6 +46,11 @@ const SEVERITY: Record<
     label: "Urgent",
     chip: "bg-warning/10 text-warning",
   },
+  warning: {
+    accent: "border-l-warning",
+    label: "Warning",
+    chip: "bg-warning/10 text-warning",
+  },
   watch: {
     accent: "border-l-line-secondary",
     label: "Watch",

@@ -3,15 +3,15 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  IconShare,
-  IconSparkles,
   IconArrowUp,
-  IconPlus,
   IconUsers,
+  IconTable,
+  IconDatabase,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
-import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { MembersDialog } from "@/components/tablescope/project/members-dialog";
+import { ShareToggle } from "@/components/tablescope/project/share-toggle";
+import { ToastViewport, useToasts } from "@/components/ui/toast";
 import {
   DataSourceResultView,
 } from "@/components/tablescope/project/detail-views";
@@ -37,6 +37,7 @@ import {
   type SavedQuery,
   type DataSource,
 } from "@/lib/ui/use-project-data";
+import { useAccordion } from "@/lib/ui/use-accordion";
 
 const QUICK_PROMPTS = [
   "Supplier delay trends",
@@ -68,8 +69,10 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const { data: graph } = useProjectGraph(projectId);
 
   const [ask, setAsk] = useState("");
-  const [showCreate, setShowCreate] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
+  // Single-expand accordion: at most one section open, all may be collapsed.
+  const { toggle, isOpen } = useAccordion();
+  const { toasts, push, dismiss } = useToasts();
   const [detail, setDetail] = useState<
     { kind: "query"; id: number } | { kind: "source"; name: string } | null
   >(null);
@@ -111,12 +114,12 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         null)
       : null;
 
-  const recentQueries = [...queryRows]
-    .sort(
-      (a, b) =>
-        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-    )
-    .slice(0, 4);
+  // All tables, most-recently-updated first. The Tables accordion shows the
+  // full list (no truncation) when expanded.
+  const sortedQueries = [...queryRows].sort(
+    (a, b) =>
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  );
 
 
 
@@ -134,21 +137,14 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
       breadcrumbLabel="Overview"
       actions={
         <>
-          <Button variant="secondary" onClick={() => setShowCreate(true)}>
-            <IconPlus size={14} />
-            New project
-          </Button>
+          <ShareToggle
+            projectId={projectId}
+            shared={project?.visibility === "shared"}
+            onToast={push}
+          />
           <Button variant="secondary" onClick={() => setShowMembers(true)}>
             <IconUsers size={14} />
             Members
-          </Button>
-          <Button variant="secondary">
-            <IconShare size={14} />
-            Share
-          </Button>
-          <Button variant="primary" onClick={() => goAsk("")}>
-            <IconSparkles size={14} />
-            Ask AI
           </Button>
         </>
       }
@@ -321,7 +317,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             hint={`${connectedSources} connected`}
           />
           <StatTile
-            label="Queries"
+            label="Tables"
             value={project?.queryCount ?? queryRows.length}
             hint={
               newQueriesThisWeek > 0
@@ -347,110 +343,119 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           />
         </div>
 
-        <Card className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-            <span className="text-h3 text-ink-primary">Queries</span>
-            <button
-              type="button"
-              onClick={() => router.push(`/projects/${projectId}/queries`)}
-              className="text-small font-medium text-brand-700 hover:underline"
-            >
-              {queryRows.length} total · View all
-            </button>
-          </div>
-          {recentQueries.length === 0 ? (
+        <OverviewAccordionSection
+          type="tables"
+          title="Tables"
+          subtitle="Saved and AI-generated tables in this project"
+          count={queryRows.length}
+          open={isOpen("tables")}
+          onToggle={() => toggle("tables")}
+        >
+          {sortedQueries.length === 0 ? (
             <div className="px-4 py-10 text-center text-small text-ink-tertiary">
-              No queries yet.
+              No tables yet.
             </div>
           ) : (
-            <table className="w-full text-left text-[13px]">
-              <thead>
-                <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
-                  <Th>Name</Th>
-                  <Th>Source</Th>
-                  <Th>Origin</Th>
-                  <Th>Visibility</Th>
-                  <Th className="text-right">Updated</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentQueries.map((q) => (
-                  <QueryRow
-                    key={q.id}
-                    q={q}
-                    onClick={() => router.push(`/projects/${projectId}/queries?q=${q.id}`)}
-                  />
-                ))}
-              </tbody>
-            </table>
+            <div className="max-h-[32rem] overflow-y-auto">
+              <table className="w-full text-left text-[13px]">
+                <thead>
+                  <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
+                    <Th>Name</Th>
+                    <Th>Source</Th>
+                    <Th>Origin</Th>
+                    <Th>Visibility</Th>
+                    <Th className="text-right">Updated</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedQueries.map((q) => (
+                    <QueryRow
+                      key={q.id}
+                      q={q}
+                      onClick={() => router.push(`/projects/${projectId}/queries?q=${q.id}`)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </Card>
+        </OverviewAccordionSection>
 
-        <Card className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-            <span className="text-h3 text-ink-primary">Data Sources</span>
-            <button
-              type="button"
-              onClick={() => router.push(`/projects/${projectId}/data-sources`)}
-              className="text-small font-medium text-brand-700 hover:underline"
-            >
-              {sourceRows.length} total · Connect new
-            </button>
-          </div>
+        <OverviewAccordionSection
+          type="sources"
+          title="Data Sources"
+          subtitle="Connected databases, files, and SaaS objects"
+          count={sourceRows.length}
+          open={isOpen("sources")}
+          onToggle={() => toggle("sources")}
+        >
           {sourceRows.length === 0 ? (
             <div className="px-4 py-10 text-center text-small text-ink-tertiary">
               No data sources connected yet.
             </div>
           ) : (
-            <table className="w-full text-left text-[13px]">
-              <thead>
-                <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
-                  <Th>Name</Th>
-                  <Th>Type</Th>
-                  <Th className="text-right">Tables</Th>
-                  <Th>Status</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {sourceRows.slice(0, 5).map((s) => (
-                  <tr
-                    key={s.viewName || s.fileName}
-                    onClick={() =>
-                      setDetail({
-                        kind: "source",
-                        name: s.viewName || s.fileName,
-                      })
-                    }
-                    className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-secondary"
-                  >
-                    <td className="px-4 py-2.5 font-medium text-ink-primary">
-                      {s.viewName || s.fileName}
-                    </td>
-                    <td className="px-4 py-2.5 text-ink-secondary">
-                      {sourceTypeLabel(s)}
-                    </td>
-                    <td className="px-4 py-2.5 text-right text-ink-secondary">
-                      {s.columnTypes?.length ?? "—"}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <Badge tone={isSaas(s) ? "warning" : "success"}>
-                        {isSaas(s) ? "Pending auth" : "Connected"}
-                      </Badge>
-                    </td>
+            <>
+              <div className="max-h-[32rem] overflow-y-auto">
+              <table className="w-full text-left text-[13px]">
+                <thead>
+                  <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
+                    <Th>Name</Th>
+                    <Th>Type</Th>
+                    <Th className="text-right">Tables</Th>
+                    <Th>Status</Th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sourceRows.map((s) => (
+                    <tr
+                      key={s.viewName || s.fileName}
+                      onClick={() =>
+                        setDetail({
+                          kind: "source",
+                          name: s.viewName || s.fileName,
+                        })
+                      }
+                      className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-secondary"
+                    >
+                      <td className="px-4 py-2.5 font-medium text-ink-primary">
+                        {s.viewName || s.fileName}
+                      </td>
+                      <td className="px-4 py-2.5 text-ink-secondary">
+                        {sourceTypeLabel(s)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-ink-secondary">
+                        {s.columnTypes?.length ?? "—"}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Badge tone={isSaas(s) ? "warning" : "success"}>
+                          {isSaas(s) ? "Pending auth" : "Connected"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+              <div className="flex justify-end border-t border-line-tertiary px-4 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/projects/${projectId}/data-sources`)}
+                  className="text-small font-medium text-brand-700 hover:underline"
+                >
+                  Connect new
+                </button>
+              </div>
+            </>
           )}
-        </Card>
+        </OverviewAccordionSection>
       </div>
       )}
-      <NewProjectDialog open={showCreate} onClose={() => setShowCreate(false)} />
       <MembersDialog
         open={showMembers}
         projectId={projectId}
         onClose={() => setShowMembers(false)}
       />
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );
 }
@@ -491,4 +496,92 @@ function Th({
   className?: string;
 }) {
   return <th className={cn("px-4 py-2 font-medium", className)}>{children}</th>;
+}
+
+const OVERVIEW_SECTION_STYLES = {
+  tables: {
+    background: "#F8FBFF",
+    border: "#D7E8FF",
+    accent: "#1E6FD9",
+    Icon: IconTable,
+  },
+  sources: {
+    background: "#F7FFFB",
+    border: "#D4F0E2",
+    accent: "#2EA66F",
+    Icon: IconDatabase,
+  },
+} as const;
+
+function OverviewAccordionSection({
+  type,
+  title,
+  subtitle,
+  count,
+  open,
+  onToggle,
+  children,
+}: {
+  type: "tables" | "sources";
+  title: string;
+  subtitle: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const style = OVERVIEW_SECTION_STYLES[type];
+  const Icon = style.Icon;
+  return (
+    <div
+      className="overflow-hidden rounded-xl border"
+      style={{ background: style.background, borderColor: style.border }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+      >
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+          style={{ background: `${style.accent}1A`, color: style.accent }}
+        >
+          <Icon size={18} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span
+              className="text-h3 font-semibold"
+              style={{ color: style.accent }}
+            >
+              {title}
+            </span>
+            <span
+              className="rounded-full px-2 py-0.5 text-caption font-medium tabular-nums"
+              style={{ background: `${style.accent}1A`, color: style.accent }}
+            >
+              {count}
+            </span>
+          </span>
+          <span className="block text-small text-ink-tertiary">{subtitle}</span>
+        </span>
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-body font-semibold"
+          style={{ borderColor: style.border, color: style.accent }}
+          aria-hidden
+        >
+          {open ? "−" : "+"}
+        </span>
+      </button>
+      {open && (
+        <div
+          className="border-t bg-bg-primary"
+          style={{ borderColor: style.border }}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
 }

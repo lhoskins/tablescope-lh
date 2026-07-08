@@ -20,11 +20,13 @@ export interface ProjectSummary {
 export type NavKey =
   // Home-mode nav
   | "home"
+  | "business-insight"
   | "projects"
   | "ai-assistant"
   | "activity"
   | "data-connections"
   | "data-sources"
+  | "database-connectors"
   | "data-source-builder"
   | "documents"
   | "dashboards"
@@ -37,13 +39,18 @@ export type NavKey =
   | "admin-users"
   | "admin-tenants"
   | "admin-data-planes"
+  | "admin-allowed-domains"
+  | "admin-data-source-assignments"
+  | "admin-branding"
   // Project-mode nav
   | "overview"
   | "project-data-sources"
   | "project-queries"
+  | "project-scopes"
   | "project-dashboards"
   | "project-documents"
   | "project-ai-assistant"
+  | "project-insight"
   | "project-relationship-map"
   | "project-metadata-catalog"
   | "project-reference-library"
@@ -53,6 +60,8 @@ export interface TenantSummary {
   name: string;
   slug: string;
   initials: string;
+  /** Admin-uploaded company logo URL (absolute), or null when unset. */
+  logoUrl?: string | null;
 }
 
 export interface CurrentUser {
@@ -65,4 +74,8 @@ export interface CurrentUser {
   isSuperAdmin?: boolean;
   tenantName: string;
   initials: string;
+  /** Numeric user id (used for the avatar URL). */
+  id?: number;
+  /** Safe served avatar URL, or null when the user has no picture. */
+  avatarUrl?: string | null;
 }

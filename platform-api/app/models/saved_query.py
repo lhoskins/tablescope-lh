@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -42,6 +42,18 @@ class SavedQuery(TimestampMixin, Base):
     )
     last_run_at: Mapped[datetime | None] = mapped_column(nullable=True)
     avg_runtime_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Archive lifecycle: archived queries remain executable but are hidden from
+    # normal lists and must be archived before they can be permanently deleted.
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    archived_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     def __repr__(self) -> str:
         return f"SavedQuery(id={self.id}, project_id={self.project_id}, name={self.name!r})"

@@ -1,0 +1,201 @@
+{
+  "generatedAt": "2026-07-07T15:36:16Z",
+  "monthToDate": 182.93,
+  "projectedMonth": 1104.58,
+  "byService": [
+    {
+      "service": "Amazon Elastic Compute Cloud - Compute",
+      "amount": 135.3
+    },
+    {
+      "service": "Amazon Virtual Private Cloud",
+      "amount": 29.86
+    },
+    {
+      "service": "EC2 - Other",
+      "amount": 17.77
+    },
+    {
+      "service": "Amazon Relational Database Service",
+      "amount": 0.0
+    },
+    {
+      "service": "Amazon Simple Storage Service",
+      "amount": 0.0
+    }
+  ],
+  "topDrivers": [
+    {
+      "service": "Amazon Elastic Compute Cloud - Compute",
+      "amount": 135.3
+    },
+    {
+      "service": "Amazon Virtual Private Cloud",
+      "amount": 29.86
+    },
+    {
+      "service": "EC2 - Other",
+      "amount": 17.77
+    },
+    {
+      "service": "Amazon Relational Database Service",
+      "amount": 0.0
+    },
+    {
+      "service": "Amazon Simple Storage Service",
+      "amount": 0.0
+    }
+  ],
+  "daily": [
+    {
+      "date": "2026-06-07",
+      "amount": 29.69
+    },
+    {
+      "date": "2026-06-08",
+      "amount": 29.7
+    },
+    {
+      "date": "2026-06-09",
+      "amount": 29.77
+    },
+    {
+      "date": "2026-06-10",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-11",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-12",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-13",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-14",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-15",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-16",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-17",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-18",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-19",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-20",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-21",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-22",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-23",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-24",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-25",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-26",
+      "amount": 29.75
+    },
+    {
+      "date": "2026-06-27",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-28",
+      "amount": 29.75
+    },
+    {
+      "date": "2026-06-29",
+      "amount": 29.8
+    },
+    {
+      "date": "2026-06-30",
+      "amount": 29.68
+    },
+    {
+      "date": "2026-07-01",
+      "amount": 29.74
+    },
+    {
+      "date": "2026-07-02",
+      "amount": 29.68
+    },
+    {
+      "date": "2026-07-03",
+      "amount": 29.74
+    },
+    {
+      "date": "2026-07-04",
+      "amount": 29.74
+    },
+    {
+      "date": "2026-07-05",
+      "amount": 29.74
+    },
+    {
+      "date": "2026-07-06",
+      "amount": 29.63
+    },
+    {
+      "date": "2026-07-07",
+      "amount": 4.68
+    }
+  ],
+  "monthlyTrend": [
+    {
+      "month": "2026-01",
+      "amount": 61.54
+    },
+    {
+      "month": "2026-02",
+      "amount": 55.87
+    },
+    {
+      "month": "2026-03",
+      "amount": 61.55
+    },
+    {
+      "month": "2026-04",
+      "amount": 59.66
+    },
+    {
+      "month": "2026-05",
+      "amount": 78.09
+    },
+    {
+      "month": "2026-06",
+      "amount": 771.91
+    }
+  ]
+}

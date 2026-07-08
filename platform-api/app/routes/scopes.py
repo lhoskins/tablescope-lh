@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from app.auth.context import RequestContext, get_request_context
+from app.auth.context import RequestContext
+from app.auth.membership import require_membership
 from app.auth.rbac import Role, require_role
 from app.schemas.scope import ScopeCreate, ScopeRead, ScopeUpdate
 from app.services.scope_proxy import ScopeError, ScopeNotFoundError, ScopeProxyService
@@ -22,7 +23,7 @@ def get_scope_service() -> ScopeProxyService:
 
 @router.get("", response_model=list[ScopeRead])
 async def list_scopes(
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
     service: ScopeProxyService = Depends(get_scope_service),
 ) -> list[ScopeRead]:
     scopes = await service.list_scopes(tenant_id=context.tenant_id)
@@ -52,7 +53,7 @@ async def create_scope(
 async def get_scope(
     source_table: str,
     source_column: str,
-    context: RequestContext = Depends(get_request_context),
+    context: RequestContext = Depends(require_membership),
     service: ScopeProxyService = Depends(get_scope_service),
 ) -> ScopeRead:
     try:

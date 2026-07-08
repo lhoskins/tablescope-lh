@@ -2,17 +2,16 @@ import {
   IconHome,
   IconFolders,
   IconSparkles,
-  IconActivity,
+  IconBulb,
   IconFileText,
   IconLayoutDashboard,
   IconTopologyStar3,
-  IconPuzzle,
   IconHistory,
-  IconSettings,
   IconLayoutGrid,
   IconDatabase,
   IconDatabasePlus,
   IconCode,
+  IconBinaryTree,
   IconBook2,
   IconLibrary,
   IconBuildingBank,
@@ -40,40 +39,17 @@ export function homeNavGroups(): NavGroup[] {
       items: [
         { key: "home", label: "Home", href: "/", icon: IconHome },
         {
+          key: "business-insight",
+          label: "Business Insight",
+          href: "/business-insight",
+          icon: IconBulb,
+        },
+        {
           key: "projects",
           label: "Projects",
           href: "/projects",
           icon: IconFolders,
           countKey: "projects",
-        },
-        {
-          key: "ai-assistant",
-          label: "AI Assistant",
-          href: "/ai",
-          icon: IconSparkles,
-        },
-        {
-          key: "activity",
-          label: "Activity",
-          href: "/activity",
-          icon: IconActivity,
-        },
-      ],
-    },
-    {
-      heading: "Tools",
-      items: [
-        {
-          key: "data-sources",
-          label: "Data Sources",
-          href: "/data-sources",
-          icon: IconDatabase,
-        },
-        {
-          key: "data-source-builder",
-          label: "Data Source Builder",
-          href: "/data-source-builder",
-          icon: IconDatabasePlus,
         },
         {
           key: "documents",
@@ -88,6 +64,29 @@ export function homeNavGroups(): NavGroup[] {
           icon: IconLayoutDashboard,
         },
         {
+          key: "ai-assistant",
+          label: "AI Assistant",
+          href: "/ai",
+          icon: IconSparkles,
+        },
+      ],
+    },
+    {
+      heading: "Tools",
+      items: [
+        {
+          key: "data-source-builder",
+          label: "Data Source Builder",
+          href: "/data-source-builder",
+          icon: IconDatabasePlus,
+        },
+        {
+          key: "database-connectors",
+          label: "Database Connectors",
+          href: "/database-connectors",
+          icon: IconDatabase,
+        },
+        {
           key: "reference-library",
           label: "Reference Library",
           href: "/reference-library",
@@ -98,29 +97,6 @@ export function homeNavGroups(): NavGroup[] {
           label: "Company Library",
           href: "/reference-library/company",
           icon: IconBuildingBank,
-        },
-      ],
-    },
-    {
-      heading: "System",
-      items: [
-        {
-          key: "integrations",
-          label: "Integrations",
-          href: "/integrations",
-          icon: IconPuzzle,
-        },
-        {
-          key: "audit-log",
-          label: "Audit Log",
-          href: "/audit-log",
-          icon: IconHistory,
-        },
-        {
-          key: "settings",
-          label: "Settings",
-          href: "/settings",
-          icon: IconSettings,
         },
       ],
     },
@@ -147,10 +123,16 @@ export function projectNavGroups(projectId: string): NavGroup[] {
         },
         {
           key: "project-queries",
-          label: "Queries",
+          label: "Tables",
           href: `${base}/queries`,
           icon: IconCode,
           countKey: "queries",
+        },
+        {
+          key: "project-scopes",
+          label: "Scopes",
+          href: `${base}/scopes`,
+          icon: IconBinaryTree,
         },
         {
           key: "project-dashboards",
@@ -171,14 +153,14 @@ export function projectNavGroups(projectId: string): NavGroup[] {
       heading: "Intelligence",
       items: [
         {
-          key: "project-ai-assistant",
-          label: "AI Assistant",
-          href: `${base}/ai`,
+          key: "project-insight",
+          label: "Project Insight",
+          href: `${base}/insight`,
           icon: IconSparkles,
         },
         {
           key: "project-relationship-map",
-          label: "Relationship Map",
+          label: "Knowledge Graph",
           href: `${base}/relationship-map`,
           icon: IconTopologyStar3,
         },

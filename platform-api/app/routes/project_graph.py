@@ -41,6 +41,28 @@ class GraphResponse(BaseModel):
     edges: list[GraphEdgeRead]
 
 
+class NodeCentricGraphResponse(BaseModel):
+    """Extended node-centric Knowledge Graph payload.
+
+    Keeps ``nodes``/``edges`` (backward compatible) and adds the insight-first
+    fields: the selected center node, AI Home-style insight cards, gap findings,
+    recommended actions, trace paths and stats.
+    """
+
+    model_config = {"extra": "allow"}
+
+    centerNode: dict | None = None
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    insightCards: list[dict] = []
+    gaps: list[dict] = []
+    recommendedActions: list[dict] = []
+    tracePaths: list[dict] = []
+    stats: dict = {}
+    pipeline_version: str = ""
+    generated_at: str = ""
+
+
 async def _require_project_access(
     project_id: int, session: AsyncSession, context: RequestContext,
 ) -> Project:
@@ -63,17 +85,53 @@ FAMILY_EDGE_TYPES = {
 }
 
 
-@router.get("", response_model=GraphResponse)
+@router.get("")
 async def get_project_graph(
     project_id: int,
     node_id: int | None = None,
     family_id: int | None = None,
     asset_id: int | None = None,
     include_families: bool = True,
+    lens: str | None = None,
+    center_node: str | None = None,
+    min_confidence: float = 0.70,
+    include_inferred: bool = False,
+    # Connector-style policy toggles (see knowledge_graph_builder). Explicit and
+    # inferred edges show by default; recommended (dashed) and weak (faint) edges
+    # are opt-in. Enabling either widens the returned edge set so the frontend
+    # can render and toggle them by ``relationshipStrength``.
+    show_explicit: bool = True,
+    show_inferred: bool = True,
+    show_recommended: bool = False,
+    show_weak: bool = False,
+    severity: str = "all",
+    refresh: bool = False,  # rebuild the cached snapshot instead of reading it
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ):
     await _require_project_access(project_id, session, context)
+
+    # Recommended/weak connectors live below the default confidence floor, so
+    # asking for them implies the wider (inferred) edge set.
+    include_inferred = include_inferred or show_recommended or show_weak
+
+    # Node-centric Insight-First Knowledge Graph: any new-UI caller passes a
+    # ``lens`` (or a ``center_node``). Legacy callers (no new params) keep the
+    # original full-graph ``{nodes, edges}`` response untouched.
+    if lens is not None or center_node is not None or refresh:
+        from app.services.knowledge_graph_builder import build_node_centric_graph
+        return await build_node_centric_graph(
+            session,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            user_id=context.user_id,
+            center_node=center_node,
+            lens=lens or "insight-first",
+            min_confidence=min_confidence,
+            include_inferred=include_inferred,
+            severity=severity,
+            refresh=refresh,
+        )
 
     # asset_id is a convenience: resolve it to the asset's document node and
     # center the subgraph there.
@@ -156,3 +214,34 @@ async def get_project_graph(
             ))
 
     return GraphResponse(nodes=nodes, edges=edges)
+
+
+@router.post("/refresh")
+async def refresh_project_graph(
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+):
+    """Rebuild and persist the project's Knowledge Graph snapshot.
+
+    Mirrors AI Home's manual refresh: collects the structural Evidence graph and
+    re-runs AI enrichment for the default view, then caches the result so node
+    clicks read from it without rebuilding.
+    """
+    await _require_project_access(project_id, session, context)
+    from app.services.knowledge_graph_builder import rebuild_project_graph_snapshot
+
+    snapshot = await rebuild_project_graph_snapshot(
+        session,
+        tenant_id=context.tenant_id,
+        project_id=project_id,
+        user_id=context.user_id,
+    )
+    full = snapshot.get("fullGraph") or {"nodes": [], "edges": []}
+    return {
+        "lastUpdated": snapshot.get("generatedAt", ""),
+        "snapshotId": snapshot.get("id"),
+        "nodeCount": len(full.get("nodes", [])),
+        "edgeCount": len(full.get("edges", [])),
+        "pipelineVersion": snapshot.get("pipelineVersion", ""),
+    }
