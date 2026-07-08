@@ -222,6 +222,76 @@ async def test_ask_and_run_falls_back_to_prose_when_no_source(
     assert body["rows"] == []
 
 
+async def test_ask_and_run_success_attaches_intent_metadata(
+    client, service_headers, monkeypatch
+):
+    """The declared Intent Engine hint rides along as ``intent`` metadata."""
+    _, _, project, headers = await _setup(client, service_headers, "askintent")
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        return {"sql": "SELECT supplier, defects FROM q", "explanation": ""}
+
+    async def fake_execute(session, context, project_id, sql):
+        return {
+            "columns": ["supplier", "defects"],
+            "rows": [{"supplier": "A", "defects": 3}],
+        }
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_execute_project_sql", fake_execute)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "total defects by supplier?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    intent = r.json()["intent"]
+    assert intent["responseMode"] == "structured_data"
+    assert intent["requiresSql"] is True
+    assert 0.0 <= intent["confidence"] <= 1.0
+
+
+async def test_intent_classification_never_forces_hard_failure(
+    client, service_headers, monkeypatch
+):
+    """Hard constraint (ASK §5 / plan §6.3): a ``structured_data`` classification
+    that hits resolver ``no_match`` (generation_error) must still fall back to
+    prose, never a hard failure — a misclassification can only degrade safely."""
+    from app.services.intent_engine import ResponseMode, classify_intent
+
+    _, _, project, headers = await _setup(client, service_headers, "askhard")
+
+    question = "How many late shipments per supplier last quarter?"
+    # Pre-condition: this question is genuinely classified data-first.
+    assert classify_intent(question).response_mode is ResponseMode.STRUCTURED_DATA
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        raise HTTPException(
+            status_code=422,
+            detail="Could not match part of your request to an authorized "
+            "project source",
+        )
+
+    async def fake_forward(path, payload):
+        return {"answer": "Late shipments cluster around two carriers..."}
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy, "_forward_to_ai", fake_forward)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": question},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # Despite the data-first classification, no source -> safe prose fallback.
+    assert body["status"] == "success"
+    assert body["answerType"] == "text"
+    assert "carriers" in body["explanation"]
+
+
 async def test_ask_and_run_execution_error_reveals_sql(
     client, service_headers, monkeypatch
 ):
