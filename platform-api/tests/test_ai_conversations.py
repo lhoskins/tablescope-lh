@@ -110,6 +110,34 @@ async def test_message_returns_updated_conversation_without_refresh(
     assert body["title"] == "What is revenue?"
 
 
+async def test_ask_attaches_conversational_envelope(
+    client, service_headers
+) -> None:
+    # The /ask chat surface stamps the shared ResponseEnvelope (M4 fast-follow)
+    # so the frontend renders it through the same ResponsePresenter as every
+    # other migrated surface. Additive — the legacy `answer` field is untouched.
+    _t, _u, project, headers = await _setup(client, service_headers)
+
+    r = await client.post(
+        "/api/ai/ask",
+        json={"question": "what does this project contain?", "project_id": project["id"]},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["answer"] == "Echo: what does this project contain?"
+
+    env = body["envelope"]
+    assert env["mode"] == "conversational"
+    assert env["sections"] == body["presentation"]["sections"]
+    assert env["sections"][0] == "prose_answer"
+    # Prose answer carries the answer text; no chart/grid/SQL for a chat reply.
+    assert env["answer"] == body["answer"]
+    assert "chart" not in env
+    assert "sql" not in env
+    assert "columns" not in env
+
+
 async def test_data_question_executes_and_returns_data(
     client, service_headers, monkeypatch
 ) -> None:

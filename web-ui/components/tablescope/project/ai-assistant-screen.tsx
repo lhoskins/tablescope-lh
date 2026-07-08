@@ -14,11 +14,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { useProjectShell, askProjectAi } from "@/lib/ui/use-project-data";
+import { ResponsePresenter } from "@/components/ai/ResponsePresenter";
+import type { ResponseEnvelope } from "@/lib/api/ai-actions";
 
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   pending?: boolean;
+  envelope?: ResponseEnvelope;
 }
 
 const QUICK_PROMPTS = [
@@ -54,7 +57,11 @@ export function AiAssistantScreen({ projectId }: { projectId: string }) {
       const res = await askProjectAi(projectId, question);
       setMessages((m) => {
         const next = [...m];
-        next[next.length - 1] = { role: "assistant", content: res.answer };
+        next[next.length - 1] = {
+          role: "assistant",
+          content: res.answer,
+          envelope: res.envelope,
+        };
         return next;
       });
     } catch (err) {
@@ -189,6 +196,8 @@ function ChatBubble({ message }: { message: ChatMessage }) {
       <div className="max-w-[80%] rounded-lg border border-line-tertiary bg-bg-primary px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-primary">
         {message.pending ? (
           <span className="text-ink-tertiary">Thinking…</span>
+        ) : message.envelope ? (
+          <ResponsePresenter envelope={message.envelope} />
         ) : (
           <span className="whitespace-pre-wrap">{message.content}</span>
         )}
