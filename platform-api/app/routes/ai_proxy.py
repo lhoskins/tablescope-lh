@@ -686,6 +686,44 @@ async def _build_query_summary(
 # AI Proxy endpoints
 # ---------------------------------------------------------------------------
 
+async def _ask_data_first(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    question: str,
+) -> dict[str, Any] | None:
+    """Try to answer a chat question with executed data (chart + grid + SQL).
+
+    Mirrors the conversations endpoint: auto-resolve a source, generate + execute
+    SQL, and return the real result under the shared ``ResponseEnvelope`` so the
+    chat renders a widget instead of printing SQL as prose. Returns ``None`` when
+    the question can't be grounded on data (so the caller falls back to the prose
+    documents/knowledge-graph answer). Fail-closed — never raises.
+    """
+    try:
+        run = await _ask_and_run_core(
+            session, context,
+            project_id=project_id,
+            question=question,
+            max_rows=CHAT_ANSWER_MAX_ROWS,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.info("Chat data-first attempt failed, falling back to prose: %s", exc)
+        return None
+    if run.get("status") != "success" or not run.get("rows"):
+        return None
+    return {
+        "answer": _chat_answer_text(question, run),
+        "model_used": "tablescope-data",
+        "request_id": "",
+        "context_summary": {},
+        "audit_id": None,
+        "presentation": run.get("presentation"),
+        "envelope": run.get("envelope"),
+    }
+
+
 @router.post("/ask")
 async def ask(
     req: AIAskRequest,
@@ -706,6 +744,16 @@ async def ask(
         }
         _attach_ask_envelope(response)
         return response
+
+    # Data-first backbone (same as the conversations chat): a question the
+    # resolver can ground on a source is answered with a real executed result —
+    # chart + table + hidden SQL — rather than a prose answer that merely prints
+    # the SQL. Anything the resolver can't ground falls through to prose below.
+    data_response = await _ask_data_first(
+        session, context, project_id=req.project_id, question=req.question
+    )
+    if data_response is not None:
+        return data_response
 
     payload = {
         "tenant_id": context.tenant_id,

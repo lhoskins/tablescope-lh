@@ -189,6 +189,91 @@ async def test_data_question_executes_and_returns_data(
     assert msg["data"]["suggestedVisualization"]["type"] == "bar"
 
 
+async def test_ask_data_question_returns_structured_envelope(
+    client, service_headers, monkeypatch
+) -> None:
+    # The stateless /ask surface (AI Assistant screen) must answer a data
+    # question with an executed result — chart + grid + hidden SQL under the
+    # shared envelope — instead of a prose answer that prints SQL. This mirrors
+    # the conversations chat and fixes the "assistant returned SQL text" bug.
+    import app.routes.ai_proxy as ai_proxy
+
+    async def _fake_core(session, context, **kwargs):
+        run = {
+            "question": kwargs["question"],
+            "sql": 'SELECT "Dept", COUNT(*) AS n FROM assets GROUP BY "Dept"',
+            "columns": ["Dept", "n"],
+            "rows": [{"Dept": "IT", "n": 12}, {"Dept": "HR", "n": 4}],
+            "suggestedVisualization": {"type": "bar"},
+            "explanation": "Assets per department.",
+            "dataSourcesUsed": ["assets_CSV"],
+            "status": "success",
+            "error": None,
+        }
+        ai_proxy._attach_presentation(run)
+        return run
+
+    monkeypatch.setattr(ai_proxy, "_ask_and_run_core", _fake_core)
+
+    _t, _u, project, headers = await _setup(client, service_headers)
+    r = await client.post(
+        "/api/ai/ask",
+        json={
+            "question": "how many assets per department",
+            "project_id": project["id"],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Grounded on data, not an "Echo:" prose reply.
+    assert "Echo:" not in body["answer"]
+    env = body["envelope"]
+    assert env["mode"] == "structured"
+    assert "chart" in env["sections"]
+    assert "grid" in env["sections"]
+    assert "show_sql" in env["sections"]
+    assert env["columns"] == ["Dept", "n"]
+    assert env["sql"].startswith("SELECT")
+
+
+async def test_ask_non_data_question_falls_back_to_prose(
+    client, service_headers, monkeypatch
+) -> None:
+    # A question the resolver can't ground on data falls through to the prose
+    # documents/knowledge-graph answer (conversational envelope), unchanged.
+    import app.routes.ai_proxy as ai_proxy
+
+    async def _fake_core(session, context, **kwargs):
+        return {
+            "question": kwargs["question"],
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "suggestedVisualization": {"type": "table"},
+            "explanation": "",
+            "dataSourcesUsed": [],
+            "status": "generation_error",
+            "error": "no source",
+        }
+
+    monkeypatch.setattr(ai_proxy, "_ask_and_run_core", _fake_core)
+
+    _t, _u, project, headers = await _setup(client, service_headers)
+    r = await client.post(
+        "/api/ai/ask",
+        json={
+            "question": "summarize the project policies",
+            "project_id": project["id"],
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["answer"] == "Echo: summarize the project policies"
+    assert body["envelope"]["mode"] == "conversational"
+
+
 async def test_non_data_question_falls_back_to_prose(
     client, service_headers, monkeypatch
 ) -> None:

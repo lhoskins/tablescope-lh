@@ -155,6 +155,17 @@ export function previewCreatedSource(body: {
   });
 }
 
+/** Run an explicit SQL statement against a project's VDB (no added LIMIT). */
+export function runDatasourceSql(body: {
+  sql: string;
+  project_id?: number;
+}): Promise<{ columns: string[]; rows: Record<string, unknown>[] }> {
+  return apiClient.post("/api/query/datasource", {
+    sql: body.sql,
+    project_id: body.project_id,
+  });
+}
+
 export function previewDbTable(
   body: ConnectionParams & {
     schema_name?: string;

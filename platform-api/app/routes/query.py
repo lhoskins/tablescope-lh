@@ -42,7 +42,9 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$.]*$")
 
 
 class DatasourceQueryRequest(BaseModel):
-    tableName: str
+    # Optional when an explicit ``sql`` is supplied (e.g. previewing a saved /
+    # suggested query); required only for the plain ``SELECT * FROM table`` path.
+    tableName: str | None = Field(default=None)
     limit: int = Field(default=1000, ge=1, le=10_000)
     project_id: int | None = Field(default=None)
     sql: str | None = Field(default=None)
@@ -288,8 +290,12 @@ async def query_datasource(
     against the project owner's VDB (where the views live). Otherwise it
     queries the current user's personal VDB.
     """
-    if not _IDENTIFIER_RE.match(payload.tableName):
-        raise HTTPException(status_code=400, detail=f"Invalid table name: {payload.tableName!r}")
+    if not payload.sql and not (
+        payload.tableName and _IDENTIFIER_RE.match(payload.tableName)
+    ):
+        raise HTTPException(
+            status_code=400, detail=f"Invalid table name: {payload.tableName!r}"
+        )
 
     database = await _resolve_vdb_database(
         session=session, context=context, project_id=payload.project_id
