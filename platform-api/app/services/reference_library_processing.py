@@ -23,9 +23,20 @@ import re
 import uuid
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from sqlalchemy import text as sql_text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from app.models.reference_library import ReferenceDocument
 
 from app.services import reference_library_ai_client as ai_client
 from app.services.document_extraction_service import extract_text
+from app.services.document_processing_service import (
+    DocumentProfileError,
+    call_document_profiler,
+)
 from app.services.reference_library_service import domain_storage_key
 
 logger = logging.getLogger(__name__)
@@ -118,6 +129,64 @@ def _extract_reference_text(file_path: str, ext: str) -> str:
     return str(extraction.get("document_text", ""))
 
 
+def _chunk_previews(doc_text: str, size: int = 1000, limit: int = 5) -> list[dict]:
+    """Lightweight chunk previews for the profiler prompt (no persistence)."""
+    previews: list[dict] = []
+    for i in range(0, min(len(doc_text), size * limit), size):
+        previews.append({"chunk_index": i // size, "text": doc_text[i : i + size]})
+    return previews
+
+
+async def _reference_tags_and_kpis(session: AsyncSession) -> tuple[list[str], list[str]]:
+    tags: list[str] = []
+    kpis: list[str] = []
+    try:
+        rows = await session.execute(
+            sql_text("SELECT tag_key FROM ai_reference_tags WHERE is_active=true LIMIT 200")
+        )
+        tags = [r[0] for r in rows.fetchall()]
+        rows = await session.execute(
+            sql_text("SELECT kpi_key FROM ai_reference_kpis WHERE is_active=true LIMIT 200")
+        )
+        kpis = [r[0] for r in rows.fetchall()]
+    except Exception:
+        logger.debug("Could not fetch reference tags/KPIs for profiling")
+    return tags, kpis
+
+
+async def _profile_reference_document(
+    session: AsyncSession, doc: ReferenceDocument, doc_text: str
+) -> dict | None:
+    """Run the shared AI profiler for a reference doc (no family step).
+
+    Returns the profile dict, or ``None`` if the profiler is unavailable/failed
+    so the caller can fall back to a summary-only path.
+    """
+    ref_tags, ref_kpis = await _reference_tags_and_kpis(session)
+    try:
+        return await call_document_profiler(
+            tenant_id=doc.tenant_id or 0,
+            user_id=doc.uploaded_by or 0,
+            project_id=doc.project_id or 0,
+            asset_id=doc.id,
+            document_id=doc.id,
+            filename=doc.original_filename or doc.title,
+            asset_type=doc.file_type or "document",
+            content_type="",
+            text_preview=doc_text[:4000],
+            chunks=_chunk_previews(doc_text),
+            ref_tags=ref_tags,
+            ref_kpis=ref_kpis,
+            include_family=False,
+        )
+    except DocumentProfileError as exc:
+        logger.warning("Reference profiling unavailable for doc %s: %s", doc.id, exc)
+        return None
+    except Exception:
+        logger.exception("Reference profiling failed for doc %s", doc.id)
+        return None
+
+
 async def process_reference_document(document_id: int) -> None:
     """Run extraction → summary → status for a single reference document.
 
@@ -171,20 +240,29 @@ async def process_reference_document(document_id: int) -> None:
         except Exception:
             logger.exception("Failed to persist extracted text for doc %s", document_id)
 
-        # ── Step 2: AI summary ──
+        # ── Step 2: AI profile (summary + tags/kpis/entities/questions) ──
+        # Reference libraries are tenant-wide, so profiling runs with
+        # include_family=False — the project-scoped document-family step never
+        # runs here. Falls back to a summary-only call if the profiler is
+        # unavailable so a doc still lands with at least a summary.
+        profile = await _profile_reference_document(session, doc, doc_text)
         summary: str | None = None
-        try:
-            summary = await ai_client.summarize_reference_document(
-                tenant_id=doc.tenant_id or 0,
-                user_id=doc.uploaded_by or 0,
-                document_id=doc.id,
-                title=doc.title,
-                issuing_body=doc.issuing_body or "",
-                domain_tag=doc.domain_tag or "",
-                extracted_text=doc_text,
-            )
-        except Exception:
-            logger.exception("AI summary call failed for doc %s", document_id)
+        if profile is not None:
+            doc.ai_metadata = profile
+            summary = profile.get("summary") or None
+        if not summary:
+            try:
+                summary = await ai_client.summarize_reference_document(
+                    tenant_id=doc.tenant_id or 0,
+                    user_id=doc.uploaded_by or 0,
+                    document_id=doc.id,
+                    title=doc.title,
+                    issuing_body=doc.issuing_body or "",
+                    domain_tag=doc.domain_tag or "",
+                    extracted_text=doc_text,
+                )
+            except Exception:
+                logger.exception("AI summary call failed for doc %s", document_id)
 
         if summary:
             doc.ai_summary = summary
