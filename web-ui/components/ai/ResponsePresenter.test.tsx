@@ -98,6 +98,51 @@ describe("ResponsePresenter", () => {
     ).toBeTruthy();
   });
 
+  it("renders a generated dashboard: narrative + widget chart cards", () => {
+    const env: ResponseEnvelope = {
+      mode: "dashboard",
+      sections: [
+        "executive_summary",
+        "key_findings",
+        "recommended_actions",
+        "chart_cards",
+        "show_data",
+        "save",
+      ],
+      executive_summary: "Spend is concentrated in a few suppliers.",
+      key_findings: ["Top 2 suppliers are 65% of spend"],
+      recommended_actions: ["Negotiate volume discounts"],
+      chart_cards: [
+        {
+          title: "Spend by supplier",
+          explanation: "Acme and Globex dominate spend.",
+          chartType: "bar",
+          chart: { type: "bar", data: { series: [{ label: "Acme", value: 1200 }] } },
+          sql: "SELECT supplier, spend FROM q",
+          labelColumn: "supplier",
+          valueColumn: "spend",
+        },
+      ],
+    };
+    render(<ResponsePresenter envelope={env} />);
+    expect(screen.getByTestId("response-presenter").dataset.mode).toBe(
+      "dashboard",
+    );
+    expect(
+      screen.getByText("Spend is concentrated in a few suppliers."),
+    ).toBeTruthy();
+    expect(screen.getByText("Top 2 suppliers are 65% of spend")).toBeTruthy();
+    expect(screen.getByText("Negotiate volume discounts")).toBeTruthy();
+    // The widget card renders its title, chart (mocked), and explanation.
+    expect(screen.getByText("Spend by supplier")).toBeTruthy();
+    expect(screen.getByTestId("chart")).toBeTruthy();
+    expect(screen.getByText("Acme and Globex dominate spend.")).toBeTruthy();
+    // Show data toggles the widget to a table (chart present -> toggle exists).
+    expect(screen.queryByText("1,200")).toBeNull();
+    fireEvent.click(screen.getByText("Show data"));
+    expect(screen.getByText("1,200")).toBeTruthy();
+  });
+
   it("skips a section whose field is absent", () => {
     const env: ResponseEnvelope = {
       mode: "structured",

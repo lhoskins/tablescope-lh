@@ -737,3 +737,11 @@ async def test_project_dashboard_builds_real_chart_widgets(
     assert len(widgets) == 1  # the empty widget was dropped
     assert widgets[0]["title"] == "Spend by supplier"
     assert widgets[0]["chart"]["type"] == "bar"
+    # M4 fast-follow (dashboard surface): a generated dashboard carries the
+    # shared ResponseEnvelope so the modal renders via the ResponsePresenter.
+    assert body["presentation"]["mode"] == "dashboard"
+    env = body["envelope"]
+    assert env["mode"] == "dashboard"
+    assert env["sections"] == body["presentation"]["sections"]
+    assert env["executive_summary"] == body["dashboard"]["summary"]
+    assert env["chart_cards"] == widgets

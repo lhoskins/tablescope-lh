@@ -35,6 +35,8 @@ from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
 from app.services import home_intelligence as hi
+from app.services.presentation_engine import PresentationMode
+from app.services.response_envelope import attach_envelope
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
@@ -654,22 +656,37 @@ async def home_project_dashboard(
         )
 
     narrative = hi.build_dashboard_narrative(widgets)
-    return {
+    dashboard = (
+        {
+            "title": f"{project.name} — AI Dashboard",
+            "summary": narrative["summary"],
+            "keyFindings": narrative["keyFindings"],
+            "recommendedActions": narrative["recommendedActions"],
+            "widgets": widgets,
+        }
+        if widgets
+        else None
+    )
+    response: dict[str, Any] = {
         "projectId": str(project.id),
         "projectName": project.name,
         "projectColor": hi.project_color(project.id),
-        "dashboard": (
-            {
-                "title": f"{project.name} — AI Dashboard",
-                "summary": narrative["summary"],
-                "keyFindings": narrative["keyFindings"],
-                "recommendedActions": narrative["recommendedActions"],
-                "widgets": widgets,
-            }
-            if widgets
-            else None
-        ),
+        "dashboard": dashboard,
     }
+    # M4 fast-follow (surface 6): a generated dashboard is the `dashboard` mode —
+    # stamp the shared ResponseEnvelope so the modal renders via the same
+    # ResponsePresenter as the other surfaces. Additive/fail-closed; the modal
+    # falls back to its legacy body when the envelope is absent.
+    if dashboard is not None:
+        attach_envelope(
+            response,
+            PresentationMode.DASHBOARD,
+            executive_summary=narrative["summary"] or None,
+            key_findings=narrative["keyFindings"] or None,
+            recommended_actions=narrative["recommendedActions"] or None,
+            chart_cards=widgets or None,
+        )
+    return response
 
 
 @router.post("/home/insights")

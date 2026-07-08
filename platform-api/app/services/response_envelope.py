@@ -50,6 +50,7 @@ class ResponseEnvelope(BaseModel):
     columns: list[str] | None = None
     rows: list[Any] | None = None
     chart: dict[str, Any] | None = None
+    chart_cards: list[Any] | None = None
     method_envelope: dict[str, Any] | None = None
 
     # Provenance

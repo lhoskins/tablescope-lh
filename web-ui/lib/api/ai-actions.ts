@@ -60,12 +60,14 @@ export interface ResponseEnvelope {
   executive_summary?: string;
   answer?: string;
   key_points?: unknown[];
+  key_findings?: unknown[];
   key_drivers?: unknown[];
   recommended_actions?: unknown[];
   sql?: string;
   columns?: string[];
   rows?: Record<string, unknown>[];
   chart?: SuggestedVisualization;
+  chart_cards?: unknown[];
   method_envelope?: MethodEnvelope;
   sources?: unknown[];
   references?: unknown[];
