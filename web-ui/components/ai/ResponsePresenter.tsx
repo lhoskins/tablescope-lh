@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
+import { DashboardWidgetCard } from "@/components/ai/DashboardWidgetCard";
 import type { ResponseEnvelope } from "@/lib/api/ai-actions";
+import type { DashboardWidgetSuggestion } from "@/lib/api/home-intelligence";
 
 /**
  * Shared renderer for the unified {@link ResponseEnvelope} (M4 fast-follow).
@@ -20,9 +22,11 @@ const CONTENT_SECTIONS = new Set([
   "executive_summary",
   "prose_answer",
   "key_points",
+  "key_findings",
   "key_drivers",
   "recommended_actions",
   "chart",
+  "chart_cards",
   "grid",
   "show_sql",
   "method_envelope",
@@ -104,6 +108,18 @@ function MethodEnvelopeBlock({
   );
 }
 
+function ChartCards({ cards }: { cards: unknown[] }) {
+  const widgets = cards as DashboardWidgetSuggestion[];
+  if (!widgets.length) return null;
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      {widgets.map((w, i) => (
+        <DashboardWidgetCard key={`${w.title}-${i}`} widget={w} />
+      ))}
+    </div>
+  );
+}
+
 function ShowSql({ sql }: { sql: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -154,6 +170,10 @@ export function ResponsePresenter({
         return envelope.key_points ? (
           <BulletList title="Key points" items={envelope.key_points} />
         ) : null;
+      case "key_findings":
+        return envelope.key_findings ? (
+          <BulletList title="Key findings" items={envelope.key_findings} />
+        ) : null;
       case "key_drivers":
         return envelope.key_drivers ? (
           <BulletList title="Key drivers" items={envelope.key_drivers} />
@@ -168,6 +188,10 @@ export function ResponsePresenter({
       case "chart":
         return envelope.chart ? (
           <ResultChart columns={columns} rows={rows} viz={envelope.chart} />
+        ) : null;
+      case "chart_cards":
+        return envelope.chart_cards ? (
+          <ChartCards cards={envelope.chart_cards} />
         ) : null;
       case "grid":
         return rows.length || columns.length ? (
