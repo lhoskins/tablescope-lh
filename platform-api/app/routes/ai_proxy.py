@@ -41,8 +41,10 @@ from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
 from app.services.analytical_method_engine import analyze as analyze_methods
+from app.services.analytical_method_engine import data_profiler
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
 from app.services.auto_scope import _get_or_create_ai_scope_set
+from app.services.intent_engine import IntentDecision, classify_intent
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
@@ -2478,8 +2480,34 @@ async def _ask_and_run_core(
         "status": "success",
         "error": None,
     }
-    await _attach_analytical_envelope(session, context, question, columns, rows, response)
+    decision = _classify_intent_safe(question, columns, rows)
+    if decision is not None:
+        response["intent"] = decision.to_dict()
+    await _attach_analytical_envelope(
+        session, context, question, columns, rows, response,
+        intent_hint=decision.analysis_intent if decision else None,
+    )
     return response
+
+
+def _classify_intent_safe(
+    question: str, columns: list[str], rows: list[Any]
+) -> IntentDecision | None:
+    """Declared Intent Engine hint over the executed result. Fail-closed.
+
+    Non-authoritative: the returned decision is attached as ``intent`` metadata
+    and feeds the Method Engine's Stage-B selector, but never gates the
+    try-then-fallback backbone. Any error yields ``None`` so a classifier bug
+    can never break the ask path.
+    """
+    try:
+        profile = (
+            data_profiler.profile(columns, rows) if columns and rows else None
+        )
+        return classify_intent(question, profile)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Intent engine hook failed: %s", exc)
+        return None
 
 
 async def _attach_analytical_envelope(
@@ -2489,13 +2517,16 @@ async def _attach_analytical_envelope(
     columns: list[str],
     rows: list[Any],
     response: dict[str, Any],
+    *,
+    intent_hint: str | None = None,
 ) -> None:
     """Run the governed Analytical Method Engine over the result set.
 
     Feature-flagged and fail-closed. In ``readonly`` mode it computes + logs the
     method envelope but never alters the response; in ``hybrid`` it also attaches
     ``analyticalMethod``. ``off`` (default) skips entirely. Tablescope — not the
-    LLM — selects the method here.
+    LLM — selects the method here; the Intent Engine's ``analysisIntent`` (when
+    available) seeds Stage-B selection.
     """
     mode = get_engine_mode()
     if mode == EngineMode.OFF:
@@ -2507,6 +2538,7 @@ async def _attach_analytical_envelope(
             columns=columns,
             rows=rows,
             question=question,
+            intent=intent_hint,
         )
     except Exception as exc:
         logger.warning("Analytical method engine hook failed: %s", exc)
