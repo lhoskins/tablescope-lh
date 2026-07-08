@@ -758,10 +758,12 @@ async def test_project_dashboard_builds_real_chart_widgets(
     project_id = r.json()["id"]
 
     import app.routes.home_intelligence as hir
+    import app.services.ai_intelligence_client as aic
 
-    async def fake_plan(session, context, project, *, max_analyses, granularity):
+    async def fake_plan(*, max_analyses, granularity, **kwargs):
         return [
             {
+                "id": "a1",
                 "title": "Spend by supplier",
                 "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend '
                 'FROM "SUP_Suppliers_CSV" GROUP BY "supplier"',
@@ -770,7 +772,12 @@ async def test_project_dashboard_builds_real_chart_widgets(
                 "value_column": "spend",
             },
             # A widget whose SQL returns nothing is dropped, never "preview only".
-            {"title": "Empty", "sql": 'SELECT "x" FROM "empty"', "chart_type": "bar"},
+            {
+                "id": "a2",
+                "title": "Empty",
+                "sql": 'SELECT "x" FROM "empty"',
+                "chart_type": "bar",
+            },
         ]
 
     def fake_make_runner(session, context, project_id):
@@ -787,7 +794,8 @@ async def test_project_dashboard_builds_real_chart_widgets(
 
         return runner
 
-    monkeypatch.setattr(hir, "_plan_analyses", fake_plan)
+    monkeypatch.setattr(aic, "is_enabled", lambda: True)
+    monkeypatch.setattr(aic, "plan", fake_plan)
     monkeypatch.setattr(hir, "_make_runner", fake_make_runner)
 
     r = await client.post(
@@ -810,3 +818,75 @@ async def test_project_dashboard_builds_real_chart_widgets(
     assert env["sections"] == body["presentation"]["sections"]
     assert env["executive_summary"] == body["dashboard"]["summary"]
     assert env["chart_cards"] == widgets
+
+
+async def test_project_dashboard_repairs_failing_widget_sql(
+    client, service_headers, monkeypatch
+) -> None:
+    """A widget whose SQL is rejected by Teiid is repaired and kept, not dropped.
+
+    Regression for #4/#7: the dashboard-suggestion surfaces used to run each
+    widget's SQL once and silently drop it on any engine error, so a single
+    Teiid quirk collapsed a rich dashboard down to one widget (or none).
+    """
+    _, _, headers = await _setup(client, service_headers)
+    r = await client.post(
+        "/api/projects",
+        json={"name": "Repair P", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert r.status_code == 201
+    project_id = r.json()["id"]
+
+    import app.routes.home_intelligence as hir
+    import app.services.ai_intelligence_client as aic
+
+    bad_sql = 'SELECT CAST("created" AS date) AS d, COUNT(*) AS n FROM "IT" GROUP BY d'
+    good_sql = "SELECT PARSETIMESTAMP(\"created\", 'M/d/yyyy') AS d, COUNT(*) AS n FROM \"IT\" GROUP BY d"
+
+    async def fake_plan(*, max_analyses, granularity, **kwargs):
+        return [
+            {
+                "id": "a1",
+                "title": "Requests over time",
+                "sql": bad_sql,
+                "chart_type": "line",
+                "label_column": "d",
+                "value_column": "n",
+            }
+        ]
+
+    async def fake_fix_sql(*, sql, error, **kwargs):
+        return good_sql
+
+    def fake_make_runner(session, context, project_id):
+        async def runner(sql: str) -> dict:
+            if "PARSETIMESTAMP" in sql:
+                return {
+                    "columns": ["d", "n"],
+                    "rows": [
+                        {"d": "2026-01", "n": 5},
+                        {"d": "2026-02", "n": 9},
+                        {"d": "2026-03", "n": 7},
+                    ],
+                }
+            raise RuntimeError("TEIID30504 unable to cast to date")
+
+        return runner
+
+    monkeypatch.setattr(aic, "is_enabled", lambda: True)
+    monkeypatch.setattr(aic, "plan", fake_plan)
+    monkeypatch.setattr(aic, "fix_sql", fake_fix_sql)
+    monkeypatch.setattr(hir, "_make_runner", fake_make_runner)
+
+    r = await client.post(
+        "/api/ai/home/project-dashboard",
+        json={"project_id": project_id},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    widgets = r.json()["dashboard"]["widgets"]
+    # The failing widget was repaired via fix_sql and kept (not dropped).
+    assert len(widgets) == 1
+    assert widgets[0]["title"] == "Requests over time"
+    assert widgets[0]["sql"] == good_sql

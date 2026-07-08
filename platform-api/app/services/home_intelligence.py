@@ -1443,6 +1443,128 @@ def build_dashboard_narrative(
     }
 
 
+def _plan_documents(ctx: ProjectContext) -> list[dict[str, Any]]:
+    """Serialize a project's documents for the analysis planner."""
+    return [
+        {
+            "title": d.title,
+            "summary": d.ai_summary or "",
+            "tags": [
+                str(t) for t in (d.ai_metadata.get("tags") or [])
+                if isinstance(t, str | int | float)
+            ],
+            "source": (
+                "reference_library"
+                if d.ai_metadata.get("reference_tier")
+                else "project"
+            ),
+            "tier": str(d.ai_metadata.get("reference_tier") or ""),
+            "issuing_body": str(d.ai_metadata.get("issuing_body") or ""),
+        }
+        for d in ctx.documents
+    ]
+
+
+async def plan_and_execute_widgets(
+    project: Project,
+    ctx: ProjectContext,
+    runner: QueryRunner,
+    *,
+    tenant_id: int,
+    user_id: int,
+    max_analyses: int,
+    granularity: int,
+) -> list[dict[str, Any]]:
+    """Plan data analyses and execute each with the SAME robustness the analyst
+    loop uses — real per-column samples in the schema, date-cast normalization,
+    and LLM self-repair on a Teiid rejection.
+
+    The dashboard-suggestion surfaces previously planned SQL without samples and
+    ran it once with no repair, so a widget whose SQL hit a Teiid quirk (non-ISO
+    date CAST, alias-in-GROUP BY, unsupported function) was silently dropped —
+    leaving dashboards with a single widget (or none). Sharing this pipeline lets
+    those widgets be repaired and survive.
+
+    Returns the analyses that produced real rows, each augmented with the final
+    ``sql`` and the executed ``result`` ({columns, rows}).
+    """
+    from app.services import ai_intelligence_client as ai
+
+    if not ai.is_enabled():
+        return []
+
+    allowed_tables = [t.view_name for t in ctx.tables]
+    samples_per_table = await asyncio.gather(
+        *(_sample_values(runner, t.view_name) for t in ctx.tables)
+    )
+    table_schema = [
+        {
+            "table": t.view_name,
+            "storage": "text" if t.kind == "file" else "native",
+            "columns": [
+                {"name": n, "type": ty, "sample": samples.get(n, "")}
+                for (n, ty) in t.columns
+            ],
+        }
+        for t, samples in zip(ctx.tables, samples_per_table, strict=False)
+    ]
+    date_masks = _date_masks_from_samples(samples_per_table)
+    documents = _plan_documents(ctx)
+    relationship_hints = find_relationship_candidates(ctx.tables)
+
+    analyses = await ai.plan(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        project_id=project.id,
+        allowed_tables=allowed_tables,
+        documents=documents,
+        table_schema=table_schema,
+        relationship_hints=relationship_hints,
+        max_analyses=max_analyses,
+        granularity=granularity,
+    )
+    if not analyses:
+        return []
+
+    executed: list[dict[str, Any]] = []
+    to_repair: list[tuple[dict[str, Any], str, str]] = []
+    for a in analyses:
+        sql = (a.get("sql") or "").strip()
+        if not sql:
+            continue  # narrative/document finding — not a chartable widget
+        sql = _normalize_date_casts(sql, date_masks)
+        result, err = await _query_with_error(runner, sql)
+        if result and result.get("rows"):
+            executed.append({**a, "sql": sql, "result": result})
+        elif err:
+            to_repair.append((a, sql, err))
+
+    if to_repair:
+        fixes = await asyncio.gather(
+            *(
+                ai.fix_sql(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    project_id=project.id,
+                    sql=sql,
+                    error=err,
+                    allowed_tables=allowed_tables,
+                    table_schema=table_schema,
+                )
+                for (_a, sql, err) in to_repair
+            )
+        )
+        for (a, orig_sql, _err), fixed in zip(to_repair, fixes, strict=True):
+            if not fixed or fixed.strip() == orig_sql.strip():
+                continue
+            fixed = _normalize_date_casts(fixed, date_masks)
+            result, _ = await _query_with_error(runner, fixed)
+            if result and result.get("rows"):
+                executed.append({**a, "sql": fixed, "result": result})
+
+    return executed
+
+
 async def run_ai_intelligence(
     project: Project,
     ctx: ProjectContext,
