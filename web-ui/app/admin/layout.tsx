@@ -27,6 +27,8 @@ function activeNavFor(pathname: string): NavKey {
   if (pathname.startsWith("/admin/data-source-assignments"))
     return "admin-data-source-assignments";
   if (pathname.startsWith("/admin/branding")) return "admin-branding";
+  if (pathname.startsWith("/admin/analytical-methods"))
+    return "admin-analytical-methods";
   return "admin-users";
 }
 
