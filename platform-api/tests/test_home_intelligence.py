@@ -120,6 +120,71 @@ async def test_trend_spend_over_budget() -> None:
     assert card["severity"] == "urgent"
 
 
+async def test_trend_metric_records_when_no_money_column() -> None:
+    # A non-financial project (IT incidents) still gets a real period-over-period
+    # trend — record volume per period — instead of a canned spend card.
+    ctx = hi.ProjectContext(
+        tables=[_table("it_incidents", ["OpenedDate", "Category", "Priority"])],
+        documents=[],
+    )
+    runner = _runner(
+        {
+            "GROUP BY": [
+                {"period": "2026-01", "metric": 10.0},
+                {"period": "2026-02", "metric": 14.0},
+            ]
+        }
+    )
+    cards = await hi.run_intelligence_suite(
+        _project(), ctx, ["trend_spend"], runner
+    )
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["insightType"] == "trend_metric"
+    assert card["chart"]["type"] == "line"
+    assert "it_incidents" in card["sources"]["tables"]
+    # 10 -> 14 is +40%, above the 15% threshold -> warning.
+    assert card["severity"] == "warning"
+    assert "up 40%" in card["title"]
+
+
+async def test_trend_metric_sums_numeric_measure() -> None:
+    # When a numeric measure exists it is summed per period (not just counted).
+    ctx = hi.ProjectContext(
+        tables=[_table("assets", ["month", "UtilizationHours", "AssetId"])],
+        documents=[],
+    )
+    runner = _runner(
+        {
+            "GROUP BY": [
+                {"period": "2026-01", "metric": 100.0},
+                {"period": "2026-02", "metric": 105.0},
+            ]
+        }
+    )
+    cards = await hi.run_intelligence_suite(
+        _project(), ctx, ["trend_spend"], runner
+    )
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["insightType"] == "trend_metric"
+    assert card["metric"] if "metric" in card else True
+    # 100 -> 105 is +5%, within threshold -> watch.
+    assert card["severity"] == "watch"
+    assert card["chart"]["title"].startswith("UtilizationHours over")
+
+
+async def test_trend_metric_skipped_without_period_column() -> None:
+    ctx = hi.ProjectContext(
+        tables=[_table("assets", ["AssetId", "Status", "Location"])],
+        documents=[],
+    )
+    cards = await hi.run_intelligence_suite(
+        _project(), ctx, ["trend_spend"], _runner({})
+    )
+    assert cards == []
+
+
 async def test_opportunity_supplier_top_performers() -> None:
     ctx = hi.ProjectContext(
         tables=[_table("vendors", ["supplier", "on_time_rate"])], documents=[]

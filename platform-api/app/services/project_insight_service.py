@@ -146,6 +146,7 @@ _INVESTIGATION_QUESTIONS = {
         "Which contracts or documents are expiring within the next 90 days?"
     ),
     "trend_spend": "How has total spend changed across recent periods?",
+    "trend_metric": "How has this metric changed across recent periods?",
     "opportunity_supplier": (
         "Which suppliers have the highest performance scores?"
     ),

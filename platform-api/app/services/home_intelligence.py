@@ -709,9 +709,132 @@ async def _risk_expiry(
     )
 
 
+_PERIOD_KEYWORDS = [
+    "month", "period", "quarter", "week", "year", "fiscal", "date", "time",
+]
+_MEASURE_KEYWORDS = [
+    "count", "qty", "quantity", "amount", "total", "sum", "duration",
+    "hours", "days", "minutes", "score", "rate", "age", "volume", "num",
+    "utilization", "usage", "capacity",
+]
+
+
+async def _trend_metric(
+    project: Project, ctx: ProjectContext, runner: QueryRunner
+) -> dict | None:
+    """Domain-agnostic period-over-period trend for a non-financial project.
+
+    Finds any table with a time/period column and trends a numeric measure over
+    it (SUM) — or, when no obvious measure exists, the record volume (COUNT) per
+    period. This keeps the Trends surface grounded in the project's real data
+    (e.g. incidents opened per month) instead of always being a spend narrative.
+    """
+    if runner is None:
+        return None
+    table: TableInfo | None = None
+    period_col: str | None = None
+    for t in ctx.tables:
+        pc = _match_col(t.column_names, _PERIOD_KEYWORDS)
+        if pc is not None:
+            table, period_col = t, pc
+            break
+    if table is None or period_col is None:
+        return None
+
+    measure_col: str | None = None
+    for c in table.column_names:
+        if c == period_col or _is_join_key(c):
+            continue
+        if _match_col([c], _MEASURE_KEYWORDS):
+            measure_col = c
+            break
+
+    if measure_col:
+        agg_sql = f'SUM(CAST("{measure_col}" AS double))'
+        metric_label = measure_col
+        measure_phrase = f"Total {metric_label}"
+    else:
+        agg_sql = "COUNT(*)"
+        metric_label = "Records"
+        measure_phrase = "Record volume"
+
+    def _trend_sql(agg: str) -> str:
+        return (
+            f'SELECT "{period_col}" AS period, {agg} AS metric '
+            f'FROM "{table.view_name}" GROUP BY "{period_col}" '
+            f'ORDER BY "{period_col}"'
+        )
+
+    res = await _safe_query(runner, _trend_sql(agg_sql))
+    if (not res or not res["rows"]) and measure_col is not None:
+        # The chosen column wasn't actually numeric — fall back to record volume
+        # so a mis-typed measure never suppresses the trend entirely.
+        measure_col = None
+        metric_label = "Records"
+        measure_phrase = "Record volume"
+        res = await _safe_query(runner, _trend_sql("COUNT(*)"))
+    if not res or not res["rows"]:
+        return None
+    series: list[dict] = []
+    for r in res["rows"]:
+        v = _to_float(r.get("metric"))
+        if v is not None and r.get("period") is not None:
+            series.append({"label": str(r.get("period")), "value": round(v, 2)})
+    if len(series) < 2:
+        return None
+
+    recent = series[-12:]
+    last = series[-1]["value"]
+    prev = series[-2]["value"]
+    pct = ((last - prev) / prev * 100) if prev else None
+
+    def fmt(v: float) -> str:
+        return f"{v:,.0f}" if (abs(v) >= 1 or v == 0) else f"{v:,.2f}"
+
+    if pct is None:
+        severity = "informational"
+        title = f"{metric_label} trend"
+        summary = (
+            f"{measure_phrase} in {table.view_name} is **{fmt(last)}** in the "
+            f"latest period ({series[-1]['label']})."
+        )
+    else:
+        direction = "up" if pct > 0 else ("down" if pct < 0 else "flat")
+        severity = "warning" if abs(pct) > 15 else "watch"
+        title = (
+            f"{metric_label} steady period-over-period"
+            if direction == "flat"
+            else f"{metric_label} {direction} {abs(pct):.0f}% period-over-period"
+        )
+        summary = (
+            f"{measure_phrase} moved from **{fmt(prev)}** ({series[-2]['label']}) "
+            f"to **{fmt(last)}** ({series[-1]['label']}) — "
+            f"**{abs(pct):.0f}% {direction}** in {table.view_name}."
+        )
+
+    chart = {
+        "type": "line",
+        "title": f"{metric_label} over {period_col}",
+        "data": {"series": recent},
+    }
+    return _card(
+        project, "trend_metric", severity, title, summary,
+        chart=chart, tables=[table.view_name],
+        metadata={
+            "sourceContext": {
+                "metric": measure_col or "",
+                "periodColumn": period_col,
+                "sourceColumns": [c for c in (measure_col, period_col) if c],
+            }
+        },
+    )
+
+
 async def _trend_spend(
     project: Project, ctx: ProjectContext, runner: QueryRunner
 ) -> dict | None:
+    if runner is None:
+        return None
     found = _find_table(
         ctx.tables,
         [
@@ -719,8 +842,11 @@ async def _trend_spend(
              "budget", "expense"],
         ],
     )
-    if not found or runner is None:
-        return None
+    if not found:
+        # No monetary measure — fall back to a domain-agnostic period-over-period
+        # trend (any numeric measure, else record volume) so the Trends surface
+        # reflects the project's real data instead of only ever being about spend.
+        return await _trend_metric(project, ctx, runner)
     table, cols = found
     amount_col = cols[0]
     budget_col = _match_col(table.column_names, ["budget", "forecast", "target", "plan"])
