@@ -39,6 +39,7 @@ from app.models.reference_library import (
 )
 from app.services.evidence_severity import gate_severity
 from app.services.prompt_loader import load_prompt_reference
+from app.services.visualization_engine import select_visualization
 
 logger = logging.getLogger(__name__)
 
@@ -931,26 +932,6 @@ def _pick_columns(
     return label_col, value_col
 
 
-_PERIOD_RE = re.compile(
-    r"^\s*("
-    r"\d{4}([-/]\d{1,2}([-/]\d{1,2})?)?"  # 2024, 2024-01, 2024-01-31
-    r"|q[1-4][\s-]?\d{2,4}"  # Q1 2024
-    r"|\d{4}[\s-]?q[1-4]"  # 2024-Q1
-    r"|w(eek)?[\s-]?\d{1,2}"  # week 5 / w5
-    r"|(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"  # month names
-    r")\s*$",
-    re.IGNORECASE,
-)
-
-
-def _is_period_label(values: list[str]) -> bool:
-    """Heuristic: do most labels look like ordered time periods (-> line chart)?"""
-    if len(values) < 3:
-        return False
-    hits = sum(1 for v in values if _PERIOD_RE.match(str(v)))
-    return hits >= max(3, int(len(values) * 0.6))
-
-
 _DIMENSION_COL_RE = re.compile(
     r"(?i)\b(period|month|year|quarter|week|date|day|fiscal)\b"
 )
@@ -973,52 +954,6 @@ def _dimension_columns(columns: list[str], label_hint: str) -> set[str]:
             skip.add(c)
     return skip
 
-
-def _looks_like_share(label_col: str, series: list[dict[str, Any]]) -> bool:
-    """Heuristic: is this a parts-of-a-whole breakdown (-> donut chart)?
-
-    True when there are a handful of distinct positive categories whose label
-    column reads like a dimension (category/type/status/segment/region/...).
-    """
-    if not (3 <= len(series) <= 8):
-        return False
-    if any(s["value"] < 0 for s in series):
-        return False
-    keys = (
-        "categor", "type", "status", "segment", "region", "channel", "class",
-        "group", "tier", "rating", "priority", "department", "mode", "method",
-        "reason", "country", "state", "industry",
-    )
-    return any(k in label_col.lower() for k in keys)
-
-
-# Chart families the Home can render — these map 1:1 onto the dashboard's
-# WidgetRenderer catalog, so Intelligence cards use the exact same charts as
-# dashboards. ``kpi_grid`` keeps its lightweight tile renderer; ``none`` yields
-# a text-only executive card. Each entry maps a planner hint -> (type, subtype).
-_CHART_ALIASES: dict[str, tuple[str, str]] = {
-    "bar": ("bar", ""),
-    "column": ("bar", "column"),
-    "horizontal_bar": ("bar", "horizontal_bar"),
-    "stacked_bar": ("bar", "stacked_bar"),
-    "waterfall": ("bar", "waterfall"),
-    "line": ("line", ""),
-    "smooth_line": ("line", "smooth_line"),
-    "step_line": ("line", "step_line"),
-    "area": ("area", ""),
-    "pie": ("pie", ""),
-    "donut": ("pie", "donut"),
-    "gauge": ("pie", "gauge"),
-    "radar": ("radar", ""),
-    "radial_bar": ("radial_bar", ""),
-    "treemap": ("treemap", ""),
-    "funnel": ("funnel", ""),
-    # New planner types with no dedicated renderer yet — degrade to the nearest
-    # existing visual so a card always renders rather than breaking.
-    "bullet": ("pie", "gauge"),  # single metric vs target ~ gauge
-    "heatmap": ("bar", ""),  # magnitude across categories (color dim dropped)
-    "sparkline_table": ("line", ""),  # per-entity trend ~ a trend line
-}
 
 # Planner chart types that compare two metrics; handled specially because they
 # need a second numeric column rather than the default {label, value} series.
@@ -1103,19 +1038,6 @@ def _two_value_chart(
     }
 
 
-def _chart(
-    chart_type: str, title: str, series: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """Wrap a {label,value} series as a dashboard-compatible chart dict."""
-    wtype, subtype = _CHART_ALIASES.get(chart_type, ("bar", ""))
-    return {
-        "type": wtype,
-        "subtype": subtype,
-        "title": title,
-        "data": {"series": series},
-    }
-
-
 def _build_chart(
     chart_type: str,
     title: str,
@@ -1183,23 +1105,28 @@ def _build_chart(
     if not series:
         return None
 
-    labels = [s["label"] for s in series]
-
+    # ``kpi_grid`` is a shape-specific tile layout, not a chart family — keep it.
     if chart_type == "kpi_grid":
         kpis = [
             {"value": _fmt_num(s["value"]), "label": s["label"]} for s in series[:6]
         ]
         return {"type": "kpi_grid", "title": title, "data": {"kpis": kpis}}
-    # Time series almost always reads best as a trend line.
-    if _is_period_label(labels):
-        return _chart("line", title, series)
-    # Honour an explicit, valid planner pick from the catalog.
-    if chart_type in _CHART_ALIASES:
-        return _chart(chart_type, title, series)
-    # Otherwise infer: parts-of-a-whole -> donut, else comparison bar.
-    if _looks_like_share(label_col, series):
-        return _chart("donut", title, series)
-    return _chart("bar", title, series)
+
+    # Delegate the single-metric chart-type decision to the one Universal
+    # Visualization Engine, passing the planner's pick as a hint so Home cards,
+    # ask-and-run, and dashboards all resolve the same chart for the same shape.
+    # The series (already shaped from the executed result) is preserved as-is.
+    decision = select_visualization(
+        [label_col, value_col],
+        [{label_col: s["label"], value_col: s["value"]} for s in series],
+        intent_hint=chart_type,
+    )
+    return {
+        "type": decision.chart_type.value,
+        "subtype": decision.chart_style,
+        "title": title,
+        "data": {"series": series},
+    }
 
 
 def _fmt_num(v: float) -> str:
