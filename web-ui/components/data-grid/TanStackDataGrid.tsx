@@ -32,7 +32,10 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { apiClient } from "@/lib/api-client";
-import { useNotifyScopesChanged } from "@/lib/ui/scope-refresh";
+import {
+  SCOPES_CHANGED_EVENT,
+  useNotifyScopesChanged,
+} from "@/lib/ui/scope-refresh";
 import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
 
 type QueryRef = {
@@ -171,6 +174,15 @@ export function TanStackDataGrid({
   }, [scopeEnabled]);
 
   useEffect(() => { if (scopeEnabled) loadScopes(currentQueryId); else setScopes([]); }, [currentQueryId, loadScopes, scopeEnabled]);
+
+  // Live-refresh the scope indicators when scopes change elsewhere (created,
+  // toggled or deleted on the Scopes page / builder) without a page reload.
+  useEffect(() => {
+    if (!scopeEnabled) return;
+    const handler = () => loadScopes(currentQueryId);
+    window.addEventListener(SCOPES_CHANGED_EVENT, handler);
+    return () => window.removeEventListener(SCOPES_CHANGED_EVENT, handler);
+  }, [currentQueryId, loadScopes, scopeEnabled]);
 
   const scopesByField = useMemo(() => {
     const m: Record<string, QueryScope> = {};

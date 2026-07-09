@@ -197,6 +197,77 @@ async def test_save_and_load_scope_map(client, service_headers) -> None:
     assert positions[f"query:{qb['id']}"] == 500.0
 
 
+async def test_save_map_persists_ai_origin_relationship(
+    client, service_headers
+) -> None:
+    """An accepted AI suggestion (created_by_ai + confidence) must survive Save.
+
+    Issue 1: the Scope Builder now merges accepted suggestions into the links
+    collection and sends them in the PUT /map relationships payload; this locks
+    the backend round-trip so an AI-origin mapping is persisted and readable.
+    """
+    _tenant, owner_headers, project, queries = await _setup(client, service_headers)
+    pid = project["id"]
+    qa, qb = queries[0], queries[1]
+
+    r = await client.post(
+        f"/api/projects/{pid}/scope_sets",
+        json={"name": "AI Match"},
+        headers=owner_headers,
+    )
+    set_id = r.json()["id"]
+
+    payload = {
+        "name": "AI Match",
+        "tables": [
+            {
+                "table_key": f"query:{qa['id']}",
+                "table_name": qa["name"],
+                "query_id": qa["id"],
+                "x_position": 0.0,
+                "y_position": 0.0,
+            },
+            {
+                "table_key": f"query:{qb['id']}",
+                "table_name": qb["name"],
+                "query_id": qb["id"],
+                "x_position": 400.0,
+                "y_position": 0.0,
+            },
+        ],
+        "relationships": [
+            {
+                "query_id": qa["id"],
+                "source_field": "CustomerID",
+                "source_table": qa["name"],
+                "target_query_id": qb["id"],
+                "target_field": "CustomerID",
+                "target_table": qb["name"],
+                "match_group_id": "ai-grp",
+                "match_mode": "all",
+                "confidence_score": 0.82,
+                "created_by_ai": True,
+            }
+        ],
+    }
+    r = await client.put(
+        f"/api/scope_sets/{set_id}/map", json=payload, headers=owner_headers
+    )
+    assert r.status_code == 200, r.text
+    saved_rel = r.json()["relationships"][0]
+    assert saved_rel["created_by_ai"] is True
+    assert saved_rel["confidence_score"] == 0.82
+
+    # Round-trips via GET (the AI-origin flag + score are not dropped on reload).
+    r = await client.get(f"/api/scope_sets/{set_id}/map", headers=owner_headers)
+    assert r.status_code == 200
+    rel = r.json()["relationships"][0]
+    assert rel["created_by_ai"] is True
+    assert rel["confidence_score"] == 0.82
+    assert rel["source_table"] == qa["name"]
+    assert rel["target_table"] == qb["name"]
+
+
 async def test_scope_builder_tables_and_ai_suggest(
     client, service_headers
 ) -> None:
@@ -344,3 +415,98 @@ async def test_viewer_cannot_create_scope_set(client, service_headers) -> None:
 
 def _tenant_id_of(project: dict) -> int:
     return project["tenant_id"]
+
+
+async def test_auto_generate_creates_ai_scope_set_and_is_idempotent(
+    client, service_headers
+) -> None:
+    """POST auto-generate builds the AI set from shared query columns; re-run
+    creates no duplicates."""
+    _tenant, owner_headers, project, _queries = await _setup(
+        client, service_headers
+    )
+    pid = project["id"]
+
+    r = await client.post(
+        f"/api/projects/{pid}/scope_sets/auto-generate", headers=owner_headers
+    )
+    assert r.status_code == 200, r.text
+    ai_set = r.json()
+    assert ai_set["type"] == "ai_generated"
+    assert ai_set["name"] == "AI Generated Scopes"
+    # Sales/Customers share CustomerID + Region → mappings both directions.
+    first_count = ai_set["scope_count"]
+    assert first_count > 0
+
+    # Idempotent: re-running must not duplicate.
+    r = await client.post(
+        f"/api/projects/{pid}/scope_sets/auto-generate", headers=owner_headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["scope_count"] == first_count
+    assert r.json()["id"] == ai_set["id"]
+
+    # It shows up in the list as a single AI set.
+    r = await client.get(
+        f"/api/projects/{pid}/scope_sets", headers=owner_headers
+    )
+    ai_sets = [s for s in r.json() if s["type"] == "ai_generated"]
+    assert len(ai_sets) == 1
+
+
+async def test_auto_generate_requires_editor(client, service_headers) -> None:
+    _tenant, owner_headers, project, _queries = await _setup(
+        client, service_headers
+    )
+    pid = project["id"]
+    viewer_headers = _headers(_tenant_id_of(project), 999, "viewer")
+    r = await client.post(
+        f"/api/projects/{pid}/scope_sets/auto-generate", headers=viewer_headers
+    )
+    assert r.status_code == 403
+
+
+async def test_on_save_trigger_extends_enabled_ai_set(
+    client, service_headers
+) -> None:
+    """Once the AI set exists+enabled, saving a new sharing query auto-adds
+    mappings; with no AI set, saving is a no-op (opt-in)."""
+    _tenant, owner_headers, project, _queries = await _setup(
+        client, service_headers
+    )
+    pid = project["id"]
+
+    # No AI set yet → saving a new query must not create one.
+    r = await client.post(
+        f"/api/projects/{pid}/queries",
+        json={"name": "Orders", "sql_text": "SELECT CustomerID, Total FROM orders"},
+        headers=owner_headers,
+    )
+    assert r.status_code == 201
+    r = await client.get(
+        f"/api/projects/{pid}/scope_sets", headers=owner_headers
+    )
+    assert [s for s in r.json() if s["type"] == "ai_generated"] == []
+
+    # Enable autoscoping by generating the AI set.
+    r = await client.post(
+        f"/api/projects/{pid}/scope_sets/auto-generate", headers=owner_headers
+    )
+    assert r.status_code == 200
+    before = r.json()["scope_count"]
+
+    # Saving another sharing query now extends the enabled AI set.
+    r = await client.post(
+        f"/api/projects/{pid}/queries",
+        json={
+            "name": "Invoices",
+            "sql_text": "SELECT CustomerID, Region FROM invoices",
+        },
+        headers=owner_headers,
+    )
+    assert r.status_code == 201
+    r = await client.get(
+        f"/api/projects/{pid}/scope_sets", headers=owner_headers
+    )
+    ai_set = next(s for s in r.json() if s["type"] == "ai_generated")
+    assert ai_set["scope_count"] > before

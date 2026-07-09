@@ -1,69 +1,85 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ScopeSet } from "@/lib/api/scopes";
 
-const { notifyScopesChanged, updateScopeSet, scopeSet } = vi.hoisted(() => ({
-  notifyScopesChanged: vi.fn(),
-  updateScopeSet: vi.fn().mockResolvedValue({}),
-  scopeSet: {
-    id: 7,
-    project_id: 1,
-    name: "AR → GL",
-    type: "manual",
-    enabled: true,
-    scope_count: 2,
-    creator_name: "Leonard",
-    creator_email: "leonard@example.com",
-    created_at: "2026-05-13T05:00:00+00:00",
-    updated_at: "2026-05-13T05:00:00+00:00",
-  },
-}));
+const listScopeSets = vi.fn();
+const updateScopeSet = vi.fn();
+const autoGenerateScopes = vi.fn();
 
 vi.mock("@/lib/api/scopes", () => ({
   scopesApi: {
-    listScopeSets: vi.fn().mockResolvedValue([scopeSet]),
-    updateScopeSet: (id: number, body: { enabled: boolean }) =>
-      updateScopeSet(id, body),
-    deleteScopeSet: vi.fn().mockResolvedValue({}),
+    listScopeSets: (...a: unknown[]) => listScopeSets(...a),
+    updateScopeSet: (...a: unknown[]) => updateScopeSet(...a),
+    autoGenerateScopes: (...a: unknown[]) => autoGenerateScopes(...a),
+    deleteScopeSet: vi.fn(),
   },
 }));
 
-vi.mock("@/lib/ui/scope-refresh", () => ({
-  useNotifyScopesChanged: () => notifyScopesChanged,
-}));
-
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 import { ScopeNavigation } from "./ScopeNavigation";
 
-function renderWithClient() {
+function aiSet(overrides: Partial<ScopeSet> = {}): ScopeSet {
+  return {
+    id: 7,
+    tenant_id: 1,
+    project_id: 3,
+    name: "AI Generated Scopes",
+    description: null,
+    type: "ai_generated",
+    enabled: false,
+    created_by: 1,
+    creator_name: "Leonard",
+    creator_email: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: null,
+    can_delete: true,
+    scope_count: 0,
+    ...overrides,
+  };
+}
+
+function renderNav() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <ScopeNavigation projectId={1} />
+      <ScopeNavigation projectId={3} />
     </QueryClientProvider>,
   );
 }
 
-describe("ScopeNavigation", () => {
+describe("ScopeNavigation AI autoscope (Issue 2)", () => {
   beforeEach(() => {
-    notifyScopesChanged.mockClear();
-    updateScopeSet.mockClear();
+    listScopeSets.mockReset();
+    updateScopeSet.mockReset().mockResolvedValue({});
+    autoGenerateScopes.mockReset().mockResolvedValue({});
   });
 
-  it("notifies scope-icon consumers when a scope set is toggled", async () => {
-    renderWithClient();
+  it("enabling the AI scope set enables it and calls auto-generate", async () => {
+    listScopeSets.mockResolvedValue([aiSet()]);
+    renderNav();
 
-    const toggle = await screen.findByRole("button", { name: /disable scope/i });
+    const toggle = await screen.findByRole("button", { name: "Enable scope" });
     fireEvent.click(toggle);
 
     await waitFor(() => {
-      expect(updateScopeSet).toHaveBeenCalledWith(7, { enabled: false });
-      expect(notifyScopesChanged).toHaveBeenCalledTimes(1);
+      expect(updateScopeSet).toHaveBeenCalledWith(7, { enabled: true });
+      expect(autoGenerateScopes).toHaveBeenCalledWith(3);
     });
+  });
+
+  it("the header Generate action triggers auto-generate for the project", async () => {
+    listScopeSets.mockResolvedValue([]);
+    renderNav();
+
+    const btn = await screen.findByRole("button", { name: /Generate AI Scopes/ });
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(autoGenerateScopes).toHaveBeenCalledWith(3));
   });
 });

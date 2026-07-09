@@ -284,6 +284,41 @@ async def create_scope_set(
     )
 
 
+@router.post(
+    "/projects/{project_id}/scope_sets/auto-generate",
+    response_model=ScopeSetRead,
+)
+async def auto_generate_scope_set(
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> ScopeSetRead:
+    """Generate the project's "AI Generated Scopes" set on demand.
+
+    Iterates the project's saved queries and creates shared-column drill-down
+    mappings (idempotent — existing mappings are skipped, so this is safe to
+    re-run). Enabling the AI scope on the Scopes page calls this so the toggle
+    actually produces the mappings. Always returns the AI set (created if
+    absent) even when no new mappings were found.
+    """
+    await _get_project(session, project_id=project_id, tenant_id=context.tenant_id)
+
+    from app.services.auto_scope import auto_generate_project_scopes
+
+    scope_set, _created = await auto_generate_project_scopes(
+        session,
+        project_id=project_id,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+    )
+    await session.commit()
+    await session.refresh(scope_set)
+    count = await _scope_count(session, scope_set.id)
+    return ScopeSetRead.model_validate(
+        await _scope_set_dict(session, scope_set, count, context)
+    )
+
+
 # ── Scope Builder: available tables ──────────────────────────────────────
 
 
