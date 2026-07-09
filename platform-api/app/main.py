@@ -104,7 +104,15 @@ async def _seed_reference_catalogs() -> None:
         method_stats = await seed_analytical_catalog()
         logger.info("Analytical method catalog seed: %s", method_stats)
     except Exception as exc:
-        logger.warning("Analytical method catalog seed failed: %s", exc)
+        # Loud, not silent: when this seed fails there is no approved+active
+        # catalog version, so hybrid classification silently produces nothing.
+        # Log at ERROR with the traceback so the failure is diagnosable.
+        logger.error(
+            "Analytical method catalog seed failed — hybrid analysis will be "
+            "unavailable until an approved+active catalog version exists: %s",
+            exc,
+            exc_info=True,
+        )
 
 
 @asynccontextmanager
@@ -113,6 +121,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level)
     setup_sentry()
     logger.info("Platform API starting (env=%s, version=%s)", settings.environment, __version__)
+    from app.services.analytical_method_engine import get_engine_mode
+    logger.info(
+        "Analytical Method Engine mode resolved to '%s' "
+        "(env ANALYTICAL_METHOD_ENGINE_MODE)",
+        get_engine_mode().value,
+    )
     reconcile_task = asyncio.create_task(_reconcile_db_sources_on_startup())
     seed_task = asyncio.create_task(_seed_reference_catalogs())
     try:

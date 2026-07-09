@@ -671,3 +671,27 @@ async def test_generate_query_preview_success(
     assert env["columns"] == ["month", "revenue"]
     assert env["rows"][0]["revenue"] == 10
     assert env["chart"]["type"] == "line"
+
+
+def _admin_headers(tenant_id: int = 1, user_id: int = 1) -> dict:
+    token = create_access_token(
+        sub="u", tenant_id=tenant_id, user_id=user_id, role="admin"
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def test_ai_status_reports_engine_mode_and_catalog(client):
+    """/api/ai/status surfaces the resolved Analytical Method Engine mode plus
+    whether an ``approved+active`` catalog version exists.
+
+    When no catalog is active, hybrid analysis silently produces nothing — this
+    field turns that silent gap into a diagnosable signal (Issue 1.2).
+    """
+    r = await client.get("/api/ai/status", headers=_admin_headers())
+    assert r.status_code == 200, r.text
+    analytical = r.json()["analytical"]
+    # Default resolves to readonly so hybrid classification runs (Issue 1.1).
+    assert analytical["engineMode"] == "readonly"
+    # No seeded catalog in the unit DB → not active (the silent-gap signal).
+    assert analytical["catalog"]["active"] is False
+    assert analytical["catalog"]["version_id"] is None

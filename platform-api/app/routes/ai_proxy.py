@@ -43,6 +43,9 @@ from app.models.saved_query import SavedQuery
 from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.analytical_method_engine import data_profiler
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
+from app.services.analytical_method_engine.method_registry import (
+    catalog_status as analytical_catalog_status,
+)
 from app.services.auto_scope import _get_or_create_ai_scope_set
 from app.services.intent_engine import IntentDecision, classify_intent
 from app.services.knowledge_graph_ai_context import (
@@ -1586,20 +1589,45 @@ async def index_document(
 
 @router.get("/status")
 async def ai_status(
+    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.ADMIN)),
 ) -> dict[str, Any]:
-    """Check AI server health (admin only)."""
+    """Check AI server health (admin only).
+
+    Also reports the resolved Analytical Method Engine mode and whether an
+    ``approved+active`` analytical catalog version exists — when it does not,
+    hybrid analysis silently produces nothing, so this is surfaced here to make
+    that state diagnosable.
+    """
     settings = get_settings()
+    try:
+        catalog = await analytical_catalog_status(session)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Analytical catalog status check failed: %s", exc)
+        catalog = {"active": False, "version_id": None, "error": str(exc)}
+    analytical = {
+        "engineMode": get_engine_mode().value,
+        "catalog": catalog,
+    }
     if not settings.tablescope_ai_enabled or not settings.tablescope_ai_api_url:
-        return {"enabled": False, "status": "not_configured"}
+        return {
+            "enabled": False,
+            "status": "not_configured",
+            "analytical": analytical,
+        }
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
             resp = await client.get(f"{settings.tablescope_ai_api_url}/health")
             resp.raise_for_status()
-            return {"enabled": True, **resp.json()}
+            return {"enabled": True, "analytical": analytical, **resp.json()}
     except Exception as e:
-        return {"enabled": True, "status": "unreachable", "error": str(e)}
+        return {
+            "enabled": True,
+            "status": "unreachable",
+            "error": str(e),
+            "analytical": analytical,
+        }
 
 
 # ---------------------------------------------------------------------------
