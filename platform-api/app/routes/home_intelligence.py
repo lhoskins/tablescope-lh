@@ -36,6 +36,7 @@ from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
 from app.services import home_intelligence as hi
+from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.presentation_engine import PresentationMode
 from app.services.response_envelope import attach_envelope
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
@@ -105,9 +106,9 @@ async def _run_for_project(
     runner = _make_runner(session, context, project.id)
 
     # Only the AI-driven analyst loop (plan -> execute real SQL -> interpret).
-    # No deterministic/hard-coded fallback: if the AI server is unavailable or
-    # finds nothing worth surfacing, we return no cards (the last saved snapshot
-    # still shows) rather than fabricating built-in metrics.
+    # A disabled AI feature degrades to no cards; an enabled-but-unavailable AI
+    # must bubble to the SSE project_error branch instead of looking like a valid
+    # empty result.
     cards: list[dict[str, Any]] | None = None
     try:
         cards = await hi.run_ai_intelligence(
@@ -118,6 +119,8 @@ async def _run_for_project(
             user_id=context.user_id,
             granularity=granularity,
         )
+    except AIUnavailableError:
+        raise
     except Exception as exc:
         logger.warning("AI intelligence failed for project %s: %s", project.id, exc)
         cards = None

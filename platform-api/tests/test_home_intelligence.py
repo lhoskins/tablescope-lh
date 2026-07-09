@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from types import SimpleNamespace
 
@@ -1048,3 +1049,65 @@ async def test_project_dashboard_repairs_failing_widget_sql(
     assert len(widgets) == 1
     assert widgets[0]["title"] == "Requests over time"
     assert widgets[0]["sql"] == good_sql
+
+
+async def test_stream_reports_ai_failure_and_persists_successful_projects(
+    client, service_headers, db_engine, monkeypatch
+) -> None:
+    _, _, headers = await _setup(client, service_headers)
+    project_ids: list[int] = []
+    for name in ("Healthy Project", "Busy Project"):
+        response = await client.post(
+            "/api/projects",
+            json={"name": name, "description": "x", "is_shared": False},
+            headers=headers,
+        )
+        assert response.status_code == 201
+        project_ids.append(response.json()["id"])
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.routes.home_intelligence as hir
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    healthy_id, busy_id = project_ids
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    saved: dict[str, object] = {}
+
+    async def fake_run(_session, _context, project, _prompt_types, **_kwargs):
+        if project.id == busy_id:
+            raise AIUnavailableError("AI server is busy; retry shortly.")
+        return [{"summary": "Grounded finding"}]
+
+    async def fake_save(_context, granularity, payload):
+        saved["granularity"] = granularity
+        saved["payload"] = payload
+
+    monkeypatch.setattr(hir, "SessionLocal", session_factory)
+    monkeypatch.setattr(hir, "_run_for_project", fake_run)
+    monkeypatch.setattr(hir, "_save_snapshot", fake_save)
+
+    response = await client.get(
+        "/api/ai/home-intelligence/stream?cross_project=false",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+
+    completed = [event for event in events if event["type"] == "project_complete"]
+    errors = [event for event in events if event["type"] == "project_error"]
+    assert [event["projectId"] for event in completed] == [str(healthy_id)]
+    assert len(errors) == 1
+    assert "busy" in errors[0]["error"]
+
+    payload = saved["payload"]
+    assert isinstance(payload, dict)
+    assert [result["projectId"] for result in payload["results"]] == [str(healthy_id)]
+    assert {project["id"] for project in payload["projects"]} == {
+        str(healthy_id),
+        str(busy_id),
+    }

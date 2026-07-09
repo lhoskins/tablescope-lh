@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     reasoning_model: str = "llama3.1:8b"
     embedding_model: str = "nomic-embed-text"
 
+    # Ollama admission control. These in-process limits are authoritative while
+    # the AI API runs as a single process.
+    ollama_max_concurrent: int = 4
+    tenant_max_concurrent: int = 2
+    ai_gate_acquire_timeout_seconds: float = 5.0
+
     class Config:
         env_file = ".env"
 

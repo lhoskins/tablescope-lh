@@ -5,9 +5,9 @@ Wraps the HMAC-signed POST to ``/ai/intelligence/plan`` and
 home-intelligence service can drive the plan -> execute -> interpret loop
 without importing route modules (avoids circular imports).
 
-Every call returns ``None`` on any failure (AI disabled, unreachable, bad
-response) so callers can fall back deterministically — the feature never breaks
-just because the AI server is slow or down.
+Disabled AI returns ``None`` so callers can degrade cleanly. Transport, timeout,
+HTTP, and malformed-response failures raise :class:`AIUnavailableError` so
+streaming callers can report an honest error instead of a misleading empty result.
 """
 
 from __future__ import annotations
@@ -26,6 +26,14 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(300.0, connect=10.0)
+
+
+class AIUnavailableError(RuntimeError):
+    """The enabled AI service could not complete a request."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _sign_payload(payload: dict[str, Any], secret: str) -> str:
@@ -50,11 +58,29 @@ async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
-            return resp.json()
-    except Exception as exc:
-        # Degrade gracefully on any AI failure (disabled/unreachable/bad response).
-        logger.warning("AI intelligence call to %s failed: %s", path, exc)
-        return None
+    except httpx.TimeoutException as exc:
+        logger.warning("AI intelligence call to %s timed out: %s", path, exc)
+        raise AIUnavailableError("AI server timed out; retry shortly.") from exc
+    except httpx.TransportError as exc:
+        logger.warning("AI intelligence transport failure for %s: %s", path, exc)
+        raise AIUnavailableError("AI server is unavailable; retry shortly.") from exc
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        if status_code == 503:
+            message = "AI server is busy; retry shortly."
+        else:
+            message = f"AI server request failed with HTTP {status_code}."
+        logger.warning("AI intelligence HTTP failure for %s: %s", path, exc)
+        raise AIUnavailableError(message, status_code=status_code) from exc
+
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        logger.warning("AI intelligence returned invalid JSON for %s", path)
+        raise AIUnavailableError("AI server returned an invalid response.") from exc
+    if not isinstance(data, dict):
+        raise AIUnavailableError("AI server returned an invalid response.")
+    return data
 
 
 async def plan(
