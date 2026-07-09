@@ -1145,12 +1145,13 @@ def _value_overlap(
     return len(intersection) / len(union) if union else 0.0
 
 
-async def _ai_analyze_and_create_scopes(
+async def _analyze_project_scopes(
     *,
     session: AsyncSession,
     context: RequestContext,
     project_id: int,
-) -> dict[str, Any]:
+    query_ids: list[int] | None = None,
+) -> tuple[list[dict[str, Any]], dict[int, str]]:
     """Hybrid scope analysis: AI suggestions validated by cell-level data.
 
     Phase 1 — AI Analysis: LLM analyzes SQL structure to suggest scopes
@@ -1159,6 +1160,12 @@ async def _ai_analyze_and_create_scopes(
       actual cell values to validate AI suggestions and discover cross-column
       relationships the AI may have missed (e.g. CategoryID ↔ CategoryName
       when they share actual values).
+
+    Returns ``(validated_scopes, query_names)`` where each validated scope is a
+    directional (summarized→detailed source→target) dict. Shared by both the
+    persist path (``_ai_analyze_and_create_scopes``) and the canvas-suggestion
+    path (``ai_suggest_scopes``). When ``query_ids`` is given, analysis is
+    restricted to those saved queries (used by AI Suggest on the canvas).
     """
     import asyncio
 
@@ -1170,9 +1177,12 @@ async def _ai_analyze_and_create_scopes(
         select(SavedQuery).where(SavedQuery.project_id == project_id)
     )
     queries = list(queries_result)
+    if query_ids is not None:
+        wanted = set(query_ids)
+        queries = [q for q in queries if q.id in wanted]
 
     if not queries:
-        return {"relationships": [], "scopes_created": 0, "status": "ok"}
+        return [], {}
 
     # Only send queries that have SQL — include extracted columns for clarity
     query_infos: list[dict[str, Any]] = []
@@ -1189,7 +1199,7 @@ async def _ai_analyze_and_create_scopes(
             })
 
     if not query_infos:
-        return {"relationships": [], "scopes_created": 0, "status": "ok"}
+        return [], query_names
 
     # ── Phase 1: AI structural analysis via the dedicated scopes endpoint ──
     # Uses /ai/project/scopes/analyze (NOT the generic /ai/ask): the AI server
@@ -1416,6 +1426,24 @@ async def _ai_analyze_and_create_scopes(
                     "confidence": 0.85,
                     "reason": f"Exact column name match ({col_lower})",
                 })
+
+    return validated_scopes, query_names
+
+
+async def _ai_analyze_and_create_scopes(
+    *,
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+) -> dict[str, Any]:
+    """Analyze the project's queries via the LLM analyzer and persist the
+    validated directional scopes into the project's "AI Generated Scopes" set.
+    """
+    validated_scopes, _query_names = await _analyze_project_scopes(
+        session=session, context=context, project_id=project_id
+    )
+    if not validated_scopes:
+        return {"relationships": [], "scopes_created": 0, "status": "ok"}
 
     # ── Write validated scopes to database ───────────────────────────
     existing_scopes = await session.scalars(

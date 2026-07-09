@@ -99,6 +99,16 @@ export const scopesApi = {
       {},
     ),
 
+  // LLM-based directional scope generation (Phase 1 AI + Phase 2 cell
+  // validation) across all of the project's saved queries. Writes into the
+  // project's "AI Generated Scopes" set, so it appears in listScopeSets.
+  generateScopeMap: (projectId: number) =>
+    apiClient.post<{
+      relationships: unknown[];
+      scopes_created: number;
+      status: string;
+    }>(`/api/ai/project/scope-map/generate`, { project_id: projectId }),
+
   getScopeSet: (scopeSetId: number) =>
     apiClient.get<ScopeSet>(`/api/scope_sets/${scopeSetId}`),
 

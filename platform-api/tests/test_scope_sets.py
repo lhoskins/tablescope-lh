@@ -268,8 +268,47 @@ async def test_save_map_persists_ai_origin_relationship(
     assert rel["target_table"] == qb["name"]
 
 
+class _FakeEndpoint:
+    pg_host = "teiid"
+    pg_port = 35442
+
+
+class _FakeTeiidResolver:
+    def __init__(self, session) -> None:
+        self._session = session
+
+    async def resolve_for_org(self, tenant_id):
+        return _FakeEndpoint()
+
+
+def _mock_llm_analyzer(monkeypatch, *, scopes):
+    """Stub the LLM analyzer seams so the directional scope analysis runs
+    without a live AI server or Teiid.
+
+    ``scopes`` is the ``/ai/project/scopes/analyze`` response payload.
+    """
+    import app.routes.ai_proxy as ai_proxy
+    import app.routes.query as query_module
+    import app.services.tenant_teiid_resolver as ttr
+
+    async def _fake_forward(path, payload):
+        assert path == "/ai/project/scopes/analyze"
+        return {"scopes": scopes}
+
+    async def _fake_resolve_vdb(*, session, context, project_id):
+        return "vdb.1"
+
+    async def _fake_sample(*, sql, database, teiid_host, teiid_port):
+        return {}
+
+    monkeypatch.setattr(ai_proxy, "_forward_to_ai", _fake_forward)
+    monkeypatch.setattr(query_module, "_resolve_vdb_database", _fake_resolve_vdb)
+    monkeypatch.setattr(ttr, "TenantTeiidResolver", _FakeTeiidResolver)
+    monkeypatch.setattr(ai_proxy, "_sample_query_values", _fake_sample)
+
+
 async def test_scope_builder_tables_and_ai_suggest(
-    client, service_headers
+    client, service_headers, monkeypatch
 ) -> None:
     _tenant, owner_headers, project, queries = await _setup(
         client, service_headers
@@ -292,6 +331,25 @@ async def test_scope_builder_tables_and_ai_suggest(
     )
     set_id = r.json()["id"]
 
+    # AI Suggest now runs the LLM directional analyzer. Mock the AI server so it
+    # returns a single directional suggestion: Sales (source) → Customers
+    # (target) on CustomerID.
+    _mock_llm_analyzer(
+        monkeypatch,
+        scopes=[
+            {
+                "source_query_id": queries[0]["id"],
+                "source_query_name": "Sales",
+                "source_field": "CustomerID",
+                "target_query_id": queries[1]["id"],
+                "target_query_name": "Customers",
+                "target_field": "CustomerID",
+                "confidence": 0.92,
+                "reason": "Sales aggregates drill into Customers by CustomerID.",
+            }
+        ],
+    )
+
     r = await client.post(
         f"/api/scope_sets/{set_id}/ai-suggest",
         json={"query_ids": [queries[0]["id"], queries[1]["id"]]},
@@ -299,10 +357,78 @@ async def test_scope_builder_tables_and_ai_suggest(
     )
     assert r.status_code == 200, r.text
     suggestions = r.json()["suggestions"]
-    fields = {s["source_field"] for s in suggestions}
-    # CustomerID + Region are shared between the two queries.
-    assert "CustomerID" in fields
-    assert "Region" in fields
+    assert suggestions, "expected at least the AI-provided directional suggestion"
+
+    # The AI-provided CustomerID suggestion comes through with its real
+    # confidence + rationale, directed Sales → Customers (source → target).
+    cust = next(s for s in suggestions if s["source_field"] == "CustomerID")
+    assert cust["query_id"] == queries[0]["id"]
+    assert cust["target_query_id"] == queries[1]["id"]
+    assert cust["confidence_score"] == pytest.approx(0.92)
+    assert "drill" in (cust["rationale"] or "").lower()
+
+    # Directional only: no pair appears in both directions (source↔target).
+    seen: set[tuple[int, str, int, str]] = set()
+    for s in suggestions:
+        fwd = (s["query_id"], s["source_field"], s["target_query_id"], s["target_field"])
+        rev = (s["target_query_id"], s["target_field"], s["query_id"], s["source_field"])
+        assert rev not in seen, f"reverse of {fwd} also suggested"
+        seen.add(fwd)
+
+
+async def test_generate_scope_map_creates_ai_scope_set(
+    client, service_headers, monkeypatch
+) -> None:
+    """POST /ai/project/scope-map/generate runs the LLM analyzer and persists
+    the validated scopes into an 'AI Generated Scopes' set visible in the list.
+    """
+    _tenant, owner_headers, project, queries = await _setup(
+        client, service_headers
+    )
+    pid = project["id"]
+
+    _mock_llm_analyzer(
+        monkeypatch,
+        scopes=[
+            {
+                "source_query_id": queries[0]["id"],
+                "source_query_name": "Sales",
+                "source_field": "CustomerID",
+                "target_query_id": queries[1]["id"],
+                "target_query_name": "Customers",
+                "target_field": "CustomerID",
+                "confidence": 0.9,
+                "reason": "Directional drill-down on CustomerID.",
+            }
+        ],
+    )
+
+    r = await client.post(
+        "/api/ai/project/scope-map/generate",
+        json={"project_id": pid},
+        headers=owner_headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["scopes_created"] >= 1
+
+    # The new "AI Generated Scopes" set shows up in listScopeSets, is typed
+    # ai_generated, and is editable like any other scope set.
+    r = await client.get(
+        f"/api/projects/{pid}/scope_sets", headers=owner_headers
+    )
+    ai_sets = [s for s in r.json() if s["type"] == "ai_generated"]
+    assert len(ai_sets) == 1
+    assert ai_sets[0]["name"] == "AI Generated Scopes"
+    assert ai_sets[0]["scope_count"] >= 1
+
+    # It opens in the map editor (ordinary QueryScope rows).
+    r = await client.get(
+        f"/api/scope_sets/{ai_sets[0]['id']}/map", headers=owner_headers
+    )
+    assert r.status_code == 200, r.text
+    assert len(r.json()["relationships"]) >= 1
 
 
 async def test_delete_scope_set(client, service_headers) -> None:

@@ -29,6 +29,7 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
   const notifyScopesChanged = useNotifyScopesChanged();
   const queryKey = ["project", projectId, "scope_sets"];
   const [pendingDelete, setPendingDelete] = useState<ScopeSet | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey,
@@ -50,10 +51,20 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
   });
 
   const generate = useMutation({
-    mutationFn: () => scopesApi.autoGenerateScopes(projectId),
+    // Use the LLM-based directional analyzer (not the name-matcher). The call
+    // takes seconds, so the "Generating…" state is now actually visible.
+    mutationFn: () => scopesApi.generateScopeMap(projectId),
+    onMutate: () => setGenerateError(null),
     onSuccess: () => {
+      // Refresh so the newly created "AI Generated Scopes" set appears.
       queryClient.invalidateQueries({ queryKey });
       notifyScopesChanged();
+    },
+    onError: (err) => {
+      // Surface failures instead of silently swallowing them.
+      setGenerateError(
+        (err as Error)?.message || "AI scope generation failed. Try again.",
+      );
     },
   });
 
@@ -102,6 +113,15 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
           </Button>
         </div>
       </div>
+
+      {generateError && (
+        <div
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12.5px] text-danger"
+        >
+          {generateError}
+        </div>
+      )}
 
       {isLoading ? (
         <p className="text-[13px] text-ink-tertiary">Loading scopes…</p>
