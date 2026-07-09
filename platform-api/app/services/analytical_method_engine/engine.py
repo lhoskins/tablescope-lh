@@ -46,11 +46,16 @@ async def analyze(
         profile = data_profiler.profile(columns, rows)
         resolved_intent = intent or infer_intent(question, profile)
         if resolved_intent is None:
+            logger.debug("Analytical engine: no intent inferred; skipping")
             return None
 
         registry = await method_registry.get_active_registry(session)
         if registry is None:
             # No governed catalog available — engine is effectively disabled.
+            logger.debug(
+                "Analytical engine: intent=%s but no active catalog registry",
+                resolved_intent,
+            )
             return None
         registry_version = registry.get("version_id")
 
@@ -70,6 +75,10 @@ async def analyze(
                     rejected_methods=list(selection.rejected.keys()), envelope=envelope,
                     registry_version=registry_version, reason=envelope.get("reason"),
                 )
+            logger.info(
+                "Analytical engine: intent=%s method=None status=no_method",
+                resolved_intent,
+            )
             return envelope
 
         method = registry["methods"][selection.method_id]
@@ -91,6 +100,10 @@ async def analyze(
                 rejected_methods=list(selection.rejected.keys()), envelope=envelope,
                 registry_version=registry_version, reason=exec_result.get("reason"),
             )
+        logger.info(
+            "Analytical engine: intent=%s method=%s status=%s",
+            resolved_intent, selection.method_id, exec_result.get("status"),
+        )
         return envelope
     except Exception as exc:
         logger.warning("Analytical method engine failed: %s", exc)

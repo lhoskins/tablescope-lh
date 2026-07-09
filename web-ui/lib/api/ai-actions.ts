@@ -43,9 +43,14 @@ export interface MethodEnvelope {
   methodName?: string | null;
   tier?: number | null;
   analysisIntent?: string | null;
+  status?: string | null;
   n?: number | null;
+  usableN?: number | null;
   quality?: string | null;
+  results?: Record<string, unknown> | null;
+  assumptions?: unknown[];
   caveats?: unknown[];
+  warnings?: unknown[];
 }
 
 /**

@@ -690,8 +690,9 @@ async def test_ai_status_reports_engine_mode_and_catalog(client):
     r = await client.get("/api/ai/status", headers=_admin_headers())
     assert r.status_code == 200, r.text
     analytical = r.json()["analytical"]
-    # Default resolves to readonly so hybrid classification runs (Issue 1.1).
-    assert analytical["engineMode"] == "readonly"
+    # Code default is `off` (safe for tests/local); production sets hybrid via
+    # ANALYTICAL_METHOD_ENGINE_MODE in the deployment env.
+    assert analytical["engineMode"] == "off"
     # No seeded catalog in the unit DB → not active (the silent-gap signal).
     assert analytical["catalog"]["active"] is False
     assert analytical["catalog"]["version_id"] is None

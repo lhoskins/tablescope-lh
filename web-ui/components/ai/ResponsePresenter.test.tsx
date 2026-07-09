@@ -81,8 +81,12 @@ describe("ResponsePresenter", () => {
         methodName: "Negative Binomial Regression",
         tier: 1,
         n: 42,
+        usableN: 40,
         quality: "good",
+        results: { effectName: "irr", effect: 1.8, pValue: 0.01 },
+        assumptions: ["Counts are non-negative integers"],
         caveats: ["Overdispersion detected; counts modeled accordingly"],
+        warnings: ["Small strata for supplier C"],
       },
       sources: ["quality_inspections_csv"],
       sql: "SELECT supplier, defects FROM q",
@@ -92,10 +96,13 @@ describe("ResponsePresenter", () => {
       screen.getByText(/Analytical method: Negative Binomial Regression/),
     ).toBeTruthy();
     expect(screen.getByText(/n = 42/)).toBeTruthy();
+    expect(screen.getByText(/usable n = 40/)).toBeTruthy();
     expect(screen.getByText(/quality_inspections_csv/)).toBeTruthy();
-    expect(
-      screen.getByText(/Overdispersion detected/),
-    ).toBeTruthy();
+    expect(screen.getByText(/Overdispersion detected/)).toBeTruthy();
+    // STEP 4: envelope results, assumptions, and warnings map into the block.
+    expect(screen.getByText(/effectName: irr/)).toBeTruthy();
+    expect(screen.getByText(/Counts are non-negative integers/)).toBeTruthy();
+    expect(screen.getByText(/Small strata for supplier C/)).toBeTruthy();
   });
 
   it("renders a generated dashboard: narrative + widget chart cards", () => {

@@ -78,6 +78,9 @@ services:
       TABLESCOPE_AI_ENABLED: ${TABLESCOPE_AI_ENABLED:-false}
       TABLESCOPE_AI_API_URL: ${TABLESCOPE_AI_API_URL:-}
       TABLESCOPE_AI_SIGNING_SECRET: ${TABLESCOPE_AI_SIGNING_SECRET:-}
+      # Analytical Method Engine: off by default (safe for tests/local);
+      # production sets this to `hybrid` in the deployment env.
+      ANALYTICAL_METHOD_ENGINE_MODE: ${ANALYTICAL_METHOD_ENGINE_MODE:-off}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_API_KEY_SID: ${TWILIO_API_KEY_SID:-}
       TWILIO_API_KEY_SECRET: ${TWILIO_API_KEY_SECRET:-}
@@ -130,6 +133,7 @@ services:
       TEIID_SERVLET_URL: http://teiid:8080
       TEIID_SERVLET_API_KEY: ${TEIID_API_KEY:-}
       CUSTOMER_BASE_PATH: /opt/wildfly/teiidfiles/customers
+      ANALYTICAL_METHOD_ENGINE_MODE: ${ANALYTICAL_METHOD_ENGINE_MODE:-off}
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       - /opt/tablescope:/opt/tablescope
