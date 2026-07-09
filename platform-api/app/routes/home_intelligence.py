@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
+from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models.audit_event import AuditEvent
 from app.models.dashboard import Dashboard
@@ -245,18 +246,28 @@ async def home_intelligence_stream(
         project_results: list[dict[str, Any]] = []
         synthesis: dict[str, Any] | None = None
 
+        # Bound how many projects run their heavy AI pipeline at once so a
+        # large project count doesn't flood the AI/Ollama server (which causes
+        # silent timeouts → empty "0 insights"). The semaphore must be created
+        # inside the running event loop / request scope, not at import time.
+        max_concurrent = max(
+            1, get_settings().home_intelligence_max_concurrent_projects
+        )
+        sem = asyncio.Semaphore(max_concurrent)
+
         async def work(project: Project) -> dict[str, Any]:
-            async with SessionLocal() as session:
-                cards = await _run_for_project(
-                    session, context, project, hi.ALL_PROMPT_TYPES,
-                    granularity=granularity,
-                )
-            return {
-                "projectId": str(project.id),
-                "projectName": project.name,
-                "projectColor": hi.project_color(project.id),
-                "insights": cards,
-            }
+            async with sem:
+                async with SessionLocal() as session:
+                    cards = await _run_for_project(
+                        session, context, project, hi.ALL_PROMPT_TYPES,
+                        granularity=granularity,
+                    )
+                return {
+                    "projectId": str(project.id),
+                    "projectName": project.name,
+                    "projectColor": hi.project_color(project.id),
+                    "insights": cards,
+                }
 
         tasks = {asyncio.create_task(work(p)): p for p in projects}
         for coro in asyncio.as_completed(list(tasks)):
