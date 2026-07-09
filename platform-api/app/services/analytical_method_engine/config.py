@@ -3,13 +3,13 @@
 The Method Engine ships behind a feature flag so it can be rolled out per the
 plan's staged gating:
 
-- ``off``      — engine never runs.
-- ``readonly`` — engine computes + logs envelopes but never alters responses
-  (default; safe for live hosts — hybrid classification runs without gating
-  rendering).
+- ``off``      — engine never runs (code default; safe for tests/local).
+- ``readonly`` — engine computes + logs envelopes but never alters responses.
 - ``hybrid``   — engine additionally attaches the envelope to hybrid responses.
 
-Controlled by env var ``ANALYTICAL_METHOD_ENGINE_MODE``.
+Controlled by env var ``ANALYTICAL_METHOD_ENGINE_MODE``. Production sets this to
+``hybrid`` in the deployment environment; the code default stays ``off`` so
+tests and local runs never execute the engine unless they opt in explicitly.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from enum import Enum
 
-DEFAULT_ENGINE_MODE = "readonly"
+DEFAULT_ENGINE_MODE = "off"
 
 
 class EngineMode(str, Enum):
@@ -33,4 +33,4 @@ def get_engine_mode() -> EngineMode:
     try:
         return EngineMode(raw)
     except ValueError:
-        return EngineMode.READONLY
+        return EngineMode.OFF

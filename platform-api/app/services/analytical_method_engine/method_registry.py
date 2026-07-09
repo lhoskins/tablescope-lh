@@ -51,10 +51,34 @@ async def catalog_status(session: AsyncSession) -> dict[str, Any]:
 
     Reports whether the runtime registry has an active version to select from —
     when ``active`` is ``False`` hybrid analysis silently produces nothing, so
-    surfacing this on a status endpoint turns a silent gap into a signal.
+    surfacing this on a status endpoint turns a silent gap into a signal. Also
+    reports the method / executable counts on the active version so an operator
+    can confirm the engine has real methods to select from, not just a shell.
     """
+    from sqlalchemy import func
+
     version_id = await _active_version_id(session)
-    return {"active": version_id is not None, "version_id": version_id}
+    if version_id is None:
+        return {"active": False, "version_id": None, "methods": 0, "executable": 0}
+
+    total = await session.scalar(
+        select(func.count()).select_from(AnalyticalMethod).where(
+            AnalyticalMethod.catalog_version_id == version_id
+        )
+    )
+    executable = await session.scalar(
+        select(func.count()).select_from(AnalyticalMethod).where(
+            AnalyticalMethod.catalog_version_id == version_id,
+            AnalyticalMethod.status == STATUS_ACTIVE,
+            AnalyticalMethod.is_executable.is_(True),
+        )
+    )
+    return {
+        "active": True,
+        "version_id": version_id,
+        "methods": int(total or 0),
+        "executable": int(executable or 0),
+    }
 
 
 async def get_active_registry(session: AsyncSession) -> dict[str, Any] | None:

@@ -20,7 +20,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,25 @@ CATALOG_FILE = (
 )
 
 
-async def seed_analytical_catalog() -> dict[str, int]:
+async def seed_analytical_catalog() -> dict[str, Any]:
+    """Seed and *activate* the analytical catalog idempotently.
+
+    The runtime registry (``method_registry.get_active_registry``) reads *only*
+    the version referenced by ``MethodCatalog.active_version_id`` when that
+    version's ``status == active`` and the catalog ``is_active``. Seeding the
+    rows is therefore not enough — production also needs the catalog *activated*
+    at startup with no manual admin step. This routine:
+
+    - creates the catalog + version + methods once (idempotent by version), and
+    - on **every** boot ensures the seeded version is the active one (status
+      ``active``, system-approved ``approved_at``, ``catalog.active_version_id``
+      pointing at it, ``is_active`` true) — repairing a half-activated state
+      from a prior partial boot without ever creating a duplicate version.
+
+    Returns an activation-status dict (``version_id``, ``active``, method /
+    executable counts) so startup can log whether hybrid is actually live.
+    """
+    from sqlalchemy import func as sa_func
     from sqlalchemy import select
 
     from app.database import SessionLocal as async_session_factory
@@ -43,8 +63,52 @@ async def seed_analytical_catalog() -> dict[str, int]:
         MethodCatalogVersion,
         MethodSelectionMatrix,
     )
+    from app.services.analytical_method_engine import method_registry
 
-    stats = {"methods": 0, "executable": 0, "policies": 0, "matrix": 0, "skipped": 0}
+    stats: dict[str, Any] = {
+        "methods": 0,
+        "executable": 0,
+        "policies": 0,
+        "matrix": 0,
+        "skipped": 0,
+        "version_id": None,
+        "active": False,
+    }
+
+    async def _counts(version_id: int) -> tuple[int, int]:
+        total = await session.scalar(
+            select(sa_func.count()).select_from(AnalyticalMethod).where(
+                AnalyticalMethod.catalog_version_id == version_id
+            )
+        )
+        executable = await session.scalar(
+            select(sa_func.count()).select_from(AnalyticalMethod).where(
+                AnalyticalMethod.catalog_version_id == version_id,
+                AnalyticalMethod.is_executable.is_(True),
+                AnalyticalMethod.status == STATUS_ACTIVE,
+            )
+        )
+        return int(total or 0), int(executable or 0)
+
+    def _ensure_active(cat: MethodCatalog, ver: MethodCatalogVersion) -> bool:
+        """Idempotently make ``ver`` the active version of ``cat``. Returns True
+        if anything changed (so the caller knows to commit + invalidate)."""
+        changed = False
+        if ver.status != STATUS_ACTIVE:
+            ver.status = STATUS_ACTIVE  # type: ignore[assignment]
+            changed = True
+        if ver.approved_at is None:
+            # System approval: no human approver, but stamp the approval time so
+            # the governed lifecycle (draft->…->approved->active) is satisfied.
+            ver.approved_at = datetime.now(UTC)
+            changed = True
+        if not cat.is_active:
+            cat.is_active = True  # type: ignore[assignment]
+            changed = True
+        if cat.active_version_id != ver.id:
+            cat.active_version_id = ver.id
+            changed = True
+        return changed
 
     if not CATALOG_FILE.exists():
         logger.warning("Analytical catalog file not found: %s", CATALOG_FILE)
@@ -77,8 +141,25 @@ async def seed_analytical_catalog() -> dict[str, int]:
             )
         )
         if version is not None:
-            logger.info("Analytical catalog %s v%s already seeded", catalog_key, version_str)
-            stats["skipped"] = 1
+            # Rows already seeded — do NOT re-insert. But still guarantee the
+            # version is activated (repairs a partial prior boot); idempotent.
+            changed = _ensure_active(catalog, version)
+            if changed:
+                await session.commit()
+                method_registry.invalidate_cache()
+            total, executable = await _counts(int(version.id))
+            stats.update(
+                skipped=1,
+                version_id=int(version.id),
+                active=True,
+                methods=total,
+                executable=executable,
+            )
+            logger.info(
+                "Analytical catalog %s v%s already seeded; active version_id=%s "
+                "(methods=%s, executable=%s, activation_repaired=%s)",
+                catalog_key, version_str, version.id, total, executable, changed,
+            )
             return stats
 
         version = MethodCatalogVersion(
@@ -146,11 +227,14 @@ async def seed_analytical_catalog() -> dict[str, int]:
             )
             stats["matrix"] += 1
 
-        version.method_count = stats["methods"]  # type: ignore[assignment]
-        catalog.active_version_id = version.id
+        version.method_count = int(stats["methods"])  # type: ignore[assignment]
         # Version itself is active so the registry can read it; only active
-        # methods within it are executed.
+        # methods within it are executed. Activate + system-approve so
+        # get_active_registry() returns a live registry with no admin step.
+        _ensure_active(catalog, version)
         await session.commit()
+        method_registry.invalidate_cache()
+        stats.update(version_id=int(version.id), active=True)
 
     logger.info("Analytical catalog seed complete: %s", stats)
     return stats

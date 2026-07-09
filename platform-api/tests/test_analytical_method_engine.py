@@ -267,3 +267,150 @@ async def test_engine_fails_closed_without_registry(db_session):
         db_session, tenant_id=None, columns=cols, rows=rows, question="correlation?",
     )
     assert envelope is None
+
+
+# --------------------------------------------------------------------------- #
+# Startup seed: auto-activation + idempotency (production enablement)
+# --------------------------------------------------------------------------- #
+def _session_factory(db_engine):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    return async_sessionmaker(db_engine, expire_on_commit=False)
+
+
+async def _patch_session_local(db_engine, monkeypatch):
+    """Point ``seed_analytical_catalog``'s SessionLocal at the test DB."""
+    import app.database as database_module
+
+    factory = _session_factory(db_engine)
+    monkeypatch.setattr(database_module, "SessionLocal", factory)
+    return factory
+
+
+@pytest.mark.asyncio
+async def test_seed_activates_and_is_idempotent(db_engine, monkeypatch):
+    from app.models.analytical_method_catalog import (
+        MethodCatalog,
+        MethodCatalogVersion,
+    )
+    from scripts.seed_analytical_catalog import seed_analytical_catalog
+
+    factory = await _patch_session_local(db_engine, monkeypatch)
+    method_registry.invalidate_cache()
+
+    stats = await seed_analytical_catalog()
+    # Seed reports the version is active with a real executable count.
+    assert stats["active"] is True
+    assert stats["version_id"] is not None
+    assert stats["executable"] >= 24
+
+    async with factory() as s:
+        registry = await method_registry.get_active_registry(s)
+        assert registry is not None  # runtime registry is live with no admin step
+        catalog = await s.scalar(
+            select(MethodCatalog).where(
+                MethodCatalog.catalog_key == "tablescope_analytical_methods"
+            )
+        )
+        assert catalog.active_version_id is not None
+        version = await s.get(MethodCatalogVersion, catalog.active_version_id)
+        assert version.status == STATUS_ACTIVE
+        assert version.approved_at is not None  # system approval stamped
+        versions_before = await s.scalar(
+            select(func.count()).select_from(MethodCatalogVersion)
+        )
+
+    # Re-running the seed must not create or re-activate a duplicate version.
+    method_registry.invalidate_cache()
+    stats2 = await seed_analytical_catalog()
+    assert stats2["skipped"] == 1
+    assert stats2["active"] is True
+    async with factory() as s:
+        versions_after = await s.scalar(
+            select(func.count()).select_from(MethodCatalogVersion)
+        )
+    assert versions_after == versions_before
+
+
+@pytest.mark.asyncio
+async def test_seed_repairs_deactivated_version(db_engine, monkeypatch):
+    from app.models.analytical_method_catalog import (
+        STATUS_DRAFT,
+        MethodCatalog,
+        MethodCatalogVersion,
+    )
+    from scripts.seed_analytical_catalog import seed_analytical_catalog
+
+    factory = await _patch_session_local(db_engine, monkeypatch)
+    method_registry.invalidate_cache()
+    await seed_analytical_catalog()
+
+    # Simulate a half-activated state left by a prior partial boot.
+    async with factory() as s:
+        catalog = await s.scalar(
+            select(MethodCatalog).where(
+                MethodCatalog.catalog_key == "tablescope_analytical_methods"
+            )
+        )
+        version = await s.get(MethodCatalogVersion, catalog.active_version_id)
+        version.status = STATUS_DRAFT
+        catalog.active_version_id = None
+        await s.commit()
+
+    method_registry.invalidate_cache()
+    async with factory() as s:
+        assert await method_registry.get_active_registry(s) is None  # broken
+
+    # Re-seeding repairs activation idempotently (without a duplicate version).
+    method_registry.invalidate_cache()
+    stats = await seed_analytical_catalog()
+    assert stats["active"] is True
+    method_registry.invalidate_cache()
+    async with factory() as s:
+        assert await method_registry.get_active_registry(s) is not None
+
+
+@pytest.mark.asyncio
+async def test_catalog_status_reports_counts(seeded):
+    status = await method_registry.catalog_status(seeded)
+    assert status["active"] is True
+    assert status["version_id"] is not None
+    assert status["executable"] >= 24
+    assert status["methods"] > status["executable"]
+
+
+@pytest.mark.asyncio
+async def test_catalog_status_inactive_without_catalog(db_session):
+    method_registry.invalidate_cache()
+    status = await method_registry.catalog_status(db_session)
+    assert status["active"] is False
+    assert status["version_id"] is None
+    assert status["executable"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Ask-and-run hook: hybrid attaches the envelope, off skips entirely
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_attach_envelope_hybrid_attaches_and_off_skips(seeded, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.routes.ai_proxy import _attach_analytical_envelope
+
+    cols, rows = _linear_rows()
+    ctx = SimpleNamespace(tenant_id=None)
+
+    monkeypatch.setenv("ANALYTICAL_METHOD_ENGINE_MODE", "hybrid")
+    hybrid_resp: dict = {}
+    await _attach_analytical_envelope(
+        seeded, ctx, "correlation of x and y?", cols, rows, hybrid_resp
+    )
+    assert hybrid_resp.get("analyticalMethod") is not None
+    assert hybrid_resp["analyticalMethod"]["method"] == "pearson_correlation"
+
+    monkeypatch.setenv("ANALYTICAL_METHOD_ENGINE_MODE", "off")
+    off_resp: dict = {}
+    await _attach_analytical_envelope(
+        seeded, ctx, "correlation of x and y?", cols, rows, off_resp
+    )
+    assert "analyticalMethod" not in off_resp
