@@ -1334,11 +1334,11 @@ async def _opportunity_top_performer(
         )
         if not res or not res["rows"]:
             continue
-        ranked = [
-            (str(r.get("entity")), _to_float(r.get("metric")))
-            for r in res["rows"]
-            if _to_float(r.get("metric")) is not None
-        ]
+        ranked: list[tuple[str, float]] = []
+        for r in res["rows"]:
+            v = _to_float(r.get("metric"))
+            if v is not None:
+                ranked.append((str(r.get("entity")), v))
         if len(ranked) < 2:
             continue
         top = ranked[:3]
