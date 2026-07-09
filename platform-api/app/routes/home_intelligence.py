@@ -523,11 +523,14 @@ async def home_dashboard_suggestions(
         widgets: list[dict[str, Any]] = []
         async with SessionLocal() as session:
             runner = _make_runner(session, context, project.id)
+            ctx = await hi.gather_project_context(session, project)
             try:
-                analyses = await _plan_analyses(
-                    session,
-                    context,
+                executed = await hi.plan_and_execute_widgets(
                     project,
+                    ctx,
+                    runner,
+                    tenant_id=context.tenant_id,
+                    user_id=context.user_id,
                     max_analyses=req.max_per_project,
                     granularity=req.granularity,
                 )
@@ -537,14 +540,9 @@ async def home_dashboard_suggestions(
                     project.id,
                     exc,
                 )
-                analyses = []
-            for a in analyses:
-                sql = (a.get("sql") or "").strip()
-                if not sql:
-                    continue
-                result = await hi._safe_query(runner, sql)
-                if not result or not result.get("rows"):
-                    continue
+                executed = []
+            for a in executed:
+                result = a["result"]
                 chart = hi._build_chart(
                     a.get("chart_type", "bar"),
                     a.get("title", ""),
@@ -559,7 +557,7 @@ async def home_dashboard_suggestions(
                         "title": a.get("title") or "Widget",
                         "chartType": a.get("chart_type", "bar"),
                         "chart": chart,
-                        "sql": sql,
+                        "sql": a.get("sql", ""),
                         "labelColumn": a.get("label_column", ""),
                         "valueColumn": a.get("value_column", ""),
                     }
@@ -595,12 +593,15 @@ async def home_project_dashboard(
     """
     project = await _project_for_access(session, context, req.project_id)
     runner = _make_runner(session, context, project.id)
+    ctx = await hi.gather_project_context(session, project)
     widgets: list[dict[str, Any]] = []
     try:
-        analyses = await _plan_analyses(
-            session,
-            context,
+        executed = await hi.plan_and_execute_widgets(
             project,
+            ctx,
+            runner,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
             max_analyses=req.max_widgets,
             granularity=req.granularity,
         )
@@ -610,14 +611,10 @@ async def home_project_dashboard(
             project.id,
             exc,
         )
-        analyses = []
-    for a in analyses:
-        sql = (a.get("sql") or "").strip()
-        if not sql:
-            continue
-        result = await hi._safe_query(runner, sql)
-        if not result or not result.get("rows"):
-            continue
+        executed = []
+    for a in executed:
+        sql = a.get("sql", "")
+        result = a["result"]
         chart = hi._build_chart(
             a.get("chart_type", "bar"),
             a.get("title", ""),

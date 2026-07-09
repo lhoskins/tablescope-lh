@@ -205,6 +205,164 @@ async def test_opportunity_supplier_top_performers() -> None:
     assert cards[0]["callout"]["type"] == "opportunity"
 
 
+# ── generalized fallbacks (Issue 2): grounded cards for non-supply projects ──
+
+async def test_risk_sla_falls_back_to_threshold_breach() -> None:
+    # A project with no SLA/lead-time column still gets a grounded risk when a
+    # numeric measure breaches a paired target/threshold column.
+    ctx = hi.ProjectContext(
+        tables=[_table("tickets", ["resolution_hours", "target_hours"])],
+        documents=[],
+    )
+    runner = _runner(
+        {"COUNT(*) AS total": [{"total": 100.0, "breaches": 30.0}]}
+    )
+    cards = await hi.run_intelligence_suite(
+        _project(pid=2, name="IT Ops"), ctx, ["risk_sla"], runner
+    )
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["insightType"] == "risk_threshold"
+    # 30% breach rate -> urgent on the risk severity scale.
+    assert card["severity"] == "urgent"
+    assert card["chart"]["type"] == "bar"
+    assert "tickets" in card["sources"]["tables"]
+    assert card["callout"]["type"] == "risk"
+    assert card["presentation"]["mode"] == "hybrid"
+
+
+async def test_risk_sla_falls_back_to_status_breach() -> None:
+    # No threshold column either — quantify risk from a status/flag categorical
+    # carrying breach-style values.
+    ctx = hi.ProjectContext(
+        tables=[_table("incidents", ["title", "incident_status"])],
+        documents=[],
+    )
+    runner = _runner(
+        {
+            "GROUP BY": [
+                {"status": "Open", "n": 40},
+                {"status": "Delayed", "n": 30},
+                {"status": "Resolved", "n": 30},
+            ]
+        }
+    )
+    cards = await hi.run_intelligence_suite(_project(), ctx, ["risk_sla"], runner)
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["insightType"] == "risk_threshold"
+    # Only "Delayed" (30 of 100) reads as a breach -> 30% -> urgent.
+    assert card["severity"] == "urgent"
+    assert "incidents" in card["sources"]["tables"]
+
+
+async def test_risk_sla_returns_none_when_no_signal() -> None:
+    # No lead-time, no threshold, no status column -> genuinely nothing.
+    ctx = hi.ProjectContext(
+        tables=[_table("orders", ["id", "name", "qty"])], documents=[]
+    )
+    cards = await hi.run_intelligence_suite(
+        _project(), ctx, ["risk_sla"], _runner({})
+    )
+    assert cards == []
+
+
+async def test_risk_expiry_falls_back_to_upcoming_dates() -> None:
+    # No governing documents, but a future-dated column exists -> trend the
+    # records approaching it.
+    d1 = (date.today() + timedelta(days=15)).isoformat()
+    d2 = (date.today() + timedelta(days=45)).isoformat()
+    ctx = hi.ProjectContext(
+        tables=[_table("renewals", ["name", "contract_renewal_date"])],
+        documents=[],
+    )
+    runner = _runner(
+        {"GROUP BY": [{"period": d1, "n": 3}, {"period": d2, "n": 5}]}
+    )
+    cards = await hi.run_intelligence_suite(
+        _project(), ctx, ["risk_expiry"], runner
+    )
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["insightType"] == "risk_upcoming"
+    assert card["chart"]["type"] == "line"
+    # Soonest in 15 days -> urgent.
+    assert card["severity"] == "urgent"
+    assert "renewals" in card["sources"]["tables"]
+
+
+async def test_risk_upcoming_skipped_with_fewer_than_two_periods() -> None:
+    past = (date.today() - timedelta(days=30)).isoformat()
+    future = (date.today() + timedelta(days=30)).isoformat()
+    ctx = hi.ProjectContext(
+        tables=[_table("renewals", ["name", "due_date"])], documents=[]
+    )
+    runner = _runner(
+        {"GROUP BY": [{"period": past, "n": 5}, {"period": future, "n": 2}]}
+    )
+    cards = await hi.run_intelligence_suite(
+        _project(), ctx, ["risk_expiry"], runner
+    )
+    # Only one upcoming period -> no trend -> no card.
+    assert cards == []
+
+
+async def test_opportunity_supplier_falls_back_to_top_performer() -> None:
+    # No supplier + score columns, but an entity dimension + numeric measure
+    # yields a generic top/bottom performer opportunity.
+    ctx = hi.ProjectContext(
+        tables=[_table("facilities", ["facility", "utilization"])],
+        documents=[],
+    )
+    runner = _runner(
+        {
+            "GROUP BY": [
+                {"entity": "Plant A", "metric": 95.0},
+                {"entity": "Plant B", "metric": 70.0},
+                {"entity": "Plant C", "metric": 50.0},
+            ]
+        }
+    )
+    cards = await hi.run_intelligence_suite(
+        _project(), ctx, ["opportunity_supplier"], runner
+    )
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["insightType"] == "opportunity_performance"
+    assert card["severity"] == "opportunity"
+    assert card["chart"]["type"] == "bar"
+    assert "facilities" in card["sources"]["tables"]
+    assert card["callout"]["type"] == "opportunity"
+
+
+async def test_opportunity_returns_none_without_entity_and_measure() -> None:
+    ctx = hi.ProjectContext(
+        tables=[_table("notes", ["title", "body"])], documents=[]
+    )
+    cards = await hi.run_intelligence_suite(
+        _project(), ctx, ["opportunity_supplier"], _runner({})
+    )
+    assert cards == []
+
+
+async def test_skip_logging_fires_when_runner_is_none(caplog) -> None:
+    import logging
+
+    ctx = hi.ProjectContext(
+        tables=[_table("orders", ["id", "name", "qty"])], documents=[]
+    )
+    with caplog.at_level(logging.DEBUG, logger="app.services.home_intelligence"):
+        cards = await hi.run_intelligence_suite(
+            _project(), ctx, ["risk_sla", "opportunity_supplier"], None
+        )
+    assert cards == []
+    text = caplog.text
+    # Suite-level signal that the VDB was unreachable for this project.
+    assert "runner=None" in text
+    # Per-generator skip reason with the cause.
+    assert "reason=no runner" in text
+
+
 async def test_synthesise_detects_shared_entity() -> None:
     summaries = [
         {
@@ -758,10 +916,12 @@ async def test_project_dashboard_builds_real_chart_widgets(
     project_id = r.json()["id"]
 
     import app.routes.home_intelligence as hir
+    import app.services.ai_intelligence_client as aic
 
-    async def fake_plan(session, context, project, *, max_analyses, granularity):
+    async def fake_plan(*, max_analyses, granularity, **kwargs):
         return [
             {
+                "id": "a1",
                 "title": "Spend by supplier",
                 "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend '
                 'FROM "SUP_Suppliers_CSV" GROUP BY "supplier"',
@@ -770,7 +930,12 @@ async def test_project_dashboard_builds_real_chart_widgets(
                 "value_column": "spend",
             },
             # A widget whose SQL returns nothing is dropped, never "preview only".
-            {"title": "Empty", "sql": 'SELECT "x" FROM "empty"', "chart_type": "bar"},
+            {
+                "id": "a2",
+                "title": "Empty",
+                "sql": 'SELECT "x" FROM "empty"',
+                "chart_type": "bar",
+            },
         ]
 
     def fake_make_runner(session, context, project_id):
@@ -787,7 +952,8 @@ async def test_project_dashboard_builds_real_chart_widgets(
 
         return runner
 
-    monkeypatch.setattr(hir, "_plan_analyses", fake_plan)
+    monkeypatch.setattr(aic, "is_enabled", lambda: True)
+    monkeypatch.setattr(aic, "plan", fake_plan)
     monkeypatch.setattr(hir, "_make_runner", fake_make_runner)
 
     r = await client.post(
@@ -810,3 +976,75 @@ async def test_project_dashboard_builds_real_chart_widgets(
     assert env["sections"] == body["presentation"]["sections"]
     assert env["executive_summary"] == body["dashboard"]["summary"]
     assert env["chart_cards"] == widgets
+
+
+async def test_project_dashboard_repairs_failing_widget_sql(
+    client, service_headers, monkeypatch
+) -> None:
+    """A widget whose SQL is rejected by Teiid is repaired and kept, not dropped.
+
+    Regression for #4/#7: the dashboard-suggestion surfaces used to run each
+    widget's SQL once and silently drop it on any engine error, so a single
+    Teiid quirk collapsed a rich dashboard down to one widget (or none).
+    """
+    _, _, headers = await _setup(client, service_headers)
+    r = await client.post(
+        "/api/projects",
+        json={"name": "Repair P", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert r.status_code == 201
+    project_id = r.json()["id"]
+
+    import app.routes.home_intelligence as hir
+    import app.services.ai_intelligence_client as aic
+
+    bad_sql = 'SELECT CAST("created" AS date) AS d, COUNT(*) AS n FROM "IT" GROUP BY d'
+    good_sql = "SELECT PARSETIMESTAMP(\"created\", 'M/d/yyyy') AS d, COUNT(*) AS n FROM \"IT\" GROUP BY d"
+
+    async def fake_plan(*, max_analyses, granularity, **kwargs):
+        return [
+            {
+                "id": "a1",
+                "title": "Requests over time",
+                "sql": bad_sql,
+                "chart_type": "line",
+                "label_column": "d",
+                "value_column": "n",
+            }
+        ]
+
+    async def fake_fix_sql(*, sql, error, **kwargs):
+        return good_sql
+
+    def fake_make_runner(session, context, project_id):
+        async def runner(sql: str) -> dict:
+            if "PARSETIMESTAMP" in sql:
+                return {
+                    "columns": ["d", "n"],
+                    "rows": [
+                        {"d": "2026-01", "n": 5},
+                        {"d": "2026-02", "n": 9},
+                        {"d": "2026-03", "n": 7},
+                    ],
+                }
+            raise RuntimeError("TEIID30504 unable to cast to date")
+
+        return runner
+
+    monkeypatch.setattr(aic, "is_enabled", lambda: True)
+    monkeypatch.setattr(aic, "plan", fake_plan)
+    monkeypatch.setattr(aic, "fix_sql", fake_fix_sql)
+    monkeypatch.setattr(hir, "_make_runner", fake_make_runner)
+
+    r = await client.post(
+        "/api/ai/home/project-dashboard",
+        json={"project_id": project_id},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    widgets = r.json()["dashboard"]["widgets"]
+    # The failing widget was repaired via fix_sql and kept (not dropped).
+    assert len(widgets) == 1
+    assert widgets[0]["title"] == "Requests over time"
+    assert widgets[0]["sql"] == good_sql

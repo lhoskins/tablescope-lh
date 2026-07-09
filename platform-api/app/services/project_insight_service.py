@@ -142,13 +142,25 @@ _INVESTIGATION_QUESTIONS = {
         "Which suppliers have the highest average delivery lead times, and "
         "which exceed the SLA threshold?"
     ),
+    "risk_threshold": (
+        "Which records breach their target/threshold, or sit in a risk "
+        "status, and how large is that share?"
+    ),
     "risk_expiry": (
         "Which contracts or documents are expiring within the next 90 days?"
+    ),
+    "risk_upcoming": (
+        "How many records are approaching an upcoming due/renewal/end date, "
+        "and how soon?"
     ),
     "trend_spend": "How has total spend changed across recent periods?",
     "trend_metric": "How has this metric changed across recent periods?",
     "opportunity_supplier": (
         "Which suppliers have the highest performance scores?"
+    ),
+    "opportunity_performance": (
+        "Which entities are the top and bottom performers on this metric, "
+        "and how large is the gap?"
     ),
 }
 

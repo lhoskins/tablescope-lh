@@ -46,6 +46,17 @@ async def _active_version_id(session: AsyncSession) -> int | None:
     return int(version.id)
 
 
+async def catalog_status(session: AsyncSession) -> dict[str, Any]:
+    """Lightweight health field: does an ``approved+active`` catalog exist?
+
+    Reports whether the runtime registry has an active version to select from —
+    when ``active`` is ``False`` hybrid analysis silently produces nothing, so
+    surfacing this on a status endpoint turns a silent gap into a signal.
+    """
+    version_id = await _active_version_id(session)
+    return {"active": version_id is not None, "version_id": version_id}
+
+
 async def get_active_registry(session: AsyncSession) -> dict[str, Any] | None:
     """Return the cached active registry (methods, matrix, policies) or None."""
     version_id = await _active_version_id(session)
