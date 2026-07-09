@@ -93,6 +93,12 @@ export const scopesApi = {
   ) =>
     apiClient.post<ScopeSet>(`/api/projects/${projectId}/scope_sets`, body),
 
+  autoGenerateScopes: (projectId: number) =>
+    apiClient.post<ScopeSet>(
+      `/api/projects/${projectId}/scope_sets/auto-generate`,
+      {},
+    ),
+
   getScopeSet: (scopeSetId: number) =>
     apiClient.get<ScopeSet>(`/api/scope_sets/${scopeSetId}`),
 

@@ -36,8 +36,21 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
   });
 
   const toggle = useMutation({
-    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
-      scopesApi.updateScopeSet(id, { enabled }),
+    mutationFn: async ({ s, enabled }: { s: ScopeSet; enabled: boolean }) => {
+      await scopesApi.updateScopeSet(s.id, { enabled });
+      // Enabling the AI set produces its mappings on demand (idempotent).
+      if (enabled && s.type === "ai_generated") {
+        await scopesApi.autoGenerateScopes(projectId);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      notifyScopesChanged();
+    },
+  });
+
+  const generate = useMutation({
+    mutationFn: () => scopesApi.autoGenerateScopes(projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
       notifyScopesChanged();
@@ -71,13 +84,23 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
             result to drill into the target query filtered by that value.
           </p>
         </div>
-        <Button
-          variant="primary"
-          onClick={() => router.push(`/projects/${projectId}/scopes/new`)}
-        >
-          <IconPlus size={14} />
-          Create Scope
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => generate.mutate()}
+            disabled={generate.isPending}
+          >
+            <IconSparkles size={14} />
+            {generate.isPending ? "Generating…" : "Generate AI Scopes"}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => router.push(`/projects/${projectId}/scopes/new`)}
+          >
+            <IconPlus size={14} />
+            Create Scope
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -164,7 +187,7 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
                       aria-label={s.enabled ? "Disable scope" : "Enable scope"}
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggle.mutate({ id: s.id, enabled: !s.enabled });
+                        toggle.mutate({ s, enabled: !s.enabled });
                       }}
                       disabled={toggle.isPending}
                     >
@@ -186,6 +209,22 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
                     </button>
                   </td>
                   <td className="px-4 py-3 text-right">
+                    {s.type === "ai_generated" && (
+                      <button
+                        type="button"
+                        title="Regenerate AI scopes from the project's queries"
+                        aria-label="Generate AI scopes"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          generate.mutate();
+                        }}
+                        disabled={generate.isPending}
+                        className="mr-1 inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-ink-tertiary hover:bg-brand-50 hover:text-brand-600 disabled:opacity-50"
+                      >
+                        <IconSparkles size={14} />
+                        {generate.isPending ? "Generating…" : "Generate"}
+                      </button>
+                    )}
                     {s.can_delete && (
                       <button
                         type="button"

@@ -1610,6 +1610,47 @@ async def list_saved_queries(
     return results
 
 
+async def _maybe_autoscope_on_save(
+    session: AsyncSession,
+    *,
+    query: SavedQuery,
+    context: RequestContext,
+) -> None:
+    """Refresh AI drill-down scopes after a query is saved.
+
+    Only runs when the project already has an *enabled* "AI Generated Scopes"
+    set — i.e. the user has opted into autoscoping via the Scopes page toggle.
+    This keeps that set fresh as new queries are added without forcing AI
+    scopes onto projects that never enabled them. Fail-soft: a scoping error
+    must never break saving the query.
+    """
+    try:
+        ai_set = await session.scalar(
+            select(ScopeSet).where(
+                ScopeSet.tenant_id == context.tenant_id,
+                ScopeSet.project_id == query.project_id,
+                ScopeSet.type == "ai_generated",
+                ScopeSet.enabled.is_(True),
+            )
+        )
+        if ai_set is None:
+            return
+        from app.services.auto_scope import auto_create_scopes_for_query
+
+        created = await auto_create_scopes_for_query(
+            session,
+            query=query,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id or ai_set.created_by or 0,
+        )
+        if created:
+            await session.commit()
+    except Exception as exc:  # never break the save on a scoping error
+        logger.warning(
+            "Auto-scope on save failed for query %s: %s", query.id, exc
+        )
+
+
 @router.post("/{project_id}/queries", response_model=SavedQueryRead,
              status_code=status.HTTP_201_CREATED)
 async def create_saved_query(
@@ -1638,6 +1679,7 @@ async def create_saved_query(
     session.add(query)
     await session.commit()
     await session.refresh(query)
+    await _maybe_autoscope_on_save(session, query=query, context=context)
     read = SavedQueryRead.model_validate(query)
     read.origin, read.origin_label = _query_origin(query)
     return read
@@ -1681,6 +1723,7 @@ async def update_saved_query(
 
     await session.commit()
     await session.refresh(query)
+    await _maybe_autoscope_on_save(session, query=query, context=context)
     read = SavedQueryRead.model_validate(query)
     read.origin, read.origin_label = _query_origin(query)
     return read
