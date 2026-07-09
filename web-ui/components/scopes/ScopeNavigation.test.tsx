@@ -6,12 +6,14 @@ import type { ScopeSet } from "@/lib/api/scopes";
 const listScopeSets = vi.fn();
 const updateScopeSet = vi.fn();
 const autoGenerateScopes = vi.fn();
+const generateScopeMap = vi.fn();
 
 vi.mock("@/lib/api/scopes", () => ({
   scopesApi: {
     listScopeSets: (...a: unknown[]) => listScopeSets(...a),
     updateScopeSet: (...a: unknown[]) => updateScopeSet(...a),
     autoGenerateScopes: (...a: unknown[]) => autoGenerateScopes(...a),
+    generateScopeMap: (...a: unknown[]) => generateScopeMap(...a),
     deleteScopeSet: vi.fn(),
   },
 }));
@@ -58,6 +60,9 @@ describe("ScopeNavigation AI autoscope (Issue 2)", () => {
     listScopeSets.mockReset();
     updateScopeSet.mockReset().mockResolvedValue({});
     autoGenerateScopes.mockReset().mockResolvedValue({});
+    generateScopeMap
+      .mockReset()
+      .mockResolvedValue({ relationships: [], scopes_created: 1, status: "ok" });
   });
 
   it("enabling the AI scope set enables it and calls auto-generate", async () => {
@@ -73,13 +78,29 @@ describe("ScopeNavigation AI autoscope (Issue 2)", () => {
     });
   });
 
-  it("the header Generate action triggers auto-generate for the project", async () => {
+  it("the header Generate action runs the LLM scope-map generator", async () => {
     listScopeSets.mockResolvedValue([]);
     renderNav();
 
     const btn = await screen.findByRole("button", { name: /Generate AI Scopes/ });
     fireEvent.click(btn);
 
-    await waitFor(() => expect(autoGenerateScopes).toHaveBeenCalledWith(3));
+    await waitFor(() => expect(generateScopeMap).toHaveBeenCalledWith(3));
+    expect(autoGenerateScopes).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an error when scope-map generation fails", async () => {
+    listScopeSets.mockResolvedValue([]);
+    generateScopeMap.mockRejectedValue(new Error("AI server unavailable"));
+    renderNav();
+
+    const btn = await screen.findByRole("button", { name: /Generate AI Scopes/ });
+    fireEvent.click(btn);
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "AI server unavailable",
+      ),
+    );
   });
 });
