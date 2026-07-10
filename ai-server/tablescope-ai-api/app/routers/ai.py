@@ -70,6 +70,7 @@ from app.models.schemas import (
     SuggestDashboardsMultiResponse,
 )
 from app.services import context_builder, llm_client, vector_store
+from app.services.ai_gate import AIGateBusyError
 from app.services.context_builder import ContextBuildError
 from app.services.kg_context import format_knowledge_graph_context
 from app.services.prompt_loader import load_prompt_reference, shared_policy_block
@@ -282,6 +283,7 @@ async def ask(req: AskRequest) -> AskResponse:
         prompt=prompt,
         system_prompt=SYSTEM_PROMPT,
         model=settings.reasoning_model,
+        tenant_id=req.tenant_id,
     )
 
     # 4. Update activity
@@ -480,6 +482,7 @@ async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateR
         system_prompt=SYSTEM_PROMPT,
         model=settings.sql_model,
         temperature=0.0,
+        tenant_id=req.tenant_id,
     )
 
     # Parse relationships from LLM response
@@ -746,6 +749,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         source_catalog=catalog,
         preferred_sources=req.preferred_sources,
         relevant_columns=req.relevant_columns,
+        tenant_id=req.tenant_id,
     )
     if _needs_clarification(raw):
         raise _clarify("Model could not find a matching authorized source.")
@@ -782,6 +786,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
                 source_catalog=catalog,
                 preferred_sources=req.preferred_sources,
                 relevant_columns=req.relevant_columns,
+                tenant_id=req.tenant_id,
             )
             repaired = True
             if _needs_clarification(raw):
@@ -1000,6 +1005,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         # alongside the project context without truncation.
         num_ctx=24576,
         response_format="json",
+        tenant_id=req.tenant_id,
     )
 
     suggestions: list[dict] = []
@@ -1169,6 +1175,7 @@ async def suggest_dashboards_multi(
         temperature=0.4,
         num_ctx=24576,
         response_format="json",
+        tenant_id=req.tenant_id,
     )
 
     parsed = _parse_json_response(raw)
@@ -1739,6 +1746,8 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         # truncated into invalid JSON.
         num_ctx=16384,
         response_format="json",
+        tenant_id=req.tenant_id,
+        request_kind="plan",
     )
 
     parsed = _parse_json_response(raw)
@@ -1836,6 +1845,7 @@ async def intelligence_fix_sql(
         model=settings.reasoning_model,
         temperature=0.1,
         num_ctx=8192,
+        tenant_id=req.tenant_id,
     )
 
     fixed = _clean_sql(raw or "")
@@ -1909,6 +1919,7 @@ async def intelligence_interpret(
         model=settings.reasoning_model,
         temperature=0.2,
         num_ctx=8192,
+        tenant_id=req.tenant_id,
     )
 
     parsed = _parse_json_response(raw)
@@ -2106,6 +2117,7 @@ async def knowledge_graph_insights(
         temperature=0.2,
         num_ctx=16384,
         response_format="json",
+        tenant_id=req.tenant_id,
     )
 
     parsed = _parse_json_response(raw)
@@ -2335,6 +2347,7 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
         temperature=0.2,
         num_ctx=16384,
         response_format="json",
+        tenant_id=req.tenant_id,
     )
 
     parsed = _parse_json_response(raw) or {}
@@ -2410,6 +2423,7 @@ async def analyze_scopes(req: AnalyzeScopesRequest) -> AnalyzeScopesResponse:
         system_prompt="You are a data analyst that identifies drill-down relationships between SQL queries. Return only valid JSON.",
         model=settings.reasoning_model,
         temperature=0.0,
+        tenant_id=req.tenant_id,
     )
 
     # Parse scopes from LLM response
@@ -2477,6 +2491,7 @@ async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
         ),
         model=settings.reasoning_model,
         temperature=0.0,
+        tenant_id=req.tenant_id,
     )
 
     match_id: int | None = None
@@ -2632,6 +2647,7 @@ Document family rules:
             model=settings.reasoning_model,
             temperature=0.1,
             max_tokens=2600,
+            tenant_id=req.tenant_id,
         )
 
         # Parse JSON from response
@@ -2658,6 +2674,8 @@ Document family rules:
             request_id=request_id,
             model_used=settings.reasoning_model,
         )
+    except AIGateBusyError:
+        raise
     except Exception as exc:
         logger.exception("[%s] document profile failed: %s", request_id, exc)
         raise HTTPException(
@@ -2794,8 +2812,11 @@ Rules:
             model=settings.reasoning_model,
             temperature=0.2,
             max_tokens=1200,
+            tenant_id=req.tenant_id,
         )
         parsed = _parse_json_response(raw) or {}
+    except AIGateBusyError:
+        raise
     except Exception as exc:
         logger.exception("[%s] family summarize failed: %s", request_id, exc)
         raise HTTPException(
@@ -2864,7 +2885,10 @@ Return ONLY the summary text — no preamble, no headings, no JSON."""
             model=settings.reasoning_model,
             temperature=0.2,
             max_tokens=400,
+            tenant_id=req.tenant_id,
         )
+    except AIGateBusyError:
+        raise
     except Exception as exc:
         logger.exception("[%s] reference summarize failed: %s", request_id, exc)
         raise HTTPException(
@@ -2924,8 +2948,11 @@ Rules:
             model=settings.reasoning_model,
             temperature=0.2,
             max_tokens=800,
+            tenant_id=req.tenant_id,
         )
         parsed = _parse_json_response(raw) or {}
+    except AIGateBusyError:
+        raise
     except Exception as exc:
         logger.exception("[%s] reference suggest failed: %s", request_id, exc)
         raise HTTPException(

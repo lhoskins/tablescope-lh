@@ -15,10 +15,13 @@ Services:
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.core.config import settings
 from app.routers import ai, health
+from app.services.ai_gate import AIGateBusyError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +40,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(AIGateBusyError)
+async def ai_gate_busy_handler(
+    _request: Request, exc: AIGateBusyError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": str(exc), "code": "ai_busy"},
+        headers={"Retry-After": str(max(1, settings.ai_gate_retry_after_seconds))},
+    )
+
 
 app.include_router(health.router)
 app.include_router(ai.router)

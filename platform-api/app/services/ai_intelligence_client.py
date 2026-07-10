@@ -5,13 +5,14 @@ Wraps the HMAC-signed POST to ``/ai/intelligence/plan`` and
 home-intelligence service can drive the plan -> execute -> interpret loop
 without importing route modules (avoids circular imports).
 
-Every call returns ``None`` on any failure (AI disabled, unreachable, bad
-response) so callers can fall back deterministically — the feature never breaks
-just because the AI server is slow or down.
+Disabled AI returns ``None`` so callers can degrade cleanly. Transport, timeout,
+HTTP, and malformed-response failures raise :class:`AIUnavailableError` so
+streaming callers can report an honest error instead of a misleading empty result.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -26,6 +27,17 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(300.0, connect=10.0)
+_BUSY_MAX_ATTEMPTS = 3
+_BUSY_DEFAULT_RETRY_SECONDS = 5.0
+_BUSY_MAX_RETRY_SECONDS = 30.0
+
+
+class AIUnavailableError(RuntimeError):
+    """The enabled AI service could not complete a request."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _sign_payload(payload: dict[str, Any], secret: str) -> str:
@@ -38,23 +50,113 @@ def is_enabled() -> bool:
     return bool(settings.tablescope_ai_enabled and settings.tablescope_ai_api_url)
 
 
-async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+def _retry_seconds(
+    *,
+    attempt: int,
+    base_seconds: float,
+    response: httpx.Response | None = None,
+) -> float:
+    if response is not None:
+        raw = response.headers.get("Retry-After")
+        if raw:
+            try:
+                return min(max(float(raw), 0.0), _BUSY_MAX_RETRY_SECONDS)
+            except ValueError:
+                pass
+    return min(
+        max(base_seconds, 0.0) * (2 ** max(attempt - 1, 0)),
+        _BUSY_MAX_RETRY_SECONDS,
+    )
+
+
+async def _post(
+    path: str,
+    payload: dict[str, Any],
+    *,
+    max_attempts: int = _BUSY_MAX_ATTEMPTS,
+    retry_read_timeouts: bool = False,
+    retry_base_seconds: float = _BUSY_DEFAULT_RETRY_SECONDS,
+) -> dict[str, Any] | None:
     settings = get_settings()
     if not is_enabled():
         return None
-    payload = dict(payload)
-    payload["timestamp"] = time.time()
-    payload["signature"] = _sign_payload(payload, settings.tablescope_ai_signing_secret)
+    base_payload = dict(payload)
     url = f"{settings.tablescope_ai_api_url}{path}"
+
+    attempts = max(1, max_attempts)
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        for attempt in range(1, attempts + 1):
+            signed_payload = dict(base_payload)
+            signed_payload["timestamp"] = time.time()
+            signed_payload["signature"] = _sign_payload(
+                signed_payload, settings.tablescope_ai_signing_secret
+            )
+            try:
+                resp = await client.post(url, json=signed_payload)
+            except httpx.ReadTimeout as exc:
+                if retry_read_timeouts and attempt < attempts:
+                    retry_seconds = _retry_seconds(
+                        attempt=attempt,
+                        base_seconds=retry_base_seconds,
+                    )
+                    logger.warning(
+                        "AI intelligence call to %s timed out; retrying in %.1fs "
+                        "(attempt %s/%s)",
+                        path,
+                        retry_seconds,
+                        attempt,
+                        attempts,
+                    )
+                    await asyncio.sleep(retry_seconds)
+                    continue
+                logger.warning("AI intelligence call to %s timed out: %s", path, exc)
+                raise AIUnavailableError("AI server timed out; retry shortly.") from exc
+            except httpx.TimeoutException as exc:
+                logger.warning("AI intelligence call to %s timed out: %s", path, exc)
+                raise AIUnavailableError("AI server timed out; retry shortly.") from exc
+            except httpx.TransportError as exc:
+                logger.warning("AI intelligence transport failure for %s: %s", path, exc)
+                raise AIUnavailableError(
+                    "AI server is unavailable; retry shortly."
+                ) from exc
+
+            if resp.status_code == 503 and attempt < attempts:
+                retry_seconds = _retry_seconds(
+                    attempt=attempt,
+                    base_seconds=retry_base_seconds,
+                    response=resp,
+                )
+                logger.warning(
+                    "AI intelligence server busy for %s; retrying in %.1fs "
+                    "(attempt %s/%s)",
+                    path,
+                    retry_seconds,
+                    attempt,
+                    attempts,
+                )
+                await asyncio.sleep(retry_seconds)
+                continue
+
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                if status_code == 503:
+                    message = "AI server is busy; retry shortly."
+                else:
+                    message = f"AI server request failed with HTTP {status_code}."
+                logger.warning("AI intelligence HTTP failure for %s: %s", path, exc)
+                raise AIUnavailableError(message, status_code=status_code) from exc
+            break
+
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            return resp.json()
-    except Exception as exc:
-        # Degrade gracefully on any AI failure (disabled/unreachable/bad response).
-        logger.warning("AI intelligence call to %s failed: %s", path, exc)
-        return None
+        data = resp.json()
+    except ValueError as exc:
+        logger.warning("AI intelligence returned invalid JSON for %s", path)
+        raise AIUnavailableError("AI server returned an invalid response.") from exc
+    if not isinstance(data, dict):
+        raise AIUnavailableError("AI server returned an invalid response.")
+    return data
 
 
 async def plan(
@@ -70,6 +172,8 @@ async def plan(
     granularity: int = 3,
 ) -> list[dict[str, Any]] | None:
     """Ask the LLM to propose diagnostic analyses. Returns ``analyses`` or None."""
+    settings = get_settings()
+    max_retries = max(0, settings.home_intelligence_plan_max_retries)
     result = await _post(
         "/ai/intelligence/plan",
         {
@@ -83,6 +187,11 @@ async def plan(
             "max_analyses": max_analyses,
             "granularity": granularity,
         },
+        max_attempts=max_retries + 1,
+        retry_read_timeouts=True,
+        retry_base_seconds=max(
+            0.0, settings.home_intelligence_plan_retry_base_seconds
+        ),
     )
     if result is None:
         return None

@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.services import ai_gate
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,8 @@ async def generate(
     max_tokens: int | None = None,
     num_ctx: int | None = None,
     response_format: str | None = None,
+    tenant_id: int | None = None,
+    request_kind: str = "default",
 ) -> str:
     """Generate text completion from Ollama.
 
@@ -55,13 +58,14 @@ async def generate(
     if system_prompt:
         payload["system"] = system_prompt
 
-    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        resp = await client.post(
-            f"{settings.ollama_url}/api/generate",
-            json=payload,
-        )
-        resp.raise_for_status()
-        return resp.json()["response"]
+    async with ai_gate.acquire(tenant_id, request_kind=request_kind):
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.post(
+                f"{settings.ollama_url}/api/generate",
+                json=payload,
+            )
+            resp.raise_for_status()
+            return resp.json()["response"]
 
 
 _TEIID_RULES = (
@@ -175,6 +179,7 @@ async def generate_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    tenant_id: int | None = None,
 ) -> str:
     """Generate SQL using the code-specialized model with semantic discovery."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -206,6 +211,7 @@ async def generate_sql(
         system_prompt=system_prompt,
         model=settings.sql_model,
         temperature=0.0,
+        tenant_id=tenant_id,
     )
 
 
@@ -218,6 +224,7 @@ async def repair_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    tenant_id: int | None = None,
 ) -> str:
     """Ask the model to fix SQL that failed validation, preserving intent."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -251,6 +258,7 @@ async def repair_sql(
         system_prompt=system_prompt,
         model=settings.sql_model,
         temperature=0.0,
+        tenant_id=tenant_id,
     )
 
 
@@ -259,15 +267,16 @@ async def generate_embeddings(texts: list[str]) -> list[list[float]]:
     embeddings = []
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         for text in texts:
-            resp = await client.post(
-                f"{settings.ollama_url}/api/embeddings",
-                json={
-                    "model": settings.embedding_model,
-                    "prompt": text,
-                },
-            )
-            resp.raise_for_status()
-            embeddings.append(resp.json()["embedding"])
+            async with ai_gate.acquire(None):
+                resp = await client.post(
+                    f"{settings.ollama_url}/api/embeddings",
+                    json={
+                        "model": settings.embedding_model,
+                        "prompt": text,
+                    },
+                )
+                resp.raise_for_status()
+                embeddings.append(resp.json()["embedding"])
     return embeddings
 
 

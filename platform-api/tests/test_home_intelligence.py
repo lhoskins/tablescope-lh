@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import date, timedelta
 from types import SimpleNamespace
 
@@ -499,6 +501,257 @@ async def test_run_ai_intelligence_executes_and_interprets(monkeypatch) -> None:
     assert card["chart"]["type"] == "bar"
     assert card["callout"]["type"] == "risk"
     assert "spend" in card["sources"]["tables"]
+
+
+async def test_run_ai_intelligence_treats_missing_plan_as_unavailable(
+    monkeypatch,
+) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**_kwargs):
+        return None
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+    with pytest.raises(ai.AIUnavailableError, match="planning is unavailable"):
+        await hi.run_ai_intelligence(
+            _project(), ctx, _runner({}), tenant_id=1, user_id=1
+        )
+
+
+async def test_multi_project_plans_are_serialized_without_losing_rich_results(
+    monkeypatch,
+) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+    active_plans = 0
+    max_active_plans = 0
+
+    async def fake_plan(**_kwargs):
+        nonlocal active_plans, max_active_plans
+        active_plans += 1
+        max_active_plans = max(max_active_plans, active_plans)
+        await asyncio.sleep(0)
+        active_plans -= 1
+        return [
+            {
+                "id": "rich",
+                "category": "trend",
+                "title": "Manufacturing throughput",
+                "rationale": "Grounded production signal.",
+                "sql": (
+                    'SELECT "plant", "throughput" FROM "operations" '
+                    "/* GOOD */"
+                ),
+                "chart_type": "bar",
+                "label_column": "plant",
+                "value_column": "throughput",
+            }
+        ]
+
+    async def fake_interpret(**_kwargs):
+        return {}
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    ctx = hi.ProjectContext(
+        tables=[_table("operations", ["plant", "throughput"])], documents=[]
+    )
+    runner = _runner({"GOOD": [{"plant": "A", "throughput": 120}]})
+    plan_semaphore = asyncio.Semaphore(1)
+    projects = [
+        _project(i, "Manufacturing" if i == 1 else f"Project {i}")
+        for i in range(1, 12)
+    ]
+
+    results = await asyncio.gather(
+        *(
+            hi.run_ai_intelligence(
+                project,
+                ctx,
+                runner,
+                tenant_id=1,
+                user_id=1,
+                plan_semaphore=plan_semaphore,
+            )
+            for project in projects
+        )
+    )
+
+    assert max_active_plans == 1
+    assert len(results) == 11
+    assert all(
+        cards and cards[0]["title"] == "Manufacturing throughput"
+        for cards in results
+    )
+
+
+async def test_run_ai_intelligence_keeps_direct_results_when_sql_repair_is_busy(
+    monkeypatch,
+) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**_kwargs):
+        return [
+            {
+                "id": "direct",
+                "category": "trend",
+                "title": "Direct result",
+                "rationale": "A grounded direct result.",
+                "sql": 'SELECT "supplier" FROM "spend" /* GOOD */',
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "amount",
+            },
+            {
+                "id": "repair",
+                "category": "risk",
+                "title": "Needs repair",
+                "rationale": "This query needs repair.",
+                "sql": 'SELECT "missing" FROM "spend" /* BAD */',
+                "chart_type": "bar",
+            },
+        ]
+
+    async def fake_fix_sql(**_kwargs):
+        raise ai.AIUnavailableError("AI server is busy; retry shortly.")
+
+    async def fake_interpret(**_kwargs):
+        return {}
+
+    async def runner(sql: str) -> dict:
+        if "BAD" in sql:
+            raise RuntimeError("unknown column")
+        if "GOOD" in sql:
+            return {
+                "columns": ["supplier", "amount"],
+                "rows": [{"supplier": "Acme", "amount": 10}],
+            }
+        return {"columns": [], "rows": []}
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "fix_sql", fake_fix_sql)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, tenant_id=1, user_id=1
+    )
+
+    assert cards is not None
+    assert [card["title"] for card in cards] == ["Direct result"]
+
+
+async def test_run_ai_intelligence_skips_busy_interpret_chunk(monkeypatch) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**_kwargs):
+        return [
+            {
+                "id": f"a{i}",
+                "category": "trend",
+                "title": f"Analysis {i}",
+                "rationale": f"Grounded rationale {i}.",
+                "sql": f'SELECT "supplier", "amount" FROM "spend" /* GOOD {i} */',
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "amount",
+            }
+            for i in range(5)
+        ]
+
+    async def fake_interpret(**kwargs):
+        analyses = kwargs["analyses"]
+        if analyses[0]["id"] == "a0":
+            raise ai.AIUnavailableError("AI server is busy; retry shortly.")
+        return {
+            "a4": {
+                "title": "Interpreted analysis 4",
+                "summary": "The final chunk completed.",
+            }
+        }
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    runner = _runner({"GOOD": [{"supplier": "Acme", "amount": 10}]})
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, tenant_id=1, user_id=1
+    )
+
+    assert cards is not None
+    assert len(cards) == 5
+    assert any(card["title"] == "Interpreted analysis 4" for card in cards)
+    assert any(card["title"] == "Analysis 0" for card in cards)
+
+
+async def test_run_ai_intelligence_bounds_interpret_fanout(monkeypatch) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        hi,
+        "get_settings",
+        lambda: SimpleNamespace(
+            home_intelligence_max_concurrent_ai_calls_per_project=2
+        ),
+    )
+
+    async def fake_plan(**_kwargs):
+        return [
+            {
+                "id": f"a{i}",
+                "category": "trend",
+                "title": f"Analysis {i}",
+                "rationale": f"Grounded rationale {i}.",
+                "sql": f'SELECT "supplier", "amount" FROM "spend" /* GOOD {i} */',
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "amount",
+            }
+            for i in range(13)
+        ]
+
+    active = 0
+    max_active = 0
+
+    async def fake_interpret(**_kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return {}
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    runner = _runner({"GOOD": [{"supplier": "Acme", "amount": 10}]})
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, tenant_id=1, user_id=1
+    )
+
+    assert cards is not None
+    assert max_active == 2
 
 
 async def test_run_ai_intelligence_returns_none_when_disabled(monkeypatch) -> None:
@@ -1048,3 +1301,127 @@ async def test_project_dashboard_repairs_failing_widget_sql(
     assert len(widgets) == 1
     assert widgets[0]["title"] == "Requests over time"
     assert widgets[0]["sql"] == good_sql
+
+
+async def test_stream_reports_ai_failure_and_persists_successful_projects(
+    client, service_headers, db_engine, monkeypatch
+) -> None:
+    _, _, headers = await _setup(client, service_headers)
+    project_ids: list[int] = []
+    for name in ("Healthy Project", "Busy Project"):
+        response = await client.post(
+            "/api/projects",
+            json={"name": name, "description": "x", "is_shared": False},
+            headers=headers,
+        )
+        assert response.status_code == 201
+        project_ids.append(response.json()["id"])
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.routes.home_intelligence as hir
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    healthy_id, busy_id = project_ids
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    saved: dict[str, object] = {}
+
+    async def fake_run(_session, _context, project, _prompt_types, **_kwargs):
+        if project.id == busy_id:
+            raise AIUnavailableError("AI server is busy; retry shortly.")
+        return [{"summary": "Grounded finding"}]
+
+    async def fake_save(
+        _context, granularity, payload, *, failed_project_count=0
+    ):
+        saved["granularity"] = granularity
+        saved["payload"] = payload
+        saved["failed_project_count"] = failed_project_count
+
+    monkeypatch.setattr(hir, "SessionLocal", session_factory)
+    monkeypatch.setattr(hir, "_run_for_project", fake_run)
+    monkeypatch.setattr(hir, "_save_snapshot", fake_save)
+
+    response = await client.get(
+        "/api/ai/home-intelligence/stream?cross_project=false",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+
+    completed = [event for event in events if event["type"] == "project_complete"]
+    errors = [event for event in events if event["type"] == "project_error"]
+    assert [event["projectId"] for event in completed] == [str(healthy_id)]
+    assert len(errors) == 1
+    assert errors[0]["projectId"] == str(busy_id)
+    assert errors[0]["projectName"] == "Busy Project"
+    assert "busy" in errors[0]["error"]
+    assert saved["failed_project_count"] == 1
+
+    payload = saved["payload"]
+    assert isinstance(payload, dict)
+    assert [result["projectId"] for result in payload["results"]] == [str(healthy_id)]
+    assert {project["id"] for project in payload["projects"]} == {
+        str(healthy_id),
+        str(busy_id),
+    }
+
+
+async def test_failed_refresh_preserves_larger_snapshot(
+    client, service_headers, db_engine, monkeypatch
+) -> None:
+    tenant, user, _headers = await _setup(client, service_headers)
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.routes.home_intelligence as hir
+    from app.models.intelligence_snapshot import IntelligenceSnapshot
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    prior_payload = {
+        "projects": [],
+        "results": [
+            {"projectId": "1", "insights": [{"title": "Prior 1"}]},
+            {"projectId": "2", "insights": [{"title": "Prior 2"}]},
+        ],
+        "synthesis": None,
+    }
+    async with session_factory() as session:
+        session.add(
+            IntelligenceSnapshot(
+                tenant_id=tenant["id"],
+                user_id=user["id"],
+                granularity=3,
+                payload=prior_payload,
+            )
+        )
+        await session.commit()
+
+    monkeypatch.setattr(hir, "SessionLocal", session_factory)
+    context = SimpleNamespace(tenant_id=tenant["id"], user_id=user["id"])
+    await hir._save_snapshot(
+        context,
+        5,
+        {
+            "projects": [],
+            "results": [{"projectId": "1", "insights": []}],
+            "synthesis": None,
+        },
+        failed_project_count=1,
+    )
+
+    async with session_factory() as session:
+        snapshot = await session.scalar(
+            select(IntelligenceSnapshot).where(
+                IntelligenceSnapshot.user_id == user["id"]
+            )
+        )
+
+    assert snapshot is not None
+    assert snapshot.granularity == 3
+    assert snapshot.payload == prior_payload

@@ -27,6 +27,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_settings
 from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
@@ -1974,6 +1975,7 @@ async def run_ai_intelligence(
     user_id: int,
     max_analyses: int = 15,
     granularity: int = 3,
+    plan_semaphore: asyncio.Semaphore | None = None,
 ) -> list[dict[str, Any]] | None:
     """LLM-driven analyst loop. Returns cards, or ``None`` to signal fallback.
 
@@ -1981,13 +1983,18 @@ async def run_ai_intelligence(
     2. Execute each generated SQL against the project's real data.
     3. Ask the AI to interpret the actual results into executive findings.
 
-    Returns ``None`` when the AI server is unavailable or proposes nothing
-    usable, so the caller can fall back to the deterministic suite.
+    Returns ``None`` only when AI is disabled. An unavailable initial plan raises
+    so streaming callers report a project failure; a valid empty plan returns [].
     """
     from app.services import ai_intelligence_client as ai
 
     if not ai.is_enabled():
         return None
+
+    ai_call_limit = max(
+        1, get_settings().home_intelligence_max_concurrent_ai_calls_per_project
+    )
+    ai_call_sem = asyncio.Semaphore(ai_call_limit)
 
     allowed_tables = [t.view_name for t in ctx.tables]
     # Pull a real example value per column so the planner can see each column's
@@ -2038,19 +2045,26 @@ async def run_ai_intelligence(
     # validated two-table insights; otherwise it stays single-table.
     relationship_hints = find_relationship_candidates(ctx.tables)
 
-    analyses = await ai.plan(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        project_id=project.id,
-        allowed_tables=allowed_tables,
-        documents=documents,
-        table_schema=table_schema,
-        relationship_hints=relationship_hints,
-        max_analyses=max_analyses,
-        granularity=granularity,
-    )
+    async def request_plan() -> list[dict[str, Any]] | None:
+        return await ai.plan(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            project_id=project.id,
+            allowed_tables=allowed_tables,
+            documents=documents,
+            table_schema=table_schema,
+            relationship_hints=relationship_hints,
+            max_analyses=max_analyses,
+            granularity=granularity,
+        )
+
+    if plan_semaphore is None:
+        analyses = await request_plan()
+    else:
+        async with plan_semaphore:
+            analyses = await request_plan()
     if analyses is None:
-        return None  # AI unreachable -> fall back
+        raise ai.AIUnavailableError("AI planning is unavailable; retry shortly.")
     if not analyses:
         return []  # AI reachable but found nothing worth surfacing
 
@@ -2124,21 +2138,30 @@ async def run_ai_intelligence(
     # (wrong CAST, alias-in-GROUP BY, unsupported function, wrong-table column)
     # into rendered cards instead of silently dropped analyses.
     if to_repair:
-        fixes = await asyncio.gather(
-            *(
-                ai.fix_sql(
+        async def fix_one(sql: str, error: str) -> str | None:
+            async with ai_call_sem:
+                return await ai.fix_sql(
                     tenant_id=tenant_id,
                     user_id=user_id,
                     project_id=project.id,
                     sql=sql,
-                    error=err,
+                    error=error,
                     allowed_tables=allowed_tables,
                     table_schema=table_schema,
                 )
-                for (_a, sql, err) in to_repair
-            )
+
+        fixes = await asyncio.gather(
+            *(fix_one(sql, err) for (_a, sql, err) in to_repair),
+            return_exceptions=True,
         )
         for (a, orig_sql, _err), fixed in zip(to_repair, fixes, strict=True):
+            if isinstance(fixed, BaseException):
+                if isinstance(fixed, asyncio.CancelledError):
+                    raise fixed
+                logger.warning(
+                    "AI SQL repair skipped for project %s: %s", project.id, fixed
+                )
+                continue
             if not fixed or fixed.strip() == orig_sql.strip():
                 continue
             fixed = _normalize_date_casts(fixed, date_masks)
@@ -2157,19 +2180,30 @@ async def run_ai_intelligence(
         interpret_inputs[i : i + chunk_size]
         for i in range(0, len(interpret_inputs), chunk_size)
     ]
-    chunk_results = await asyncio.gather(
-        *(
-            ai.interpret(
+    async def interpret_chunk(
+        chunk: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]] | None:
+        async with ai_call_sem:
+            return await ai.interpret(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 project_id=project.id,
                 analyses=chunk,
             )
-            for chunk in chunks
-        )
+
+    chunk_results = await asyncio.gather(
+        *(interpret_chunk(chunk) for chunk in chunks),
+        return_exceptions=True,
     )
     interpreted: dict[str, dict[str, Any]] = {}
     for res in chunk_results:
+        if isinstance(res, BaseException):
+            if isinstance(res, asyncio.CancelledError):
+                raise res
+            logger.warning(
+                "AI interpretation chunk skipped for project %s: %s", project.id, res
+            )
+            continue
         if res:
             interpreted.update(res)
 

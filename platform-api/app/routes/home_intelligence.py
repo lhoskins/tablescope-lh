@@ -36,6 +36,7 @@ from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
 from app.services import home_intelligence as hi
+from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.presentation_engine import PresentationMode
 from app.services.response_envelope import attach_envelope
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
@@ -99,15 +100,16 @@ async def _run_for_project(
     *,
     write_audit: bool = True,
     granularity: int = 3,
+    plan_semaphore: asyncio.Semaphore | None = None,
 ) -> list[dict[str, Any]]:
     started = datetime.now(UTC)
     ctx = await hi.gather_project_context(session, project)
     runner = _make_runner(session, context, project.id)
 
     # Only the AI-driven analyst loop (plan -> execute real SQL -> interpret).
-    # No deterministic/hard-coded fallback: if the AI server is unavailable or
-    # finds nothing worth surfacing, we return no cards (the last saved snapshot
-    # still shows) rather than fabricating built-in metrics.
+    # A disabled AI feature degrades to no cards; an enabled-but-unavailable AI
+    # must bubble to the SSE project_error branch instead of looking like a valid
+    # empty result.
     cards: list[dict[str, Any]] | None = None
     try:
         cards = await hi.run_ai_intelligence(
@@ -117,7 +119,10 @@ async def _run_for_project(
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             granularity=granularity,
+            plan_semaphore=plan_semaphore,
         )
+    except AIUnavailableError:
+        raise
     except Exception as exc:
         logger.warning("AI intelligence failed for project %s: %s", project.id, exc)
         cards = None
@@ -244,6 +249,7 @@ async def home_intelligence_stream(
 
         summaries: list[dict[str, Any]] = []
         project_results: list[dict[str, Any]] = []
+        failed_projects: list[dict[str, Any]] = []
         synthesis: dict[str, Any] | None = None
 
         # Bound how many projects run their heavy AI pipeline at once so a
@@ -254,41 +260,55 @@ async def home_intelligence_stream(
             1, get_settings().home_intelligence_max_concurrent_projects
         )
         sem = asyncio.Semaphore(max_concurrent)
+        max_concurrent_plans = max(
+            1, get_settings().home_intelligence_max_concurrent_plan_calls
+        )
+        plan_sem = asyncio.Semaphore(max_concurrent_plans)
 
         async def work(project: Project) -> dict[str, Any]:
-            async with sem:
-                async with SessionLocal() as session:
-                    cards = await _run_for_project(
-                        session, context, project, hi.ALL_PROMPT_TYPES,
-                        granularity=granularity,
-                    )
+            try:
+                async with sem:
+                    async with SessionLocal() as session:
+                        cards = await _run_for_project(
+                            session,
+                            context,
+                            project,
+                            hi.ALL_PROMPT_TYPES,
+                            granularity=granularity,
+                            plan_semaphore=plan_sem,
+                        )
+                    return {
+                        "projectId": str(project.id),
+                        "projectName": project.name,
+                        "projectColor": hi.project_color(project.id),
+                        "insights": cards,
+                    }
+            except Exception as exc:
+                logger.warning(
+                    "project intelligence failed for project %s: %s", project.id, exc
+                )
                 return {
                     "projectId": str(project.id),
                     "projectName": project.name,
-                    "projectColor": hi.project_color(project.id),
-                    "insights": cards,
+                    "error": str(exc),
                 }
 
-        tasks = {asyncio.create_task(work(p)): p for p in projects}
-        for coro in asyncio.as_completed(list(tasks)):
-            try:
-                result = await coro
-                summaries.append(
-                    {
-                        "projectId": result["projectId"],
-                        "projectName": result["projectName"],
-                        "insightSummaries": [
-                            c["summary"] for c in result["insights"]
-                        ],
-                    }
-                )
-                project_results.append(result)
-                yield _sse({"type": "project_complete", **result})
-            except Exception as exc:
-                logger.warning("project intelligence failed: %s", exc)
-                yield _sse(
-                    {"type": "project_error", "error": str(exc)}
-                )
+        tasks = [asyncio.create_task(work(p)) for p in projects]
+        for coro in asyncio.as_completed(tasks):
+            result = await coro
+            if "error" in result:
+                failed_projects.append(result)
+                yield _sse({"type": "project_error", **result})
+                continue
+            summaries.append(
+                {
+                    "projectId": result["projectId"],
+                    "projectName": result["projectName"],
+                    "insightSummaries": [c["summary"] for c in result["insights"]],
+                }
+            )
+            project_results.append(result)
+            yield _sse({"type": "project_complete", **result})
 
         if cross_project:
             synthesis = hi.synthesise_cross_project(summaries)
@@ -312,7 +332,12 @@ async def home_intelligence_stream(
                 "synthesis": synthesis,
                 "generatedAt": generated_at,
             }
-            await _save_snapshot(context, granularity, payload)
+            await _save_snapshot(
+                context,
+                granularity,
+                payload,
+                failed_project_count=len(failed_projects),
+            )
         except Exception as exc:
             logger.warning("failed to persist intelligence snapshot: %s", exc)
 
@@ -335,7 +360,11 @@ async def home_intelligence_stream(
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _save_snapshot(
-    context: RequestContext, granularity: int, payload: dict[str, Any]
+    context: RequestContext,
+    granularity: int,
+    payload: dict[str, Any],
+    *,
+    failed_project_count: int = 0,
 ) -> None:
     """Upsert the caller's single latest intelligence snapshot."""
     async with SessionLocal() as session:
@@ -344,6 +373,21 @@ async def _save_snapshot(
                 IntelligenceSnapshot.user_id == context.user_id
             )
         )
+        new_result_count = len(payload.get("results") or [])
+        if failed_project_count:
+            previous_result_count = (
+                len(snap.payload.get("results") or []) if snap else 0
+            )
+            if new_result_count == 0 or new_result_count < previous_result_count:
+                logger.warning(
+                    "preserving prior home intelligence snapshot for user %s: "
+                    "%s project failures, %s new results vs %s previous",
+                    context.user_id,
+                    failed_project_count,
+                    new_result_count,
+                    previous_result_count,
+                )
+                return
         if snap is None:
             snap = IntelligenceSnapshot(
                 tenant_id=context.tenant_id,
