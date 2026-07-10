@@ -344,3 +344,140 @@ async def test_viewer_cannot_create_scope_set(client, service_headers) -> None:
 
 def _tenant_id_of(project: dict) -> int:
     return project["tenant_id"]
+
+
+async def _create_scope(client, owner_headers, set_id, qa, qb, *, source_field="CustomerID"):
+    """Save a one-relationship map onto ``set_id`` and return the created scope."""
+    payload = {
+        "tables": [
+            {
+                "table_key": f"query:{qa['id']}",
+                "table_name": qa["name"],
+                "query_id": qa["id"],
+                "x_position": 0.0,
+                "y_position": 0.0,
+            },
+            {
+                "table_key": f"query:{qb['id']}",
+                "table_name": qb["name"],
+                "query_id": qb["id"],
+                "x_position": 100.0,
+                "y_position": 0.0,
+            },
+        ],
+        "relationships": [
+            {
+                "query_id": qa["id"],
+                "source_field": source_field,
+                "source_table": qa["name"],
+                "target_query_id": qb["id"],
+                "target_field": source_field,
+                "target_table": qb["name"],
+            }
+        ],
+    }
+    r = await client.put(
+        f"/api/scope_sets/{set_id}/map", json=payload, headers=owner_headers
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["relationships"][0]
+
+
+async def test_list_query_scopes_returns_only_enabled(client, service_headers) -> None:
+    _tenant, owner_headers, project, queries = await _setup(client, service_headers)
+    pid = project["id"]
+    qa, qb = queries[0], queries[1]
+
+    r = await client.post(
+        f"/api/projects/{pid}/scope_sets",
+        json={"name": "CustomerID Map"},
+        headers=owner_headers,
+    )
+    set_id = r.json()["id"]
+    await _create_scope(client, owner_headers, set_id, qa, qb)
+
+    # Enabled scope is drillable for the source query.
+    r = await client.get(
+        f"/api/query-scopes?query_id={qa['id']}", headers=owner_headers
+    )
+    assert r.status_code == 200, r.text
+    scopes = r.json()
+    assert len(scopes) == 1
+    assert scopes[0]["source_field"] == "CustomerID"
+
+    # Disabling the parent set cascades to its mappings, which then disappear
+    # from the grid's scope list.
+    r = await client.patch(
+        f"/api/scope_sets/{set_id}",
+        json={"enabled": False},
+        headers=owner_headers,
+    )
+    assert r.status_code == 200, r.text
+    r = await client.get(
+        f"/api/query-scopes?query_id={qa['id']}", headers=owner_headers
+    )
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+async def test_filter_by_scope_returns_target_rows(
+    client, service_headers, monkeypatch
+) -> None:
+    _tenant, owner_headers, project, queries = await _setup(client, service_headers)
+    pid = project["id"]
+    qa, qb = queries[0], queries[1]
+
+    r = await client.post(
+        f"/api/projects/{pid}/scope_sets",
+        json={"name": "Drill Map"},
+        headers=owner_headers,
+    )
+    set_id = r.json()["id"]
+    await _create_scope(client, owner_headers, set_id, qa, qb)
+
+    r = await client.get(
+        f"/api/query-scopes?query_id={qa['id']}", headers=owner_headers
+    )
+    scope = r.json()[0]
+
+    import app.routes.query_scopes as qs
+
+    class _Endpoint:
+        pg_host = "teiid"
+        pg_port = 35432
+
+    class _FakeResolver:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def resolve_for_org(self, _tenant_id):
+            return _Endpoint()
+
+    async def _fake_resolve_vdb(*, session, context, project_id):
+        return "vdb_db"
+
+    captured: dict = {}
+
+    async def _fake_run_sql(*, database, sql, teiid_host, teiid_port):
+        captured["sql"] = sql
+        return {
+            "columns": ["CustomerID", "Region", "Name"],
+            "rows": [{"CustomerID": "C1", "Region": "West", "Name": "Acme"}],
+        }
+
+    monkeypatch.setattr(qs, "TenantTeiidResolver", _FakeResolver)
+    monkeypatch.setattr(qs, "_resolve_vdb_database", _fake_resolve_vdb)
+    monkeypatch.setattr(qs, "_run_sql", _fake_run_sql)
+
+    r = await client.post(
+        "/api/query-scopes/filter",
+        json={"scope_id": scope["id"], "value": "C1", "limit": 1000},
+        headers=owner_headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["target_query_id"] == qb["id"]
+    assert body["rows"] == [{"CustomerID": "C1", "Region": "West", "Name": "Acme"}]
+    # The clicked value was injected as a WHERE filter on the target field.
+    assert "C1" in captured["sql"]
+    assert "CustomerID" in captured["sql"]

@@ -60,8 +60,18 @@ type TanStackDataGridProps = {
   canEditScopes?: boolean;
   projectId?: number;
   columnTypes?: { field: string; name?: string; type: string }[];
-  scopeEnabled?: boolean;
 };
+
+/**
+ * Normalize a field name for scope matching: lower-case and strip surrounding
+ * quotes. AI-generated scopes carry source_field values from
+ * extract_select_columns(), whose casing/quoting can differ from the grid's
+ * column labels, so match them the same case-insensitive way widget X/Y
+ * detection does (commit eae03e0d).
+ */
+function normalizeField(field: string): string {
+  return field.trim().replace(/^"+|"+$/g, "").toLowerCase();
+}
 
 const _currencyFmt = new Intl.NumberFormat(undefined, {
   style: "currency",
@@ -137,7 +147,6 @@ export function TanStackDataGrid({
   canEditScopes = false,
   projectId,
   columnTypes = [],
-  scopeEnabled = true,
 }: TanStackDataGridProps) {
   // ── Drill-down breadcrumb ───────────────────────────────────────
   const [levels, setLevels] = useState<Level[]>([
@@ -158,9 +167,13 @@ export function TanStackDataGrid({
   const [scopes, setScopes] = useState<QueryScope[]>([]);
   const notifyScopesChanged = useNotifyScopesChanged();
 
+  // A grid is scope-capable purely from the presence of enabled scope rows
+  // for the current query — the API returns only enabled scopes, so there is
+  // no separate project-level toggle to consult. Always load when we have a
+  // query id so restoring scopes via the Scope page makes columns drillable
+  // immediately.
   const loadScopes = useCallback(async (qid: number | null) => {
     if (qid == null) {
-      if (scopeEnabled) console.warn("[TanStackDataGrid] Scoping enabled but no query_id — scoping disabled for this grid");
       setScopes([]);
       return;
     }
@@ -168,20 +181,20 @@ export function TanStackDataGrid({
       const data = await apiClient.get<QueryScope[]>(`/api/query-scopes?query_id=${qid}`);
       setScopes(data);
     } catch { setScopes([]); }
-  }, [scopeEnabled]);
+  }, []);
 
-  useEffect(() => { if (scopeEnabled) loadScopes(currentQueryId); else setScopes([]); }, [currentQueryId, loadScopes, scopeEnabled]);
+  useEffect(() => { loadScopes(currentQueryId); }, [currentQueryId, loadScopes]);
 
   const scopesByField = useMemo(() => {
     const m: Record<string, QueryScope> = {};
-    for (const s of scopes) m[s.source_field] = s;
+    for (const s of scopes) m[normalizeField(s.source_field)] = s;
     return m;
   }, [scopes]);
 
   // ── Drill-down on scoped cell click ─────────────────────────────
   const drilldown = useCallback(
     async (field: string, value: unknown) => {
-      const scope = scopesByField[field];
+      const scope = scopesByField[normalizeField(field)];
       if (!scope) return;
       setDrilling(true);
       setError(null);
@@ -232,7 +245,7 @@ export function TanStackDataGrid({
   }, [targetQueryId, availableQueries, projectId]);
 
   const openScopeDialog = useCallback((field: string) => {
-    const existing = scopesByField[field];
+    const existing = scopesByField[normalizeField(field)];
     setDialogField(field);
     setEditing(existing ?? null);
     setTargetQueryId(existing ? existing.target_query_id : "");
@@ -342,7 +355,7 @@ export function TanStackDataGrid({
   }, [columnTypes]);
 
   // ── TanStack column defs ────────────────────────────────────────
-  const scopeActive = scopeEnabled && canEditScopes && currentQueryId != null;
+  const scopeActive = canEditScopes && currentQueryId != null;
 
   const tableColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
     () =>
@@ -350,7 +363,7 @@ export function TanStackDataGrid({
         id: field,
         accessorKey: field,
         header: () => {
-          const scoped = !!scopesByField[field];
+          const scoped = !!scopesByField[normalizeField(field)];
           return (
             <span className="flex items-center gap-1 font-medium text-xs">
               {field}
@@ -360,7 +373,7 @@ export function TanStackDataGrid({
         },
         cell: (info) => {
           const val = info.getValue();
-          const scoped = !!scopesByField[field];
+          const scoped = !!scopesByField[normalizeField(field)];
           const fieldType = typeByField[field];
           const text = val == null ? "" : formatTypedValue(val, fieldType);
           const numeric = fieldType === "currency" || fieldType === "number";
@@ -653,7 +666,7 @@ export function TanStackDataGrid({
             className="w-full px-4 py-1.5 text-left text-xs hover:bg-slate-50"
             onClick={() => { openScopeDialog(contextMenu.field); setContextMenu(null); }}
           >
-            {scopesByField[contextMenu.field] ? "Edit Scope…" : "Create Scope…"}
+            {scopesByField[normalizeField(contextMenu.field)] ? "Edit Scope…" : "Create Scope…"}
           </button>
         </div>
       )}
