@@ -91,9 +91,10 @@ class Settings(BaseSettings):
     # Initial plans are non-degradable, so start them serially while completed
     # plans overlap with sibling projects' execution and interpretation work.
     home_intelligence_max_concurrent_plan_calls: int = 1
-    # Plan calls retry transient gate saturation and read timeouts before the
-    # project is reported as unavailable.
-    home_intelligence_plan_max_retries: int = 2
+    # A busy plan is the one call that restarts the whole project job, so let
+    # the client absorb more transient 503s in-place before escalating to an
+    # arq-level retry (which re-samples tables and re-runs SQL from scratch).
+    home_intelligence_plan_max_retries: int = 4
     home_intelligence_plan_retry_base_seconds: float = 2.0
     # Max concurrent repair/interpret calls spawned by one project analysis.
     # Kept at 1 so (tenant slots) x (this fan-out) stays under the AI gate's
@@ -103,14 +104,14 @@ class Settings(BaseSettings):
     # --- Durable per-tenant Home-intelligence queue (arq + Redis) ---
     # Per-tenant fairness cap: at most this many of a tenant's projects run
     # their heavy AI pipeline at once across all workers (Redis-backed, so it
-    # is authoritative even when the worker is scaled horizontally). Kept small
-    # so (tenant slots) x (a project's interpret/fix_sql fan-out) matches — and
-    # never exceeds — the AI gate's real per-tenant capacity. With the fan-out
-    # pinned at 1 this is set to the gate's per-tenant limit so a tenant's
-    # projects fully use the gate without oversubscribing it (which would turn
-    # every extra project into a stream of retryable 503s). The gate remains
-    # the hard global ceiling; raising this above it does not add throughput.
-    home_intelligence_max_concurrent_projects_per_tenant: int = 3
+    # is authoritative even when the worker is scaled horizontally). With the
+    # per-project fan-out pinned at 1, peak steady-state demand is
+    # (cap x 1) regular calls plus one in-flight plan per starting project.
+    # Kept at 2 (one below the gate's per-tenant limit of 3) so a full tenant
+    # never oversubscribes the gate and there is headroom for plan calls,
+    # embeddings, and a second tenant. Raising this above the gate's
+    # per-tenant limit adds retries, not throughput.
+    home_intelligence_max_concurrent_projects_per_tenant: int = 2
     # TTL for a run's per-run result store (expected set, results hash, run
     # metadata, pub/sub bookkeeping). Long enough for a slow run to drain.
     home_intelligence_run_result_ttl_seconds: int = 3600
@@ -121,11 +122,26 @@ class Settings(BaseSettings):
     # backoff) or late-queued projects get abandoned before their turn.
     home_intelligence_job_max_tries: int = 200
     # Backoff (seconds) when a project defers because its tenant is at the
-    # concurrency cap; kept short so freed slots are picked up quickly.
-    home_intelligence_tenant_slot_retry_seconds: float = 2.0
+    # concurrency cap. Every deferral consumes one of job_max_tries, so this
+    # interval x job_max_tries is the total time a queued project will wait
+    # for a slot before being abandoned as "capacity". 10s x 200 tries gives
+    # a ~33-minute budget — enough to outlast a full multi-project drain
+    # (2s x 200 was only ~7 minutes and abandoned late-queued projects).
+    home_intelligence_tenant_slot_retry_seconds: float = 10.0
     # Fallback backoff (seconds) when the AI gate signals busy without an
     # explicit Retry-After; the client's Retry-After is honored when present.
     home_intelligence_busy_retry_seconds: float = 5.0
+    # Hard arq kill-switch for one analyze_project_intelligence job. Must
+    # comfortably exceed the worst-case single-project wall time under gate
+    # contention (plan + serialized interpret chunks + SQL repair). A job
+    # killed by arq's job_timeout writes NO result, so the run can never
+    # finalize — keep this above the self-timeout below.
+    home_intelligence_job_timeout_seconds: int = 2700
+    # Self-imposed per-project analysis deadline, enforced INSIDE the job so
+    # a too-slow project raises an ordinary TimeoutError that is recorded as
+    # a terminal result (run still finalizes) instead of being silently
+    # cancelled by arq. Keep below home_intelligence_job_timeout_seconds.
+    home_intelligence_project_analysis_timeout_seconds: int = 2400
 
     # --- Supabase authentication ---
     # Single environment-configured auth provider (NOT one project per tenant).

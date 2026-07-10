@@ -1622,6 +1622,84 @@ async def test_worker_skips_superseded_run(
     assert await q.acquire_tenant_slot(7, cap=1) is True
 
 
+async def test_worker_records_terminal_result_on_analysis_timeout(
+    client, service_headers, db_engine, monkeypatch, fake_redis
+) -> None:
+    """A project whose analysis exceeds the self-timeout is recorded terminally.
+
+    The in-job ``asyncio.wait_for`` must convert a stuck analysis into an
+    ordinary ``TimeoutError`` that writes an ``"analysis timed out"`` result
+    (so the run still finalizes) instead of letting arq's ``job_timeout``
+    silently cancel the job with no result written.
+    """
+    tenant, user, headers = await _setup(client, service_headers)
+    tenant_id, user_id = tenant["id"], user["id"]
+    response = await client.post(
+        "/api/projects",
+        json={"name": "Slow Project", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    project_id = response.json()["id"]
+
+    import asyncio
+
+    from arq.worker import Retry
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.routes.home_intelligence as hir
+    from app.config import get_settings
+    from app.services import home_intel_queue as q
+
+    # Shrink the deadline so the test does not actually wait 40 minutes.
+    monkeypatch.setattr(
+        get_settings(), "home_intelligence_project_analysis_timeout_seconds", 0.05
+    )
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    async def fake_run(_session, _context, _project, _prompt_types, **_kwargs):
+        # Hang well past the shrunk deadline.
+        await asyncio.sleep(5)
+        return [{"summary": "never reached"}]
+
+    async def fake_access(_session, _context, _project):
+        return True
+
+    monkeypatch.setattr(hir, "SessionLocal", session_factory)
+    monkeypatch.setattr(hir, "_run_for_project", fake_run)
+    monkeypatch.setattr(hir, "_has_access", fake_access)
+
+    projects = [{"id": str(project_id), "name": "Slow", "color": "#fff"}]
+    run_id = "run-timeout"
+    await q.create_run(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        granularity=3,
+        cross_project=False,
+        projects=projects,
+    )
+
+    outcome = await _run_worker(
+        monkeypatch,
+        hir,
+        job_try=1,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        project_id=project_id,
+        granularity=3,
+        run_id=run_id,
+    )
+    # Not a Retry: a self-timeout is terminal, not deferred.
+    assert not isinstance(outcome, Retry)
+    results = await q.get_results(run_id)
+    assert str(project_id) in results
+    assert results[str(project_id)]["error"] == "analysis timed out"
+    # The slot was released so the timeout cannot leak capacity.
+    assert await q.acquire_tenant_slot(tenant_id, cap=1) is True
+
+
 async def test_two_tenants_are_not_starved(fake_redis) -> None:
     """Per-tenant tokens are isolated: one busy tenant cannot starve another."""
     from app.services import home_intel_queue as q
