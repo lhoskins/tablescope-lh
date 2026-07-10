@@ -16,6 +16,7 @@ direct access to the Teiid admin API.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any, ClassVar
@@ -333,10 +334,37 @@ async def analyze_project_intelligence(
         await _finalize_run_if_complete(run_id)
         return result
 
+    # A newer run for the same user (e.g. a page reload) supersedes this one:
+    # exit immediately without taking a slot or retrying so abandoned runs
+    # cannot pile up and starve the tenant's live run. No result is written —
+    # the stale run's Redis keys simply TTL out.
+    if not await q.is_current_run(tenant_id, user_id, run_id):
+        logger.info(
+            "home-intel skipping superseded run %s project %s", run_id, project_id
+        )
+        return {"superseded": True}
+
     # Per-tenant fairness: if the tenant is at its cap, defer so another
-    # tenant's work can proceed (round-robin-ish). Never terminal.
+    # tenant's work can proceed (round-robin-ish). This is retried until the
+    # tenant frees a slot; only if the (generous) try budget is exhausted do we
+    # write a terminal result so the run can still finalize instead of hanging.
     if not await q.acquire_tenant_slot(tenant_id, cap=cap):
-        raise Retry(defer=settings.home_intelligence_tenant_slot_retry_seconds)
+        if job_try < max_tries:
+            raise Retry(defer=settings.home_intelligence_tenant_slot_retry_seconds)
+        logger.warning(
+            "home-intel project %s never acquired a tenant slot within %s tries",
+            project_id,
+            max_tries,
+        )
+        async with hir.SessionLocal() as session:
+            project = await session.get(Project, project_id)
+            return await _record_and_finalize(
+                {
+                    "projectId": str(project_id),
+                    "projectName": project.name if project else "",
+                    "error": "capacity",
+                }
+            )
 
     try:
         async with hir.SessionLocal() as session:
@@ -356,12 +384,31 @@ async def analyze_project_intelligence(
                     }
                 )
             try:
-                cards = await hir._run_for_project(
-                    session,
-                    context,
-                    project,
-                    hi.ALL_PROMPT_TYPES,
-                    granularity=granularity,
+                cards = await asyncio.wait_for(
+                    hir._run_for_project(
+                        session,
+                        context,
+                        project,
+                        hi.ALL_PROMPT_TYPES,
+                        granularity=granularity,
+                    ),
+                    timeout=settings.home_intelligence_project_analysis_timeout_seconds,
+                )
+            except TimeoutError:
+                # Deliberate self-timeout: record a terminal result so the run
+                # finalizes and the UI clears "Analyzing", rather than letting
+                # arq's job_timeout cancel the job with no result written.
+                logger.warning(
+                    "home-intel project %s exceeded analysis deadline (%ss)",
+                    project_id,
+                    settings.home_intelligence_project_analysis_timeout_seconds,
+                )
+                return await _record_and_finalize(
+                    {
+                        "projectId": str(project_id),
+                        "projectName": project.name,
+                        "error": "analysis timed out",
+                    }
                 )
             except AIUnavailableError as exc:
                 if exc.retryable and job_try < max_tries:
@@ -428,7 +475,10 @@ class WorkerSettings:
         sync_saas_object,
         analyze_project_intelligence,
     ]
-    job_timeout: ClassVar[int] = 600
+    # Must exceed home_intelligence_project_analysis_timeout_seconds: a job
+    # killed by arq writes no result and permanently stalls its run, so the
+    # in-job self-timeout must always fire first.
+    job_timeout: ClassVar[int] = get_settings().home_intelligence_job_timeout_seconds
     # Retry AI-capacity contention generously so a project defers rather than
     # drops; genuine errors are recorded terminally and never reach this.
     max_tries: ClassVar[int] = get_settings().home_intelligence_job_max_tries

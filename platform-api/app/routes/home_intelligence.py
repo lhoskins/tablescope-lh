@@ -50,7 +50,7 @@ router = APIRouter(prefix="/ai", tags=["AI Intelligence"])
 # cuts this short) and the overall wall-clock cap before the stream gives up
 # waiting (the run still finishes server-side and the snapshot is written).
 _STREAM_POLL_SECONDS = 1.0
-_STREAM_DEADLINE_SECONDS = 900.0
+_STREAM_DEADLINE_SECONDS = 1800.0
 
 
 async def _accessible_projects(

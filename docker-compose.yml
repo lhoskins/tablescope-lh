@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
+    environment: &platform_api_env
       ENVIRONMENT: ${ENVIRONMENT:-production}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATABASE_URL: postgresql+asyncpg://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope
@@ -124,13 +124,7 @@ services:
       timeout: 10s
       start_period: 20s
       retries: 3
-    environment:
-      DATABASE_URL: postgresql+asyncpg://tablescope:${POSTGRES_PASSWORD:-tablescope}@db:5432/tablescope
-      REDIS_URL: redis://redis:6379/0
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
-      TEIID_SERVLET_URL: http://teiid:8080
-      TEIID_SERVLET_API_KEY: ${TEIID_API_KEY:-}
-      CUSTOMER_BASE_PATH: /opt/wildfly/teiidfiles/customers
+    environment: *platform_api_env
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       - /opt/tablescope:/opt/tablescope
