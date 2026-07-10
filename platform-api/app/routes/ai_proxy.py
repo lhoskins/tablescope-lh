@@ -714,7 +714,7 @@ async def _ask_data_first(
     except Exception as exc:  # pragma: no cover - defensive
         logger.info("Chat data-first attempt failed, falling back to prose: %s", exc)
         return None
-    if run.get("status") != "success" or not run.get("rows"):
+    if run.get("status") != "success":
         return None
     return {
         "answer": _chat_answer_text(question, run),
@@ -769,6 +769,8 @@ async def ask(
         "history": [],
     }
     response = await _forward_to_ai("/ai/ask", payload)
+    if isinstance(response, dict) and response.get("answer"):
+        response["answer"] = _shield_prose_from_sql(str(response["answer"]))
     _attach_ask_envelope(response)
     return response
 
@@ -2191,8 +2193,33 @@ _ASK_AND_RUN_SURFACE: dict[ChartType, str] = {
 }
 
 
+# Explicit chart request in a chat question, e.g. "as a horizontal bar chart",
+# "show a donut", "line graph of ...". Longest alternatives first so
+# "horizontal bar" wins over "bar". The extracted token is passed to the
+# Universal Visualization Engine as intent_hint (family) and kept verbatim as
+# the requested style (subtype).
+_CHART_REQUEST_RE = re.compile(
+    r"\b(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|column|donut|pie|"
+    r"area|line|scatter|bubble|radar|treemap|funnel|kpi|table)"
+    r"(?:\s+(?:chart|graph|plot))?\b",
+    re.IGNORECASE,
+)
+
+
+def _requested_chart(question: str | None) -> str | None:
+    """Return the normalized chart token the user explicitly asked for."""
+    if not question:
+        return None
+    m = _CHART_REQUEST_RE.search(question)
+    if not m:
+        return None
+    return m.group(1).lower().strip().replace(" ", "_").replace("__", "_")
+
+
 def _suggest_visualization(
-    columns: list[str], rows: list[dict[str, Any]]
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    question: str | None = None,
 ) -> dict[str, Any]:
     """Pick a sensible default chart for a result set (deterministic).
 
@@ -2204,19 +2231,35 @@ def _suggest_visualization(
     if not columns or not rows:
         return {"type": "table"}
 
-    decision = select_visualization(columns, rows)
+    requested = _requested_chart(question)
+    decision = select_visualization(columns, rows, intent_hint=requested)
     surface_type = _ASK_AND_RUN_SURFACE.get(decision.chart_type, "table")
+
+    # The engine's family decision wins (it never emits an unrenderable
+    # shape), but an explicitly requested variant of that family is honored
+    # as the style: "horizontal bar" on a bar, "donut" on a pie.
+    style = decision.chart_style
+    if (
+        requested in ("horizontal_bar", "stacked_bar", "grouped_bar")
+        and surface_type == "bar"
+    ):
+        style = requested
+    elif requested == "donut" and surface_type == "pie":
+        style = "donut"
 
     if surface_type == "table":
         return {"type": "table"}
     if surface_type == "kpi":
         return {"type": "kpi", "metricField": decision.y_field or columns[0]}
     fallback_y = columns[1] if len(columns) > 1 else columns[0]
-    return {
+    viz: dict[str, Any] = {
         "type": surface_type,
         "xField": decision.x_field or columns[0],
         "yField": decision.y_field or fallback_y,
     }
+    if style:
+        viz["style"] = style
+    return viz
 
 
 _LIMIT_RE = re.compile(r"\blimit\s+\d+\s*$", re.IGNORECASE)
@@ -2562,7 +2605,7 @@ async def _ask_and_run_core(
         "sql": sql,
         "columns": columns,
         "rows": rows,
-        "suggestedVisualization": _suggest_visualization(columns, rows),
+        "suggestedVisualization": _suggest_visualization(columns, rows, question),
         "explanation": ai_result.get("explanation", ""),
         "dataSourcesUsed": [used] if used else [],
         "status": "success",
@@ -2739,6 +2782,28 @@ async def _forward_prose_answer(
     return str(result.get("answer") or "").strip()
 
 
+_PROSE_SQL_RE = re.compile(
+    r"```(?:sql)?\s*(?:SELECT|WITH)\b|^\s*(?:SELECT|WITH)\b",
+    re.IGNORECASE,
+)
+
+
+def _shield_prose_from_sql(answer: str) -> str:
+    """Never render raw SQL as a chat answer.
+
+    The prose channel is instructed not to emit SQL, but a model may still do
+    so. A SQL-dominated answer is replaced with a friendly redirect — the
+    data-first path is the only surface that presents SQL (collapsed).
+    """
+    if not _PROSE_SQL_RE.search(answer or ""):
+        return answer
+    return (
+        "I couldn't run this as a data query against the project's tables. "
+        "Try rephrasing with a field or metric from your data (for example "
+        "\"incident count by category\"), and I'll return the chart and table."
+    )
+
+
 @router.post("/actions/ask-and-run")
 async def ai_ask_and_run(
     req: AIAskAndRunRequest,
@@ -2770,8 +2835,10 @@ async def ai_ask_and_run(
         result["answerType"] = "data"
         return result
     if result.get("status") == "generation_error":
-        prose = await _forward_prose_answer(
-            context, project_id=req.project_id, question=req.question
+        prose = _shield_prose_from_sql(
+            await _forward_prose_answer(
+                context, project_id=req.project_id, question=req.question
+            )
         )
         if prose:
             prose_result = {
@@ -2891,7 +2958,7 @@ async def ai_generate_query_preview(
         "sql": sql,
         "columns": columns,
         "rows": rows,
-        "suggestedVisualization": _suggest_visualization(columns, rows),
+        "suggestedVisualization": _suggest_visualization(columns, rows, req.question),
         "dataSourcesUsed": [used] if used else [],
         "explanation": ai_result.get("explanation", ""),
         "status": "success",
@@ -4167,11 +4234,13 @@ async def add_conversation_message(
                 "dataSourcesUsed": run.get("dataSourcesUsed", []),
             }
         else:
-            answer = await _forward_prose_answer(
-                context,
-                project_id=project_id,
-                question=question,
-                history=history,
+            answer = _shield_prose_from_sql(
+                await _forward_prose_answer(
+                    context,
+                    project_id=project_id,
+                    question=question,
+                    history=history,
+                )
             ) or "The AI returned an empty response."
 
     assistant_msg = AiConversationMessage(
