@@ -33,11 +33,30 @@ _BUSY_MAX_RETRY_SECONDS = 30.0
 
 
 class AIUnavailableError(RuntimeError):
-    """The enabled AI service could not complete a request."""
+    """The enabled AI service could not complete a request.
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    ``retryable`` distinguishes transient capacity/contention failures (gate
+    ``503`` busy, timeouts, transport drops) from terminal ones (other HTTP
+    errors, malformed responses). The durable Home-intelligence worker maps a
+    retryable error onto ``arq``'s ``Retry`` — so contention defers a project
+    instead of dropping it — while a terminal error is reported once and not
+    retried. ``retry_after`` carries the server's ``Retry-After`` when present.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retryable: bool | None = None,
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.retry_after = retry_after
+        # Default: only an explicit 503 "busy" is retryable; callers pass
+        # ``retryable=True`` for timeout/transport failures.
+        self.retryable = (status_code == 503) if retryable is None else retryable
 
 
 def _sign_payload(payload: dict[str, Any], secret: str) -> str:
@@ -110,14 +129,18 @@ async def _post(
                     await asyncio.sleep(retry_seconds)
                     continue
                 logger.warning("AI intelligence call to %s timed out: %s", path, exc)
-                raise AIUnavailableError("AI server timed out; retry shortly.") from exc
+                raise AIUnavailableError(
+                    "AI server timed out; retry shortly.", retryable=True
+                ) from exc
             except httpx.TimeoutException as exc:
                 logger.warning("AI intelligence call to %s timed out: %s", path, exc)
-                raise AIUnavailableError("AI server timed out; retry shortly.") from exc
+                raise AIUnavailableError(
+                    "AI server timed out; retry shortly.", retryable=True
+                ) from exc
             except httpx.TransportError as exc:
                 logger.warning("AI intelligence transport failure for %s: %s", path, exc)
                 raise AIUnavailableError(
-                    "AI server is unavailable; retry shortly."
+                    "AI server is unavailable; retry shortly.", retryable=True
                 ) from exc
 
             if resp.status_code == 503 and attempt < attempts:
@@ -141,12 +164,23 @@ async def _post(
                 resp.raise_for_status()
             except httpx.HTTPStatusError as exc:
                 status_code = exc.response.status_code
+                retry_after: float | None = None
                 if status_code == 503:
                     message = "AI server is busy; retry shortly."
+                    raw = exc.response.headers.get("Retry-After")
+                    if raw:
+                        try:
+                            retry_after = min(
+                                max(float(raw), 0.0), _BUSY_MAX_RETRY_SECONDS
+                            )
+                        except ValueError:
+                            retry_after = None
                 else:
                     message = f"AI server request failed with HTTP {status_code}."
                 logger.warning("AI intelligence HTTP failure for %s: %s", path, exc)
-                raise AIUnavailableError(message, status_code=status_code) from exc
+                raise AIUnavailableError(
+                    message, status_code=status_code, retry_after=retry_after
+                ) from exc
             break
 
     try:

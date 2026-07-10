@@ -8,3 +8,4 @@ mypy==1.13.0
 types-requests==2.32.0.20241016
 asgi-lifespan==2.1.0
 aiosqlite==0.20.0
+fakeredis==2.30.1

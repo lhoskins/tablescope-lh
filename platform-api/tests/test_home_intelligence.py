@@ -1303,8 +1303,45 @@ async def test_project_dashboard_repairs_failing_widget_sql(
     assert widgets[0]["sql"] == good_sql
 
 
+# ───────────────────────── durable per-tenant queue ─────────────────────────
+#
+# The Home feed no longer analyses projects inline on the SSE request. It
+# registers a run in Redis, enqueues one arq job per project, and streams
+# whatever the workers write to the per-run store. These tests drive the real
+# worker (``analyze_project_intelligence``) and coordination module against an
+# in-memory (fake) Redis, so they cover the durable path end-to-end without a
+# live broker.
+
+
+@pytest.fixture
+def fake_redis(monkeypatch):
+    """Back ``home_intel_queue`` with an in-memory Redis for the test."""
+    import fakeredis.aioredis as fake_aioredis
+
+    from app.services import home_intel_queue as q
+
+    client = fake_aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(q, "_redis", client)
+    monkeypatch.setattr(q, "get_redis", lambda: client)
+    return client
+
+
+async def _run_worker(monkeypatch, hir, *, job_try=1, **kwargs):
+    """Invoke the real worker job once, returning its result or the raised Retry."""
+    from arq.worker import Retry
+
+    from app.tasks import workflows
+
+    try:
+        return await workflows.analyze_project_intelligence(
+            {"job_try": job_try}, **kwargs
+        )
+    except Retry as retry:
+        return retry
+
+
 async def test_stream_reports_ai_failure_and_persists_successful_projects(
-    client, service_headers, db_engine, monkeypatch
+    client, service_headers, db_engine, monkeypatch, fake_redis
 ) -> None:
     _, _, headers = await _setup(client, service_headers)
     project_ids: list[int] = []
@@ -1328,7 +1365,8 @@ async def test_stream_reports_ai_failure_and_persists_successful_projects(
 
     async def fake_run(_session, _context, project, _prompt_types, **_kwargs):
         if project.id == busy_id:
-            raise AIUnavailableError("AI server is busy; retry shortly.")
+            # Terminal (non-retryable) AI failure → surfaces as project_error.
+            raise AIUnavailableError("AI server rejected the request.")
         return [{"summary": "Grounded finding"}]
 
     async def fake_save(
@@ -1338,9 +1376,19 @@ async def test_stream_reports_ai_failure_and_persists_successful_projects(
         saved["payload"] = payload
         saved["failed_project_count"] = failed_project_count
 
+    async def fake_access(_session, _context, _project):
+        return True
+
+    # The SSE route enqueues to arq; run the worker inline against fake Redis.
+    async def fake_enqueue(**kwargs):
+        await _run_worker(monkeypatch, hir, **kwargs)
+        return ""
+
     monkeypatch.setattr(hir, "SessionLocal", session_factory)
     monkeypatch.setattr(hir, "_run_for_project", fake_run)
+    monkeypatch.setattr(hir, "_has_access", fake_access)
     monkeypatch.setattr(hir, "_save_snapshot", fake_save)
+    monkeypatch.setattr(hir, "enqueue_analyze_project_intelligence", fake_enqueue)
 
     response = await client.get(
         "/api/ai/home-intelligence/stream?cross_project=false",
@@ -1359,7 +1407,6 @@ async def test_stream_reports_ai_failure_and_persists_successful_projects(
     assert len(errors) == 1
     assert errors[0]["projectId"] == str(busy_id)
     assert errors[0]["projectName"] == "Busy Project"
-    assert "busy" in errors[0]["error"]
     assert saved["failed_project_count"] == 1
 
     payload = saved["payload"]
@@ -1371,9 +1418,239 @@ async def test_stream_reports_ai_failure_and_persists_successful_projects(
     }
 
 
-async def test_failed_refresh_preserves_larger_snapshot(
+async def test_worker_retries_busy_then_succeeds(
+    client, service_headers, db_engine, monkeypatch, fake_redis
+) -> None:
+    """A project whose AI gate is busy defers (Retry) and is never dropped."""
+    _, _, headers = await _setup(client, service_headers)
+    response = await client.post(
+        "/api/projects",
+        json={"name": "Flaky Project", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    project_id = response.json()["id"]
+
+    from arq.worker import Retry
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.routes.home_intelligence as hir
+    from app.services import home_intel_queue as q
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    attempts = {"n": 0}
+
+    async def fake_run(_session, _context, _project, _prompt_types, **_kwargs):
+        attempts["n"] += 1
+        if attempts["n"] <= 3:
+            raise AIUnavailableError(
+                "AI server is busy; retry shortly.",
+                status_code=503,
+                retry_after=0.01,
+            )
+        return [{"summary": "Grounded finding"}]
+
+    async def fake_access(_session, _context, _project):
+        return True
+
+    monkeypatch.setattr(hir, "SessionLocal", session_factory)
+    monkeypatch.setattr(hir, "_run_for_project", fake_run)
+    monkeypatch.setattr(hir, "_has_access", fake_access)
+
+    run_id = "run-busy"
+    await q.create_run(
+        run_id=run_id,
+        tenant_id=1,
+        user_id=1,
+        granularity=3,
+        cross_project=False,
+        projects=[{"id": str(project_id), "name": "Flaky Project", "color": "#fff"}],
+    )
+
+    kwargs = dict(
+        tenant_id=1,
+        user_id=1,
+        project_id=project_id,
+        granularity=3,
+        run_id=run_id,
+    )
+    # First three attempts defer (retryable busy) — the tenant slot is released
+    # each time so a retry can re-acquire it.
+    for job_try in (1, 2, 3):
+        outcome = await _run_worker(monkeypatch, hir, job_try=job_try, **kwargs)
+        assert isinstance(outcome, Retry)
+        assert await q.acquire_tenant_slot(1, cap=2) is True
+        await q.release_tenant_slot(1)
+
+    outcome = await _run_worker(monkeypatch, hir, job_try=4, **kwargs)
+    assert not isinstance(outcome, Retry)
+    results = await q.get_results(run_id)
+    assert results[str(project_id)]["insights"] == [{"summary": "Grounded finding"}]
+    assert "error" not in results[str(project_id)]
+
+
+async def test_worker_terminal_error_not_retried(
+    client, service_headers, db_engine, monkeypatch, fake_redis
+) -> None:
+    """A genuinely broken project reports a terminal error and is not retried."""
+    _, _, headers = await _setup(client, service_headers)
+    response = await client.post(
+        "/api/projects",
+        json={"name": "Broken Project", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    project_id = response.json()["id"]
+
+    from arq.worker import Retry
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.routes.home_intelligence as hir
+    from app.services import home_intel_queue as q
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    async def fake_run(_session, _context, _project, _prompt_types, **_kwargs):
+        raise RuntimeError("no vector store for project")
+
+    async def fake_access(_session, _context, _project):
+        return True
+
+    monkeypatch.setattr(hir, "SessionLocal", session_factory)
+    monkeypatch.setattr(hir, "_run_for_project", fake_run)
+    monkeypatch.setattr(hir, "_has_access", fake_access)
+
+    run_id = "run-broken"
+    await q.create_run(
+        run_id=run_id,
+        tenant_id=1,
+        user_id=1,
+        granularity=3,
+        cross_project=False,
+        projects=[{"id": str(project_id), "name": "Broken", "color": "#fff"}],
+    )
+    outcome = await _run_worker(
+        monkeypatch,
+        hir,
+        job_try=1,
+        tenant_id=1,
+        user_id=1,
+        project_id=project_id,
+        granularity=3,
+        run_id=run_id,
+    )
+    assert not isinstance(outcome, Retry)
+    results = await q.get_results(run_id)
+    assert "error" in results[str(project_id)]
+    assert "insights" not in results[str(project_id)]
+
+
+async def test_two_tenants_are_not_starved(fake_redis) -> None:
+    """Per-tenant tokens are isolated: one busy tenant cannot starve another."""
+    from app.services import home_intel_queue as q
+
+    cap = 2
+    # Tenant 1 fills its cap.
+    assert await q.acquire_tenant_slot(1, cap=cap) is True
+    assert await q.acquire_tenant_slot(1, cap=cap) is True
+    # Tenant 1 is now at cap — further work defers.
+    assert await q.acquire_tenant_slot(1, cap=cap) is False
+    # Tenant 2 is unaffected and makes progress immediately.
+    assert await q.acquire_tenant_slot(2, cap=cap) is True
+    assert await q.acquire_tenant_slot(2, cap=cap) is True
+    assert await q.acquire_tenant_slot(2, cap=cap) is False
+    # Releasing a tenant-1 slot lets tenant 1 proceed again.
+    await q.release_tenant_slot(1)
+    assert await q.acquire_tenant_slot(1, cap=cap) is True
+
+
+async def test_dropped_sse_still_persists_snapshot(
+    client, service_headers, db_engine, monkeypatch, fake_redis
+) -> None:
+    """The run finishes server-side and the snapshot is written even if no SSE
+    consumer is ever attached (the client dropped)."""
+    _, _, headers = await _setup(client, service_headers)
+    project_ids: list[int] = []
+    for name in ("Alpha", "Beta"):
+        response = await client.post(
+            "/api/projects",
+            json={"name": name, "description": "x", "is_shared": False},
+            headers=headers,
+        )
+        assert response.status_code == 201
+        project_ids.append(response.json()["id"])
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.routes.home_intelligence as hir
+    from app.services import home_intel_queue as q
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    saved: dict[str, object] = {}
+
+    async def fake_run(_session, _context, _project, _prompt_types, **_kwargs):
+        return [{"summary": "Grounded finding"}]
+
+    async def fake_access(_session, _context, _project):
+        return True
+
+    async def fake_save(_context, granularity, payload, *, failed_project_count=0):
+        saved["payload"] = payload
+        saved["failed_project_count"] = failed_project_count
+
+    monkeypatch.setattr(hir, "SessionLocal", session_factory)
+    monkeypatch.setattr(hir, "_run_for_project", fake_run)
+    monkeypatch.setattr(hir, "_has_access", fake_access)
+    monkeypatch.setattr(hir, "_save_snapshot", fake_save)
+
+    run_id = "run-dropped"
+    projects = [
+        {"id": str(pid), "name": name, "color": "#fff"}
+        for pid, name in zip(project_ids, ("Alpha", "Beta"), strict=True)
+    ]
+    await q.create_run(
+        run_id=run_id,
+        tenant_id=1,
+        user_id=1,
+        granularity=3,
+        cross_project=False,
+        projects=projects,
+    )
+    # No SSE consumer subscribes; workers drain every project regardless.
+    for pid in project_ids:
+        await _run_worker(
+            monkeypatch,
+            hir,
+            job_try=1,
+            tenant_id=1,
+            user_id=1,
+            project_id=pid,
+            granularity=3,
+            run_id=run_id,
+        )
+
+    # The last worker to finish finalized the run and persisted the snapshot.
+    assert await q.is_complete(run_id) is True
+    stored, _ = await q.get_synthesis(run_id)
+    assert stored is True
+    payload = saved["payload"]
+    assert isinstance(payload, dict)
+    assert {r["projectId"] for r in payload["results"]} == {
+        str(pid) for pid in project_ids
+    }
+
+
+async def test_failed_refresh_merges_and_preserves_prior_entries(
     client, service_headers, db_engine, monkeypatch
 ) -> None:
+    """A partial refresh must not wipe a good prior result.
+
+    The finalizer passes only the run's *successful* project results to
+    ``_save_snapshot``; a project that errored this run is simply absent. The
+    merge must update the projects that refreshed and keep the previous entry
+    for the one that errored — never blank it.
+    """
     tenant, user, _headers = await _setup(client, service_headers)
 
     from sqlalchemy import select
@@ -1384,7 +1661,7 @@ async def test_failed_refresh_preserves_larger_snapshot(
 
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
     prior_payload = {
-        "projects": [],
+        "projects": [{"id": "1"}, {"id": "2"}],
         "results": [
             {"projectId": "1", "insights": [{"title": "Prior 1"}]},
             {"projectId": "2", "insights": [{"title": "Prior 2"}]},
@@ -1404,12 +1681,13 @@ async def test_failed_refresh_preserves_larger_snapshot(
 
     monkeypatch.setattr(hir, "SessionLocal", session_factory)
     context = SimpleNamespace(tenant_id=tenant["id"], user_id=user["id"])
+    # Project 1 refreshed this run; project 2 errored (absent from results).
     await hir._save_snapshot(
         context,
         5,
         {
-            "projects": [],
-            "results": [{"projectId": "1", "insights": []}],
+            "projects": [{"id": "1"}, {"id": "2"}],
+            "results": [{"projectId": "1", "insights": [{"title": "New 1"}]}],
             "synthesis": None,
         },
         failed_project_count=1,
@@ -1423,5 +1701,8 @@ async def test_failed_refresh_preserves_larger_snapshot(
         )
 
     assert snapshot is not None
-    assert snapshot.granularity == 3
-    assert snapshot.payload == prior_payload
+    assert snapshot.granularity == 5
+    by_id = {r["projectId"]: r for r in snapshot.payload["results"]}
+    # Project 1's fresh result won; project 2's prior entry was preserved.
+    assert by_id["1"]["insights"] == [{"title": "New 1"}]
+    assert by_id["2"]["insights"] == [{"title": "Prior 2"}]

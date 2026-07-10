@@ -97,6 +97,25 @@ class Settings(BaseSettings):
     home_intelligence_plan_retry_base_seconds: float = 2.0
     # Max concurrent repair/interpret calls spawned by one project analysis.
     home_intelligence_max_concurrent_ai_calls_per_project: int = 2
+    # --- Durable per-tenant Home-intelligence queue (arq + Redis) ---
+    # Per-tenant fairness cap: at most this many of a tenant's projects run
+    # their heavy AI pipeline at once across all workers (Redis-backed, so it
+    # is authoritative even when the worker is scaled horizontally). Kept small
+    # so (tenant slots) x (a project's interpret/fix_sql fan-out) stays under
+    # the AI gate's real capacity — the gate remains the hard global ceiling.
+    home_intelligence_max_concurrent_projects_per_tenant: int = 2
+    # TTL for a run's per-run result store (expected set, results hash, run
+    # metadata, pub/sub bookkeeping). Long enough for a slow run to drain.
+    home_intelligence_run_result_ttl_seconds: int = 3600
+    # arq max_tries for analyze_project_intelligence — high so AI-capacity
+    # contention is retried generously rather than dropping a project.
+    home_intelligence_job_max_tries: int = 20
+    # Backoff (seconds) when a project defers because its tenant is at the
+    # concurrency cap; kept short so freed slots are picked up quickly.
+    home_intelligence_tenant_slot_retry_seconds: float = 2.0
+    # Fallback backoff (seconds) when the AI gate signals busy without an
+    # explicit Retry-After; the client's Retry-After is honored when present.
+    home_intelligence_busy_retry_seconds: float = 5.0
 
     # --- Supabase authentication ---
     # Single environment-configured auth provider (NOT one project per tenant).

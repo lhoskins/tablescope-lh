@@ -17,10 +17,12 @@ direct access to the Teiid admin API.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 from arq import create_pool
 from arq.connections import RedisSettings
+from arq.worker import Retry
 from sqlalchemy import select
 
 from app.config import get_settings
@@ -196,9 +198,237 @@ async def index_for_search(
     return {"status": "ok", "tenant_id": tenant_id, "vdb_id": vdb_id, "path": path}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Home / Business Insight — durable per-project analysis
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def enqueue_analyze_project_intelligence(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    granularity: int,
+    run_id: str,
+) -> str:
+    """Enqueue one project's Home-intelligence analysis; return the job id."""
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "analyze_project_intelligence",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            project_id=project_id,
+            granularity=granularity,
+            run_id=run_id,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+def _worker_context(tenant_id: int, user_id: int):
+    """A minimal authenticated context for worker-side project analysis."""
+    from app.auth.context import RequestContext
+    from app.auth.jwt import TokenClaims
+
+    return RequestContext(
+        claims=TokenClaims(
+            sub=str(user_id),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            role="admin",
+        )
+    )
+
+
+async def _finalize_run_if_complete(run_id: str) -> None:
+    """When every project has reported, run synthesis + persist the snapshot.
+
+    Exactly-once across workers via a Redis set-once marker, so the snapshot is
+    written even if the client's SSE connection dropped — coverage is bounded
+    by drain time, not by the stream staying open.
+    """
+    from app.routes import home_intelligence as hir
+    from app.services import home_intel_queue as q
+    from app.services import home_intelligence as hi
+
+    if not await q.is_complete(run_id):
+        return
+    if not await q.try_claim_finalize(run_id):
+        return  # another worker is finalizing this run
+
+    meta = await q.get_meta(run_id)
+    if meta is None:  # pragma: no cover - run metadata expired
+        return
+    results = await q.get_results(run_id)
+
+    successful = [r for r in results.values() if "insights" in r]
+    failed = [r for r in results.values() if "insights" not in r]
+    summaries = [
+        {
+            "projectId": r["projectId"],
+            "projectName": r.get("projectName", ""),
+            "insightSummaries": [
+                c.get("summary", "") for c in r.get("insights", [])
+            ],
+        }
+        for r in successful
+    ]
+    synthesis = (
+        hi.synthesise_cross_project(summaries) if meta["cross_project"] else None
+    )
+
+    context = _worker_context(meta["tenant_id"], meta["user_id"])
+    payload = {
+        "projects": meta["projects"],
+        "results": successful,
+        "synthesis": synthesis,
+        "generatedAt": datetime.now(UTC).isoformat(),
+    }
+    try:
+        await hir._save_snapshot(
+            context,
+            meta["granularity"],
+            payload,
+            failed_project_count=len(failed),
+        )
+    except Exception as exc:  # pragma: no cover - snapshot best-effort
+        logger.warning("home-intel snapshot persist failed for run %s: %s", run_id, exc)
+
+    # Publish the synthesis last: it is the SSE consumer's completion signal.
+    await q.store_synthesis(run_id, synthesis)
+
+
+async def analyze_project_intelligence(
+    ctx: dict[str, Any],
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    granularity: int,
+    run_id: str,
+) -> dict[str, Any]:
+    """Analyse one project for a Home-intelligence run (durable, retryable).
+
+    Runs the exact same ``_run_for_project`` call the reliable single-project
+    path uses. AI-capacity contention (gate 503 / timeout) is mapped onto arq's
+    ``Retry`` so the project is deferred and re-enqueued rather than dropped;
+    genuine errors write a terminal ``project_error`` result and are not
+    retried. A per-tenant token bounds how many of one tenant's projects run at
+    once so a busy tenant cannot starve others.
+    """
+    from app.models.project import Project
+    from app.routes import home_intelligence as hir
+    from app.services import home_intel_queue as q
+    from app.services import home_intelligence as hi
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    settings = get_settings()
+    cap = max(1, settings.home_intelligence_max_concurrent_projects_per_tenant)
+    job_try = int(ctx.get("job_try", 1) or 1)
+    max_tries = max(1, settings.home_intelligence_job_max_tries)
+
+    async def _record_and_finalize(result: dict[str, Any]) -> dict[str, Any]:
+        await q.write_result(run_id, project_id, result)
+        await _finalize_run_if_complete(run_id)
+        return result
+
+    # Per-tenant fairness: if the tenant is at its cap, defer so another
+    # tenant's work can proceed (round-robin-ish). Never terminal.
+    if not await q.acquire_tenant_slot(tenant_id, cap=cap):
+        raise Retry(defer=settings.home_intelligence_tenant_slot_retry_seconds)
+
+    try:
+        async with hir.SessionLocal() as session:
+            project = await session.get(Project, project_id)
+            context = _worker_context(tenant_id, user_id)
+            if (
+                project is None
+                or project.tenant_id != tenant_id
+                or not await hir._has_access(session, context, project)
+            ):
+                # Terminal: no access / gone. Report once, do not retry.
+                return await _record_and_finalize(
+                    {
+                        "projectId": str(project_id),
+                        "projectName": project.name if project else "",
+                        "error": "no_access",
+                    }
+                )
+            try:
+                cards = await hir._run_for_project(
+                    session,
+                    context,
+                    project,
+                    hi.ALL_PROMPT_TYPES,
+                    granularity=granularity,
+                )
+            except AIUnavailableError as exc:
+                if exc.retryable and job_try < max_tries:
+                    defer = (
+                        exc.retry_after
+                        if exc.retry_after is not None
+                        else settings.home_intelligence_busy_retry_seconds
+                    )
+                    raise Retry(defer=defer) from exc
+                if exc.retryable:
+                    # Retries exhausted — record terminal so the run can
+                    # complete instead of hanging forever.
+                    logger.warning(
+                        "home-intel project %s exhausted retries: %s",
+                        project_id,
+                        exc,
+                    )
+                    return await _record_and_finalize(
+                        {
+                            "projectId": str(project_id),
+                            "projectName": project.name,
+                            "error": str(exc),
+                        }
+                    )
+                # Non-retryable AI failure — terminal.
+                return await _record_and_finalize(
+                    {
+                        "projectId": str(project_id),
+                        "projectName": project.name,
+                        "error": str(exc),
+                    }
+                )
+            except Exception as exc:
+                logger.warning(
+                    "home-intel project %s failed terminally: %s", project_id, exc
+                )
+                return await _record_and_finalize(
+                    {
+                        "projectId": str(project_id),
+                        "projectName": project.name,
+                        "error": str(exc),
+                    }
+                )
+
+            return await _record_and_finalize(
+                {
+                    "projectId": str(project.id),
+                    "projectName": project.name,
+                    "projectColor": hi.project_color(project.id),
+                    "insights": cards,
+                }
+            )
+    finally:
+        await q.release_tenant_slot(tenant_id)
+
+
 class WorkerSettings:
     """arq worker entrypoint."""
 
     redis_settings: ClassVar[RedisSettings] = _redis_settings()
-    functions: ClassVar[list] = [process_upload, index_for_search, sync_saas_object]
+    functions: ClassVar[list] = [
+        process_upload,
+        index_for_search,
+        sync_saas_object,
+        analyze_project_intelligence,
+    ]
     job_timeout: ClassVar[int] = 600
+    # Retry AI-capacity contention generously so a project defers rather than
+    # drops; genuine errors are recorded terminally and never reach this.
+    max_tries: ClassVar[int] = get_settings().home_intelligence_job_max_tries
