@@ -191,11 +191,10 @@ export function TanStackDataGrid({
   // Live-refresh the scope indicators when scopes change elsewhere (created,
   // toggled or deleted on the Scopes page / builder) without a page reload.
   useEffect(() => {
-    if (!scopeEnabled) return;
     const handler = () => loadScopes(currentQueryId);
     window.addEventListener(SCOPES_CHANGED_EVENT, handler);
     return () => window.removeEventListener(SCOPES_CHANGED_EVENT, handler);
-  }, [currentQueryId, loadScopes, scopeEnabled]);
+  }, [currentQueryId, loadScopes]);
 
   const scopesByField = useMemo(() => {
     const m: Record<string, QueryScope> = {};
