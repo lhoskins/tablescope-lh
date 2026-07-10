@@ -96,7 +96,10 @@ class Settings(BaseSettings):
     home_intelligence_plan_max_retries: int = 2
     home_intelligence_plan_retry_base_seconds: float = 2.0
     # Max concurrent repair/interpret calls spawned by one project analysis.
-    home_intelligence_max_concurrent_ai_calls_per_project: int = 2
+    # Kept at 1 so (tenant slots) x (this fan-out) stays under the AI gate's
+    # real per-tenant capacity; a higher value oversubscribes the gate and
+    # turns every project into a stream of retryable 503s.
+    home_intelligence_max_concurrent_ai_calls_per_project: int = 1
     # --- Durable per-tenant Home-intelligence queue (arq + Redis) ---
     # Per-tenant fairness cap: at most this many of a tenant's projects run
     # their heavy AI pipeline at once across all workers (Redis-backed, so it
@@ -108,8 +111,11 @@ class Settings(BaseSettings):
     # metadata, pub/sub bookkeeping). Long enough for a slow run to drain.
     home_intelligence_run_result_ttl_seconds: int = 3600
     # arq max_tries for analyze_project_intelligence — high so AI-capacity
-    # contention is retried generously rather than dropping a project.
-    home_intelligence_job_max_tries: int = 20
+    # contention AND per-tenant slot waiting are retried generously rather
+    # than dropping a project. Because every slot deferral consumes one try,
+    # this must comfortably exceed (projects / cap) x (run duration / slot
+    # backoff) or late-queued projects get abandoned before their turn.
+    home_intelligence_job_max_tries: int = 200
     # Backoff (seconds) when a project defers because its tenant is at the
     # concurrency cap; kept short so freed slots are picked up quickly.
     home_intelligence_tenant_slot_retry_seconds: float = 2.0

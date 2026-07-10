@@ -334,9 +334,26 @@ async def analyze_project_intelligence(
         return result
 
     # Per-tenant fairness: if the tenant is at its cap, defer so another
-    # tenant's work can proceed (round-robin-ish). Never terminal.
+    # tenant's work can proceed (round-robin-ish). This is retried until the
+    # tenant frees a slot; only if the (generous) try budget is exhausted do we
+    # write a terminal result so the run can still finalize instead of hanging.
     if not await q.acquire_tenant_slot(tenant_id, cap=cap):
-        raise Retry(defer=settings.home_intelligence_tenant_slot_retry_seconds)
+        if job_try < max_tries:
+            raise Retry(defer=settings.home_intelligence_tenant_slot_retry_seconds)
+        logger.warning(
+            "home-intel project %s never acquired a tenant slot within %s tries",
+            project_id,
+            max_tries,
+        )
+        async with hir.SessionLocal() as session:
+            project = await session.get(Project, project_id)
+            return await _record_and_finalize(
+                {
+                    "projectId": str(project_id),
+                    "projectName": project.name if project else "",
+                    "error": "capacity",
+                }
+            )
 
     try:
         async with hir.SessionLocal() as session:
