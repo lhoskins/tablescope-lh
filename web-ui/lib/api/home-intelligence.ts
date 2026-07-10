@@ -123,7 +123,12 @@ export interface StreamProject {
 export type IntelligenceEvent =
   | { type: "start"; projects: StreamProject[] }
   | ({ type: "project_complete" } & ProjectResult)
-  | { type: "project_error"; error: string }
+  | {
+      type: "project_error";
+      error: string;
+      projectId?: string;
+      projectName?: string;
+    }
   | { type: "synthesis_complete"; synthesis: CrossProjectSynthesis }
   | { type: "done"; projectCount: number };
 

@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     # Bounds AI/Ollama load so a large project count doesn't flood the server
     # and silently time out into empty "0 insights" results.
     home_intelligence_max_concurrent_projects: int = 3
+    # Max concurrent repair/interpret calls spawned by one project analysis.
+    home_intelligence_max_concurrent_ai_calls_per_project: int = 2
 
     # --- Supabase authentication ---
     # Single environment-configured auth provider (NOT one project per tenant).

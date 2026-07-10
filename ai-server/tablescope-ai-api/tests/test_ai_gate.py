@@ -77,6 +77,34 @@ def test_gate_enforces_global_cap_across_tenants() -> None:
     asyncio.run(run())
 
 
+def test_eleven_same_tenant_requests_drain_with_tuned_limits() -> None:
+    async def run() -> None:
+        gate = AIGate(
+            global_limit=4,
+            tenant_limit=3,
+            acquire_timeout_seconds=1.0,
+        )
+        active = 0
+        max_active = 0
+        completed: list[int] = []
+
+        async def worker(index: int) -> None:
+            nonlocal active, max_active
+            async with gate.acquire(1):
+                active += 1
+                max_active = max(max_active, active)
+                await asyncio.sleep(0.01)
+                completed.append(index)
+                active -= 1
+
+        await asyncio.gather(*(worker(index) for index in range(11)))
+
+        assert len(completed) == 11
+        assert max_active == 3
+
+    asyncio.run(run())
+
+
 def test_gate_timeout_maps_to_http_503() -> None:
     async def run() -> None:
         from app.main import ai_gate_busy_handler

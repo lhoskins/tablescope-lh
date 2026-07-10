@@ -12,6 +12,7 @@ streaming callers can report an honest error instead of a misleading empty resul
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -26,6 +27,9 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(300.0, connect=10.0)
+_BUSY_MAX_ATTEMPTS = 3
+_BUSY_DEFAULT_RETRY_SECONDS = 5.0
+_BUSY_MAX_RETRY_SECONDS = 30.0
 
 
 class AIUnavailableError(RuntimeError):
@@ -46,32 +50,65 @@ def is_enabled() -> bool:
     return bool(settings.tablescope_ai_enabled and settings.tablescope_ai_api_url)
 
 
+def _busy_retry_seconds(response: httpx.Response) -> float:
+    raw = response.headers.get("Retry-After")
+    if raw:
+        try:
+            return min(max(float(raw), 0.0), _BUSY_MAX_RETRY_SECONDS)
+        except ValueError:
+            pass
+    return _BUSY_DEFAULT_RETRY_SECONDS
+
+
 async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
     settings = get_settings()
     if not is_enabled():
         return None
-    payload = dict(payload)
-    payload["timestamp"] = time.time()
-    payload["signature"] = _sign_payload(payload, settings.tablescope_ai_signing_secret)
+    base_payload = dict(payload)
     url = f"{settings.tablescope_ai_api_url}{path}"
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-    except httpx.TimeoutException as exc:
-        logger.warning("AI intelligence call to %s timed out: %s", path, exc)
-        raise AIUnavailableError("AI server timed out; retry shortly.") from exc
-    except httpx.TransportError as exc:
-        logger.warning("AI intelligence transport failure for %s: %s", path, exc)
-        raise AIUnavailableError("AI server is unavailable; retry shortly.") from exc
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code
-        if status_code == 503:
-            message = "AI server is busy; retry shortly."
-        else:
-            message = f"AI server request failed with HTTP {status_code}."
-        logger.warning("AI intelligence HTTP failure for %s: %s", path, exc)
-        raise AIUnavailableError(message, status_code=status_code) from exc
+
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        for attempt in range(1, _BUSY_MAX_ATTEMPTS + 1):
+            signed_payload = dict(base_payload)
+            signed_payload["timestamp"] = time.time()
+            signed_payload["signature"] = _sign_payload(
+                signed_payload, settings.tablescope_ai_signing_secret
+            )
+            try:
+                resp = await client.post(url, json=signed_payload)
+            except httpx.TimeoutException as exc:
+                logger.warning("AI intelligence call to %s timed out: %s", path, exc)
+                raise AIUnavailableError("AI server timed out; retry shortly.") from exc
+            except httpx.TransportError as exc:
+                logger.warning("AI intelligence transport failure for %s: %s", path, exc)
+                raise AIUnavailableError(
+                    "AI server is unavailable; retry shortly."
+                ) from exc
+
+            if resp.status_code == 503 and attempt < _BUSY_MAX_ATTEMPTS:
+                retry_seconds = _busy_retry_seconds(resp)
+                logger.warning(
+                    "AI intelligence server busy for %s; retrying in %.1fs "
+                    "(attempt %s/%s)",
+                    path,
+                    retry_seconds,
+                    attempt,
+                    _BUSY_MAX_ATTEMPTS,
+                )
+                await asyncio.sleep(retry_seconds)
+                continue
+
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                if status_code == 503:
+                    message = "AI server is busy; retry shortly."
+                else:
+                    message = f"AI server request failed with HTTP {status_code}."
+                logger.warning("AI intelligence HTTP failure for %s: %s", path, exc)
+                raise AIUnavailableError(message, status_code=status_code) from exc
+            break
 
     try:
         data = resp.json()
