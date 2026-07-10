@@ -28,8 +28,6 @@ import {
   type ProjectAsset,
 } from "@/lib/ui/use-project-data";
 
-type ProjectScoping = { scoping_enabled?: boolean };
-
 type QueryResult = {
   columns: string[];
   rows: Record<string, unknown>[];
@@ -87,10 +85,6 @@ export function QueryResultView({
   });
 
   const { data: allQueries } = useProjectQueries(projectId);
-  const { data: scoping } = useQuery<ProjectScoping>({
-    queryKey: ["project", projectId, "info"],
-    queryFn: () => apiClient.get<ProjectScoping>(`/api/projects/${projectId}`),
-  });
   const availableQueries = (allQueries ?? []).map((q) => ({
     id: q.id,
     name: q.name,
@@ -136,7 +130,6 @@ export function QueryResultView({
             projectId={Number(projectId)}
             availableQueries={availableQueries}
             canEditScopes
-            scopeEnabled={scoping?.scoping_enabled ?? false}
           />
         )}
       </Card>

@@ -13,8 +13,8 @@ export const SCOPES_CHANGED_EVENT = "tablescope:scopes-changed";
 /**
  * Returns a callback that live-refreshes every view affected by a scope change
  * without reloading the page. It invalidates the project-scoped React Query
- * caches (queries list drives the scope icon, project info drives
- * scoping_enabled, etc.) and broadcasts a DOM event for non-RQ listeners.
+ * caches (the query-scopes list is the single source of truth for which
+ * columns are drillable) and broadcasts a DOM event for non-RQ listeners.
  */
 export function useNotifyScopesChanged() {
   const queryClient = useQueryClient();
