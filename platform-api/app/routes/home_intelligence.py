@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -26,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
-from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models.audit_event import AuditEvent
 from app.models.dashboard import Dashboard
@@ -35,14 +35,26 @@ from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
+from app.services import home_intel_queue as q
 from app.services import home_intelligence as hi
 from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.presentation_engine import PresentationMode
 from app.services.response_envelope import attach_envelope
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
+from app.tasks.workflows import enqueue_analyze_project_intelligence
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI Intelligence"])
+
+# SSE consumer loop: how long to wait between store polls (a pub/sub wakeup
+# cuts this short) and the overall wall-clock cap before the stream gives up
+# waiting (the run still finishes server-side and the snapshot is written).
+_STREAM_POLL_SECONDS = 1.0
+# A full multi-project run at cap 2 can legitimately take longer than 15
+# minutes; keep the live stream open for the common case. If the stream
+# still times out, the run continues server-side and the merged snapshot is
+# written by the worker — the next page load hydrates the full result set.
+_STREAM_DEADLINE_SECONDS = 1800.0
 
 
 async def _accessible_projects(
@@ -233,113 +245,67 @@ async def home_intelligence_stream(
             yield _sse({"type": "done", "projectCount": 0})
             return
 
-        yield _sse(
-            {
-                "type": "start",
-                "projects": [
-                    {
-                        "id": str(p.id),
-                        "name": p.name,
-                        "color": hi.project_color(p.id),
-                    }
-                    for p in projects
-                ],
-            }
-        )
+        project_meta = [
+            {"id": str(p.id), "name": p.name, "color": hi.project_color(p.id)}
+            for p in projects
+        ]
+        yield _sse({"type": "start", "projects": project_meta})
 
-        summaries: list[dict[str, Any]] = []
-        project_results: list[dict[str, Any]] = []
-        failed_projects: list[dict[str, Any]] = []
-        synthesis: dict[str, Any] | None = None
-
-        # Bound how many projects run their heavy AI pipeline at once so a
-        # large project count doesn't flood the AI/Ollama server (which causes
-        # silent timeouts → empty "0 insights"). The semaphore must be created
-        # inside the running event loop / request scope, not at import time.
-        max_concurrent = max(
-            1, get_settings().home_intelligence_max_concurrent_projects
+        # Move per-project analysis off the request path into the durable
+        # Redis + arq queue: register the run, enqueue one job per project,
+        # then stream results as workers write them to the per-run store. The
+        # workers own synthesis + snapshot persistence, so the run completes
+        # (and the snapshot is written) even if this SSE connection drops.
+        run_id = uuid.uuid4().hex
+        await q.create_run(
+            run_id=run_id,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            granularity=granularity,
+            cross_project=cross_project,
+            projects=project_meta,
         )
-        sem = asyncio.Semaphore(max_concurrent)
-        max_concurrent_plans = max(
-            1, get_settings().home_intelligence_max_concurrent_plan_calls
-        )
-        plan_sem = asyncio.Semaphore(max_concurrent_plans)
+        for p in projects:
+            await enqueue_analyze_project_intelligence(
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=p.id,
+                granularity=granularity,
+                run_id=run_id,
+            )
 
-        async def work(project: Project) -> dict[str, Any]:
-            try:
-                async with sem:
-                    async with SessionLocal() as session:
-                        cards = await _run_for_project(
-                            session,
-                            context,
-                            project,
-                            hi.ALL_PROMPT_TYPES,
-                            granularity=granularity,
-                            plan_semaphore=plan_sem,
+        emitted: set[str] = set()
+        deadline = asyncio.get_event_loop().time() + _STREAM_DEADLINE_SECONDS
+        async with q.subscribe(run_id) as pubsub:
+            while True:
+                results = await q.get_results(run_id)
+                for pid, result in results.items():
+                    if pid in emitted:
+                        continue
+                    emitted.add(pid)
+                    if "insights" in result:
+                        yield _sse({"type": "project_complete", **result})
+                    else:
+                        yield _sse({"type": "project_error", **result})
+
+                stored, synthesis = await q.get_synthesis(run_id)
+                if stored:
+                    if cross_project and synthesis is not None:
+                        yield _sse(
+                            {"type": "synthesis_complete", "synthesis": synthesis}
                         )
-                    return {
-                        "projectId": str(project.id),
-                        "projectName": project.name,
-                        "projectColor": hi.project_color(project.id),
-                        "insights": cards,
-                    }
-            except Exception as exc:
-                logger.warning(
-                    "project intelligence failed for project %s: %s", project.id, exc
-                )
-                return {
-                    "projectId": str(project.id),
-                    "projectName": project.name,
-                    "error": str(exc),
-                }
-
-        tasks = [asyncio.create_task(work(p)) for p in projects]
-        for coro in asyncio.as_completed(tasks):
-            result = await coro
-            if "error" in result:
-                failed_projects.append(result)
-                yield _sse({"type": "project_error", **result})
-                continue
-            summaries.append(
-                {
-                    "projectId": result["projectId"],
-                    "projectName": result["projectName"],
-                    "insightSummaries": [c["summary"] for c in result["insights"]],
-                }
-            )
-            project_results.append(result)
-            yield _sse({"type": "project_complete", **result})
-
-        if cross_project:
-            synthesis = hi.synthesise_cross_project(summaries)
-            if synthesis is not None:
-                yield _sse({"type": "synthesis_complete", "synthesis": synthesis})
-
-        # Persist this completed run as the user's latest snapshot (overwrites
-        # any prior one) so the Home can hydrate instantly on next open.
-        try:
-            generated_at = datetime.now(UTC).isoformat()
-            payload = {
-                "projects": [
-                    {
-                        "id": str(p.id),
-                        "name": p.name,
-                        "color": hi.project_color(p.id),
-                    }
-                    for p in projects
-                ],
-                "results": project_results,
-                "synthesis": synthesis,
-                "generatedAt": generated_at,
-            }
-            await _save_snapshot(
-                context,
-                granularity,
-                payload,
-                failed_project_count=len(failed_projects),
-            )
-        except Exception as exc:
-            logger.warning("failed to persist intelligence snapshot: %s", exc)
+                    break
+                if asyncio.get_event_loop().time() > deadline:
+                    logger.warning(
+                        "home-intel stream %s timed out after %ss with %s/%s "
+                        "projects reported",
+                        run_id,
+                        _STREAM_DEADLINE_SECONDS,
+                        len(emitted),
+                        len(projects),
+                    )
+                    break
+                await q.wait_for_wakeup(pubsub, timeout=_STREAM_POLL_SECONDS)
 
         yield _sse({"type": "done", "projectCount": len(projects)})
 
@@ -366,28 +332,45 @@ async def _save_snapshot(
     *,
     failed_project_count: int = 0,
 ) -> None:
-    """Upsert the caller's single latest intelligence snapshot."""
+    """Upsert the caller's single latest intelligence snapshot.
+
+    Results are *merged* with the prior snapshot rather than replacing it: the
+    new run's per-project results win, but any project that produced no fresh
+    result this run (because it ended terminally errored, or the run drained
+    before it finished) keeps its previous entry. This guarantees a partial or
+    failed refresh never wipes a good prior result with a blank one. The merge
+    is scoped to the projects the current run actually covered, so results for
+    projects the caller can no longer access are dropped.
+    """
     async with SessionLocal() as session:
         snap = await session.scalar(
             select(IntelligenceSnapshot).where(
                 IntelligenceSnapshot.user_id == context.user_id
             )
         )
-        new_result_count = len(payload.get("results") or [])
+        prior_results = (snap.payload.get("results") or []) if snap else []
+        new_results = payload.get("results") or []
+        merged: dict[str, dict[str, Any]] = {
+            str(r.get("projectId")): r for r in prior_results
+        }
+        for r in new_results:
+            merged[str(r.get("projectId"))] = r
+        current_ids = {str(p.get("id")) for p in (payload.get("projects") or [])}
+        if current_ids:
+            merged = {
+                pid: r for pid, r in merged.items() if pid in current_ids
+            }
         if failed_project_count:
-            previous_result_count = (
-                len(snap.payload.get("results") or []) if snap else 0
+            logger.info(
+                "home intelligence snapshot for user %s finalized with %s project "
+                "failure(s); merged %s new result(s) over %s prior into %s total",
+                context.user_id,
+                failed_project_count,
+                len(new_results),
+                len(prior_results),
+                len(merged),
             )
-            if new_result_count == 0 or new_result_count < previous_result_count:
-                logger.warning(
-                    "preserving prior home intelligence snapshot for user %s: "
-                    "%s project failures, %s new results vs %s previous",
-                    context.user_id,
-                    failed_project_count,
-                    new_result_count,
-                    previous_result_count,
-                )
-                return
+        payload = {**payload, "results": list(merged.values())}
         if snap is None:
             snap = IntelligenceSnapshot(
                 tenant_id=context.tenant_id,
