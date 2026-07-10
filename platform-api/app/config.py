@@ -104,9 +104,13 @@ class Settings(BaseSettings):
     # Per-tenant fairness cap: at most this many of a tenant's projects run
     # their heavy AI pipeline at once across all workers (Redis-backed, so it
     # is authoritative even when the worker is scaled horizontally). Kept small
-    # so (tenant slots) x (a project's interpret/fix_sql fan-out) stays under
-    # the AI gate's real capacity — the gate remains the hard global ceiling.
-    home_intelligence_max_concurrent_projects_per_tenant: int = 2
+    # so (tenant slots) x (a project's interpret/fix_sql fan-out) matches — and
+    # never exceeds — the AI gate's real per-tenant capacity. With the fan-out
+    # pinned at 1 this is set to the gate's per-tenant limit so a tenant's
+    # projects fully use the gate without oversubscribing it (which would turn
+    # every extra project into a stream of retryable 503s). The gate remains
+    # the hard global ceiling; raising this above it does not add throughput.
+    home_intelligence_max_concurrent_projects_per_tenant: int = 3
     # TTL for a run's per-run result store (expected set, results hash, run
     # metadata, pub/sub bookkeeping). Long enough for a slow run to drain.
     home_intelligence_run_result_ttl_seconds: int = 3600
