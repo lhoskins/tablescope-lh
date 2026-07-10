@@ -1,6 +1,10 @@
 "use client";
 
 import { apiClient } from "@/lib/api-client";
+import type {
+  PresentationDescriptor,
+  ResponseEnvelope,
+} from "@/lib/api/ai-actions";
 
 // ── Insight card shape (mirrors the platform-api InsightCard dict) ───────────
 
@@ -119,7 +123,12 @@ export interface StreamProject {
 export type IntelligenceEvent =
   | { type: "start"; projects: StreamProject[] }
   | ({ type: "project_complete" } & ProjectResult)
-  | { type: "project_error"; error: string }
+  | {
+      type: "project_error";
+      error: string;
+      projectId?: string;
+      projectName?: string;
+    }
   | { type: "synthesis_complete"; synthesis: CrossProjectSynthesis }
   | { type: "done"; projectCount: number };
 
@@ -344,6 +353,9 @@ export interface DashboardSuggestionsProject {
   projectName: string;
   projectColor: string;
   dashboard: DashboardSuggestion | null;
+  // M4: shared presentation descriptor + unified envelope (additive).
+  presentation?: PresentationDescriptor;
+  envelope?: ResponseEnvelope;
 }
 
 export function suggestDashboards(

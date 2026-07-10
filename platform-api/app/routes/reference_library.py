@@ -41,6 +41,8 @@ from app.models.reference_library import (
     ReferenceDocumentAssignment,
 )
 from app.services import reference_library_ai_client as suggest_client
+from app.services.presentation_engine import PresentationMode
+from app.services.response_envelope import attach_envelope
 from app.services.reference_library_processing import (
     EXT_TO_FILE_TYPE,
     EXTRACTABLE_EXTENSIONS,
@@ -210,7 +212,98 @@ async def get_document(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     doc = await _get_doc_with_read_access(session, context, document_id)
-    return doc.to_dict()
+    payload = doc.to_dict()
+    attach_envelope(
+        payload,
+        PresentationMode.DOCUMENT,
+        summary=doc.ai_summary or None,
+        status=doc.status or None,
+    )
+    return payload
+
+
+@router.get("/documents/{document_id}/detail")
+async def get_document_detail(
+    document_id: int,
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Full detail for a reference document: metadata + AI summary, its version
+    (supersede) family, and where it is used across projects."""
+    doc = await _get_doc_with_read_access(session, context, document_id)
+
+    # ── version family: walk the supersede lineage in both directions ──
+    family_ids: set[int] = {doc.id}
+    cur: ReferenceDocument | None = doc
+    seen: set[int] = set()
+    while cur is not None and cur.id not in seen:
+        seen.add(cur.id)
+        family_ids.add(cur.id)
+        if cur.superseded_by_id is None:
+            break
+        cur = await session.get(ReferenceDocument, cur.superseded_by_id)
+    for _ in range(10):  # bounded backward expansion over predecessors
+        preds = (
+            await session.scalars(
+                select(ReferenceDocument.id).where(
+                    ReferenceDocument.superseded_by_id.in_(family_ids)
+                )
+            )
+        ).all()
+        new_ids = set(preds) - family_ids
+        if not new_ids:
+            break
+        family_ids |= new_ids
+
+    fam_rows = (
+        await session.scalars(
+            select(ReferenceDocument).where(ReferenceDocument.id.in_(family_ids))
+        )
+    ).all()
+    version_family = sorted(
+        (
+            {
+                "id": d.id,
+                "title": d.title,
+                "versionLabel": d.version_label,
+                "status": d.status,
+                "effectiveDate": d.effective_date.isoformat() if d.effective_date else None,
+                "isCurrent": d.id == doc.id,
+                "supersededById": d.superseded_by_id,
+            }
+            for d in fam_rows
+        ),
+        key=lambda r: (r["effectiveDate"] or "", r["id"]),
+    )
+
+    # ── usage: projects that inherit / use this reference ──
+    usage: list[dict] = []
+    if doc.tier in (TIER_COMPANY, TIER_INDUSTRY):
+        rows = (
+            await session.execute(
+                select(ReferenceDocumentAssignment, Project.name)
+                .join(Project, Project.id == ReferenceDocumentAssignment.project_id)
+                .where(
+                    ReferenceDocumentAssignment.reference_document_id == doc.id,
+                    ReferenceDocumentAssignment.is_active.is_(True),
+                )
+            )
+        ).all()
+        usage = [
+            {
+                "projectId": a.project_id,
+                "projectName": name,
+                "assignmentType": a.assignment_type,
+                "suggestionStatus": a.suggestion_status,
+            }
+            for a, name in rows
+        ]
+
+    return {
+        "document": doc.to_dict(),
+        "versionFamily": version_family,
+        "usage": usage,
+    }
 
 
 @router.get("/documents/{document_id}/download")
@@ -443,6 +536,42 @@ async def reprocess_document(
     await session.commit()
     background_tasks.add_task(process_reference_document, doc.id)
     return {"status": "processing"}
+
+
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: int,
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Delete a reference document (and its stored file). Write-permission +
+    tenant/project scoped. Assignment rows cascade; supersede links reset."""
+    doc = await session.get(ReferenceDocument, document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Reference document not found")
+    if not await can_write_tier(session, context, doc.tier, doc.project_id):
+        raise HTTPException(status_code=403, detail="Not permitted to delete this document")
+    if doc.tier == TIER_COMPANY and doc.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=403, detail="Not in this tenant")
+
+    for path in (doc.file_path, doc.extracted_text_path):
+        if path:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove file %s for reference doc %s", path, doc.id)
+
+    _audit(
+        session,
+        context,
+        event_type="reference_library_delete",
+        title=doc.title,
+        project_id=doc.project_id,
+        documents=[doc.id],
+    )
+    await session.delete(doc)
+    await session.commit()
+    return {"status": "deleted"}
 
 
 @router.post("/documents/{document_id}/supersede")

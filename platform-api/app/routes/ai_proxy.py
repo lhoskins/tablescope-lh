@@ -40,10 +40,26 @@ from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
+from app.services.analytical_method_engine import analyze as analyze_methods
+from app.services.analytical_method_engine import data_profiler
+from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
+from app.services.analytical_method_engine.method_registry import (
+    catalog_status as analytical_catalog_status,
+)
 from app.services.auto_scope import _get_or_create_ai_scope_set
+from app.services.intent_engine import IntentDecision, classify_intent
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
+from app.services.presentation_engine import (
+    PresentationMode,
+    mode_for_ask_and_run,
+)
+from app.services.presentation_engine import (
+    describe as describe_presentation,
+)
+from app.services.response_envelope import ResponseEnvelope
+from app.services.visualization_engine import ChartType, select_visualization
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
@@ -673,6 +689,44 @@ async def _build_query_summary(
 # AI Proxy endpoints
 # ---------------------------------------------------------------------------
 
+async def _ask_data_first(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    question: str,
+) -> dict[str, Any] | None:
+    """Try to answer a chat question with executed data (chart + grid + SQL).
+
+    Mirrors the conversations endpoint: auto-resolve a source, generate + execute
+    SQL, and return the real result under the shared ``ResponseEnvelope`` so the
+    chat renders a widget instead of printing SQL as prose. Returns ``None`` when
+    the question can't be grounded on data (so the caller falls back to the prose
+    documents/knowledge-graph answer). Fail-closed — never raises.
+    """
+    try:
+        run = await _ask_and_run_core(
+            session, context,
+            project_id=project_id,
+            question=question,
+            max_rows=CHAT_ANSWER_MAX_ROWS,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.info("Chat data-first attempt failed, falling back to prose: %s", exc)
+        return None
+    if run.get("status") != "success" or not run.get("rows"):
+        return None
+    return {
+        "answer": _chat_answer_text(question, run),
+        "model_used": "tablescope-data",
+        "request_id": "",
+        "context_summary": {},
+        "audit_id": None,
+        "presentation": run.get("presentation"),
+        "envelope": run.get("envelope"),
+    }
+
+
 @router.post("/ask")
 async def ask(
     req: AIAskRequest,
@@ -685,12 +739,24 @@ async def ask(
     # A request for a summary of the user's queries is answered directly from
     # the database (authorization-correct, no AI-server dependency).
     if _is_query_summary_request(req.question):
-        return {
+        response = {
             "answer": await _build_query_summary(session, context),
             "model_used": "tablescope-direct",
             "request_id": "",
             "context_summary": {},
         }
+        _attach_ask_envelope(response)
+        return response
+
+    # Data-first backbone (same as the conversations chat): a question the
+    # resolver can ground on a source is answered with a real executed result —
+    # chart + table + hidden SQL — rather than a prose answer that merely prints
+    # the SQL. Anything the resolver can't ground falls through to prose below.
+    data_response = await _ask_data_first(
+        session, context, project_id=req.project_id, question=req.question
+    )
+    if data_response is not None:
+        return data_response
 
     payload = {
         "tenant_id": context.tenant_id,
@@ -702,7 +768,9 @@ async def ask(
         "include_dashboard_context": req.include_dashboard_context,
         "history": [],
     }
-    return await _forward_to_ai("/ai/ask", payload)
+    response = await _forward_to_ai("/ai/ask", payload)
+    _attach_ask_envelope(response)
+    return response
 
 
 class RoutePromptRequest(BaseModel):
@@ -1077,12 +1145,13 @@ def _value_overlap(
     return len(intersection) / len(union) if union else 0.0
 
 
-async def _ai_analyze_and_create_scopes(
+async def _analyze_project_scopes(
     *,
     session: AsyncSession,
     context: RequestContext,
     project_id: int,
-) -> dict[str, Any]:
+    query_ids: list[int] | None = None,
+) -> tuple[list[dict[str, Any]], dict[int, str]]:
     """Hybrid scope analysis: AI suggestions validated by cell-level data.
 
     Phase 1 — AI Analysis: LLM analyzes SQL structure to suggest scopes
@@ -1091,6 +1160,12 @@ async def _ai_analyze_and_create_scopes(
       actual cell values to validate AI suggestions and discover cross-column
       relationships the AI may have missed (e.g. CategoryID ↔ CategoryName
       when they share actual values).
+
+    Returns ``(validated_scopes, query_names)`` where each validated scope is a
+    directional (summarized→detailed source→target) dict. Shared by both the
+    persist path (``_ai_analyze_and_create_scopes``) and the canvas-suggestion
+    path (``ai_suggest_scopes``). When ``query_ids`` is given, analysis is
+    restricted to those saved queries (used by AI Suggest on the canvas).
     """
     import asyncio
 
@@ -1102,9 +1177,12 @@ async def _ai_analyze_and_create_scopes(
         select(SavedQuery).where(SavedQuery.project_id == project_id)
     )
     queries = list(queries_result)
+    if query_ids is not None:
+        wanted = set(query_ids)
+        queries = [q for q in queries if q.id in wanted]
 
     if not queries:
-        return {"relationships": [], "scopes_created": 0, "status": "ok"}
+        return [], {}
 
     # Only send queries that have SQL — include extracted columns for clarity
     query_infos: list[dict[str, Any]] = []
@@ -1121,7 +1199,7 @@ async def _ai_analyze_and_create_scopes(
             })
 
     if not query_infos:
-        return {"relationships": [], "scopes_created": 0, "status": "ok"}
+        return [], query_names
 
     # ── Phase 1: AI structural analysis via the dedicated scopes endpoint ──
     # Uses /ai/project/scopes/analyze (NOT the generic /ai/ask): the AI server
@@ -1349,6 +1427,24 @@ async def _ai_analyze_and_create_scopes(
                     "reason": f"Exact column name match ({col_lower})",
                 })
 
+    return validated_scopes, query_names
+
+
+async def _ai_analyze_and_create_scopes(
+    *,
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+) -> dict[str, Any]:
+    """Analyze the project's queries via the LLM analyzer and persist the
+    validated directional scopes into the project's "AI Generated Scopes" set.
+    """
+    validated_scopes, _query_names = await _analyze_project_scopes(
+        session=session, context=context, project_id=project_id
+    )
+    if not validated_scopes:
+        return {"relationships": [], "scopes_created": 0, "status": "ok"}
+
     # ── Write validated scopes to database ───────────────────────────
     existing_scopes = await session.scalars(
         select(QueryScope).where(
@@ -1521,20 +1617,45 @@ async def index_document(
 
 @router.get("/status")
 async def ai_status(
+    session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.ADMIN)),
 ) -> dict[str, Any]:
-    """Check AI server health (admin only)."""
+    """Check AI server health (admin only).
+
+    Also reports the resolved Analytical Method Engine mode and whether an
+    ``approved+active`` analytical catalog version exists — when it does not,
+    hybrid analysis silently produces nothing, so this is surfaced here to make
+    that state diagnosable.
+    """
     settings = get_settings()
+    try:
+        catalog = await analytical_catalog_status(session)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Analytical catalog status check failed: %s", exc)
+        catalog = {"active": False, "version_id": None, "error": str(exc)}
+    analytical = {
+        "engineMode": get_engine_mode().value,
+        "catalog": catalog,
+    }
     if not settings.tablescope_ai_enabled or not settings.tablescope_ai_api_url:
-        return {"enabled": False, "status": "not_configured"}
+        return {
+            "enabled": False,
+            "status": "not_configured",
+            "analytical": analytical,
+        }
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
             resp = await client.get(f"{settings.tablescope_ai_api_url}/health")
             resp.raise_for_status()
-            return {"enabled": True, **resp.json()}
+            return {"enabled": True, "analytical": analytical, **resp.json()}
     except Exception as e:
-        return {"enabled": True, "status": "unreachable", "error": str(e)}
+        return {
+            "enabled": True,
+            "status": "unreachable",
+            "error": str(e),
+            "analytical": analytical,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -2075,26 +2196,27 @@ async def ai_generate_and_save_query(
     }
 
 
-def _is_numeric_value(value: Any) -> bool:
-    if isinstance(value, bool):
-        return False
-    if isinstance(value, int | float):
-        return True
-    if isinstance(value, str):
-        try:
-            float(value.replace(",", "").strip())
-            return True
-        except (ValueError, AttributeError):
-            return False
-    return False
-
-
-def _looks_like_time_column(name: str) -> bool:
-    lowered = name.lower()
-    return any(
-        token in lowered
-        for token in ("date", "time", "month", "year", "day", "week", "quarter")
-    )
+# The ask-and-run mini-renderer (``web-ui/.../ai-result-view.tsx``) draws a
+# subset of the full chart vocabulary. Map the Visualization Engine's decision
+# onto what this surface can render, so the decision stays unified while the
+# rendered output never exceeds this surface's capability. Charts this surface
+# cannot shape meaningfully (scatter) degrade to a table rather than a
+# misleading bar.
+_ASK_AND_RUN_SURFACE: dict[ChartType, str] = {
+    ChartType.KPI: "kpi",
+    ChartType.TABLE: "table",
+    ChartType.LINE: "line",
+    ChartType.AREA: "line",
+    ChartType.BAR: "bar",
+    ChartType.PIE: "pie",
+    ChartType.COMBO: "line",
+    ChartType.SCATTER: "table",
+    ChartType.RADAR: "bar",
+    ChartType.TREEMAP: "bar",
+    ChartType.FUNNEL: "bar",
+    ChartType.SANKEY: "bar",
+    ChartType.RADIAL_BAR: "bar",
+}
 
 
 def _suggest_visualization(
@@ -2102,33 +2224,34 @@ def _suggest_visualization(
 ) -> dict[str, Any]:
     """Pick a sensible default chart for a result set (deterministic).
 
-    - single numeric cell -> kpi
-    - a time column + a numeric column -> line
-    - a categorical column + a numeric column -> bar
-    - otherwise -> table
+    Delegates the decision to the single Universal Visualization Engine
+    (``app.services.visualization_engine``) so ask-and-run, Home cards, and
+    dashboards all agree on the same chart for the same shape, then maps the
+    engine's decision onto the subset this surface can render.
     """
     if not columns or not rows:
         return {"type": "table"}
 
-    sample = rows[0]
-    numeric_cols = [
-        c
-        for c in columns
-        if any(_is_numeric_value(r.get(c)) for r in rows[:20])
-    ]
-    non_numeric_cols = [c for c in columns if c not in numeric_cols]
+    decision = select_visualization(columns, rows)
+    surface_type = _ASK_AND_RUN_SURFACE.get(decision.chart_type, "table")
 
-    if len(rows) == 1 and len(columns) == 1 and _is_numeric_value(sample.get(columns[0])):
-        return {"type": "kpi", "metricField": columns[0]}
-
-    if numeric_cols and non_numeric_cols:
-        y_field = numeric_cols[0]
-        time_cols = [c for c in non_numeric_cols if _looks_like_time_column(c)]
-        if time_cols:
-            return {"type": "line", "xField": time_cols[0], "yField": y_field}
-        return {"type": "bar", "xField": non_numeric_cols[0], "yField": y_field}
-
-    return {"type": "table"}
+    if surface_type == "table":
+        return {"type": "table"}
+    if surface_type == "kpi":
+        return {"type": "kpi", "metricField": decision.y_field or columns[0]}
+    fallback_y = columns[1] if len(columns) > 1 else columns[0]
+    viz: dict[str, Any] = {
+        "type": surface_type,
+        "xField": decision.x_field or columns[0],
+        "yField": decision.y_field or fallback_y,
+    }
+    # Carry the engine's readability decision so the surface renders a horizontal,
+    # top-N-ranked bar for many categories instead of an unreadable vertical wall.
+    if decision.chart_style:
+        viz["chartStyle"] = decision.chart_style
+    if decision.top_n is not None:
+        viz["topN"] = decision.top_n
+    return viz
 
 
 _LIMIT_RE = re.compile(r"\blimit\s+\d+\s*$", re.IGNORECASE)
@@ -2469,7 +2592,7 @@ async def _ask_and_run_core(
     columns = result.get("columns", [])
     rows = result.get("rows", [])[:max_rows]
     used = _detect_datasource(sql, allowed_tables)
-    return {
+    response: dict[str, Any] = {
         "question": question,
         "sql": sql,
         "columns": columns,
@@ -2480,6 +2603,147 @@ async def _ask_and_run_core(
         "status": "success",
         "error": None,
     }
+    decision = _classify_intent_safe(question, columns, rows)
+    if decision is not None:
+        response["intent"] = decision.to_dict()
+    await _attach_analytical_envelope(
+        session, context, question, columns, rows, response,
+        intent_hint=decision.analysis_intent if decision else None,
+    )
+    _attach_presentation(response)
+    return response
+
+
+def _attach_presentation(response: dict[str, Any]) -> None:
+    """Stamp the shared ``presentation`` descriptor + ``ResponseEnvelope``.
+
+    Non-breaking, fail-closed. ``presentation`` is the ``{mode, sections}``
+    descriptor from the one section registry; ``envelope`` is the shared
+    :class:`ResponseEnvelope` — the ask-and-run pilot for the M4 fast-follow,
+    emitting the surface's data under the unified contract so the frontend can
+    read one shape. Existing fields are left untouched. Never raises.
+    """
+    try:
+        mode = mode_for_ask_and_run(
+            answer_type=response.get("answerType"),
+            has_method_envelope=response.get("analyticalMethod") is not None,
+        )
+        response["presentation"] = describe_presentation(mode)
+        response["envelope"] = _build_ask_and_run_envelope(response, mode)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Presentation engine hook failed: %s", exc)
+
+
+def _attach_ask_envelope(response: dict[str, Any]) -> None:
+    """Stamp the conversational ``presentation`` descriptor + ``ResponseEnvelope``
+    on an ``/ask`` chat response.
+
+    The conversational surface always returns a prose ``answer``; this maps it
+    onto the shared contract (``mode="conversational"``, ``prose_answer`` section)
+    so the frontend can render it through the same ``ResponsePresenter`` as every
+    other migrated surface. Additive, fail-closed — never raises, existing fields
+    untouched.
+    """
+    try:
+        if not isinstance(response, dict):
+            return
+        mode = PresentationMode.CONVERSATIONAL
+        response["presentation"] = describe_presentation(mode)
+        response["envelope"] = ResponseEnvelope.build(
+            mode,
+            answer=response.get("answer") or None,
+        ).model_dump(exclude_none=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Presentation engine hook (ask) failed: %s", exc)
+
+
+def _build_ask_and_run_envelope(
+    response: dict[str, Any], mode: PresentationMode
+) -> dict[str, Any]:
+    """Map an ask-and-run response dict onto the shared ``ResponseEnvelope``.
+
+    The prose explanation is the answer for a conversational fallback and the
+    (executive) summary for an executed result; None fields are dropped.
+    """
+    explanation = response.get("explanation") or None
+    is_prose = mode is PresentationMode.CONVERSATIONAL
+    # A prose answer renders no chart/grid/SQL — don't carry those fields even
+    # if the fallback stamped a default table visualization.
+    data = None if is_prose else response
+    envelope = ResponseEnvelope.build(
+        mode,
+        status=response.get("status"),
+        answer=explanation if is_prose else None,
+        summary=explanation if not is_prose else None,
+        executive_summary=(
+            explanation if mode is PresentationMode.HYBRID else None
+        ),
+        sql=(data or {}).get("sql") or None,
+        columns=(data or {}).get("columns") or None,
+        rows=(data or {}).get("rows") or None,
+        chart=(data or {}).get("suggestedVisualization") or None,
+        method_envelope=response.get("analyticalMethod"),
+        sources=response.get("dataSourcesUsed") or None,
+        intent=response.get("intent"),
+    )
+    return envelope.model_dump(exclude_none=True)
+
+
+def _classify_intent_safe(
+    question: str, columns: list[str], rows: list[Any]
+) -> IntentDecision | None:
+    """Declared Intent Engine hint over the executed result. Fail-closed.
+
+    Non-authoritative: the returned decision is attached as ``intent`` metadata
+    and feeds the Method Engine's Stage-B selector, but never gates the
+    try-then-fallback backbone. Any error yields ``None`` so a classifier bug
+    can never break the ask path.
+    """
+    try:
+        profile = (
+            data_profiler.profile(columns, rows) if columns and rows else None
+        )
+        return classify_intent(question, profile)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Intent engine hook failed: %s", exc)
+        return None
+
+
+async def _attach_analytical_envelope(
+    session: AsyncSession,
+    context: RequestContext,
+    question: str,
+    columns: list[str],
+    rows: list[Any],
+    response: dict[str, Any],
+    *,
+    intent_hint: str | None = None,
+) -> None:
+    """Run the governed Analytical Method Engine over the result set.
+
+    Feature-flagged and fail-closed. In ``readonly`` mode it computes + logs the
+    method envelope but never alters the response; in ``hybrid`` it also attaches
+    ``analyticalMethod``. ``off`` (default) skips entirely. Tablescope — not the
+    LLM — selects the method here; the Intent Engine's ``analysisIntent`` (when
+    available) seeds Stage-B selection.
+    """
+    mode = get_engine_mode()
+    if mode == EngineMode.OFF:
+        return
+    try:
+        envelope = await analyze_methods(
+            session,
+            tenant_id=context.tenant_id,
+            columns=columns,
+            rows=rows,
+            question=question,
+            intent=intent_hint,
+        )
+    except Exception as exc:
+        logger.warning("Analytical method engine hook failed: %s", exc)
+        return
+    if envelope and mode == EngineMode.HYBRID:
+        response["analyticalMethod"] = envelope
 
 
 async def _forward_prose_answer(
@@ -2545,7 +2809,7 @@ async def ai_ask_and_run(
             context, project_id=req.project_id, question=req.question
         )
         if prose:
-            return {
+            prose_result = {
                 "question": req.question,
                 "sql": "",
                 "columns": [],
@@ -2557,6 +2821,8 @@ async def ai_ask_and_run(
                 "answerType": "text",
                 "error": None,
             }
+            _attach_presentation(prose_result)
+            return prose_result
     return result
 
 
@@ -2654,7 +2920,7 @@ async def ai_generate_query_preview(
     columns = result.get("columns", [])
     rows = result.get("rows", [])[: req.max_rows]
     used = _detect_datasource(sql, allowed_tables)
-    return {
+    response: dict[str, Any] = {
         "title": title,
         "description": req.description or "",
         "sql": sql,
@@ -2666,6 +2932,11 @@ async def ai_generate_query_preview(
         "status": "success",
         "error": None,
     }
+    # M4 fast-follow: an executed preview is a structured result — stamp the
+    # shared ResponseEnvelope so the modal renders via the same ResponsePresenter
+    # as ask-and-run. Additive/fail-closed (same helper as ask-and-run).
+    _attach_presentation(response)
+    return response
 
 
 @router.post("/actions/generate-and-save-dashboard")
@@ -3526,7 +3797,6 @@ def _build_join_metadata(widget: dict[str, Any]) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 _TIME_SERIES_TYPES = frozenset({"line", "area", "dual_line"})
-_PART_TO_WHOLE_TYPES = frozenset({"pie", "donut"})
 _NARRATIVE_TYPES = frozenset({"narrative_insight", "none", "narrative"})
 
 
@@ -3564,30 +3834,76 @@ def _judge_widget(
     return True, ""
 
 
+# Engine chart family -> planner-vocabulary type understood by _CHART_TYPE_MAP.
+_ENGINE_TO_PLANNER: dict[ChartType, str] = {
+    ChartType.KPI: "kpi",
+    ChartType.TABLE: "table",
+    ChartType.LINE: "line",
+    ChartType.AREA: "area",
+    ChartType.COMBO: "dual_line",
+    ChartType.PIE: "pie",
+    ChartType.SCATTER: "scatter",
+    ChartType.RADAR: "radar",
+    ChartType.RADIAL_BAR: "gauge",
+    ChartType.TREEMAP: "treemap",
+    ChartType.FUNNEL: "funnel",
+    ChartType.SANKEY: "table",
+    ChartType.BAR: "bar",
+}
+
+# Visually interchangeable families: when the engine's decision lands in the same
+# group as the planner's family, the planner's (richer) type/subtype is left
+# untouched — so valid variants (waterfall, stacked_bar, biaxial_line, gauge, …)
+# survive. Only a shape-mismatched choice is rewritten. Keys are dashboard
+# WidgetTypes; values are engine ChartType values considered compatible.
+_FAMILY_GROUPS: dict[str, frozenset[str]] = {
+    "bar": frozenset({"bar"}),
+    "line": frozenset({"line", "area", "combo"}),
+    "area": frozenset({"line", "area", "combo"}),
+    "combo": frozenset({"line", "area", "combo"}),
+    "pie": frozenset({"pie"}),
+    "scatter": frozenset({"scatter"}),
+    "radar": frozenset({"radar"}),
+    "radial_bar": frozenset({"radial_bar"}),
+    "treemap": frozenset({"treemap"}),
+    "funnel": frozenset({"funnel"}),
+    "sankey": frozenset({"sankey"}),
+}
+
+
 def _correct_widget_chart(
     widget: dict[str, Any], columns: list[str], rows: list[dict[str, Any]]
 ) -> None:
-    """Apply safe in-place chart-type corrections after execution.
+    """Validate the LLM's chart choice against the executed data shape.
 
-    - pie/donut with > 8 slices → horizontal_bar (ranking, not part-to-whole).
-    - vertical bar with long category labels (or many bars) → horizontal_bar.
+    Delegates the shape decision to the one Universal Visualization Engine
+    (the same authority Home cards and ask-and-run use). When the engine's
+    family agrees with the planner's family, the planner's (richer) type +
+    subtype is preserved; only a shape-mismatched choice — e.g. a pie with
+    many slices, or a line over non-time categories — is rewritten in place to
+    the engine's renderable family. KPI / table / narrative widgets are
+    container choices, not chart-shape ones, and are left as the planner set
+    them.
     """
     wtype = str(widget.get("type", "bar")).lower()
-
-    if wtype in _PART_TO_WHOLE_TYPES and len(rows) > 8:
-        widget["type"] = "horizontal_bar"
+    if wtype in _NARRATIVE_TYPES or not rows or not columns:
         return
 
-    if wtype in ("bar", "vertical_bar"):
-        lcol = widget.get("label_column") or widget.get("x_column") or ""
-        col_map = {_norm_col(c): c for c in columns}
-        actual = col_map.get(_norm_col(lcol))
-        if actual:
-            labels = [str(r.get(actual, "")) for r in rows[:20]]
-            if labels:
-                avg_len = sum(len(x) for x in labels) / len(labels)
-                if avg_len > 16 or len(rows) > 8:
-                    widget["type"] = "horizontal_bar"
+    widget_family = _map_widget_visual(wtype)[0]
+    if widget_family in ("kpi", "table"):
+        return
+
+    decision = select_visualization(columns, rows, intent_hint=wtype)
+    compatible = decision.chart_type.value in _FAMILY_GROUPS.get(
+        widget_family, frozenset({widget_family})
+    )
+    if compatible:
+        return
+
+    corrected = _ENGINE_TO_PLANNER.get(decision.chart_type, "bar")
+    if decision.chart_type is ChartType.BAR and decision.chart_style == "horizontal_bar":
+        corrected = "horizontal_bar"
+    widget["type"] = corrected
 
 
 def _pack_grid(widgets_config: list[dict[str, Any]]) -> None:

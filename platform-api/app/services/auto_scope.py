@@ -207,3 +207,46 @@ async def auto_create_scopes_for_query(
         )
 
     return scopes_created
+
+
+async def auto_generate_project_scopes(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    tenant_id: int,
+    user_id: int,
+) -> tuple[ScopeSet, int]:
+    """Generate AI scopes across every saved query in a project on demand.
+
+    Iterates the project's saved queries and creates shared-column
+    :class:`QueryScope` mappings for each, reusing the idempotent per-query
+    routine (existing keys are skipped, so re-running is safe). Always returns
+    the project's "AI Generated Scopes" set — creating it if absent — so the
+    caller can enable/return it even when no new mappings were found.
+
+    Returns ``(ai_scope_set, total_new_scopes)``.
+    """
+    ai_set = await _get_or_create_ai_scope_set(
+        session, tenant_id=tenant_id, project_id=project_id, user_id=user_id
+    )
+
+    queries = list(
+        await session.scalars(
+            select(SavedQuery).where(
+                SavedQuery.project_id == project_id,
+                SavedQuery.is_archived.is_(False),
+            )
+        )
+    )
+
+    total = 0
+    for q in queries:
+        total += await auto_create_scopes_for_query(
+            session, query=q, tenant_id=tenant_id, user_id=user_id
+        )
+
+    logger.info(
+        "Auto-generated %d project scope(s) for project %d across %d queries",
+        total, project_id, len(queries),
+    )
+    return ai_set, total

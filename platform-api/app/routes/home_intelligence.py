@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
+from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models.audit_event import AuditEvent
 from app.models.dashboard import Dashboard
@@ -35,6 +36,9 @@ from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
 from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
 from app.services import home_intelligence as hi
+from app.services.ai_intelligence_client import AIUnavailableError
+from app.services.presentation_engine import PresentationMode
+from app.services.response_envelope import attach_envelope
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
@@ -96,15 +100,16 @@ async def _run_for_project(
     *,
     write_audit: bool = True,
     granularity: int = 3,
+    plan_semaphore: asyncio.Semaphore | None = None,
 ) -> list[dict[str, Any]]:
     started = datetime.now(UTC)
     ctx = await hi.gather_project_context(session, project)
     runner = _make_runner(session, context, project.id)
 
     # Only the AI-driven analyst loop (plan -> execute real SQL -> interpret).
-    # No deterministic/hard-coded fallback: if the AI server is unavailable or
-    # finds nothing worth surfacing, we return no cards (the last saved snapshot
-    # still shows) rather than fabricating built-in metrics.
+    # A disabled AI feature degrades to no cards; an enabled-but-unavailable AI
+    # must bubble to the SSE project_error branch instead of looking like a valid
+    # empty result.
     cards: list[dict[str, Any]] | None = None
     try:
         cards = await hi.run_ai_intelligence(
@@ -114,7 +119,10 @@ async def _run_for_project(
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             granularity=granularity,
+            plan_semaphore=plan_semaphore,
         )
+    except AIUnavailableError:
+        raise
     except Exception as exc:
         logger.warning("AI intelligence failed for project %s: %s", project.id, exc)
         cards = None
@@ -241,41 +249,66 @@ async def home_intelligence_stream(
 
         summaries: list[dict[str, Any]] = []
         project_results: list[dict[str, Any]] = []
+        failed_projects: list[dict[str, Any]] = []
         synthesis: dict[str, Any] | None = None
 
-        async def work(project: Project) -> dict[str, Any]:
-            async with SessionLocal() as session:
-                cards = await _run_for_project(
-                    session, context, project, hi.ALL_PROMPT_TYPES,
-                    granularity=granularity,
-                )
-            return {
-                "projectId": str(project.id),
-                "projectName": project.name,
-                "projectColor": hi.project_color(project.id),
-                "insights": cards,
-            }
+        # Bound how many projects run their heavy AI pipeline at once so a
+        # large project count doesn't flood the AI/Ollama server (which causes
+        # silent timeouts → empty "0 insights"). The semaphore must be created
+        # inside the running event loop / request scope, not at import time.
+        max_concurrent = max(
+            1, get_settings().home_intelligence_max_concurrent_projects
+        )
+        sem = asyncio.Semaphore(max_concurrent)
+        max_concurrent_plans = max(
+            1, get_settings().home_intelligence_max_concurrent_plan_calls
+        )
+        plan_sem = asyncio.Semaphore(max_concurrent_plans)
 
-        tasks = {asyncio.create_task(work(p)): p for p in projects}
-        for coro in asyncio.as_completed(list(tasks)):
+        async def work(project: Project) -> dict[str, Any]:
             try:
-                result = await coro
-                summaries.append(
-                    {
-                        "projectId": result["projectId"],
-                        "projectName": result["projectName"],
-                        "insightSummaries": [
-                            c["summary"] for c in result["insights"]
-                        ],
+                async with sem:
+                    async with SessionLocal() as session:
+                        cards = await _run_for_project(
+                            session,
+                            context,
+                            project,
+                            hi.ALL_PROMPT_TYPES,
+                            granularity=granularity,
+                            plan_semaphore=plan_sem,
+                        )
+                    return {
+                        "projectId": str(project.id),
+                        "projectName": project.name,
+                        "projectColor": hi.project_color(project.id),
+                        "insights": cards,
                     }
-                )
-                project_results.append(result)
-                yield _sse({"type": "project_complete", **result})
             except Exception as exc:
-                logger.warning("project intelligence failed: %s", exc)
-                yield _sse(
-                    {"type": "project_error", "error": str(exc)}
+                logger.warning(
+                    "project intelligence failed for project %s: %s", project.id, exc
                 )
+                return {
+                    "projectId": str(project.id),
+                    "projectName": project.name,
+                    "error": str(exc),
+                }
+
+        tasks = [asyncio.create_task(work(p)) for p in projects]
+        for coro in asyncio.as_completed(tasks):
+            result = await coro
+            if "error" in result:
+                failed_projects.append(result)
+                yield _sse({"type": "project_error", **result})
+                continue
+            summaries.append(
+                {
+                    "projectId": result["projectId"],
+                    "projectName": result["projectName"],
+                    "insightSummaries": [c["summary"] for c in result["insights"]],
+                }
+            )
+            project_results.append(result)
+            yield _sse({"type": "project_complete", **result})
 
         if cross_project:
             synthesis = hi.synthesise_cross_project(summaries)
@@ -299,7 +332,12 @@ async def home_intelligence_stream(
                 "synthesis": synthesis,
                 "generatedAt": generated_at,
             }
-            await _save_snapshot(context, granularity, payload)
+            await _save_snapshot(
+                context,
+                granularity,
+                payload,
+                failed_project_count=len(failed_projects),
+            )
         except Exception as exc:
             logger.warning("failed to persist intelligence snapshot: %s", exc)
 
@@ -322,7 +360,11 @@ async def home_intelligence_stream(
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _save_snapshot(
-    context: RequestContext, granularity: int, payload: dict[str, Any]
+    context: RequestContext,
+    granularity: int,
+    payload: dict[str, Any],
+    *,
+    failed_project_count: int = 0,
 ) -> None:
     """Upsert the caller's single latest intelligence snapshot."""
     async with SessionLocal() as session:
@@ -331,6 +373,21 @@ async def _save_snapshot(
                 IntelligenceSnapshot.user_id == context.user_id
             )
         )
+        new_result_count = len(payload.get("results") or [])
+        if failed_project_count:
+            previous_result_count = (
+                len(snap.payload.get("results") or []) if snap else 0
+            )
+            if new_result_count == 0 or new_result_count < previous_result_count:
+                logger.warning(
+                    "preserving prior home intelligence snapshot for user %s: "
+                    "%s project failures, %s new results vs %s previous",
+                    context.user_id,
+                    failed_project_count,
+                    new_result_count,
+                    previous_result_count,
+                )
+                return
         if snap is None:
             snap = IntelligenceSnapshot(
                 tenant_id=context.tenant_id,
@@ -521,11 +578,14 @@ async def home_dashboard_suggestions(
         widgets: list[dict[str, Any]] = []
         async with SessionLocal() as session:
             runner = _make_runner(session, context, project.id)
+            ctx = await hi.gather_project_context(session, project)
             try:
-                analyses = await _plan_analyses(
-                    session,
-                    context,
+                executed = await hi.plan_and_execute_widgets(
                     project,
+                    ctx,
+                    runner,
+                    tenant_id=context.tenant_id,
+                    user_id=context.user_id,
                     max_analyses=req.max_per_project,
                     granularity=req.granularity,
                 )
@@ -535,14 +595,9 @@ async def home_dashboard_suggestions(
                     project.id,
                     exc,
                 )
-                analyses = []
-            for a in analyses:
-                sql = (a.get("sql") or "").strip()
-                if not sql:
-                    continue
-                result = await hi._safe_query(runner, sql)
-                if not result or not result.get("rows"):
-                    continue
+                executed = []
+            for a in executed:
+                result = a["result"]
                 chart = hi._build_chart(
                     a.get("chart_type", "bar"),
                     a.get("title", ""),
@@ -557,7 +612,7 @@ async def home_dashboard_suggestions(
                         "title": a.get("title") or "Widget",
                         "chartType": a.get("chart_type", "bar"),
                         "chart": chart,
-                        "sql": sql,
+                        "sql": a.get("sql", ""),
                         "labelColumn": a.get("label_column", ""),
                         "valueColumn": a.get("value_column", ""),
                     }
@@ -593,12 +648,15 @@ async def home_project_dashboard(
     """
     project = await _project_for_access(session, context, req.project_id)
     runner = _make_runner(session, context, project.id)
+    ctx = await hi.gather_project_context(session, project)
     widgets: list[dict[str, Any]] = []
     try:
-        analyses = await _plan_analyses(
-            session,
-            context,
+        executed = await hi.plan_and_execute_widgets(
             project,
+            ctx,
+            runner,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
             max_analyses=req.max_widgets,
             granularity=req.granularity,
         )
@@ -608,14 +666,10 @@ async def home_project_dashboard(
             project.id,
             exc,
         )
-        analyses = []
-    for a in analyses:
-        sql = (a.get("sql") or "").strip()
-        if not sql:
-            continue
-        result = await hi._safe_query(runner, sql)
-        if not result or not result.get("rows"):
-            continue
+        executed = []
+    for a in executed:
+        sql = a.get("sql", "")
+        result = a["result"]
         chart = hi._build_chart(
             a.get("chart_type", "bar"),
             a.get("title", ""),
@@ -654,22 +708,37 @@ async def home_project_dashboard(
         )
 
     narrative = hi.build_dashboard_narrative(widgets)
-    return {
+    dashboard = (
+        {
+            "title": f"{project.name} — AI Dashboard",
+            "summary": narrative["summary"],
+            "keyFindings": narrative["keyFindings"],
+            "recommendedActions": narrative["recommendedActions"],
+            "widgets": widgets,
+        }
+        if widgets
+        else None
+    )
+    response: dict[str, Any] = {
         "projectId": str(project.id),
         "projectName": project.name,
         "projectColor": hi.project_color(project.id),
-        "dashboard": (
-            {
-                "title": f"{project.name} — AI Dashboard",
-                "summary": narrative["summary"],
-                "keyFindings": narrative["keyFindings"],
-                "recommendedActions": narrative["recommendedActions"],
-                "widgets": widgets,
-            }
-            if widgets
-            else None
-        ),
+        "dashboard": dashboard,
     }
+    # M4 fast-follow (surface 6): a generated dashboard is the `dashboard` mode —
+    # stamp the shared ResponseEnvelope so the modal renders via the same
+    # ResponsePresenter as the other surfaces. Additive/fail-closed; the modal
+    # falls back to its legacy body when the envelope is absent.
+    if dashboard is not None:
+        attach_envelope(
+            response,
+            PresentationMode.DASHBOARD,
+            executive_summary=narrative["summary"] or None,
+            key_findings=narrative["keyFindings"] or None,
+            recommended_actions=narrative["recommendedActions"] or None,
+            chart_cards=widgets or None,
+        )
+    return response
 
 
 @router.post("/home/insights")

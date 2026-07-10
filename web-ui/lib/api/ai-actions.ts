@@ -7,6 +7,10 @@ export interface SuggestedVisualization {
   xField?: string;
   yField?: string;
   metricField?: string;
+  /** Engine-chosen variant, e.g. "horizontal_bar" for many categories. */
+  chartStyle?: string;
+  /** Rank by the measure and keep only the top N categories when set. */
+  topN?: number;
 }
 
 export type AiActionStatus =
@@ -37,6 +41,55 @@ export interface SuggestedSource {
   reason: string;
 }
 
+/** Compact analytical-method envelope carried by a hybrid answer (M1). */
+export interface MethodEnvelope {
+  method?: string | null;
+  methodName?: string | null;
+  tier?: number | null;
+  analysisIntent?: string | null;
+  status?: string | null;
+  n?: number | null;
+  usableN?: number | null;
+  quality?: string | null;
+  results?: Record<string, unknown> | null;
+  assumptions?: unknown[];
+  caveats?: unknown[];
+  warnings?: unknown[];
+}
+
+/**
+ * Unified response contract (M4). The section-per-mode registry decides which
+ * of these fields render and in what order via `sections`; every field is
+ * optional so each surface fills only what it produces.
+ */
+export interface ResponseEnvelope {
+  mode: string;
+  sections: string[];
+  summary?: string;
+  executive_summary?: string;
+  answer?: string;
+  key_points?: unknown[];
+  key_findings?: unknown[];
+  key_drivers?: unknown[];
+  recommended_actions?: unknown[];
+  sql?: string;
+  columns?: string[];
+  rows?: Record<string, unknown>[];
+  chart?: SuggestedVisualization;
+  chart_cards?: unknown[];
+  method_envelope?: MethodEnvelope;
+  sources?: unknown[];
+  references?: unknown[];
+  intent?: Record<string, unknown>;
+  status?: string;
+}
+
+/** Presentation descriptor stamped alongside a response (M4). */
+export interface PresentationDescriptor {
+  mode: string;
+  sections: string[];
+}
+
 export interface AskAndRunResult {
   question: string;
   sql: string;
@@ -53,6 +106,11 @@ export interface AskAndRunResult {
   errorDetails?: AiErrorDetails;
   message?: string;
   suggestedSources?: SuggestedSource[];
+  // M4: shared presentation descriptor + unified envelope (additive).
+  presentation?: PresentationDescriptor;
+  envelope?: ResponseEnvelope;
+  analyticalMethod?: MethodEnvelope;
+  intent?: Record<string, unknown>;
 }
 
 export interface GenerateQueryPreviewResult {
@@ -69,6 +127,9 @@ export interface GenerateQueryPreviewResult {
   errorDetails?: AiErrorDetails;
   message?: string;
   suggestedSources?: SuggestedSource[];
+  // M4: shared presentation descriptor + unified envelope (additive).
+  presentation?: PresentationDescriptor;
+  envelope?: ResponseEnvelope;
 }
 
 export interface SaveQueryResult {

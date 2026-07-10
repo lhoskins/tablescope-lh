@@ -63,7 +63,6 @@ export function IntelligenceFeed() {
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [synthesis, setSynthesis] = useState<CrossProjectSynthesis | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [settings, setSettings] = useState<IntelligenceSettings | null>(null);
   const [, forceTick] = useState(0);
 
@@ -73,7 +72,9 @@ export function IntelligenceFeed() {
   const backgroundRef = useRef(false);
   const bufProjectsRef = useRef<StreamProject[]>([]);
   const bufResultsRef = useRef<Record<string, ProjectResult>>({});
+  const bufErroredRef = useRef<Set<string>>(new Set());
   const bufSynthesisRef = useRef<CrossProjectSynthesis | null>(null);
+  const visibleResultCountRef = useRef(0);
   const { openPanel, addInsightCard, sections } = useReportBuilder();
 
   const handleEvent = useCallback((event: IntelligenceEvent) => {
@@ -82,10 +83,12 @@ export function IntelligenceFeed() {
       case "start":
         bufProjectsRef.current = event.projects;
         bufResultsRef.current = {};
+        bufErroredRef.current = new Set();
         bufSynthesisRef.current = null;
         if (!bg) {
           setProjects(event.projects);
           setResults({});
+          visibleResultCountRef.current = 0;
           setCompleted(new Set());
           setSynthesis(null);
         }
@@ -103,27 +106,53 @@ export function IntelligenceFeed() {
             ...prev,
             [projectId]: { projectId, projectName, projectColor, insights },
           }));
+          visibleResultCountRef.current = Object.keys(bufResultsRef.current).length;
           setCompleted((prev) => new Set(prev).add(projectId));
           setLastUpdated(new Date());
         }
         break;
       }
-      case "project_error":
-        setErrorMsg(event.error);
+      case "project_error": {
+        const projectId = event.projectId;
+        if (projectId) {
+          bufErroredRef.current.add(projectId);
+          if (!bg) {
+            setCompleted((prev) => new Set(prev).add(projectId));
+          }
+        } else {
+          setStatus("complete");
+          if (!bg) {
+            setCompleted(new Set(bufProjectsRef.current.map((p) => p.id)));
+          }
+        }
         break;
+      }
       case "synthesis_complete":
         bufSynthesisRef.current = event.synthesis;
         if (!bg) setSynthesis(event.synthesis);
         break;
       case "done":
         if (bg) {
-          setProjects(bufProjectsRef.current);
-          setResults(bufResultsRef.current);
-          setCompleted(new Set(Object.keys(bufResultsRef.current)));
-          setSynthesis(bufSynthesisRef.current);
+          const nextCount = Object.keys(bufResultsRef.current).length;
+          const shouldReplace =
+            nextCount > 0 && nextCount >= visibleResultCountRef.current;
+          if (shouldReplace) {
+            setProjects(bufProjectsRef.current);
+            setResults({ ...bufResultsRef.current });
+            visibleResultCountRef.current = nextCount;
+            setCompleted(
+              new Set([
+                ...Object.keys(bufResultsRef.current),
+                ...bufErroredRef.current,
+              ]),
+            );
+            setSynthesis(bufSynthesisRef.current);
+          }
         }
         setStatus("complete");
-        setLastUpdated(new Date());
+        if (Object.keys(bufResultsRef.current).length > 0) {
+          setLastUpdated(new Date());
+        }
         break;
     }
   }, []);
@@ -133,7 +162,6 @@ export function IntelligenceFeed() {
       controllerRef.current?.abort();
       backgroundRef.current = background;
       setStatus("streaming");
-      setErrorMsg(null);
       if (!background) {
         setProjects([]);
         setResults({});
@@ -171,6 +199,7 @@ export function IntelligenceFeed() {
         const map: Record<string, ProjectResult> = {};
         for (const r of snap.results) map[r.projectId] = r;
         setResults(map);
+        visibleResultCountRef.current = Object.keys(map).length;
         setCompleted(new Set(Object.keys(map)));
         setSynthesis(snap.synthesis);
         setLastUpdated(snap.updatedAt ? new Date(snap.updatedAt) : new Date());
@@ -273,22 +302,6 @@ export function IntelligenceFeed() {
             </div>
           )}
 
-          {errorMsg && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger/10 p-4">
-              <div className="flex items-center gap-2 text-small text-danger">
-                <IconAlertTriangle size={16} />
-                <span>AI intelligence hit an error: {errorMsg}</span>
-              </div>
-              <button
-                type="button"
-                onClick={handleRefresh}
-                className="rounded-md border border-danger/40 px-2.5 py-1 text-small font-medium text-danger hover:bg-danger/10"
-              >
-                Retry
-              </button>
-            </div>
-          )}
-
           <Section
             title="Risks"
             icon={<IconAlertTriangle size={16} className="text-warning" />}
@@ -325,10 +338,9 @@ export function IntelligenceFeed() {
 
           {status === "complete" &&
             allInsights.length === 0 &&
-            projects.length > 0 &&
-            !errorMsg && (
+            projects.length > 0 && (
               <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
-                No actionable insights surfaced across your projects right now.
+                No new insights are available right now.
               </div>
             )}
         </div>

@@ -29,6 +29,7 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
   const notifyScopesChanged = useNotifyScopesChanged();
   const queryKey = ["project", projectId, "scope_sets"];
   const [pendingDelete, setPendingDelete] = useState<ScopeSet | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey,
@@ -36,11 +37,34 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
   });
 
   const toggle = useMutation({
-    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
-      scopesApi.updateScopeSet(id, { enabled }),
+    mutationFn: async ({ s, enabled }: { s: ScopeSet; enabled: boolean }) => {
+      await scopesApi.updateScopeSet(s.id, { enabled });
+      // Enabling the AI set produces its mappings on demand (idempotent).
+      if (enabled && s.type === "ai_generated") {
+        await scopesApi.autoGenerateScopes(projectId);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
       notifyScopesChanged();
+    },
+  });
+
+  const generate = useMutation({
+    // Use the LLM-based directional analyzer (not the name-matcher). The call
+    // takes seconds, so the "Generating…" state is now actually visible.
+    mutationFn: () => scopesApi.generateScopeMap(projectId),
+    onMutate: () => setGenerateError(null),
+    onSuccess: () => {
+      // Refresh so the newly created "AI Generated Scopes" set appears.
+      queryClient.invalidateQueries({ queryKey });
+      notifyScopesChanged();
+    },
+    onError: (err) => {
+      // Surface failures instead of silently swallowing them.
+      setGenerateError(
+        (err as Error)?.message || "AI scope generation failed. Try again.",
+      );
     },
   });
 
@@ -71,14 +95,33 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
             result to drill into the target query filtered by that value.
           </p>
         </div>
-        <Button
-          variant="primary"
-          onClick={() => router.push(`/projects/${projectId}/scopes/new`)}
-        >
-          <IconPlus size={14} />
-          Create Scope
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => generate.mutate()}
+            disabled={generate.isPending}
+          >
+            <IconSparkles size={14} />
+            {generate.isPending ? "Generating…" : "Generate AI Scopes"}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => router.push(`/projects/${projectId}/scopes/new`)}
+          >
+            <IconPlus size={14} />
+            Create Scope
+          </Button>
+        </div>
       </div>
+
+      {generateError && (
+        <div
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-[12.5px] text-danger"
+        >
+          {generateError}
+        </div>
+      )}
 
       {isLoading ? (
         <p className="text-[13px] text-ink-tertiary">Loading scopes…</p>
@@ -164,7 +207,7 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
                       aria-label={s.enabled ? "Disable scope" : "Enable scope"}
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggle.mutate({ id: s.id, enabled: !s.enabled });
+                        toggle.mutate({ s, enabled: !s.enabled });
                       }}
                       disabled={toggle.isPending}
                     >
@@ -186,6 +229,22 @@ export function ScopeNavigation({ projectId }: { projectId: number }) {
                     </button>
                   </td>
                   <td className="px-4 py-3 text-right">
+                    {s.type === "ai_generated" && (
+                      <button
+                        type="button"
+                        title="Regenerate AI scopes from the project's queries"
+                        aria-label="Generate AI scopes"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          generate.mutate();
+                        }}
+                        disabled={generate.isPending}
+                        className="mr-1 inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-ink-tertiary hover:bg-brand-50 hover:text-brand-600 disabled:opacity-50"
+                      >
+                        <IconSparkles size={14} />
+                        {generate.isPending ? "Generating…" : "Generate"}
+                      </button>
+                    )}
                     {s.can_delete && (
                       <button
                         type="button"

@@ -84,6 +84,19 @@ class Settings(BaseSettings):
     tablescope_ai_default_scope: str = "project"
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
+    # Max projects analysed concurrently by the Home intelligence SSE stream.
+    # Bounds AI/Ollama load so a large project count doesn't flood the server
+    # and silently time out into empty "0 insights" results.
+    home_intelligence_max_concurrent_projects: int = 3
+    # Initial plans are non-degradable, so start them serially while completed
+    # plans overlap with sibling projects' execution and interpretation work.
+    home_intelligence_max_concurrent_plan_calls: int = 1
+    # Plan calls retry transient gate saturation and read timeouts before the
+    # project is reported as unavailable.
+    home_intelligence_plan_max_retries: int = 2
+    home_intelligence_plan_retry_base_seconds: float = 2.0
+    # Max concurrent repair/interpret calls spawned by one project analysis.
+    home_intelligence_max_concurrent_ai_calls_per_project: int = 2
 
     # --- Supabase authentication ---
     # Single environment-configured auth provider (NOT one project per tenant).

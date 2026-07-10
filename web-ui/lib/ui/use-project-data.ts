@@ -4,6 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useCurrentUser, useProjectSummaries } from "./use-shell-data";
 import type {
+  PresentationDescriptor,
+  ResponseEnvelope,
+} from "@/lib/api/ai-actions";
+import type {
   CurrentUser,
   ProjectSummary,
   TenantSummary,
@@ -659,6 +663,9 @@ export interface AiAskResponse {
   request_id: string;
   context_summary: Record<string, unknown>;
   audit_id: number | null;
+  // M4: shared presentation descriptor + unified envelope (additive).
+  presentation?: PresentationDescriptor;
+  envelope?: ResponseEnvelope;
 }
 
 export function askProjectAi(

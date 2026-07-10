@@ -20,6 +20,7 @@ export interface ReferenceDocument {
   fileSizeBytes: number | null;
   originalFilename: string | null;
   aiSummary: string | null;
+  aiMetadata?: Record<string, unknown> | null;
   aiErrorMessage: string | null;
   inheritDefault: boolean;
   createdAt: string | null;
@@ -27,6 +28,29 @@ export interface ReferenceDocument {
   tierBadge?: string;
   assignmentId?: number;
   reasoning?: string | null;
+}
+
+export interface ReferenceVersion {
+  id: number;
+  title: string;
+  versionLabel: string | null;
+  status: string;
+  effectiveDate: string | null;
+  isCurrent: boolean;
+  supersededById: number | null;
+}
+
+export interface ReferenceUsage {
+  projectId: number;
+  projectName: string;
+  assignmentType: string;
+  suggestionStatus: string | null;
+}
+
+export interface ReferenceDocumentDetail {
+  document: ReferenceDocument;
+  versionFamily: ReferenceVersion[];
+  usage: ReferenceUsage[];
 }
 
 export interface ReferenceMeta {
@@ -104,8 +128,28 @@ export const referenceLibraryApi = {
   updateDocument: (id: number, body: Record<string, unknown>) =>
     apiClient.patch<ReferenceDocument>(`${BASE}/documents/${id}`, body),
 
+  getDocumentDetail: (id: number) =>
+    apiClient.get<ReferenceDocumentDetail>(`${BASE}/documents/${id}/detail`),
+
+  documentDownloadUrl: (id: number) => `${BASE}/documents/${id}/download`,
+
+  downloadDocument: async (id: number, filename: string) => {
+    const res = await apiClient.stream(`${BASE}/documents/${id}/download`);
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
   reprocess: (id: number) =>
     apiClient.post<{ status: string }>(`${BASE}/documents/${id}/process`, {}),
+
+  deleteDocument: (id: number) =>
+    apiClient.delete<{ status: string }>(`${BASE}/documents/${id}`),
 
   companyLibrary: () =>
     apiClient.get<{

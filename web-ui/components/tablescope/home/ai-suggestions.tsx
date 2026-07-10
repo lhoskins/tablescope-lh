@@ -8,13 +8,13 @@ import {
   IconCheck,
   IconLoader2,
   IconDeviceFloppy,
+  IconPlayerPlay,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import {
   suggestQueries,
   suggestDashboards,
   suggestInsights,
-  saveQuerySuggestion,
   saveDashboardSuggestion,
   type QuerySuggestionsProject,
   type DashboardSuggestionsProject,
@@ -24,6 +24,7 @@ import {
   IntelligenceCard,
   InsightChartBlock,
 } from "@/components/tablescope/home/intelligence-card";
+import { QuerySuggestionPreviewModal } from "@/components/tablescope/home/query-suggestion-preview-modal";
 
 type Pill = "queries" | "dashboards" | "insights";
 
@@ -198,25 +199,8 @@ function QuerySuggestionCard({
   description: string;
   sql: string;
 }) {
-  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
-  const [err, setErr] = useState<string | null>(null);
-
-  const save = async () => {
-    setState("saving");
-    setErr(null);
-    try {
-      await saveQuerySuggestion({
-        project_id: projectId,
-        name: title,
-        description,
-        sql_text: sql,
-      });
-      setState("saved");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Save failed");
-      setState("idle");
-    }
-  };
+  const [preview, setPreview] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   return (
     <article className="rounded-lg border border-line-tertiary bg-bg-primary p-4">
@@ -229,26 +213,21 @@ function QuerySuggestionCard({
         </div>
         <button
           type="button"
-          onClick={() => void save()}
-          disabled={state !== "idle"}
+          onClick={() => setPreview(true)}
           className={cn(
             "inline-flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1 text-small font-medium transition-colors",
-            state === "saved"
+            saved
               ? "border-success/40 bg-success/10 text-success"
-              : "border-line-secondary text-ink-secondary hover:border-brand-100 hover:text-brand-700 disabled:opacity-50",
+              : "border-line-secondary text-ink-secondary hover:border-brand-100 hover:text-brand-700",
           )}
         >
-          {state === "saved" ? (
+          {saved ? (
             <>
               <IconCheck size={14} /> Saved
             </>
-          ) : state === "saving" ? (
-            <>
-              <IconLoader2 size={14} className="animate-spin" /> Saving…
-            </>
           ) : (
             <>
-              <IconDeviceFloppy size={14} /> Save
+              <IconPlayerPlay size={14} /> Preview
             </>
           )}
         </button>
@@ -256,7 +235,15 @@ function QuerySuggestionCard({
       <pre className="mt-3 overflow-x-auto rounded-md bg-bg-secondary p-3 text-caption text-ink-secondary">
         <code>{sql}</code>
       </pre>
-      {err && <p className="mt-2 text-small text-danger">{err}</p>}
+      <QuerySuggestionPreviewModal
+        open={preview}
+        projectId={projectId}
+        title={title}
+        description={description}
+        sql={sql}
+        onClose={() => setPreview(false)}
+        onSaved={() => setSaved(true)}
+      />
     </article>
   );
 }

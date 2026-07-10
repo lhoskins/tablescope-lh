@@ -284,6 +284,41 @@ async def create_scope_set(
     )
 
 
+@router.post(
+    "/projects/{project_id}/scope_sets/auto-generate",
+    response_model=ScopeSetRead,
+)
+async def auto_generate_scope_set(
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> ScopeSetRead:
+    """Generate the project's "AI Generated Scopes" set on demand.
+
+    Iterates the project's saved queries and creates shared-column drill-down
+    mappings (idempotent — existing mappings are skipped, so this is safe to
+    re-run). Enabling the AI scope on the Scopes page calls this so the toggle
+    actually produces the mappings. Always returns the AI set (created if
+    absent) even when no new mappings were found.
+    """
+    await _get_project(session, project_id=project_id, tenant_id=context.tenant_id)
+
+    from app.services.auto_scope import auto_generate_project_scopes
+
+    scope_set, _created = await auto_generate_project_scopes(
+        session,
+        project_id=project_id,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+    )
+    await session.commit()
+    await session.refresh(scope_set)
+    count = await _scope_count(session, scope_set.id)
+    return ScopeSetRead.model_validate(
+        await _scope_set_dict(session, scope_set, count, context)
+    )
+
+
 # ── Scope Builder: available tables ──────────────────────────────────────
 
 
@@ -603,9 +638,11 @@ async def ai_suggest_scopes(
 ) -> ScopeAISuggestResponse:
     """Suggest field-to-field relationships among the canvas tables.
 
-    Matches identically-named columns across the selected saved queries (the
-    same heuristic that powers automatic scope creation) and returns them as
-    suggestions the user can accept onto the canvas.
+    Runs the LLM-based directional analyzer (the same Phase 1 AI call + Phase 2
+    cell validation that powers "Generate AI Scopes") over the selected saved
+    queries and returns the validated suggestions — one direction per pair
+    (summarized/aggregated → detailed/raw), never the reverse — for the user to
+    accept onto the canvas.
     """
     scope_set = await _get_scope_set(
         session, scope_set_id=scope_set_id, tenant_id=context.tenant_id
@@ -613,53 +650,34 @@ async def ai_suggest_scopes(
     if not payload.query_ids:
         return ScopeAISuggestResponse(suggestions=[])
 
-    queries = (
-        await session.scalars(
-            select(SavedQuery).where(
-                SavedQuery.id.in_(payload.query_ids),
-                SavedQuery.project_id == scope_set.project_id,
-            )
-        )
-    ).all()
-    cols_by_q: dict[int, dict[str, str]] = {}
-    name_by_q: dict[int, str] = {}
-    for q in queries:
-        name_by_q[q.id] = q.name
-        fields = await _resolve_query_fields(
-            session,
-            context=context,
-            project_id=scope_set.project_id,
-            query_sql=q.sql_text,
-        )
-        cols_by_q[q.id] = {c.lower(): c for c in fields}
+    # Reuse the shared analyzer from the generate path. Imported lazily to keep
+    # the scope_sets ↔ ai_proxy module graph acyclic.
+    from app.routes.ai_proxy import _analyze_project_scopes
 
-    suggestions: list[ScopeAISuggestion] = []
-    seen: set[tuple[int, str, int, str]] = set()
-    ids = sorted(cols_by_q.keys())
-    for i, qa in enumerate(ids):
-        for qb in ids[i + 1 :]:
-            common = set(cols_by_q[qa]) & set(cols_by_q[qb])
-            for low in sorted(common):
-                src_field = cols_by_q[qa][low]
-                tgt_field = cols_by_q[qb][low]
-                key = (qa, src_field, qb, tgt_field)
-                if key in seen:
-                    continue
-                seen.add(key)
-                # ID-like joins score higher than incidental shared names.
-                score = 0.9 if low.endswith("id") else 0.6
-                suggestions.append(
-                    ScopeAISuggestion(
-                        query_id=qa,
-                        source_field=src_field,
-                        source_table=name_by_q.get(qa),
-                        target_query_id=qb,
-                        target_field=tgt_field,
-                        target_table=name_by_q.get(qb),
-                        match_group_id=None,
-                        match_mode="all",
-                        confidence_score=score,
-                        rationale=f"Both queries expose a '{src_field}' column.",
-                    )
-                )
+    validated, _names = await _analyze_project_scopes(
+        session=session,
+        context=context,
+        project_id=scope_set.project_id,
+        query_ids=payload.query_ids,
+    )
+
+    suggestions: list[ScopeAISuggestion] = [
+        ScopeAISuggestion(
+            query_id=s["source_query_id"],
+            source_field=s["source_field"],
+            source_table=s.get("source_query_name"),
+            target_query_id=s["target_query_id"],
+            target_field=s["target_field"],
+            target_table=s.get("target_query_name"),
+            match_group_id=None,
+            match_mode="all",
+            confidence_score=s.get("confidence"),
+            rationale=(
+                s.get("reason")
+                or "AI-suggested drill-down "
+                f"({s.get('source_query_name')} → {s.get('target_query_name')})."
+            ),
+        )
+        for s in validated
+    ]
     return ScopeAISuggestResponse(suggestions=suggestions)

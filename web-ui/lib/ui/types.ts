@@ -42,6 +42,7 @@ export type NavKey =
   | "admin-allowed-domains"
   | "admin-data-source-assignments"
   | "admin-branding"
+  | "admin-analytical-methods"
   // Project-mode nav
   | "overview"
   | "project-data-sources"

@@ -26,6 +26,8 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.project import Project
 from app.models.project_asset import ProjectAsset
+from app.services.presentation_engine import PresentationMode
+from app.services.response_envelope import attach_envelope
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}/assets", tags=["project-assets"])
@@ -402,10 +404,20 @@ async def get_asset_ai_profile(
     asset = await session.get(ProjectAsset, asset_id)
     if not asset or asset.project_id != project_id or asset.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Asset not found")
-    return {
+    profile: dict = {
         "asset_id": asset.id,
         "ai_status": asset.ai_status,
         "ai_summary": asset.ai_summary,
         "ai_metadata": asset.ai_metadata,
         "ai_error_message": asset.ai_error_message,
     }
+    # M4 fast-follow (contract-only): stamp the shared ResponseEnvelope so the
+    # document profile also emits the unified contract. The profile drawer keeps
+    # its bespoke renderer; this is additive metadata (fail-closed) it ignores.
+    attach_envelope(
+        profile,
+        PresentationMode.DOCUMENT,
+        summary=asset.ai_summary or None,
+        status=asset.ai_status or None,
+    )
+    return profile
