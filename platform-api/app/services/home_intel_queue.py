@@ -75,6 +75,10 @@ def _tenant_slots_key(tenant_id: int) -> str:
     return f"{_KEY_PREFIX}:tenant-slots:{tenant_id}"
 
 
+def _current_run_key(tenant_id: int, user_id: int) -> str:
+    return f"{_KEY_PREFIX}:current-run:{tenant_id}:{user_id}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Run lifecycle
 # ─────────────────────────────────────────────────────────────────────────────
@@ -104,7 +108,21 @@ async def create_run(
     if projects:
         pipe.sadd(_k(run_id, "expected"), *[str(p["id"]) for p in projects])
         pipe.expire(_k(run_id, "expected"), ttl)
+    # Mark this as the caller's current run so any still-queued jobs from an
+    # earlier run they abandoned (e.g. a page reload) supersede themselves
+    # instead of competing forever for the tenant's slots.
+    pipe.set(_current_run_key(tenant_id, user_id), run_id, ex=ttl)
     await pipe.execute()
+
+
+async def is_current_run(tenant_id: int, user_id: int, run_id: str) -> bool:
+    """True unless a newer run for the same (tenant, user) has superseded this.
+
+    A missing marker means "not superseded" (fail-open) so a run whose marker
+    has already TTL'd out still finalizes rather than silently stalling.
+    """
+    current = await get_redis().get(_current_run_key(tenant_id, user_id))
+    return current is None or current == run_id
 
 
 async def get_meta(run_id: str) -> dict[str, Any] | None:

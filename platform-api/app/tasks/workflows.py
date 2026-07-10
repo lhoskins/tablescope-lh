@@ -333,6 +333,16 @@ async def analyze_project_intelligence(
         await _finalize_run_if_complete(run_id)
         return result
 
+    # A newer run for the same user (e.g. a page reload) supersedes this one:
+    # exit immediately without taking a slot or retrying so abandoned runs
+    # cannot pile up and starve the tenant's live run. No result is written —
+    # the stale run's Redis keys simply TTL out.
+    if not await q.is_current_run(tenant_id, user_id, run_id):
+        logger.info(
+            "home-intel skipping superseded run %s project %s", run_id, project_id
+        )
+        return {"superseded": True}
+
     # Per-tenant fairness: if the tenant is at its cap, defer so another
     # tenant's work can proceed (round-robin-ish). This is retried until the
     # tenant frees a slot; only if the (generous) try budget is exhausted do we

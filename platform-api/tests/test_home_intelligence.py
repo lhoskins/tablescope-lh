@@ -1546,6 +1546,82 @@ async def test_worker_terminal_error_not_retried(
     assert "insights" not in results[str(project_id)]
 
 
+async def test_worker_skips_superseded_run(
+    client, service_headers, db_engine, monkeypatch, fake_redis
+) -> None:
+    """A run superseded by a newer one for the same user exits without work.
+
+    It must neither take a tenant slot nor write a result nor retry, so
+    abandoned runs (e.g. page reloads) cannot pile up and starve the live run.
+    """
+    _, _, headers = await _setup(client, service_headers)
+    response = await client.post(
+        "/api/projects",
+        json={"name": "Stale Project", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    project_id = response.json()["id"]
+
+    from arq.worker import Retry
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.routes.home_intelligence as hir
+    from app.services import home_intel_queue as q
+
+    session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    ran = False
+
+    async def fake_run(_session, _context, _project, _prompt_types, **_kwargs):
+        nonlocal ran
+        ran = True
+        return [{"summary": "should never run"}]
+
+    async def fake_access(_session, _context, _project):
+        return True
+
+    monkeypatch.setattr(hir, "SessionLocal", session_factory)
+    monkeypatch.setattr(hir, "_run_for_project", fake_run)
+    monkeypatch.setattr(hir, "_has_access", fake_access)
+
+    projects = [{"id": str(project_id), "name": "Stale", "color": "#fff"}]
+    stale_run, live_run = "run-stale", "run-live"
+    await q.create_run(
+        run_id=stale_run,
+        tenant_id=7,
+        user_id=9,
+        granularity=3,
+        cross_project=False,
+        projects=projects,
+    )
+    # A newer run for the same (tenant, user) supersedes the stale one.
+    await q.create_run(
+        run_id=live_run,
+        tenant_id=7,
+        user_id=9,
+        granularity=3,
+        cross_project=False,
+        projects=projects,
+    )
+
+    outcome = await _run_worker(
+        monkeypatch,
+        hir,
+        job_try=1,
+        tenant_id=7,
+        user_id=9,
+        project_id=project_id,
+        granularity=3,
+        run_id=stale_run,
+    )
+    assert not isinstance(outcome, Retry)
+    assert outcome == {"superseded": True}
+    assert ran is False
+    assert await q.get_results(stale_run) == {}
+    # The stale run never touched the tenant's slot budget.
+    assert await q.acquire_tenant_slot(7, cap=1) is True
+
+
 async def test_two_tenants_are_not_starved(fake_redis) -> None:
     """Per-tenant tokens are isolated: one busy tenant cannot starve another."""
     from app.services import home_intel_queue as q
