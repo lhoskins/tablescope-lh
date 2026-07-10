@@ -1975,6 +1975,7 @@ async def run_ai_intelligence(
     user_id: int,
     max_analyses: int = 15,
     granularity: int = 3,
+    plan_semaphore: asyncio.Semaphore | None = None,
 ) -> list[dict[str, Any]] | None:
     """LLM-driven analyst loop. Returns cards, or ``None`` to signal fallback.
 
@@ -1982,8 +1983,8 @@ async def run_ai_intelligence(
     2. Execute each generated SQL against the project's real data.
     3. Ask the AI to interpret the actual results into executive findings.
 
-    Returns ``None`` when the AI server is unavailable or proposes nothing
-    usable, so the caller can fall back to the deterministic suite.
+    Returns ``None`` only when AI is disabled. An unavailable initial plan raises
+    so streaming callers report a project failure; a valid empty plan returns [].
     """
     from app.services import ai_intelligence_client as ai
 
@@ -2044,19 +2045,26 @@ async def run_ai_intelligence(
     # validated two-table insights; otherwise it stays single-table.
     relationship_hints = find_relationship_candidates(ctx.tables)
 
-    analyses = await ai.plan(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        project_id=project.id,
-        allowed_tables=allowed_tables,
-        documents=documents,
-        table_schema=table_schema,
-        relationship_hints=relationship_hints,
-        max_analyses=max_analyses,
-        granularity=granularity,
-    )
+    async def request_plan() -> list[dict[str, Any]] | None:
+        return await ai.plan(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            project_id=project.id,
+            allowed_tables=allowed_tables,
+            documents=documents,
+            table_schema=table_schema,
+            relationship_hints=relationship_hints,
+            max_analyses=max_analyses,
+            granularity=granularity,
+        )
+
+    if plan_semaphore is None:
+        analyses = await request_plan()
+    else:
+        async with plan_semaphore:
+            analyses = await request_plan()
     if analyses is None:
-        return None  # AI unreachable -> fall back
+        raise ai.AIUnavailableError("AI planning is unavailable; retry shortly.")
     if not analyses:
         return []  # AI reachable but found nothing worth surfacing
 

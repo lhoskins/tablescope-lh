@@ -1747,6 +1747,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         num_ctx=16384,
         response_format="json",
         tenant_id=req.tenant_id,
+        request_kind="plan",
     )
 
     parsed = _parse_json_response(raw)

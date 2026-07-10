@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     # Bounds AI/Ollama load so a large project count doesn't flood the server
     # and silently time out into empty "0 insights" results.
     home_intelligence_max_concurrent_projects: int = 3
+    # Initial plans are non-degradable, so start them serially while completed
+    # plans overlap with sibling projects' execution and interpretation work.
+    home_intelligence_max_concurrent_plan_calls: int = 1
+    # Plan calls retry transient gate saturation and read timeouts before the
+    # project is reported as unavailable.
+    home_intelligence_plan_max_retries: int = 2
+    home_intelligence_plan_retry_base_seconds: float = 2.0
     # Max concurrent repair/interpret calls spawned by one project analysis.
     home_intelligence_max_concurrent_ai_calls_per_project: int = 2
 

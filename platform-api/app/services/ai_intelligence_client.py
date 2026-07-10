@@ -50,25 +50,42 @@ def is_enabled() -> bool:
     return bool(settings.tablescope_ai_enabled and settings.tablescope_ai_api_url)
 
 
-def _busy_retry_seconds(response: httpx.Response) -> float:
-    raw = response.headers.get("Retry-After")
-    if raw:
-        try:
-            return min(max(float(raw), 0.0), _BUSY_MAX_RETRY_SECONDS)
-        except ValueError:
-            pass
-    return _BUSY_DEFAULT_RETRY_SECONDS
+def _retry_seconds(
+    *,
+    attempt: int,
+    base_seconds: float,
+    response: httpx.Response | None = None,
+) -> float:
+    if response is not None:
+        raw = response.headers.get("Retry-After")
+        if raw:
+            try:
+                return min(max(float(raw), 0.0), _BUSY_MAX_RETRY_SECONDS)
+            except ValueError:
+                pass
+    return min(
+        max(base_seconds, 0.0) * (2 ** max(attempt - 1, 0)),
+        _BUSY_MAX_RETRY_SECONDS,
+    )
 
 
-async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+async def _post(
+    path: str,
+    payload: dict[str, Any],
+    *,
+    max_attempts: int = _BUSY_MAX_ATTEMPTS,
+    retry_read_timeouts: bool = False,
+    retry_base_seconds: float = _BUSY_DEFAULT_RETRY_SECONDS,
+) -> dict[str, Any] | None:
     settings = get_settings()
     if not is_enabled():
         return None
     base_payload = dict(payload)
     url = f"{settings.tablescope_ai_api_url}{path}"
 
+    attempts = max(1, max_attempts)
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        for attempt in range(1, _BUSY_MAX_ATTEMPTS + 1):
+        for attempt in range(1, attempts + 1):
             signed_payload = dict(base_payload)
             signed_payload["timestamp"] = time.time()
             signed_payload["signature"] = _sign_payload(
@@ -76,6 +93,24 @@ async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
             )
             try:
                 resp = await client.post(url, json=signed_payload)
+            except httpx.ReadTimeout as exc:
+                if retry_read_timeouts and attempt < attempts:
+                    retry_seconds = _retry_seconds(
+                        attempt=attempt,
+                        base_seconds=retry_base_seconds,
+                    )
+                    logger.warning(
+                        "AI intelligence call to %s timed out; retrying in %.1fs "
+                        "(attempt %s/%s)",
+                        path,
+                        retry_seconds,
+                        attempt,
+                        attempts,
+                    )
+                    await asyncio.sleep(retry_seconds)
+                    continue
+                logger.warning("AI intelligence call to %s timed out: %s", path, exc)
+                raise AIUnavailableError("AI server timed out; retry shortly.") from exc
             except httpx.TimeoutException as exc:
                 logger.warning("AI intelligence call to %s timed out: %s", path, exc)
                 raise AIUnavailableError("AI server timed out; retry shortly.") from exc
@@ -85,15 +120,19 @@ async def _post(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
                     "AI server is unavailable; retry shortly."
                 ) from exc
 
-            if resp.status_code == 503 and attempt < _BUSY_MAX_ATTEMPTS:
-                retry_seconds = _busy_retry_seconds(resp)
+            if resp.status_code == 503 and attempt < attempts:
+                retry_seconds = _retry_seconds(
+                    attempt=attempt,
+                    base_seconds=retry_base_seconds,
+                    response=resp,
+                )
                 logger.warning(
                     "AI intelligence server busy for %s; retrying in %.1fs "
                     "(attempt %s/%s)",
                     path,
                     retry_seconds,
                     attempt,
-                    _BUSY_MAX_ATTEMPTS,
+                    attempts,
                 )
                 await asyncio.sleep(retry_seconds)
                 continue
@@ -133,6 +172,8 @@ async def plan(
     granularity: int = 3,
 ) -> list[dict[str, Any]] | None:
     """Ask the LLM to propose diagnostic analyses. Returns ``analyses`` or None."""
+    settings = get_settings()
+    max_retries = max(0, settings.home_intelligence_plan_max_retries)
     result = await _post(
         "/ai/intelligence/plan",
         {
@@ -146,6 +187,11 @@ async def plan(
             "max_analyses": max_analyses,
             "granularity": granularity,
         },
+        max_attempts=max_retries + 1,
+        retry_read_timeouts=True,
+        retry_base_seconds=max(
+            0.0, settings.home_intelligence_plan_retry_base_seconds
+        ),
     )
     if result is None:
         return None

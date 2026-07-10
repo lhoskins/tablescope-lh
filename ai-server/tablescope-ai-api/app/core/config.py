@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     ollama_max_concurrent: int = 4
     tenant_max_concurrent: int = 3
     ai_gate_acquire_timeout_seconds: float = 30.0
+    ai_plan_reserved_global_slots: int = 1
+    ai_plan_reserved_tenant_slots: int = 1
+    ai_plan_gate_acquire_timeout_seconds: float = 5.0
+    ai_gate_retry_after_seconds: int = 5
 
     class Config:
         env_file = ".env"

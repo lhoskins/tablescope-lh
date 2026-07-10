@@ -100,6 +100,7 @@ async def _run_for_project(
     *,
     write_audit: bool = True,
     granularity: int = 3,
+    plan_semaphore: asyncio.Semaphore | None = None,
 ) -> list[dict[str, Any]]:
     started = datetime.now(UTC)
     ctx = await hi.gather_project_context(session, project)
@@ -118,6 +119,7 @@ async def _run_for_project(
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             granularity=granularity,
+            plan_semaphore=plan_semaphore,
         )
     except AIUnavailableError:
         raise
@@ -258,6 +260,10 @@ async def home_intelligence_stream(
             1, get_settings().home_intelligence_max_concurrent_projects
         )
         sem = asyncio.Semaphore(max_concurrent)
+        max_concurrent_plans = max(
+            1, get_settings().home_intelligence_max_concurrent_plan_calls
+        )
+        plan_sem = asyncio.Semaphore(max_concurrent_plans)
 
         async def work(project: Project) -> dict[str, Any]:
             try:
@@ -269,6 +275,7 @@ async def home_intelligence_stream(
                             project,
                             hi.ALL_PROMPT_TYPES,
                             granularity=granularity,
+                            plan_semaphore=plan_sem,
                         )
                     return {
                         "projectId": str(project.id),

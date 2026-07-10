@@ -105,6 +105,27 @@ def test_eleven_same_tenant_requests_drain_with_tuned_limits() -> None:
     asyncio.run(run())
 
 
+def test_gate_reserves_tenant_capacity_for_plan_requests() -> None:
+    async def run() -> None:
+        gate = AIGate(
+            global_limit=3,
+            tenant_limit=3,
+            acquire_timeout_seconds=0.01,
+            plan_reserved_global_slots=1,
+            plan_reserved_slots=1,
+            plan_acquire_timeout_seconds=0.01,
+        )
+        async with gate.acquire(1):
+            async with gate.acquire(1):
+                async with gate.acquire(1, request_kind="plan"):
+                    pass
+                with pytest.raises(AIGateBusyError):
+                    async with gate.acquire(1):
+                        pass
+
+    asyncio.run(run())
+
+
 def test_gate_timeout_maps_to_http_503() -> None:
     async def run() -> None:
         from app.main import ai_gate_busy_handler
@@ -133,8 +154,11 @@ def test_generate_without_tenant_uses_global_gate(monkeypatch) -> None:
     acquired: list[int | None] = []
 
     @asynccontextmanager
-    async def fake_acquire(tenant_id: int | None):
+    async def fake_acquire(
+        tenant_id: int | None, *, request_kind: str = "default"
+    ):
         acquired.append(tenant_id)
+        assert request_kind == "default"
         yield
 
     class FakeResponse:

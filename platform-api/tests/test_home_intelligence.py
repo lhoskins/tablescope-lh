@@ -503,6 +503,96 @@ async def test_run_ai_intelligence_executes_and_interprets(monkeypatch) -> None:
     assert "spend" in card["sources"]["tables"]
 
 
+async def test_run_ai_intelligence_treats_missing_plan_as_unavailable(
+    monkeypatch,
+) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**_kwargs):
+        return None
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+    with pytest.raises(ai.AIUnavailableError, match="planning is unavailable"):
+        await hi.run_ai_intelligence(
+            _project(), ctx, _runner({}), tenant_id=1, user_id=1
+        )
+
+
+async def test_multi_project_plans_are_serialized_without_losing_rich_results(
+    monkeypatch,
+) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+    active_plans = 0
+    max_active_plans = 0
+
+    async def fake_plan(**_kwargs):
+        nonlocal active_plans, max_active_plans
+        active_plans += 1
+        max_active_plans = max(max_active_plans, active_plans)
+        await asyncio.sleep(0)
+        active_plans -= 1
+        return [
+            {
+                "id": "rich",
+                "category": "trend",
+                "title": "Manufacturing throughput",
+                "rationale": "Grounded production signal.",
+                "sql": (
+                    'SELECT "plant", "throughput" FROM "operations" '
+                    "/* GOOD */"
+                ),
+                "chart_type": "bar",
+                "label_column": "plant",
+                "value_column": "throughput",
+            }
+        ]
+
+    async def fake_interpret(**_kwargs):
+        return {}
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    ctx = hi.ProjectContext(
+        tables=[_table("operations", ["plant", "throughput"])], documents=[]
+    )
+    runner = _runner({"GOOD": [{"plant": "A", "throughput": 120}]})
+    plan_semaphore = asyncio.Semaphore(1)
+    projects = [
+        _project(i, "Manufacturing" if i == 1 else f"Project {i}")
+        for i in range(1, 12)
+    ]
+
+    results = await asyncio.gather(
+        *(
+            hi.run_ai_intelligence(
+                project,
+                ctx,
+                runner,
+                tenant_id=1,
+                user_id=1,
+                plan_semaphore=plan_semaphore,
+            )
+            for project in projects
+        )
+    )
+
+    assert max_active_plans == 1
+    assert len(results) == 11
+    assert all(
+        cards and cards[0]["title"] == "Manufacturing throughput"
+        for cards in results
+    )
+
+
 async def test_run_ai_intelligence_keeps_direct_results_when_sql_repair_is_busy(
     monkeypatch,
 ) -> None:

@@ -19,6 +19,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.core.config import settings
 from app.routers import ai, health
 from app.services.ai_gate import AIGateBusyError
 
@@ -48,7 +49,7 @@ async def ai_gate_busy_handler(
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": str(exc), "code": "ai_busy"},
-        headers={"Retry-After": "5"},
+        headers={"Retry-After": str(max(1, settings.ai_gate_retry_after_seconds))},
     )
 
 

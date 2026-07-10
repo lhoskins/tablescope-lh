@@ -30,6 +30,7 @@ async def generate(
     num_ctx: int | None = None,
     response_format: str | None = None,
     tenant_id: int | None = None,
+    request_kind: str = "default",
 ) -> str:
     """Generate text completion from Ollama.
 
@@ -57,7 +58,7 @@ async def generate(
     if system_prompt:
         payload["system"] = system_prompt
 
-    async with ai_gate.acquire(tenant_id):
+    async with ai_gate.acquire(tenant_id, request_kind=request_kind):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(
                 f"{settings.ollama_url}/api/generate",
