@@ -20,6 +20,7 @@ import {
   IconSearch,
   IconTable,
   IconFileText,
+  IconLoader2,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,9 @@ import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewM
 import type { AiCardContext } from "@/lib/api/ai-actions";
 import { GenerateDashboardModal } from "@/components/tablescope/project-insight/generate-dashboard-modal";
 import { renderBold } from "@/components/tablescope/home/intelligence-card";
+import { InsightsPanel } from "@/components/tablescope/home/ai-suggestions";
+import { suggestInsights } from "@/lib/api/home-intelligence";
+import { formatLastUpdated } from "@/lib/format-datetime";
 import {
   projectInsightApi,
   type ProjectInsight,
@@ -80,11 +84,28 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   });
   const [customQuestion, setCustomQuestion] = useState("");
 
-  const { data, isLoading, isError, refetch, isFetching } =
+  const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
     useQuery<ProjectInsight>({
       queryKey: INSIGHT_KEY(projectId),
       queryFn: () => projectInsightApi.get(projectId),
+      // Snapshot behavior: a remount hydrates instantly from cache while a
+      // background refetch runs — cards are never blanked to a spinner.
+      staleTime: 5 * 60_000,
     });
+
+  // Insights & opportunities — the same content as the Home page's
+  // "Suggest Insights" pill, scoped to this project, rendered inline.
+  const insightsQuery = useQuery({
+    queryKey: [...INSIGHT_KEY(projectId), "suggested-insights"],
+    queryFn: () => suggestInsights(3, Number(projectId)),
+    staleTime: 5 * 60_000,
+  });
+
+  const analyzing = isFetching || insightsQuery.isFetching;
+  const handleRefresh = () => {
+    refetch();
+    insightsQuery.refetch();
+  };
 
   const [workflowTab, setWorkflowTab] = useState<"open" | "reviewed">("open");
 
@@ -192,14 +213,26 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       activeNav="project-insight"
       breadcrumbLabel="Project Insight"
       actions={
-        <Button
-          variant="secondary"
-          onClick={() => refetch()}
-          disabled={isFetching}
-        >
-          <IconRefresh size={14} className={isFetching ? "animate-spin" : ""} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3">
+          <span className="text-small text-ink-tertiary">
+            {analyzing
+              ? "Analyzing…"
+              : formatLastUpdated(
+                  dataUpdatedAt ? new Date(dataUpdatedAt) : null,
+                )}
+          </span>
+          <Button
+            variant="secondary"
+            onClick={handleRefresh}
+            disabled={analyzing}
+          >
+            <IconRefresh
+              size={14}
+              className={analyzing ? "animate-spin" : ""}
+            />
+            Refresh
+          </Button>
+        </div>
       }
     >
       <div className="mx-auto w-full max-w-content space-y-4 py-4">
@@ -618,6 +651,20 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 </Panel>
               </div>
             </div>
+
+            <Panel title="Insights & Opportunities">
+              {insightsQuery.isFetching && !insightsQuery.data ? (
+                <div className="flex items-center gap-2 py-8 text-small text-ink-tertiary">
+                  <IconLoader2 size={16} className="animate-spin" />
+                  Analyzing this project…
+                </div>
+              ) : (
+                <InsightsPanel
+                  projects={insightsQuery.data?.projects ?? []}
+                  showProjectHeader={false}
+                />
+              )}
+            </Panel>
           </>
         )}
       </div>
@@ -714,7 +761,7 @@ function Panel({
   headerRight,
 }: {
   title: string;
-  icon: ReactNode;
+  icon?: ReactNode;
   children: ReactNode;
   headerRight?: ReactNode;
 }) {

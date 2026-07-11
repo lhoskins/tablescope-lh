@@ -3,9 +3,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-const { push, getInsight, acknowledge, reviewed, reopen } = vi.hoisted(() => ({
+const { push, getInsight, acknowledge, reviewed, reopen, suggestInsights } =
+  vi.hoisted(() => ({
   push: vi.fn(),
   getInsight: vi.fn(),
+  suggestInsights: vi.fn(),
   acknowledge: vi.fn().mockResolvedValue({
     insightId: "i1",
     status: "reviewed",
@@ -65,6 +67,12 @@ vi.mock("@/lib/api/project-insight", () => ({
     reopen: (projectId: string, insightId: string) =>
       reopen(projectId, insightId),
   },
+}));
+
+vi.mock("@/lib/api/home-intelligence", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/api/home-intelligence")>()),
+  suggestInsights: (granularity?: number, projectId?: number) =>
+    suggestInsights(granularity, projectId),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -145,6 +153,8 @@ describe("ProjectInsightScreen", () => {
     reviewed.mockResolvedValue({ items: [] });
     getInsight.mockReset();
     getInsight.mockResolvedValue(INSIGHT);
+    suggestInsights.mockReset();
+    suggestInsights.mockResolvedValue({ projects: [] });
   });
 
   it("renders the approved layout sections", async () => {
@@ -447,6 +457,67 @@ describe("ProjectInsightScreen", () => {
     fireEvent.click(reopenBtn);
     await waitFor(() =>
       expect(reopen).toHaveBeenCalledWith("42", "i9"),
+    );
+  });
+
+  it("shows a last-updated timestamp and Analyzing on refresh", async () => {
+    renderScreen();
+    // Once loaded, the header shows the last-updated label, not a spinner.
+    expect(
+      await screen.findByText(/Last updated:/),
+    ).toBeTruthy();
+    // Make the next refetch hang so the in-flight state is observable.
+    let release: (() => void) | undefined;
+    getInsight.mockReturnValue(
+      new Promise((resolve) => {
+        release = () => resolve(INSIGHT);
+      }),
+    );
+    const refresh = screen.getByRole("button", { name: /refresh/i });
+    fireEvent.click(refresh);
+    // While refetching, the label flips to "Analyzing…" and disables refresh.
+    expect(await screen.findByText("Analyzing…")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: /refresh/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    release?.();
+  });
+
+  it("renders scoped inline insights and sends this project's id", async () => {
+    suggestInsights.mockResolvedValue({
+      projects: [
+        {
+          projectId: "42",
+          projectName: "Boeing",
+          projectColor: "#123456",
+          insights: [
+            {
+              id: "ins-1",
+              projectId: "42",
+              projectName: "Boeing",
+              projectColor: "#123456",
+              insightType: "opportunity_supplier",
+              severity: "recommendation",
+              title: "Consolidate spend with top suppliers",
+              summary: "Two suppliers account for most spend.",
+              chart: null,
+              callout: null,
+              sources: { tables: [], documents: [] },
+              executedAt: "2026-06-25T00:00:00Z",
+            },
+          ],
+        },
+      ],
+    });
+    renderScreen();
+    expect(await screen.findByText("Insights & Opportunities")).toBeTruthy();
+    expect(
+      await screen.findByText("Consolidate spend with top suppliers"),
+    ).toBeTruthy();
+    // The endpoint must be scoped to this project only.
+    await waitFor(() =>
+      expect(suggestInsights).toHaveBeenCalledWith(3, 42),
     );
   });
 });

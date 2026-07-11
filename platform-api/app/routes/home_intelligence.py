@@ -414,6 +414,9 @@ async def get_intelligence_snapshot(
 class SuggestRequest(BaseModel):
     max_per_project: int = 5
     granularity: int = 3
+    # When set, generate for this single project only (Project Insight page).
+    # None keeps the original every-accessible-project behavior (Home page).
+    project_id: int | None = None
 
 
 class ProjectDashboardRequest(BaseModel):
@@ -725,9 +728,11 @@ async def home_insights(
     req: SuggestRequest,
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
-    """AI insights & opportunities for every accessible project (in memory)."""
+    """AI insights & opportunities for accessible projects (in memory)."""
     async with SessionLocal() as session:
         projects = await _accessible_projects(session, context)
+        if req.project_id is not None:
+            projects = [p for p in projects if p.id == req.project_id]
     if not projects:
         return {"projects": []}
 

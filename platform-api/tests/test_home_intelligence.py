@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.auth.jwt import create_access_token
 from app.services import home_intelligence as hi
@@ -657,6 +658,122 @@ async def test_run_intelligence_suite_no_access(client, service_headers) -> None
     )
     assert r.status_code == 200
     assert r.json()["error"] == "no_access"
+
+
+async def test_home_insights_project_id_scopes_to_one_project(
+    client, db_engine, service_headers, monkeypatch
+) -> None:
+    _, _, headers = await _setup(client, service_headers)
+    ids: list[int] = []
+    for name in ("Alpha", "Beta", "Gamma"):
+        r = await client.post(
+            "/api/projects",
+            json={"name": name, "description": "x", "is_shared": False},
+            headers=headers,
+        )
+        assert r.status_code == 201
+        ids.append(r.json()["id"])
+
+    import app.routes.home_intelligence as hir
+
+    # The endpoint opens its own SessionLocal; bind it to the test engine.
+    monkeypatch.setattr(
+        hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
+    )
+
+    ran: list[int] = []
+
+    async def spy_run_for_project(
+        session, context, project, prompt_types, *, write_audit, granularity
+    ):
+        ran.append(project.id)
+        return []
+
+    monkeypatch.setattr(hir, "_run_for_project", spy_run_for_project)
+
+    target = ids[1]
+    r = await client.post(
+        "/api/ai/home/insights",
+        json={"project_id": target},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # Only the requested project was analyzed — no thundering herd.
+    assert ran == [target]
+    assert [p["projectId"] for p in body["projects"]] == [str(target)]
+
+
+async def test_home_insights_without_project_id_runs_all(
+    client, db_engine, service_headers, monkeypatch
+) -> None:
+    _, _, headers = await _setup(client, service_headers)
+    ids: list[int] = []
+    for name in ("Alpha", "Beta"):
+        r = await client.post(
+            "/api/projects",
+            json={"name": name, "description": "x", "is_shared": False},
+            headers=headers,
+        )
+        assert r.status_code == 201
+        ids.append(r.json()["id"])
+
+    import app.routes.home_intelligence as hir
+
+    monkeypatch.setattr(
+        hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
+    )
+
+    ran: list[int] = []
+
+    async def spy_run_for_project(
+        session, context, project, prompt_types, *, write_audit, granularity
+    ):
+        ran.append(project.id)
+        return []
+
+    monkeypatch.setattr(hir, "_run_for_project", spy_run_for_project)
+
+    r = await client.post("/api/ai/home/insights", json={}, headers=headers)
+    assert r.status_code == 200
+    assert sorted(ran) == sorted(ids)
+
+
+async def test_home_insights_inaccessible_project_id_returns_empty(
+    client, db_engine, service_headers, monkeypatch
+) -> None:
+    _, _, headers = await _setup(client, service_headers)
+    r = await client.post(
+        "/api/projects",
+        json={"name": "Alpha", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert r.status_code == 201
+
+    import app.routes.home_intelligence as hir
+
+    monkeypatch.setattr(
+        hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
+    )
+
+    ran: list[int] = []
+
+    async def spy_run_for_project(
+        session, context, project, prompt_types, *, write_audit, granularity
+    ):
+        ran.append(project.id)
+        return []
+
+    monkeypatch.setattr(hir, "_run_for_project", spy_run_for_project)
+
+    r = await client.post(
+        "/api/ai/home/insights",
+        json={"project_id": 999999},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert r.json() == {"projects": []}
+    assert ran == []
 
 
 async def test_project_dashboard_rejects_inaccessible_project(
