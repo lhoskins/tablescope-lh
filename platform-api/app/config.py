@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     # embeddings, and a second tenant. Raising this above the gate's
     # per-tenant limit adds retries, not throughput.
     home_intelligence_max_concurrent_projects_per_tenant: int = 2
+    # When a fresh run produces a *successful-but-empty* result for a project,
+    # keep the project's prior non-empty snapshot entry rather than blanking it
+    # (project data rarely vanishes between runs, so a stale non-empty result is
+    # more useful than an empty one). Errored projects already keep prior. Set
+    # False to let a genuine emptying propagate immediately.
+    home_intelligence_keep_prior_on_empty: bool = True
     # TTL for a run's per-run result store (expected set, results hash, run
     # metadata, pub/sub bookkeeping). Long enough for a slow run to drain.
     home_intelligence_run_result_ttl_seconds: int = 3600

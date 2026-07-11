@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from arq import create_pool
 from arq.connections import RedisSettings
@@ -31,6 +31,12 @@ from app.database import SessionLocal
 from app.models.shared_vdb import SharedVDB
 from app.models.user_vdb import UserVDB
 from app.services.vdb_management import VDBManagementService
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.project import Project
+    from app.security.context import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +340,37 @@ async def analyze_project_intelligence(
         await _finalize_run_if_complete(run_id)
         return result
 
+    async def _floor_or_error(
+        session: AsyncSession,
+        context: RequestContext,
+        project: Project,
+        error: str,
+    ) -> dict[str, Any]:
+        """Deterministic floor before a terminal error result.
+
+        The suite needs no AI server, so a saturated/down AI still yields
+        grounded cards (marked ``degraded``) instead of 0 insights. Only when
+        even the floor is empty do we record the bare error.
+        """
+        floor = await hir.run_deterministic_for_project(session, context, project)
+        if floor:
+            return await _record_and_finalize(
+                {
+                    "projectId": str(project.id),
+                    "projectName": project.name,
+                    "projectColor": hi.project_color(project.id),
+                    "insights": floor,
+                    "degraded": "ai_unavailable",
+                }
+            )
+        return await _record_and_finalize(
+            {
+                "projectId": str(project.id),
+                "projectName": project.name,
+                "error": error,
+            }
+        )
+
     # A newer run for the same user (e.g. a page reload) supersedes this one:
     # exit immediately without taking a slot or retrying so abandoned runs
     # cannot pile up and starve the tenant's live run. No result is written —
@@ -358,13 +395,16 @@ async def analyze_project_intelligence(
         )
         async with hir.SessionLocal() as session:
             project = await session.get(Project, project_id)
-            return await _record_and_finalize(
-                {
-                    "projectId": str(project_id),
-                    "projectName": project.name if project else "",
-                    "error": "capacity",
-                }
-            )
+            if project is None:
+                return await _record_and_finalize(
+                    {
+                        "projectId": str(project_id),
+                        "projectName": "",
+                        "error": "capacity",
+                    }
+                )
+            context = _worker_context(tenant_id, user_id)
+            return await _floor_or_error(session, context, project, "capacity")
 
     try:
         async with hir.SessionLocal() as session:
@@ -403,12 +443,8 @@ async def analyze_project_intelligence(
                     project_id,
                     settings.home_intelligence_project_analysis_timeout_seconds,
                 )
-                return await _record_and_finalize(
-                    {
-                        "projectId": str(project_id),
-                        "projectName": project.name,
-                        "error": "analysis timed out",
-                    }
+                return await _floor_or_error(
+                    session, context, project, "analysis timed out"
                 )
             except AIUnavailableError as exc:
                 if exc.retryable and job_try < max_tries:
@@ -419,19 +455,16 @@ async def analyze_project_intelligence(
                     )
                     raise Retry(defer=defer) from exc
                 if exc.retryable:
-                    # Retries exhausted — record terminal so the run can
-                    # complete instead of hanging forever.
+                    # Retries exhausted — try the deterministic floor (no AI
+                    # server needed) before recording a terminal error so the
+                    # run completes with grounded cards instead of 0 insights.
                     logger.warning(
                         "home-intel project %s exhausted retries: %s",
                         project_id,
                         exc,
                     )
-                    return await _record_and_finalize(
-                        {
-                            "projectId": str(project_id),
-                            "projectName": project.name,
-                            "error": str(exc),
-                        }
+                    return await _floor_or_error(
+                        session, context, project, str(exc)
                     )
                 # Non-retryable AI failure — terminal.
                 return await _record_and_finalize(
@@ -445,12 +478,8 @@ async def analyze_project_intelligence(
                 logger.warning(
                     "home-intel project %s failed terminally: %s", project_id, exc
                 )
-                return await _record_and_finalize(
-                    {
-                        "projectId": str(project_id),
-                        "projectName": project.name,
-                        "error": str(exc),
-                    }
+                return await _floor_or_error(
+                    session, context, project, str(exc)
                 )
 
             return await _record_and_finalize(

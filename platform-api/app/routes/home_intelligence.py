@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
+from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models.audit_event import AuditEvent
 from app.models.dashboard import Dashboard
@@ -131,12 +132,25 @@ async def _run_for_project(
             plan_semaphore=plan_semaphore,
         )
     except AIUnavailableError:
+        # Transient AI capacity: let the queue retry with a fresh AI attempt.
+        # The deterministic floor for a *permanently* unavailable AI lives in
+        # the worker's terminal paths (analyze_project_intelligence).
         raise
     except Exception as exc:
         logger.warning("AI intelligence failed for project %s: %s", project.id, exc)
         cards = None
-    if cards is None:
-        cards = []
+    if not cards:
+        # Deterministic floor: the AI path was disabled (None), errored, or
+        # honestly surfaced nothing ([]). The suite is grounded in executed
+        # project data, needs no AI server, and skips cleanly when the data
+        # genuinely has nothing — so no project with real data zeroes out just
+        # because one non-deterministic plan came up empty.
+        reason = "ai_empty" if cards == [] else "ai_failed_or_disabled"
+        cards = await hi.run_intelligence_suite(project, ctx, prompt_types, runner)
+        logger.info(
+            "home-intel project %s deterministic fallback (%s) -> %s card(s)",
+            project.id, reason, len(cards),
+        )
 
     if write_audit and cards:
         duration_ms = int(
@@ -159,6 +173,31 @@ async def _run_for_project(
             )
         await session.commit()
     return cards
+
+
+async def run_deterministic_for_project(
+    session: AsyncSession,
+    context: RequestContext,
+    project: Project,
+) -> list[dict[str, Any]]:
+    """Deterministic-suite-only cards (no AI dependency). Fail-open: [].
+
+    Used at the worker's terminal paths (AI retries exhausted, analysis
+    timeout, tenant-slot budget exhausted, unexpected error): the suite needs
+    no AI server, so even a fully saturated or down AI can still yield grounded
+    cards instead of a bare error / 0 insights.
+    """
+    try:
+        ctx = await hi.gather_project_context(session, project)
+        runner = _make_runner(session, context, project.id)
+        return await hi.run_intelligence_suite(
+            project, ctx, hi.ALL_PROMPT_TYPES, runner
+        )
+    except Exception as exc:  # pragma: no cover - floor must never raise
+        logger.warning(
+            "deterministic floor failed for project %s: %s", project.id, exc
+        )
+        return []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -322,6 +361,43 @@ async def home_intelligence_stream(
 # Snapshot — persist the latest completed run; hydrate instantly on open
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _merge_snapshot_results(
+    prior_results: list[dict[str, Any]],
+    new_results: list[dict[str, Any]],
+    current_ids: set[str],
+    *,
+    keep_prior_on_empty: bool,
+) -> list[dict[str, Any]]:
+    """Merge a run's per-project results over the prior snapshot.
+
+    The new run's per-project result wins, except (when
+    ``keep_prior_on_empty``) a *successful-but-empty* fresh result does not
+    blank a prior non-empty entry — project data rarely vanishes between runs.
+    Errored results (``"error"`` key) never overwrite here; a project that
+    produced no fresh result at all keeps its prior entry. The merged set is
+    scoped to ``current_ids`` when provided, so results for projects the caller
+    can no longer access are dropped.
+    """
+    merged: dict[str, dict[str, Any]] = {
+        str(r.get("projectId")): r for r in prior_results
+    }
+    for r in new_results:
+        pid = str(r.get("projectId"))
+        prior = merged.get(pid)
+        if (
+            keep_prior_on_empty
+            and not r.get("insights")
+            and "error" not in r
+            and prior
+            and prior.get("insights")
+        ):
+            continue
+        merged[pid] = r
+    if current_ids:
+        merged = {pid: r for pid, r in merged.items() if pid in current_ids}
+    return list(merged.values())
+
+
 async def _save_snapshot(
     context: RequestContext,
     granularity: int,
@@ -347,16 +423,15 @@ async def _save_snapshot(
         )
         prior_results = (snap.payload.get("results") or []) if snap else []
         new_results = payload.get("results") or []
-        merged: dict[str, dict[str, Any]] = {
-            str(r.get("projectId")): r for r in prior_results
-        }
-        for r in new_results:
-            merged[str(r.get("projectId"))] = r
         current_ids = {str(p.get("id")) for p in (payload.get("projects") or [])}
-        if current_ids:
-            merged = {
-                pid: r for pid, r in merged.items() if pid in current_ids
-            }
+        merged_list = _merge_snapshot_results(
+            prior_results,
+            new_results,
+            current_ids,
+            keep_prior_on_empty=(
+                get_settings().home_intelligence_keep_prior_on_empty
+            ),
+        )
         if failed_project_count:
             logger.info(
                 "home intelligence snapshot for user %s finalized with %s project "
@@ -365,9 +440,9 @@ async def _save_snapshot(
                 failed_project_count,
                 len(new_results),
                 len(prior_results),
-                len(merged),
+                len(merged_list),
             )
-        payload = {**payload, "results": list(merged.values())}
+        payload = {**payload, "results": merged_list}
         if snap is None:
             snap = IntelligenceSnapshot(
                 tenant_id=context.tenant_id,
