@@ -912,3 +912,170 @@ async def test_project_dashboard_builds_real_chart_widgets(
     assert len(widgets) == 1  # the empty widget was dropped
     assert widgets[0]["title"] == "Spend by supplier"
     assert widgets[0]["chart"]["type"] == "bar"
+
+
+# ─────────── no-project-skipped: deterministic floor + merge policy ──────────
+
+def _floor_ctx(monkeypatch):
+    """Patch context-gathering + runner so _run_for_project needs no DB/VDB."""
+    import app.routes.home_intelligence as hir
+
+    async def fake_gather(session, project):
+        return hi.ProjectContext(tables=[], documents=[])
+
+    monkeypatch.setattr(hi, "gather_project_context", fake_gather)
+    monkeypatch.setattr(hir, "_make_runner", lambda *a, **k: None)
+    return hir
+
+
+def _ctx_obj():
+    return SimpleNamespace(tenant_id=1, user_id=1)
+
+
+@pytest.mark.parametrize("ai_result", [None, []])
+async def test_run_for_project_falls_back_to_suite_on_empty(
+    monkeypatch, ai_result
+) -> None:
+    hir = _floor_ctx(monkeypatch)
+
+    async def ai_empty(*a, **k):
+        return ai_result
+
+    monkeypatch.setattr(hi, "run_ai_intelligence", ai_empty)
+
+    called = {"v": False}
+
+    async def fake_suite(project, ctx, prompt_types, runner):
+        called["v"] = True
+        return [{"title": "floor card", "insightType": "risk_sla"}]
+
+    monkeypatch.setattr(hi, "run_intelligence_suite", fake_suite)
+
+    cards = await hir._run_for_project(
+        object(), _ctx_obj(), _project(), ["risk_sla"], write_audit=False
+    )
+    assert called["v"] is True
+    assert cards == [{"title": "floor card", "insightType": "risk_sla"}]
+
+
+async def test_run_for_project_keeps_ai_cards_no_fallback(monkeypatch) -> None:
+    hir = _floor_ctx(monkeypatch)
+
+    async def ai_cards(*a, **k):
+        return [{"title": "ai card"}]
+
+    monkeypatch.setattr(hi, "run_ai_intelligence", ai_cards)
+
+    called = {"v": False}
+
+    async def fake_suite(*a, **k):
+        called["v"] = True
+        return [{"title": "floor"}]
+
+    monkeypatch.setattr(hi, "run_intelligence_suite", fake_suite)
+
+    cards = await hir._run_for_project(
+        object(), _ctx_obj(), _project(), ["risk_sla"], write_audit=False
+    )
+    assert called["v"] is False  # no fallback when AI produced cards
+    assert cards == [{"title": "ai card"}]
+
+
+async def test_run_for_project_still_raises_ai_unavailable(monkeypatch) -> None:
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    hir = _floor_ctx(monkeypatch)
+
+    async def ai_busy(*a, **k):
+        raise AIUnavailableError("busy")
+
+    monkeypatch.setattr(hi, "run_ai_intelligence", ai_busy)
+
+    called = {"v": False}
+
+    async def fake_suite(*a, **k):
+        called["v"] = True
+        return [{"title": "floor"}]
+
+    monkeypatch.setattr(hi, "run_intelligence_suite", fake_suite)
+
+    with pytest.raises(AIUnavailableError):
+        await hir._run_for_project(
+            object(), _ctx_obj(), _project(), ["risk_sla"], write_audit=False
+        )
+    # Queue-retry contract intact: no deterministic fallback on transient busy.
+    assert called["v"] is False
+
+
+async def test_run_deterministic_for_project_fail_open(monkeypatch) -> None:
+    import app.routes.home_intelligence as hir
+
+    async def boom(session, project):
+        raise RuntimeError("context gather failed")
+
+    monkeypatch.setattr(hi, "gather_project_context", boom)
+    cards = await hir.run_deterministic_for_project(
+        object(), _ctx_obj(), _project()
+    )
+    assert cards == []  # floor must never raise
+
+
+def test_merge_snapshot_success_empty_keeps_prior_non_empty() -> None:
+    import app.routes.home_intelligence as hir
+
+    prior = [{"projectId": "1", "insights": [{"t": "old"}]}]
+    fresh_empty = [{"projectId": "1", "insights": []}]
+    merged = hir._merge_snapshot_results(
+        prior, fresh_empty, {"1"}, keep_prior_on_empty=True
+    )
+    assert merged == [{"projectId": "1", "insights": [{"t": "old"}]}]
+
+
+def test_merge_snapshot_success_empty_overwrites_when_disabled() -> None:
+    import app.routes.home_intelligence as hir
+
+    prior = [{"projectId": "1", "insights": [{"t": "old"}]}]
+    fresh_empty = [{"projectId": "1", "insights": []}]
+    merged = hir._merge_snapshot_results(
+        prior, fresh_empty, {"1"}, keep_prior_on_empty=False
+    )
+    assert merged == [{"projectId": "1", "insights": []}]
+
+
+def test_merge_snapshot_fresh_nonempty_always_wins() -> None:
+    import app.routes.home_intelligence as hir
+
+    prior = [{"projectId": "1", "insights": [{"t": "old"}]}]
+    fresh = [{"projectId": "1", "insights": [{"t": "new"}]}]
+    merged = hir._merge_snapshot_results(
+        prior, fresh, {"1"}, keep_prior_on_empty=True
+    )
+    assert merged == [{"projectId": "1", "insights": [{"t": "new"}]}]
+
+
+def test_merge_snapshot_error_preserves_prior_behavior() -> None:
+    # The empty-guard only shields *successful* empties. An errored fresh
+    # result keeps the pre-change behavior (it overwrites), since it is not a
+    # silent "AI came up empty" case — the worker's floor already tried to
+    # supply grounded cards before recording a bare error.
+    import app.routes.home_intelligence as hir
+
+    prior = [{"projectId": "1", "insights": [{"t": "old"}]}]
+    errored = [{"projectId": "1", "error": "analysis timed out"}]
+    merged = hir._merge_snapshot_results(
+        prior, errored, {"1"}, keep_prior_on_empty=True
+    )
+    assert merged == [{"projectId": "1", "error": "analysis timed out"}]
+
+
+def test_merge_snapshot_scopes_to_current_ids() -> None:
+    import app.routes.home_intelligence as hir
+
+    prior = [
+        {"projectId": "1", "insights": [{"t": "a"}]},
+        {"projectId": "2", "insights": [{"t": "b"}]},
+    ]
+    merged = hir._merge_snapshot_results(
+        prior, [], {"1"}, keep_prior_on_empty=True
+    )
+    assert merged == [{"projectId": "1", "insights": [{"t": "a"}]}]

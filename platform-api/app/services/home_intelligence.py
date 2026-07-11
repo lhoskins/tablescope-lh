@@ -2133,6 +2133,10 @@ async def run_ai_intelligence(
     if analyses is None:
         raise ai.AIUnavailableError("AI planning is unavailable; retry shortly.")
     if not analyses:
+        logger.info(
+            "home-intel project %s AI-empty: planner proposed 0 analyses",
+            project.id,
+        )
         return []  # AI reachable but found nothing worth surfacing
 
     doc_by_title = {d.title: d for d in ctx.documents}
@@ -2237,6 +2241,11 @@ async def run_ai_intelligence(
                 _record_data_analysis({**a, "sql": fixed}, result)
 
     if not executed:
+        logger.info(
+            "home-intel project %s AI-empty: %s planned analyses, 0 executed "
+            "with rows (all zero-row or unrepairable SQL)",
+            project.id, len(analyses),
+        )
         return []
 
     # Governed statistical enrichment: real effect sizes / p-values / CIs from
@@ -2432,7 +2441,14 @@ async def run_ai_intelligence(
 
     # Rank by severity + evidence strength and drop duplicates, returning the
     # strongest few (best-practices §Insight Selection / §Card Ranking).
-    return rank_and_dedupe_cards(cards)
+    ranked = rank_and_dedupe_cards(cards)
+    if not ranked:
+        logger.info(
+            "home-intel project %s AI-empty: %s analyses executed but 0 cards "
+            "survived building / quality gates",
+            project.id, len(executed),
+        )
+    return ranked
 
 
 # ─────────────────────────────────────────────────────────────────────────────
