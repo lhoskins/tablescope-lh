@@ -172,6 +172,12 @@ export interface AiChatMessageData {
   suggestedVisualization: SuggestedVisualization;
   explanation: string;
   dataSourcesUsed: string[];
+  /** Set when the question could not be grounded: pick a source and re-ask. */
+  needsClarification?: boolean;
+  question?: string;
+  suggestedSources?: string[];
+  /** Set when the answer came from executing an existing saved query. */
+  savedQueryId?: number;
 }
 
 export interface AiChatMessage {
@@ -219,10 +225,11 @@ export function sendConversationMessage(
   conversationId: number,
   question: string,
   projectId?: number | null,
+  source?: string | null,
 ): Promise<AiConversation> {
   return apiClient.post<AiConversation>(
     `/api/ai/conversations/${conversationId}/messages`,
-    { question, project_id: projectId ?? null },
+    { question, project_id: projectId ?? null, source: source ?? null },
   );
 }
 

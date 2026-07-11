@@ -17,7 +17,10 @@ from app.routes import ai_proxy
 from app.routes.ai_proxy import (
     _ai_generation_error,
     _apply_row_limit,
+    _ask_data_first,
     _is_read_only_select,
+    _requested_chart,
+    _shield_prose_answer,
     _suggest_visualization,
 )
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
@@ -125,6 +128,154 @@ def test_suggest_visualization_line_for_time_and_numeric():
 
 def test_suggest_visualization_table_when_no_rows():
     assert _suggest_visualization(["a"], [])["type"] == "table"
+
+
+# ── Requested chart type ──────────────────────────────────────────────────
+
+
+def test_requested_chart_extracts_horizontal_bar():
+    assert (
+        _requested_chart("incident category and count as a horizontal bar chart")
+        == "horizontal_bar"
+    )
+
+
+def test_requested_chart_extracts_donut():
+    assert _requested_chart("show a donut of spend by vendor") == "donut"
+
+
+def test_requested_chart_none_when_unspecified():
+    assert _requested_chart("how many incidents by category") is None
+    assert _requested_chart(None) is None
+
+
+def test_suggest_visualization_honors_horizontal_bar_style():
+    viz = _suggest_visualization(
+        ["category", "count"],
+        [{"category": "A", "count": 3}, {"category": "B", "count": 5}],
+        "incident count by category as a horizontal bar chart",
+    )
+    assert viz["type"] == "bar"
+    assert viz["style"] == "horizontal_bar"
+    assert viz["xField"] == "category"
+    assert viz["yField"] == "count"
+
+
+def test_suggest_visualization_ignores_shape_invalid_donut_request():
+    # A donut over many categories is shape-invalid; the engine corrects to a
+    # ranking bar and the donut style is not applied.
+    rows = [{"category": f"C{i}", "count": i + 1} for i in range(40)]
+    viz = _suggest_visualization(["category", "count"], rows, "show a donut")
+    assert viz["type"] == "bar"
+    assert viz.get("style") != "donut"
+
+
+# ── Prose SQL shield ──────────────────────────────────────────────────────
+
+
+def test_shield_prose_answer_replaces_sql_fenced_answer():
+    out = _shield_prose_answer("```sql\nSELECT * FROM incidents\n```")
+    assert "SELECT" not in out
+    assert "rephrasing" in out.lower()
+
+
+def test_shield_prose_answer_replaces_leading_select():
+    out = _shield_prose_answer("SELECT category, count(*) FROM incidents")
+    assert "SELECT" not in out
+
+
+def test_shield_prose_answer_replaces_markdown_table():
+    out = _shield_prose_answer(
+        "Here are the incidents:\n\n"
+        "| Category | Count |\n| --- | --- |\n| Safety | 12 |\n"
+    )
+    assert "| --- |" not in out
+    assert "rephrasing" in out.lower()
+
+
+def test_shield_prose_answer_replaces_fabricated_chart_heading():
+    out = _shield_prose_answer(
+        "**Horizontal Bar Chart:**\nSafety ############ 12\nQuality ##### 5"
+    )
+    assert "rephrasing" in out.lower()
+
+
+def test_shield_prose_answer_passes_ordinary_prose_through():
+    prose = "The safety policy requires quarterly audits per document Policy-12."
+    assert _shield_prose_answer(prose) == prose
+
+
+# ── Saved-query title matcher ─────────────────────────────────────────────
+
+
+class _FakeSavedQuery:
+    def __init__(self, id: int, name: str, sql_text: str = "SELECT 1") -> None:
+        self.id = id
+        self.name = name
+        self.sql_text = sql_text
+
+
+class _FakeScalarResult:
+    def __init__(self, items):
+        self._items = items
+
+    def all(self):
+        return self._items
+
+
+class _FakeSession:
+    def __init__(self, saved):
+        self._saved = saved
+
+    async def scalars(self, _stmt):
+        return _FakeScalarResult(self._saved)
+
+
+async def _match(question, saved):
+    return await ai_proxy._match_saved_query(
+        _FakeSession(saved), project_id=1, question=question
+    )
+
+
+async def test_match_saved_query_run_verb_80pct():
+    saved = [_FakeSavedQuery(7, "AI - High-Risk IT Changes Over Time")]
+    m = await _match("Run the AI High Risk IT changes over time", saved)
+    assert m is not None and m.id == 7
+
+
+async def test_match_saved_query_single_token_matches_nothing():
+    saved = [_FakeSavedQuery(7, "AI - High-Risk IT Changes Over Time")]
+    assert await _match("changes", saved) is None
+
+
+async def test_match_saved_query_one_word_title_never_matches():
+    saved = [_FakeSavedQuery(9, "Incidents")]
+    assert await _match("show incidents", saved) is None
+
+
+async def test_match_saved_query_partial_no_verb_below_100pct():
+    # No run/show verb → needs all title tokens; "high risk" alone falls short.
+    saved = [_FakeSavedQuery(7, "AI - High-Risk IT Changes Over Time")]
+    assert await _match("what are the high risk items", saved) is None
+
+
+async def test_ask_data_first_returns_structured_for_zero_row_success(monkeypatch):
+    async def fake_core(*args, **kwargs):
+        return {
+            "status": "success",
+            "sql": "SELECT category FROM incidents WHERE 1=0",
+            "columns": ["category"],
+            "rows": [],
+            "presentation": {"mode": "data"},
+            "envelope": {"mode": "data"},
+        }
+
+    monkeypatch.setattr(ai_proxy, "_ask_and_run_core", fake_core)
+    out = await _ask_data_first(
+        None, None, project_id=1, question="incidents last month"
+    )
+    assert out is not None
+    assert out["model_used"] == "tablescope-data"
 
 
 # ── Endpoint behaviour ────────────────────────────────────────────────────

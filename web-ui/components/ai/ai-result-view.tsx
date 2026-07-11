@@ -56,7 +56,12 @@ export function buildChart(
   if (!series.length) return null;
 
   const type = viz.type === "pie" ? "pie" : viz.type === "line" ? "line" : "bar";
-  return { type, data: { series }, seriesLabels: { value: yField } };
+  return {
+    type,
+    subtype: viz.style || undefined,
+    data: { series },
+    seriesLabels: { value: yField },
+  };
 }
 
 export function ResultChart({

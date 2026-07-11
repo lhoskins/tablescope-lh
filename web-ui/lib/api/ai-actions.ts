@@ -7,6 +7,8 @@ export interface SuggestedVisualization {
   xField?: string;
   yField?: string;
   metricField?: string;
+  /** Chart variant within the family, e.g. "horizontal_bar", "donut". */
+  style?: string;
 }
 
 export type AiActionStatus =
