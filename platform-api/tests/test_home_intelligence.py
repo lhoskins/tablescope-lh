@@ -1022,3 +1022,210 @@ async def test_project_dashboard_builds_real_chart_widgets(
     assert len(widgets) == 1  # the empty widget was dropped
     assert widgets[0]["title"] == "Spend by supplier"
     assert widgets[0]["chart"]["type"] == "bar"
+
+# ───────────── multi-table enrichment: tiered relationship evidence ──────────
+
+def _pair(cands, a, b):
+    for c in cands:
+        if {c["left_table"], c["right_table"]} == {a, b}:
+            return c
+    return None
+
+
+def test_relationship_baseline_exact_name_no_samples() -> None:
+    # No scopes, no samples: exact key-name matching survives unchanged.
+    tables = [
+        _table("suppliers", ["SupplierID", "SupplierName"]),
+        _table("inspections", ["SupplierID", "DefectQty"]),
+    ]
+    cands = hi.find_relationship_candidates(tables)
+    assert len(cands) == 1
+    c = cands[0]
+    assert c["join_confidence"] == 0.6
+    assert "exact key-name match" in c["confidence_reason"]
+    # Without measured evidence, cardinality/risk stay conservative.
+    assert c["relationship_type"] == "unknown"
+    assert c["row_multiplication_risk"] == "medium"
+
+
+def test_relationship_scope_link_user_created_09() -> None:
+    tables = [
+        _table("orders", ["OrderRef", "Amount"]),
+        _table("shipments", ["ShipRef", "Carrier"]),
+    ]
+    link = hi.ScopeLink(
+        left_table="orders",
+        right_table="shipments",
+        left_column="OrderRef",
+        right_column="ShipRef",
+        created_by_ai=False,
+    )
+    cands = hi.find_relationship_candidates(tables, scope_links=[link])
+    c = _pair(cands, "orders", "shipments")
+    assert c is not None
+    assert c["join_confidence"] == 0.9
+    assert "curated scope relationship" in c["confidence_reason"]
+
+
+def test_relationship_scope_link_ai_created_085() -> None:
+    tables = [
+        _table("orders", ["OrderRef", "Amount"]),
+        _table("shipments", ["ShipRef", "Carrier"]),
+    ]
+    link = hi.ScopeLink(
+        left_table="orders",
+        right_table="shipments",
+        left_column="OrderRef",
+        right_column="ShipRef",
+        created_by_ai=True,
+    )
+    cands = hi.find_relationship_candidates(tables, scope_links=[link])
+    c = _pair(cands, "orders", "shipments")
+    assert c is not None
+    assert c["join_confidence"] == 0.85
+
+
+def test_relationship_scope_link_ignored_when_view_absent() -> None:
+    # A scope pointing at a view the project no longer exposes is dropped.
+    tables = [_table("orders", ["OrderRef", "Amount"])]
+    link = hi.ScopeLink(
+        left_table="orders",
+        right_table="gone_view",
+        left_column="OrderRef",
+        right_column="X",
+        created_by_ai=False,
+    )
+    assert hi.find_relationship_candidates(tables, scope_links=[link]) == []
+
+
+def test_relationship_value_overlap_differently_named_keys() -> None:
+    # SupplierCode vs VendorCode: different names, but sampled values overlap
+    # ≥30% → a Tier-4 candidate with measured confidence.
+    tables = [
+        _table("purchases", ["SupplierCode", "Amount"]),
+        _table("vendors", ["VendorCode", "Name"]),
+    ]
+    key_values = {
+        "purchases": {"suppliercode": {"A", "B", "C", "D"}},
+        "vendors": {"vendorcode": {"A", "B", "C", "E"}},
+    }
+    cands = hi.find_relationship_candidates(tables, key_values=key_values)
+    c = _pair(cands, "purchases", "vendors")
+    assert c is not None
+    assert "sampled value overlap" in c["confidence_reason"]
+    assert c["join_confidence"] >= 0.3
+
+
+def test_relationship_value_overlap_below_threshold_excluded() -> None:
+    tables = [
+        _table("purchases", ["SupplierCode", "Amount"]),
+        _table("vendors", ["VendorCode", "Name"]),
+    ]
+    key_values = {
+        "purchases": {"suppliercode": {"A", "B", "C", "D", "E"}},
+        "vendors": {"vendorcode": {"A", "Z", "Y", "X", "W"}},
+    }
+    # Only 1/5 overlap (0.2) < 0.3 → no candidate.
+    assert hi.find_relationship_candidates(tables, key_values=key_values) == []
+
+
+def test_relationship_same_name_measured_upgrade() -> None:
+    # Same-name key with high sampled containment upgrades a Tier-3 match from
+    # 0.6/unknown/medium to a measured one_to_many/low at the overlap.
+    tables = [
+        _table("suppliers", ["SupplierID", "SupplierName"]),
+        _table("inspections", ["SupplierID", "DefectQty"]),
+    ]
+    suppliers = {f"S{i}" for i in range(10)}  # size 10
+    # inspections contains 9 of the 10 supplier ids (plus extras) → 0.9.
+    inspections = {f"S{i}" for i in range(9)} | {f"X{i}" for i in range(5)}
+    key_values = {
+        "suppliers": {"supplierid": suppliers},
+        "inspections": {"supplierid": inspections},
+    }
+    cands = hi.find_relationship_candidates(tables, key_values=key_values)
+    c = _pair(cands, "suppliers", "inspections")
+    assert c is not None
+    assert c["join_confidence"] == 0.9  # measured containment upgrades 0.6
+    assert c["relationship_type"] == "one_to_many"
+    assert c["row_multiplication_risk"] == "low"
+
+
+def test_detect_view_strict_rejects_ambiguous() -> None:
+    allowed = ["orders_v", "shipments_v"]
+    assert hi._detect_view_strict("SELECT * FROM orders_v", allowed) == "orders_v"
+    # zero matches
+    assert hi._detect_view_strict("SELECT * FROM other", allowed) is None
+    # multiple matches → ambiguous
+    assert (
+        hi._detect_view_strict(
+            "SELECT * FROM orders_v JOIN shipments_v", allowed
+        )
+        is None
+    )
+    assert hi._detect_view_strict(None, allowed) is None
+
+
+async def test_resolve_scope_links_maps_enabled_only(monkeypatch) -> None:
+    # Enabled scope → link; disabled scope → ignored; never fabricates from
+    # allowed_tables[0]. Uses a fake session returning scopes then queries.
+    enabled = SimpleNamespace(
+        query_id=1,
+        target_query_id=2,
+        source_field="OrderRef",
+        target_field="ShipRef",
+        created_by_ai=False,
+    )
+    queries = [
+        SimpleNamespace(id=1, sql_text="SELECT * FROM orders_v"),
+        SimpleNamespace(id=2, sql_text="SELECT * FROM shipments_v"),
+    ]
+
+    class _Scalars:
+        def __init__(self, items):
+            self._items = items
+
+        def all(self):
+            return self._items
+
+    class _FakeSession:
+        def __init__(self):
+            self._calls = 0
+
+        async def scalars(self, _stmt):
+            self._calls += 1
+            return _Scalars([enabled] if self._calls == 1 else queries)
+
+    links = await hi._resolve_scope_links(
+        _FakeSession(),
+        project_id=1,
+        allowed_tables=["orders_v", "shipments_v"],
+    )
+    assert len(links) == 1
+    lk = links[0]
+    assert {lk.left_table, lk.right_table} == {"orders_v", "shipments_v"}
+    assert lk.left_column == "OrderRef"
+    assert lk.created_by_ai is False
+
+
+async def test_gather_project_context_fail_open_on_scope_error(
+    monkeypatch,
+) -> None:
+    # If scope resolution raises, context is still returned (scope_links empty)
+    # and tier-3 discovery still works downstream.
+    async def boom(session, *, project_id, allowed_tables):
+        raise RuntimeError("scope query failed")
+
+    monkeypatch.setattr(hi, "_resolve_scope_links", boom)
+
+    class _EmptyScalars:
+        def all(self):
+            return []
+
+    class _FakeSession:
+        async def scalars(self, _stmt):
+            return _EmptyScalars()
+
+    project = SimpleNamespace(id=1, name="P", tenant_id=1)
+    ctx = await hi.gather_project_context(_FakeSession(), project)
+    assert ctx.scope_links == []
