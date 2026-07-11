@@ -9,6 +9,7 @@ import {
   IconPlus,
   IconTable,
 } from "@tabler/icons-react";
+import { MethodEnvelopeBlock } from "@/components/ai/method-envelope";
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
 import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import type {
@@ -236,6 +237,12 @@ export function IntelligenceCard({
           ) : (
             <InsightChartView chart={card.chart} />
           )}
+        </div>
+      )}
+
+      {card.analyticalMethod && (
+        <div className="mt-3">
+          <MethodEnvelopeBlock envelope={card.analyticalMethod} />
         </div>
       )}
 

@@ -38,6 +38,11 @@ from app.models.reference_library import (
     TIER_PROJECT,
     ReferenceDocument,
 )
+from app.services.analytical_method_engine import analyze as analyze_methods
+from app.services.analytical_method_engine.config import (
+    EngineMode,
+    get_engine_mode,
+)
 from app.services.evidence_severity import gate_severity
 from app.services.presentation_engine import PresentationMode
 from app.services.prompt_loader import load_prompt_reference
@@ -1966,11 +1971,73 @@ async def plan_and_execute_widgets(
     return executed
 
 
+# Analysis categories that map cleanly onto a declared engine intent. Risk and
+# opportunity carry no shape information, so the engine's own inference (which
+# reconciles keywords against the actual data profile) decides for those.
+_CATEGORY_INTENT_HINTS = {
+    "trend": "detect_trend",
+    "relationship": "relationship_numeric",
+}
+
+
+async def _attach_method_envelopes(
+    session: AsyncSession | None,
+    *,
+    tenant_id: int,
+    executed: list[dict[str, Any]],
+) -> None:
+    """Run the Analytical Method Engine over each executed analysis.
+
+    Attaches the governed envelope onto the executed item (HYBRID only) so
+    the card-building loop can surface it. Sequential on purpose: the engine
+    reads/writes through this AsyncSession, which is not safe for concurrent
+    use. Fail-closed per item — an engine problem never drops a card
+    (regression guard for the earlier 6->0 incidents).
+    """
+    if session is None:
+        return
+    mode = get_engine_mode()
+    if mode == EngineMode.OFF:
+        return
+    for item in executed:
+        a = item["analysis"]
+        result = item["result"]
+        if not result:
+            continue
+        question = " — ".join(
+            str(x) for x in (a.get("title"), a.get("rationale")) if x
+        )
+        try:
+            envelope = await analyze_methods(
+                session,
+                tenant_id=tenant_id,
+                columns=result.get("columns", []),
+                rows=result.get("rows", []),
+                question=question or str(a.get("category") or ""),
+                intent=_CATEGORY_INTENT_HINTS.get(str(a.get("category") or "")),
+            )
+        except Exception as exc:  # pragma: no cover - engine is fail-closed
+            logger.warning(
+                "Method engine skipped for analysis %s: %s", a.get("id"), exc
+            )
+            continue
+        # Attach only envelopes that actually selected a method — a
+        # "no_method" envelope on every thin aggregate would be card noise
+        # (it is still audited by the engine either way).
+        if (
+            mode == EngineMode.HYBRID
+            and envelope
+            and envelope.get("method") is not None
+        ):
+            item["method_envelope"] = envelope
+
+
 async def run_ai_intelligence(
     project: Project,
     ctx: ProjectContext,
     runner: QueryRunner,
     *,
+    session: AsyncSession | None = None,
     tenant_id: int,
     user_id: int,
     max_analyses: int = 15,
@@ -2172,6 +2239,13 @@ async def run_ai_intelligence(
     if not executed:
         return []
 
+    # Governed statistical enrichment: real effect sizes / p-values / CIs from
+    # the Method Engine's 24 executable Tier-1 methods, computed in-process
+    # over the rows each analysis already executed (no extra AI-server load).
+    await _attach_method_envelopes(
+        session, tenant_id=tenant_id, executed=executed
+    )
+
     # Interpret in small concurrent chunks so each LLM call stays fast and fits
     # the model context window (large single calls at Granular were the main
     # source of latency / empty results). Ollama now serves these in parallel.
@@ -2310,9 +2384,19 @@ async def run_ai_intelligence(
             if relationship_meta:
                 confidence = min(confidence, relationship_meta["join_confidence"])
 
+        # A successfully executed method envelope carries a real quality
+        # verdict — prefer it over the row-count guess. (Engine quality
+        # vocabulary: "reliable", or "tentative" when usable n < 15.)
+        method_envelope = item.get("method_envelope")
+        if method_envelope and method_envelope.get("status") == "ok":
+            confidence = {"reliable": 0.9, "tentative": 0.6}.get(
+                str(method_envelope.get("quality")), confidence
+            )
+
         metadata: dict[str, Any] = {
             "insightMethod": method,
             "confidenceScore": round(float(confidence), 2),
+            "analyticalMethod": method_envelope,
             "validation": validation,
             "referenceDocuments": documents_used if uses_reference else [],
             "relationshipMetadata": {

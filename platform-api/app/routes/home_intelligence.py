@@ -124,6 +124,7 @@ async def _run_for_project(
             project,
             ctx,
             runner,
+            session=session,
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             granularity=granularity,
