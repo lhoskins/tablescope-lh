@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  IconRefresh,
-  IconSparkles,
-} from "@tabler/icons-react";
-import type { InsightCard } from "@/lib/api/home-intelligence";
+import { IconRefresh } from "@tabler/icons-react";
 
 const GRANULARITY_LABELS: Record<number, string> = {
   1: "Executive",
@@ -15,8 +11,6 @@ const GRANULARITY_LABELS: Record<number, string> = {
 };
 
 export interface IntelligenceStripProps {
-  projectCount: number;
-  insights: InsightCard[];
   running: boolean;
   lastUpdatedLabel: string | null;
   onRefresh: () => void;
@@ -25,8 +19,6 @@ export interface IntelligenceStripProps {
 }
 
 export function IntelligenceStrip({
-  projectCount,
-  insights,
   running,
   lastUpdatedLabel,
   onRefresh,
@@ -34,32 +26,15 @@ export function IntelligenceStrip({
   onGranularityChange,
 }: IntelligenceStripProps) {
   return (
-    <div className="flex items-center gap-4 rounded-lg bg-brand px-4 py-2.5 text-brand-fg">
-      <div className="flex shrink-0 items-center gap-2 text-small font-medium">
-        <IconSparkles
-          size={16}
-          className={running ? "animate-pulse" : undefined}
-        />
-        <span>
-          {running ? "AI running across" : "AI analyzed"} {projectCount} project
-          {projectCount === 1 ? "" : "s"}
-        </span>
-      </div>
+    <div className="flex items-center gap-4 rounded-lg border border-line-tertiary bg-bg-primary px-4 py-2.5">
+      <div className="min-w-0 flex-1" />
 
-      <div className="min-w-0 flex-1">
-        {insights.length === 0 && running && (
-          <span className="text-small text-brand-fg/70">
-            Gathering insights…
-          </span>
-        )}
-      </div>
-
-      <div className="flex shrink-0 items-center gap-2 text-small text-brand-fg/90">
+      <div className="flex shrink-0 items-center gap-2 text-small text-ink-secondary">
         <label
           className="flex items-center gap-2"
           title="Slide from high-level executive insights to fine-grained, detailed analyses"
         >
-          <span className="hidden sm:inline text-brand-fg/70">Depth</span>
+          <span className="hidden sm:inline text-ink-tertiary">Depth</span>
           <input
             type="range"
             min={1}
@@ -68,21 +43,21 @@ export function IntelligenceStrip({
             value={granularity}
             onChange={(e) => onGranularityChange(Number(e.target.value))}
             aria-label="Insight granularity"
-            className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/30 accent-white"
+            className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-line-secondary accent-brand"
           />
-          <span className="w-16 text-brand-fg">
+          <span className="w-16 text-ink-primary">
             {GRANULARITY_LABELS[granularity] ?? "Balanced"}
           </span>
         </label>
       </div>
 
-      <div className="flex shrink-0 items-center gap-3 text-small text-brand-fg/80">
+      <div className="flex shrink-0 items-center gap-3 text-small text-ink-tertiary">
         {lastUpdatedLabel && <span>{lastUpdatedLabel}</span>}
         <button
           type="button"
           onClick={onRefresh}
           aria-label="Refresh intelligence"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors hover:bg-white/15"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors hover:bg-bg-tertiary"
         >
           <IconRefresh
             size={15}

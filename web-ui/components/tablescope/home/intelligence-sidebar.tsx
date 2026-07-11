@@ -72,6 +72,8 @@ export interface IntelligenceSidebarProps {
   projects: StreamProject[];
   results: Record<string, ProjectResult>;
   completed: Set<string>;
+  refreshing?: boolean;
+  freshCompleted?: Set<string>;
   insights: InsightCard[];
   cardsInReport: number;
   settings: IntelligenceSettings | null;
@@ -83,6 +85,8 @@ export function IntelligenceSidebar({
   projects,
   results,
   completed,
+  refreshing = false,
+  freshCompleted,
   insights,
   cardsInReport,
   settings,
@@ -127,7 +131,9 @@ export function IntelligenceSidebar({
           )}
           {projects.map((p) => {
             const result = results[p.id];
-            const done = completed.has(p.id);
+            const done = refreshing
+              ? (freshCompleted?.has(p.id) ?? false)
+              : completed.has(p.id);
             const count = result?.insights.length ?? 0;
             return (
               <li key={p.id}>
