@@ -61,6 +61,10 @@ export function IntelligenceFeed() {
   const [projects, setProjects] = useState<StreamProject[]>([]);
   const [results, setResults] = useState<Record<string, ProjectResult>>({});
   const [completed, setCompleted] = useState<Set<string>>(new Set());
+  // Projects that reported in the CURRENT run (fresh), regardless of
+  // foreground/background mode — drives the sidebar's per-project "Analyzing"
+  // state during a refresh without touching the visible (buffered) cards.
+  const [freshCompleted, setFreshCompleted] = useState<Set<string>>(new Set());
   const [synthesis, setSynthesis] = useState<CrossProjectSynthesis | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [settings, setSettings] = useState<IntelligenceSettings | null>(null);
@@ -101,6 +105,7 @@ export function IntelligenceFeed() {
           projectColor,
           insights,
         };
+        setFreshCompleted((prev) => new Set(prev).add(projectId));
         if (!bg) {
           setResults((prev) => ({
             ...prev,
@@ -116,11 +121,13 @@ export function IntelligenceFeed() {
         const projectId = event.projectId;
         if (projectId) {
           bufErroredRef.current.add(projectId);
+          setFreshCompleted((prev) => new Set(prev).add(projectId));
           if (!bg) {
             setCompleted((prev) => new Set(prev).add(projectId));
           }
         } else {
           setStatus("complete");
+          setFreshCompleted(new Set(bufProjectsRef.current.map((p) => p.id)));
           if (!bg) {
             setCompleted(new Set(bufProjectsRef.current.map((p) => p.id)));
           }
@@ -162,6 +169,7 @@ export function IntelligenceFeed() {
       controllerRef.current?.abort();
       backgroundRef.current = background;
       setStatus("streaming");
+      setFreshCompleted(new Set());
       if (!background) {
         setProjects([]);
         setResults({});
@@ -279,8 +287,6 @@ export function IntelligenceFeed() {
   return (
     <div className="space-y-4">
       <IntelligenceStrip
-        projectCount={projects.length}
-        insights={allInsights}
         running={running}
         lastUpdatedLabel={formatLastUpdated(lastUpdated)}
         onRefresh={handleRefresh}
@@ -349,6 +355,8 @@ export function IntelligenceFeed() {
           projects={projects}
           results={results}
           completed={completed}
+          refreshing={running}
+          freshCompleted={freshCompleted}
           insights={allInsights}
           cardsInReport={sections.length}
           settings={settings}
