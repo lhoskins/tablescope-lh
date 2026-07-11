@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   IconArrowUp,
   IconSparkles,
@@ -34,6 +38,7 @@ import {
   type AiConversation,
 } from "@/lib/ui/use-shell-data";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
+import { projectInsightApi } from "@/lib/api/project-insight";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 
 const FALLBACK_USER: CurrentUser = {
@@ -82,9 +87,11 @@ export default function AiAssistantPage() {
     mutationFn: async ({
       question,
       pid,
+      source,
     }: {
       question: string;
       pid: number | null;
+      source?: string | null;
     }) => {
       let id = activeId;
       if (id == null) {
@@ -92,7 +99,7 @@ export default function AiAssistantPage() {
         id = convo.id;
         setActiveId(id);
       }
-      return sendConversationMessage(id, question, pid);
+      return sendConversationMessage(id, question, pid, source ?? null);
     },
     onSuccess: (convo) => {
       queryClient.setQueryData(["ai", "conversation", convo.id], convo);
@@ -153,6 +160,34 @@ export default function AiAssistantPage() {
     if (busy || !sendMutation.variables) return;
     sendMutation.mutate(sendMutation.variables);
   };
+
+  // Re-run a clarification question with the source the user picked, so the
+  // resolver locks onto it instead of guessing again.
+  const askWithSource = (question: string, source: string) => {
+    if (busy) return;
+    const pid = projectId ?? active?.projectId ?? null;
+    if (pid == null) {
+      setNeedsProject(true);
+      return;
+    }
+    sendMutation.mutate({ question, pid, source });
+  };
+
+  // Suggested questions mirror the Project Insight page's "Questions to Ask";
+  // fetched lazily (behind the button) and sharing that page's React Query
+  // cache so build_project_insight is not recomputed.
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestPid = projectId ?? active?.projectId ?? null;
+  const insightQuery = useQuery({
+    queryKey: ["project", String(suggestPid), "insight"],
+    queryFn: () => projectInsightApi.get(String(suggestPid)),
+    enabled: showSuggestions && suggestPid != null,
+    staleTime: 5 * 60 * 1000,
+  });
+  const suggestedQuestions = (insightQuery.data?.questionsToAsk ?? [])
+    .map((q) => q.question?.trim())
+    .filter((q): q is string => !!q)
+    .slice(0, 6);
 
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
@@ -236,6 +271,7 @@ export default function AiAssistantPage() {
                   <ChatBubble
                     key={m.id}
                     message={m}
+                    onPickSource={askWithSource}
                     onBranch={
                       activeId != null && m.id > 0
                         ? () =>
@@ -323,6 +359,43 @@ export default function AiAssistantPage() {
                 Please choose a project so I know which data to use.
               </p>
             )}
+            <div className="mx-auto mb-2 flex max-w-3xl flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSuggestions((v) => !v)}
+                disabled={suggestPid == null}
+                className="self-start text-[12px] text-brand-500 hover:text-brand-700 disabled:opacity-40"
+              >
+                {showSuggestions ? "Hide suggestions" : "Suggest questions"}
+              </button>
+              {showSuggestions && insightQuery.isLoading && (
+                <span className="text-[12px] text-ink-tertiary">
+                  Loading suggestions…
+                </span>
+              )}
+              {showSuggestions &&
+                !insightQuery.isLoading &&
+                suggestedQuestions.length === 0 && (
+                  <span className="text-[12px] text-ink-tertiary">
+                    No suggested questions for this project yet.
+                  </span>
+                )}
+              {showSuggestions && suggestedQuestions.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {suggestedQuestions.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => send(q)}
+                      disabled={busy}
+                      className="rounded-full border border-line-secondary bg-bg-secondary px-3 py-1 text-[12px] text-ink-secondary hover:border-brand-500 hover:text-ink-primary disabled:opacity-40"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border border-line-secondary bg-bg-primary px-4 py-3 shadow-sm">
               <textarea
                 value={input}
@@ -544,10 +617,12 @@ function ChatBubble({
   message,
   onBranch,
   branching,
+  onPickSource,
 }: {
   message: AiChatMessage;
   onBranch?: () => void;
   branching?: boolean;
+  onPickSource?: (question: string, source: string) => void;
 }) {
   if (message.role === "user") {
     return (
@@ -561,16 +636,36 @@ function ChatBubble({
   }
   const data = message.data;
   const hasData = !!data && ((data.rows?.length ?? 0) > 0 || !!data.sql);
+  const clarify =
+    !!data?.needsClarification &&
+    (data.suggestedSources?.length ?? 0) > 0 &&
+    !!data.question;
+  const wide = hasData || clarify;
   return (
     <div className="group flex items-start gap-3">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
         <IconSparkles size={16} />
       </div>
-      <div className={cn("flex flex-col", hasData ? "w-full" : "max-w-[75%]")}>
+      <div className={cn("flex flex-col", wide ? "w-full" : "max-w-[75%]")}>
         <div className="rounded-xl bg-bg-secondary px-4 py-3 text-[13px] leading-relaxed text-ink-primary">
           <span className="whitespace-pre-wrap">{message.content}</span>
         </div>
         {hasData && data && <ChatResult data={data} />}
+        {clarify && data && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {(data.suggestedSources ?? []).map((src) => (
+              <button
+                key={src}
+                type="button"
+                onClick={() => onPickSource?.(data.question ?? "", src)}
+                disabled={!onPickSource}
+                className="rounded-full border border-line-secondary bg-bg-primary px-3 py-1 text-[12px] text-ink-secondary hover:border-brand-500 hover:text-ink-primary disabled:opacity-40"
+              >
+                {src}
+              </button>
+            ))}
+          </div>
+        )}
         <BranchButton onBranch={onBranch} branching={branching} />
       </div>
     </div>

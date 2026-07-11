@@ -32,6 +32,12 @@ def test_ask_system_prompt_forbids_sql() -> None:
     assert "NEVER output SQL" in prompt
 
 
+def test_ask_system_prompt_forbids_charts_and_fabrication() -> None:
+    prompt = _constant("ASK_SYSTEM_PROMPT")
+    assert "CANNOT render charts or tables" in prompt
+    assert "NEVER fabricate sample" in prompt
+
+
 def test_ask_uses_ask_system_prompt_not_shared() -> None:
     """``ask()`` must call the LLM with ASK_SYSTEM_PROMPT; the relationship
     endpoint keeps the SQL-capable SYSTEM_PROMPT."""

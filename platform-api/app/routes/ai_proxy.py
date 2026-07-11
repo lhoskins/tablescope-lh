@@ -770,7 +770,7 @@ async def ask(
     }
     response = await _forward_to_ai("/ai/ask", payload)
     if isinstance(response, dict) and response.get("answer"):
-        response["answer"] = _shield_prose_from_sql(str(response["answer"]))
+        response["answer"] = _shield_prose_answer(str(response["answer"]))
     _attach_ask_envelope(response)
     return response
 
@@ -2206,6 +2206,17 @@ _CHART_REQUEST_RE = re.compile(
 )
 
 
+# A question is "data-shaped" when it asks for counts/metrics/records or a
+# presentation of them. Used only to choose the failure UX (clarify vs prose)
+# — never to gate the data path itself, which always tries first.
+_DATA_QUESTION_RE = re.compile(
+    r"\b(count|how many|total|sum|average|avg|median|trend|over time|"
+    r"top\s+\d+|by\s+\w+|distribution|rate|per\s+\w+|chart|graph|plot|"
+    r"table|kpi|metric|breakdown)\b",
+    re.IGNORECASE,
+)
+
+
 def _requested_chart(question: str | None) -> str | None:
     """Return the normalized chart token the user explicitly asked for."""
     if not question:
@@ -2507,6 +2518,91 @@ async def _resolve_action_sources(
     )
 
 
+_RUN_VERB_RE = re.compile(
+    r"^\s*(run|execute|show|open|display|rerun)\b", re.IGNORECASE
+)
+_TITLE_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _title_tokens(text: str) -> set[str]:
+    return set(_TITLE_WORD_RE.findall((text or "").lower()))
+
+
+async def _match_saved_query(
+    session: AsyncSession, *, project_id: int, question: str
+) -> SavedQuery | None:
+    """Match a chat question to a saved query it names, deterministically.
+
+    A match requires the query title's tokens to appear in the question —
+    all of them normally, or 80% when the question opens with a run/show
+    verb (the user is explicitly executing something by name). One-word
+    titles are skipped: they match too easily.
+    """
+    q_tokens = _title_tokens(question)
+    if not q_tokens:
+        return None
+    threshold = 0.8 if _RUN_VERB_RE.match(question) else 1.0
+    saved = (
+        await session.scalars(
+            select(SavedQuery).where(
+                SavedQuery.project_id == project_id,
+                SavedQuery.is_archived.is_(False),
+                SavedQuery.sql_text.is_not(None),
+            )
+        )
+    ).all()
+    best: tuple[float, SavedQuery] | None = None
+    for sq in saved:
+        t_tokens = _title_tokens(sq.name)
+        if len(t_tokens) < 2:
+            continue
+        coverage = len(t_tokens & q_tokens) / len(t_tokens)
+        if coverage >= threshold and (best is None or coverage > best[0]):
+            best = (coverage, sq)
+    return best[1] if best else None
+
+
+async def _run_saved_query_for_chat(
+    session: AsyncSession,
+    context: RequestContext,
+    *,
+    project_id: int,
+    saved: SavedQuery,
+    question: str,
+    max_rows: int,
+) -> dict[str, Any] | None:
+    """Execute a matched saved query and shape it like an ask-and-run result.
+
+    Returns None on execution failure so the caller falls through to normal
+    SQL generation instead of surfacing an error for a fuzzy match.
+    """
+    sql = _apply_row_limit((saved.sql_text or "").strip().rstrip(";"), max_rows)
+    try:
+        result = await _execute_project_sql(session, context, project_id, sql)
+    except Exception as exc:
+        logger.info(
+            "Saved-query chat match %r failed to execute; falling back to "
+            "generation: %s", saved.name, exc,
+        )
+        return None
+    columns = result.get("columns", [])
+    rows = result.get("rows", [])[:max_rows]
+    response: dict[str, Any] = {
+        "question": question,
+        "sql": sql,
+        "columns": columns,
+        "rows": rows,
+        "suggestedVisualization": _suggest_visualization(columns, rows, question),
+        "explanation": f'Ran your saved query "{saved.name}".',
+        "dataSourcesUsed": [],
+        "savedQueryId": saved.id,
+        "status": "success",
+        "error": None,
+    }
+    _attach_presentation(response)
+    return response
+
+
 async def _ask_and_run_core(
     session: AsyncSession,
     context: RequestContext,
@@ -2523,6 +2619,22 @@ async def _ask_and_run_core(
     ground answers on real executed data. Never raises on a generation/execution
     failure — returns a structured ``status`` with SQL + error instead.
     """
+    # A question that names an existing saved query runs that query's stored
+    # SQL directly — deterministic, no generation. Skipped when the caller
+    # already locked a source (a clarification re-ask).
+    if source is None and card_context is None:
+        matched = await _match_saved_query(
+            session, project_id=project_id, question=question
+        )
+        if matched is not None:
+            run = await _run_saved_query_for_chat(
+                session, context,
+                project_id=project_id, saved=matched,
+                question=question, max_rows=max_rows,
+            )
+            if run is not None:
+                return run
+
     resolver = await _resolve_action_sources(
         session, context,
         project_id=project_id,
@@ -2540,6 +2652,20 @@ async def _ask_and_run_core(
         )
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc)
+        # Mirror the insight question modal: give the caller pickable sources
+        # (the AI server's 422 detail when present, else a heuristic ranking
+        # over the project's authorized tables).
+        suggested = list(details.get("matchedSources") or [])
+        if not suggested:
+            try:
+                table_schema = await _project_table_schema(
+                    session, tenant_id=context.tenant_id, project_id=project_id
+                )
+                suggested = _heuristic_rank_sources(
+                    question, [str(t["table"]) for t in table_schema]
+                )
+            except Exception:  # pragma: no cover - suggestion is best-effort
+                suggested = []
         return {
             "question": question,
             "sql": "",
@@ -2551,6 +2677,7 @@ async def _ask_and_run_core(
             "status": "generation_error",
             "error": friendly,
             "errorDetails": details,
+            "suggestedSources": suggested,
         }
 
     allowed_tables = ai_result.pop("_allowed_tables", [])
@@ -2786,16 +2913,26 @@ _PROSE_SQL_RE = re.compile(
     r"```(?:sql)?\s*(?:SELECT|WITH)\b|^\s*(?:SELECT|WITH)\b",
     re.IGNORECASE,
 )
+# Text-drawn presentation: a markdown table separator row (| --- | --- |) or
+# a "**...Chart:**"/"**...Table:**" heading. The prose channel cannot render
+# charts or tables, so such an answer is fabricated output — usually with
+# invented numbers.
+_PROSE_FAKE_DATA_RE = re.compile(
+    r"\|\s*:?-{2,}:?\s*\||\*\*[^\n*]{0,60}(?:chart|table)[^\n*]{0,20}\*\*",
+    re.IGNORECASE,
+)
 
 
-def _shield_prose_from_sql(answer: str) -> str:
-    """Never render raw SQL as a chat answer.
+def _shield_prose_answer(answer: str) -> str:
+    """Never render raw SQL or fabricated charts/tables as a chat answer.
 
-    The prose channel is instructed not to emit SQL, but a model may still do
-    so. A SQL-dominated answer is replaced with a friendly redirect — the
-    data-first path is the only surface that presents SQL (collapsed).
+    The prose channel is instructed not to emit SQL or draw presentation in
+    text, but a model may still do so. Such answers are replaced with a
+    friendly redirect — the data-first path is the only surface that presents
+    SQL (collapsed) and real charts/tables.
     """
-    if not _PROSE_SQL_RE.search(answer or ""):
+    text = answer or ""
+    if not (_PROSE_SQL_RE.search(text) or _PROSE_FAKE_DATA_RE.search(text)):
         return answer
     return (
         "I couldn't run this as a data query against the project's tables. "
@@ -2835,7 +2972,7 @@ async def ai_ask_and_run(
         result["answerType"] = "data"
         return result
     if result.get("status") == "generation_error":
-        prose = _shield_prose_from_sql(
+        prose = _shield_prose_answer(
             await _forward_prose_answer(
                 context, project_id=req.project_id, question=req.question
             )
@@ -3980,6 +4117,8 @@ class ConversationRename(BaseModel):
 class ConversationMessageCreate(BaseModel):
     question: str
     project_id: int | None = None
+    # Source table chosen from a prior clarification — locks the resolver.
+    source: str | None = None
 
 
 def _message_dict(m: AiConversationMessage) -> dict[str, Any]:
@@ -4220,6 +4359,7 @@ async def add_conversation_message(
             project_id=project_id,
             question=question,
             max_rows=CHAT_ANSWER_MAX_ROWS,
+            source=req.source,
         )
         if run.get("status") == "success":
             answer = _chat_answer_text(question, run)
@@ -4233,8 +4373,30 @@ async def add_conversation_message(
                 "explanation": run.get("explanation", ""),
                 "dataSourcesUsed": run.get("dataSourcesUsed", []),
             }
+            if run.get("savedQueryId") is not None:
+                answer_data["savedQueryId"] = run["savedQueryId"]
+        elif _DATA_QUESTION_RE.search(question) and run.get("suggestedSources"):
+            # Ungroundable data question: ask the user to pick a source (same
+            # UX as the Project Insight question modal) instead of letting the
+            # prose channel improvise an answer it cannot ground.
+            answer = (
+                "I couldn't confidently identify which project source answers "
+                "this question. Pick a source below and I'll run it, or "
+                "rephrase using a field or metric from your data."
+            )
+            answer_data = {
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "suggestedVisualization": {"type": "table"},
+                "explanation": "",
+                "dataSourcesUsed": [],
+                "needsClarification": True,
+                "question": question,
+                "suggestedSources": list(run["suggestedSources"])[:6],
+            }
         else:
-            answer = _shield_prose_from_sql(
+            answer = _shield_prose_answer(
                 await _forward_prose_answer(
                     context,
                     project_id=project_id,

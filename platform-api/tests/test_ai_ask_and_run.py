@@ -20,7 +20,7 @@ from app.routes.ai_proxy import (
     _ask_data_first,
     _is_read_only_select,
     _requested_chart,
-    _shield_prose_from_sql,
+    _shield_prose_answer,
     _suggest_visualization,
 )
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
@@ -173,20 +173,90 @@ def test_suggest_visualization_ignores_shape_invalid_donut_request():
 # ── Prose SQL shield ──────────────────────────────────────────────────────
 
 
-def test_shield_prose_from_sql_replaces_sql_fenced_answer():
-    out = _shield_prose_from_sql("```sql\nSELECT * FROM incidents\n```")
+def test_shield_prose_answer_replaces_sql_fenced_answer():
+    out = _shield_prose_answer("```sql\nSELECT * FROM incidents\n```")
     assert "SELECT" not in out
     assert "rephrasing" in out.lower()
 
 
-def test_shield_prose_from_sql_replaces_leading_select():
-    out = _shield_prose_from_sql("SELECT category, count(*) FROM incidents")
+def test_shield_prose_answer_replaces_leading_select():
+    out = _shield_prose_answer("SELECT category, count(*) FROM incidents")
     assert "SELECT" not in out
 
 
-def test_shield_prose_from_sql_passes_ordinary_prose_through():
+def test_shield_prose_answer_replaces_markdown_table():
+    out = _shield_prose_answer(
+        "Here are the incidents:\n\n"
+        "| Category | Count |\n| --- | --- |\n| Safety | 12 |\n"
+    )
+    assert "| --- |" not in out
+    assert "rephrasing" in out.lower()
+
+
+def test_shield_prose_answer_replaces_fabricated_chart_heading():
+    out = _shield_prose_answer(
+        "**Horizontal Bar Chart:**\nSafety ############ 12\nQuality ##### 5"
+    )
+    assert "rephrasing" in out.lower()
+
+
+def test_shield_prose_answer_passes_ordinary_prose_through():
     prose = "The safety policy requires quarterly audits per document Policy-12."
-    assert _shield_prose_from_sql(prose) == prose
+    assert _shield_prose_answer(prose) == prose
+
+
+# ── Saved-query title matcher ─────────────────────────────────────────────
+
+
+class _FakeSavedQuery:
+    def __init__(self, id: int, name: str, sql_text: str = "SELECT 1") -> None:
+        self.id = id
+        self.name = name
+        self.sql_text = sql_text
+
+
+class _FakeScalarResult:
+    def __init__(self, items):
+        self._items = items
+
+    def all(self):
+        return self._items
+
+
+class _FakeSession:
+    def __init__(self, saved):
+        self._saved = saved
+
+    async def scalars(self, _stmt):
+        return _FakeScalarResult(self._saved)
+
+
+async def _match(question, saved):
+    return await ai_proxy._match_saved_query(
+        _FakeSession(saved), project_id=1, question=question
+    )
+
+
+async def test_match_saved_query_run_verb_80pct():
+    saved = [_FakeSavedQuery(7, "AI - High-Risk IT Changes Over Time")]
+    m = await _match("Run the AI High Risk IT changes over time", saved)
+    assert m is not None and m.id == 7
+
+
+async def test_match_saved_query_single_token_matches_nothing():
+    saved = [_FakeSavedQuery(7, "AI - High-Risk IT Changes Over Time")]
+    assert await _match("changes", saved) is None
+
+
+async def test_match_saved_query_one_word_title_never_matches():
+    saved = [_FakeSavedQuery(9, "Incidents")]
+    assert await _match("show incidents", saved) is None
+
+
+async def test_match_saved_query_partial_no_verb_below_100pct():
+    # No run/show verb → needs all title tokens; "high risk" alone falls short.
+    saved = [_FakeSavedQuery(7, "AI - High-Risk IT Changes Over Time")]
+    assert await _match("what are the high risk items", saved) is None
 
 
 async def test_ask_data_first_returns_structured_for_zero_row_success(monkeypatch):
