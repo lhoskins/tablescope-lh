@@ -314,6 +314,190 @@ async def test_run_ai_intelligence_skips_empty_results(monkeypatch) -> None:
     assert interpret_called["v"] is False  # nothing to interpret
 
 
+# ─────────────── Analytical Method Engine wiring (hybrid mode) ───────────────
+
+def _method_plan_interpret(monkeypatch, *, summary_confidence=None) -> None:
+    """Wire a minimal enabled AI plan/interpret producing one trend card."""
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**kwargs):
+        return [
+            {
+                "id": "a1",
+                "category": "trend",
+                "title": "Spend by supplier",
+                "rationale": "Concentration risk.",
+                "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend '
+                'FROM "spend" GROUP BY "supplier"',
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "spend",
+                "severity_hint": "watch",
+            }
+        ]
+
+    async def fake_interpret(**kwargs):
+        ins: dict = {
+            "id": "a1",
+            "title": "Spend concentrated",
+            "summary": "**Acme** dominates spend.",
+            "severity": "watch",
+        }
+        if summary_confidence is not None:
+            ins["confidence"] = summary_confidence
+        return {"a1": ins}
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+
+def _spend_ctx_runner():
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+    runner = _runner(
+        {
+            "GROUP BY": [
+                {"supplier": "Acme", "spend": 1200.0},
+                {"supplier": "Globex", "spend": 800.0},
+                {"supplier": "Initech", "spend": 200.0},
+            ]
+        }
+    )
+    return ctx, runner
+
+
+async def test_method_engine_hybrid_attaches_envelope(monkeypatch) -> None:
+    _method_plan_interpret(monkeypatch)
+    monkeypatch.setattr(hi, "get_engine_mode", lambda: hi.EngineMode.HYBRID)
+
+    seen = {"question": None}
+
+    async def fake_analyze(session, **kwargs):
+        seen["question"] = kwargs.get("question")
+        return {
+            "status": "ok",
+            "method": "pearson_correlation",
+            "methodName": "Pearson Correlation",
+            "quality": "reliable",
+            "tier": 1,
+            "n": 12,
+            "usableN": 12,
+        }
+
+    monkeypatch.setattr(hi, "analyze_methods", fake_analyze)
+
+    ctx, runner = _spend_ctx_runner()
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, session=object(), tenant_id=1, user_id=1
+    )
+    assert cards is not None and len(cards) == 1
+    card = cards[0]
+    assert card["analyticalMethod"]["method"] == "pearson_correlation"
+    # Real quality verdict replaces the row-count guess (0.75 -> 0.9).
+    assert card["confidenceScore"] == 0.9
+    # The declared trend intent is forwarded and the question is built.
+    assert "Spend by supplier" in (seen["question"] or "")
+
+
+async def test_method_engine_tentative_confidence(monkeypatch) -> None:
+    _method_plan_interpret(monkeypatch)
+    monkeypatch.setattr(hi, "get_engine_mode", lambda: hi.EngineMode.HYBRID)
+
+    async def fake_analyze(session, **kwargs):
+        return {
+            "status": "ok",
+            "method": "describe_numeric",
+            "quality": "tentative",
+        }
+
+    monkeypatch.setattr(hi, "analyze_methods", fake_analyze)
+
+    ctx, runner = _spend_ctx_runner()
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, session=object(), tenant_id=1, user_id=1
+    )
+    assert cards[0]["confidenceScore"] == 0.6
+
+
+async def test_method_engine_off_is_noop(monkeypatch) -> None:
+    _method_plan_interpret(monkeypatch)
+    monkeypatch.setattr(hi, "get_engine_mode", lambda: hi.EngineMode.OFF)
+
+    called = {"v": False}
+
+    async def fake_analyze(session, **kwargs):
+        called["v"] = True
+        return {"status": "ok", "method": "x", "quality": "reliable"}
+
+    monkeypatch.setattr(hi, "analyze_methods", fake_analyze)
+
+    ctx, runner = _spend_ctx_runner()
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, session=object(), tenant_id=1, user_id=1
+    )
+    assert called["v"] is False
+    assert "analyticalMethod" not in cards[0]
+    assert cards[0]["confidenceScore"] == 0.75  # unchanged row-count guess
+
+
+async def test_method_engine_failure_never_drops_card(monkeypatch) -> None:
+    _method_plan_interpret(monkeypatch)
+    monkeypatch.setattr(hi, "get_engine_mode", lambda: hi.EngineMode.HYBRID)
+
+    async def boom(session, **kwargs):
+        raise RuntimeError("engine exploded")
+
+    monkeypatch.setattr(hi, "analyze_methods", boom)
+
+    ctx, runner = _spend_ctx_runner()
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, session=object(), tenant_id=1, user_id=1
+    )
+    # 6->0 regression guard: the card still builds, just without an envelope.
+    assert len(cards) == 1
+    assert "analyticalMethod" not in cards[0]
+
+
+async def test_method_engine_no_method_not_attached(monkeypatch) -> None:
+    _method_plan_interpret(monkeypatch)
+    monkeypatch.setattr(hi, "get_engine_mode", lambda: hi.EngineMode.HYBRID)
+
+    async def fake_analyze(session, **kwargs):
+        # Selector honestly rejected the shape — no method bound.
+        return {"status": "no_method", "method": None, "quality": None}
+
+    monkeypatch.setattr(hi, "analyze_methods", fake_analyze)
+
+    ctx, runner = _spend_ctx_runner()
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, session=object(), tenant_id=1, user_id=1
+    )
+    assert "analyticalMethod" not in cards[0]
+
+
+async def test_method_engine_no_session_is_noop(monkeypatch) -> None:
+    _method_plan_interpret(monkeypatch)
+    monkeypatch.setattr(hi, "get_engine_mode", lambda: hi.EngineMode.HYBRID)
+
+    called = {"v": False}
+
+    async def fake_analyze(session, **kwargs):
+        called["v"] = True
+        return {"status": "ok", "method": "x", "quality": "reliable"}
+
+    monkeypatch.setattr(hi, "analyze_methods", fake_analyze)
+
+    ctx, runner = _spend_ctx_runner()
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, tenant_id=1, user_id=1
+    )
+    assert called["v"] is False
+    assert "analyticalMethod" not in cards[0]
+
+
 # ───────────── insight-first methodology: helpers & metadata ─────────────────
 
 def test_home_best_practices_reference_loads() -> None:

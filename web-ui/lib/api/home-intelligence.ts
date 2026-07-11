@@ -2,6 +2,7 @@
 
 import { apiClient } from "@/lib/api-client";
 import type {
+  MethodEnvelope,
   PresentationDescriptor,
   ResponseEnvelope,
 } from "@/lib/api/ai-actions";
@@ -97,6 +98,8 @@ export interface InsightCard {
     confidenceReason?: string;
     rowMultiplicationRisk?: string;
   };
+  /** Governed Analytical Method Engine envelope (hybrid mode only). */
+  analyticalMethod?: MethodEnvelope;
 }
 
 export interface ProjectResult {
