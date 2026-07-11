@@ -379,10 +379,12 @@ export function generateProjectDashboard(
 
 export function suggestInsights(
   granularity = 3,
+  projectId?: number,
 ): Promise<{ projects: ProjectResult[] }> {
   return apiClient.post("/api/ai/home/insights", {
     granularity,
     max_per_project: 5,
+    project_id: projectId ?? null,
   });
 }
 

@@ -42,7 +42,6 @@ from app.models.reference_library import (
 )
 from app.services import reference_library_ai_client as suggest_client
 from app.services.presentation_engine import PresentationMode
-from app.services.response_envelope import attach_envelope
 from app.services.reference_library_processing import (
     EXT_TO_FILE_TYPE,
     EXTRACTABLE_EXTENSIONS,
@@ -56,6 +55,7 @@ from app.services.reference_library_service import (
     find_duplicate_in_tier,
     normalize_domain_tag,
 )
+from app.services.response_envelope import attach_envelope
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/reference-library", tags=["reference-library"])

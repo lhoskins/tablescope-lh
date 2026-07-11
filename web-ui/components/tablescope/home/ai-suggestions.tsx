@@ -359,7 +359,13 @@ function DashboardSuggestionCard({
 
 // ── Insights ─────────────────────────────────────────────────────────
 
-function InsightsPanel({ projects }: { projects: ProjectResult[] }) {
+export function InsightsPanel({
+  projects,
+  showProjectHeader = true,
+}: {
+  projects: ProjectResult[];
+  showProjectHeader?: boolean;
+}) {
   const withResults = projects.filter((p) => p.insights.length > 0);
   if (withResults.length === 0) {
     return (
@@ -370,7 +376,9 @@ function InsightsPanel({ projects }: { projects: ProjectResult[] }) {
     <div className="space-y-8">
       {withResults.map((p) => (
         <section key={p.projectId}>
-          <ProjectHeader name={p.projectName} color={p.projectColor} />
+          {showProjectHeader && (
+            <ProjectHeader name={p.projectName} color={p.projectColor} />
+          )}
           <div className="space-y-3">
             {p.insights.map((card) => (
               <IntelligenceCard key={card.id} card={card} hideActions />
