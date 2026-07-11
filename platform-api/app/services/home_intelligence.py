@@ -32,12 +32,14 @@ from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
 from app.models.project_asset import ProjectAsset
+from app.models.query_scope import QueryScope
 from app.models.reference_library import (
     TIER_COMPANY,
     TIER_INDUSTRY,
     TIER_PROJECT,
     ReferenceDocument,
 )
+from app.models.saved_query import SavedQuery
 from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.analytical_method_engine.config import (
     EngineMode,
@@ -95,9 +97,26 @@ class DocInfo:
 
 
 @dataclass
+class ScopeLink:
+    """A user/AI-curated drill-down relationship resolved to view names.
+
+    Sourced from enabled ``QueryScope`` rows and mapped from saved-query ids
+    onto the concrete Teiid view names the planner reasons about, so a curated
+    relationship becomes strong join evidence.
+    """
+
+    left_table: str
+    right_table: str
+    left_column: str
+    right_column: str
+    created_by_ai: bool
+
+
+@dataclass
 class ProjectContext:
     tables: list[TableInfo]
     documents: list[DocInfo]
+    scope_links: list[ScopeLink] = field(default_factory=list)
 
 
 async def gather_project_context(
@@ -193,7 +212,23 @@ async def gather_project_context(
             )
         )
 
-    return ProjectContext(tables=tables, documents=documents)
+    scope_links: list[ScopeLink] = []
+    try:
+        scope_links = await _resolve_scope_links(
+            session,
+            project_id=project.id,
+            allowed_tables=[t.view_name for t in tables],
+        )
+    except Exception as exc:  # fail-open: enrichment must never break context
+        logger.warning(
+            "Scope-link enrichment skipped for project %s: %s", project.id, exc
+        )
+
+    return ProjectContext(
+        tables=tables,
+        documents=documents,
+        scope_links=scope_links,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -285,45 +320,248 @@ def detect_entities(tables: list[TableInfo]) -> dict[str, list[str]]:
     return out
 
 
-def find_relationship_candidates(tables: list[TableInfo]) -> list[dict[str, Any]]:
+def _detect_view_strict(
+    sql: str | None, allowed_tables: list[str]
+) -> str | None:
+    """Which allowed view a query's SQL references — ``None`` when ambiguous.
+
+    A curated scope is only trustworthy as a view-to-view link when its
+    source/target query unambiguously reads a single project view. Zero or
+    multiple matches are ambiguous and rejected so we never fabricate a pair.
+    """
+    if not sql:
+        return None
+    sql_upper = sql.upper()
+    matches = [t for t in allowed_tables if t.upper() in sql_upper]
+    return matches[0] if len(matches) == 1 else None
+
+
+async def _resolve_scope_links(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    allowed_tables: list[str],
+) -> list[ScopeLink]:
+    """Map this project's enabled ``QueryScope`` rows onto view-to-view links.
+
+    Only enabled scopes for *this* project are read (never crossing project
+    boundaries). Each scope's source and target saved query is resolved to a
+    single allowed view via :func:`_detect_view_strict`; scopes whose SQL is
+    missing, matches zero or multiple views, or self-references are skipped.
+    Links are de-duplicated by (sorted view pair, normalized source field).
+    """
+    scopes = (
+        await session.scalars(
+            select(QueryScope).where(
+                QueryScope.project_id == project_id,
+                QueryScope.enabled.is_(True),
+            )
+        )
+    ).all()
+    if not scopes:
+        return []
+
+    query_ids = {s.query_id for s in scopes} | {
+        s.target_query_id for s in scopes
+    }
+    queries = (
+        await session.scalars(
+            select(SavedQuery).where(SavedQuery.id.in_(query_ids))
+        )
+    ).all()
+    sql_by_id = {q.id: q.sql_text for q in queries}
+
+    links: list[ScopeLink] = []
+    seen: set[tuple[str, str, str]] = set()
+    for s in scopes:
+        left = _detect_view_strict(sql_by_id.get(s.query_id), allowed_tables)
+        right = _detect_view_strict(
+            sql_by_id.get(s.target_query_id), allowed_tables
+        )
+        if not left or not right or left == right:
+            continue
+        lo, hi_ = sorted([left, right])
+        key = (lo, hi_, _norm(s.source_field))
+        if key in seen:
+            continue
+        seen.add(key)
+        links.append(
+            ScopeLink(
+                left_table=left,
+                right_table=right,
+                left_column=s.source_field.strip('"'),
+                right_column=s.target_field.strip('"'),
+                created_by_ai=bool(s.created_by_ai),
+            )
+        )
+    return links
+
+
+def _containment(left: set[str], right: set[str]) -> float:
+    """Fraction of the smaller value set contained in the larger.
+
+    A measured signal that two columns actually share values — the basis for
+    upgrading confidence beyond a name match and for inferring cardinality.
+    """
+    if not left or not right:
+        return 0.0
+    small, large = (left, right) if len(left) <= len(right) else (right, left)
+    return len(small & large) / len(small)
+
+
+def _cardinality(
+    left: set[str], right: set[str], overlap: float
+) -> tuple[str, str]:
+    """Infer (relationship_type, row_multiplication_risk) from value overlap."""
+    if not left or not right or overlap <= 0.0:
+        return "unknown", "medium"
+    if overlap >= 0.8:
+        return "one_to_many", "low"
+    if overlap >= 0.5:
+        return "one_to_many", "medium"
+    return "many_to_many", "high"
+
+
+def find_relationship_candidates(
+    tables: list[TableInfo],
+    *,
+    scope_links: list[ScopeLink] | None = None,
+    key_values: dict[str, dict[str, set[str]]] | None = None,
+) -> list[dict[str, Any]]:
     """Discover evidence-backed join candidates between table pairs.
 
-    Evidence today is an exact key-name match (e.g. both tables expose a
-    ``SupplierID`` column). Each candidate carries the relationship metadata the
-    planner and card config expect. Name-only matches with no key shape are
-    deliberately excluded so unrelated tables are never joined.
+    Tiered evidence, strongest first; the best evidence per table-pair wins:
+
+    - **Tier 1 — curated scope links**: an enabled drill-down relationship
+      (user-created → 0.9, AI-created → 0.85).
+    - **Tier 3 — exact key-name match**: both tables expose the same join key
+      (e.g. ``SupplierID``), base confidence 0.6.
+    - **Tier 4 — differently-named join keys** whose *sampled* values overlap
+      (e.g. ``SupplierCode`` vs ``VendorCode``), requiring ≥0.3 containment.
+
+    When sampled ``key_values`` are supplied, measured containment upgrades a
+    candidate's confidence and derives its cardinality / row-multiplication
+    risk. Name-only matches with no key shape are still excluded so unrelated
+    tables are never joined; the resolver never fabricates a pair.
     """
+    key_values = key_values or {}
+    by_view = {t.view_name: t for t in tables}
+
+    # best[(sorted view pair)] -> candidate dict (higher confidence wins)
+    best: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def _consider(cand: dict[str, Any]) -> None:
+        lo, hi_ = sorted([cand["left_table"], cand["right_table"]])
+        pair = (lo, hi_)
+        prior = best.get(pair)
+        if prior is None or cand["join_confidence"] > prior["join_confidence"]:
+            best[pair] = cand
+
+    def _kv(view: str, col: str) -> set[str]:
+        return key_values.get(view, {}).get(_norm(col), set())
+
+    def _measured(
+        left_view: str,
+        left_col: str,
+        right_view: str,
+        right_col: str,
+        base_conf: float,
+        base_reason: str,
+    ) -> dict[str, Any]:
+        lv, rv = _kv(left_view, left_col), _kv(right_view, right_col)
+        overlap = _containment(lv, rv)
+        confidence = base_conf
+        reason = base_reason
+        rel_type, risk = "unknown", "medium"
+        if lv and rv:
+            rel_type, risk = _cardinality(lv, rv, overlap)
+            if overlap > confidence:
+                confidence = round(overlap, 2)
+            reason = (
+                f"{base_reason}; measured value containment {overlap:.0%}"
+            )
+        return {
+            "left_table": left_view,
+            "right_table": right_view,
+            "left_join_key": left_col,
+            "right_join_key": right_col,
+            "relationship_type": rel_type,
+            "join_confidence": confidence,
+            "confidence_reason": reason,
+            "row_multiplication_risk": risk,
+        }
+
+    # Tier 1 — curated scope relationships.
+    for link in scope_links or []:
+        if link.left_table not in by_view or link.right_table not in by_view:
+            continue
+        base = 0.85 if link.created_by_ai else 0.9
+        origin = "AI-suggested" if link.created_by_ai else "user-defined"
+        _consider(
+            _measured(
+                link.left_table,
+                link.left_column,
+                link.right_table,
+                link.right_column,
+                base,
+                f"curated scope relationship ({origin})",
+            )
+        )
+
+    # Tier 3 — exact key-name matches across tables.
     by_key: dict[str, list[tuple[TableInfo, str]]] = {}
     for t in tables:
         for c in t.column_names:
             if _is_join_key(c):
                 by_key.setdefault(_norm(c), []).append((t, c))
-
-    candidates: list[dict[str, Any]] = []
-    seen: set[tuple[str, ...]] = set()
     for occ in by_key.values():
         for i in range(len(occ)):
             for j in range(i + 1, len(occ)):
                 (lt, lc), (rt, rc) = occ[i], occ[j]
                 if lt.view_name == rt.view_name:
                     continue
-                pair = (*sorted([lt.view_name, rt.view_name]), _norm(lc))
-                if pair in seen:
-                    continue
-                seen.add(pair)
-                candidates.append(
-                    {
-                        "left_table": lt.view_name,
-                        "right_table": rt.view_name,
-                        "left_join_key": lc,
-                        "right_join_key": rc,
-                        "relationship_type": "unknown",
-                        "join_confidence": 0.6,
-                        "confidence_reason": f"exact key-name match on '{lc}'",
-                        "row_multiplication_risk": "medium",
-                    }
+                _consider(
+                    _measured(
+                        lt.view_name,
+                        lc,
+                        rt.view_name,
+                        rc,
+                        0.6,
+                        f"exact key-name match on '{lc}'",
+                    )
                 )
-    return candidates
+
+    # Tier 4 — differently-named join keys with sampled value overlap.
+    join_cols_by_view = {
+        t.view_name: [c for c in t.column_names if _is_join_key(c)]
+        for t in tables
+    }
+    view_names = [t.view_name for t in tables]
+    for a in range(len(view_names)):
+        for b in range(a + 1, len(view_names)):
+            lv_name, rv_name = view_names[a], view_names[b]
+            for lc in join_cols_by_view[lv_name]:
+                for rc in join_cols_by_view[rv_name]:
+                    if _norm(lc) == _norm(rc):
+                        continue  # covered by Tier 3
+                    lv, rv = _kv(lv_name, lc), _kv(rv_name, rc)
+                    if not lv or not rv:
+                        continue
+                    overlap = _containment(lv, rv)
+                    if overlap < 0.3:
+                        continue
+                    _consider(
+                        _measured(
+                            lv_name,
+                            lc,
+                            rv_name,
+                            rc,
+                            round(overlap, 2),
+                            f"sampled value overlap ('{lc}' ~ '{rc}')",
+                        )
+                    )
+
+    return list(best.values())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -503,27 +741,34 @@ async def _safe_query(runner: QueryRunner, sql: str) -> dict[str, Any] | None:
         return None
 
 
-async def _sample_values(runner: QueryRunner, view_name: str) -> dict[str, str]:
-    """Return one real example value per column for a table.
+async def _sample_values(
+    runner: QueryRunner, view_name: str
+) -> tuple[dict[str, str], dict[str, set[str]]]:
+    """Sample a table: (one example per column, distinct join-key values).
 
-    The planner uses these to detect each column's true format (e.g. a date
-    stored as ``"1/19/2026"`` vs ISO, or whether text is numeric) so it can
-    CAST/parse correctly. Best-effort: returns ``{}`` if the probe query fails.
+    The first mapping is one real example value per column, used by the planner
+    to detect each column's true format (e.g. a date stored as ``"1/19/2026"``
+    vs ISO). The second collects the *distinct* values seen (over the same 25
+    probe rows) for columns recognised as join keys, keyed by normalised name —
+    the measured evidence relationship discovery uses to score value overlap.
+    Best-effort: returns ``({}, {})`` if the probe query fails.
     """
     result = await _safe_query(runner, f'SELECT * FROM "{view_name}"')
     if not result:
-        return {}
+        return {}, {}
     samples: dict[str, str] = {}
+    key_values: dict[str, set[str]] = {}
     for row in result.get("rows", [])[:25]:
         for col, val in row.items():
-            if col in samples:
-                continue
             if val is None:
                 continue
             text = str(val).strip()
-            if text:
-                samples[col] = text[:40]
-    return samples
+            if not text:
+                continue
+            samples.setdefault(col, text[:40])
+            if _is_join_key(col):
+                key_values.setdefault(_norm(col), set()).add(text[:80])
+    return samples, key_values
 
 
 _SLASH_DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/(\d{4}|\d{2})$")
@@ -1900,9 +2145,14 @@ async def plan_and_execute_widgets(
         return []
 
     allowed_tables = [t.view_name for t in ctx.tables]
-    samples_per_table = await asyncio.gather(
+    sample_results = await asyncio.gather(
         *(_sample_values(runner, t.view_name) for t in ctx.tables)
     )
+    samples_per_table = [s for (s, _) in sample_results]
+    key_values_by_table = {
+        t.view_name: kv
+        for t, (_, kv) in zip(ctx.tables, sample_results, strict=False)
+    }
     table_schema = [
         {
             "table": t.view_name,
@@ -1916,7 +2166,11 @@ async def plan_and_execute_widgets(
     ]
     date_masks = _date_masks_from_samples(samples_per_table)
     documents = _plan_documents(ctx)
-    relationship_hints = find_relationship_candidates(ctx.tables)
+    relationship_hints = find_relationship_candidates(
+        ctx.tables,
+        scope_links=ctx.scope_links,
+        key_values=key_values_by_table,
+    )
 
     analyses = await ai.plan(
         tenant_id=tenant_id,
@@ -2065,10 +2319,16 @@ async def run_ai_intelligence(
 
     allowed_tables = [t.view_name for t in ctx.tables]
     # Pull a real example value per column so the planner can see each column's
-    # actual format (date masks, numeric-vs-text) and generate valid SQL.
-    samples_per_table = await asyncio.gather(
+    # actual format (date masks, numeric-vs-text) and generate valid SQL; the
+    # same probe collects distinct join-key values for relationship scoring.
+    sample_results = await asyncio.gather(
         *(_sample_values(runner, t.view_name) for t in ctx.tables)
     )
+    samples_per_table = [s for (s, _) in sample_results]
+    key_values_by_table = {
+        t.view_name: kv
+        for t, (_, kv) in zip(ctx.tables, sample_results, strict=False)
+    }
     table_schema = [
         {
             "table": t.view_name,
@@ -2110,7 +2370,11 @@ async def run_ai_intelligence(
     # Evidence-backed join candidates (best-practices §Multi-Table
     # Relationship Policy). When present, the planner is allowed to propose
     # validated two-table insights; otherwise it stays single-table.
-    relationship_hints = find_relationship_candidates(ctx.tables)
+    relationship_hints = find_relationship_candidates(
+        ctx.tables,
+        scope_links=ctx.scope_links,
+        key_values=key_values_by_table,
+    )
 
     async def request_plan() -> list[dict[str, Any]] | None:
         return await ai.plan(
