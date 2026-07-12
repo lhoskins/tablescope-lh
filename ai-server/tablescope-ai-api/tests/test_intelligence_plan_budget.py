@@ -1,5 +1,5 @@
 """The intelligence planner must treat cross-table (relationship) analyses as
-additive: the parser slice budget is ``target_count + len(relationship_hints)``
+additive: the parser budget is ``target_count + per_pair * len(relationship_hints)``
 so evidence-backed joins the prompt mandates are never truncated off.
 
 Run from ``tablescope-ai-api``: ``pytest -q tests/test_intelligence_plan_budget.py``.
@@ -87,8 +87,8 @@ def _req(hints: list[dict]) -> IntelligencePlanRequest:
 
 
 def test_plan_budget_keeps_extra_join_analyses(monkeypatch):
-    # 8 single + 3 join = 11 analyses; with 3 hints the budget is 8 + 3 = 11,
-    # so none are sliced off.
+    # 11 analyses; with 3 hints at granularity 3 the budget is
+    # 8 + 2*3 = 14, so none are sliced off.
     async def fake_generate(**kwargs):
         return _plan_json(11)
 

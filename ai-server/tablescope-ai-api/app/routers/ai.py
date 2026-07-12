@@ -1321,32 +1321,88 @@ def _build_relationship_hint_lines(hints: list[dict]) -> str:
     if not rows:
         return ""
     return (
-        "\nRELATIONSHIP EVIDENCE — verified joins you MAY use (exception to the "
-        "single-table rule below):\n" + "\n".join(rows) + "\n"
+        "\nRELATIONSHIP EVIDENCE — verified joins your cross-table analyses "
+        "MUST build on (the one exception to the single-table rule below):\n"
+        + "\n".join(rows) + "\n"
         "Multi-table join rules:\n"
-        "- You may JOIN a pair of tables ONLY when the exact pair and keys "
-        "appear in the list above. Never invent a join or join on matching "
-        "names that are not listed here.\n"
-        "- Default to at most TWO tables per analysis. Aggregate the detail/fact "
-        "table to one row per key in a derived step expressed as a single "
-        "GROUP BY before relating it to the master/entity table, so a "
-        "one-to-many join cannot multiply rows.\n"
-        "- Prefer a join only when it produces a genuinely cross-table insight "
-        "(e.g. high-spend suppliers with elevated defect rates, single-source "
-        "dependency, concentration risk). Otherwise stay single-table.\n"
-        "- Skip any join whose row_multiplication_risk is high unless you "
-        "aggregate first.\n"
+        "- JOIN a pair of tables ONLY when the exact pair and keys appear in "
+        "the list above. Never invent a join or join on matching names that "
+        "are not listed here.\n"
+        "- At most TWO tables per analysis. Write ONE flat SELECT (no "
+        "subqueries, no derived tables): JOIN the two tables directly on the "
+        "listed keys, GROUP BY label columns from the entity/master side, and "
+        "aggregate (SUM/AVG/COUNT) ONLY numeric columns from the detail/fact "
+        "side. Never SUM or AVG a master-side numeric column after the join — "
+        "the row fan-out inflates it.\n"
+        '- Alias both tables and table-qualify every column (e.g. '
+        'i."DefectQty", s."Region").\n'
+        "- When row_multiplication_risk is high, GROUP BY the join key itself "
+        "and aggregate measures from only one side — or skip the pair.\n"
+        "- A join must produce a genuinely cross-table insight (e.g. "
+        "high-spend suppliers with elevated defect rates, single-source "
+        "dependency, concentration risk) — not a restated single-table "
+        "metric.\n"
     )
 
 
-_TEIID_SQL_RULES = (
+# Table references in FROM/JOIN clauses; the negative lookahead skips function
+# calls so the FROM inside EXTRACT(... FROM ...) is not counted (same pattern
+# the SQL validator uses).
+_SQL_TABLE_REF_RE = re.compile(r'(?:FROM|JOIN)\s+"?(\w+)"?(?![\w(])', re.IGNORECASE)
+
+
+def _sql_table_count(sql: str, allowed_tables: list[str]) -> int:
+    """Number of distinct allowed tables a query reads — ≥2 means cross-table."""
+    allowed = {t.upper() for t in allowed_tables}
+    return len(
+        {m.upper() for m in _SQL_TABLE_REF_RE.findall(sql) if m.upper() in allowed}
+    )
+
+
+_TEIID_RULES_HEADER = (
     "This database uses Teiid (not MySQL/PostgreSQL). Text-backed (CSV/file) "
     "columns are stored as STRINGS no matter what logical type is shown.\n"
+)
+
+# Default table rule: strictly one table per query. Used verbatim whenever no
+# relationship evidence is in play (dashboard suggestion, scope analysis, and
+# any plan request without hints), so single-table behaviour never changes.
+_TEIID_SINGLE_TABLE_RULE = (
     "- Query a SINGLE table per analysis. Do NOT write JOINs. (Many tables "
     'share column names like "SupplierID" — joining causes ambiguity errors. '
     "One table per query avoids this entirely.)\n"
     "- Reference ONLY columns listed under the table you select FROM; never "
     "invent columns and never borrow a column from another table.\n"
+)
+
+# Swapped in for the rule above ONLY when the plan prompt carries a
+# RELATIONSHIP EVIDENCE block. Without this, the unconditional "Do NOT write
+# JOINs" sits later in the prompt than the cross-table mandate and suppresses
+# the very joins the mandate asks for.
+_TEIID_JOIN_EXCEPTION_RULE = (
+    "- Query a SINGLE table per analysis, with ONE exception: a cross-table "
+    "analysis may JOIN exactly the two tables of a pair listed in "
+    "RELATIONSHIP EVIDENCE, on exactly the listed keys. Alias both tables "
+    'and table-qualify EVERY column reference (e.g. i."DefectQty", '
+    's."Region") — many tables share column names and an unqualified column '
+    "in a join is an ambiguity error.\n"
+    "- Reference ONLY columns listed under the table(s) in your FROM/JOIN; "
+    "never invent columns and never borrow a column from any other table.\n"
+)
+
+# Used by the SQL repair endpoint when the failing query already joins two
+# tables (a planner-mandated cross-table analysis): the repair must keep the
+# join rather than "fixing" it back to a single-table query.
+_TEIID_FIX_JOIN_RULE = (
+    "- This query intentionally JOINs two tables (a verified relationship). "
+    "KEEP the same two tables and the same join keys — do NOT rewrite it as "
+    "a single-table query and do NOT add more tables. Alias both tables and "
+    "table-qualify EVERY column reference to avoid ambiguity errors.\n"
+    "- Reference ONLY columns listed under the two joined tables; never "
+    "invent columns.\n"
+)
+
+_TEIID_RULES_COMMON = (
     '- Quote every table and column name with double quotes: "ColName".\n'
     "- Only CAST columns that hold NUMERIC values (quantities, amounts, counts, "
     "prices). Do NOT CAST categorical/label text (status, type, rating, name, "
@@ -1379,6 +1435,10 @@ _TEIID_SQL_RULES = (
     "allowed tables directly with WHERE/GROUP BY/aggregations only.\n"
     "- GROUP BY must repeat the full SELECT expression (Teiid forbids alias "
     "references in GROUP BY). Never use SELECT *.\n"
+)
+
+_TEIID_SQL_RULES = (
+    _TEIID_RULES_HEADER + _TEIID_SINGLE_TABLE_RULE + _TEIID_RULES_COMMON
 )
 
 # Chart families the planner may request. These map onto the dashboard's chart
@@ -1502,12 +1562,24 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
 
     schema_lines = _build_schema_lines(req.table_schema)
     relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
-    teiid_rules = _TEIID_SQL_RULES
+    # With relationship evidence in play, the flat "Do NOT write JOINs" rule
+    # would contradict (and, sitting later in the prompt, override) the
+    # cross-table mandate — swap in the exception-aware variant. Without
+    # evidence the rules are byte-identical to the single-table original.
+    teiid_rules = (
+        _TEIID_RULES_HEADER + _TEIID_JOIN_EXCEPTION_RULE + _TEIID_RULES_COMMON
+        if relationship_lines
+        else _TEIID_SQL_RULES
+    )
 
     # Granularity (1 executive .. 5 granular) steers count + depth + how
     # aggressively to surface smaller, lower-severity signals.
     granularity = max(1, min(5, req.granularity))
     target_count = max(1, min(req.max_analyses, {1: 3, 2: 5, 3: 8, 4: 11, 5: 15}[granularity]))
+    # Cross-table analyses per evidence pair: executive levels get the single
+    # strongest comparison per pair; balanced/granular levels may develop two
+    # genuinely different insights on the same verified join.
+    per_pair = 1 if granularity <= 2 else 2
     if granularity <= 2:
         depth_guidance = (
             "Operate at an EXECUTIVE level. Surface ONLY the few most material, "
@@ -1538,11 +1610,19 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "opportunities, and relationships where the data supports it. Each "
         "analysis must be answerable from the allowed tables OR grounded in a "
         "listed document.\n"
-        "IN ADDITION to those, propose one CROSS-TABLE analysis for EACH table "
-        "pair listed in RELATIONSHIP EVIDENCE whose data supports a genuine "
-        "insight. Cross-table analyses are extra — they do NOT count toward "
-        f"the {target_count} limit, and you must not drop a supportable "
-        "evidence pair to stay under it.\n\n"
+        + (
+            "IN ADDITION to those, propose "
+            + (
+                "one CROSS-TABLE analysis"
+                if per_pair == 1
+                else "one CROSS-TABLE analysis — or TWO genuinely different "
+                "ones when the pair's data supports both —"
+            )
+            + " for EACH table pair listed in RELATIONSHIP EVIDENCE whose "
+            "data supports a genuine insight. Cross-table analyses are extra "
+            f"— they do NOT count toward the {target_count} limit, and you "
+            "must not drop a supportable evidence pair to stay under it.\n\n"
+        ) +
         "RELATIONSHIP ANALYSES (category \"relationship\"):\n"
         "In addition to single-metric risks/trends/opportunities, actively look "
         "for pairs of columns within ONE allowed table whose relationship to each "
@@ -1555,11 +1635,26 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "the SAME table, or on TWO tables joined per the CROSS-TABLE rules "
         "below.\n"
         "CROSS-TABLE ANALYSES (category \"relationship\"):\n"
-        "For each pair in the RELATIONSHIP EVIDENCE list above, propose one "
-        "analysis that JOINs exactly that pair on exactly the listed keys. "
-        "Aggregate the detail/fact table to one row per join key in a derived "
-        "GROUP BY step BEFORE joining, so a one-to-many join cannot multiply "
-        "rows. Prefer the highest-confidence pairs first and skip a pair only "
+        + (
+            "For each pair in the RELATIONSHIP EVIDENCE list above, propose "
+            + (
+                "one analysis"
+                if per_pair == 1
+                else "one analysis — or two that answer genuinely different "
+                "business questions —"
+            )
+            + " that JOINs exactly that pair on exactly the listed keys. "
+        ) +
+        "Write ONE flat SELECT: JOIN the two tables directly, GROUP BY label "
+        "columns from the entity/master side, and aggregate ONLY numeric "
+        "columns from the detail/fact side (never SUM/AVG a master-side "
+        "number after the join — row fan-out inflates it). Example shape:\n"
+        'SELECT s."SupplierName" AS Supplier, '
+        'SUM(CAST(i."DefectQty" AS double)) AS TotalDefects '
+        'FROM "Inspections" i JOIN "Suppliers" s '
+        'ON i."SupplierID" = s."SupplierID" '
+        'GROUP BY s."SupplierName" ORDER BY TotalDefects DESC\n'
+        "Prefer the highest-confidence pairs first and skip a pair only "
         "when its data genuinely supports no insight (e.g. the joined result "
         "would be a single row or empty). Never join a pair that is not "
         "listed, and never join on matching column names that are not listed "
@@ -1592,8 +1687,9 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "pair from the RELATIONSHIP EVIDENCE list (and only then), columns may "
         "come from BOTH joined tables. Every referenced column must still "
         "appear under one of the two joined tables in the schema, the join "
-        "must use exactly the listed keys, and the detail table must be "
-        "aggregated to one row per key before the join. "
+        "must use exactly the listed keys, every column must be "
+        "table-qualified via the table aliases, and only detail/fact-side "
+        "columns may be aggregated (per the flat-SELECT shape above). "
         "The Inspections-style table that holds two numeric quantities "
         "(e.g. a received quantity and a defect quantity) is usually the best "
         "single source for a real two-metric relationship.\n"
@@ -1747,7 +1843,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         temperature=0.2,
         # The window is shared by the prompt AND the generated JSON. The plan
         # prompt (schema + documents + relationship evidence + rules) plus
-        # target_count + one-per-evidence-pair analyses is the largest
+        # target_count + per_pair-per-evidence-pair analyses is the largest
         # prompt+output pair in the pipeline — run it at the same 24576 the
         # scope-analysis calls already use on this model, so a rich project's
         # response is not truncated into invalid JSON.
@@ -1763,13 +1859,28 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             len(raw), raw[-80:],
         )
     analyses: list[PlannedAnalysis] = []
-    # Cross-table analyses are additive: allow one extra slot per evidence
-    # pair so the slice never drops a join the prompt mandated.
-    plan_budget = target_count + len(req.relationship_hints or [])
+    # Cross-table analyses are additive: reserve per_pair slots per evidence
+    # pair on top of target_count. When the model overproduces, single-table
+    # and cross-table analyses each compete only for their OWN budget — a
+    # blind head-slice would cut mandated joins from the tail whenever the
+    # model over-delivered single-table analyses first.
+    join_budget = per_pair * len(req.relationship_hints or [])
+    plan_budget = target_count + join_budget
     if parsed and isinstance(parsed.get("analyses"), list):
-        for i, a in enumerate(parsed["analyses"][:plan_budget]):
-            if not isinstance(a, dict):
-                continue
+        raw_items = [a for a in parsed["analyses"] if isinstance(a, dict)]
+        if len(raw_items) > plan_budget:
+            selected: list[dict] = []
+            kept_single = kept_cross = 0
+            for a in raw_items:
+                if _sql_table_count(a.get("sql", "") or "", allowed_tables) >= 2:
+                    if kept_cross < join_budget:
+                        selected.append(a)
+                        kept_cross += 1
+                elif kept_single < target_count:
+                    selected.append(a)
+                    kept_single += 1
+            raw_items = selected
+        for i, a in enumerate(raw_items):
             sql = _clean_sql(a.get("sql", "") or "")
             if sql:
                 try:
@@ -1823,12 +1934,23 @@ async def intelligence_fix_sql(
     This closes the analyst loop: when generated SQL fails (CAST on the wrong
     type, alias-in-GROUP BY, an unsupported function, a wrong-table column, …),
     the model is shown the precise engine error and asked to return a corrected
-    single-table query. Returns empty SQL if it can't be fixed.
+    query — keeping a cross-table query's verified join joined. Returns empty
+    SQL if it can't be fixed.
     """
     request_id = str(uuid.uuid4())
     verify_signature(req.model_dump(exclude={"signature"}), req.signature)
 
     schema_lines = _build_schema_lines(req.table_schema)
+    # A failing query that already JOINs two tables is a planner-mandated
+    # cross-table analysis. The default rules' "Do NOT write JOINs" would make
+    # the repair strip the join (silently demoting the card to single-table or
+    # to nothing) — use the keep-the-join variant instead.
+    is_join_repair = bool(re.search(r"\bJOIN\b", req.sql or "", re.IGNORECASE))
+    teiid_rules = (
+        _TEIID_RULES_HEADER + _TEIID_FIX_JOIN_RULE + _TEIID_RULES_COMMON
+        if is_join_repair
+        else _TEIID_SQL_RULES
+    )
     prompt = (
         "A read-only SQL query failed against a Teiid database. Rewrite it so it "
         "runs, keeping the SAME analytical intent. Fix ONLY what the error "
@@ -1846,7 +1968,7 @@ async def intelligence_fix_sql(
         "PARSETIMESTAMP(\"col\", 'M/d/yyyy'), never CAST(\"col\" AS date).\n\n"
         f"Allowed tables (use ONLY these): {', '.join(req.allowed_tables)}\n"
         f"{schema_lines}\n\n"
-        f"{_TEIID_SQL_RULES}\n"
+        f"{teiid_rules}\n"
         f"Failing SQL:\n{req.sql}\n\n"
         f"Engine error:\n{req.error[:800]}\n\n"
         "Return ONLY the corrected SQL query (no markdown, no commentary), or an "
