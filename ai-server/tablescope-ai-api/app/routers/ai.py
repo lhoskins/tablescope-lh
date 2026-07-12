@@ -1294,8 +1294,15 @@ def _build_relationship_hint_lines(hints: list[dict]) -> str:
     there is no relationship evidence, which leaves single-table behaviour
     completely unchanged.
     """
+    def _conf(h: dict) -> float:
+        c = h.get("join_confidence")
+        return float(c) if isinstance(c, int | float) else 0.0
+
     rows: list[str] = []
-    for h in hints:
+    # Strongest evidence first: the prompt tells the planner to prefer the
+    # highest-confidence pairs, and if a response is ever truncated the
+    # weakest pairs are the ones nearest the cut.
+    for h in sorted(hints, key=_conf, reverse=True):
         left = h.get("left_table") or ""
         right = h.get("right_table") or ""
         lkey = h.get("left_join_key") or ""
@@ -1303,14 +1310,13 @@ def _build_relationship_hint_lines(hints: list[dict]) -> str:
         if not (left and right and lkey and rkey):
             continue
         rel = h.get("relationship_type") or "unknown"
-        conf = h.get("join_confidence")
-        reason = h.get("confidence_reason") or ""
+        reason = str(h.get("confidence_reason") or "")[:60]
         risk = h.get("row_multiplication_risk") or "unknown"
-        conf_str = f"{conf:.2f}" if isinstance(conf, int | float) else "n/a"
+        conf_str = f"{_conf(h):.2f}" if h.get("join_confidence") is not None else "n/a"
         rows.append(
             f'  - "{left}"."{lkey}" = "{right}"."{rkey}" '
-            f"(relationship={rel}, confidence={conf_str}, "
-            f"row_multiplication_risk={risk}{f'; {reason}' if reason else ''})"
+            f"(rel={rel}, conf={conf_str}, risk={risk}"
+            f"{f'; {reason}' if reason else ''})"
         )
     if not rows:
         return ""
@@ -1739,14 +1745,23 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         system_prompt=_INTEL_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.2,
-        # Larger window so the prompt (schema + documents + relationship rules)
-        # plus the full JSON array of analyses fits without the response being
-        # truncated into invalid JSON.
-        num_ctx=16384,
+        # The window is shared by the prompt AND the generated JSON. The plan
+        # prompt (schema + documents + relationship evidence + rules) plus
+        # target_count + one-per-evidence-pair analyses is the largest
+        # prompt+output pair in the pipeline — run it at the same 24576 the
+        # scope-analysis calls already use on this model, so a rich project's
+        # response is not truncated into invalid JSON.
+        num_ctx=24576,
         response_format="json",
     )
 
     parsed = _parse_json_response(raw)
+    if parsed is None and raw:
+        logger.warning(
+            "intelligence plan JSON unparseable (len=%s, tail=%r) — "
+            "attempting truncation salvage",
+            len(raw), raw[-80:],
+        )
     analyses: list[PlannedAnalysis] = []
     # Cross-table analyses are additive: allow one extra slot per evidence
     # pair so the slice never drops a join the prompt mandated.
@@ -2967,4 +2982,37 @@ def _parse_json_response(text: str) -> dict | None:
         except _json.JSONDecodeError:
             pass
 
+    # Truncation salvage: a response cut off mid-generation (context window
+    # exhausted) is prefix-valid JSON. Trim back to the last complete object
+    # boundary and close the open brackets, so every COMPLETE analysis in a
+    # truncated plan survives instead of the whole plan degrading to [].
+    return _repair_truncated_json(text)
+
+
+def _repair_truncated_json(text: str) -> dict | None:
+    """Best-effort recovery of a JSON object truncated mid-stream."""
+    import json as _json
+
+    start = text.find("{")
+    if start == -1:
+        return None
+    snippet = text[start:]
+    cut = snippet.rfind("}")
+    while cut != -1:
+        candidate = snippet[: cut + 1]
+        open_braces = candidate.count("{") - candidate.count("}")
+        open_arrays = candidate.count("[") - candidate.count("]")
+        if open_braces >= 0 and open_arrays >= 0:
+            try:
+                repaired = _json.loads(
+                    candidate + "]" * open_arrays + "}" * open_braces
+                )
+                logger.warning(
+                    "Salvaged truncated JSON response: kept %s of %s chars",
+                    cut + 1, len(snippet),
+                )
+                return repaired
+            except _json.JSONDecodeError:
+                pass
+        cut = snippet.rfind("}", 0, cut)
     return None
