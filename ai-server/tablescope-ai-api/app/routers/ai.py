@@ -1650,7 +1650,12 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         f"{relationship_floor}"
         "Each "
         "analysis must be answerable from the allowed tables OR grounded in a "
-        "listed document.\n\n"
+        "listed document.\n"
+        "IN ADDITION to those, propose one CROSS-TABLE analysis for EACH table "
+        "pair listed in RELATIONSHIP EVIDENCE whose data supports a genuine "
+        "insight. Cross-table analyses are extra — they do NOT count toward "
+        f"the {target_count} limit, and you must not drop a supportable "
+        "evidence pair to stay under it.\n\n"
         "RELATIONSHIP ANALYSES (category \"relationship\"):\n"
         "In addition to single-metric risks/trends/opportunities, actively look "
         "for pairs of columns within ONE allowed table whose relationship to each "
@@ -1659,10 +1664,19 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "Examples of what counts: a cost metric and a quality metric that used to "
         "track together but no longer do; one category's share of a total "
         "shrinking while another grows; a rate (e.g. defects per unit) drifting "
-        "away from its historical band. By default the two variables should be "
-        "columns on the SAME table. Only relate columns across two tables when "
-        "that exact table pair and join keys appear in the RELATIONSHIP EVIDENCE "
-        "list above — never join on matching names that are not listed there.\n"
+        "away from its historical band. The two variables may be columns on "
+        "the SAME table, or on TWO tables joined per the CROSS-TABLE rules "
+        "below.\n"
+        "CROSS-TABLE ANALYSES (category \"relationship\"):\n"
+        "For each pair in the RELATIONSHIP EVIDENCE list above, propose one "
+        "analysis that JOINs exactly that pair on exactly the listed keys. "
+        "Aggregate the detail/fact table to one row per join key in a derived "
+        "GROUP BY step BEFORE joining, so a one-to-many join cannot multiply "
+        "rows. Prefer the highest-confidence pairs first and skip a pair only "
+        "when its data genuinely supports no insight (e.g. the joined result "
+        "would be a single row or empty). Never join a pair that is not "
+        "listed, and never join on matching column names that are not listed "
+        "there.\n"
         "For each relationship analysis, decide which shape best reveals the "
         "change and choose accordingly:\n"
         "- If both variables are naturally plotted on a shared timeline → use "
@@ -1834,7 +1848,8 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "analysis in its place — do not include an analysis you expect to come "
         "back empty, and do not fill a gap with placeholder, sample, or invented "
         "figures.\n"
-        f"- Aim to deliver the full {target_count} analyses this way; if the data "
+        f"- Aim to deliver the full {target_count} analyses PLUS the "
+        "cross-table analyses this way; if the data "
         "genuinely can't support that many non-empty analyses, return fewer rather "
         "than padding with weak or empty ones.\n\n"
         "Return ONLY a JSON object: {\"analyses\": [ {\n"
@@ -1873,8 +1888,11 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
 
     parsed = _parse_json_response(raw)
     analyses: list[PlannedAnalysis] = []
+    # Cross-table analyses are additive: allow one extra slot per evidence
+    # pair so the slice never drops a join the prompt mandated.
+    plan_budget = target_count + len(req.relationship_hints or [])
     if parsed and isinstance(parsed.get("analyses"), list):
-        for i, a in enumerate(parsed["analyses"][:target_count]):
+        for i, a in enumerate(parsed["analyses"][:plan_budget]):
             if not isinstance(a, dict):
                 continue
             sql = _clean_sql(a.get("sql", "") or "")

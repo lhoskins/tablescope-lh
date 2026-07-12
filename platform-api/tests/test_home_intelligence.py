@@ -409,6 +409,131 @@ def test_rank_and_dedupe_caps_to_max() -> None:
     assert len(hi.rank_and_dedupe_cards(cards)) == 8
 
 
+def test_rank_and_dedupe_exempts_multi_table_from_cap() -> None:
+    single = [
+        {
+            "projectId": "1",
+            "insightType": f"trend_{i}",
+            "title": f"Single {i}",
+            "severity": "info",
+            "sources": {"tables": [f"t{i}"], "documents": []},
+        }
+        for i in range(10)
+    ]
+    multi = [
+        {
+            "projectId": "1",
+            "insightType": f"relationship_{i}",
+            "title": f"Join {i}",
+            "severity": "info",
+            "sources": {"tables": [f"a{i}", f"b{i}"], "documents": []},
+            "relationshipMetadata": {"leftTable": f"a{i}"},
+        }
+        for i in range(4)
+    ]
+    ranked = hi.rank_and_dedupe_cards(single + multi)
+    # 8 single-table (capped) + all 4 multi-table (uncapped) = 12.
+    assert len(ranked) == 12
+    surfaced_multi = [
+        c for c in ranked if len(c["sources"]["tables"]) >= 2
+    ]
+    assert len(surfaced_multi) == 4
+
+
+def test_rank_and_dedupe_collapses_duplicate_multi_table_cards() -> None:
+    base = {
+        "projectId": "1",
+        "insightType": "relationship_a",
+        "title": "Suppliers x Inspections",
+        "severity": "warning",
+        "sources": {"tables": ["suppliers", "inspections"], "documents": []},
+        "relationshipMetadata": {"leftTable": "suppliers"},
+    }
+    ranked = hi.rank_and_dedupe_cards([dict(base), dict(base)])
+    assert len(ranked) == 1
+
+
+def test_card_priority_ranks_multi_table_above_single_at_equal_severity() -> None:
+    single = {
+        "severity": "warning",
+        "confidenceScore": 0.75,
+        "sources": {"tables": ["t1"], "documents": []},
+    }
+    multi = {
+        "severity": "warning",
+        "confidenceScore": 0.75,
+        "sources": {"tables": ["a", "b"], "documents": []},
+        "relationshipMetadata": {"leftTable": "a"},
+    }
+    assert hi._card_priority(multi) > hi._card_priority(single)
+
+
+async def test_run_ai_intelligence_logs_multi_table_funnel(
+    monkeypatch, caplog
+) -> None:
+    import logging
+
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**kwargs):
+        return [
+            {
+                "id": "a1",
+                "category": "trend",
+                "title": "Spend by supplier",
+                "rationale": "Concentration risk.",
+                "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend '
+                'FROM "spend" GROUP BY "supplier"',
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "spend",
+                "severity_hint": "watch",
+            }
+        ]
+
+    async def fake_interpret(**kwargs):
+        return {
+            "a1": {
+                "id": "a1",
+                "title": "Spend concentrated",
+                "summary": "**Acme** dominates spend.",
+                "severity": "watch",
+            }
+        }
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+    runner = _runner(
+        {
+            "GROUP BY": [
+                {"supplier": "Acme", "spend": 1200.0},
+                {"supplier": "Globex", "spend": 800.0},
+                {"supplier": "Initech", "spend": 200.0},
+            ]
+        }
+    )
+
+    with caplog.at_level(logging.INFO, logger="app.services.home_intelligence"):
+        await hi.run_ai_intelligence(
+            _project(), ctx, runner, tenant_id=1, user_id=1
+        )
+
+    funnel = [
+        r.getMessage()
+        for r in caplog.records
+        if "multi-table funnel" in r.getMessage()
+    ]
+    assert len(funnel) == 1
+    # Single-table plan → all four funnel counts are zero.
+    assert "hints=0 planned=0 executed=0 surfaced=0" in funnel[0]
+
+
 async def test_run_ai_intelligence_attaches_metadata(monkeypatch) -> None:
     from app.services import ai_intelligence_client as ai
 

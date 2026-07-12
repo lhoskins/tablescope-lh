@@ -604,7 +604,10 @@ def _card_priority(card: dict[str, Any]) -> float:
     if card.get("kpiReferences") or card.get("referenceDocuments"):
         score += 2.0
     if card.get("relationshipMetadata"):
-        score += 1.0
+        # Evidence-backed cross-table findings are the scarcest signal class;
+        # weight them so they rank alongside same-severity single-table cards
+        # rather than at the bottom of the page.
+        score += 2.5
     pri = card.get("priorityScore")
     if isinstance(pri, int | float) and pri > 0:
         return float(pri)
@@ -623,7 +626,13 @@ def rank_and_dedupe_cards(
 ) -> list[dict[str, Any]]:
     """Return the strongest, de-duplicated cards (best-practices §Insight
     Selection / §Card Ranking). Duplicates that share project + insight type +
-    source tables + title are collapsed to the highest-scoring one."""
+    source tables + title are collapsed to the highest-scoring one.
+
+    Multi-table (relationship-evidence) cards are exempt from the cap: they
+    are the rarest, highest-effort findings, so every one that executed and
+    passed the quality gates is surfaced. Only single-table cards compete for
+    the ``max_cards`` slots.
+    """
     seen: set[tuple[Any, ...]] = set()
     unique: list[dict[str, Any]] = []
     for c in sorted(cards, key=_card_priority, reverse=True):
@@ -632,7 +641,13 @@ def rank_and_dedupe_cards(
             continue
         seen.add(key)
         unique.append(c)
-    return unique[:max_cards]
+
+    def _is_multi(c: dict[str, Any]) -> bool:
+        return len(c.get("sources", {}).get("tables", [])) >= 2
+
+    multi = [c for c in unique if _is_multi(c)]
+    single = [c for c in unique if not _is_multi(c)]
+    return sorted(multi + single[:max_cards], key=_card_priority, reverse=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2975,9 +2990,36 @@ async def run_ai_intelligence(
             )
         )
 
-    # Rank by severity + evidence strength and drop duplicates, returning the
-    # strongest few (best-practices §Insight Selection / §Card Ranking).
-    return rank_and_dedupe_cards(cards)
+
+    # Rank by severity + evidence strength and drop duplicates. Single-table
+    # cards compete for the cap; multi-table cards are always surfaced.
+    ranked = rank_and_dedupe_cards(cards)
+    if not ranked:
+        logger.info(
+            "home-intel project %s AI-empty: %s analyses executed but 0 cards "
+            "survived building / quality gates",
+            project.id, len(executed),
+        )
+
+    def _n_tables(sql: str) -> int:
+        return len(_tables_in_sql(sql, ctx.tables))
+
+    logger.info(
+        "home-intel project %s multi-table funnel: hints=%s planned=%s "
+        "executed=%s surfaced=%s",
+        project.id,
+        len(relationship_hints),
+        sum(1 for a in analyses if _n_tables(a.get("sql", "")) >= 2),
+        sum(
+            1 for item in executed
+            if _n_tables(item["analysis"].get("sql", "")) >= 2
+        ),
+        sum(
+            1 for c in ranked
+            if len(c.get("sources", {}).get("tables", [])) >= 2
+        ),
+    )
+    return ranked
 
 
 # ─────────────────────────────────────────────────────────────────────────────
