@@ -4,7 +4,6 @@ import {
   IconRefresh,
   IconSparkles,
 } from "@tabler/icons-react";
-import type { InsightCard } from "@/lib/api/home-intelligence";
 
 const GRANULARITY_LABELS: Record<number, string> = {
   1: "Executive",
@@ -16,22 +15,23 @@ const GRANULARITY_LABELS: Record<number, string> = {
 
 export interface IntelligenceStripProps {
   projectCount: number;
-  insights: InsightCard[];
   running: boolean;
   lastUpdatedLabel: string | null;
   onRefresh: () => void;
   granularity: number;
   onGranularityChange: (value: number) => void;
+  /** Cross-project synthesis headline, folded into the band across the width. */
+  synthesisHeadline: string | null;
 }
 
 export function IntelligenceStrip({
   projectCount,
-  insights,
   running,
   lastUpdatedLabel,
   onRefresh,
   granularity,
   onGranularityChange,
+  synthesisHeadline,
 }: IntelligenceStripProps) {
   return (
     <div className="flex items-center gap-4 rounded-lg bg-brand px-4 py-2.5 text-brand-fg">
@@ -47,11 +47,15 @@ export function IntelligenceStrip({
       </div>
 
       <div className="min-w-0 flex-1">
-        {insights.length === 0 && running && (
+        {synthesisHeadline ? (
+          <span className="block truncate text-small font-medium text-brand-fg">
+            {synthesisHeadline}
+          </span>
+        ) : running ? (
           <span className="text-small text-brand-fg/70">
             Gathering insights…
           </span>
-        )}
+        ) : null}
       </div>
 
       <div className="flex shrink-0 items-center gap-2 text-small text-brand-fg/90">

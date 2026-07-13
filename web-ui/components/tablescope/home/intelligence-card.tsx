@@ -2,8 +2,6 @@
 
 import { Fragment, type ReactNode } from "react";
 import {
-  IconAlertTriangle,
-  IconBulb,
   IconChevronRight,
   IconFileText,
   IconPlus,
@@ -12,12 +10,18 @@ import {
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
 import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import type {
+  InsightCallout,
   InsightCard as InsightCardData,
   InsightChart,
 } from "@/lib/api/home-intelligence";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
 
-/** Render a string with `**bold**` markers as bold spans. */
+/** Remove every remaining `**` marker (matched pairs handled by renderBold). */
+export function stripStars(text: string): string {
+  return text.replace(/\*\*/g, "");
+}
+
+/** Render a string with `**bold**` markers as bold spans; strip stray `**`. */
 export function renderBold(text: string): ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, i) => {
@@ -28,8 +32,15 @@ export function renderBold(text: string): ReactNode {
         </strong>
       );
     }
-    return <Fragment key={i}>{part}</Fragment>;
+    return <Fragment key={i}>{stripStars(part)}</Fragment>;
   });
+}
+
+/** Short text prefix that replaces the old callout icon. */
+function calloutLabel(type: InsightCallout["type"]): string {
+  if (type === "opportunity") return "Action:";
+  if (type === "risk") return "Caution:";
+  return "Note:";
 }
 
 /**
@@ -164,7 +175,7 @@ export function IntelligenceCard({
 
   return (
     <article
-      className={`rounded-lg border border-line-tertiary border-l-[3px] ${sev.accent} bg-bg-primary p-4`}
+      className={`rounded-lg border border-line-tertiary bg-bg-primary p-4`}
     >
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -175,7 +186,10 @@ export function IntelligenceCard({
             />
             <span className="truncate">{card.projectName}</span>
           </div>
-          <h3 className="mt-1 text-h3 text-ink-primary">{card.title}</h3>
+          <h3 className="mt-1 text-h3 text-ink-primary">
+            <span className="text-ink-tertiary">Title: </span>
+            {renderBold(card.title)}
+          </h3>
         </div>
         <span
           className={`shrink-0 rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
@@ -185,6 +199,7 @@ export function IntelligenceCard({
       </header>
 
       <p className="mt-2 text-body text-ink-secondary">
+        <span className="text-ink-tertiary">Summary: </span>
         {renderBold(card.summary)}
       </p>
 
@@ -211,11 +226,9 @@ export function IntelligenceCard({
               : "bg-warning/10 text-warning"
           }`}
         >
-          {card.callout.type === "opportunity" ? (
-            <IconBulb size={16} className="mt-0.5 shrink-0" />
-          ) : (
-            <IconAlertTriangle size={16} className="mt-0.5 shrink-0" />
-          )}
+          <span className="shrink-0 font-semibold">
+            {calloutLabel(card.callout.type)}
+          </span>
           <span className="text-ink-secondary">
             {renderBold(card.callout.text)}
           </span>
@@ -235,10 +248,10 @@ export function IntelligenceCard({
             </span>
           ))}
         </div>
-        {!hideActions && (
+        {!hideActions && onAddToReport && (
           <button
             type="button"
-            onClick={() => onAddToReport?.(card)}
+            onClick={() => onAddToReport(card)}
             className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
           >
             <IconPlus size={14} /> Add to report

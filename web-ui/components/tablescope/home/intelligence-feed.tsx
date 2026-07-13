@@ -19,12 +19,14 @@ import {
   type ProjectResult,
   type StreamProject,
 } from "@/lib/api/home-intelligence";
-import { useReportBuilder } from "@/lib/stores/report-builder-store";
 import { formatLastUpdated } from "@/lib/format-datetime";
-import { IntelligenceCard, LoadingCard } from "./intelligence-card";
-import { IntelligenceSidebar } from "./intelligence-sidebar";
+import {
+  IntelligenceCard,
+  LoadingCard,
+  renderBold,
+  stripStars,
+} from "./intelligence-card";
 import { IntelligenceStrip } from "./intelligence-strip";
-import { ReportBuilderPanel } from "./report-builder-panel";
 
 type Status = "idle" | "streaming" | "complete" | "error";
 
@@ -32,12 +34,10 @@ function Section({
   title,
   icon,
   cards,
-  onAdd,
 }: {
   title: string;
   icon: React.ReactNode;
   cards: InsightCard[];
-  onAdd: (card: InsightCard) => void;
 }) {
   if (cards.length === 0) return null;
   return (
@@ -49,7 +49,7 @@ function Section({
       </div>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {cards.map((card) => (
-          <IntelligenceCard key={card.id} card={card} onAddToReport={onAdd} />
+          <IntelligenceCard key={card.id} card={card} />
         ))}
       </div>
     </div>
@@ -75,7 +75,6 @@ export function IntelligenceFeed() {
   const bufErroredRef = useRef<Set<string>>(new Set());
   const bufSynthesisRef = useRef<CrossProjectSynthesis | null>(null);
   const visibleResultCountRef = useRef(0);
-  const { openPanel, addInsightCard, sections } = useReportBuilder();
 
   const handleEvent = useCallback((event: IntelligenceEvent) => {
     const bg = backgroundRef.current;
@@ -250,13 +249,6 @@ export function IntelligenceFeed() {
   const pending = projects.filter((p) => !completed.has(p.id));
   const running = status === "streaming";
 
-  const handleToggle = (key: keyof IntelligenceSettings, value: boolean) => {
-    setSettings((prev) => (prev ? { ...prev, [key]: value } : prev));
-    updatePreferences({ [key]: value }).catch(() => {
-      /* keep optimistic value; will reconcile on next load */
-    });
-  };
-
   const granularity = settings?.granularity ?? 3;
   const hasCards = allInsights.length > 0;
 
@@ -280,84 +272,65 @@ export function IntelligenceFeed() {
     <div className="space-y-4">
       <IntelligenceStrip
         projectCount={projects.length}
-        insights={allInsights}
         running={running}
         lastUpdatedLabel={formatLastUpdated(lastUpdated)}
         onRefresh={handleRefresh}
         granularity={granularity}
         onGranularityChange={handleGranularity}
+        synthesisHeadline={synthesis ? stripStars(synthesis.headline) : null}
       />
 
-      <div className="flex gap-5">
-        <div className="min-w-0 flex-1 space-y-6">
-          {synthesis && (
-            <div className="rounded-lg border border-brand/30 bg-ai-bg p-4">
-              <div className="flex items-center gap-2 text-ai">
-                <IconSparkles size={18} />
-                <h3 className="text-h3">{synthesis.headline}</h3>
-              </div>
-              <p className="mt-1 text-body text-ink-secondary">
-                {synthesis.body}
+      <div className="space-y-6">
+        {synthesis?.body && (
+          <div className="rounded-lg border border-brand/30 bg-ai-bg p-4">
+            <div className="flex items-start gap-2 text-ai">
+              <IconSparkles size={18} className="mt-0.5 shrink-0" />
+              <p className="text-body text-ink-secondary">
+                {renderBold(synthesis.body)}
               </p>
             </div>
-          )}
+          </div>
+        )}
 
-          <Section
-            title="Risks"
-            icon={<IconAlertTriangle size={16} className="text-warning" />}
-            cards={risks}
-            onAdd={addInsightCard}
-          />
-          <Section
-            title="Trends"
-            icon={<IconTrendingUp size={16} className="text-ink-secondary" />}
-            cards={trends}
-            onAdd={addInsightCard}
-          />
-          <Section
-            title="Opportunities"
-            icon={<IconBulb size={16} className="text-success" />}
-            cards={opportunities}
-            onAdd={addInsightCard}
-          />
-
-          {pending.length > 0 && (
-            <div className="space-y-3">
-              {pending.map((p) => (
-                <LoadingCard key={p.id} projectName={p.name} />
-              ))}
-            </div>
-          )}
-
-          {empty && (
-            <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
-              No projects to analyze yet. Create a project and connect data to
-              see AI intelligence here.
-            </div>
-          )}
-
-          {status === "complete" &&
-            allInsights.length === 0 &&
-            projects.length > 0 && (
-              <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
-                No new insights are available right now.
-              </div>
-            )}
-        </div>
-
-        <IntelligenceSidebar
-          projects={projects}
-          results={results}
-          completed={completed}
-          insights={allInsights}
-          cardsInReport={sections.length}
-          settings={settings}
-          onStartReport={openPanel}
-          onToggleSetting={handleToggle}
+        <Section
+          title="Risks"
+          icon={<IconAlertTriangle size={16} className="text-warning" />}
+          cards={risks}
         />
-      </div>
+        <Section
+          title="Trends"
+          icon={<IconTrendingUp size={16} className="text-ink-secondary" />}
+          cards={trends}
+        />
+        <Section
+          title="Opportunities"
+          icon={<IconBulb size={16} className="text-success" />}
+          cards={opportunities}
+        />
 
-      <ReportBuilderPanel />
+        {pending.length > 0 && (
+          <div className="space-y-3">
+            {pending.map((p) => (
+              <LoadingCard key={p.id} projectName={p.name} />
+            ))}
+          </div>
+        )}
+
+        {empty && (
+          <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
+            No projects to analyze yet. Create a project and connect data to
+            see AI intelligence here.
+          </div>
+        )}
+
+        {status === "complete" &&
+          allInsights.length === 0 &&
+          projects.length > 0 && (
+            <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
+              No new insights are available right now.
+            </div>
+          )}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -86,14 +86,31 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   });
   const [customQuestion, setCustomQuestion] = useState("");
 
-  const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } =
+  const { data, isLoading, isError, isFetching, dataUpdatedAt } =
     useQuery<ProjectInsight>({
       queryKey: INSIGHT_KEY(projectId),
+      // Hydrate instantly from the saved server snapshot (no forced run).
       queryFn: () => projectInsightApi.get(projectId),
-      // Snapshot behavior: a remount hydrates instantly from cache while a
-      // background refetch runs — cards are never blanked to a spinner.
       staleTime: 5 * 60_000,
     });
+
+  // Snapshot behavior mirroring Business Insight: after hydrating from the
+  // saved snapshot, re-run in the background and commit the fresh result only
+  // once the run completes — the visible cards are never blanked mid-refresh.
+  const backgroundRef = useRef(false);
+  const refresh = useMutation({
+    mutationFn: () => projectInsightApi.refresh(projectId),
+    onSuccess: (fresh) => {
+      queryClient.setQueryData(INSIGHT_KEY(projectId), fresh);
+    },
+  });
+
+  useEffect(() => {
+    if (data && !backgroundRef.current) {
+      backgroundRef.current = true;
+      refresh.mutate();
+    }
+  }, [data, refresh]);
 
   // Insights & opportunities — the same content as the Home page's
   // "Suggest Insights" pill, scoped to this project, rendered inline.
@@ -103,9 +120,10 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     staleTime: 5 * 60_000,
   });
 
-  const analyzing = isFetching || insightsQuery.isFetching;
+  const analyzing =
+    isFetching || refresh.isPending || insightsQuery.isFetching;
   const handleRefresh = () => {
-    refetch();
+    refresh.mutate();
     insightsQuery.refetch();
   };
 
@@ -207,9 +225,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     (n, p) => n + p.insights.length,
     0,
   );
-  const recommendationCount =
-    dashboards.length + queries.length + kpis.length;
-
   const reviewCard = (card: ProjectInsightCard) =>
     acknowledge.mutate({
       id: card.id,
@@ -468,7 +483,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               icon={<IconBulb size={16} className="text-brand-500" />}
               collapsible
               defaultOpen={false}
-              count={recommendationCount}
             >
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <Panel
@@ -789,14 +803,10 @@ function InsightCardItem({
 }) {
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.informational;
   return (
-    <article
-      className={cn(
-        "rounded-md border border-line-tertiary border-l-[3px] bg-bg-primary p-3",
-        sev.accent,
-      )}
-    >
+    <article className="rounded-md border border-line-tertiary bg-bg-primary p-3">
       <header className="flex items-start justify-between gap-2">
         <h4 className="min-w-0 text-[13px] font-semibold text-ink-primary">
+          <span className="font-normal text-ink-tertiary">Title: </span>
           {card.title}
         </h4>
         <span
@@ -809,6 +819,7 @@ function InsightCardItem({
         </span>
       </header>
       <p className="mt-1 text-[13px] leading-snug text-ink-secondary">
+        <span className="text-ink-tertiary">Summary: </span>
         {renderBold(card.summary)}
       </p>
       {card.recommendedAction && (
