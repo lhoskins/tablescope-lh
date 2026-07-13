@@ -1347,6 +1347,86 @@ def _build_relationship_hint_lines(hints: list[dict]) -> str:
     )
 
 
+def _build_kpi_catalog_lines(
+    reference_kpis: list[dict], table_schema: list[dict]
+) -> str:
+    """Render the governed KPI catalog entries the project can actually compute.
+
+    Governed KPIs (industry standards + tenant custom metrics) carry a formula
+    and a list of ``required_fields``. To protect the token budget we surface
+    only the entries whose required fields plausibly map onto the project's real
+    columns, ranked by how completely they match, capped at 15. Returns "" when
+    there is no catalog or nothing is relevant, which leaves the prompt
+    byte-identical to before.
+    """
+    if not reference_kpis:
+        return ""
+
+    def _norm(s: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+    project_cols = {
+        _norm(c.get("name", ""))
+        for t in table_schema
+        for c in (t.get("columns") or [])
+        if c.get("name")
+    }
+    project_cols.discard("")
+    if not project_cols:
+        return ""
+
+    def _matches(field: str) -> bool:
+        nf = _norm(field)
+        if not nf:
+            return False
+        # A field is satisfied when a project column contains it or vice-versa
+        # (e.g. "revenue" matches a "TotalRevenue" column).
+        return any(nf in col or col in nf for col in project_cols)
+
+    scored: list[tuple[float, int, int, dict]] = []
+    for i, kpi in enumerate(reference_kpis):
+        required = [str(f) for f in (kpi.get("required_fields") or []) if f]
+        if not required:
+            continue
+        hits = sum(1 for f in required if _matches(f))
+        if hits == 0:
+            continue
+        # Prefer KPIs whose required fields are fully covered; break ties by
+        # the number of matched fields, then by catalog order for determinism.
+        coverage = hits / len(required)
+        scored.append((coverage, hits, -i, kpi))
+
+    if not scored:
+        return ""
+    scored.sort(key=lambda s: (s[0], s[1], s[2]), reverse=True)
+
+    rows: list[str] = []
+    for _cov, _hits, _idx, kpi in scored[:15]:
+        name = str(kpi.get("display_name") or kpi.get("kpi_key") or "").strip()
+        if not name:
+            continue
+        formula = str(kpi.get("formula") or "").strip()
+        needs = ", ".join(
+            str(f) for f in (kpi.get("required_fields") or []) if f
+        )
+        line = f"  - {name}"
+        if formula:
+            line += f" = {formula}"
+        if needs:
+            line += f"  [needs: {needs}]"
+        rows.append(line)
+    if not rows:
+        return ""
+    return (
+        "\nGOVERNED KPI CATALOG — installed, board-approved metrics for this "
+        "tenant. When the project's columns can compute one of these, PREFER it "
+        "over an invented metric: use its formula, and name it verbatim in the "
+        "analysis' kpi_references list so the card can cite the governed "
+        "definition. Do NOT force a KPI whose inputs the data lacks.\n"
+        + "\n".join(rows) + "\n"
+    )
+
+
 # Table references in FROM/JOIN clauses; the negative lookahead skips function
 # calls so the FROM inside EXTRACT(... FROM ...) is not counted (same pattern
 # the SQL validator uses).
@@ -1565,6 +1645,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
 
     schema_lines = _build_schema_lines(req.table_schema)
     relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
+    kpi_lines = _build_kpi_catalog_lines(req.reference_kpis, req.table_schema)
     # With relationship evidence in play, the flat "Do NOT write JOINs" rule
     # would contradict (and, sitting later in the prompt, override) the
     # cross-table mandate — swap in the exception-aware variant. Without
@@ -1605,6 +1686,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
 
     prompt = (
         f"{context_text}\n{doc_lines}\n{schema_lines}\n{relationship_lines}\n"
+        f"{kpi_lines}"
         f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
         f"{teiid_rules}\n"
         f"{depth_guidance}\n\n"
@@ -1836,7 +1918,9 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "  \"value_column\": \"alias used for the numeric value (primary metric, or size for bubble)\",\n"
         "  \"value_column_2\": \"alias for a second metric — used by dual_line, combo (line metric), scatter, bubble, heatmap (color value), gauge/bullet (target). Omit/empty otherwise.\",\n"
         "  \"severity_hint\": \"critical|urgent|watch|opportunity|info\",\n"
-        "  \"source_documents\": [\"doc title\"]\n"
+        "  \"source_documents\": [\"doc title\"],\n"
+        "  \"kpi_references\": [\"governed KPI name(s) from the GOVERNED KPI "
+        "CATALOG this analysis computes — omit or leave empty when none apply\"]\n"
         "} ] }\n\n"
         "OUTPUT FORMAT: respond with this JSON object and nothing else — no "
         "prose, no markdown, no headings, no numbered list, no code fences. "
@@ -1848,7 +1932,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
     # or context changes, or the user changes granularity — no more re-rolling
     # a different chart mix on every refresh when nothing changed.
     prompt_fingerprint = hashlib.sha1(
-        (schema_lines + relationship_lines + doc_lines).encode()
+        (schema_lines + relationship_lines + doc_lines + kpi_lines).encode()
     ).hexdigest()[:12]
     plan_seed = zlib.crc32(
         f"{req.tenant_id}:{req.project_id}:{granularity}:"
@@ -1930,6 +2014,9 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
                     severity_hint=str(a.get("severity_hint", "watch")),
                     source_documents=[
                         str(d) for d in a.get("source_documents", []) if d
+                    ],
+                    kpi_references=[
+                        str(k) for k in (a.get("kpi_references") or []) if k
                     ],
                 )
             )

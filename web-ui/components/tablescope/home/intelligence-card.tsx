@@ -4,6 +4,7 @@ import { Fragment, type ReactNode } from "react";
 import {
   IconAlertTriangle,
   IconBulb,
+  IconCertificate,
   IconChevronRight,
   IconFileText,
   IconPlus,
@@ -275,6 +276,15 @@ export function IntelligenceCard({
           {documents.slice(0, 2).map((d) => (
             <span key={d} className="inline-flex items-center gap-1">
               <IconFileText size={13} /> {d}
+            </span>
+          ))}
+          {(card.kpiReferences ?? []).map((k) => (
+            <span
+              key={k}
+              className="inline-flex items-center gap-1 text-brand"
+              title="Governed KPI from your reference catalog"
+            >
+              <IconCertificate size={13} /> {k}
             </span>
           ))}
         </div>

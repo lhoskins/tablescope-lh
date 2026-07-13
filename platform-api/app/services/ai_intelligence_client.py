@@ -202,6 +202,7 @@ async def plan(
     documents: list[dict[str, Any]],
     table_schema: list[dict[str, Any]] | None = None,
     relationship_hints: list[dict[str, Any]] | None = None,
+    reference_kpis: list[dict[str, Any]] | None = None,
     max_analyses: int = 6,
     granularity: int = 3,
 ) -> list[dict[str, Any]] | None:
@@ -218,6 +219,7 @@ async def plan(
             "table_schema": table_schema or [],
             "documents": documents,
             "relationship_hints": relationship_hints or [],
+            "reference_kpis": reference_kpis or [],
             "max_analyses": max_analyses,
             "granularity": granularity,
         },
