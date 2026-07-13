@@ -379,7 +379,7 @@ export function InsightsPanel({
           {showProjectHeader && (
             <ProjectHeader name={p.projectName} color={p.projectColor} />
           )}
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
             {p.insights.map((card) => (
               <IntelligenceCard key={card.id} card={card} hideActions />
             ))}

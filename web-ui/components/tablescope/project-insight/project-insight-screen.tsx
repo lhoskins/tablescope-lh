@@ -21,6 +21,8 @@ import {
   IconTable,
   IconFileText,
   IconLoader2,
+  IconPlus,
+  IconMinus,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
@@ -39,10 +41,10 @@ import {
   projectInsightApi,
   type ProjectInsight,
   type ProjectInsightCard,
-  type InsightCardSeverity,
   type InsightWorkflowItem,
   type ReviewedInsight,
 } from "@/lib/api/project-insight";
+import { SUMMARY_TONES, CARD_SEVERITY } from "@/lib/ui/insight-tones";
 
 function cardContextFromCard(card: ProjectInsightCard): AiCardContext {
   return {
@@ -107,8 +109,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     insightsQuery.refetch();
   };
 
-  const [workflowTab, setWorkflowTab] = useState<"open" | "reviewed">("open");
-
   const acknowledge = useMutation({
     mutationFn: (item: InsightWorkflowItem) =>
       projectInsightApi.acknowledge(projectId, item.id, {
@@ -131,17 +131,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const reviewedQuery = useQuery({
     queryKey: REVIEWED_KEY(projectId),
     queryFn: () => projectInsightApi.reviewed(projectId),
-  });
-
-  const reopen = useMutation({
-    mutationFn: (insightId: string) =>
-      projectInsightApi.reopen(projectId, insightId),
-    onSuccess: () => {
-      push("Insight reopened.", "success");
-      queryClient.invalidateQueries({ queryKey: INSIGHT_KEY(projectId) });
-      queryClient.invalidateQueries({ queryKey: REVIEWED_KEY(projectId) });
-    },
-    onError: () => push("Could not reopen insight", "error"),
   });
 
   const askQuestion = (
@@ -185,10 +174,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     q.title?.trim(),
   );
   const kpis = (data?.recommendedKpis ?? []).filter((k) => k.name?.trim());
-  const workflow = (data?.insightValidationWorkflow ?? []).filter((i) =>
-    i.title?.trim(),
-  );
-  const openWorkflow = workflow.filter((i) => i.status !== "reviewed");
   const reviewedItems: ReviewedInsight[] = reviewedQuery.data?.items ?? [];
   const reviewedIds = new Set(reviewedItems.map((i) => i.insightId));
 
@@ -197,6 +182,33 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const opportunityCards = (data?.opportunities ?? []).filter((c) =>
     c.title?.trim(),
   );
+
+  // Consolidate the former standalone "Trend Detection" panel into the Trends
+  // column: each detected trend becomes a project insight card (blue accent).
+  const trendDetectionCards: ProjectInsightCard[] = trends
+    .filter((t) => (t.label || t.title)?.trim())
+    .map((t) => ({
+      id: t.id,
+      insightType: "trend",
+      title: (t.label || t.title || "").trim(),
+      summary: [
+        t.description,
+        t.possibleCause && `Possible cause: ${t.possibleCause}`,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      severity: "trend" as const,
+      question: t.title || t.label || "",
+      supportingSources: t.sourceSummary ? [t.sourceSummary] : [],
+    }));
+  const allTrendCards = [...trendCards, ...trendDetectionCards];
+
+  const insightCount = (insightsQuery.data?.projects ?? []).reduce(
+    (n, p) => n + p.insights.length,
+    0,
+  );
+  const recommendationCount =
+    dashboards.length + queries.length + kpis.length;
 
   const reviewCard = (card: ProjectInsightCard) =>
     acknowledge.mutate({
@@ -269,26 +281,26 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               <p className="max-w-4xl text-[13px] leading-relaxed text-ink-secondary">
                 {es?.summary || "No summary available for this project yet."}
               </p>
-              <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                <SummaryColumn
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <SummaryCard
                   title="Critical"
                   tone="danger"
                   icon={<IconAlertCircle size={15} />}
                   items={es?.critical ?? []}
                 />
-                <SummaryColumn
+                <SummaryCard
                   title="Warnings"
                   tone="warning"
                   icon={<IconAlertTriangle size={15} />}
                   items={es?.warnings ?? []}
                 />
-                <SummaryColumn
+                <SummaryCard
                   title="Opportunities"
                   tone="success"
                   icon={<IconArrowUpRight size={15} />}
                   items={es?.opportunities ?? []}
                 />
-                <SummaryColumn
+                <SummaryCard
                   title="Recommendations"
                   tone="brand"
                   icon={<IconBulb size={15} />}
@@ -319,7 +331,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 icon={
                   <IconTrendingUp size={16} className="text-brand-500" />
                 }
-                cards={trendCards}
+                cards={allTrendCards}
                 emptyText="No trends detected from this project's data yet."
                 reviewedIds={reviewedIds}
                 onInvestigate={(c) =>
@@ -344,129 +356,132 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               />
             </div>
 
-            {/* 2 + 3. Questions to Ask | Trend Detection */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Panel
-                title="AI-Generated Questions to Ask"
-                icon={<IconHelpCircle size={16} className="text-brand-500" />}
-              >
-                {questions.length === 0 ? (
-                  <PanelEmpty text="No suggested questions yet." />
-                ) : (
-                  <ul className="divide-y divide-line-tertiary">
-                    {questions.map((q) => (
-                      <li key={q.id}>
-                        <button
-                          type="button"
-                          onClick={() => askQuestion(q.question)}
-                          className="flex w-full items-center justify-between gap-3 py-2.5 text-left text-[13px] text-ink-secondary hover:text-brand-700"
-                        >
-                          <span>{q.question}</span>
-                          <IconChevronRight
-                            size={15}
-                            className="shrink-0 text-ink-tertiary"
-                          />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {questionsNeedingData.length > 0 && (
-                  <div className="mt-3 border-t border-line-tertiary pt-3">
-                    <div className="mb-2 flex items-center gap-1.5 text-[12px] font-medium text-ink-tertiary">
-                      <IconAlertCircle size={14} className="text-warning" />
-                      Needs additional data
-                    </div>
-                    <ul className="space-y-2">
-                      {questionsNeedingData.map((q, i) => {
-                        const text =
-                          q.question || q.businessQuestion || q.title || "";
-                        return (
-                          <li
-                            key={q.id ?? `${text}-${i}`}
-                            className="rounded-md bg-bg-secondary px-2.5 py-2 text-[13px]"
-                          >
-                            <div className="text-ink-secondary">{text}</div>
-                            {q.missingDataHint && (
-                              <div className="mt-1 text-[12px] text-ink-tertiary">
-                                {q.missingDataHint}
-                              </div>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                )}
-                <div className="mt-3 flex items-center gap-2 border-t border-line-tertiary pt-3">
-                  <input
-                    type="text"
-                    value={customQuestion}
-                    onChange={(e) => setCustomQuestion(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        submitCustomQuestion();
-                      }
-                    }}
-                    placeholder="Ask a question about this project..."
-                    aria-label="Ask a question about this project"
-                    className="min-w-0 flex-1 rounded-md border border-line-tertiary bg-bg-primary px-2.5 py-1.5 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
-                  />
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={!customQuestion.trim()}
-                    onClick={submitCustomQuestion}
-                  >
-                    <IconSparkles size={14} />
-                    Ask
-                  </Button>
+            {/* Insights & Opportunities (collapsed by default) */}
+            <Panel
+              title="Insights & Opportunities"
+              icon={<IconSparkles size={16} className="text-brand-500" />}
+              collapsible
+              defaultOpen={false}
+              count={insightCount}
+            >
+              {insightsQuery.isFetching && !insightsQuery.data ? (
+                <div className="flex items-center gap-2 py-8 text-small text-ink-tertiary">
+                  <IconLoader2 size={16} className="animate-spin" />
+                  Analyzing this project…
                 </div>
-              </Panel>
+              ) : (
+                <InsightsPanel
+                  projects={insightsQuery.data?.projects ?? []}
+                  showProjectHeader={false}
+                />
+              )}
+            </Panel>
 
-              <Panel
-                title="Trend Detection"
-                icon={<IconTrendingUp size={16} className="text-brand-500" />}
-              >
-                {trends.length === 0 ? (
-                  <PanelEmpty text="No trends detected yet." />
-                ) : (
-                  <div className="space-y-3">
-                    {trends.map((t) => (
-                      <div key={t.id} className="text-[13px]">
-                        <div className="flex items-baseline gap-2">
-                          {t.label && (
-                            <span className="font-medium text-ink-primary">
-                              {t.label}
-                            </span>
-                          )}
-                          <span className="text-ink-secondary">
-                            {t.title || t.description}
-                          </span>
-                        </div>
-                        {t.possibleCause && (
-                          <div className="mt-0.5 text-small text-ink-tertiary">
-                            Possible cause: {t.possibleCause}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+            {/* AI-Generated Questions to Ask (collapsed by default) */}
+            <Panel
+              title="AI-Generated Questions to Ask"
+              icon={<IconHelpCircle size={16} className="text-brand-500" />}
+              collapsible
+              defaultOpen={false}
+              count={questions.length}
+            >
+              {questions.length === 0 ? (
+                <PanelEmpty text="No suggested questions yet." />
+              ) : (
+                <ul className="divide-y divide-line-tertiary">
+                  {questions.map((q) => (
+                    <li key={q.id}>
+                      <button
+                        type="button"
+                        onClick={() => askQuestion(q.question)}
+                        className="flex w-full items-center justify-between gap-3 py-2.5 text-left text-[13px] text-ink-secondary hover:text-brand-700"
+                      >
+                        <span>{q.question}</span>
+                        <IconChevronRight
+                          size={15}
+                          className="shrink-0 text-ink-tertiary"
+                        />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {questionsNeedingData.length > 0 && (
+                <div className="mt-3 border-t border-line-tertiary pt-3">
+                  <div className="mb-2 flex items-center gap-1.5 text-[12px] font-medium text-ink-tertiary">
+                    <IconAlertCircle size={14} className="text-warning" />
+                    Needs additional data
                   </div>
-                )}
-              </Panel>
+                  <ul className="space-y-2">
+                    {questionsNeedingData.map((q, i) => {
+                      const text =
+                        q.question || q.businessQuestion || q.title || "";
+                      return (
+                        <li
+                          key={q.id ?? `${text}-${i}`}
+                          className="rounded-md bg-bg-secondary px-2.5 py-2 text-[13px]"
+                        >
+                          <div className="text-ink-secondary">{text}</div>
+                          {q.missingDataHint && (
+                            <div className="mt-1 text-[12px] text-ink-tertiary">
+                              {q.missingDataHint}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+            </Panel>
+
+            {/* Ask box — always visible between Questions and Recommendations */}
+            <div className="flex items-center gap-2 rounded-lg border border-line-tertiary bg-bg-primary px-4 py-3">
+              <input
+                type="text"
+                value={customQuestion}
+                onChange={(e) => setCustomQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    submitCustomQuestion();
+                  }
+                }}
+                placeholder="Ask a question about this project..."
+                aria-label="Ask a question about this project"
+                className="min-w-0 flex-1 rounded-md border border-line-tertiary bg-bg-primary px-2.5 py-1.5 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!customQuestion.trim()}
+                onClick={submitCustomQuestion}
+              >
+                <IconSparkles size={14} />
+                Ask
+              </Button>
             </div>
 
-            {/* 4 + 5 + 6. Recommended Dashboards | Queries | KPIs */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <Panel
-                title="Recommended Dashboards"
-                icon={
-                  <IconLayoutDashboard size={16} className="text-brand-500" />
-                }
-              >
-                {dashboards.length === 0 ? (
-                  <PanelEmpty text="No dashboard suggestions." />
+            {/* Recommendations (collapsed by default) — Dashboards | Queries | KPIs */}
+            <Panel
+              title="Recommendations"
+              icon={<IconBulb size={16} className="text-brand-500" />}
+              collapsible
+              defaultOpen={false}
+              count={recommendationCount}
+            >
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <Panel
+                  title="Recommended Dashboards"
+                  icon={
+                    <IconLayoutDashboard
+                      size={16}
+                      className="text-brand-500"
+                    />
+                  }
+                >
+                  {dashboards.length === 0 ? (
+                    <PanelEmpty text="No dashboard suggestions." />
                 ) : (
                   <div className="space-y-2.5">
                     {dashboards.map((d) => (
@@ -554,116 +569,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                   </div>
                 )}
               </Panel>
-            </div>
-
-            {/* 7 + 8. What Changed | Insight Validation Workflow */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-              <div className="lg:col-span-2">
-                <Panel
-                  title="What Changed Since Last Visit"
-                  icon={<IconRefresh size={16} className="text-brand-500" />}
-                >
-                  <dl className="space-y-2">
-                    <ChangeRow
-                      label="New files added"
-                      value={data.whatChangedSinceLastVisit.newFilesAdded}
-                    />
-                    <ChangeRow
-                      label="Changed data sources"
-                      value={data.whatChangedSinceLastVisit.changedDataSources}
-                    />
-                    <ChangeRow
-                      label="New risks identified"
-                      value={data.whatChangedSinceLastVisit.newRisksIdentified}
-                    />
-                    <ChangeRow
-                      label="New queries"
-                      value={data.whatChangedSinceLastVisit.newQueries}
-                    />
-                    <ChangeRow
-                      label="New dashboards"
-                      value={data.whatChangedSinceLastVisit.newDashboards}
-                    />
-                    <ChangeRow
-                      label="Updated knowledge graph"
-                      value={data.whatChangedSinceLastVisit.updatedKnowledgeGraph}
-                    />
-                  </dl>
-                </Panel>
               </div>
-
-              <div className="lg:col-span-3">
-                <Panel
-                  title="Insight Validation Workflow"
-                  icon={<IconCheck size={16} className="text-brand-500" />}
-                  headerRight={
-                    <div className="flex items-center gap-1 rounded-md bg-bg-secondary p-0.5">
-                      <WorkflowTab
-                        label="Open"
-                        count={openWorkflow.length}
-                        active={workflowTab === "open"}
-                        onClick={() => setWorkflowTab("open")}
-                      />
-                      <WorkflowTab
-                        label="Reviewed"
-                        count={reviewedItems.length}
-                        active={workflowTab === "reviewed"}
-                        onClick={() => setWorkflowTab("reviewed")}
-                      />
-                    </div>
-                  }
-                >
-                  {workflowTab === "open" ? (
-                    openWorkflow.length === 0 ? (
-                      <PanelEmpty text="No insights to review." />
-                    ) : (
-                      <div className="space-y-2">
-                        {openWorkflow.map((item) => (
-                          <WorkflowRow
-                            key={item.id}
-                            item={item}
-                            pending={
-                              acknowledge.isPending &&
-                              acknowledge.variables?.id === item.id
-                            }
-                            onReview={() => acknowledge.mutate(item)}
-                          />
-                        ))}
-                      </div>
-                    )
-                  ) : reviewedItems.length === 0 ? (
-                    <PanelEmpty text="No reviewed insights yet." />
-                  ) : (
-                    <div className="space-y-2">
-                      {reviewedItems.map((item) => (
-                        <ReviewedRow
-                          key={item.insightId}
-                          item={item}
-                          pending={
-                            reopen.isPending &&
-                            reopen.variables === item.insightId
-                          }
-                          onReopen={() => reopen.mutate(item.insightId)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </Panel>
-              </div>
-            </div>
-
-            <Panel title="Insights & Opportunities">
-              {insightsQuery.isFetching && !insightsQuery.data ? (
-                <div className="flex items-center gap-2 py-8 text-small text-ink-tertiary">
-                  <IconLoader2 size={16} className="animate-spin" />
-                  Analyzing this project…
-                </div>
-              ) : (
-                <InsightsPanel
-                  projects={insightsQuery.data?.projects ?? []}
-                  showProjectHeader={false}
-                />
-              )}
             </Panel>
           </>
         )}
@@ -711,27 +617,27 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   );
 }
 
-const TONE_TEXT = {
-  danger: "text-danger",
-  warning: "text-warning",
-  success: "text-success",
-  brand: "text-brand-700",
-} as const;
-
-function SummaryColumn({
+function SummaryCard({
   title,
   tone,
   icon,
   items,
 }: {
   title: string;
-  tone: keyof typeof TONE_TEXT;
+  tone: keyof typeof SUMMARY_TONES;
   icon: ReactNode;
   items: string[];
 }) {
+  const t = SUMMARY_TONES[tone];
+
   return (
-    <div>
-      <div className={cn("mb-1.5 flex items-center gap-1.5 text-[13px] font-semibold", TONE_TEXT[tone])}>
+    <div className={cn("rounded-lg border p-3.5", t.box)}>
+      <div
+        className={cn(
+          "mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide",
+          t.label,
+        )}
+      >
         {icon}
         {title}
       </div>
@@ -742,10 +648,9 @@ function SummaryColumn({
           {items.map((it, i) => (
             <li
               key={i}
-              className="flex gap-1.5 text-[13px] leading-snug text-ink-secondary"
+              className="text-[13px] leading-snug text-ink-secondary"
             >
-              <span className={cn("mt-1 h-1 w-1 shrink-0 rounded-full", `bg-current ${TONE_TEXT[tone]}`)} />
-              <span>{it}</span>
+              {it}
             </li>
           ))}
         </ul>
@@ -759,148 +664,72 @@ function Panel({
   icon,
   children,
   headerRight,
+  collapsible = false,
+  defaultOpen = true,
+  count,
 }: {
   title: string;
   icon?: ReactNode;
   children: ReactNode;
   headerRight?: ReactNode;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  count?: number;
 }) {
+  const [open, setOpen] = useState(!collapsible || defaultOpen);
+  const badge = collapsible && count != null && count > 0 && (
+    <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
+      {count}
+    </span>
+  );
+  const toggle = collapsible ? () => setOpen((v) => !v) : undefined;
+
   return (
     <section className="rounded-lg border border-line-tertiary bg-bg-primary">
-      <div className="flex items-center justify-between gap-2 border-b border-line-tertiary px-4 py-3">
+      <div
+        className={cn(
+          "flex items-center justify-between gap-2 px-4 py-3",
+          open && "border-b border-line-tertiary",
+          collapsible && "cursor-pointer select-none",
+        )}
+        {...(collapsible
+          ? {
+              role: "button" as const,
+              tabIndex: 0,
+              "aria-expanded": open,
+              onClick: toggle,
+              onKeyDown: (e: React.KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggle?.();
+                }
+              },
+            }
+          : {})}
+      >
         <div className="flex items-center gap-2">
           {icon}
           <h3 className="text-h3 text-ink-primary">{title}</h3>
         </div>
-        {headerRight}
-      </div>
-      <div className="p-4">{children}</div>
-    </section>
-  );
-}
-
-function WorkflowTab({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded px-2.5 py-1 text-[12px] font-medium transition-colors",
-        active
-          ? "bg-bg-primary text-ink-primary shadow-sm"
-          : "text-ink-tertiary hover:text-ink-secondary",
-      )}
-    >
-      {label}
-      <span className="ml-1 text-ink-tertiary">{count}</span>
-    </button>
-  );
-}
-
-function ReviewedRow({
-  item,
-  pending,
-  onReopen,
-}: {
-  item: ReviewedInsight;
-  pending: boolean;
-  onReopen: () => void;
-}) {
-  const priorityTone =
-    PRIORITY_TONE[item.severity as keyof typeof PRIORITY_TONE] ?? "neutral";
-  const reviewedAt = item.reviewedAt
-    ? new Date(item.reviewedAt).toLocaleDateString()
-    : "";
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-line-tertiary px-3 py-2">
-      <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className="truncate text-[13px] font-medium text-ink-primary">
-            {item.title || item.insightId}
-          </span>
-          {item.severity && (
-            <Badge tone={priorityTone} size="sm">
-              {item.severity}
-            </Badge>
-          )}
-        </div>
-        {item.summary && (
-          <div className="mt-0.5 truncate text-small text-ink-tertiary">
-            {item.summary}
-          </div>
-        )}
-        <div className="mt-0.5 text-small text-success">
-          Reviewed{item.reviewedByName ? ` by ${item.reviewedByName}` : ""}
-          {reviewedAt ? ` · ${reviewedAt}` : ""}
+          {headerRight}
+          {badge}
+          {collapsible &&
+            (open ? (
+              <IconMinus size={16} className="text-ink-tertiary" />
+            ) : (
+              <IconPlus size={16} className="text-ink-tertiary" />
+            ))}
         </div>
       </div>
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={onReopen}
-        disabled={pending}
-        className="shrink-0"
-      >
-        {pending ? "Reopening…" : "Reopen"}
-      </Button>
-    </div>
+      {open && <div className="p-4">{children}</div>}
+    </section>
   );
 }
 
 function PanelEmpty({ text }: { text: string }) {
   return <p className="py-2 text-[13px] text-ink-tertiary">{text}</p>;
 }
-
-const CARD_SEVERITY: Record<
-  InsightCardSeverity,
-  { accent: string; chip: string; label: string }
-> = {
-  critical: {
-    accent: "border-l-danger",
-    chip: "bg-danger/10 text-danger",
-    label: "Critical",
-  },
-  urgent: {
-    accent: "border-l-warning",
-    chip: "bg-warning/10 text-warning",
-    label: "Urgent",
-  },
-  warning: {
-    accent: "border-l-warning",
-    chip: "bg-warning/10 text-warning",
-    label: "Warning",
-  },
-  watch: {
-    accent: "border-l-line-secondary",
-    chip: "bg-bg-tertiary text-ink-secondary",
-    label: "Watch",
-  },
-  opportunity: {
-    accent: "border-l-success",
-    chip: "bg-success/10 text-success",
-    label: "Opportunity",
-  },
-  recommendation: {
-    accent: "border-l-brand-500",
-    chip: "bg-brand-50 text-brand-700",
-    label: "Recommendation",
-  },
-  informational: {
-    accent: "border-l-line-secondary",
-    chip: "bg-bg-tertiary text-ink-secondary",
-    label: "Informational",
-  },
-};
 
 function InsightCardColumn({
   title,
@@ -1105,80 +934,6 @@ function KpiStatusBadge({ status }: { status?: string }) {
     <Badge tone={tone} size="sm">
       {statusLabel(status)}
     </Badge>
-  );
-}
-
-function ChangeRow({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex items-center justify-between gap-2 text-[13px]">
-      <dt className="text-ink-secondary">{label}</dt>
-      <dd className="rounded-full bg-bg-secondary px-2 py-0.5 text-[12px] font-medium text-ink-primary">
-        {value}
-      </dd>
-    </div>
-  );
-}
-
-const PRIORITY_TONE = {
-  critical: "danger",
-  high: "warning",
-  medium: "brand",
-  low: "neutral",
-} as const;
-
-function WorkflowRow({
-  item,
-  pending,
-  onReview,
-}: {
-  item: InsightWorkflowItem;
-  pending: boolean;
-  onReview: () => void;
-}) {
-  const reviewed = item.status === "reviewed";
-  const priorityTone =
-    PRIORITY_TONE[item.priority as keyof typeof PRIORITY_TONE] ?? "neutral";
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-line-tertiary px-3 py-2">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-[13px] font-medium text-ink-primary">
-            {item.title}
-          </span>
-          {item.priority && (
-            <Badge tone={priorityTone} size="sm">
-              {item.priority}
-            </Badge>
-          )}
-        </div>
-        {item.evidenceSummary && (
-          <div className="mt-0.5 truncate text-small text-ink-tertiary">
-            {item.evidenceSummary}
-          </div>
-        )}
-        {reviewed && item.acknowledgedBy && (
-          <div className="mt-0.5 text-small text-success">
-            Reviewed by {item.acknowledgedBy}
-          </div>
-        )}
-      </div>
-      {reviewed ? (
-        <Badge tone="success" size="md" className="shrink-0">
-          <IconCheck size={13} />
-          Reviewed
-        </Badge>
-      ) : (
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onReview}
-          disabled={pending}
-          className="shrink-0"
-        >
-          {pending ? "Saving…" : "Mark reviewed"}
-        </Button>
-      )}
-    </div>
   );
 }
 
