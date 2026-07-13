@@ -10,10 +10,12 @@ Every endpoint:
 """
 
 import difflib
+import hashlib
 import json
 import logging
 import re
 import uuid
+import zlib
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -1450,6 +1452,7 @@ _ALLOWED_PLAN_CHART_TYPES = frozenset(
         "line",
         "area",
         "dual_line",
+        "combo",
         "scatter",
         "bubble",
         "bar",
@@ -1773,6 +1776,10 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "- 'line' (or 'area'): a trend over time / ordered periods.\n"
         "- 'dual_line': two related metrics plotted over the same time axis to show "
         "how their relationship shifts.\n"
+        "- 'combo': bars for one metric with a line for a second on the same time "
+        "axis — the right shape for plan vs actuals; for a cumulative line compute "
+        "it in SQL with SUM(metric) OVER (ORDER BY period). Set value_column to the "
+        "bar metric and value_column_2 to the line metric.\n"
         "- 'scatter': two variables compared across periods or entities, to show a "
         "changing or underlying relationship.\n"
         "- 'bubble': scatter with a third dimension encoded as point size (e.g. "
@@ -1824,10 +1831,10 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "  \"title\": \"short headline\",\n"
         "  \"rationale\": \"why this matters for the business (1 sentence)\",\n"
         "  \"sql\": \"SELECT ... (empty for document findings)\",\n"
-        "  \"chart_type\": \"kpi_grid|line|area|dual_line|scatter|bubble|bar|horizontal_bar|stacked_bar|waterfall|donut|pie|treemap|funnel|radar|heatmap|gauge|bullet|sparkline_table|none\",\n"
+        "  \"chart_type\": \"kpi_grid|line|area|dual_line|combo|scatter|bubble|bar|horizontal_bar|stacked_bar|waterfall|donut|pie|treemap|funnel|radar|heatmap|gauge|bullet|sparkline_table|none\",\n"
         "  \"label_column\": \"alias used for the category/x axis\",\n"
         "  \"value_column\": \"alias used for the numeric value (primary metric, or size for bubble)\",\n"
-        "  \"value_column_2\": \"alias for a second metric — used by dual_line, scatter, bubble, heatmap (color value), gauge/bullet (target). Omit/empty otherwise.\",\n"
+        "  \"value_column_2\": \"alias for a second metric — used by dual_line, combo (line metric), scatter, bubble, heatmap (color value), gauge/bullet (target). Omit/empty otherwise.\",\n"
         "  \"severity_hint\": \"critical|urgent|watch|opportunity|info\",\n"
         "  \"source_documents\": [\"doc title\"]\n"
         "} ] }\n\n"
@@ -1836,11 +1843,23 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "Begin your response with { and end it with }."
     )
 
+    # Deterministic planning: same project + same schema/evidence/documents =>
+    # same seed => same plan. The surface only changes when the project's data
+    # or context changes, or the user changes granularity — no more re-rolling
+    # a different chart mix on every refresh when nothing changed.
+    prompt_fingerprint = hashlib.sha1(
+        (schema_lines + relationship_lines + doc_lines).encode()
+    ).hexdigest()[:12]
+    plan_seed = zlib.crc32(
+        f"{req.tenant_id}:{req.project_id}:{granularity}:"
+        f"{prompt_fingerprint}".encode()
+    )
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_INTEL_SYSTEM_PROMPT,
         model=settings.reasoning_model,
-        temperature=0.2,
+        temperature=0.0,
+        seed=plan_seed,
         # The window is shared by the prompt AND the generated JSON. The plan
         # prompt (schema + documents + relationship evidence + rules) plus
         # target_count + per_pair-per-evidence-pair analyses is the largest

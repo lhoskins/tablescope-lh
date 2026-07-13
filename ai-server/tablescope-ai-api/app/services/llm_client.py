@@ -27,6 +27,7 @@ async def generate(
     temperature: float = 0.1,
     max_tokens: int | None = None,
     num_ctx: int | None = None,
+    seed: int | None = None,
     response_format: str | None = None,
 ) -> str:
     """Generate text completion from Ollama.
@@ -43,6 +44,8 @@ async def generate(
         options["num_predict"] = max_tokens
     if num_ctx is not None:
         options["num_ctx"] = num_ctx
+    if seed is not None:
+        options["seed"] = seed
 
     payload: dict[str, Any] = {
         "model": model,
