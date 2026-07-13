@@ -179,6 +179,12 @@ export interface ReviewedInsightsResponse {
 export const projectInsightApi = {
   get: (projectId: string) =>
     apiClient.get<ProjectInsight>(`/api/projects/${projectId}/insight`),
+  // Force a fresh run (bypasses the saved snapshot); the completed result is
+  // persisted server-side and becomes the new snapshot.
+  refresh: (projectId: string) =>
+    apiClient.get<ProjectInsight>(
+      `/api/projects/${projectId}/insight?refresh=true`,
+    ),
   acknowledge: (
     projectId: string,
     insightId: string,

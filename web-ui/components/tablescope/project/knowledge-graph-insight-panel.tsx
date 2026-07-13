@@ -80,7 +80,7 @@ function Card({
   const canTrace = card.traceToEvidence.nodeIds.length > 0;
   return (
     <article
-      className={`rounded-lg border border-line-tertiary border-l-[3px] ${sev.accent} bg-bg-primary p-4`}
+      className={`rounded-lg border border-line-tertiary bg-bg-primary p-4`}
     >
       <header className="flex items-start justify-between gap-3">
         <h3 className="min-w-0 text-h3 text-ink-primary">{card.title}</h3>

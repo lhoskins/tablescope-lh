@@ -74,6 +74,7 @@ const INSIGHT = {
 vi.mock("@/lib/api/project-insight", () => ({
   projectInsightApi: {
     get: (projectId: string) => getInsight(projectId),
+    refresh: (projectId: string) => getInsight(projectId),
     acknowledge: (projectId: string, insightId: string) =>
       acknowledge(projectId, insightId),
     reviewed: (projectId: string) => reviewed(projectId),
@@ -233,8 +234,8 @@ describe("ProjectInsightScreen", () => {
       name: /Recommendations/,
     });
     expect(recommendations.getAttribute("aria-expanded")).toBe("false");
-    // 1 dashboard + 1 query + 1 kpi.
-    expect(within(recommendations).getByText("3")).toBeTruthy();
+    // The Recommendations header shows no count badge.
+    expect(within(recommendations).queryByText("3")).toBeNull();
     expect(
       screen.queryByRole("heading", { name: "Recommended Dashboards" }),
     ).toBeNull();

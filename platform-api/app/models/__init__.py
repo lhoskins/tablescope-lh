@@ -61,6 +61,9 @@ from app.models.project_asset import ProjectAsset
 from app.models.project_insight_acknowledgement import (
     ProjectInsightAcknowledgement,
 )
+from app.models.project_intelligence_snapshot import (
+    ProjectIntelligenceSnapshot,
+)
 from app.models.query_scope import QueryScope
 from app.models.reference_library import (
     ReferenceAdditionRequest,
@@ -132,6 +135,7 @@ __all__ = [
     "Project",
     "ProjectAsset",
     "ProjectInsightAcknowledgement",
+    "ProjectIntelligenceSnapshot",
     "ProjectMember",
     "QueryScope",
     "ReferenceAdditionRequest",

@@ -23,6 +23,9 @@ from app.models.project import Project, ProjectMember
 from app.models.project_insight_acknowledgement import (
     ProjectInsightAcknowledgement,
 )
+from app.models.project_intelligence_snapshot import (
+    ProjectIntelligenceSnapshot,
+)
 from app.models.user import User
 from app.schemas.project_insight import (
     AcknowledgeInsightRequest,
@@ -58,24 +61,76 @@ async def _require_project_access(
     return project
 
 
+async def _get_snapshot(
+    session: AsyncSession, context: RequestContext, project_id: int
+) -> ProjectIntelligenceSnapshot | None:
+    return await session.scalar(
+        select(ProjectIntelligenceSnapshot).where(
+            ProjectIntelligenceSnapshot.tenant_id == context.tenant_id,
+            ProjectIntelligenceSnapshot.user_id == context.user_id,
+            ProjectIntelligenceSnapshot.project_id == project_id,
+        )
+    )
+
+
+async def _save_snapshot(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    payload: dict,
+) -> None:
+    """Upsert the caller's latest completed run for one project.
+
+    Committing only the completed result guarantees a hydrating page never
+    shows a blanked report: the prior snapshot stays until a fresh run finishes.
+    """
+    snap = await _get_snapshot(session, context, project_id)
+    if snap is None:
+        snap = ProjectIntelligenceSnapshot(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+        )
+        session.add(snap)
+    snap.payload = payload
+    await session.commit()
+
+
 @router.get("/{project_id}/insight", response_model=ProjectInsightResponse)
 async def get_project_insight(
     project_id: int,
+    refresh: bool = False,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> ProjectInsightResponse:
-    """Return the project-scoped executive insight report for one project."""
+    """Return the project-scoped executive insight report for one project.
+
+    Snapshot behavior mirrors Business Insight: without ``refresh`` a saved
+    snapshot is returned immediately so the page hydrates instantly; the client
+    then re-runs with ``refresh=true`` in the background and commits the fresh
+    result only once the run completes. A completed run overwrites the snapshot.
+    """
     from app.routes.home_intelligence import _make_runner
 
     project = await _require_project_access(project_id, session, context)
+
+    if not refresh:
+        snap = await _get_snapshot(session, context, project_id)
+        if snap is not None:
+            return ProjectInsightResponse.model_validate(snap.payload)
+
     runner = _make_runner(session, context, project.id)
-    return await build_project_insight(
+    report = await build_project_insight(
         session,
         project=project,
         tenant_id=context.tenant_id,
         user_id=context.user_id,
         runner=runner,
     )
+    await _save_snapshot(
+        session, context, project_id, report.model_dump(mode="json")
+    )
+    return report
 
 
 @router.post(
