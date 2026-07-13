@@ -88,6 +88,19 @@ export interface InsightCard {
   };
   referenceDocuments?: string[];
   kpiReferences?: string[];
+  /** Stable identity across refreshes (see home_intelligence._card_fingerprint). */
+  fingerprint?: string;
+  /** Primary comparable metric used for the trend delta. */
+  metricValue?: number;
+  /** ISO timestamp this card first appeared, carried across refreshes. */
+  firstSeenAt?: string;
+  /** Change vs. the prior snapshot's same-fingerprint card. */
+  trend?: {
+    direction: "up" | "down" | "flat" | "new" | "unchanged";
+    prevValue?: number;
+    delta?: number;
+    deltaPct?: number | null;
+  };
   relationshipMetadata?: {
     leftTable?: string;
     rightTable?: string;

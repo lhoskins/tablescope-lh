@@ -184,6 +184,48 @@ export function InsightChartBlock({ chart }: { chart: InsightChart }) {
   );
 }
 
+/**
+ * Polarity-aware trend badge. A rising metric is *good* on an opportunity card
+ * and *bad* on a risk/cost card, so the same ▲ is colored green or red
+ * accordingly. Brand-new cards get a subtle "New" badge instead.
+ */
+function TrendBadge({ card }: { card: InsightCardData }) {
+  const trend = card.trend;
+  if (!trend) return null;
+
+  if (trend.direction === "new") {
+    return (
+      <span className="shrink-0 rounded-full bg-bg-tertiary px-2 py-0.5 text-caption font-medium text-ink-tertiary">
+        New
+      </span>
+    );
+  }
+
+  if (trend.direction !== "up" && trend.direction !== "down") return null;
+
+  const risingIsGood =
+    card.severity === "opportunity" ||
+    card.insightType.startsWith("opp") ||
+    card.callout?.type === "opportunity";
+  const isGood = trend.direction === "up" ? risingIsGood : !risingIsGood;
+  const arrow = trend.direction === "up" ? "▲" : "▼";
+  const pct = trend.deltaPct;
+  const label =
+    typeof pct === "number" ? `${Math.abs(pct).toFixed(1)}%` : "";
+
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-0.5 text-small font-medium ${
+        isGood ? "text-success" : "text-danger"
+      }`}
+      title="Change vs. the previous refresh"
+    >
+      {arrow}
+      {label && <span>{label}</span>}
+    </span>
+  );
+}
+
 export interface IntelligenceCardProps {
   card: InsightCardData;
   /** Hide the "Add to report" action (e.g. inside the report viewer). */
@@ -215,11 +257,14 @@ export function IntelligenceCard({
           </div>
           <h3 className="mt-1 text-h3 text-ink-primary">{card.title}</h3>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
-        >
-          {sev.label}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <TrendBadge card={card} />
+          <span
+            className={`rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
+          >
+            {sev.label}
+          </span>
+        </div>
       </header>
 
       <p className="mt-2 text-body text-ink-secondary">

@@ -17,6 +17,7 @@ The four built-in prompt types:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -714,6 +715,54 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _card_fingerprint(card: dict[str, Any]) -> str:
+    """A stable identity for a card across refreshes.
+
+    Derived from the structural facts that make a finding "the same" run to
+    run — project, insight category, the tables it draws on, and its
+    (normalized) title — plus the chart's label/value axis when present. With
+    deterministic planning (PR #50) these are reproducible, so the same
+    analysis lands on the same fingerprint and its metric can be compared to
+    the prior snapshot to render a trend arrow.
+    """
+    category = str(card.get("insightType", "")).split("_", 1)[0]
+    tables = ",".join(sorted(card.get("sources", {}).get("tables", [])))
+    chart = card.get("chart") or {}
+    axis = f"{chart.get('type', '')}:{chart.get('subtype', '')}"
+    parts = "|".join(
+        [
+            str(card.get("projectId", "")),
+            category,
+            tables,
+            _norm(str(card.get("title", ""))),
+            axis,
+        ]
+    )
+    return hashlib.sha1(parts.encode()).hexdigest()[:16]
+
+
+def _card_metric_value(card: dict[str, Any]) -> float | None:
+    """Extract a single comparable metric from a card for trend deltas.
+
+    Prefers a KPI value; otherwise the latest point of the chart's primary
+    series. Returns ``None`` when nothing numeric is available (e.g. a
+    document-only card), in which case the card simply carries no trend.
+    """
+    chart = card.get("chart") or {}
+    data = chart.get("data") or {}
+    kpis = data.get("kpis") or []
+    if kpis:
+        v = _to_float(kpis[0].get("value"))
+        if v is not None:
+            return v
+    series = data.get("series") or []
+    nums = [_to_float(s.get("value")) for s in series]
+    nums = [n for n in nums if n is not None]
+    if nums:
+        return nums[-1]
+    return None
+
+
 def _card(
     project: Project,
     insight_type: str,
@@ -758,7 +807,71 @@ def _card(
         chart=chart,
         sources=[*(tables or []), *(documents or [])] or None,
     )
+    # #3 stable identity + comparable metric for cross-refresh trend arrows.
+    card["fingerprint"] = _card_fingerprint(card)
+    metric = _card_metric_value(card)
+    if metric is not None:
+        card["metricValue"] = metric
     return card
+
+
+def attach_card_trends(
+    prior_results: list[dict[str, Any]],
+    new_results: list[dict[str, Any]],
+) -> None:
+    """Compare each new card to the prior snapshot's card of the same
+    fingerprint and stamp a ``trend`` (and carry ``firstSeenAt`` forward).
+
+    Matching is per project + fingerprint. A card with no prior match is
+    flagged ``direction="new"``; a matched card with comparable numeric
+    ``metricValue`` on both sides carries ``prevValue``/``delta``/``deltaPct``
+    and an up/down/flat direction. Polarity (good vs. bad) is decided by the
+    frontend from the card's category, so the raw direction is kept here.
+    Mutates ``new_results`` in place.
+    """
+    prior_by_project: dict[str, dict[str, dict[str, Any]]] = {}
+    for r in prior_results:
+        pid = str(r.get("projectId"))
+        fps: dict[str, dict[str, Any]] = {}
+        for c in r.get("insights") or []:
+            fp = c.get("fingerprint")
+            if fp:
+                fps[str(fp)] = c
+        prior_by_project[pid] = fps
+
+    now = _now_iso()
+    for r in new_results:
+        pid = str(r.get("projectId"))
+        prior_cards = prior_by_project.get(pid, {})
+        for c in r.get("insights") or []:
+            fp = c.get("fingerprint")
+            prev = prior_cards.get(str(fp)) if fp else None
+            if prev is None:
+                c["firstSeenAt"] = c.get("firstSeenAt") or now
+                c["trend"] = {"direction": "new"}
+                continue
+            c["firstSeenAt"] = (
+                prev.get("firstSeenAt") or prev.get("executedAt") or now
+            )
+            cur_v = c.get("metricValue")
+            prev_v = prev.get("metricValue")
+            if isinstance(cur_v, int | float) and isinstance(prev_v, int | float):
+                delta = float(cur_v) - float(prev_v)
+                pct = (delta / abs(prev_v) * 100.0) if prev_v else None
+                if delta == 0:
+                    direction = "flat"
+                elif delta > 0:
+                    direction = "up"
+                else:
+                    direction = "down"
+                c["trend"] = {
+                    "prevValue": float(prev_v),
+                    "delta": delta,
+                    "deltaPct": round(pct, 1) if pct is not None else None,
+                    "direction": direction,
+                }
+            else:
+                c["trend"] = {"direction": "unchanged"}
 
 
 # Type signature for the Teiid query runner injected by the route layer.

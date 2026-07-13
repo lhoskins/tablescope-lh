@@ -1443,3 +1443,80 @@ def test_plan_reference_kpis_serializes_governed_catalog() -> None:
 def test_plan_reference_kpis_empty_by_default() -> None:
     ctx = hi.ProjectContext(tables=[], documents=[])
     assert hi._plan_reference_kpis(ctx) == []
+
+
+# ──────────────────────────── #3 trend arrows ───────────────────────────────
+
+def _series_card(title: str, latest: float) -> dict:
+    return {
+        "projectId": "7",
+        "insightType": "trend_spend",
+        "title": title,
+        "sources": {"tables": ["finance"], "documents": []},
+        "chart": {
+            "type": "line",
+            "subtype": "",
+            "data": {"series": [{"label": "Jan", "value": 1.0},
+                                {"label": "Feb", "value": latest}]},
+        },
+    }
+
+
+def test_card_stamps_stable_fingerprint_and_metric() -> None:
+    c1 = hi._card(
+        _project(),
+        "trend_spend",
+        "warning",
+        "Spend rising",
+        "summary",
+        chart={"type": "line", "data": {"series": [
+            {"label": "Jan", "value": 5.0}, {"label": "Feb", "value": 9.0}]}},
+        tables=["finance"],
+    )
+    c2 = hi._card(
+        _project(),
+        "trend_spend",
+        "warning",
+        "Spend rising",
+        "summary",
+        chart={"type": "line", "data": {"series": [
+            {"label": "Jan", "value": 1.0}, {"label": "Feb", "value": 2.0}]}},
+        tables=["finance"],
+    )
+    # Same structural identity -> same fingerprint across refreshes.
+    assert c1["fingerprint"] == c2["fingerprint"]
+    # Metric is the latest series point.
+    assert c1["metricValue"] == 9.0
+    assert c2["metricValue"] == 2.0
+
+
+def test_attach_card_trends_marks_new_and_deltas() -> None:
+    prior = [
+        {
+            "projectId": "7",
+            "insights": [
+                {**_series_card("Spend", 100.0),
+                 "fingerprint": "fp1", "metricValue": 100.0,
+                 "firstSeenAt": "2026-01-01T00:00:00+00:00"},
+            ],
+        }
+    ]
+    new = [
+        {
+            "projectId": "7",
+            "insights": [
+                {**_series_card("Spend", 120.0),
+                 "fingerprint": "fp1", "metricValue": 120.0},
+                {**_series_card("New metric", 5.0),
+                 "fingerprint": "fp2", "metricValue": 5.0},
+            ],
+        }
+    ]
+    hi.attach_card_trends(prior, new)
+    matched, fresh = new[0]["insights"]
+    assert matched["trend"]["direction"] == "up"
+    assert matched["trend"]["prevValue"] == 100.0
+    assert matched["trend"]["delta"] == 20.0
+    assert matched["trend"]["deltaPct"] == 20.0
+    assert matched["firstSeenAt"] == "2026-01-01T00:00:00+00:00"  # carried
+    assert fresh["trend"]["direction"] == "new"
