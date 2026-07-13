@@ -1761,7 +1761,7 @@ def _dimension_columns(columns: list[str], label_hint: str) -> set[str]:
 
 # Planner chart types that compare two metrics; handled specially because they
 # need a second numeric column rather than the default {label, value} series.
-_TWO_VALUE_TYPES = frozenset({"dual_line", "scatter", "bubble"})
+_TWO_VALUE_TYPES = frozenset({"dual_line", "combo", "scatter", "bubble"})
 
 
 def _pick_second_value(
@@ -1820,7 +1820,7 @@ def _two_value_chart(
     if not series:
         return None
     series_labels = {"value": value_col, "value2": value2_col}
-    if chart_type == "dual_line":
+    if chart_type in ("dual_line", "combo"):
         # Two metrics over a shared (time) axis -> combo (bar + overlay line).
         return {
             "type": "combo",
