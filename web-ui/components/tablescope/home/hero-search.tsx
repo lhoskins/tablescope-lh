@@ -49,7 +49,7 @@ export function HeroSearch() {
       </p>
 
       <div className="mt-6 w-full max-w-2xl">
-        <div className="flex items-center gap-2 rounded-xl border border-line-secondary bg-bg-primary px-4 py-2.5 shadow-sm focus-within:border-brand-100 focus-within:ring-2 focus-within:ring-brand-100">
+        <div className="flex items-center gap-2 rounded-xl border border-line-secondary bg-bg-primary px-4 py-2.5 focus-within:border-brand-100 focus-within:ring-2 focus-within:ring-brand-100">
           <IconSparkles size={18} className="shrink-0 text-ai" />
           <input
             ref={inputRef}

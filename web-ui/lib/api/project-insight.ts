@@ -81,6 +81,7 @@ export type InsightCardSeverity =
   | "urgent"
   | "warning"
   | "watch"
+  | "trend"
   | "opportunity"
   | "recommendation"
   | "informational";

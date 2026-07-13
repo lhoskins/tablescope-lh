@@ -1,23 +1,29 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 const { push, getInsight, acknowledge, reviewed, reopen, suggestInsights } =
   vi.hoisted(() => ({
-  push: vi.fn(),
-  getInsight: vi.fn(),
-  suggestInsights: vi.fn(),
-  acknowledge: vi.fn().mockResolvedValue({
-    insightId: "i1",
-    status: "reviewed",
-    acknowledgedByUserId: 1,
-    acknowledgedByName: "Leonard",
-    acknowledgedAt: "2026-06-25T00:00:00Z",
-  }),
-  reviewed: vi.fn().mockResolvedValue({ items: [] }),
-  reopen: vi.fn().mockResolvedValue({ insightId: "i1", status: "reopened" }),
-}));
+    push: vi.fn(),
+    getInsight: vi.fn(),
+    suggestInsights: vi.fn(),
+    acknowledge: vi.fn().mockResolvedValue({
+      insightId: "i1",
+      status: "reviewed",
+      acknowledgedByUserId: 1,
+      acknowledgedByName: "Leonard",
+      acknowledgedAt: "2026-06-25T00:00:00Z",
+    }),
+    reviewed: vi.fn().mockResolvedValue({ items: [] }),
+    reopen: vi.fn().mockResolvedValue({ insightId: "i1", status: "reopened" }),
+  }));
 
 const INSIGHT = {
   project: { id: 42, name: "Boeing", status: "Active" },
@@ -33,7 +39,14 @@ const INSIGHT = {
   questionsToAsk: [
     { id: "q1", question: "Why did Supplier A slip?", reason: "risk" },
   ],
-  trendDetection: [{ id: "t1", label: "Spend up", description: "MoM +12%" }],
+  trendDetection: [
+    {
+      id: "t1",
+      label: "Spend up",
+      description: "MoM +12%",
+      possibleCause: "New supplier onboarding",
+    },
+  ],
   recommendedDashboards: [
     { id: "d1", title: "Supplier SLA", status: "suggested" },
   ],
@@ -144,6 +157,12 @@ function renderScreen() {
   );
 }
 
+/** Expand a collapsible Panel by clicking its section header (the click
+ * bubbles from the heading up to the header's role="button" handler). */
+function expandSection(name: string | RegExp) {
+  fireEvent.click(screen.getByRole("heading", { name }));
+}
+
 describe("ProjectInsightScreen", () => {
   beforeEach(() => {
     push.mockClear();
@@ -157,31 +176,91 @@ describe("ProjectInsightScreen", () => {
     suggestInsights.mockResolvedValue({ projects: [] });
   });
 
-  it("renders the approved layout sections", async () => {
+  it("renders the restyled layout sections", async () => {
     renderScreen();
     expect(
       await screen.findByText("Executive Project Summary"),
     ).toBeTruthy();
-    expect(screen.getByText("AI-Generated Questions to Ask")).toBeTruthy();
-    expect(screen.getByText("Trend Detection")).toBeTruthy();
-    expect(screen.getByText("Recommended Dashboards")).toBeTruthy();
-    expect(screen.getByText("Recommended Queries")).toBeTruthy();
-    expect(screen.getByText("Recommended KPIs")).toBeTruthy();
-    expect(screen.getByText("What Changed Since Last Visit")).toBeTruthy();
-    expect(screen.getByText("Insight Validation Workflow")).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Risks" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Trends" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Insights & Opportunities" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "AI-Generated Questions to Ask" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Recommendations" }),
+    ).toBeTruthy();
   });
 
-  it("shows executive summary bullet categories", async () => {
+  it("removes the panels that are not part of the restyle", async () => {
     renderScreen();
+    await screen.findByText("Executive Project Summary");
+    expect(screen.queryByText("Trend Detection")).toBeNull();
+    expect(screen.queryByText("What Changed Since Last Visit")).toBeNull();
+    expect(screen.queryByText("Insight Validation Workflow")).toBeNull();
+  });
+
+  it("renders executive summary as tinted, colored cards", async () => {
+    const { container } = renderScreen();
     expect(await screen.findByText("Critical")).toBeTruthy();
     expect(screen.getByText("Warnings")).toBeTruthy();
-    // "Opportunities" is both an executive-summary column and a card section.
     expect(screen.getAllByText("Opportunities").length).toBeGreaterThan(0);
-    expect(screen.getByText("Recommendations")).toBeTruthy();
     expect(screen.getByText("Supplier A SLA breach")).toBeTruthy();
+    // The Critical card is a tinted danger box.
+    expect(container.querySelector('[class*="bg-danger/5"]')).toBeTruthy();
   });
 
-  it("shows unanswerable questions in a Needs additional data section", async () => {
+  it("collapses Insights / Questions / Recommendations by default with a count badge", async () => {
+    renderScreen();
+    await screen.findByText("Executive Project Summary");
+
+    const questions = screen.getByRole("button", {
+      name: /AI-Generated Questions to Ask/,
+    });
+    expect(questions.getAttribute("aria-expanded")).toBe("false");
+    // Count badge (1 question) is shown while collapsed.
+    expect(within(questions).getByText("1")).toBeTruthy();
+    // Collapsed content is absent.
+    expect(screen.queryByText("Why did Supplier A slip?")).toBeNull();
+
+    const recommendations = screen.getByRole("button", {
+      name: /Recommendations/,
+    });
+    expect(recommendations.getAttribute("aria-expanded")).toBe("false");
+    // 1 dashboard + 1 query + 1 kpi.
+    expect(within(recommendations).getByText("3")).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { name: "Recommended Dashboards" }),
+    ).toBeNull();
+  });
+
+  it("expands a collapsed section when its header is clicked", async () => {
+    renderScreen();
+    await screen.findByText("Executive Project Summary");
+    expect(screen.queryByText("Why did Supplier A slip?")).toBeNull();
+    expandSection("AI-Generated Questions to Ask");
+    expect(
+      await screen.findByText("Why did Supplier A slip?"),
+    ).toBeTruthy();
+  });
+
+  it("folds trend-detection items into the Trends column as cards", async () => {
+    renderScreen();
+    await screen.findByText("Executive Project Summary");
+    // The former Trend Detection panel is gone; its item now renders as a
+    // trend card in the always-visible Trends column.
+    expect(screen.queryByText("Trend Detection")).toBeNull();
+    expect(await screen.findByText("Spend up")).toBeTruthy();
+    expect(screen.getByText("Trend")).toBeTruthy();
+  });
+
+  it("shows unanswerable questions after expanding the Questions section", async () => {
     getInsight.mockResolvedValue({
       ...INSIGHT,
       questionsNeedingData: [
@@ -193,6 +272,8 @@ describe("ProjectInsightScreen", () => {
       ],
     });
     renderScreen();
+    await screen.findByText("Executive Project Summary");
+    expandSection("AI-Generated Questions to Ask");
     expect(await screen.findByText("Needs additional data")).toBeTruthy();
     expect(
       screen.getByText("What is employee headcount by department?"),
@@ -202,121 +283,14 @@ describe("ProjectInsightScreen", () => {
     ).toBeTruthy();
   });
 
-  it("shows suggestion status on recommended assets", async () => {
+  it("shows suggestion status after expanding Recommendations", async () => {
     renderScreen();
-    // "Suggested" appears for dashboards + queries; KPI shows "Suggested" too.
+    await screen.findByText("Executive Project Summary");
+    expandSection("Recommendations");
     expect((await screen.findAllByText("Suggested")).length).toBeGreaterThan(0);
   });
 
-  it("does not show Approve or Reject in the validation workflow", async () => {
-    renderScreen();
-    await screen.findByText("Insight Validation Workflow");
-    expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /reject/i })).toBeNull();
-  });
-
-  it("marks an insight reviewed; it moves to the Reviewed tab", async () => {
-    // After review, the insight is no longer 'new' in the report and the
-    // reviewed-list endpoint returns it.
-    const reviewedInsight = {
-      ...INSIGHT,
-      insightValidationWorkflow: [
-        {
-          id: "i1",
-          title: "Supplier A risk",
-          priority: "high",
-          status: "reviewed",
-          acknowledgedBy: "Leonard",
-        },
-      ],
-    };
-    acknowledge.mockImplementation(() => {
-      getInsight.mockResolvedValue(reviewedInsight);
-      reviewed.mockResolvedValue({
-        items: [
-          {
-            insightId: "i1",
-            title: "Supplier A risk",
-            summary: "",
-            category: "risk",
-            severity: "high",
-            note: null,
-            reviewedByUserId: 1,
-            reviewedByName: "Leonard",
-            reviewedAt: "2026-06-25T00:00:00Z",
-          },
-        ],
-      });
-      return Promise.resolve({
-        insightId: "i1",
-        status: "reviewed",
-        acknowledgedByUserId: 1,
-        acknowledgedByName: "Leonard",
-        acknowledgedAt: "2026-06-25T00:00:00Z",
-      });
-    });
-    renderScreen();
-    const btn = await screen.findByRole("button", { name: /mark reviewed/i });
-    fireEvent.click(btn);
-    await waitFor(() =>
-      expect(acknowledge).toHaveBeenCalledWith("42", "i1"),
-    );
-    // The Open tab no longer shows the reviewed item.
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /mark reviewed/i })).toBeNull(),
-    );
-    // It now appears under the Reviewed tab (with the reviewer name).
-    fireEvent.click(screen.getByRole("button", { name: /^Reviewed/ }));
-    expect(await screen.findByText("Supplier A risk")).toBeTruthy();
-    expect(
-      (await screen.findAllByText((t) => t.includes("by Leonard"))).length,
-    ).toBeGreaterThan(0);
-  });
-
-  it("filters out empty items instead of showing placeholder fallbacks", async () => {
-    getInsight.mockResolvedValue({
-      ...INSIGHT,
-      questionsToAsk: [{ id: "q1", question: "   ", reason: "" }],
-      trendDetection: [{ id: "t1", label: "Trend A", description: "" }],
-      recommendedDashboards: [{ id: "d1", title: "", status: "suggested" }],
-      recommendedQueries: [
-        {
-          id: "rq1",
-          title: "",
-          businessQuestion: "What drove late deliveries?",
-          status: "suggested",
-        },
-      ],
-      recommendedKpis: [
-        { id: "k1", name: "", status: "recommended", currentValue: null },
-      ],
-      insightValidationWorkflow: [{ id: "i1", title: "", status: "new" }],
-    });
-    renderScreen();
-    // Trend A here has a label, so it still renders (the model must derive a
-    // real label) — but empty-title items must not render placeholder text.
-    await screen.findByText("Recommended Queries");
-    expect(screen.queryByText("Query")).toBeNull();
-    expect(screen.queryByText("KPI")).toBeNull();
-    expect(screen.queryByText("Dashboard")).toBeNull();
-    expect(screen.getByText("No query suggestions.")).toBeTruthy();
-    expect(screen.getByText("No KPI suggestions.")).toBeTruthy();
-    expect(screen.getByText("No dashboard suggestions.")).toBeTruthy();
-    expect(screen.getByText("No suggested questions yet.")).toBeTruthy();
-    expect(screen.getByText("No insights to review.")).toBeTruthy();
-  });
-
-  it("opens the AI answer modal (no navigation) when a question is clicked", async () => {
-    renderScreen();
-    const q = await screen.findByText("Why did Supplier A slip?");
-    fireEvent.click(q);
-    // Opens the inline modal rather than routing to the AI Assistant page.
-    const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
-    expect(dialog.textContent).toContain("Why did Supplier A slip?");
-    expect(push).not.toHaveBeenCalled();
-  });
-
-  it("opens the same AI answer modal from the custom question box", async () => {
+  it("keeps the Ask box always visible and opens the AI answer modal", async () => {
     renderScreen();
     const input = await screen.findByLabelText(
       "Ask a question about this project",
@@ -330,10 +304,22 @@ describe("ProjectInsightScreen", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("opens the query preview modal when a recommended query's Generate is clicked", async () => {
+  it("opens the AI answer modal when a suggested question is clicked", async () => {
     renderScreen();
-    await screen.findByText("Recommended Queries");
-    // The recommended query "Late shipments" has a Generate button.
+    await screen.findByText("Executive Project Summary");
+    expandSection("AI-Generated Questions to Ask");
+    const q = await screen.findByText("Why did Supplier A slip?");
+    fireEvent.click(q);
+    const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
+    expect(dialog.textContent).toContain("Why did Supplier A slip?");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("opens the query preview modal from a recommended query", async () => {
+    renderScreen();
+    await screen.findByText("Executive Project Summary");
+    expandSection("Recommendations");
+    await screen.findByRole("heading", { name: "Recommended Queries" });
     const generateButtons = screen.getAllByRole("button", { name: /generate/i });
     fireEvent.click(generateButtons[generateButtons.length - 1]);
     expect(
@@ -341,25 +327,27 @@ describe("ProjectInsightScreen", () => {
     ).toBeTruthy();
   });
 
-  it("opens the dashboard generation modal when a recommended dashboard's Generate is clicked", async () => {
+  it("opens the dashboard generation modal from a recommended dashboard", async () => {
     renderScreen();
-    await screen.findByText("Recommended Dashboards");
-    const generateButtons = screen.getAllByRole("button", { name: /generate/i });
-    fireEvent.click(generateButtons[0]);
+    await screen.findByText("Executive Project Summary");
+    expandSection("Recommendations");
+    const dashPanel = (
+      await screen.findByRole("heading", { name: "Recommended Dashboards" })
+    ).closest("section") as HTMLElement;
+    fireEvent.click(
+      within(dashPanel).getByRole("button", { name: /generate/i }),
+    );
     expect(
       await screen.findByRole("dialog", { name: "Generate Dashboard" }),
     ).toBeTruthy();
   });
 
-  it("shows a clean empty state for risks, trends, and opportunities", async () => {
+  it("shows a clean empty state for risks and opportunities", async () => {
     renderScreen();
     expect(
       await screen.findByText(
         "No risks detected from this project's data yet.",
       ),
-    ).toBeTruthy();
-    expect(
-      screen.getByText("No trends detected from this project's data yet."),
     ).toBeTruthy();
     expect(
       screen.getByText(
@@ -371,6 +359,7 @@ describe("ProjectInsightScreen", () => {
   it("renders risk/opportunity cards with severity badges", async () => {
     getInsight.mockResolvedValue({
       ...INSIGHT,
+      trendDetection: [],
       risks: [
         {
           id: "risk-1",
@@ -399,15 +388,15 @@ describe("ProjectInsightScreen", () => {
     expect(
       await screen.findByText("Delivery lead time exceeds SLA threshold"),
     ).toBeTruthy();
-    // Deterministic severity badge labels (Business Insight style).
     expect(screen.getByText("Recommendation")).toBeTruthy();
     expect(screen.getByText("Escalate with the supplier.")).toBeTruthy();
     expect(screen.getByText("SUP_Quality_CSV")).toBeTruthy();
   });
 
-  it("opens the AI answer modal (no navigation) when a card is investigated", async () => {
+  it("opens the AI answer modal when a card is investigated", async () => {
     getInsight.mockResolvedValue({
       ...INSIGHT,
+      trendDetection: [],
       trends: [
         {
           id: "trend-1",
@@ -433,40 +422,9 @@ describe("ProjectInsightScreen", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("shows reviewed insights in the Reviewed tab and can reopen one", async () => {
-    reviewed.mockResolvedValue({
-      items: [
-        {
-          insightId: "i9",
-          title: "Reviewed supplier risk",
-          summary: "Confirmed and mitigated",
-          category: "risk",
-          severity: "high",
-          note: null,
-          reviewedByUserId: 1,
-          reviewedByName: "Leonard",
-          reviewedAt: "2026-06-25T00:00:00Z",
-        },
-      ],
-    });
-    renderScreen();
-    // Switch to the Reviewed tab.
-    fireEvent.click(await screen.findByRole("button", { name: /^Reviewed/ }));
-    expect(await screen.findByText("Reviewed supplier risk")).toBeTruthy();
-    const reopenBtn = await screen.findByRole("button", { name: /reopen/i });
-    fireEvent.click(reopenBtn);
-    await waitFor(() =>
-      expect(reopen).toHaveBeenCalledWith("42", "i9"),
-    );
-  });
-
   it("shows a last-updated timestamp and Analyzing on refresh", async () => {
     renderScreen();
-    // Once loaded, the header shows the last-updated label, not a spinner.
-    expect(
-      await screen.findByText(/Last updated:/),
-    ).toBeTruthy();
-    // Make the next refetch hang so the in-flight state is observable.
+    expect(await screen.findByText(/Last updated:/)).toBeTruthy();
     let release: (() => void) | undefined;
     getInsight.mockReturnValue(
       new Promise((resolve) => {
@@ -475,7 +433,6 @@ describe("ProjectInsightScreen", () => {
     );
     const refresh = screen.getByRole("button", { name: /refresh/i });
     fireEvent.click(refresh);
-    // While refetching, the label flips to "Analyzing…" and disables refresh.
     expect(await screen.findByText("Analyzing…")).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: /refresh/i }) as HTMLButtonElement)
@@ -511,13 +468,22 @@ describe("ProjectInsightScreen", () => {
       ],
     });
     renderScreen();
-    expect(await screen.findByText("Insights & Opportunities")).toBeTruthy();
+    // The Insights & Opportunities section is collapsed by default.
     expect(
-      await screen.findByText("Consolidate spend with top suppliers"),
+      await screen.findByRole("heading", { name: "Insights & Opportunities" }),
     ).toBeTruthy();
-    // The endpoint must be scoped to this project only.
     await waitFor(() =>
       expect(suggestInsights).toHaveBeenCalledWith(3, 42),
     );
+    expandSection("Insights & Opportunities");
+    expect(
+      await screen.findByText("Consolidate spend with top suppliers"),
+    ).toBeTruthy();
+  });
+
+  it("has no residual card shadows in the page body", async () => {
+    const { container } = renderScreen();
+    await screen.findByText("Executive Project Summary");
+    expect(container.querySelector('[class*="shadow"]')).toBeNull();
   });
 });

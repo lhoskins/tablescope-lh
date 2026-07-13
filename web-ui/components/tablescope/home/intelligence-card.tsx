@@ -14,8 +14,8 @@ import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import type {
   InsightCard as InsightCardData,
   InsightChart,
-  InsightSeverity,
 } from "@/lib/api/home-intelligence";
+import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
 
 /** Render a string with `**bold**` markers as bold spans. */
 export function renderBold(text: string): ReactNode {
@@ -31,42 +31,6 @@ export function renderBold(text: string): ReactNode {
     return <Fragment key={i}>{part}</Fragment>;
   });
 }
-
-const SEVERITY: Record<
-  InsightSeverity,
-  { accent: string; label: string; chip: string }
-> = {
-  critical: {
-    accent: "border-l-danger",
-    label: "Critical",
-    chip: "bg-danger/10 text-danger",
-  },
-  urgent: {
-    accent: "border-l-warning",
-    label: "Urgent",
-    chip: "bg-warning/10 text-warning",
-  },
-  warning: {
-    accent: "border-l-warning",
-    label: "Warning",
-    chip: "bg-warning/10 text-warning",
-  },
-  watch: {
-    accent: "border-l-line-secondary",
-    label: "Watch",
-    chip: "bg-bg-tertiary text-ink-secondary",
-  },
-  opportunity: {
-    accent: "border-l-success",
-    label: "Opportunity",
-    chip: "bg-success/10 text-success",
-  },
-  info: {
-    accent: "border-l-line-secondary",
-    label: "Info",
-    chip: "bg-bg-tertiary text-ink-secondary",
-  },
-};
 
 /**
  * Render a chart through the same `WidgetRenderer` the dashboard uses, so
@@ -194,7 +158,7 @@ export function IntelligenceCard({
   hideActions,
   onAddToReport,
 }: IntelligenceCardProps) {
-  const sev = SEVERITY[card.severity] ?? SEVERITY.info;
+  const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.info;
   const tables = card.sources?.tables ?? [];
   const documents = card.sources?.documents ?? [];
 
