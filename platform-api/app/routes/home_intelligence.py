@@ -423,6 +423,9 @@ async def _save_snapshot(
         )
         prior_results = (snap.payload.get("results") or []) if snap else []
         new_results = payload.get("results") or []
+        # #3: stamp each fresh card with a trend vs. the same-fingerprint card
+        # in the prior snapshot (or "new") before the results are merged.
+        hi.attach_card_trends(prior_results, new_results)
         current_ids = {str(p.get("id")) for p in (payload.get("projects") or [])}
         merged_list = _merge_snapshot_results(
             prior_results,
