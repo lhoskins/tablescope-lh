@@ -1412,3 +1412,34 @@ async def test_gather_project_context_fail_open_on_scope_error(
     project = SimpleNamespace(id=1, name="P", tenant_id=1)
     ctx = await hi.gather_project_context(_FakeSession(), project)
     assert ctx.scope_links == []
+
+
+def test_plan_reference_kpis_serializes_governed_catalog() -> None:
+    ctx = hi.ProjectContext(
+        tables=[],
+        documents=[],
+        reference_kpis=[
+            {
+                "kpi_key": "gross_margin_pct",
+                "display_name": "Gross Margin %",
+                "formula": "(Revenue - COGS) / Revenue",
+                "description": "x" * 500,
+                "required_fields": ["revenue", "cogs"],
+                "optional_fields": ["region"],
+                "recommended_chart_type": "kpi_grid",
+            },
+            {"kpi_key": "", "display_name": "", "formula": ""},  # dropped: no name
+        ],
+    )
+    out = hi._plan_reference_kpis(ctx)
+    assert len(out) == 1
+    kpi = out[0]
+    assert kpi["display_name"] == "Gross Margin %"
+    assert kpi["formula"] == "(Revenue - COGS) / Revenue"
+    assert kpi["required_fields"] == ["revenue", "cogs"]
+    assert len(kpi["description"]) == 200  # bounded
+
+
+def test_plan_reference_kpis_empty_by_default() -> None:
+    ctx = hi.ProjectContext(tables=[], documents=[])
+    assert hi._plan_reference_kpis(ctx) == []

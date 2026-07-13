@@ -217,6 +217,12 @@ class IntelligencePlanRequest(AIBaseRequest):
     # row_multiplication_risk}. The planner may only propose multi-table
     # analyses that are supported by one of these hints.
     relationship_hints: list[dict] = Field(default_factory=list)
+    # Governed KPI catalog entries the tenant has enabled (from ai_reference_kpis
+    # + tenant custom KPIs). Each: {kpi_key, display_name, formula, description,
+    # required_fields, optional_fields, recommended_chart_type}. When the
+    # project's columns can compute one, the planner is told to PREFER it over
+    # an invented metric and name it in the analysis' kpi_references.
+    reference_kpis: list[dict] = Field(default_factory=list)
     max_analyses: int = 6
     # 1 = executive/high-level (few, most leveraging) .. 5 = granular (many, detailed)
     granularity: int = 3
@@ -236,6 +242,10 @@ class PlannedAnalysis(BaseModel):
     value_column_2: str = ""
     severity_hint: str = "watch"
     source_documents: list[str] = Field(default_factory=list)
+    # Governed KPI catalog display names this analysis computes, when the
+    # planner matched one from the request's reference_kpis. Copied onto card
+    # metadata as kpiReferences.
+    kpi_references: list[str] = Field(default_factory=list)
 
 
 class IntelligencePlanResponse(BaseModel):

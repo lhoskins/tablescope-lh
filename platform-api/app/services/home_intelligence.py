@@ -117,6 +117,10 @@ class ProjectContext:
     tables: list[TableInfo]
     documents: list[DocInfo]
     scope_links: list[ScopeLink] = field(default_factory=list)
+    # Governed KPI catalog entries the tenant has enabled (industry standards +
+    # tenant custom metrics). The planner is told to PREFER one of these when the
+    # project's columns can compute it, and cards cite the ones it used.
+    reference_kpis: list[dict[str, Any]] = field(default_factory=list)
 
 
 async def gather_project_context(
@@ -224,10 +228,25 @@ async def gather_project_context(
             "Scope-link enrichment skipped for project %s: %s", project.id, exc
         )
 
+    # Governed KPI catalog (same source the ask-context builder uses) so the
+    # planner can prefer installed, board-approved metrics over invented ones.
+    reference_kpis: list[dict[str, Any]] = []
+    try:
+        from app.services.reference_catalog_service import get_reference_kpis
+
+        reference_kpis = await get_reference_kpis(session, project.tenant_id)
+    except Exception as exc:  # fail-open: enrichment must never break context
+        logger.warning(
+            "Reference-KPI enrichment skipped for project %s: %s",
+            project.id,
+            exc,
+        )
+
     return ProjectContext(
         tables=tables,
         documents=documents,
         scope_links=scope_links,
+        reference_kpis=reference_kpis,
     )
 
 
@@ -2109,6 +2128,31 @@ def build_dashboard_narrative(
     }
 
 
+def _plan_reference_kpis(ctx: ProjectContext) -> list[dict[str, Any]]:
+    """Serialize the governed KPI catalog for the analysis planner.
+
+    Only the fields the planner needs to decide relevance and cite the metric —
+    the AI server bounds these to the ~15 the project's columns can compute.
+    """
+    kpis: list[dict[str, Any]] = []
+    for k in ctx.reference_kpis:
+        name = k.get("display_name") or k.get("kpi_key")
+        if not name:
+            continue
+        kpis.append(
+            {
+                "kpi_key": k.get("kpi_key") or "",
+                "display_name": name,
+                "formula": k.get("formula") or "",
+                "description": (k.get("description") or "")[:200],
+                "required_fields": list(k.get("required_fields") or []),
+                "optional_fields": list(k.get("optional_fields") or []),
+                "recommended_chart_type": k.get("recommended_chart_type") or "",
+            }
+        )
+    return kpis
+
+
 def _plan_documents(ctx: ProjectContext) -> list[dict[str, Any]]:
     """Serialize a project's documents for the analysis planner."""
     return [
@@ -2195,6 +2239,7 @@ async def plan_and_execute_widgets(
         documents=documents,
         table_schema=table_schema,
         relationship_hints=relationship_hints,
+        reference_kpis=_plan_reference_kpis(ctx),
         max_analyses=max_analyses,
         granularity=granularity,
     )
@@ -2400,6 +2445,7 @@ async def run_ai_intelligence(
             documents=documents,
             table_schema=table_schema,
             relationship_hints=relationship_hints,
+            reference_kpis=_plan_reference_kpis(ctx),
             max_analyses=max_analyses,
             granularity=granularity,
         )
@@ -2687,6 +2733,9 @@ async def run_ai_intelligence(
             "analyticalMethod": method_envelope,
             "validation": validation,
             "referenceDocuments": documents_used if uses_reference else [],
+            "kpiReferences": [
+                str(k) for k in (a.get("kpi_references") or []) if k
+            ],
             "relationshipMetadata": {
                 "leftTable": relationship_meta["left_table"],
                 "rightTable": relationship_meta["right_table"],

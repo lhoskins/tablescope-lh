@@ -52,6 +52,7 @@ def _req(
     project_id: int = 1,
     granularity: int = 3,
     columns: list[dict] | None = None,
+    reference_kpis: list[dict] | None = None,
 ) -> IntelligencePlanRequest:
     return IntelligencePlanRequest(
         tenant_id=1,
@@ -70,6 +71,7 @@ def _req(
         ],
         documents=[{"title": "Doc", "summary": "s"}],
         relationship_hints=[],
+        reference_kpis=reference_kpis or [],
         max_analyses=50,
         granularity=granularity,
     )
@@ -147,6 +149,71 @@ def test_combo_in_plan_prompt_vocabulary(monkeypatch):
     prompt = captured["prompt"]
     assert "combo" in prompt
     assert "|combo|" in prompt  # present in the chart_type enum line
+
+
+# ── 3. governed KPI catalog (#5) ─────────────────────────────────────────────
+
+_KPI = {
+    "kpi_key": "spend_total",
+    "display_name": "Total Spend",
+    "formula": "SUM(amount)",
+    "required_fields": ["amount"],
+    "optional_fields": [],
+    "recommended_chart_type": "kpi_grid",
+}
+
+
+def test_kpi_catalog_in_prompt_when_columns_match(monkeypatch):
+    captured = _capture_generate(monkeypatch, _PLAN_JSON)
+    asyncio.run(ai.intelligence_plan(_req(reference_kpis=[_KPI])))
+    prompt = captured["prompt"]
+    assert "installed, board-approved metrics" in prompt  # section header
+    assert "Total Spend = SUM(amount)" in prompt
+    assert "kpi_references" in prompt
+
+
+def test_kpi_catalog_absent_when_no_column_match(monkeypatch):
+    captured = _capture_generate(monkeypatch, _PLAN_JSON)
+    unrelated = {**_KPI, "required_fields": ["patient_readmission_rate"]}
+    asyncio.run(ai.intelligence_plan(_req(reference_kpis=[unrelated])))
+    assert "installed, board-approved metrics" not in captured["prompt"]
+
+
+def test_kpi_catalog_absent_when_empty(monkeypatch):
+    captured = _capture_generate(monkeypatch, _PLAN_JSON)
+    asyncio.run(ai.intelligence_plan(_req(reference_kpis=[])))
+    assert "installed, board-approved metrics" not in captured["prompt"]
+
+
+def test_kpi_catalog_changes_seed(monkeypatch):
+    captured = _capture_generate(monkeypatch, _PLAN_JSON)
+    asyncio.run(ai.intelligence_plan(_req()))
+    base = captured["seed"]
+    asyncio.run(ai.intelligence_plan(_req(reference_kpis=[_KPI])))
+    assert captured["seed"] != base
+
+
+def test_kpi_references_survive_parser(monkeypatch):
+    plan = json.dumps(
+        {
+            "analyses": [
+                {
+                    "id": "k0",
+                    "category": "trend",
+                    "title": "Total spend",
+                    "rationale": "why",
+                    "sql": 'SELECT SUM("amount") AS A FROM "spend"',
+                    "chart_type": "kpi_grid",
+                    "value_column": "A",
+                    "kpi_references": ["Total Spend"],
+                }
+            ]
+        }
+    )
+    _capture_generate(monkeypatch, plan)
+    resp = asyncio.run(ai.intelligence_plan(_req(reference_kpis=[_KPI])))
+    assert resp.analyses
+    assert resp.analyses[0].kpi_references == ["Total Spend"]
 
 
 def test_combo_chart_type_survives_parser(monkeypatch):
