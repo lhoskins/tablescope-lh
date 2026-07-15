@@ -26,6 +26,7 @@ from app.routes import auth as auth_routes
 from app.routes import billing as billing_routes
 from app.routes import billing_admin as billing_admin_routes
 from app.routes import connectors as connectors_routes
+from app.routes import conversational_analytics as conversational_analytics_routes
 from app.routes import dashboards as dashboards_routes
 from app.routes import data_source_assignments as data_source_assignments_routes
 from app.routes import database_sources as database_sources_routes
@@ -213,6 +214,7 @@ def create_app() -> FastAPI:
     app.include_router(provisioning_routes.router, prefix=api_prefix)
     app.include_router(home_intelligence_routes.router, prefix=api_prefix)
     app.include_router(home_pins_routes.router, prefix=api_prefix)
+    app.include_router(conversational_analytics_routes.router, prefix=api_prefix)
     app.include_router(reference_library_routes.router, prefix=api_prefix)
     app.include_router(reference_library_bulk_routes.router, prefix=api_prefix)
     app.include_router(reports_routes.router, prefix=api_prefix)
