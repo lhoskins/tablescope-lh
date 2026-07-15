@@ -24,6 +24,7 @@ from app.services.query_executor import (
     TeiidQueryExecutor,
 )
 from app.services.scope_proxy import ScopeProxyService
+from app.services.teiid_sql import normalize_teiid_timestamps
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.services.vdb_routing import (
     VDBInactiveError,
@@ -304,7 +305,10 @@ async def query_datasource(
     endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
 
     if payload.sql:
-        sql = _auto_cast_aggregates(payload.sql).rstrip().rstrip(";")
+        # Generated SQL may use PostgreSQL timestamp functions or literal
+        # casts that Teiid does not accept; normalize before casting aggregates.
+        sql = normalize_teiid_timestamps(payload.sql)
+        sql = _auto_cast_aggregates(sql).rstrip().rstrip(";")
     else:
         sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
 

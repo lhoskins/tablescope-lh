@@ -49,6 +49,10 @@ from app.services.evidence_severity import gate_severity
 from app.services.presentation_engine import PresentationMode
 from app.services.prompt_loader import load_prompt_reference
 from app.services.response_envelope import attach_envelope
+from app.services.teiid_sql import (
+    date_masks_from_samples,
+    normalize_date_casts,
+)
 from app.services.visualization_engine import select_visualization
 
 logger = logging.getLogger(__name__)
@@ -528,39 +532,8 @@ async def _sample_values(runner: QueryRunner, view_name: str) -> dict[str, str]:
     return samples
 
 
-_SLASH_DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/(\d{4}|\d{2})$")
-
-
-def _date_masks_from_samples(
-    samples_per_table: list[dict[str, str]]
-) -> dict[str, str]:
-    """Map each date column (by name) to a Teiid PARSETIMESTAMP mask.
-
-    Only columns whose example value is a slash date (e.g. ``"1/19/2026"``)
-    need a mask — ISO dates cast cleanly and are left alone.
-    """
-    masks: dict[str, str] = {}
-    for samples in samples_per_table:
-        for col, val in samples.items():
-            if col in masks:
-                continue
-            if _SLASH_DATE_RE.match(val):
-                year = val.rsplit("/", 1)[-1]
-                masks[col] = "M/d/yyyy" if len(year) == 4 else "M/d/yy"
-    return masks
-
-
-def _normalize_date_casts(sql: str, date_masks: dict[str, str]) -> str:
-    """Rewrite ``CAST("col" AS date|timestamp)`` to ``PARSETIMESTAMP("col",
-    'mask')`` for slash-date columns, so time-bucketed SQL runs on Teiid even
-    when the model casts a non-ISO text date (which Teiid rejects)."""
-    for col, mask in date_masks.items():
-        pat = re.compile(
-            r'CAST\(\s*"' + re.escape(col) + r'"\s+AS\s+(?:date|timestamp)\s*\)',
-            re.IGNORECASE,
-        )
-        sql = pat.sub(f"PARSETIMESTAMP(\"{col}\", '{mask}')", sql)
-    return sql
+# Timestamp/date normalization is shared with the query preview routes via
+# app.services.teiid_sql so all SQL execution paths behave consistently.
 
 
 async def _query_with_error(
@@ -1916,7 +1889,7 @@ async def plan_and_execute_widgets(
         }
         for t, samples in zip(ctx.tables, samples_per_table, strict=False)
     ]
-    date_masks = _date_masks_from_samples(samples_per_table)
+    date_masks = date_masks_from_samples(samples_per_table)
     documents = _plan_documents(ctx)
     relationship_hints = find_relationship_candidates(ctx.tables)
 
@@ -1940,7 +1913,7 @@ async def plan_and_execute_widgets(
         sql = (a.get("sql") or "").strip()
         if not sql:
             continue  # narrative/document finding — not a chartable widget
-        sql = _normalize_date_casts(sql, date_masks)
+        sql = normalize_date_casts(sql, date_masks)
         result, err = await _query_with_error(runner, sql)
         if result and result.get("rows"):
             executed.append({**a, "sql": sql, "result": result})
@@ -1965,7 +1938,7 @@ async def plan_and_execute_widgets(
         for (a, orig_sql, _err), fixed in zip(to_repair, fixes, strict=True):
             if not fixed or fixed.strip() == orig_sql.strip():
                 continue
-            fixed = _normalize_date_casts(fixed, date_masks)
+            fixed = normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
                 executed.append({**a, "sql": fixed, "result": result})
@@ -2086,7 +2059,7 @@ async def run_ai_intelligence(
     ]
     # Deterministic safety net: even if the model casts a non-ISO text date
     # (which Teiid rejects), rewrite it to PARSETIMESTAMP before executing.
-    date_masks = _date_masks_from_samples(samples_per_table)
+    date_masks = date_masks_from_samples(samples_per_table)
     documents = [
         {
             "title": d.title,
@@ -2170,7 +2143,7 @@ async def run_ai_intelligence(
     for a in analyses:
         sql = (a.get("sql") or "").strip()
         if sql:
-            sql = _normalize_date_casts(sql, date_masks)
+            sql = normalize_date_casts(sql, date_masks)
             result, err = await _query_with_error(runner, sql)
             if result and result.get("rows"):
                 _record_data_analysis(a, result)
@@ -2233,7 +2206,7 @@ async def run_ai_intelligence(
                 continue
             if not fixed or fixed.strip() == orig_sql.strip():
                 continue
-            fixed = _normalize_date_casts(fixed, date_masks)
+            fixed = normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
                 _record_data_analysis({**a, "sql": fixed}, result)

@@ -41,6 +41,7 @@ from app.services import home_intelligence as hi
 from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.presentation_engine import PresentationMode
 from app.services.response_envelope import attach_envelope
+from app.services.teiid_sql import normalize_teiid_timestamps
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.tasks.workflows import enqueue_analyze_project_intelligence
 
@@ -93,12 +94,44 @@ def _make_runner(
         )
         return await _run_sql(
             database=database,
-            sql=_auto_cast_aggregates(sql),
+            sql=_auto_cast_aggregates(normalize_teiid_timestamps(sql)),
             teiid_host=endpoint.pg_host,
             teiid_port=endpoint.pg_port,
         )
 
     return runner
+
+
+async def _sample_project_columns(
+    session: AsyncSession,
+    context: RequestContext,
+    project: Project,
+    tables: list[str],
+) -> dict[str, str]:
+    """Return one non-empty sample value per column across project tables.
+
+    Used to infer Teiid date-parse masks when normalizing AI-generated SQL for
+    query suggestions. Failures are swallowed so a missing VDB does not break
+    suggestion generation.
+    """
+    runner = _make_runner(session, context, project.id)
+    samples: dict[str, str] = {}
+    for view_name in tables:
+        try:
+            result = await runner(f'SELECT * FROM "{view_name}" LIMIT 25')
+        except Exception as exc:
+            logger.debug(
+                "Could not sample %s for project %s: %s", view_name, project.id, exc
+            )
+            continue
+        for row in result.get("rows", [])[:25]:
+            for col, val in row.items():
+                if col in samples:
+                    continue
+                text = str(val).strip() if val is not None else ""
+                if text:
+                    samples[col] = text[:40]
+    return samples
 
 
 async def _run_for_project(
@@ -496,7 +529,19 @@ async def _plan_analyses(
         max_analyses=max_analyses,
         granularity=granularity,
     )
-    return analyses or []
+    if not analyses:
+        return []
+
+    # Sample live table values so generated timestamp casts can be rewritten to
+    # Teiid PARSETIMESTAMP with the right mask before the preview is run.
+    column_samples = await _sample_project_columns(
+        session, context, project, allowed_tables
+    )
+    for a in analyses:
+        sql = (a.get("sql") or "").strip()
+        if sql:
+            a["sql"] = normalize_teiid_timestamps(sql, column_samples=column_samples)
+    return analyses
 
 
 @router.post("/home/query-suggestions")
