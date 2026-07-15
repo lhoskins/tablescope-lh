@@ -62,13 +62,17 @@ async def _require_project_access(
 
 
 async def _get_snapshot(
-    session: AsyncSession, context: RequestContext, project_id: int
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    suite: str = "project_insight",
 ) -> ProjectIntelligenceSnapshot | None:
     return await session.scalar(
         select(ProjectIntelligenceSnapshot).where(
             ProjectIntelligenceSnapshot.tenant_id == context.tenant_id,
             ProjectIntelligenceSnapshot.user_id == context.user_id,
             ProjectIntelligenceSnapshot.project_id == project_id,
+            ProjectIntelligenceSnapshot.suite == suite,
         )
     )
 
@@ -78,18 +82,20 @@ async def _save_snapshot(
     context: RequestContext,
     project_id: int,
     payload: dict,
+    suite: str = "project_insight",
 ) -> None:
-    """Upsert the caller's latest completed run for one project.
+    """Upsert the caller's latest completed run for one project suite.
 
     Committing only the completed result guarantees a hydrating page never
     shows a blanked report: the prior snapshot stays until a fresh run finishes.
     """
-    snap = await _get_snapshot(session, context, project_id)
+    snap = await _get_snapshot(session, context, project_id, suite=suite)
     if snap is None:
         snap = ProjectIntelligenceSnapshot(
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             project_id=project_id,
+            suite=suite,
         )
         session.add(snap)
     snap.payload = payload
@@ -128,7 +134,11 @@ async def get_project_insight(
         runner=runner,
     )
     await _save_snapshot(
-        session, context, project_id, report.model_dump(mode="json")
+        session,
+        context,
+        project_id,
+        report.model_dump(mode="json"),
+        suite="project_insight",
     )
     return report
 

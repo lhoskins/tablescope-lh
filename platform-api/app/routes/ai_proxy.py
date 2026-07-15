@@ -59,6 +59,7 @@ from app.services.presentation_engine import (
     describe as describe_presentation,
 )
 from app.services.response_envelope import ResponseEnvelope
+from app.services.teiid_sql import normalize_teiid_timestamps
 from app.services.visualization_engine import ChartType, select_visualization
 
 logger = logging.getLogger(__name__)
@@ -2283,9 +2284,12 @@ async def _execute_project_sql(
         session=session, context=context, project_id=project_id
     )
     endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+    # Normalise PostgreSQL-style timestamp literals/functions before casting
+    # aggregates, so the first execution attempt is more likely to succeed.
+    normalized = normalize_teiid_timestamps(sql)
     return await _run_sql(
         database=database,
-        sql=_auto_cast_aggregates(sql),
+        sql=_auto_cast_aggregates(normalized),
         teiid_host=endpoint.pg_host,
         teiid_port=endpoint.pg_port,
     )

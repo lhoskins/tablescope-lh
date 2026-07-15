@@ -27,6 +27,10 @@ import {
   stripStars,
 } from "./intelligence-card";
 import { IntelligenceStrip } from "./intelligence-strip";
+import {
+  InsightPanel,
+  PanelEmpty,
+} from "@/components/tablescope/insight-panel";
 
 type Status = "idle" | "streaming" | "complete" | "error";
 
@@ -34,25 +38,27 @@ function Section({
   title,
   icon,
   cards,
+  emptyText,
+  loading,
 }: {
   title: string;
   icon: React.ReactNode;
   cards: InsightCard[];
+  emptyText: string;
+  loading: boolean;
 }) {
-  if (cards.length === 0) return null;
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-h3 text-ink-secondary">
-        {icon}
-        <span>{title}</span>
-        <span className="text-caption text-ink-tertiary">({cards.length})</span>
-      </div>
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {cards.map((card) => (
-          <IntelligenceCard key={card.id} card={card} />
-        ))}
-      </div>
-    </div>
+    <InsightPanel title={title} icon={icon} collapsible count={cards.length}>
+      {cards.length === 0 ? (
+        loading ? null : <PanelEmpty text={emptyText} />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {cards.map((card) => (
+            <IntelligenceCard key={card.id} card={card} />
+          ))}
+        </div>
+      )}
+    </InsightPanel>
   );
 }
 
@@ -296,16 +302,22 @@ export function IntelligenceFeed() {
           title="Risks"
           icon={<IconAlertTriangle size={16} className="text-warning" />}
           cards={risks}
+          emptyText="No risks detected from your projects yet."
+          loading={running}
         />
         <Section
           title="Trends"
           icon={<IconTrendingUp size={16} className="text-ink-secondary" />}
           cards={trends}
+          emptyText="No trends detected from your projects yet."
+          loading={running}
         />
         <Section
           title="Opportunities"
           icon={<IconBulb size={16} className="text-success" />}
           cards={opportunities}
+          emptyText="No opportunities detected from your projects yet."
+          loading={running}
         />
 
         {pending.length > 0 && (

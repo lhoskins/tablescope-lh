@@ -38,10 +38,21 @@ from app.models.reference_library import (
     TIER_PROJECT,
     ReferenceDocument,
 )
+from app.services.analytical_method_engine import (
+    EngineMode,
+    get_engine_mode,
+)
+from app.services.analytical_method_engine import (
+    analyze as analyze_methods,
+)
 from app.services.evidence_severity import gate_severity
 from app.services.presentation_engine import PresentationMode
 from app.services.prompt_loader import load_prompt_reference
 from app.services.response_envelope import attach_envelope
+from app.services.teiid_sql import (
+    date_masks_from_samples,
+    normalize_date_casts,
+)
 from app.services.visualization_engine import select_visualization
 
 logger = logging.getLogger(__name__)
@@ -521,39 +532,8 @@ async def _sample_values(runner: QueryRunner, view_name: str) -> dict[str, str]:
     return samples
 
 
-_SLASH_DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/(\d{4}|\d{2})$")
-
-
-def _date_masks_from_samples(
-    samples_per_table: list[dict[str, str]]
-) -> dict[str, str]:
-    """Map each date column (by name) to a Teiid PARSETIMESTAMP mask.
-
-    Only columns whose example value is a slash date (e.g. ``"1/19/2026"``)
-    need a mask — ISO dates cast cleanly and are left alone.
-    """
-    masks: dict[str, str] = {}
-    for samples in samples_per_table:
-        for col, val in samples.items():
-            if col in masks:
-                continue
-            if _SLASH_DATE_RE.match(val):
-                year = val.rsplit("/", 1)[-1]
-                masks[col] = "M/d/yyyy" if len(year) == 4 else "M/d/yy"
-    return masks
-
-
-def _normalize_date_casts(sql: str, date_masks: dict[str, str]) -> str:
-    """Rewrite ``CAST("col" AS date|timestamp)`` to ``PARSETIMESTAMP("col",
-    'mask')`` for slash-date columns, so time-bucketed SQL runs on Teiid even
-    when the model casts a non-ISO text date (which Teiid rejects)."""
-    for col, mask in date_masks.items():
-        pat = re.compile(
-            r'CAST\(\s*"' + re.escape(col) + r'"\s+AS\s+(?:date|timestamp)\s*\)',
-            re.IGNORECASE,
-        )
-        sql = pat.sub(f"PARSETIMESTAMP(\"{col}\", '{mask}')", sql)
-    return sql
+# Timestamp/date normalization is shared with the query preview routes via
+# app.services.teiid_sql so all SQL execution paths behave consistently.
 
 
 async def _query_with_error(
@@ -1909,7 +1889,7 @@ async def plan_and_execute_widgets(
         }
         for t, samples in zip(ctx.tables, samples_per_table, strict=False)
     ]
-    date_masks = _date_masks_from_samples(samples_per_table)
+    date_masks = date_masks_from_samples(samples_per_table)
     documents = _plan_documents(ctx)
     relationship_hints = find_relationship_candidates(ctx.tables)
 
@@ -1933,7 +1913,7 @@ async def plan_and_execute_widgets(
         sql = (a.get("sql") or "").strip()
         if not sql:
             continue  # narrative/document finding — not a chartable widget
-        sql = _normalize_date_casts(sql, date_masks)
+        sql = normalize_date_casts(sql, date_masks)
         result, err = await _query_with_error(runner, sql)
         if result and result.get("rows"):
             executed.append({**a, "sql": sql, "result": result})
@@ -1958,7 +1938,7 @@ async def plan_and_execute_widgets(
         for (a, orig_sql, _err), fixed in zip(to_repair, fixes, strict=True):
             if not fixed or fixed.strip() == orig_sql.strip():
                 continue
-            fixed = _normalize_date_casts(fixed, date_masks)
+            fixed = normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
                 executed.append({**a, "sql": fixed, "result": result})
@@ -1966,11 +1946,73 @@ async def plan_and_execute_widgets(
     return executed
 
 
+# Analysis categories that map cleanly onto a declared engine intent. Risk and
+# opportunity carry no shape information, so the engine's own inference (which
+# reconciles keywords against the actual data profile) decides for those.
+_CATEGORY_INTENT_HINTS = {
+    "trend": "detect_trend",
+    "relationship": "relationship_numeric",
+}
+
+
+async def _attach_method_envelopes(
+    session: AsyncSession | None,
+    *,
+    tenant_id: int,
+    executed: list[dict[str, Any]],
+) -> None:
+    """Run the Analytical Method Engine over each executed analysis.
+
+    Attaches the governed envelope onto the executed item (HYBRID only) so
+    the card-building loop can surface it. Sequential on purpose: the engine
+    reads/writes through this AsyncSession, which is not safe for concurrent
+    use. Fail-closed per item — an engine problem never drops a card
+    (regression guard for the earlier 6->0 incidents).
+    """
+    if session is None:
+        return
+    mode = get_engine_mode()
+    if mode == EngineMode.OFF:
+        return
+    for item in executed:
+        a = item["analysis"]
+        result = item["result"]
+        if not result:
+            continue
+        question = " — ".join(
+            str(x) for x in (a.get("title"), a.get("rationale")) if x
+        )
+        try:
+            envelope = await analyze_methods(
+                session,
+                tenant_id=tenant_id,
+                columns=result.get("columns", []),
+                rows=result.get("rows", []),
+                question=question or str(a.get("category") or ""),
+                intent=_CATEGORY_INTENT_HINTS.get(str(a.get("category") or "")),
+            )
+        except Exception as exc:  # pragma: no cover - engine is fail-closed
+            logger.warning(
+                "Method engine skipped for analysis %s: %s", a.get("id"), exc
+            )
+            continue
+        # Attach only envelopes that actually selected a method — a
+        # "no_method" envelope on every thin aggregate would be card noise
+        # (it is still audited by the engine either way).
+        if (
+            mode == EngineMode.HYBRID
+            and envelope
+            and envelope.get("method") is not None
+        ):
+            item["method_envelope"] = envelope
+
+
 async def run_ai_intelligence(
     project: Project,
     ctx: ProjectContext,
     runner: QueryRunner,
     *,
+    session: AsyncSession | None = None,
     tenant_id: int,
     user_id: int,
     max_analyses: int = 15,
@@ -2017,7 +2059,7 @@ async def run_ai_intelligence(
     ]
     # Deterministic safety net: even if the model casts a non-ISO text date
     # (which Teiid rejects), rewrite it to PARSETIMESTAMP before executing.
-    date_masks = _date_masks_from_samples(samples_per_table)
+    date_masks = date_masks_from_samples(samples_per_table)
     documents = [
         {
             "title": d.title,
@@ -2101,7 +2143,7 @@ async def run_ai_intelligence(
     for a in analyses:
         sql = (a.get("sql") or "").strip()
         if sql:
-            sql = _normalize_date_casts(sql, date_masks)
+            sql = normalize_date_casts(sql, date_masks)
             result, err = await _query_with_error(runner, sql)
             if result and result.get("rows"):
                 _record_data_analysis(a, result)
@@ -2164,13 +2206,20 @@ async def run_ai_intelligence(
                 continue
             if not fixed or fixed.strip() == orig_sql.strip():
                 continue
-            fixed = _normalize_date_casts(fixed, date_masks)
+            fixed = normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
                 _record_data_analysis({**a, "sql": fixed}, result)
 
     if not executed:
         return []
+
+    # Governed statistical enrichment: real effect sizes / p-values / CIs from
+    # the Method Engine's executable Tier-1 methods, computed in-process
+    # over the rows each analysis already executed (no extra AI-server load).
+    await _attach_method_envelopes(
+        session, tenant_id=tenant_id, executed=executed
+    )
 
     # Interpret in small concurrent chunks so each LLM call stays fast and fits
     # the model context window (large single calls at Granular were the main
@@ -2310,9 +2359,19 @@ async def run_ai_intelligence(
             if relationship_meta:
                 confidence = min(confidence, relationship_meta["join_confidence"])
 
+        # A successfully executed method envelope carries a real quality
+        # verdict — prefer it over the row-count guess. (Engine quality
+        # vocabulary: "reliable", or "tentative" when usable n < 15.)
+        method_envelope = item.get("method_envelope")
+        if method_envelope and method_envelope.get("status") == "ok":
+            confidence = {"reliable": 0.9, "tentative": 0.6}.get(
+                str(method_envelope.get("quality")), confidence
+            )
+
         metadata: dict[str, Any] = {
             "insightMethod": method,
             "confidenceScore": round(float(confidence), 2),
+            "analyticalMethod": method_envelope,
             "validation": validation,
             "referenceDocuments": documents_used if uses_reference else [],
             "relationshipMetadata": {

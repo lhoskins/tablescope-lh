@@ -25,12 +25,14 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sqlalchemy import delete
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from app.models.reference_library import ReferenceDocument
 
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.services import reference_library_ai_client as ai_client
 from app.services.document_extraction_service import extract_text
 from app.services.document_processing_service import (
@@ -248,7 +250,11 @@ async def process_reference_document(document_id: int) -> None:
         profile = await _profile_reference_document(session, doc, doc_text)
         summary: str | None = None
         if profile is not None:
-            doc.ai_metadata = profile
+            # Merge so values previously set by the upload/parser or another step
+            # (e.g. document_family) are preserved when the AI returns a partial
+            # metadata payload.
+            existing = doc.ai_metadata or {}
+            doc.ai_metadata = {**existing, **profile}
             summary = profile.get("summary") or None
         if not summary:
             try:
@@ -266,6 +272,18 @@ async def process_reference_document(document_id: int) -> None:
 
         if summary:
             doc.ai_summary = summary
+
+        # Reference metadata changed; cached insights/opportunities that depend on
+        # this tenant/project are now stale. Clear them before the final commit.
+        try:
+            stmt = delete(ProjectIntelligenceSnapshot).where(
+                ProjectIntelligenceSnapshot.tenant_id == doc.tenant_id
+            )
+            if doc.project_id:
+                stmt = stmt.where(ProjectIntelligenceSnapshot.project_id == doc.project_id)
+            await session.execute(stmt)
+        except Exception:
+            logger.exception("Failed to invalidate project intelligence snapshots")
 
         # ── Step 3: embed into the shared reference vector store ──
         indexed = False

@@ -7,7 +7,7 @@ run rebuilds in the background.
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,7 +29,13 @@ class ProjectIntelligenceSnapshot(TimestampMixin, Base):
     project_id: Mapped[int] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    # The serialized ProjectInsightResponse of the last completed run.
+    # Identifies the cached intelligence suite for this project, e.g.
+    # "project_insight" or "insights". Mirrors the Business Insight cache
+    # lifecycle while allowing multiple project-scoped snapshots.
+    suite: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="project_insight"
+    )
+    # The serialized response of the last completed run for this suite.
     payload: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
 
     __table_args__ = (
@@ -37,6 +43,7 @@ class ProjectIntelligenceSnapshot(TimestampMixin, Base):
             "tenant_id",
             "user_id",
             "project_id",
+            "suite",
             name="uq_project_intelligence_snapshot",
         ),
     )

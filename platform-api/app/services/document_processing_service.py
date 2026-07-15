@@ -13,11 +13,12 @@ import time
 from typing import Any
 
 import httpx
-from sqlalchemy import text
+from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.project_asset import ProjectAsset
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.services.document_chunking_service import chunk_document
 from app.services.document_extraction_service import extract_text
 from app.services.project_graph_service import apply_document_family
@@ -168,8 +169,12 @@ async def process_document_asset(
         return
 
     # ── Step 5: Persist profile ──────────────────────────────────────
-    asset.ai_summary = profile.get("summary", "")
-    asset.ai_metadata = profile
+    asset.ai_summary = profile.get("summary", asset.ai_summary or "")
+    # Merge the new profile on top of existing metadata so upstream values
+    # (e.g. document_family set during upload or a previous run) are never
+    # silently dropped by a partial AI payload.
+    existing = asset.ai_metadata or {}
+    asset.ai_metadata = {**existing, **profile}
     asset.ai_status = "profiled"
     asset.ai_error_message = None
 
@@ -180,6 +185,19 @@ async def process_document_asset(
         )
 
     await session.commit()
+
+    # Document metadata changed, so any cached project insights/opportunities
+    # for this project are now stale. Clear them so the next request refreshes.
+    try:
+        await session.execute(
+            delete(ProjectIntelligenceSnapshot).where(
+                ProjectIntelligenceSnapshot.tenant_id == tenant_id,
+                ProjectIntelligenceSnapshot.project_id == project_id,
+            )
+        )
+        await session.commit()
+    except Exception:
+        logger.exception("Failed to invalidate project intelligence snapshots")
 
     # ── Step 6: Build graph nodes/edges ──────────────────────────────
     try:
