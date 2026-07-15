@@ -14,7 +14,10 @@ export type InsightSeverity =
   | "urgent"
   | "warning"
   | "watch"
+  | "trend"
   | "opportunity"
+  | "recommendation"
+  | "informational"
   | "info";
 
 export interface InsightChart {
@@ -62,8 +65,77 @@ export interface InsightCallout {
   text: string;
 }
 
+export interface InsightExplanationConfidence {
+  level: "low" | "medium" | "high" | null;
+  score: number | null;
+  basis: string;
+}
+
+export interface InsightExplanationSource {
+  projectId: string | number;
+  projectName: string;
+  dataSourceId: string | null;
+  dataSourceName: string | null;
+  tables: string[];
+  fields: string[];
+}
+
+export interface InsightExplanationMetric {
+  name: string;
+  aggregation: string;
+  field: string;
+}
+
+export interface InsightExplanationEvidence {
+  rowCount: number | null;
+  resultColumns: string[] | null;
+  topFinding?: string | null;
+}
+
+export interface InsightExplanationChart {
+  chartType: string;
+  labelColumn: string | null;
+  valueColumn: string | null;
+  valueColumn2: string | null;
+}
+
+export interface InsightExplanationFilter {
+  field: string;
+  operator?: string;
+  value: unknown;
+}
+
+export interface InsightExplanationComparison {
+  type: string;
+  baselineValue: number;
+  currentValue: number;
+  baselineLabel: string;
+  currentLabel: string;
+  field: string;
+}
+
+export interface InsightExplanation {
+  summary: string;
+  method: string;
+  methodLabel: string;
+  steps: string[];
+  source: InsightExplanationSource;
+  filters?: InsightExplanationFilter[];
+  metrics?: InsightExplanationMetric[];
+  comparison?: InsightExplanationComparison;
+  evidence: InsightExplanationEvidence;
+  sql?: string;
+  chart?: InsightExplanationChart;
+  assumptions: string[];
+  limitations: string[];
+  confidence: InsightExplanationConfidence;
+  generatedAt: string;
+}
+
 export interface InsightCard {
   id: string;
+  /** Stable, server-generated identifier for this insight instance. */
+  insightId?: string;
   projectId: string;
   projectName: string;
   projectColor: string;
@@ -110,6 +182,8 @@ export interface InsightCard {
   labelColumn?: string;
   valueColumn?: string;
   valueColumn2?: string;
+  /** Structured explainability metadata produced by the insight pipeline. */
+  explanation?: InsightExplanation;
 }
 
 export interface ProjectResult {
