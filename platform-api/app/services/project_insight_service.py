@@ -205,8 +205,11 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
     metric = str(ctx.get("metric") or "")
     period_column = str(ctx.get("periodColumn") or "")
     source_columns = [str(c) for c in (ctx.get("sourceColumns") or [])]
+    # Prefer the stable server-generated insightId; legacy ids are a fallback.
+    stable_id = str(card.get("insightId") or card.get("id") or "")
     return {
-        "id": str(card.get("id", "")),
+        "id": stable_id,
+        "insightId": stable_id,
         "insightType": insight_type,
         "title": str(card.get("title", "")),
         "summary": str(card.get("summary", "")),
@@ -220,6 +223,14 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
         "sourceColumns": source_columns,
         "metric": metric,
         "periodColumn": period_column,
+        "sql": card.get("sql"),
+        "chartType": card.get("chartType"),
+        "labelColumn": card.get("labelColumn"),
+        "valueColumn": card.get("valueColumn"),
+        "valueColumn2": card.get("valueColumn2"),
+        "chart": card.get("chart"),
+        "explanation": card.get("explanation"),
+        "executedAt": card.get("executedAt"),
     }
 
 

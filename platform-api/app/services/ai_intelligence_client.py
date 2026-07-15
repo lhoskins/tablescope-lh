@@ -218,6 +218,7 @@ async def plan(
             "table_schema": table_schema or [],
             "documents": documents,
             "relationship_hints": relationship_hints or [],
+            "reference_kpis": [],
             "max_analyses": max_analyses,
             "granularity": granularity,
         },

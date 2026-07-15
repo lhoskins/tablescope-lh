@@ -56,6 +56,7 @@ from app.models.database_data_source_assignment import (
 from app.models.file_source_meta import FileSourceMeta
 from app.models.grid_preference import GridPreference
 from app.models.home_pin import HomePin
+from app.models.insight_feedback import InsightFeedback
 from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.knowledge_graph_snapshot import AIProjectGraphSnapshot
 from app.models.mfa_phone_factor import MfaPhoneFactor
@@ -135,6 +136,7 @@ __all__ = [
     "FileSourceMeta",
     "GridPreference",
     "HomePin",
+    "InsightFeedback",
     "IntelligenceSnapshot",
     "AIProjectGraphSnapshot",
     "MfaPhoneFactor",

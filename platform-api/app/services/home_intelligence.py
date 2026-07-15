@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
@@ -46,6 +47,7 @@ from app.services.analytical_method_engine import (
     analyze as analyze_methods,
 )
 from app.services.evidence_severity import gate_severity
+from app.services.insight_explanation import build_explanation
 from app.services.presentation_engine import PresentationMode
 from app.services.prompt_loader import load_prompt_reference
 from app.services.response_envelope import attach_envelope
@@ -465,9 +467,13 @@ def _card(
     label_column: str | None = None,
     value_column: str | None = None,
     value_column_2: str | None = None,
+    insight_id: str | None = None,
+    result: dict[str, Any] | None = None,
+    explanation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
+        "insightId": insight_id or uuid.uuid4().hex,
         "projectId": str(project.id),
         "projectName": project.name,
         "projectColor": project_color(project.id),
@@ -500,6 +506,40 @@ def _card(
         for key, value in metadata.items():
             if value not in (None, "", [], {}):
                 card[key] = value
+
+    # Build a structured explanation from the actual analysis inputs. Callers can
+    # supply a pre-built explanation; otherwise it is derived from the SQL, chart,
+    # and sourceContext metadata already on the card.
+    if explanation is None:
+        ctx = (metadata or {}).get("sourceContext") or {}
+        fields = [c for c in (ctx.get("sourceColumns") or []) if c]
+        explanation = build_explanation(
+            project_id=project.id,
+            project_name=project.name,
+            insight_type=insight_type,
+            summary=summary,
+            chart=chart,
+            chart_type=chart_type,
+            label_column=label_column,
+            value_column=value_column,
+            value_column_2=value_column_2,
+            tables=tables,
+            fields=fields,
+            metric=ctx.get("metric") or value_column,
+            aggregation=ctx.get("aggregation"),
+            period_column=ctx.get("periodColumn") or label_column,
+            filters=ctx.get("filters"),
+            comparison=ctx.get("comparison"),
+            result=result,
+            sql=sql,
+            assumptions=ctx.get("assumptions"),
+            limitations=ctx.get("limitations"),
+            documents=documents,
+            generated_at=card["executedAt"],
+        ) or {}
+    if explanation:
+        card["explanation"] = explanation
+
     # M4 fast-follow (contract-only): stamp the shared ResponseEnvelope so a
     # Home card also emits the unified contract. The card keeps its bespoke
     # renderer; this is additive metadata (fail-closed) the UI ignores.
@@ -691,9 +731,11 @@ async def _risk_sla(
         chart_type="bar" if chart else None,
         label_column="period" if chart else None,
         value_column="avg_lead" if chart else None,
+        result=res,
         metadata={
             "sourceContext": {
                 "metric": lead_col,
+                "aggregation": "avg",
                 "periodColumn": period_col,
                 "sourceColumns": [
                     c for c in (lead_col, period_col, supplier_col) if c
@@ -803,9 +845,12 @@ async def _risk_measure_vs_threshold(
         return _card(
             project, "risk_threshold", severity, title, summary,
             chart=chart, callout=callout, tables=[t.view_name],
+            chart_type="bar",
+            result=res,
             metadata={
                 "sourceContext": {
                     "metric": measure_col,
+                    "aggregation": "COUNT",
                     "sourceColumns": [measure_col, threshold_col],
                 }
             },
@@ -872,9 +917,11 @@ async def _risk_status_breach(
             chart_type="bar",
             label_column="status",
             value_column="n",
+            result=res,
             metadata={
                 "sourceContext": {
                     "metric": status_col,
+                    "aggregation": "COUNT",
                     "sourceColumns": [status_col],
                 }
             },
@@ -934,6 +981,13 @@ async def _risk_expiry(
     return _card(
         project, "risk_expiry", severity, title, summary,
         documents=[name for name, _ in expiring],
+        result={
+            "columns": ["document", "expiry"],
+            "rows": [
+                {"document": name, "expiry": d.isoformat()}
+                for name, d in expiring
+            ],
+        },
     )
 
 
@@ -1015,9 +1069,11 @@ async def _risk_upcoming(
         chart_type="line",
         label_column="period",
         value_column="n",
+        result=res,
         metadata={
             "sourceContext": {
                 "metric": date_col,
+                "aggregation": "COUNT",
                 "periodColumn": date_col,
                 "sourceColumns": [date_col],
             }
@@ -1135,6 +1191,18 @@ async def _trend_metric(
         "title": f"{metric_label} over {period_col}",
         "data": {"series": recent},
     }
+    comparison = (
+        {
+            "type": "period_over_period",
+            "baselineValue": prev,
+            "currentValue": last,
+            "baselineLabel": series[-2]["label"],
+            "currentLabel": series[-1]["label"],
+            "field": measure_col or "Records",
+        }
+        if prev is not None
+        else None
+    )
     return _card(
         project, "trend_metric", severity, title, summary,
         chart=chart, tables=[table.view_name],
@@ -1142,11 +1210,14 @@ async def _trend_metric(
         chart_type="line",
         label_column="period",
         value_column="metric",
+        result=res,
         metadata={
             "sourceContext": {
                 "metric": measure_col or "",
+                "aggregation": "SUM" if measure_col else "COUNT",
                 "periodColumn": period_col,
                 "sourceColumns": [c for c in (measure_col, period_col) if c],
+                "comparison": comparison,
             }
         },
     )
@@ -1187,6 +1258,7 @@ async def _trend_spend(
         return None
 
     budget: float | None = None
+    pres: dict[str, Any] | None = None
     if budget_col and budget_col != amount_col:
         bres = await _safe_query(
             runner,
@@ -1249,12 +1321,16 @@ async def _trend_spend(
 
     title = "Spend tracking over budget" if severity == "urgent" else "Spend overview"
     chart = {"type": "kpi_grid", "title": "Spend", "data": {"kpis": kpis}}
+    result_for_card = pres if pres and len(pres.get("rows", [])) >= 2 else res
     return _card(
         project, "trend_spend", severity, title, summary,
         chart=chart, tables=[table.view_name],
+        chart_type="kpi_grid",
+        result=result_for_card,
         metadata={
             "sourceContext": {
                 "metric": amount_col,
+                "aggregation": "SUM",
                 "periodColumn": period_col,
                 "sourceColumns": [
                     c for c in (amount_col, budget_col, period_col) if c
@@ -1318,9 +1394,11 @@ async def _opportunity_supplier(
         chart_type="bar",
         label_column="supplier",
         value_column="metric",
+        result=res,
         metadata={
             "sourceContext": {
                 "metric": metric_col,
+                "aggregation": "AVG",
                 "sourceColumns": [
                     c for c in (supplier_col, metric_col) if c
                 ],
@@ -1393,9 +1471,11 @@ async def _opportunity_top_performer(
             chart_type="bar",
             label_column="entity",
             value_column="metric",
+            result=res,
             metadata={
                 "sourceContext": {
                     "metric": measure_col,
+                    "aggregation": "AVG",
                     "sourceColumns": [dim_col, measure_col],
                 }
             },
@@ -2413,11 +2493,21 @@ async def run_ai_intelligence(
                 str(method_envelope.get("quality")), confidence
             )
 
+        source_context: dict[str, Any] = {
+            "metric": a.get("value_column") if result is not None else None,
+            "sourceColumns": list(result.get("columns", [])) if result is not None else [],
+        }
+        if a.get("chart_type") in ("line", "area"):
+            source_context["periodColumn"] = a.get("label_column")
+        if result is not None:
+            source_context["aggregation"] = "value"
+
         metadata: dict[str, Any] = {
             "insightMethod": method,
             "confidenceScore": round(float(confidence), 2),
             "analyticalMethod": method_envelope,
             "validation": validation,
+            "sourceContext": {k: v for k, v in source_context.items() if v},
             "referenceDocuments": documents_used if uses_reference else [],
             "relationshipMetadata": {
                 "leftTable": relationship_meta["left_table"],
@@ -2447,6 +2537,7 @@ async def run_ai_intelligence(
                 tables=tables,
                 documents=documents_used,
                 metadata=metadata,
+                result=result,
                 sql=(a.get("sql") if result is not None else None),
                 chart_type=(a.get("chart_type") if result is not None else None),
                 label_column=(a.get("label_column") if result is not None else None),
