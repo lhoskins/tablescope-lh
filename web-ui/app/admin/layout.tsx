@@ -31,6 +31,8 @@ function activeNavFor(pathname: string): NavKey {
     return "admin-analytical-methods";
   if (pathname.startsWith("/admin/ai-governance"))
     return "admin-ai-governance";
+  if (pathname.startsWith("/admin/repositories"))
+    return "admin-repositories";
   return "admin-users";
 }
 
