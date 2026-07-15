@@ -11,38 +11,11 @@ from __future__ import annotations
 import math
 from typing import Any
 
-_METHOD_TAXONOMY = {
-    "aggregation": "Aggregation",
-    "trend_analysis": "Trend analysis",
-    "period_over_period_comparison": "Period-over-period comparison",
-    "variance_analysis": "Variance analysis",
-    "ranking": "Ranking",
-    "segmentation": "Segmentation",
-    "anomaly_detection": "Anomaly detection",
-    "distribution_analysis": "Distribution analysis",
-    "correlation_analysis": "Correlation analysis",
-    "forecast": "Forecast",
-    "document_synthesis": "Document synthesis",
-    "rule_based_detection": "Rule-based detection",
-    "other": "Other",
-}
-
-# Backward-compatible labels for the built-in diagnostic prompt types.
-_INSIGHT_TYPE_METHOD: dict[str, str] = {
-    "risk_sla": "rule_based_detection",
-    "risk_threshold": "rule_based_detection",
-    "risk_expiry": "document_synthesis",
-    "risk_upcoming": "trend_analysis",
-    "trend_spend": "period_over_period_comparison",
-    "trend_metric": "trend_analysis",
-    "opportunity_supplier": "ranking",
-    "opportunity_performance": "ranking",
-}
+from app.services.ai_governance import get_method_label, infer_governance_key
 
 
 def _method_label(method: str | None) -> str:
-    key = method or "other"
-    return _METHOD_TAXONOMY.get(key, key.replace("_", " ").title())
+    return get_method_label(method)
 
 
 def infer_method(
@@ -51,31 +24,19 @@ def infer_method(
     sql: str | None = None,
     documents: list[str] | None = None,
     category: str | None = None,
+    method_id: str | None = None,
+    analysis_intent: str | None = None,
 ) -> str:
     """Select a controlled analytical-method taxonomy key for an insight."""
-    base = insight_type.split("_", 1)[0] if insight_type else ""
-    exact = _INSIGHT_TYPE_METHOD.get(insight_type)
-    if exact:
-        return exact
-    if category == "relationship" or "relationship" in insight_type:
-        return "correlation_analysis"
-    if documents and not sql:
-        return "document_synthesis"
-    if chart_type in ("line", "area"):
-        return "trend_analysis"
-    if chart_type in ("bar", "radial_bar") and base == "opportunity":
-        return "ranking"
-    if chart_type == "bar" and (base == "risk" or "status" in insight_type):
-        return "distribution_analysis"
-    if chart_type == "kpi_grid" and base in ("trend", "spend"):
-        return "period_over_period_comparison"
-    if base == "risk":
-        return "rule_based_detection"
-    if base == "opportunity":
-        return "ranking"
-    if base == "trend":
-        return "trend_analysis"
-    return "other"
+    return infer_governance_key(
+        insight_type=insight_type,
+        chart_type=chart_type,
+        sql=sql,
+        documents=documents,
+        category=category,
+        method_id=method_id,
+        analysis_intent=analysis_intent,
+    )
 
 
 def _pluck_series(chart: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -242,6 +203,7 @@ def build_explanation(
     limitations: list[str] | None = None,
     documents: list[str] | None = None,
     generated_at: str | None = None,
+    governance: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build a structured explanation from the actual analysis that produced a card.
 
@@ -333,6 +295,8 @@ def build_explanation(
         "confidence": _confidence(row_count, method, sql),
         "generatedAt": generated_at,
     }
+    if governance:
+        explanation["governance"] = governance
 
     if metric:
         explanation["metrics"].append(
