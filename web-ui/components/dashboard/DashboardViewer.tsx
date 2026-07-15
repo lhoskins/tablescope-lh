@@ -37,9 +37,11 @@ type Props = {
   /** Called after any change is persisted (widget/filter/status save). Used to
    *  mark a freshly-created draft dashboard as kept (no longer ephemeral). */
   onPersisted?: () => void;
+  /** Called when the user pins a widget to their Home grid. */
+  onPinWidget?: (widget: WidgetConfig, data: unknown[], dashboardId: number) => void;
 };
 
-export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack, onPersisted }: Props) {
+export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack, onPersisted, onPinWidget }: Props) {
   const queryClient = useQueryClient();
   const widgets = useMemo(() => dashboard.config?.widgets ?? [], [dashboard.config?.widgets]);
   const globalFilters = useMemo(() => dashboard.config?.globalFilters ?? [], [dashboard.config?.globalFilters]);
@@ -550,6 +552,15 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                       )}
                     </div>
                     <div className="flex gap-0.5 flex-shrink-0 ml-2">
+                      {onPinWidget && (
+                        <button
+                          onClick={() => onPinWidget(w, widgetData[w.id] ?? [], dashboard.id)}
+                          title="Pin to Home"
+                          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                        >
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
+                        </button>
+                      )}
                       <button onClick={() => handleEditWidget(w)} title="Edit" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                       </button>

@@ -6,7 +6,9 @@ import { IconHelpCircle } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
+import { HomePinsGrid } from "@/components/tablescope/home/home-pins-grid";
 import { getUserMeta } from "@/lib/auth";
+import { greeting } from "@/lib/ui/format";
 import {
   useCurrentUser,
   useProjectSummaries,
@@ -59,19 +61,17 @@ export default function HomePage() {
         </>
       }
     >
-      <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
-        <h1 className="text-h1 text-ink-primary">Home</h1>
-        <p className="mt-2 max-w-md text-body text-ink-tertiary">
-          This page is reserved for future development. Visit{" "}
-          <button
-            type="button"
-            className="text-brand-700 underline hover:text-brand-800"
-            onClick={() => router.push("/business-insight")}
-          >
-            Business Insight
-          </button>{" "}
-          for AI suggestions and intelligence.
-        </p>
+      <div className="space-y-6 py-6">
+        <div>
+          <h1 className="text-h1 text-ink-primary">
+            {user.name ? greeting(user.name) : "Home"}
+          </h1>
+          <p className="mt-1 text-body text-ink-tertiary">
+            Pin insights and dashboards from Business Insight to build your
+            personal overview.
+          </p>
+        </div>
+        <HomePinsGrid />
       </div>
     </AppShell>
   );
