@@ -19,6 +19,10 @@ vi.mock("@/lib/api/home-intelligence", async (importActual) => ({
   updatePreferences,
 }));
 
+vi.mock("@/lib/api/insight-feedback", () => ({
+  batchGetInsightFeedback: vi.fn().mockResolvedValue({ items: [] }),
+}));
+
 const RISK: InsightCard = {
   id: "risk-1",
   projectId: "1",
