@@ -140,6 +140,52 @@ describe("IntelligenceFeed", () => {
     expect(opportunities.getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("renders analytical method metadata on chart cards", async () => {
+    const chartCard: InsightCard = {
+      ...TREND,
+      id: "trend-method",
+      title: "Spend concentrated",
+      summary: "Spend is concentrated among top suppliers.",
+      chart: {
+        type: "bar",
+        title: "Spend by supplier",
+        data: {
+          series: [
+            { label: "Acme", value: 1200 },
+            { label: "Globex", value: 800 },
+          ],
+        },
+      },
+      analyticalMethod: {
+        method: "pareto_analysis",
+        methodName: "Pareto analysis",
+        status: "ok",
+        quality: "reliable",
+        tier: 1,
+        n: 10,
+        usableN: 10,
+        results: { topPercent: 80 },
+        assumptions: ["Independent categories"],
+        warnings: [],
+        caveats: [],
+      },
+    };
+    getIntelligenceSnapshot.mockResolvedValue({
+      snapshot: {
+        ...SNAPSHOT,
+        results: [
+          {
+            ...SNAPSHOT.results[0],
+            insights: [chartCard],
+          },
+        ],
+      },
+    });
+    renderFeed();
+    expect(await screen.findByText("Analytical method: Pareto analysis")).toBeTruthy();
+    expect(screen.getByText("Quality: reliable")).toBeTruthy();
+  });
+
   it("does not re-request intelligence on toggle", async () => {
     renderFeed();
     await screen.findByRole("button", { name: /Risks/ });

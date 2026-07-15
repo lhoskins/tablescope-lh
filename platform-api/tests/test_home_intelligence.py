@@ -466,6 +466,85 @@ async def test_run_ai_intelligence_attaches_metadata(monkeypatch) -> None:
     assert card["validation"]["nonNullMetricCount"] == 3
     # relationshipMetadata is omitted for a single-table card.
     assert "relationshipMetadata" not in card
+    # The method engine is off by default, so no envelope is attached.
+    assert "analyticalMethod" not in card
+
+
+async def test_run_ai_intelligence_attaches_analytical_method_in_hybrid_mode(
+    monkeypatch, db_session
+) -> None:
+    from app.services import ai_intelligence_client as ai
+
+    monkeypatch.setattr(ai, "is_enabled", lambda: True)
+
+    async def fake_plan(**kwargs):
+        return [
+            {
+                "id": "a1",
+                "category": "trend",
+                "title": "Spend by supplier",
+                "rationale": "Concentration risk.",
+                "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend '
+                'FROM "spend" GROUP BY "supplier"',
+                "chart_type": "bar",
+                "label_column": "supplier",
+                "value_column": "spend",
+                "severity_hint": "watch",
+            }
+        ]
+
+    async def fake_interpret(**kwargs):
+        return {
+            "a1": {
+                "id": "a1",
+                "title": "Spend concentrated",
+                "summary": "**Acme** dominates spend.",
+                "severity": "watch",
+            }
+        }
+
+    monkeypatch.setattr(ai, "plan", fake_plan)
+    monkeypatch.setattr(ai, "interpret", fake_interpret)
+
+    ctx = hi.ProjectContext(
+        tables=[_table("spend", ["supplier", "amount"])], documents=[]
+    )
+    runner = _runner(
+        {
+            "GROUP BY": [
+                {"supplier": "Acme", "spend": 1200.0},
+                {"supplier": "Globex", "spend": 800.0},
+                {"supplier": "Initech", "spend": 200.0},
+            ]
+        }
+    )
+
+    async def fake_analyze(*args, **kwargs):
+        return {
+            "method": "linear_regression",
+            "methodName": "Linear regression",
+            "status": "ok",
+            "quality": "reliable",
+            "tier": 1,
+            "n": 3,
+            "usableN": 3,
+            "results": {"slope": 1.2},
+            "assumptions": [],
+            "warnings": [],
+            "caveats": [],
+        }
+
+    monkeypatch.setattr(hi, "get_engine_mode", lambda: hi.EngineMode.HYBRID)
+    monkeypatch.setattr(hi, "analyze_methods", fake_analyze)
+
+    cards = await hi.run_ai_intelligence(
+        _project(), ctx, runner, session=db_session, tenant_id=1, user_id=1
+    )
+    assert cards is not None and len(cards) == 1
+    card = cards[0]
+    assert card["insightMethod"] == "llm_planned"
+    assert card["confidenceScore"] == 0.9  # reliable quality from envelope
+    assert card["analyticalMethod"]["method"] == "linear_regression"
 
 
 async def test_run_ai_intelligence_multi_table_relationship(monkeypatch) -> None:
