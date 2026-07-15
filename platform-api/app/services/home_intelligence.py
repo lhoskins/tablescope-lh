@@ -460,6 +460,11 @@ def _card(
     tables: list[str] | None = None,
     documents: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    sql: str | None = None,
+    chart_type: str | None = None,
+    label_column: str | None = None,
+    value_column: str | None = None,
+    value_column_2: str | None = None,
 ) -> dict[str, Any]:
     card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
@@ -475,6 +480,19 @@ def _card(
         "sources": {"tables": tables or [], "documents": documents or []},
         "executedAt": _now_iso(),
     }
+    # Persist the raw SQL and chart roles for data-backed cards so they can
+    # be saved as dashboard widgets. Only include non-empty values; narrative-only
+    # cards will omit these fields and remain ineligible for "Save to dashboard".
+    if sql:
+        card["sql"] = sql
+    if chart_type:
+        card["chartType"] = chart_type
+    if label_column:
+        card["labelColumn"] = label_column
+    if value_column:
+        card["valueColumn"] = value_column
+    if value_column_2:
+        card["valueColumn2"] = value_column_2
     # Backward-compatible optional metadata (confidenceScore, priorityScore,
     # insightMethod, validation, relationshipMetadata, ...). The frontend
     # ignores unknown keys, so this never affects the existing card layout.
@@ -2402,6 +2420,11 @@ async def run_ai_intelligence(
                 tables=tables,
                 documents=documents_used,
                 metadata=metadata,
+                sql=(a.get("sql") if result is not None else None),
+                chart_type=(a.get("chart_type") if result is not None else None),
+                label_column=(a.get("label_column") if result is not None else None),
+                value_column=(a.get("value_column") if result is not None else None),
+                value_column_2=(a.get("value_column_2") if result is not None else None),
             )
         )
 

@@ -100,6 +100,16 @@ export interface InsightCard {
   };
   /** Governed Analytical Method Engine envelope (hybrid mode only). */
   analyticalMethod?: MethodEnvelope;
+  /**
+   * Raw SQL and chart roles for data-backed cards. These are optional and
+   * only present when the insight was generated from a successfully executed
+   * query. When absent, the card is not eligible for "Save to dashboard".
+   */
+  sql?: string;
+  chartType?: string;
+  labelColumn?: string;
+  valueColumn?: string;
+  valueColumn2?: string;
 }
 
 export interface ProjectResult {
