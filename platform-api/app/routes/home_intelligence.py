@@ -1107,7 +1107,7 @@ async def save_card_to_dashboard(
         )
         session.add(dashboard)
     else:
-        config = dashboard.config or {}
+        config = dict(dashboard.config or {})
         widgets: list[dict[str, Any]] = list(config.get("widgets") or [])
         position = len(widgets)
         used_ids = {w.get("id") for w in widgets if w.get("id")}
