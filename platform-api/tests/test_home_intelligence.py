@@ -684,7 +684,7 @@ async def test_home_insights_project_id_scopes_to_one_project(
     ran: list[int] = []
 
     async def spy_run_for_project(
-        session, context, project, prompt_types, *, write_audit, granularity
+        session, context, project, prompt_types, *, write_audit, granularity, **kwargs
     ):
         ran.append(project.id)
         return []
@@ -727,7 +727,7 @@ async def test_home_insights_without_project_id_runs_all(
     ran: list[int] = []
 
     async def spy_run_for_project(
-        session, context, project, prompt_types, *, write_audit, granularity
+        session, context, project, prompt_types, *, write_audit, granularity, **kwargs
     ):
         ran.append(project.id)
         return []
@@ -759,7 +759,7 @@ async def test_home_insights_inaccessible_project_id_returns_empty(
     ran: list[int] = []
 
     async def spy_run_for_project(
-        session, context, project, prompt_types, *, write_audit, granularity
+        session, context, project, prompt_types, *, write_audit, granularity, **kwargs
     ):
         ran.append(project.id)
         return []
@@ -800,38 +800,45 @@ async def test_project_dashboard_builds_real_chart_widgets(
     assert r.status_code == 201
     project_id = r.json()["id"]
 
-    import app.routes.home_intelligence as hir
+    import app.services.home_intelligence as hi
 
-    async def fake_plan(session, context, project, *, max_analyses, granularity):
+    async def fake_plan_and_execute(
+        project,
+        ctx,
+        runner,
+        *,
+        tenant_id,
+        user_id,
+        max_analyses,
+        granularity,
+    ):
         return [
             {
                 "title": "Spend by supplier",
-                "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend '
-                'FROM "SUP_Suppliers_CSV" GROUP BY "supplier"',
+                "sql": 'SELECT "supplier", SUM(CAST("amount" AS double)) AS spend FROM "SUP_Suppliers_CSV" GROUP BY "supplier"',
                 "chart_type": "bar",
                 "label_column": "supplier",
                 "value_column": "spend",
-            },
-            # A widget whose SQL returns nothing is dropped, never "preview only".
-            {"title": "Empty", "sql": 'SELECT "x" FROM "empty"', "chart_type": "bar"},
-        ]
-
-    def fake_make_runner(session, context, project_id):
-        async def runner(sql: str) -> dict:
-            if "SUP_Suppliers_CSV" in sql:
-                return {
+                "result": {
                     "columns": ["supplier", "spend"],
                     "rows": [
                         {"supplier": "Acme", "spend": 1200.0},
                         {"supplier": "Globex", "spend": 800.0},
                     ],
-                }
-            return {"columns": [], "rows": []}
+                },
+            },
+            # A widget whose SQL returns nothing is dropped, never "preview only".
+            {
+                "title": "Empty",
+                "sql": 'SELECT "x" FROM "empty"',
+                "chart_type": "bar",
+                "label_column": "x",
+                "value_column": "x",
+                "result": {"columns": [], "rows": []},
+            },
+        ]
 
-        return runner
-
-    monkeypatch.setattr(hir, "_plan_analyses", fake_plan)
-    monkeypatch.setattr(hir, "_make_runner", fake_make_runner)
+    monkeypatch.setattr(hi, "plan_and_execute_widgets", fake_plan_and_execute)
 
     r = await client.post(
         "/api/ai/home/project-dashboard",

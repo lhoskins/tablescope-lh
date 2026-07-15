@@ -33,6 +33,7 @@ from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.project import Project, ProjectMember
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.saved_query import SavedQuery
 from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
 from app.services import home_intel_queue as q
@@ -109,6 +110,7 @@ async def _run_for_project(
     write_audit: bool = True,
     granularity: int = 3,
     plan_semaphore: asyncio.Semaphore | None = None,
+    raise_on_error: bool = False,
 ) -> list[dict[str, Any]]:
     started = datetime.now(UTC)
     ctx = await hi.gather_project_context(session, project)
@@ -133,6 +135,8 @@ async def _run_for_project(
         raise
     except Exception as exc:
         logger.warning("AI intelligence failed for project %s: %s", project.id, exc)
+        if raise_on_error:
+            raise
         cards = None
     if cards is None:
         cards = []
@@ -726,9 +730,10 @@ async def home_project_dashboard(
 @router.post("/home/insights")
 async def home_insights(
     req: SuggestRequest,
+    refresh: bool = False,
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
-    """AI insights & opportunities for accessible projects (in memory)."""
+    """AI insights & opportunities for accessible projects; cached per project."""
     async with SessionLocal() as session:
         projects = await _accessible_projects(session, context)
         if req.project_id is not None:
@@ -736,9 +741,39 @@ async def home_insights(
     if not projects:
         return {"projects": []}
 
+    async def _get_insights_snapshot(
+        session: AsyncSession, project: Project
+    ) -> ProjectIntelligenceSnapshot | None:
+        return await session.scalar(
+            select(ProjectIntelligenceSnapshot).where(
+                ProjectIntelligenceSnapshot.tenant_id == context.tenant_id,
+                ProjectIntelligenceSnapshot.user_id == context.user_id,
+                ProjectIntelligenceSnapshot.project_id == project.id,
+                ProjectIntelligenceSnapshot.suite == "insights",
+            )
+        )
+
+    async def _save_insights_snapshot(
+        session: AsyncSession, project: Project, payload: dict[str, Any]
+    ) -> None:
+        snap = await _get_insights_snapshot(session, project)
+        if snap is None:
+            snap = ProjectIntelligenceSnapshot(
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=project.id,
+                suite="insights",
+            )
+            session.add(snap)
+        snap.payload = payload
+        await session.commit()
+
     async def work(project: Project) -> dict[str, Any]:
-        cards: list[dict[str, Any]] = []
         async with SessionLocal() as session:
+            if not refresh:
+                snap = await _get_insights_snapshot(session, project)
+                if snap is not None:
+                    return snap.payload
             try:
                 cards = await _run_for_project(
                     session,
@@ -747,17 +782,29 @@ async def home_insights(
                     hi.ALL_PROMPT_TYPES,
                     write_audit=False,
                     granularity=req.granularity,
+                    raise_on_error=True,
                 )
             except Exception as exc:
                 logger.warning(
                     "insights failed for project %s: %s", project.id, exc
                 )
-        return {
-            "projectId": str(project.id),
-            "projectName": project.name,
-            "projectColor": hi.project_color(project.id),
-            "insights": cards,
-        }
+                snap = await _get_insights_snapshot(session, project)
+                if snap is not None:
+                    return snap.payload
+                return {
+                    "projectId": str(project.id),
+                    "projectName": project.name,
+                    "projectColor": hi.project_color(project.id),
+                    "insights": [],
+                }
+            payload = {
+                "projectId": str(project.id),
+                "projectName": project.name,
+                "projectColor": hi.project_color(project.id),
+                "insights": cards,
+            }
+            await _save_insights_snapshot(session, project, payload)
+            return payload
 
     results = await asyncio.gather(*(work(p) for p in projects))
     return {"projects": list(results)}
