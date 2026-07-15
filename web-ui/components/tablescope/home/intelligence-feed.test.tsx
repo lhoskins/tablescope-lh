@@ -104,24 +104,22 @@ describe("IntelligenceFeed", () => {
     renderFeed();
     const risks = await screen.findByRole("button", { name: /Risks/ });
     expect(risks.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("SLA breach")).toBeTruthy();
-    expect(screen.getByText("Spend trending up")).toBeTruthy();
-    expect(screen.getByText("Consolidate suppliers")).toBeTruthy();
+    expect(await screen.findByText("SLA breach")).toBeTruthy();
+    expect(await screen.findByText("Spend trending up")).toBeTruthy();
+    expect(await screen.findByText("Consolidate suppliers")).toBeTruthy();
   });
 
   it("collapses and re-expands Risks independently", async () => {
     renderFeed();
     const risks = await screen.findByRole("button", { name: /Risks/ });
-    expect(screen.getByText("SLA breach")).toBeTruthy();
+    expect(await screen.findByText("SLA breach")).toBeTruthy();
 
     fireEvent.click(risks);
     await waitFor(() => expect(screen.queryByText("SLA breach")).toBeNull());
     expect(risks.getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(risks);
-    await waitFor(() =>
-      expect(screen.getByText("SLA breach")).toBeTruthy(),
-    );
+    expect(await screen.findByText("SLA breach")).toBeTruthy();
     expect(risks.getAttribute("aria-expanded")).toBe("true");
   });
 
@@ -134,8 +132,8 @@ describe("IntelligenceFeed", () => {
     fireEvent.click(risks);
     await waitFor(() => expect(screen.queryByText("SLA breach")).toBeNull());
 
-    expect(screen.getByText("Spend trending up")).toBeTruthy();
-    expect(screen.getByText("Consolidate suppliers")).toBeTruthy();
+    expect(await screen.findByText("Spend trending up")).toBeTruthy();
+    expect(await screen.findByText("Consolidate suppliers")).toBeTruthy();
     expect(trends.getAttribute("aria-expanded")).toBe("true");
     expect(opportunities.getAttribute("aria-expanded")).toBe("true");
   });
