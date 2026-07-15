@@ -145,6 +145,59 @@ async def process_upload(
         await teiid.aclose()
 
 
+async def enqueue_scan_repository_connection(
+    *,
+    tenant_id: int,
+    connection_id: int,
+    scan_id: int,
+) -> str:
+    """Enqueue a repository scan and return the job id."""
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "scan_repository_connection",
+            tenant_id=tenant_id,
+            connection_id=connection_id,
+            scan_id=scan_id,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def scan_repository_connection(
+    ctx: dict[str, Any],
+    *,
+    tenant_id: int,
+    connection_id: int,
+    scan_id: int,
+) -> dict[str, Any]:
+    """Run a repository scan through the connector abstraction."""
+    from app.services.repository_scanner import RepositoryScanner
+
+    async with SessionLocal() as session:
+        scanner = RepositoryScanner(session)
+        try:
+            await scanner.scan(tenant_id, connection_id, scan_id)
+            return {
+                "status": "ok",
+                "tenant_id": tenant_id,
+                "connection_id": connection_id,
+                "scan_id": scan_id,
+            }
+        except Exception as exc:
+            logger.warning(
+                "scan_repository_connection failed for scan %s: %s", scan_id, exc
+            )
+            return {
+                "status": "error",
+                "tenant_id": tenant_id,
+                "connection_id": connection_id,
+                "scan_id": scan_id,
+                "error": str(exc)[:500],
+            }
+
+
 async def enqueue_sync_saas_object(
     *, saas_source_id: int, limit: int | None = None
 ) -> str:
@@ -474,6 +527,7 @@ class WorkerSettings:
         index_for_search,
         sync_saas_object,
         analyze_project_intelligence,
+        scan_repository_connection,
     ]
     # Must exceed home_intelligence_project_analysis_timeout_seconds: a job
     # killed by arq writes no result and permanently stalls its run, so the

@@ -80,6 +80,12 @@ from app.models.reference_library import (
     ReferenceLibraryImportRow,
 )
 from app.models.report import Report
+from app.models.repository import (
+    RepositoryConnection,
+    RepositoryItem,
+    RepositoryProfile,
+    RepositoryScan,
+)
 from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.saved_query import SavedQuery
 from app.models.scope_canvas_layout import ScopeCanvasLayout
@@ -159,6 +165,10 @@ __all__ = [
     "ReferenceDocumentAssignment",
     "ReferenceLibraryImportBatch",
     "ReferenceLibraryImportRow",
+    "RepositoryConnection",
+    "RepositoryItem",
+    "RepositoryProfile",
+    "RepositoryScan",
     "SaasObjectDataSource",
     "SavedQuery",
     "SharedVDB",

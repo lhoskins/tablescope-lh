@@ -15,6 +15,7 @@ import {
   IconPhoto,
   IconMathFunction,
   IconBrain,
+  IconFolders,
   IconUserCircle,
   IconLogout,
   IconLayoutSidebarLeftCollapse,
@@ -207,6 +208,12 @@ export function Sidebar({
           label: "AI Governance",
           href: "/admin/ai-governance",
           icon: IconBrain,
+        },
+        {
+          key: "admin-repositories",
+          label: "Repositories",
+          href: "/admin/repositories",
+          icon: IconFolders,
         },
       ]
     : [];
