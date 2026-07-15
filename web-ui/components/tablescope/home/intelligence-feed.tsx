@@ -28,6 +28,11 @@ import {
   renderBold,
   stripStars,
 } from "./intelligence-card";
+import {
+  useInsightFeedback,
+  type SaveInsightFeedbackArgs,
+} from "@/lib/hooks/use-insight-feedback";
+import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
 import { IntelligenceStrip } from "./intelligence-strip";
 import {
   InsightPanel,
@@ -42,16 +47,24 @@ function Section({
   cards,
   emptyText,
   loading,
+  feedbackById,
+  savingFeedback,
   onSaveToDashboard,
   onPin,
+  onFeedbackSave,
+  onFeedbackRemove,
 }: {
   title: string;
   icon: React.ReactNode;
   cards: InsightCard[];
   emptyText: string;
   loading: boolean;
+  feedbackById: Record<string, InsightFeedbackRecord>;
+  savingFeedback: boolean;
   onSaveToDashboard?: (card: InsightCard) => void;
   onPin?: (card: InsightCard) => void;
+  onFeedbackSave?: (card: InsightCard, payload: Omit<SaveInsightFeedbackArgs, "insightId" | "projectId" | "insightType" | "cardSnapshot" | "explanationSnapshot">) => void;
+  onFeedbackRemove?: (card: InsightCard) => void;
 }) {
   return (
     <InsightPanel title={title} icon={icon} collapsible count={cards.length}>
@@ -61,10 +74,20 @@ function Section({
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {cards.map((card) => (
             <IntelligenceCard
-              key={card.id}
+              key={card.insightId || card.id}
               card={card}
+              feedback={feedbackById[card.insightId || card.id]}
+              savingFeedback={savingFeedback}
               onSaveToDashboard={onSaveToDashboard}
               onPin={onPin}
+              onFeedbackSave={
+                onFeedbackSave
+                  ? (payload) => onFeedbackSave(card, payload)
+                  : undefined
+              }
+              onFeedbackRemove={
+                onFeedbackRemove ? () => onFeedbackRemove(card) : undefined
+              }
             />
           ))}
         </div>
@@ -247,6 +270,55 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
     [results],
   );
 
+  const insightIds = useMemo(
+    () => allInsights.map((c) => c.insightId || c.id),
+    [allInsights],
+  );
+  const {
+    feedbackById,
+    isLoading: feedbackLoading,
+    saveFeedback,
+    removeFeedback,
+    saving: savingFeedback,
+  } = useInsightFeedback(insightIds);
+
+  const handleFeedbackSave = useCallback(
+    (
+      card: InsightCard,
+      payload: {
+        sentiment: "agree" | "disagree";
+        reason_codes: string[];
+        comment: string;
+      },
+    ) => {
+      const insightId = card.insightId || card.id;
+      if (!card.projectId || !insightId) return;
+      void saveFeedback({
+        insightId,
+        projectId: Number(card.projectId),
+        insightType: card.insightType,
+        sentiment: payload.sentiment,
+        reason_codes: payload.reason_codes,
+        comment: payload.comment,
+        cardSnapshot: card as unknown as Record<string, unknown>,
+        explanationSnapshot: card.explanation as unknown as Record<string, unknown> | undefined,
+      });
+    },
+    [saveFeedback],
+  );
+
+  const handleFeedbackRemove = useCallback(
+    (card: InsightCard) => {
+      const insightId = card.insightId || card.id;
+      if (!card.projectId || !insightId) return;
+      void removeFeedback({
+        insightId,
+        projectId: Number(card.projectId),
+      });
+    },
+    [removeFeedback],
+  );
+
   const risks = allInsights.filter(
     (c) =>
       c.insightType.startsWith("risk_") ||
@@ -329,8 +401,12 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
           cards={risks}
           emptyText="No risks detected from your projects yet."
           loading={running}
+          feedbackById={feedbackById}
+          savingFeedback={savingFeedback}
           onSaveToDashboard={handleSaveToDashboard}
           onPin={onPin}
+          onFeedbackSave={handleFeedbackSave}
+          onFeedbackRemove={handleFeedbackRemove}
         />
         <Section
           title="Trends"
@@ -338,8 +414,12 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
           cards={trends}
           emptyText="No trends detected from your projects yet."
           loading={running}
+          feedbackById={feedbackById}
+          savingFeedback={savingFeedback}
           onSaveToDashboard={handleSaveToDashboard}
           onPin={onPin}
+          onFeedbackSave={handleFeedbackSave}
+          onFeedbackRemove={handleFeedbackRemove}
         />
         <Section
           title="Opportunities"
@@ -347,8 +427,12 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
           cards={opportunities}
           emptyText="No opportunities detected from your projects yet."
           loading={running}
+          feedbackById={feedbackById}
+          savingFeedback={savingFeedback}
           onSaveToDashboard={handleSaveToDashboard}
           onPin={onPin}
+          onFeedbackSave={handleFeedbackSave}
+          onFeedbackRemove={handleFeedbackRemove}
         />
 
         {pending.length > 0 && (

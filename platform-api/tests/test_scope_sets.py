@@ -198,7 +198,7 @@ async def test_save_and_load_scope_map(client, service_headers) -> None:
 
 
 async def test_scope_builder_tables_and_ai_suggest(
-    client, service_headers
+    client, service_headers, monkeypatch
 ) -> None:
     _tenant, owner_headers, project, queries = await _setup(
         client, service_headers
@@ -221,9 +221,41 @@ async def test_scope_builder_tables_and_ai_suggest(
     )
     set_id = r.json()["id"]
 
+    # The AI/VDB pipeline is unavailable in the test environment, so stub it
+    # to return deterministic relationship suggestions for the two queries.
+    import app.routes.ai_proxy as ai_proxy
+
+    qa, qb = queries[0]["id"], queries[1]["id"]
+
+    async def _fake_analyze(*, session, context, project_id, query_ids=None):
+        return [
+            {
+                "source_query_id": qa,
+                "source_query_name": "Sales",
+                "source_field": "CustomerID",
+                "target_query_id": qb,
+                "target_query_name": "Customers",
+                "target_field": "CustomerID",
+                "confidence": 0.95,
+                "reason": "Shared CustomerID values",
+            },
+            {
+                "source_query_id": qa,
+                "source_query_name": "Sales",
+                "source_field": "Region",
+                "target_query_id": qb,
+                "target_query_name": "Customers",
+                "target_field": "Region",
+                "confidence": 0.9,
+                "reason": "Shared Region values",
+            },
+        ], {}
+
+    monkeypatch.setattr(ai_proxy, "_analyze_project_scopes", _fake_analyze)
+
     r = await client.post(
         f"/api/scope_sets/{set_id}/ai-suggest",
-        json={"query_ids": [queries[0]["id"], queries[1]["id"]]},
+        json={"query_ids": [qa, qb]},
         headers=owner_headers,
     )
     assert r.status_code == 200, r.text

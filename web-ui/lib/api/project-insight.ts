@@ -88,6 +88,8 @@ export type InsightCardSeverity =
 
 export interface ProjectInsightCard {
   id: string;
+  /** Stable identifier copied from the source insight card (usually a UUID). */
+  insightId?: string;
   insightType: string;
   title: string;
   summary: string;
@@ -101,6 +103,15 @@ export interface ProjectInsightCard {
   sourceColumns?: string[];
   metric?: string;
   periodColumn?: string;
+  /** Structured explainability metadata forwarded from the insight card. */
+  explanation?: Record<string, unknown>;
+  /** Query/result context when the card is data-backed. */
+  sql?: string;
+  chartType?: string;
+  labelColumn?: string;
+  valueColumn?: string;
+  valueColumn2?: string;
+  executedAt?: string;
 }
 
 export interface WhatChangedSinceLastVisit {
