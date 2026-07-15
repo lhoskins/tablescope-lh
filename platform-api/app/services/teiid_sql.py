@@ -165,7 +165,7 @@ def normalize_teiid_timestamps(
     def _replace_to_timestamp(m: re.Match[str]) -> str:
         value = _extract_string(m.group(1))
         if m.group(2):
-            mask = _translate_psql_mask(_extract_string(m.group(2)))
+            mask: str | None = _translate_psql_mask(_extract_string(m.group(2)))
         else:
             mask = _mask_for_literal(value)
         if mask is None:
@@ -175,7 +175,7 @@ def normalize_teiid_timestamps(
     def _replace_to_date(m: re.Match[str]) -> str:
         value = _extract_string(m.group(1))
         if m.group(2):
-            mask = _translate_psql_mask(_extract_string(m.group(2)))
+            mask: str | None = _translate_psql_mask(_extract_string(m.group(2)))
         else:
             mask = _mask_for_literal(value)
         if mask is None:
