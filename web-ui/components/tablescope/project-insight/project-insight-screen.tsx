@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -21,21 +21,38 @@ import {
   IconTable,
   IconFileText,
   IconLoader2,
-  IconPlus,
-  IconMinus,
+  IconInfoCircle,
+  IconThumbUp,
+  IconThumbDown,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
+import {
+  InsightPanel as Panel,
+  PanelEmpty,
+} from "@/components/tablescope/insight-panel";
 import { AIQuestionResultModal } from "@/components/ai/AIQuestionResultModal";
 import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewModal";
 import type { AiCardContext } from "@/lib/api/ai-actions";
 import { GenerateDashboardModal } from "@/components/tablescope/project-insight/generate-dashboard-modal";
 import { renderBold } from "@/components/tablescope/home/intelligence-card";
 import { InsightsPanel } from "@/components/tablescope/home/ai-suggestions";
-import { suggestInsights } from "@/lib/api/home-intelligence";
+import {
+  InsightExplanationPanel,
+} from "@/components/tablescope/home/insight-explanation-panel";
+import {
+  InsightFeedbackDialog,
+} from "@/components/tablescope/home/insight-feedback-dialog";
+import {
+  suggestInsights,
+  type InsightCard as InsightCardData,
+  type InsightExplanation,
+} from "@/lib/api/home-intelligence";
+import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
+import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import {
   projectInsightApi,
@@ -221,6 +238,66 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     }));
   const allTrendCards = [...trendCards, ...trendDetectionCards];
 
+  const allInsightCards = useMemo(() => {
+    const risks = (data?.risks ?? []).filter((c) => c.title?.trim());
+    const trends = (data?.trends ?? []).filter((c) => c.title?.trim());
+    const opportunities = (data?.opportunities ?? []).filter((c) =>
+      c.title?.trim(),
+    );
+    const detectionCards: ProjectInsightCard[] = (data?.trendDetection ?? [])
+      .filter((t) => (t.label || t.title || t.description)?.trim())
+      .map((t) => ({
+        id: t.id,
+        insightType: "trend",
+        title: (t.label || t.title || "").trim(),
+        summary: [t.description, t.possibleCause && `Possible cause: ${t.possibleCause}`]
+          .filter(Boolean)
+          .join(" "),
+        severity: "trend" as const,
+        question: t.title || t.label || "",
+        supportingSources: t.sourceSummary ? [t.sourceSummary] : [],
+      }));
+    return [...risks, ...trends, ...opportunities, ...detectionCards];
+  }, [data]);
+  const insightIds = useMemo(
+    () => allInsightCards.map((c) => c.id).filter(Boolean),
+    [allInsightCards],
+  );
+  const {
+    feedbackById,
+    saveFeedback,
+    removeFeedback,
+    saving: savingFeedback,
+  } = useInsightFeedback(insightIds);
+
+  const handleFeedbackSave = (
+    card: ProjectInsightCard,
+    payload: {
+      sentiment: "agree" | "disagree";
+      reason_codes: string[];
+      comment: string;
+    },
+  ) => {
+    const projectIdNum = Number(projectId);
+    if (!card.id || Number.isNaN(projectIdNum)) return;
+    void saveFeedback({
+      insightId: card.id,
+      projectId: projectIdNum,
+      insightType: card.insightType,
+      sentiment: payload.sentiment,
+      reason_codes: payload.reason_codes,
+      comment: payload.comment,
+      cardSnapshot: card as unknown as Record<string, unknown>,
+      explanationSnapshot: card.explanation,
+    });
+  };
+
+  const handleFeedbackRemove = (card: ProjectInsightCard) => {
+    const projectIdNum = Number(projectId);
+    if (!card.id || Number.isNaN(projectIdNum)) return;
+    void removeFeedback({ insightId: card.id, projectId: projectIdNum });
+  };
+
   const insightCount = (insightsQuery.data?.projects ?? []).reduce(
     (n, p) => n + p.insights.length,
     0,
@@ -334,10 +411,16 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 cards={riskCards}
                 emptyText="No risks detected from this project's data yet."
                 reviewedIds={reviewedIds}
+                projectId={projectId}
+                projectName={data?.project.name ?? ""}
+                feedbackById={feedbackById}
+                savingFeedback={savingFeedback}
                 onInvestigate={(c) =>
                   investigateCard(c, "project_insight_risk")
                 }
                 onReview={reviewCard}
+                onFeedbackSave={handleFeedbackSave}
+                onFeedbackRemove={handleFeedbackRemove}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
               />
@@ -349,10 +432,16 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 cards={allTrendCards}
                 emptyText="No trends detected from this project's data yet."
                 reviewedIds={reviewedIds}
+                projectId={projectId}
+                projectName={data?.project.name ?? ""}
+                feedbackById={feedbackById}
+                savingFeedback={savingFeedback}
                 onInvestigate={(c) =>
                   investigateCard(c, "project_insight_trend")
                 }
                 onReview={reviewCard}
+                onFeedbackSave={handleFeedbackSave}
+                onFeedbackRemove={handleFeedbackRemove}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
               />
@@ -362,10 +451,16 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 cards={opportunityCards}
                 emptyText="No opportunities detected from this project's data yet."
                 reviewedIds={reviewedIds}
+                projectId={projectId}
+                projectName={data?.project.name ?? ""}
+                feedbackById={feedbackById}
+                savingFeedback={savingFeedback}
                 onInvestigate={(c) =>
                   investigateCard(c, "project_insight_opportunity")
                 }
                 onReview={reviewCard}
+                onFeedbackSave={handleFeedbackSave}
+                onFeedbackRemove={handleFeedbackRemove}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
               />
@@ -673,86 +768,20 @@ function SummaryCard({
   );
 }
 
-function Panel({
-  title,
-  icon,
-  children,
-  headerRight,
-  collapsible = false,
-  defaultOpen = true,
-  count,
-}: {
-  title: string;
-  icon?: ReactNode;
-  children: ReactNode;
-  headerRight?: ReactNode;
-  collapsible?: boolean;
-  defaultOpen?: boolean;
-  count?: number;
-}) {
-  const [open, setOpen] = useState(!collapsible || defaultOpen);
-  const badge = collapsible && count != null && count > 0 && (
-    <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
-      {count}
-    </span>
-  );
-  const toggle = collapsible ? () => setOpen((v) => !v) : undefined;
-
-  return (
-    <section className="rounded-lg border border-line-tertiary bg-bg-primary">
-      <div
-        className={cn(
-          "flex items-center justify-between gap-2 px-4 py-3",
-          open && "border-b border-line-tertiary",
-          collapsible && "cursor-pointer select-none",
-        )}
-        {...(collapsible
-          ? {
-              role: "button" as const,
-              tabIndex: 0,
-              "aria-expanded": open,
-              onClick: toggle,
-              onKeyDown: (e: React.KeyboardEvent) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggle?.();
-                }
-              },
-            }
-          : {})}
-      >
-        <div className="flex items-center gap-2">
-          {icon}
-          <h3 className="text-h3 text-ink-primary">{title}</h3>
-        </div>
-        <div className="flex items-center gap-2">
-          {headerRight}
-          {badge}
-          {collapsible &&
-            (open ? (
-              <IconMinus size={16} className="text-ink-tertiary" />
-            ) : (
-              <IconPlus size={16} className="text-ink-tertiary" />
-            ))}
-        </div>
-      </div>
-      {open && <div className="p-4">{children}</div>}
-    </section>
-  );
-}
-
-function PanelEmpty({ text }: { text: string }) {
-  return <p className="py-2 text-[13px] text-ink-tertiary">{text}</p>;
-}
-
 function InsightCardColumn({
   title,
   icon,
   cards,
   emptyText,
   reviewedIds,
+  projectId,
+  projectName,
+  feedbackById,
+  savingFeedback,
   onInvestigate,
   onReview,
+  onFeedbackSave,
+  onFeedbackRemove,
   reviewPending,
   reviewPendingId,
 }: {
@@ -761,8 +790,18 @@ function InsightCardColumn({
   cards: ProjectInsightCard[];
   emptyText: string;
   reviewedIds: Set<string>;
+  projectId: string;
+  projectName: string;
+  feedbackById: Record<string, InsightFeedbackRecord>;
+  savingFeedback: boolean;
   onInvestigate: (card: ProjectInsightCard) => void;
   onReview: (card: ProjectInsightCard) => void;
+  onFeedbackSave?: (card: ProjectInsightCard, payload: {
+    sentiment: "agree" | "disagree";
+    reason_codes: string[];
+    comment: string;
+  }) => void;
+  onFeedbackRemove?: (card: ProjectInsightCard) => void;
   reviewPending: boolean;
   reviewPendingId?: string;
 }) {
@@ -776,9 +815,15 @@ function InsightCardColumn({
             <InsightCardItem
               key={card.id}
               card={card}
+              projectId={projectId}
+              projectName={projectName}
               reviewed={reviewedIds.has(card.id)}
+              feedback={feedbackById[card.id]}
+              savingFeedback={savingFeedback}
               onInvestigate={() => onInvestigate(card)}
               onReview={() => onReview(card)}
+              onFeedbackSave={onFeedbackSave ? (payload) => onFeedbackSave(card, payload) : undefined}
+              onFeedbackRemove={onFeedbackRemove ? () => onFeedbackRemove(card) : undefined}
               reviewPending={reviewPending && reviewPendingId === card.id}
             />
           ))}
@@ -790,18 +835,67 @@ function InsightCardColumn({
 
 function InsightCardItem({
   card,
+  projectId,
+  projectName,
   reviewed,
+  feedback,
+  savingFeedback,
   onInvestigate,
   onReview,
+  onFeedbackSave,
+  onFeedbackRemove,
   reviewPending,
 }: {
   card: ProjectInsightCard;
+  projectId: string;
+  projectName: string;
   reviewed: boolean;
+  feedback?: InsightFeedbackRecord | null;
+  savingFeedback?: boolean;
   onInvestigate: () => void;
   onReview: () => void;
+  onFeedbackSave?: (payload: {
+    sentiment: "agree" | "disagree";
+    reason_codes: string[];
+    comment: string;
+  }) => void;
+  onFeedbackRemove?: () => void;
   reviewPending: boolean;
 }) {
+  const [explainOpen, setExplainOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const hasFeedback = feedback != null && feedback.status === "active";
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.informational;
+
+  const tables = card.sourceTables ?? card.supportingSources.filter(
+    (s) => !/\.(pdf|docx?|txt|csv)$/i.test(s),
+  );
+  const documents = card.supportingSources.filter((s) =>
+    /\.(pdf|docx?|txt|csv)$/i.test(s),
+  );
+
+  const insightCardData: InsightCardData = {
+    id: card.id,
+    insightId: card.id,
+    projectId,
+    projectName,
+    projectColor: "",
+    insightType: card.insightType,
+    severity: card.severity as InsightCardData["severity"],
+    title: card.title,
+    summary: card.summary,
+    chart: null,
+    callout: null,
+    sources: { tables, documents },
+    executedAt: card.executedAt ?? "",
+    sql: card.sql,
+    chartType: card.chartType,
+    labelColumn: card.labelColumn,
+    valueColumn: card.valueColumn,
+    valueColumn2: card.valueColumn2,
+    explanation: card.explanation as InsightExplanation | undefined,
+  };
+
   return (
     <article className="rounded-md border border-line-tertiary bg-bg-primary p-3">
       <header className="flex items-start justify-between gap-2">
@@ -842,7 +936,7 @@ function InsightCardItem({
           ))}
         </div>
       )}
-      <div className="mt-2.5 flex items-center gap-2 border-t border-line-tertiary pt-2.5">
+      <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-line-tertiary pt-2.5">
         <Button variant="secondary" size="sm" onClick={onInvestigate}>
           <IconSearch size={13} />
           Investigate
@@ -862,7 +956,55 @@ function InsightCardItem({
             {reviewPending ? "Saving…" : "Mark reviewed"}
           </Button>
         )}
+        <button
+          type="button"
+          onClick={() => setExplainOpen(true)}
+          className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+        >
+          <IconInfoCircle size={13} />
+          Explain
+        </button>
+        {onFeedbackSave && (
+          <button
+            type="button"
+            onClick={() => setFeedbackOpen(true)}
+            aria-label={hasFeedback ? "Edit feedback" : "Give feedback"}
+            title={hasFeedback ? "Edit feedback" : "Give feedback"}
+            className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              hasFeedback
+                ? "border-brand-500 bg-brand-50 text-brand-700 hover:bg-brand-100"
+                : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
+            }`}
+          >
+            {feedback?.sentiment === "disagree" ? (
+              <IconThumbDown size={13} />
+            ) : (
+              <IconThumbUp size={13} />
+            )}
+            {hasFeedback ? "Feedback saved" : "Agree"}
+          </button>
+        )}
       </div>
+
+      <InsightExplanationPanel
+        card={insightCardData}
+        open={explainOpen}
+        onClose={() => setExplainOpen(false)}
+      />
+      {onFeedbackSave && (
+        <InsightFeedbackDialog
+          card={insightCardData}
+          open={feedbackOpen}
+          onClose={() => setFeedbackOpen(false)}
+          feedback={feedback || null}
+          onSave={onFeedbackSave}
+          onRemove={async () => {
+            await onFeedbackRemove?.();
+            setFeedbackOpen(false);
+          }}
+          saving={savingFeedback}
+        />
+      )}
     </article>
   );
 }

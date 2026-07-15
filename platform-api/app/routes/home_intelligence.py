@@ -33,13 +33,16 @@ from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.project import Project, ProjectMember
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.saved_query import SavedQuery
 from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
+from app.services import dashboard_widget as dw
 from app.services import home_intel_queue as q
 from app.services import home_intelligence as hi
 from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.presentation_engine import PresentationMode
 from app.services.response_envelope import attach_envelope
+from app.services.teiid_sql import normalize_teiid_timestamps
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.tasks.workflows import enqueue_analyze_project_intelligence
 
@@ -92,12 +95,44 @@ def _make_runner(
         )
         return await _run_sql(
             database=database,
-            sql=_auto_cast_aggregates(sql),
+            sql=_auto_cast_aggregates(normalize_teiid_timestamps(sql)),
             teiid_host=endpoint.pg_host,
             teiid_port=endpoint.pg_port,
         )
 
     return runner
+
+
+async def _sample_project_columns(
+    session: AsyncSession,
+    context: RequestContext,
+    project: Project,
+    tables: list[str],
+) -> dict[str, str]:
+    """Return one non-empty sample value per column across project tables.
+
+    Used to infer Teiid date-parse masks when normalizing AI-generated SQL for
+    query suggestions. Failures are swallowed so a missing VDB does not break
+    suggestion generation.
+    """
+    runner = _make_runner(session, context, project.id)
+    samples: dict[str, str] = {}
+    for view_name in tables:
+        try:
+            result = await runner(f'SELECT * FROM "{view_name}" LIMIT 25')
+        except Exception as exc:
+            logger.debug(
+                "Could not sample %s for project %s: %s", view_name, project.id, exc
+            )
+            continue
+        for row in result.get("rows", [])[:25]:
+            for col, val in row.items():
+                if col in samples:
+                    continue
+                text = str(val).strip() if val is not None else ""
+                if text:
+                    samples[col] = text[:40]
+    return samples
 
 
 async def _run_for_project(
@@ -109,6 +144,7 @@ async def _run_for_project(
     write_audit: bool = True,
     granularity: int = 3,
     plan_semaphore: asyncio.Semaphore | None = None,
+    raise_on_error: bool = False,
 ) -> list[dict[str, Any]]:
     started = datetime.now(UTC)
     ctx = await hi.gather_project_context(session, project)
@@ -124,6 +160,7 @@ async def _run_for_project(
             project,
             ctx,
             runner,
+            session=session,
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             granularity=granularity,
@@ -133,6 +170,8 @@ async def _run_for_project(
         raise
     except Exception as exc:
         logger.warning("AI intelligence failed for project %s: %s", project.id, exc)
+        if raise_on_error:
+            raise
         cards = None
     if cards is None:
         cards = []
@@ -210,6 +249,24 @@ async def _has_access(
         )
     )
     return member is not None
+
+
+async def _has_project_edit(
+    session: AsyncSession, context: RequestContext, project: Project
+) -> bool:
+    """Check whether the caller may edit dashboards/queries in this project."""
+    if project.owner_id == context.user_id:
+        return True
+    if context.role == Role.ADMIN.value:
+        return True
+    member = await session.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == context.user_id,
+            ProjectMember.is_active.is_(True),
+        )
+    )
+    return member is not None and member.role in ("editor", "admin", "owner")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -491,7 +548,19 @@ async def _plan_analyses(
         max_analyses=max_analyses,
         granularity=granularity,
     )
-    return analyses or []
+    if not analyses:
+        return []
+
+    # Sample live table values so generated timestamp casts can be rewritten to
+    # Teiid PARSETIMESTAMP with the right mask before the preview is run.
+    column_samples = await _sample_project_columns(
+        session, context, project, allowed_tables
+    )
+    for a in analyses:
+        sql = (a.get("sql") or "").strip()
+        if sql:
+            a["sql"] = normalize_teiid_timestamps(sql, column_samples=column_samples)
+    return analyses
 
 
 @router.post("/home/query-suggestions")
@@ -726,9 +795,10 @@ async def home_project_dashboard(
 @router.post("/home/insights")
 async def home_insights(
     req: SuggestRequest,
+    refresh: bool = False,
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
-    """AI insights & opportunities for accessible projects (in memory)."""
+    """AI insights & opportunities for accessible projects; cached per project."""
     async with SessionLocal() as session:
         projects = await _accessible_projects(session, context)
         if req.project_id is not None:
@@ -736,9 +806,39 @@ async def home_insights(
     if not projects:
         return {"projects": []}
 
+    async def _get_insights_snapshot(
+        session: AsyncSession, project: Project
+    ) -> ProjectIntelligenceSnapshot | None:
+        return await session.scalar(
+            select(ProjectIntelligenceSnapshot).where(
+                ProjectIntelligenceSnapshot.tenant_id == context.tenant_id,
+                ProjectIntelligenceSnapshot.user_id == context.user_id,
+                ProjectIntelligenceSnapshot.project_id == project.id,
+                ProjectIntelligenceSnapshot.suite == "insights",
+            )
+        )
+
+    async def _save_insights_snapshot(
+        session: AsyncSession, project: Project, payload: dict[str, Any]
+    ) -> None:
+        snap = await _get_insights_snapshot(session, project)
+        if snap is None:
+            snap = ProjectIntelligenceSnapshot(
+                tenant_id=context.tenant_id,
+                user_id=context.user_id,
+                project_id=project.id,
+                suite="insights",
+            )
+            session.add(snap)
+        snap.payload = payload
+        await session.commit()
+
     async def work(project: Project) -> dict[str, Any]:
-        cards: list[dict[str, Any]] = []
         async with SessionLocal() as session:
+            if not refresh:
+                snap = await _get_insights_snapshot(session, project)
+                if snap is not None:
+                    return snap.payload
             try:
                 cards = await _run_for_project(
                     session,
@@ -747,17 +847,29 @@ async def home_insights(
                     hi.ALL_PROMPT_TYPES,
                     write_audit=False,
                     granularity=req.granularity,
+                    raise_on_error=True,
                 )
             except Exception as exc:
                 logger.warning(
                     "insights failed for project %s: %s", project.id, exc
                 )
-        return {
-            "projectId": str(project.id),
-            "projectName": project.name,
-            "projectColor": hi.project_color(project.id),
-            "insights": cards,
-        }
+                snap = await _get_insights_snapshot(session, project)
+                if snap is not None:
+                    return snap.payload
+                return {
+                    "projectId": str(project.id),
+                    "projectName": project.name,
+                    "projectColor": hi.project_color(project.id),
+                    "insights": [],
+                }
+            payload = {
+                "projectId": str(project.id),
+                "projectName": project.name,
+                "projectColor": hi.project_color(project.id),
+                "insights": cards,
+            }
+            await _save_insights_snapshot(session, project, payload)
+            return payload
 
     results = await asyncio.gather(*(work(p) for p in projects))
     return {"projects": list(results)}
@@ -773,6 +885,7 @@ class SaveDashboardWidget(BaseModel):
     explanation: str | None = None
     labelColumn: str | None = None
     valueColumn: str | None = None
+    valueColumn2: str | None = None
 
 
 class SaveDashboardRequest(BaseModel):
@@ -795,20 +908,14 @@ async def home_save_dashboard(
     Each widget's SQL is saved as a project query (reusing an existing one when
     the SQL matches) and referenced from the dashboard's widget config.
     """
-    from app.routes.ai_proxy import (
-        _detect_datasource,
-        _map_chart_subtype,
-        _map_chart_type,
-    )
-
     project = await session.get(Project, req.project_id)
     if (
         project is None
         or project.tenant_id != context.tenant_id
-        or not await _has_access(session, context, project)
+        or not await _has_project_edit(session, context, project)
     ):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Project not accessible"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Project not editable"
         )
     if not req.widgets:
         raise HTTPException(
@@ -825,65 +932,32 @@ async def home_save_dashboard(
     )
     allowed_tables = [ds.view_name for ds in ds_result.scalars()]
 
-    existing = list(
-        await session.scalars(
-            select(SavedQuery).where(SavedQuery.project_id == project.id)
-        )
-    )
-
-    def _norm(sql: str) -> str:
-        import re as _re
-
-        return _re.sub(r"\s+", " ", sql.strip().rstrip(";").lower())
-
-    by_sql = {q.sql_text and _norm(q.sql_text): q for q in existing if q.sql_text}
-
+    existing_by_sql: dict[str, SavedQuery] = {}
     widgets_config: list[dict[str, Any]] = []
     for idx, w in enumerate(req.widgets):
         sql = (w.sql or "").strip().rstrip(";")
         if not sql:
             continue
-        match = by_sql.get(_norm(sql))
-        if match is not None:
-            query_id = match.id
-        else:
-            query = SavedQuery(
-                project_id=project.id,
-                owner_id=context.user_id,
-                name=f"AI - {w.title}",
-                description="",
-                sql_text=sql,
-                left_datasource=_detect_datasource(sql, allowed_tables),
-                ai_generated=True,
-            )
-            session.add(query)
-            await session.flush()
-            query_id = query.id
-            by_sql[_norm(sql)] = query
-
-        mapped_type = _map_chart_type(w.chartType)
-        default_w = {"kpi": 3, "table": 12, "pie": 4}.get(mapped_type, 6)
-        default_h = {"kpi": 2, "table": 5}.get(mapped_type, 4)
+        query = await dw.find_or_create_saved_query(
+            session,
+            project_id=project.id,
+            title=f"AI - {w.title}",
+            sql=sql,
+            user_id=context.user_id,
+            allowed_tables=allowed_tables,
+            existing_by_sql=existing_by_sql,
+        )
         widgets_config.append(
-            {
-                "id": f"ai_widget_{idx}",
-                "title": w.title,
-                "explanation": w.explanation or "",
-                "type": mapped_type,
-                "chartSubtype": _map_chart_subtype(w.chartType),
-                "dataSource": {"kind": "query", "queryId": query_id},
-                "xColumn": w.labelColumn or "",
-                "yColumn": w.valueColumn or "",
-                "aggregation": "sum",
-                "sortBy": "x_asc",
-                "filters": [],
-                "colSpan": default_w,
-                "position": idx,
-                "gridX": (idx % 2) * 6,
-                "gridY": (idx // 2) * default_h,
-                "gridW": default_w,
-                "gridH": default_h,
-            }
+            dw.build_widget_config(
+                title=w.title,
+                query_id=query.id,
+                chart_type=w.chartType,
+                label_column=w.labelColumn,
+                value_column=w.valueColumn,
+                value_column_2=w.valueColumn2,
+                explanation=w.explanation or "",
+                index=idx,
+            )
         )
 
     dashboard = Dashboard(
@@ -912,4 +986,160 @@ async def home_save_dashboard(
         "name": dashboard.name,
         "project_id": project.id,
         "widgets_created": len(widgets_config),
+    }
+
+
+class SaveCardToDashboardRequest(BaseModel):
+    project_id: int
+    dashboard_id: int | None = None
+    dashboard_name: str | None = None
+    title: str
+    sql: str
+    chartType: str = "bar"
+    labelColumn: str | None = None
+    valueColumn: str | None = None
+    valueColumn2: str | None = None
+
+
+@router.post("/home/save-card-to-dashboard")
+async def save_card_to_dashboard(
+    req: SaveCardToDashboardRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Save a single insight card's chart to a new or existing dashboard."""
+    project = await session.get(Project, req.project_id)
+    if (
+        project is None
+        or project.tenant_id != context.tenant_id
+        or not await _has_project_edit(session, context, project)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Project not editable"
+        )
+
+    sql = (req.sql or "").strip().rstrip(";")
+    if not sql:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="SQL is required to save a chart",
+        )
+    if not req.title or not req.title.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Widget title is required",
+        )
+
+    if req.dashboard_id is not None and req.dashboard_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide either dashboard_id or dashboard_name, not both",
+        )
+
+    dashboard: Dashboard | None = None
+    if req.dashboard_id is not None:
+        dashboard = await session.get(Dashboard, req.dashboard_id)
+        if dashboard is None or dashboard.tenant_id != context.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard not found"
+            )
+        if dashboard.project_id != project.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Dashboard does not belong to the selected project",
+            )
+        if dashboard.owner_id != context.user_id and not (
+            await _has_project_edit(session, context, project)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not allowed to edit this dashboard",
+            )
+    elif not req.dashboard_name or not req.dashboard_name.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="New dashboard name is required",
+        )
+
+    ds_result = await session.execute(
+        select(FileSourceMeta).where(
+            FileSourceMeta.project_id == project.id,
+            FileSourceMeta.tenant_id == context.tenant_id,
+            FileSourceMeta.archived.is_(False),
+        )
+    )
+    allowed_tables = [ds.view_name for ds in ds_result.scalars()]
+
+    query = await dw.find_or_create_saved_query(
+        session,
+        project_id=project.id,
+        title=req.title,
+        sql=sql,
+        user_id=context.user_id,
+        allowed_tables=allowed_tables,
+    )
+
+    if dashboard is None:
+        assert req.dashboard_name is not None
+        widget_id = f"ai_widget_0_{int(datetime.now(UTC).timestamp() * 1000) % 100000}"
+        widget_config = dw.build_widget_config(
+            title=req.title,
+            query_id=query.id,
+            chart_type=req.chartType,
+            label_column=req.labelColumn,
+            value_column=req.valueColumn,
+            value_column_2=req.valueColumn2,
+            widget_id=widget_id,
+            index=0,
+        )
+        dashboard = Dashboard(
+            project_id=project.id,
+            owner_id=context.user_id,
+            tenant_id=context.tenant_id,
+            name=req.dashboard_name.strip(),
+            description="",
+            status="draft",
+            config={
+                "widgets": [widget_config],
+                "globalFilters": [],
+                "layout": "grid",
+                "ai_generated": True,
+            },
+        )
+        session.add(dashboard)
+    else:
+        config = dict(dashboard.config or {})
+        widgets: list[dict[str, Any]] = list(config.get("widgets") or [])
+        position = len(widgets)
+        used_ids = {w.get("id") for w in widgets if w.get("id")}
+        suffix = 0
+        base_id = f"ai_widget_{position}"
+        widget_id = base_id
+        while widget_id in used_ids:
+            suffix += 1
+            widget_id = f"{base_id}_{suffix}"
+        widget_config = dw.build_widget_config(
+            title=req.title,
+            query_id=query.id,
+            chart_type=req.chartType,
+            label_column=req.labelColumn,
+            value_column=req.valueColumn,
+            value_column_2=req.valueColumn2,
+            widget_id=widget_id,
+            index=position,
+        )
+        widgets.append(widget_config)
+        config["widgets"] = widgets
+        dashboard.config = config
+
+    await session.flush()
+    await session.commit()
+    await session.refresh(dashboard)
+    return {
+        "status": "saved",
+        "dashboard_id": dashboard.id,
+        "name": dashboard.name,
+        "project_id": project.id,
+        "query_id": query.id,
+        "widget_id": widget_config["id"],
     }

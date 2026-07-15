@@ -2,6 +2,7 @@
 
 import { apiClient } from "@/lib/api-client";
 import type {
+  MethodEnvelope,
   PresentationDescriptor,
   ResponseEnvelope,
 } from "@/lib/api/ai-actions";
@@ -13,7 +14,10 @@ export type InsightSeverity =
   | "urgent"
   | "warning"
   | "watch"
+  | "trend"
   | "opportunity"
+  | "recommendation"
+  | "informational"
   | "info";
 
 export interface InsightChart {
@@ -61,8 +65,85 @@ export interface InsightCallout {
   text: string;
 }
 
+export interface InsightExplanationConfidence {
+  level: "low" | "medium" | "high" | null;
+  score: number | null;
+  basis: string;
+}
+
+export interface InsightExplanationSource {
+  projectId: string | number;
+  projectName: string;
+  dataSourceId: string | null;
+  dataSourceName: string | null;
+  tables: string[];
+  fields: string[];
+}
+
+export interface InsightExplanationMetric {
+  name: string;
+  aggregation: string;
+  field: string;
+}
+
+export interface InsightExplanationEvidence {
+  rowCount: number | null;
+  resultColumns: string[] | null;
+  topFinding?: string | null;
+}
+
+export interface InsightExplanationChart {
+  chartType: string;
+  labelColumn: string | null;
+  valueColumn: string | null;
+  valueColumn2: string | null;
+}
+
+export interface InsightExplanationFilter {
+  field: string;
+  operator?: string;
+  value: unknown;
+}
+
+export interface InsightExplanationComparison {
+  type: string;
+  baselineValue: number;
+  currentValue: number;
+  baselineLabel: string;
+  currentLabel: string;
+  field: string;
+}
+
+export interface InsightExplanation {
+  summary: string;
+  method: string;
+  methodLabel: string;
+  steps: string[];
+  source: InsightExplanationSource;
+  filters?: InsightExplanationFilter[];
+  metrics?: InsightExplanationMetric[];
+  comparison?: InsightExplanationComparison;
+  evidence: InsightExplanationEvidence;
+  sql?: string;
+  chart?: InsightExplanationChart;
+  assumptions: string[];
+  limitations: string[];
+  confidence: InsightExplanationConfidence;
+  generatedAt: string;
+  governance?: {
+    requestedMethod: string;
+    effectiveMethod: string;
+    decision: "allowed" | "fallback" | "blocked";
+    policyVersion: number;
+    message: string;
+    evaluatedAt: string;
+  };
+}
+
 export interface InsightCard {
   id: string;
+  /** Stable, server-generated identifier for this insight instance. */
+  insightId?: string;
   projectId: string;
   projectName: string;
   projectColor: string;
@@ -97,6 +178,20 @@ export interface InsightCard {
     confidenceReason?: string;
     rowMultiplicationRisk?: string;
   };
+  /** Governed Analytical Method Engine envelope (hybrid mode only). */
+  analyticalMethod?: MethodEnvelope;
+  /**
+   * Raw SQL and chart roles for data-backed cards. These are optional and
+   * only present when the insight was generated from a successfully executed
+   * query. When absent, the card is not eligible for "Save to dashboard".
+   */
+  sql?: string;
+  chartType?: string;
+  labelColumn?: string;
+  valueColumn?: string;
+  valueColumn2?: string;
+  /** Structured explainability metadata produced by the insight pipeline. */
+  explanation?: InsightExplanation;
 }
 
 export interface ProjectResult {
@@ -410,7 +505,35 @@ export function saveDashboardSuggestion(body: {
     explanation?: string;
     labelColumn?: string;
     valueColumn?: string;
+    valueColumn2?: string;
   }[];
 }): Promise<{ status: string; dashboard_id: number; name: string }> {
   return apiClient.post("/api/ai/home/save-dashboard", body);
+}
+
+export interface SaveCardToDashboardPayload {
+  project_id: number;
+  dashboard_id?: number | null;
+  dashboard_name?: string | null;
+  title: string;
+  sql: string;
+  chartType: string;
+  labelColumn?: string | null;
+  valueColumn?: string | null;
+  valueColumn2?: string | null;
+}
+
+export interface SaveCardToDashboardResponse {
+  status: string;
+  dashboard_id: number;
+  name: string;
+  project_id: number;
+  query_id: number;
+  widget_id: string;
+}
+
+export function saveCardToDashboard(
+  body: SaveCardToDashboardPayload,
+): Promise<SaveCardToDashboardResponse> {
+  return apiClient.post("/api/ai/home/save-card-to-dashboard", body);
 }

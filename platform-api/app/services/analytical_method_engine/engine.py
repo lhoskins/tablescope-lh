@@ -15,6 +15,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.ai_governance import ai_governance_service, infer_governance_key
 from app.services.analytical_method_engine import (
     data_profiler,
     method_audit,
@@ -81,7 +82,63 @@ async def analyze(
             )
             return envelope
 
-        method = registry["methods"][selection.method_id]
+        # Resolve the chosen catalog method through tenant AI governance.
+        # Fall back to the next allowed alternative if the primary is disabled.
+        chosen_method_id: str | None = None
+        governance_decision = None
+        if tenant_id is not None:
+            candidates = [selection.method_id, *selection.alternatives]
+            for candidate_id in candidates:
+                method_key = infer_governance_key(
+                    method_id=candidate_id, analysis_intent=resolved_intent
+                )
+                decision = await ai_governance_service.evaluate_method(
+                    session,
+                    tenant_id,
+                    method_key,
+                    actor_user_id=None,
+                    record=False,
+                )
+                if decision.allowed:
+                    chosen_method_id = candidate_id
+                    governance_decision = decision
+                    break
+
+        if tenant_id is None:
+            chosen_method_id = selection.method_id
+
+        if chosen_method_id is None:
+            envelope = result_envelope.build(
+                intent=resolved_intent,
+                profile=profile,
+                method=registry["methods"].get(selection.method_id),
+                selection_reasons=selection.reasons,
+                alternatives=selection.alternatives,
+                exec_result={
+                    "status": "governed_blocked",
+                    "reason": "Selected analytical method is disabled for this tenant.",
+                },
+                registry_version=registry_version,
+            )
+            if audit:
+                await method_audit.record(
+                    session,
+                    tenant_id=tenant_id,
+                    event_type="governed_blocked",
+                    analysis_intent=resolved_intent,
+                    selected_method=selection.method_id,
+                    rejected_methods=list(selection.rejected.keys()),
+                    envelope=envelope,
+                    registry_version=registry_version,
+                    reason="Selected analytical method is disabled for this tenant.",
+                )
+            logger.info(
+                "Analytical engine: intent=%s method=%s status=governed_blocked",
+                resolved_intent, selection.method_id,
+            )
+            return envelope
+
+        method = registry["methods"][chosen_method_id]
         df = data_profiler.to_dataframe(columns, rows)
         exec_result = method_executor.execute(
             method["executor_key"], df, selection.roles, profile,
@@ -92,17 +149,19 @@ async def analyze(
             selection_reasons=selection.reasons, alternatives=selection.alternatives,
             exec_result=exec_result, registry_version=registry_version,
         )
+        if governance_decision:
+            envelope["governance"] = governance_decision.to_explanation_dict()
         if audit:
             event = "executed" if exec_result["status"] == "ok" else exec_result["status"]
             await method_audit.record(
                 session, tenant_id=tenant_id, event_type=event,
-                analysis_intent=resolved_intent, selected_method=selection.method_id,
+                analysis_intent=resolved_intent, selected_method=chosen_method_id,
                 rejected_methods=list(selection.rejected.keys()), envelope=envelope,
                 registry_version=registry_version, reason=exec_result.get("reason"),
             )
         logger.info(
             "Analytical engine: intent=%s method=%s status=%s",
-            resolved_intent, selection.method_id, exec_result.get("status"),
+            resolved_intent, chosen_method_id, exec_result.get("status"),
         )
         return envelope
     except Exception as exc:

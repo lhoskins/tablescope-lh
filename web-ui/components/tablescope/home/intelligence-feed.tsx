@@ -19,6 +19,8 @@ import {
   type ProjectResult,
   type StreamProject,
 } from "@/lib/api/home-intelligence";
+import { SaveInsightToDashboardModal } from "./save-insight-to-dashboard-modal";
+import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import {
   IntelligenceCard,
@@ -26,7 +28,16 @@ import {
   renderBold,
   stripStars,
 } from "./intelligence-card";
+import {
+  useInsightFeedback,
+  type SaveInsightFeedbackArgs,
+} from "@/lib/hooks/use-insight-feedback";
+import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
 import { IntelligenceStrip } from "./intelligence-strip";
+import {
+  InsightPanel,
+  PanelEmpty,
+} from "@/components/tablescope/insight-panel";
 
 type Status = "idle" | "streaming" | "complete" | "error";
 
@@ -34,29 +45,60 @@ function Section({
   title,
   icon,
   cards,
+  emptyText,
+  loading,
+  feedbackById,
+  savingFeedback,
+  onSaveToDashboard,
+  onPin,
+  onFeedbackSave,
+  onFeedbackRemove,
 }: {
   title: string;
   icon: React.ReactNode;
   cards: InsightCard[];
+  emptyText: string;
+  loading: boolean;
+  feedbackById: Record<string, InsightFeedbackRecord>;
+  savingFeedback: boolean;
+  onSaveToDashboard?: (card: InsightCard) => void;
+  onPin?: (card: InsightCard) => void;
+  onFeedbackSave?: (card: InsightCard, payload: Omit<SaveInsightFeedbackArgs, "insightId" | "projectId" | "insightType" | "cardSnapshot" | "explanationSnapshot">) => void;
+  onFeedbackRemove?: (card: InsightCard) => void;
 }) {
-  if (cards.length === 0) return null;
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-h3 text-ink-secondary">
-        {icon}
-        <span>{title}</span>
-        <span className="text-caption text-ink-tertiary">({cards.length})</span>
-      </div>
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {cards.map((card) => (
-          <IntelligenceCard key={card.id} card={card} />
-        ))}
-      </div>
-    </div>
+    <InsightPanel title={title} icon={icon} collapsible count={cards.length}>
+      {cards.length === 0 ? (
+        loading ? null : <PanelEmpty text={emptyText} />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {cards.map((card) => (
+            <IntelligenceCard
+              key={card.insightId || card.id}
+              card={card}
+              feedback={feedbackById[card.insightId || card.id]}
+              savingFeedback={savingFeedback}
+              onSaveToDashboard={onSaveToDashboard}
+              onPin={onPin}
+              onFeedbackSave={
+                onFeedbackSave
+                  ? (payload) => onFeedbackSave(card, payload)
+                  : undefined
+              }
+              onFeedbackRemove={
+                onFeedbackRemove ? () => onFeedbackRemove(card) : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+    </InsightPanel>
   );
 }
 
-export function IntelligenceFeed() {
+export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => void } = {}) {
+  const { toasts, push: pushToast, dismiss } = useToasts();
+  const [saveCard, setSaveCard] = useState<InsightCard | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [projects, setProjects] = useState<StreamProject[]>([]);
   const [results, setResults] = useState<Record<string, ProjectResult>>({});
@@ -228,6 +270,55 @@ export function IntelligenceFeed() {
     [results],
   );
 
+  const insightIds = useMemo(
+    () => allInsights.map((c) => c.insightId || c.id),
+    [allInsights],
+  );
+  const {
+    feedbackById,
+    isLoading: feedbackLoading,
+    saveFeedback,
+    removeFeedback,
+    saving: savingFeedback,
+  } = useInsightFeedback(insightIds);
+
+  const handleFeedbackSave = useCallback(
+    (
+      card: InsightCard,
+      payload: {
+        sentiment: "agree" | "disagree";
+        reason_codes: string[];
+        comment: string;
+      },
+    ) => {
+      const insightId = card.insightId || card.id;
+      if (!card.projectId || !insightId) return;
+      void saveFeedback({
+        insightId,
+        projectId: Number(card.projectId),
+        insightType: card.insightType,
+        sentiment: payload.sentiment,
+        reason_codes: payload.reason_codes,
+        comment: payload.comment,
+        cardSnapshot: card as unknown as Record<string, unknown>,
+        explanationSnapshot: card.explanation as unknown as Record<string, unknown> | undefined,
+      });
+    },
+    [saveFeedback],
+  );
+
+  const handleFeedbackRemove = useCallback(
+    (card: InsightCard) => {
+      const insightId = card.insightId || card.id;
+      if (!card.projectId || !insightId) return;
+      void removeFeedback({
+        insightId,
+        projectId: Number(card.projectId),
+      });
+    },
+    [removeFeedback],
+  );
+
   const risks = allInsights.filter(
     (c) =>
       c.insightType.startsWith("risk_") ||
@@ -265,6 +356,18 @@ export function IntelligenceFeed() {
     startStream(settings?.cross_project ?? true, granularity, hasCards);
   };
 
+  const handleSaveToDashboard = useCallback((card: InsightCard) => {
+    setSaveCard(card);
+  }, []);
+
+  const handleSaved = useCallback(
+    (_dashboardId: number, dashboardName: string) => {
+      pushToast(`Saved to dashboard "${dashboardName}"`, "success");
+      setSaveCard(null);
+    },
+    [pushToast],
+  );
+
   const empty =
     status === "complete" && allInsights.length === 0 && projects.length === 0;
 
@@ -296,16 +399,40 @@ export function IntelligenceFeed() {
           title="Risks"
           icon={<IconAlertTriangle size={16} className="text-warning" />}
           cards={risks}
+          emptyText="No risks detected from your projects yet."
+          loading={running}
+          feedbackById={feedbackById}
+          savingFeedback={savingFeedback}
+          onSaveToDashboard={handleSaveToDashboard}
+          onPin={onPin}
+          onFeedbackSave={handleFeedbackSave}
+          onFeedbackRemove={handleFeedbackRemove}
         />
         <Section
           title="Trends"
           icon={<IconTrendingUp size={16} className="text-ink-secondary" />}
           cards={trends}
+          emptyText="No trends detected from your projects yet."
+          loading={running}
+          feedbackById={feedbackById}
+          savingFeedback={savingFeedback}
+          onSaveToDashboard={handleSaveToDashboard}
+          onPin={onPin}
+          onFeedbackSave={handleFeedbackSave}
+          onFeedbackRemove={handleFeedbackRemove}
         />
         <Section
           title="Opportunities"
           icon={<IconBulb size={16} className="text-success" />}
           cards={opportunities}
+          emptyText="No opportunities detected from your projects yet."
+          loading={running}
+          feedbackById={feedbackById}
+          savingFeedback={savingFeedback}
+          onSaveToDashboard={handleSaveToDashboard}
+          onPin={onPin}
+          onFeedbackSave={handleFeedbackSave}
+          onFeedbackRemove={handleFeedbackRemove}
         />
 
         {pending.length > 0 && (
@@ -331,6 +458,17 @@ export function IntelligenceFeed() {
             </div>
           )}
       </div>
+
+      {saveCard && (
+        <SaveInsightToDashboardModal
+          card={saveCard}
+          open={true}
+          onClose={() => setSaveCard(null)}
+          onSaved={handleSaved}
+        />
+      )}
+
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }

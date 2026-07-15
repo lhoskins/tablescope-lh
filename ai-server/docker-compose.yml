@@ -23,6 +23,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    runtime: nvidia
     volumes:
       - /mnt/tablescope-ai/ollama:/root/.ollama
     environment:

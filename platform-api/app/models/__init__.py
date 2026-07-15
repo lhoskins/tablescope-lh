@@ -10,6 +10,7 @@ from app.models.ai_conversation import (
     AiConversation,
     AiConversationMessage,
 )
+from app.models.ai_governance_audit import AIGovernanceAuditEvent
 from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.models.ai_reference_catalog import (
     AIReferenceCatalog,
@@ -26,6 +27,10 @@ from app.models.analytical_method_catalog import (
     MethodCatalogAuditLog,
     MethodCatalogVersion,
     MethodSelectionMatrix,
+)
+from app.models.analytics_conversation import (
+    AnalyticsConversation,
+    AnalyticsConversationTurn,
 )
 from app.models.audit_event import AuditEvent
 from app.models.base import Base
@@ -51,6 +56,8 @@ from app.models.database_data_source_assignment import (
 )
 from app.models.file_source_meta import FileSourceMeta
 from app.models.grid_preference import GridPreference
+from app.models.home_pin import HomePin
+from app.models.insight_feedback import InsightFeedback
 from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.knowledge_graph_snapshot import AIProjectGraphSnapshot
 from app.models.mfa_phone_factor import MfaPhoneFactor
@@ -79,6 +86,10 @@ from app.models.scope_canvas_layout import ScopeCanvasLayout
 from app.models.scope_set import ScopeSet
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant, TenantAllowedDomain
+from app.models.tenant_ai_governance import (
+    TenantAIGovernancePolicy,
+    TenantAIMethodPolicy,
+)
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
 from app.models.tenant_membership import TenantAuthBinding, TenantMembership
 from app.models.user import User
@@ -87,6 +98,9 @@ from app.models.user_vdb import UserVDB
 __all__ = [
     "AIProjectGraphEdge",
     "AIProjectGraphNode",
+    "AIGovernanceAuditEvent",
+    "AnalyticsConversation",
+    "AnalyticsConversationTurn",
     "AiConversation",
     "AiConversationMessage",
     "AuditEvent",
@@ -127,6 +141,8 @@ __all__ = [
     "DatabaseDataSourceAssignment",
     "FileSourceMeta",
     "GridPreference",
+    "HomePin",
+    "InsightFeedback",
     "IntelligenceSnapshot",
     "AIProjectGraphSnapshot",
     "MfaPhoneFactor",
@@ -148,6 +164,8 @@ __all__ = [
     "SharedVDB",
     "Tenant",
     "TenantAllowedDomain",
+    "TenantAIGovernancePolicy",
+    "TenantAIMethodPolicy",
     "TenantDataPlane",
     "TenantSecretRef",
     "TenantAuthBinding",

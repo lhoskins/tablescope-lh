@@ -1,12 +1,19 @@
 "use client";
 
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import {
   IconChevronRight,
   IconFileText,
+  IconInfoCircle,
+  IconLayoutDashboard,
+  IconPin,
+  IconPinnedOff,
   IconPlus,
   IconTable,
+  IconThumbDown,
+  IconThumbUp,
 } from "@tabler/icons-react";
+import { MethodEnvelopeBlock } from "@/components/ai/method-envelope";
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
 import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import type {
@@ -14,6 +21,9 @@ import type {
   InsightCard as InsightCardData,
   InsightChart,
 } from "@/lib/api/home-intelligence";
+import type { InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
+import { InsightExplanationPanel } from "./insight-explanation-panel";
+import { InsightFeedbackDialog } from "./insight-feedback-dialog";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
 
 /** Remove every remaining `**` marker (matched pairs handled by renderBold). */
@@ -159,19 +169,51 @@ export function InsightChartBlock({ chart }: { chart: InsightChart }) {
 
 export interface IntelligenceCardProps {
   card: InsightCardData;
-  /** Hide the "Add to report" action (e.g. inside the report viewer). */
+  /** Hide the "Add to dashboard / Pin / Add to report" actions, but keep Explain and feedback. */
   hideActions?: boolean;
   onAddToReport?: (card: InsightCardData) => void;
+  onPin?: (card: InsightCardData) => void;
+  onUnpin?: (card: InsightCardData) => void;
+  onSaveToDashboard?: (card: InsightCardData) => void;
+  pinned?: boolean;
+  /** Whether this card is a frozen snapshot (Home pin). Used by the Explain panel. */
+  frozen?: boolean;
+  /** The current user's feedback for this card, if any. */
+  feedback?: InsightFeedbackRecord | null;
+  onFeedbackSave?: (payload: {
+    sentiment: InsightSentiment;
+    reason_codes: string[];
+    comment: string;
+  }) => void | Promise<void>;
+  onFeedbackRemove?: () => void | Promise<void>;
+  savingFeedback?: boolean;
 }
 
 export function IntelligenceCard({
   card,
   hideActions,
   onAddToReport,
+  onPin,
+  onUnpin,
+  onSaveToDashboard,
+  pinned,
+  frozen,
+  feedback,
+  onFeedbackSave,
+  onFeedbackRemove,
+  savingFeedback = false,
 }: IntelligenceCardProps) {
+  const [explainOpen, setExplainOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.info;
+  const canSaveToDashboard = Boolean(
+    card.sql?.trim() && card.valueColumn?.trim(),
+  );
+  const hasFeedback = feedback != null && feedback.status === "active";
   const tables = card.sources?.tables ?? [];
   const documents = card.sources?.documents ?? [];
+
+  const stableInsightId = card.insightId || card.id;
 
   return (
     <article
@@ -191,11 +233,18 @@ export function IntelligenceCard({
             {renderBold(card.title)}
           </h3>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
-        >
-          {sev.label}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span
+            className={`rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
+          >
+            {sev.label}
+          </span>
+          {card.explanation?.governance?.decision === "fallback" && (
+            <span className="rounded-full bg-sky-50 px-2 py-0.5 text-small font-medium text-sky-700">
+              AI fallback
+            </span>
+          )}
+        </div>
       </header>
 
       <p className="mt-2 text-body text-ink-secondary">
@@ -214,6 +263,9 @@ export function IntelligenceCard({
             <KpiGridView kpis={card.chart.data.kpis} />
           ) : (
             <InsightChartView chart={card.chart} />
+          )}
+          {card.analyticalMethod && (
+            <MethodEnvelopeBlock envelope={card.analyticalMethod} />
           )}
         </div>
       )}
@@ -248,16 +300,110 @@ export function IntelligenceCard({
             </span>
           ))}
         </div>
-        {!hideActions && onAddToReport && (
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => onAddToReport(card)}
+            onClick={() => setExplainOpen(true)}
             className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
           >
-            <IconPlus size={14} /> Add to report
+            <IconInfoCircle size={14} />
+            Explain
           </button>
-        )}
+
+          {onFeedbackSave && stableInsightId && (
+            <button
+              type="button"
+              onClick={() => setFeedbackOpen(true)}
+              aria-label={hasFeedback ? "Edit feedback" : "Give feedback"}
+              title={hasFeedback ? "Edit feedback" : "Give feedback"}
+              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-small font-medium transition-colors ${
+                hasFeedback
+                  ? "border-brand-500 bg-brand-50 text-brand-700 hover:bg-brand-100"
+                  : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
+              }`}
+            >
+              {feedback?.sentiment === "disagree" ? (
+                <IconThumbDown size={14} />
+              ) : (
+                <IconThumbUp size={14} />
+              )}
+              {hasFeedback ? "Feedback saved" : "Agree"}
+            </button>
+          )}
+
+          {!hideActions && (
+            <>
+              {onSaveToDashboard && (
+                <button
+                  type="button"
+                  disabled={!canSaveToDashboard}
+                  title={
+                    canSaveToDashboard
+                      ? "Add this insight to a project dashboard"
+                      : "This insight does not have query data and cannot be added to a dashboard"
+                  }
+                  onClick={() => onSaveToDashboard(card)}
+                  className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <IconLayoutDashboard size={14} />
+                  Add to dashboard
+                </button>
+              )}
+              {onPin && !pinned && (
+                <button
+                  type="button"
+                  onClick={() => onPin(card)}
+                  className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+                >
+                  <IconPin size={14} />
+                  Pin to Home
+                </button>
+              )}
+              {onUnpin && pinned && (
+                <button
+                  type="button"
+                  onClick={() => onUnpin(card)}
+                  className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+                >
+                  <IconPinnedOff size={14} />
+                  Unpin
+                </button>
+              )}
+              {onAddToReport && (
+                <button
+                  type="button"
+                  onClick={() => onAddToReport(card)}
+                  className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+                >
+                  <IconPlus size={14} /> Add to report
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </footer>
+
+      <InsightExplanationPanel
+        card={card}
+        open={explainOpen}
+        onClose={() => setExplainOpen(false)}
+        frozen={frozen}
+      />
+
+      {onFeedbackSave && (
+        <InsightFeedbackDialog
+          card={card}
+          open={feedbackOpen}
+          onClose={() => setFeedbackOpen(false)}
+          feedback={feedback || null}
+          onSave={onFeedbackSave}
+          onRemove={async () => {
+            await onFeedbackRemove?.();
+            setFeedbackOpen(false);
+          }}
+          saving={savingFeedback}
+        />
+      )}
     </article>
   );
 }

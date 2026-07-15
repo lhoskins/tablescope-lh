@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
@@ -38,10 +39,23 @@ from app.models.reference_library import (
     TIER_PROJECT,
     ReferenceDocument,
 )
+from app.services.ai_governance import ai_governance_service
+from app.services.analytical_method_engine import (
+    EngineMode,
+    get_engine_mode,
+)
+from app.services.analytical_method_engine import (
+    analyze as analyze_methods,
+)
 from app.services.evidence_severity import gate_severity
+from app.services.insight_explanation import build_explanation, infer_method
 from app.services.presentation_engine import PresentationMode
 from app.services.prompt_loader import load_prompt_reference
 from app.services.response_envelope import attach_envelope
+from app.services.teiid_sql import (
+    date_masks_from_samples,
+    normalize_date_casts,
+)
 from app.services.visualization_engine import select_visualization
 
 logger = logging.getLogger(__name__)
@@ -449,9 +463,20 @@ def _card(
     tables: list[str] | None = None,
     documents: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    sql: str | None = None,
+    chart_type: str | None = None,
+    label_column: str | None = None,
+    value_column: str | None = None,
+    value_column_2: str | None = None,
+    insight_id: str | None = None,
+    result: dict[str, Any] | None = None,
+    explanation: dict[str, Any] | None = None,
+    method: str | None = None,
+    governance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
+        "insightId": insight_id or uuid.uuid4().hex,
         "projectId": str(project.id),
         "projectName": project.name,
         "projectColor": project_color(project.id),
@@ -464,6 +489,19 @@ def _card(
         "sources": {"tables": tables or [], "documents": documents or []},
         "executedAt": _now_iso(),
     }
+    # Persist the raw SQL and chart roles for data-backed cards so they can
+    # be saved as dashboard widgets. Only include non-empty values; narrative-only
+    # cards will omit these fields and remain ineligible for "Save to dashboard".
+    if sql:
+        card["sql"] = sql
+    if chart_type:
+        card["chartType"] = chart_type
+    if label_column:
+        card["labelColumn"] = label_column
+    if value_column:
+        card["valueColumn"] = value_column
+    if value_column_2:
+        card["valueColumn2"] = value_column_2
     # Backward-compatible optional metadata (confidenceScore, priorityScore,
     # insightMethod, validation, relationshipMetadata, ...). The frontend
     # ignores unknown keys, so this never affects the existing card layout.
@@ -471,6 +509,42 @@ def _card(
         for key, value in metadata.items():
             if value not in (None, "", [], {}):
                 card[key] = value
+
+    # Build a structured explanation from the actual analysis inputs. Callers can
+    # supply a pre-built explanation; otherwise it is derived from the SQL, chart,
+    # and sourceContext metadata already on the card.
+    if explanation is None:
+        ctx = (metadata or {}).get("sourceContext") or {}
+        fields = [c for c in (ctx.get("sourceColumns") or []) if c]
+        explanation = build_explanation(
+            project_id=project.id,
+            project_name=project.name,
+            insight_type=insight_type,
+            summary=summary,
+            chart=chart,
+            chart_type=chart_type,
+            label_column=label_column,
+            value_column=value_column,
+            value_column_2=value_column_2,
+            tables=tables,
+            fields=fields,
+            metric=ctx.get("metric") or value_column,
+            aggregation=ctx.get("aggregation"),
+            period_column=ctx.get("periodColumn") or label_column,
+            filters=ctx.get("filters"),
+            comparison=ctx.get("comparison"),
+            result=result,
+            sql=sql,
+            assumptions=ctx.get("assumptions"),
+            limitations=ctx.get("limitations"),
+            documents=documents,
+            generated_at=card["executedAt"],
+            method=method,
+            governance=governance,
+        ) or {}
+    if explanation:
+        card["explanation"] = explanation
+
     # M4 fast-follow (contract-only): stamp the shared ResponseEnvelope so a
     # Home card also emits the unified contract. The card keeps its bespoke
     # renderer; this is additive metadata (fail-closed) the UI ignores.
@@ -521,39 +595,8 @@ async def _sample_values(runner: QueryRunner, view_name: str) -> dict[str, str]:
     return samples
 
 
-_SLASH_DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/(\d{4}|\d{2})$")
-
-
-def _date_masks_from_samples(
-    samples_per_table: list[dict[str, str]]
-) -> dict[str, str]:
-    """Map each date column (by name) to a Teiid PARSETIMESTAMP mask.
-
-    Only columns whose example value is a slash date (e.g. ``"1/19/2026"``)
-    need a mask — ISO dates cast cleanly and are left alone.
-    """
-    masks: dict[str, str] = {}
-    for samples in samples_per_table:
-        for col, val in samples.items():
-            if col in masks:
-                continue
-            if _SLASH_DATE_RE.match(val):
-                year = val.rsplit("/", 1)[-1]
-                masks[col] = "M/d/yyyy" if len(year) == 4 else "M/d/yy"
-    return masks
-
-
-def _normalize_date_casts(sql: str, date_masks: dict[str, str]) -> str:
-    """Rewrite ``CAST("col" AS date|timestamp)`` to ``PARSETIMESTAMP("col",
-    'mask')`` for slash-date columns, so time-bucketed SQL runs on Teiid even
-    when the model casts a non-ISO text date (which Teiid rejects)."""
-    for col, mask in date_masks.items():
-        pat = re.compile(
-            r'CAST\(\s*"' + re.escape(col) + r'"\s+AS\s+(?:date|timestamp)\s*\)',
-            re.IGNORECASE,
-        )
-        sql = pat.sub(f"PARSETIMESTAMP(\"{col}\", '{mask}')", sql)
-    return sql
+# Timestamp/date normalization is shared with the query preview routes via
+# app.services.teiid_sql so all SQL execution paths behave consistently.
 
 
 async def _query_with_error(
@@ -619,6 +662,7 @@ async def _risk_sla(
 
     chart_data: list[dict] = []
     avg_recent: float | None = None
+    sql: str | None = None
     if runner is not None and period_col:
         sql = (
             f'SELECT "{period_col}" AS period, '
@@ -688,9 +732,15 @@ async def _risk_sla(
     return _card(
         project, "risk_sla", severity, title, summary,
         chart=chart, callout=callout, tables=[table.view_name],
+        sql=sql if chart else None,
+        chart_type="bar" if chart else None,
+        label_column="period" if chart else None,
+        value_column="avg_lead" if chart else None,
+        result=res,
         metadata={
             "sourceContext": {
                 "metric": lead_col,
+                "aggregation": "avg",
                 "periodColumn": period_col,
                 "sourceColumns": [
                     c for c in (lead_col, period_col, supplier_col) if c
@@ -800,9 +850,12 @@ async def _risk_measure_vs_threshold(
         return _card(
             project, "risk_threshold", severity, title, summary,
             chart=chart, callout=callout, tables=[t.view_name],
+            chart_type="bar",
+            result=res,
             metadata={
                 "sourceContext": {
                     "metric": measure_col,
+                    "aggregation": "COUNT",
                     "sourceColumns": [measure_col, threshold_col],
                 }
             },
@@ -818,11 +871,11 @@ async def _risk_status_breach(
         status_col = _match_col(t.column_names, _STATUS_KEYWORDS)
         if status_col is None:
             continue
-        res = await _safe_query(
-            runner,
+        sql = (
             f'SELECT "{status_col}" AS status, COUNT(*) AS n '
-            f'FROM "{t.view_name}" GROUP BY "{status_col}" ORDER BY n DESC',
+            f'FROM "{t.view_name}" GROUP BY "{status_col}" ORDER BY n DESC'
         )
+        res = await _safe_query(runner, sql)
         if not res or not res["rows"]:
             continue
         total = 0.0
@@ -865,9 +918,15 @@ async def _risk_status_breach(
         return _card(
             project, "risk_threshold", severity, title, summary,
             chart=chart, callout=callout, tables=[t.view_name],
+            sql=sql,
+            chart_type="bar",
+            label_column="status",
+            value_column="n",
+            result=res,
             metadata={
                 "sourceContext": {
                     "metric": status_col,
+                    "aggregation": "COUNT",
                     "sourceColumns": [status_col],
                 }
             },
@@ -927,6 +986,13 @@ async def _risk_expiry(
     return _card(
         project, "risk_expiry", severity, title, summary,
         documents=[name for name, _ in expiring],
+        result={
+            "columns": ["document", "expiry"],
+            "rows": [
+                {"document": name, "expiry": d.isoformat()}
+                for name, d in expiring
+            ],
+        },
     )
 
 
@@ -961,11 +1027,11 @@ async def _risk_upcoming(
     if table is None or date_col is None:
         _log_skip(project, "risk_upcoming", "no future-dated column")
         return None
-    res = await _safe_query(
-        runner,
+    sql = (
         f'SELECT "{date_col}" AS period, COUNT(*) AS n '
-        f'FROM "{table.view_name}" GROUP BY "{date_col}" ORDER BY "{date_col}"',
+        f'FROM "{table.view_name}" GROUP BY "{date_col}" ORDER BY "{date_col}"'
     )
+    res = await _safe_query(runner, sql)
     if not res or not res["rows"]:
         _log_skip(project, "risk_upcoming", "empty result")
         return None
@@ -1004,9 +1070,15 @@ async def _risk_upcoming(
     return _card(
         project, "risk_upcoming", severity, title, summary,
         chart=chart, tables=[table.view_name],
+        sql=sql,
+        chart_type="line",
+        label_column="period",
+        value_column="n",
+        result=res,
         metadata={
             "sourceContext": {
                 "metric": date_col,
+                "aggregation": "COUNT",
                 "periodColumn": date_col,
                 "sourceColumns": [date_col],
             }
@@ -1070,14 +1142,16 @@ async def _trend_metric(
             f'ORDER BY "{period_col}"'
         )
 
-    res = await _safe_query(runner, _trend_sql(agg_sql))
+    sql = _trend_sql(agg_sql)
+    res = await _safe_query(runner, sql)
     if (not res or not res["rows"]) and measure_col is not None:
         # The chosen column wasn't actually numeric — fall back to record volume
         # so a mis-typed measure never suppresses the trend entirely.
         measure_col = None
         metric_label = "Records"
         measure_phrase = "Record volume"
-        res = await _safe_query(runner, _trend_sql("COUNT(*)"))
+        sql = _trend_sql("COUNT(*)")
+        res = await _safe_query(runner, sql)
     if not res or not res["rows"]:
         return None
     series: list[dict] = []
@@ -1122,14 +1196,33 @@ async def _trend_metric(
         "title": f"{metric_label} over {period_col}",
         "data": {"series": recent},
     }
+    comparison = (
+        {
+            "type": "period_over_period",
+            "baselineValue": prev,
+            "currentValue": last,
+            "baselineLabel": series[-2]["label"],
+            "currentLabel": series[-1]["label"],
+            "field": measure_col or "Records",
+        }
+        if prev is not None
+        else None
+    )
     return _card(
         project, "trend_metric", severity, title, summary,
         chart=chart, tables=[table.view_name],
+        sql=sql,
+        chart_type="line",
+        label_column="period",
+        value_column="metric",
+        result=res,
         metadata={
             "sourceContext": {
                 "metric": measure_col or "",
+                "aggregation": "SUM" if measure_col else "COUNT",
                 "periodColumn": period_col,
                 "sourceColumns": [c for c in (measure_col, period_col) if c],
+                "comparison": comparison,
             }
         },
     )
@@ -1170,6 +1263,7 @@ async def _trend_spend(
         return None
 
     budget: float | None = None
+    pres: dict[str, Any] | None = None
     if budget_col and budget_col != amount_col:
         bres = await _safe_query(
             runner,
@@ -1232,12 +1326,16 @@ async def _trend_spend(
 
     title = "Spend tracking over budget" if severity == "urgent" else "Spend overview"
     chart = {"type": "kpi_grid", "title": "Spend", "data": {"kpis": kpis}}
+    result_for_card = pres if pres and len(pres.get("rows", [])) >= 2 else res
     return _card(
         project, "trend_spend", severity, title, summary,
         chart=chart, tables=[table.view_name],
+        chart_type="kpi_grid",
+        result=result_for_card,
         metadata={
             "sourceContext": {
                 "metric": amount_col,
+                "aggregation": "SUM",
                 "periodColumn": period_col,
                 "sourceColumns": [
                     c for c in (amount_col, budget_col, period_col) if c
@@ -1267,13 +1365,13 @@ async def _opportunity_supplier(
         return await _opportunity_top_performer(project, ctx, runner)
     table, cols = found
     supplier_col, metric_col = cols[0], cols[1]
-    res = await _safe_query(
-        runner,
+    sql = (
         f'SELECT "{supplier_col}" AS supplier, '
         f'AVG(CAST("{metric_col}" AS double)) AS metric '
         f'FROM "{table.view_name}" GROUP BY "{supplier_col}" '
-        f'ORDER BY metric DESC',
+        f'ORDER BY metric DESC'
     )
+    res = await _safe_query(runner, sql)
     if not res or not res["rows"]:
         return await _opportunity_top_performer(project, ctx, runner)
     top = [
@@ -1297,9 +1395,15 @@ async def _opportunity_supplier(
         project, "opportunity_supplier", "opportunity",
         f"{len(top)} top-performing suppliers identified", summary,
         callout=callout, tables=[table.view_name],
+        sql=sql,
+        chart_type="bar",
+        label_column="supplier",
+        value_column="metric",
+        result=res,
         metadata={
             "sourceContext": {
                 "metric": metric_col,
+                "aggregation": "AVG",
                 "sourceColumns": [
                     c for c in (supplier_col, metric_col) if c
                 ],
@@ -1327,12 +1431,12 @@ async def _opportunity_top_performer(
         measure_col = _measure_col(t, exclude=frozenset({dim_col}))
         if measure_col is None:
             continue
-        res = await _safe_query(
-            runner,
+        sql = (
             f'SELECT "{dim_col}" AS entity, '
             f'AVG(CAST("{measure_col}" AS double)) AS metric '
-            f'FROM "{t.view_name}" GROUP BY "{dim_col}" ORDER BY metric DESC',
+            f'FROM "{t.view_name}" GROUP BY "{dim_col}" ORDER BY metric DESC'
         )
+        res = await _safe_query(runner, sql)
         if not res or not res["rows"]:
             continue
         ranked: list[tuple[str, float]] = []
@@ -1368,9 +1472,15 @@ async def _opportunity_top_performer(
             project, "opportunity_performance", "opportunity",
             f"Top performers by {measure_col} identified", summary,
             chart=chart, callout=callout, tables=[t.view_name],
+            sql=sql,
+            chart_type="bar",
+            label_column="entity",
+            value_column="metric",
+            result=res,
             metadata={
                 "sourceContext": {
                     "metric": measure_col,
+                    "aggregation": "AVG",
                     "sourceColumns": [dim_col, measure_col],
                 }
             },
@@ -1392,6 +1502,10 @@ async def run_intelligence_suite(
     ctx: ProjectContext,
     prompt_types: list[str],
     runner: QueryRunner = None,
+    *,
+    session: AsyncSession | None = None,
+    tenant_id: int | None = None,
+    user_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Run the requested prompt types against a project's real data.
 
@@ -1412,6 +1526,27 @@ async def run_intelligence_suite(
         fn = _PROMPT_FUNCS.get(pt)
         if fn is None:
             continue
+
+        # Enforce tenant AI governance for built-in prompt types.  Each prompt is
+        # a deterministic expression of one analytical method; if that method is
+        # disabled for the tenant the prompt is skipped instead of fabricated.
+        if session is not None and tenant_id is not None:
+            method_key = infer_method(pt)
+            decision = await ai_governance_service.evaluate_method(
+                session,
+                tenant_id,
+                method_key,
+                project_id=project.id,
+                actor_user_id=user_id,
+            )
+            if not decision.allowed:
+                skipped.append(pt)
+                logger.debug(
+                    "home-intel generator | project=%s prompt=%s skipped by AI governance",
+                    project.id, pt,
+                )
+                continue
+
         try:
             card = await fn(project, ctx, runner)
         except Exception as exc:
@@ -1909,7 +2044,7 @@ async def plan_and_execute_widgets(
         }
         for t, samples in zip(ctx.tables, samples_per_table, strict=False)
     ]
-    date_masks = _date_masks_from_samples(samples_per_table)
+    date_masks = date_masks_from_samples(samples_per_table)
     documents = _plan_documents(ctx)
     relationship_hints = find_relationship_candidates(ctx.tables)
 
@@ -1933,7 +2068,7 @@ async def plan_and_execute_widgets(
         sql = (a.get("sql") or "").strip()
         if not sql:
             continue  # narrative/document finding — not a chartable widget
-        sql = _normalize_date_casts(sql, date_masks)
+        sql = normalize_date_casts(sql, date_masks)
         result, err = await _query_with_error(runner, sql)
         if result and result.get("rows"):
             executed.append({**a, "sql": sql, "result": result})
@@ -1958,7 +2093,7 @@ async def plan_and_execute_widgets(
         for (a, orig_sql, _err), fixed in zip(to_repair, fixes, strict=True):
             if not fixed or fixed.strip() == orig_sql.strip():
                 continue
-            fixed = _normalize_date_casts(fixed, date_masks)
+            fixed = normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
                 executed.append({**a, "sql": fixed, "result": result})
@@ -1966,11 +2101,73 @@ async def plan_and_execute_widgets(
     return executed
 
 
+# Analysis categories that map cleanly onto a declared engine intent. Risk and
+# opportunity carry no shape information, so the engine's own inference (which
+# reconciles keywords against the actual data profile) decides for those.
+_CATEGORY_INTENT_HINTS = {
+    "trend": "detect_trend",
+    "relationship": "relationship_numeric",
+}
+
+
+async def _attach_method_envelopes(
+    session: AsyncSession | None,
+    *,
+    tenant_id: int,
+    executed: list[dict[str, Any]],
+) -> None:
+    """Run the Analytical Method Engine over each executed analysis.
+
+    Attaches the governed envelope onto the executed item (HYBRID only) so
+    the card-building loop can surface it. Sequential on purpose: the engine
+    reads/writes through this AsyncSession, which is not safe for concurrent
+    use. Fail-closed per item — an engine problem never drops a card
+    (regression guard for the earlier 6->0 incidents).
+    """
+    if session is None:
+        return
+    mode = get_engine_mode()
+    if mode == EngineMode.OFF:
+        return
+    for item in executed:
+        a = item["analysis"]
+        result = item["result"]
+        if not result:
+            continue
+        question = " — ".join(
+            str(x) for x in (a.get("title"), a.get("rationale")) if x
+        )
+        try:
+            envelope = await analyze_methods(
+                session,
+                tenant_id=tenant_id,
+                columns=result.get("columns", []),
+                rows=result.get("rows", []),
+                question=question or str(a.get("category") or ""),
+                intent=_CATEGORY_INTENT_HINTS.get(str(a.get("category") or "")),
+            )
+        except Exception as exc:  # pragma: no cover - engine is fail-closed
+            logger.warning(
+                "Method engine skipped for analysis %s: %s", a.get("id"), exc
+            )
+            continue
+        # Attach only envelopes that actually selected a method — a
+        # "no_method" envelope on every thin aggregate would be card noise
+        # (it is still audited by the engine either way).
+        if (
+            mode == EngineMode.HYBRID
+            and envelope
+            and envelope.get("method") is not None
+        ):
+            item["method_envelope"] = envelope
+
+
 async def run_ai_intelligence(
     project: Project,
     ctx: ProjectContext,
     runner: QueryRunner,
     *,
+    session: AsyncSession | None = None,
     tenant_id: int,
     user_id: int,
     max_analyses: int = 15,
@@ -2017,7 +2214,7 @@ async def run_ai_intelligence(
     ]
     # Deterministic safety net: even if the model casts a non-ISO text date
     # (which Teiid rejects), rewrite it to PARSETIMESTAMP before executing.
-    date_masks = _date_masks_from_samples(samples_per_table)
+    date_masks = date_masks_from_samples(samples_per_table)
     documents = [
         {
             "title": d.title,
@@ -2101,7 +2298,7 @@ async def run_ai_intelligence(
     for a in analyses:
         sql = (a.get("sql") or "").strip()
         if sql:
-            sql = _normalize_date_casts(sql, date_masks)
+            sql = normalize_date_casts(sql, date_masks)
             result, err = await _query_with_error(runner, sql)
             if result and result.get("rows"):
                 _record_data_analysis(a, result)
@@ -2164,13 +2361,20 @@ async def run_ai_intelligence(
                 continue
             if not fixed or fixed.strip() == orig_sql.strip():
                 continue
-            fixed = _normalize_date_casts(fixed, date_masks)
+            fixed = normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
                 _record_data_analysis({**a, "sql": fixed}, result)
 
     if not executed:
         return []
+
+    # Governed statistical enrichment: real effect sizes / p-values / CIs from
+    # the Method Engine's executable Tier-1 methods, computed in-process
+    # over the rows each analysis already executed (no extra AI-server load).
+    await _attach_method_envelopes(
+        session, tenant_id=tenant_id, executed=executed
+    )
 
     # Interpret in small concurrent chunks so each LLM call stays fast and fits
     # the model context window (large single calls at Granular were the main
@@ -2310,10 +2514,30 @@ async def run_ai_intelligence(
             if relationship_meta:
                 confidence = min(confidence, relationship_meta["join_confidence"])
 
+        # A successfully executed method envelope carries a real quality
+        # verdict — prefer it over the row-count guess. (Engine quality
+        # vocabulary: "reliable", or "tentative" when usable n < 15.)
+        method_envelope = item.get("method_envelope")
+        if method_envelope and method_envelope.get("status") == "ok":
+            confidence = {"reliable": 0.9, "tentative": 0.6}.get(
+                str(method_envelope.get("quality")), confidence
+            )
+
+        source_context: dict[str, Any] = {
+            "metric": a.get("value_column") if result is not None else None,
+            "sourceColumns": list(result.get("columns", [])) if result is not None else [],
+        }
+        if a.get("chart_type") in ("line", "area"):
+            source_context["periodColumn"] = a.get("label_column")
+        if result is not None:
+            source_context["aggregation"] = "value"
+
         metadata: dict[str, Any] = {
             "insightMethod": method,
             "confidenceScore": round(float(confidence), 2),
+            "analyticalMethod": method_envelope,
             "validation": validation,
+            "sourceContext": {k: v for k, v in source_context.items() if v},
             "referenceDocuments": documents_used if uses_reference else [],
             "relationshipMetadata": {
                 "leftTable": relationship_meta["left_table"],
@@ -2331,6 +2555,32 @@ async def run_ai_intelligence(
             else {},
         }
 
+        insight_id = uuid.uuid4().hex
+        governance_method = infer_method(
+            f"{category}_{a['id']}",
+            chart_type=a.get("chart_type"),
+            sql=a.get("sql"),
+            documents=documents_used,
+            category=category,
+            method_id=method_envelope.get("method") if method_envelope else None,
+        )
+
+        effective_method: str | None = None
+        governance_decision = None
+        if session is not None:
+            decision = await ai_governance_service.evaluate_method(
+                session,
+                tenant_id,
+                governance_method,
+                project_id=project.id,
+                insight_id=insight_id,
+                actor_user_id=user_id,
+            )
+            if not decision.allowed:
+                continue
+            effective_method = decision.effective_method
+            governance_decision = decision
+
         cards.append(
             _card(
                 project,
@@ -2343,6 +2593,15 @@ async def run_ai_intelligence(
                 tables=tables,
                 documents=documents_used,
                 metadata=metadata,
+                result=result,
+                sql=(a.get("sql") if result is not None else None),
+                chart_type=(a.get("chart_type") if result is not None else None),
+                label_column=(a.get("label_column") if result is not None else None),
+                value_column=(a.get("value_column") if result is not None else None),
+                value_column_2=(a.get("value_column_2") if result is not None else None),
+                insight_id=insight_id,
+                method=effective_method,
+                governance=governance_decision.to_explanation_dict() if governance_decision else None,
             )
         )
 

@@ -14,6 +14,7 @@ import {
   IconDatabaseShare,
   IconPhoto,
   IconMathFunction,
+  IconBrain,
   IconUserCircle,
   IconLogout,
   IconLayoutSidebarLeftCollapse,
@@ -200,6 +201,12 @@ export function Sidebar({
           label: "Analytical Methods",
           href: "/admin/analytical-methods",
           icon: IconMathFunction,
+        },
+        {
+          key: "admin-ai-governance",
+          label: "AI Governance",
+          href: "/admin/ai-governance",
+          icon: IconBrain,
         },
       ]
     : [];

@@ -36,6 +36,71 @@ def _mock_supabase(monkeypatch):
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
 
 
+@pytest.fixture
+def _mock_scope_ai(monkeypatch):
+    """Stub out VDB resolution, Teiid, and the AI server for scope suggestions.
+
+    The scope-builder/ai-suggest route needs a configured VDB and live query
+    samples to validate AI suggestions. None of those are available in the
+    test environment, so this fixture provides deterministic in-memory fakes.
+    """
+    import app.routes.ai_proxy as ai_proxy
+    import app.routes.query as query_module
+    import app.services.tenant_teiid_resolver as ttr
+
+    class _Endpoint:
+        pg_host = "teiid"
+        pg_port = 35432
+
+    class _FakeResolver:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def resolve_for_org(self, _tenant_id: int):
+            return _Endpoint()
+
+    async def fake_resolve_vdb(*, session, context, project_id):
+        return "vdb_db"
+
+    async def fake_sample_query_values(*, sql, database, teiid_host=None, teiid_port=None):
+        return {
+            "CustomerID": {"1", "2", "3"},
+            "Region": {"East", "West"},
+            "Amount": {"100", "200"},
+            "Name": {"Alice", "Bob"},
+        }
+
+    async def fake_forward_to_ai(path: str, payload: dict):
+        q0 = payload["queries"][0]["id"]
+        q1 = payload["queries"][1]["id"]
+        return {
+            "model_used": "test-model",
+            "scopes": [
+                {
+                    "source_query_id": q0,
+                    "source_field": "CustomerID",
+                    "target_query_id": q1,
+                    "target_field": "CustomerID",
+                    "confidence": 0.95,
+                    "reason": "shared customer id",
+                },
+                {
+                    "source_query_id": q0,
+                    "source_field": "Region",
+                    "target_query_id": q1,
+                    "target_field": "Region",
+                    "confidence": 0.95,
+                    "reason": "shared region",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(query_module, "_resolve_vdb_database", fake_resolve_vdb)
+    monkeypatch.setattr(ttr, "TenantTeiidResolver", _FakeResolver)
+    monkeypatch.setattr(ai_proxy, "_sample_query_values", fake_sample_query_values)
+    monkeypatch.setattr(ai_proxy, "_forward_to_ai", fake_forward_to_ai)
+
+
 def _headers(tenant_id: int, user_id: int, role: str) -> dict:
     token = create_access_token(
         sub="u", tenant_id=tenant_id, user_id=user_id, role=role
@@ -198,7 +263,7 @@ async def test_save_and_load_scope_map(client, service_headers) -> None:
 
 
 async def test_scope_builder_tables_and_ai_suggest(
-    client, service_headers
+    client, service_headers, _mock_scope_ai, monkeypatch
 ) -> None:
     _tenant, owner_headers, project, queries = await _setup(
         client, service_headers
@@ -221,9 +286,41 @@ async def test_scope_builder_tables_and_ai_suggest(
     )
     set_id = r.json()["id"]
 
+    # The AI/VDB pipeline is unavailable in the test environment, so stub it
+    # to return deterministic relationship suggestions for the two queries.
+    import app.routes.ai_proxy as ai_proxy
+
+    qa, qb = queries[0]["id"], queries[1]["id"]
+
+    async def _fake_analyze(*, session, context, project_id, query_ids=None):
+        return [
+            {
+                "source_query_id": qa,
+                "source_query_name": "Sales",
+                "source_field": "CustomerID",
+                "target_query_id": qb,
+                "target_query_name": "Customers",
+                "target_field": "CustomerID",
+                "confidence": 0.95,
+                "reason": "Shared CustomerID values",
+            },
+            {
+                "source_query_id": qa,
+                "source_query_name": "Sales",
+                "source_field": "Region",
+                "target_query_id": qb,
+                "target_query_name": "Customers",
+                "target_field": "Region",
+                "confidence": 0.9,
+                "reason": "Shared Region values",
+            },
+        ], {}
+
+    monkeypatch.setattr(ai_proxy, "_analyze_project_scopes", _fake_analyze)
+
     r = await client.post(
         f"/api/scope_sets/{set_id}/ai-suggest",
-        json={"query_ids": [queries[0]["id"], queries[1]["id"]]},
+        json={"query_ids": [qa, qb]},
         headers=owner_headers,
     )
     assert r.status_code == 200, r.text
