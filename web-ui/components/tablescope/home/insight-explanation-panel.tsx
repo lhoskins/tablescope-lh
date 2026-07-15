@@ -111,6 +111,32 @@ function ExplanationContent({
           <Badge tone={confidenceTone}>{explanation.methodLabel || explanation.method}</Badge>
           <span className="text-[12px] text-ink-tertiary">{explanation.method}</span>
         </div>
+        {explanation.governance && (
+          <div
+            className={`mt-2 rounded-md p-2 text-[13px] ${
+              explanation.governance.decision === "fallback"
+                ? "bg-sky-50 text-sky-800"
+                : explanation.governance.decision === "blocked"
+                  ? "bg-rose-50 text-rose-800"
+                  : "bg-emerald-50 text-emerald-800"
+            }`}
+          >
+            <span className="font-medium">
+              {explanation.governance.decision === "allowed"
+                ? "Permitted"
+                : explanation.governance.decision === "fallback"
+                  ? "Fallback used"
+                  : "Blocked"}
+              :
+            </span>{" "}
+            {explanation.governance.message}
+            <div className="mt-1 text-[11px] text-ink-tertiary">
+              Requested {explanation.governance.requestedMethod} → effective{" "}
+              {explanation.governance.effectiveMethod} (policy v
+              {explanation.governance.policyVersion})
+            </div>
+          </div>
+        )}
       </Section>
 
       <Section title="Steps">

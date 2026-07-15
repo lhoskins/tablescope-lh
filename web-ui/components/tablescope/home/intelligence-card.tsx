@@ -233,11 +233,18 @@ export function IntelligenceCard({
             {renderBold(card.title)}
           </h3>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
-        >
-          {sev.label}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span
+            className={`rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
+          >
+            {sev.label}
+          </span>
+          {card.explanation?.governance?.decision === "fallback" && (
+            <span className="rounded-full bg-sky-50 px-2 py-0.5 text-small font-medium text-sky-700">
+              AI fallback
+            </span>
+          )}
+        </div>
       </header>
 
       <p className="mt-2 text-body text-ink-secondary">

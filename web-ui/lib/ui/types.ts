@@ -43,6 +43,7 @@ export type NavKey =
   | "admin-data-source-assignments"
   | "admin-branding"
   | "admin-analytical-methods"
+  | "admin-ai-governance"
   // Project-mode nav
   | "overview"
   | "project-data-sources"

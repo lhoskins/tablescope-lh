@@ -130,6 +130,14 @@ export interface InsightExplanation {
   limitations: string[];
   confidence: InsightExplanationConfidence;
   generatedAt: string;
+  governance?: {
+    requestedMethod: string;
+    effectiveMethod: string;
+    decision: "allowed" | "fallback" | "blocked";
+    policyVersion: number;
+    message: string;
+    evaluatedAt: string;
+  };
 }
 
 export interface InsightCard {
