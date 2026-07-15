@@ -43,6 +43,7 @@ function Section({
   emptyText,
   loading,
   onSaveToDashboard,
+  onPin,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -50,6 +51,7 @@ function Section({
   emptyText: string;
   loading: boolean;
   onSaveToDashboard?: (card: InsightCard) => void;
+  onPin?: (card: InsightCard) => void;
 }) {
   return (
     <InsightPanel title={title} icon={icon} collapsible count={cards.length}>
@@ -62,6 +64,7 @@ function Section({
               key={card.id}
               card={card}
               onSaveToDashboard={onSaveToDashboard}
+              onPin={onPin}
             />
           ))}
         </div>
@@ -70,7 +73,7 @@ function Section({
   );
 }
 
-export function IntelligenceFeed() {
+export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => void } = {}) {
   const { toasts, push: pushToast, dismiss } = useToasts();
   const [saveCard, setSaveCard] = useState<InsightCard | null>(null);
   const [status, setStatus] = useState<Status>("idle");
@@ -327,6 +330,7 @@ export function IntelligenceFeed() {
           emptyText="No risks detected from your projects yet."
           loading={running}
           onSaveToDashboard={handleSaveToDashboard}
+          onPin={onPin}
         />
         <Section
           title="Trends"
@@ -335,6 +339,7 @@ export function IntelligenceFeed() {
           emptyText="No trends detected from your projects yet."
           loading={running}
           onSaveToDashboard={handleSaveToDashboard}
+          onPin={onPin}
         />
         <Section
           title="Opportunities"
@@ -343,6 +348,7 @@ export function IntelligenceFeed() {
           emptyText="No opportunities detected from your projects yet."
           loading={running}
           onSaveToDashboard={handleSaveToDashboard}
+          onPin={onPin}
         />
 
         {pending.length > 0 && (
