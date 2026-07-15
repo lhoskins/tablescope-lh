@@ -21,17 +21,39 @@ import {
   type HomePin,
 } from "@/lib/api/home-pins";
 import type { InsightCard } from "@/lib/api/home-intelligence";
+import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
+import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 
 type HomePinItem = HomePin;
 
+function getPinInsightId(pin: HomePinItem): string {
+  const frozen = (pin.frozen_payload ?? pin.config ?? {}) as {
+    insightId?: string;
+    id?: string;
+  };
+  return frozen.insightId || frozen.id || pin.pin_key;
+}
+
 function PinCard({
   pin,
+  feedback,
+  savingFeedback,
   onUnpin,
   onRefresh,
+  onFeedbackSave,
+  onFeedbackRemove,
 }: {
   pin: HomePinItem;
+  feedback?: InsightFeedbackRecord | null;
+  savingFeedback?: boolean;
   onUnpin: (pin: HomePinItem) => void;
   onRefresh: (pin: HomePinItem) => void;
+  onFeedbackSave?: (pin: HomePinItem, payload: {
+    sentiment: "agree" | "disagree";
+    reason_codes: string[];
+    comment: string;
+  }) => void;
+  onFeedbackRemove?: (pin: HomePinItem) => void;
 }) {
   const isLive = pin.pin_type === "live_widget";
   return (
@@ -65,7 +87,13 @@ function PinCard({
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
-        <PinContent pin={pin} />
+        <PinContent
+          pin={pin}
+          feedback={feedback}
+          savingFeedback={savingFeedback}
+          onFeedbackSave={onFeedbackSave}
+          onFeedbackRemove={onFeedbackRemove}
+        />
       </div>
       {pin.refresh_error && (
         <div className="px-3 py-1.5 text-[11px] text-red-600">
@@ -76,7 +104,23 @@ function PinCard({
   );
 }
 
-function PinContent({ pin }: { pin: HomePinItem }) {
+function PinContent({
+  pin,
+  feedback,
+  savingFeedback,
+  onFeedbackSave,
+  onFeedbackRemove,
+}: {
+  pin: HomePinItem;
+  feedback?: InsightFeedbackRecord | null;
+  savingFeedback?: boolean;
+  onFeedbackSave?: (pin: HomePinItem, payload: {
+    sentiment: "agree" | "disagree";
+    reason_codes: string[];
+    comment: string;
+  }) => void;
+  onFeedbackRemove?: (pin: HomePinItem) => void;
+}) {
   if (pin.pin_type === "insight_card") {
     const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
     if (!card.title) {
@@ -84,7 +128,21 @@ function PinContent({ pin }: { pin: HomePinItem }) {
         <div className="text-small text-ink-tertiary">Insight snapshot unavailable</div>
       );
     }
-    return <IntelligenceCard card={card} hideActions />;
+    return (
+      <IntelligenceCard
+        card={card}
+        hideActions
+        frozen
+        feedback={feedback}
+        savingFeedback={savingFeedback}
+        onFeedbackSave={
+          onFeedbackSave ? (payload) => onFeedbackSave(pin, payload) : undefined
+        }
+        onFeedbackRemove={
+          onFeedbackRemove ? () => onFeedbackRemove(pin) : undefined
+        }
+      />
+    );
   }
 
   const widget = (pin.config?.widget ?? {}) as unknown as WidgetConfig;
@@ -107,6 +165,58 @@ export function HomePinsGrid() {
     queryKey: ["home-pins"],
     queryFn: getHomePins,
   });
+
+  const insightCardPins = useMemo(
+    () =>
+      pins.filter(
+        (p) =>
+          p.pin_type === "insight_card" &&
+          (p.frozen_payload ?? p.config)?.title,
+      ),
+    [pins],
+  );
+  const insightIds = useMemo(
+    () => insightCardPins.map(getPinInsightId),
+    [insightCardPins],
+  );
+  const {
+    feedbackById,
+    saveFeedback,
+    removeFeedback,
+    saving: savingFeedback,
+  } = useInsightFeedback(insightIds);
+
+  const handleFeedbackSave = (
+    pin: HomePinItem,
+    payload: {
+      sentiment: "agree" | "disagree";
+      reason_codes: string[];
+      comment: string;
+    },
+  ) => {
+    const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
+    const insightId = card.insightId || card.id;
+    const projectId = pin.project_id ?? Number(card.projectId);
+    if (!insightId || !projectId) return;
+    void saveFeedback({
+      insightId,
+      projectId,
+      insightType: card.insightType,
+      sentiment: payload.sentiment,
+      reason_codes: payload.reason_codes,
+      comment: payload.comment,
+      cardSnapshot: card as unknown as Record<string, unknown>,
+      explanationSnapshot: card.explanation as unknown as Record<string, unknown> | undefined,
+    });
+  };
+
+  const handleFeedbackRemove = (pin: HomePinItem) => {
+    const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
+    const insightId = card.insightId || card.id;
+    const projectId = pin.project_id ?? Number(card.projectId);
+    if (!insightId || !projectId) return;
+    void removeFeedback({ insightId, projectId });
+  };
 
   const [optimisticLayout, setOptimisticLayout] = useState<LayoutItem[] | null>(null);
 
@@ -206,15 +316,22 @@ export function HomePinsGrid() {
         resizeConfig={{ enabled: true }}
         width={1200}
       >
-        {pins.map((pin) => (
-          <div key={pin.id}>
-            <PinCard
-              pin={pin}
-              onUnpin={(p) => deleteMutation.mutate(p)}
-              onRefresh={() => refreshMutation.mutate()}
-            />
-          </div>
-        ))}
+        {pins.map((pin) => {
+          const insightId = getPinInsightId(pin);
+          return (
+            <div key={pin.id}>
+              <PinCard
+                pin={pin}
+                feedback={feedbackById[insightId]}
+                savingFeedback={savingFeedback}
+                onUnpin={(p) => deleteMutation.mutate(p)}
+                onRefresh={() => refreshMutation.mutate()}
+                onFeedbackSave={handleFeedbackSave}
+                onFeedbackRemove={handleFeedbackRemove}
+              />
+            </div>
+          );
+        })}
       </ResponsiveGridLayout>
     </div>
   );
