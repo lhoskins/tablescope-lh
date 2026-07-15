@@ -164,7 +164,7 @@ async def create_conversation(
     req: CreateConversationRequest,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> AnalyticsConversation:
+) -> ConversationResponse:
     """Create a new conversation. If an initial message is provided, run the first turn."""
     if req.project_id is not None:
         await _check_project_access(session, context, req.project_id)
@@ -215,7 +215,7 @@ async def list_conversations(
     project_id: int | None = None,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> list[AnalyticsConversation]:
+) -> list[ConversationSummary]:
     """List the current user's conversations, optionally filtered by project."""
     stmt = select(AnalyticsConversation).where(
         AnalyticsConversation.tenant_id == context.tenant_id,
@@ -244,7 +244,7 @@ async def get_conversation(
     conversation_id: int,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> AnalyticsConversation:
+) -> ConversationResponse:
     """Return a conversation with its ordered turns and bounded result caches."""
     conversation = await _load_conversation(session, context, conversation_id, with_turns=True)
     return _conversation_to_response(conversation)
@@ -347,7 +347,7 @@ async def update_conversation(
     req: RenameConversationRequest,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> AnalyticsConversation:
+) -> ConversationResponse:
     """Rename or archive a conversation."""
     conversation = await _load_conversation(session, context, conversation_id, with_turns=True)
     conversation.title = req.title

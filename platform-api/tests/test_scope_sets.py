@@ -263,7 +263,7 @@ async def test_save_and_load_scope_map(client, service_headers) -> None:
 
 
 async def test_scope_builder_tables_and_ai_suggest(
-    client, service_headers, _mock_scope_ai
+    client, service_headers, _mock_scope_ai, monkeypatch
 ) -> None:
     _tenant, owner_headers, project, queries = await _setup(
         client, service_headers
