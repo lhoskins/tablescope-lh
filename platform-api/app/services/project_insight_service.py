@@ -38,6 +38,7 @@ from app.schemas.project_insight import (
 )
 from app.services import ai_intelligence_client as ai
 from app.services import home_intelligence as hi
+from app.services.ai_governance import ai_governance_service, infer_governance_key
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
@@ -122,10 +123,26 @@ async def _partition_questions(
             )
             answerable.append(item)
             continue
-        if result.status == "resolved":
-            answerable.append(item)
-        else:
+        if result.status != "resolved":
             needs_data.append({**item, "missingDataHint": _missing_data_hint(result)})
+            continue
+
+        # Filter suggested questions whose analytical method is disabled for the
+        # tenant.  These are surfaced in the "needs data" bucket with a governance
+        # hint instead of being offered as clickable follow-ups.
+        method_key = infer_governance_key(question=question)
+        decision = await ai_governance_service.evaluate_method(
+            session, tenant_id, method_key, project_id=project_id, record=False
+        )
+        if not decision.allowed:
+            needs_data.append({
+                **item,
+                "missingDataHint": decision.user_message,
+                "governanceBlocked": True,
+            })
+        else:
+            answerable.append({**item, "governance": decision.to_explanation_dict()})
+
     return answerable, needs_data
 
 
@@ -238,6 +255,10 @@ async def _grouped_intelligence_cards(
     project: Project,
     ctx: hi.ProjectContext,
     runner: Any,
+    *,
+    session: AsyncSession | None = None,
+    tenant_id: int | None = None,
+    user_id: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Generate Business Insight-style cards grouped by risk/trend/opportunity.
 
@@ -251,9 +272,20 @@ async def _grouped_intelligence_cards(
         "opportunities": [],
     }
     try:
-        cards = await hi.run_intelligence_suite(
-            project, ctx, hi.ALL_PROMPT_TYPES, runner
-        )
+        if session is not None:
+            cards = await hi.run_intelligence_suite(
+                project,
+                ctx,
+                hi.ALL_PROMPT_TYPES,
+                runner,
+                session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+        else:
+            cards = await hi.run_intelligence_suite(
+                project, ctx, hi.ALL_PROMPT_TYPES, runner
+            )
     except Exception as exc:
         logger.warning(
             "project insight cards failed for project %s: %s", project.id, exc
@@ -359,7 +391,9 @@ async def build_project_insight(
     )
 
     ctx = await hi.gather_project_context(session, project)
-    grouped_cards = await _grouped_intelligence_cards(project, ctx, runner)
+    grouped_cards = await _grouped_intelligence_cards(
+        project, ctx, runner, session=session, tenant_id=tenant_id, user_id=user_id
+    )
     tables_payload = [
         {
             "name": t.view_name,

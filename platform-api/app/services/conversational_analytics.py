@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext
 from app.models.analytics_conversation import AnalyticsConversation, AnalyticsConversationTurn
 from app.routes.ai_proxy import _ask_and_run_core
+from app.services.ai_governance import ai_governance_service, infer_governance_key
 
 logger = logging.getLogger(__name__)
 
@@ -298,14 +299,22 @@ def apply_chart_change(chart_config: dict[str, Any], result: dict[str, Any], ins
     return new_config, message
 
 
-def _build_explanation(sql: str | None, result: dict[str, Any] | None, chart_config: dict[str, Any] | None) -> dict[str, Any]:
-    return {
+def _build_explanation(
+    sql: str | None,
+    result: dict[str, Any] | None,
+    chart_config: dict[str, Any] | None,
+    governance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    exp: dict[str, Any] = {
         "sql": sql,
         "rowCount": (result or {}).get("rowCount") if result else None,
         "columns": (result or {}).get("columns") if result else None,
         "chartType": (chart_config or {}).get("type"),
         "generatedAt": datetime.now(UTC).isoformat(),
     }
+    if governance:
+        exp["governance"] = governance
+    return exp
 
 
 async def _run_analytical_turn(
@@ -409,6 +418,24 @@ async def execute_turn(
         turn.assistant_message = "This conversation is not attached to a project."
         return
 
+    # Pre-execution governance check: block obvious high-risk or disabled methods
+    # before any SQL is generated for this turn.
+    pre_method = infer_governance_key(question=question)
+    pre_decision = await ai_governance_service.evaluate_method(
+        session,
+        context.tenant_id,
+        pre_method,
+        project_id=project_id,
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        actor_user_id=context.user_id,
+    )
+    if not pre_decision.allowed:
+        turn.status = "error"
+        turn.error_code = "ai_governance_blocked"
+        turn.assistant_message = pre_decision.user_message
+        return
+
     run = await _run_analytical_turn(
         session, context, project_id, question, prior_turn, datasource_id
     )
@@ -437,10 +464,35 @@ async def execute_turn(
     }
     chart_config = _build_chart_config(run.get("suggestedVisualization"), columns, bounded_rows)
 
+    # Post-execution governance check against the generated SQL/chart.  If the AI
+    # produced a disabled analytical method, surface a governed message instead of
+    # the result.
+    post_method = infer_governance_key(
+        question=question,
+        chart_type=chart_config.get("type"),
+        sql=turn.sql,
+    )
+    post_decision = await ai_governance_service.evaluate_method(
+        session,
+        context.tenant_id,
+        post_method,
+        project_id=project_id,
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        actor_user_id=context.user_id,
+    )
+    if not post_decision.allowed:
+        turn.status = "error"
+        turn.error_code = "ai_governance_blocked"
+        turn.assistant_message = post_decision.user_message
+        return
+
     turn.result_cache = result_cache
     turn.result_metadata = profile
     turn.chart_config = chart_config
-    turn.explanation = _build_explanation(turn.sql, result_cache, chart_config)
+    turn.explanation = _build_explanation(
+        turn.sql, result_cache, chart_config, governance=post_decision.to_explanation_dict()
+    )
     turn.datasource_context = {"dataSourcesUsed": run.get("dataSourcesUsed", [])}
     turn.assistant_message = run.get("explanation") or "Here is the result."
     turn.status = "success"

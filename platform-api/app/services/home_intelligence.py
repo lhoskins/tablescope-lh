@@ -39,6 +39,7 @@ from app.models.reference_library import (
     TIER_PROJECT,
     ReferenceDocument,
 )
+from app.services.ai_governance import ai_governance_service
 from app.services.analytical_method_engine import (
     EngineMode,
     get_engine_mode,
@@ -47,7 +48,7 @@ from app.services.analytical_method_engine import (
     analyze as analyze_methods,
 )
 from app.services.evidence_severity import gate_severity
-from app.services.insight_explanation import build_explanation
+from app.services.insight_explanation import build_explanation, infer_method
 from app.services.presentation_engine import PresentationMode
 from app.services.prompt_loader import load_prompt_reference
 from app.services.response_envelope import attach_envelope
@@ -470,6 +471,8 @@ def _card(
     insight_id: str | None = None,
     result: dict[str, Any] | None = None,
     explanation: dict[str, Any] | None = None,
+    method: str | None = None,
+    governance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
@@ -536,6 +539,8 @@ def _card(
             limitations=ctx.get("limitations"),
             documents=documents,
             generated_at=card["executedAt"],
+            method=method,
+            governance=governance,
         ) or {}
     if explanation:
         card["explanation"] = explanation
@@ -1497,6 +1502,10 @@ async def run_intelligence_suite(
     ctx: ProjectContext,
     prompt_types: list[str],
     runner: QueryRunner = None,
+    *,
+    session: AsyncSession | None = None,
+    tenant_id: int | None = None,
+    user_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Run the requested prompt types against a project's real data.
 
@@ -1517,6 +1526,27 @@ async def run_intelligence_suite(
         fn = _PROMPT_FUNCS.get(pt)
         if fn is None:
             continue
+
+        # Enforce tenant AI governance for built-in prompt types.  Each prompt is
+        # a deterministic expression of one analytical method; if that method is
+        # disabled for the tenant the prompt is skipped instead of fabricated.
+        if session is not None and tenant_id is not None:
+            method_key = infer_method(pt)
+            decision = await ai_governance_service.evaluate_method(
+                session,
+                tenant_id,
+                method_key,
+                project_id=project.id,
+                actor_user_id=user_id,
+            )
+            if not decision.allowed:
+                skipped.append(pt)
+                logger.debug(
+                    "home-intel generator | project=%s prompt=%s skipped by AI governance",
+                    project.id, pt,
+                )
+                continue
+
         try:
             card = await fn(project, ctx, runner)
         except Exception as exc:
@@ -2525,6 +2555,32 @@ async def run_ai_intelligence(
             else {},
         }
 
+        insight_id = uuid.uuid4().hex
+        governance_method = infer_method(
+            f"{category}_{a['id']}",
+            chart_type=a.get("chart_type"),
+            sql=a.get("sql"),
+            documents=documents_used,
+            category=category,
+            method_id=method_envelope.get("method") if method_envelope else None,
+        )
+
+        effective_method: str | None = None
+        governance_decision = None
+        if session is not None:
+            decision = await ai_governance_service.evaluate_method(
+                session,
+                tenant_id,
+                governance_method,
+                project_id=project.id,
+                insight_id=insight_id,
+                actor_user_id=user_id,
+            )
+            if not decision.allowed:
+                continue
+            effective_method = decision.effective_method
+            governance_decision = decision
+
         cards.append(
             _card(
                 project,
@@ -2543,6 +2599,9 @@ async def run_ai_intelligence(
                 label_column=(a.get("label_column") if result is not None else None),
                 value_column=(a.get("value_column") if result is not None else None),
                 value_column_2=(a.get("value_column_2") if result is not None else None),
+                insight_id=insight_id,
+                method=effective_method,
+                governance=governance_decision.to_explanation_dict() if governance_decision else None,
             )
         )
 
