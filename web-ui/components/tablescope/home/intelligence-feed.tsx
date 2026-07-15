@@ -19,6 +19,8 @@ import {
   type ProjectResult,
   type StreamProject,
 } from "@/lib/api/home-intelligence";
+import { SaveInsightToDashboardModal } from "./save-insight-to-dashboard-modal";
+import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import {
   IntelligenceCard,
@@ -40,12 +42,14 @@ function Section({
   cards,
   emptyText,
   loading,
+  onSaveToDashboard,
 }: {
   title: string;
   icon: React.ReactNode;
   cards: InsightCard[];
   emptyText: string;
   loading: boolean;
+  onSaveToDashboard?: (card: InsightCard) => void;
 }) {
   return (
     <InsightPanel title={title} icon={icon} collapsible count={cards.length}>
@@ -54,7 +58,11 @@ function Section({
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {cards.map((card) => (
-            <IntelligenceCard key={card.id} card={card} />
+            <IntelligenceCard
+              key={card.id}
+              card={card}
+              onSaveToDashboard={onSaveToDashboard}
+            />
           ))}
         </div>
       )}
@@ -63,6 +71,8 @@ function Section({
 }
 
 export function IntelligenceFeed() {
+  const { toasts, push: pushToast, dismiss } = useToasts();
+  const [saveCard, setSaveCard] = useState<InsightCard | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [projects, setProjects] = useState<StreamProject[]>([]);
   const [results, setResults] = useState<Record<string, ProjectResult>>({});
@@ -271,6 +281,18 @@ export function IntelligenceFeed() {
     startStream(settings?.cross_project ?? true, granularity, hasCards);
   };
 
+  const handleSaveToDashboard = useCallback((card: InsightCard) => {
+    setSaveCard(card);
+  }, []);
+
+  const handleSaved = useCallback(
+    (_dashboardId: number, dashboardName: string) => {
+      pushToast(`Saved to dashboard "${dashboardName}"`, "success");
+      setSaveCard(null);
+    },
+    [pushToast],
+  );
+
   const empty =
     status === "complete" && allInsights.length === 0 && projects.length === 0;
 
@@ -304,6 +326,7 @@ export function IntelligenceFeed() {
           cards={risks}
           emptyText="No risks detected from your projects yet."
           loading={running}
+          onSaveToDashboard={handleSaveToDashboard}
         />
         <Section
           title="Trends"
@@ -311,6 +334,7 @@ export function IntelligenceFeed() {
           cards={trends}
           emptyText="No trends detected from your projects yet."
           loading={running}
+          onSaveToDashboard={handleSaveToDashboard}
         />
         <Section
           title="Opportunities"
@@ -318,6 +342,7 @@ export function IntelligenceFeed() {
           cards={opportunities}
           emptyText="No opportunities detected from your projects yet."
           loading={running}
+          onSaveToDashboard={handleSaveToDashboard}
         />
 
         {pending.length > 0 && (
@@ -343,6 +368,17 @@ export function IntelligenceFeed() {
             </div>
           )}
       </div>
+
+      {saveCard && (
+        <SaveInsightToDashboardModal
+          card={saveCard}
+          open={true}
+          onClose={() => setSaveCard(null)}
+          onSaved={handleSaved}
+        />
+      )}
+
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }

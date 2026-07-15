@@ -423,7 +423,35 @@ export function saveDashboardSuggestion(body: {
     explanation?: string;
     labelColumn?: string;
     valueColumn?: string;
+    valueColumn2?: string;
   }[];
 }): Promise<{ status: string; dashboard_id: number; name: string }> {
   return apiClient.post("/api/ai/home/save-dashboard", body);
+}
+
+export interface SaveCardToDashboardPayload {
+  project_id: number;
+  dashboard_id?: number | null;
+  dashboard_name?: string | null;
+  title: string;
+  sql: string;
+  chartType: string;
+  labelColumn?: string | null;
+  valueColumn?: string | null;
+  valueColumn2?: string | null;
+}
+
+export interface SaveCardToDashboardResponse {
+  status: string;
+  dashboard_id: number;
+  name: string;
+  project_id: number;
+  query_id: number;
+  widget_id: string;
+}
+
+export function saveCardToDashboard(
+  body: SaveCardToDashboardPayload,
+): Promise<SaveCardToDashboardResponse> {
+  return apiClient.post("/api/ai/home/save-card-to-dashboard", body);
 }

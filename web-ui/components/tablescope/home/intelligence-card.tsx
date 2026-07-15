@@ -3,7 +3,10 @@
 import { Fragment, type ReactNode } from "react";
 import {
   IconChevronRight,
+  IconDeviceFloppy,
   IconFileText,
+  IconLayoutDashboard,
+  IconPinnedOff,
   IconPlus,
   IconTable,
 } from "@tabler/icons-react";
@@ -163,14 +166,23 @@ export interface IntelligenceCardProps {
   /** Hide the "Add to report" action (e.g. inside the report viewer). */
   hideActions?: boolean;
   onAddToReport?: (card: InsightCardData) => void;
+  onPin?: (card: InsightCardData) => void;
+  onUnpin?: (card: InsightCardData) => void;
+  onSaveToDashboard?: (card: InsightCardData) => void;
+  pinned?: boolean;
 }
 
 export function IntelligenceCard({
   card,
   hideActions,
   onAddToReport,
+  onPin,
+  onUnpin,
+  onSaveToDashboard,
+  pinned,
 }: IntelligenceCardProps) {
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.info;
+  const canSaveToDashboard = Boolean(card.sql?.trim());
   const tables = card.sources?.tables ?? [];
   const documents = card.sources?.documents ?? [];
 
@@ -252,14 +264,48 @@ export function IntelligenceCard({
             </span>
           ))}
         </div>
-        {!hideActions && onAddToReport && (
-          <button
-            type="button"
-            onClick={() => onAddToReport(card)}
-            className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-          >
-            <IconPlus size={14} /> Add to report
-          </button>
+        {!hideActions && (
+          <div className="flex flex-wrap items-center gap-2">
+            {canSaveToDashboard && onSaveToDashboard && (
+              <button
+                type="button"
+                onClick={() => onSaveToDashboard(card)}
+                className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+              >
+                <IconDeviceFloppy size={14} />
+                Save to dashboard
+              </button>
+            )}
+            {onPin && !pinned && (
+              <button
+                type="button"
+                onClick={() => onPin(card)}
+                className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+              >
+                <IconLayoutDashboard size={14} />
+                Pin to Home
+              </button>
+            )}
+            {onUnpin && pinned && (
+              <button
+                type="button"
+                onClick={() => onUnpin(card)}
+                className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+              >
+                <IconPinnedOff size={14} />
+                Unpin
+              </button>
+            )}
+            {onAddToReport && (
+              <button
+                type="button"
+                onClick={() => onAddToReport(card)}
+                className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+              >
+                <IconPlus size={14} /> Add to report
+              </button>
+            )}
+          </div>
         )}
       </footer>
     </article>
