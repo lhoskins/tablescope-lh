@@ -9,7 +9,6 @@ import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
 import { HeroSearch } from "@/components/tablescope/home/hero-search";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
-import { HomePinsGrid } from "@/components/tablescope/home/home-pins-grid";
 import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
 import { getUserMeta } from "@/lib/auth";
 import { greeting } from "@/lib/ui/format";
@@ -111,7 +110,6 @@ export default function BusinessInsightPage() {
           <HeroSearch />
           <HomeAiSuggestions />
         </div>
-        <HomePinsGrid />
         <IntelligenceFeed onPin={handlePinInsight} />
       </div>
 

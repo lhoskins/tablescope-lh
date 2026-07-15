@@ -3,9 +3,9 @@
 import { Fragment, type ReactNode } from "react";
 import {
   IconChevronRight,
-  IconDeviceFloppy,
   IconFileText,
   IconLayoutDashboard,
+  IconPin,
   IconPinnedOff,
   IconPlus,
   IconTable,
@@ -182,7 +182,9 @@ export function IntelligenceCard({
   pinned,
 }: IntelligenceCardProps) {
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.info;
-  const canSaveToDashboard = Boolean(card.sql?.trim());
+  const canSaveToDashboard = Boolean(
+    card.sql?.trim() && card.valueColumn?.trim(),
+  );
   const tables = card.sources?.tables ?? [];
   const documents = card.sources?.documents ?? [];
 
@@ -266,14 +268,20 @@ export function IntelligenceCard({
         </div>
         {!hideActions && (
           <div className="flex flex-wrap items-center gap-2">
-            {canSaveToDashboard && onSaveToDashboard && (
+            {onSaveToDashboard && (
               <button
                 type="button"
+                disabled={!canSaveToDashboard}
+                title={
+                  canSaveToDashboard
+                    ? "Add this insight to a project dashboard"
+                    : "This insight does not have query data and cannot be added to a dashboard"
+                }
                 onClick={() => onSaveToDashboard(card)}
-                className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+                className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <IconDeviceFloppy size={14} />
-                Save to dashboard
+                <IconLayoutDashboard size={14} />
+                Add to dashboard
               </button>
             )}
             {onPin && !pinned && (
@@ -282,7 +290,7 @@ export function IntelligenceCard({
                 onClick={() => onPin(card)}
                 className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
               >
-                <IconLayoutDashboard size={14} />
+                <IconPin size={14} />
                 Pin to Home
               </button>
             )}

@@ -1080,6 +1080,7 @@ async def save_card_to_dashboard(
     )
 
     if dashboard is None:
+        assert req.dashboard_name is not None
         widget_id = f"ai_widget_0_{int(datetime.now(UTC).timestamp() * 1000) % 100000}"
         widget_config = dw.build_widget_config(
             title=req.title,
