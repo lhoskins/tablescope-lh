@@ -10,6 +10,7 @@ from app.models.ai_conversation import (
     AiConversation,
     AiConversationMessage,
 )
+from app.models.ai_governance_audit import AIGovernanceAuditEvent
 from app.models.ai_project_graph import AIProjectGraphEdge, AIProjectGraphNode
 from app.models.ai_reference_catalog import (
     AIReferenceCatalog,
@@ -85,6 +86,10 @@ from app.models.scope_canvas_layout import ScopeCanvasLayout
 from app.models.scope_set import ScopeSet
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant, TenantAllowedDomain
+from app.models.tenant_ai_governance import (
+    TenantAIGovernancePolicy,
+    TenantAIMethodPolicy,
+)
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
 from app.models.tenant_membership import TenantAuthBinding, TenantMembership
 from app.models.user import User
@@ -93,6 +98,7 @@ from app.models.user_vdb import UserVDB
 __all__ = [
     "AIProjectGraphEdge",
     "AIProjectGraphNode",
+    "AIGovernanceAuditEvent",
     "AnalyticsConversation",
     "AnalyticsConversationTurn",
     "AiConversation",
@@ -158,6 +164,8 @@ __all__ = [
     "SharedVDB",
     "Tenant",
     "TenantAllowedDomain",
+    "TenantAIGovernancePolicy",
+    "TenantAIMethodPolicy",
     "TenantDataPlane",
     "TenantSecretRef",
     "TenantAuthBinding",
