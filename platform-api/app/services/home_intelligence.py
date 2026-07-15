@@ -460,6 +460,11 @@ def _card(
     tables: list[str] | None = None,
     documents: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    sql: str | None = None,
+    chart_type: str | None = None,
+    label_column: str | None = None,
+    value_column: str | None = None,
+    value_column_2: str | None = None,
 ) -> dict[str, Any]:
     card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
@@ -475,6 +480,19 @@ def _card(
         "sources": {"tables": tables or [], "documents": documents or []},
         "executedAt": _now_iso(),
     }
+    # Persist the raw SQL and chart roles for data-backed cards so they can
+    # be saved as dashboard widgets. Only include non-empty values; narrative-only
+    # cards will omit these fields and remain ineligible for "Save to dashboard".
+    if sql:
+        card["sql"] = sql
+    if chart_type:
+        card["chartType"] = chart_type
+    if label_column:
+        card["labelColumn"] = label_column
+    if value_column:
+        card["valueColumn"] = value_column
+    if value_column_2:
+        card["valueColumn2"] = value_column_2
     # Backward-compatible optional metadata (confidenceScore, priorityScore,
     # insightMethod, validation, relationshipMetadata, ...). The frontend
     # ignores unknown keys, so this never affects the existing card layout.
@@ -599,6 +617,7 @@ async def _risk_sla(
 
     chart_data: list[dict] = []
     avg_recent: float | None = None
+    sql: str | None = None
     if runner is not None and period_col:
         sql = (
             f'SELECT "{period_col}" AS period, '
@@ -668,6 +687,10 @@ async def _risk_sla(
     return _card(
         project, "risk_sla", severity, title, summary,
         chart=chart, callout=callout, tables=[table.view_name],
+        sql=sql if chart else None,
+        chart_type="bar" if chart else None,
+        label_column="period" if chart else None,
+        value_column="avg_lead" if chart else None,
         metadata={
             "sourceContext": {
                 "metric": lead_col,
@@ -798,11 +821,11 @@ async def _risk_status_breach(
         status_col = _match_col(t.column_names, _STATUS_KEYWORDS)
         if status_col is None:
             continue
-        res = await _safe_query(
-            runner,
+        sql = (
             f'SELECT "{status_col}" AS status, COUNT(*) AS n '
-            f'FROM "{t.view_name}" GROUP BY "{status_col}" ORDER BY n DESC',
+            f'FROM "{t.view_name}" GROUP BY "{status_col}" ORDER BY n DESC'
         )
+        res = await _safe_query(runner, sql)
         if not res or not res["rows"]:
             continue
         total = 0.0
@@ -845,6 +868,10 @@ async def _risk_status_breach(
         return _card(
             project, "risk_threshold", severity, title, summary,
             chart=chart, callout=callout, tables=[t.view_name],
+            sql=sql,
+            chart_type="bar",
+            label_column="status",
+            value_column="n",
             metadata={
                 "sourceContext": {
                     "metric": status_col,
@@ -941,11 +968,11 @@ async def _risk_upcoming(
     if table is None or date_col is None:
         _log_skip(project, "risk_upcoming", "no future-dated column")
         return None
-    res = await _safe_query(
-        runner,
+    sql = (
         f'SELECT "{date_col}" AS period, COUNT(*) AS n '
-        f'FROM "{table.view_name}" GROUP BY "{date_col}" ORDER BY "{date_col}"',
+        f'FROM "{table.view_name}" GROUP BY "{date_col}" ORDER BY "{date_col}"'
     )
+    res = await _safe_query(runner, sql)
     if not res or not res["rows"]:
         _log_skip(project, "risk_upcoming", "empty result")
         return None
@@ -984,6 +1011,10 @@ async def _risk_upcoming(
     return _card(
         project, "risk_upcoming", severity, title, summary,
         chart=chart, tables=[table.view_name],
+        sql=sql,
+        chart_type="line",
+        label_column="period",
+        value_column="n",
         metadata={
             "sourceContext": {
                 "metric": date_col,
@@ -1050,14 +1081,16 @@ async def _trend_metric(
             f'ORDER BY "{period_col}"'
         )
 
-    res = await _safe_query(runner, _trend_sql(agg_sql))
+    sql = _trend_sql(agg_sql)
+    res = await _safe_query(runner, sql)
     if (not res or not res["rows"]) and measure_col is not None:
         # The chosen column wasn't actually numeric — fall back to record volume
         # so a mis-typed measure never suppresses the trend entirely.
         measure_col = None
         metric_label = "Records"
         measure_phrase = "Record volume"
-        res = await _safe_query(runner, _trend_sql("COUNT(*)"))
+        sql = _trend_sql("COUNT(*)")
+        res = await _safe_query(runner, sql)
     if not res or not res["rows"]:
         return None
     series: list[dict] = []
@@ -1105,6 +1138,10 @@ async def _trend_metric(
     return _card(
         project, "trend_metric", severity, title, summary,
         chart=chart, tables=[table.view_name],
+        sql=sql,
+        chart_type="line",
+        label_column="period",
+        value_column="metric",
         metadata={
             "sourceContext": {
                 "metric": measure_col or "",
@@ -1247,13 +1284,13 @@ async def _opportunity_supplier(
         return await _opportunity_top_performer(project, ctx, runner)
     table, cols = found
     supplier_col, metric_col = cols[0], cols[1]
-    res = await _safe_query(
-        runner,
+    sql = (
         f'SELECT "{supplier_col}" AS supplier, '
         f'AVG(CAST("{metric_col}" AS double)) AS metric '
         f'FROM "{table.view_name}" GROUP BY "{supplier_col}" '
-        f'ORDER BY metric DESC',
+        f'ORDER BY metric DESC'
     )
+    res = await _safe_query(runner, sql)
     if not res or not res["rows"]:
         return await _opportunity_top_performer(project, ctx, runner)
     top = [
@@ -1277,6 +1314,10 @@ async def _opportunity_supplier(
         project, "opportunity_supplier", "opportunity",
         f"{len(top)} top-performing suppliers identified", summary,
         callout=callout, tables=[table.view_name],
+        sql=sql,
+        chart_type="bar",
+        label_column="supplier",
+        value_column="metric",
         metadata={
             "sourceContext": {
                 "metric": metric_col,
@@ -1307,12 +1348,12 @@ async def _opportunity_top_performer(
         measure_col = _measure_col(t, exclude=frozenset({dim_col}))
         if measure_col is None:
             continue
-        res = await _safe_query(
-            runner,
+        sql = (
             f'SELECT "{dim_col}" AS entity, '
             f'AVG(CAST("{measure_col}" AS double)) AS metric '
-            f'FROM "{t.view_name}" GROUP BY "{dim_col}" ORDER BY metric DESC',
+            f'FROM "{t.view_name}" GROUP BY "{dim_col}" ORDER BY metric DESC'
         )
+        res = await _safe_query(runner, sql)
         if not res or not res["rows"]:
             continue
         ranked: list[tuple[str, float]] = []
@@ -1348,6 +1389,10 @@ async def _opportunity_top_performer(
             project, "opportunity_performance", "opportunity",
             f"Top performers by {measure_col} identified", summary,
             chart=chart, callout=callout, tables=[t.view_name],
+            sql=sql,
+            chart_type="bar",
+            label_column="entity",
+            value_column="metric",
             metadata={
                 "sourceContext": {
                     "metric": measure_col,
@@ -2402,6 +2447,11 @@ async def run_ai_intelligence(
                 tables=tables,
                 documents=documents_used,
                 metadata=metadata,
+                sql=(a.get("sql") if result is not None else None),
+                chart_type=(a.get("chart_type") if result is not None else None),
+                label_column=(a.get("label_column") if result is not None else None),
+                value_column=(a.get("value_column") if result is not None else None),
+                value_column_2=(a.get("value_column_2") if result is not None else None),
             )
         )
 

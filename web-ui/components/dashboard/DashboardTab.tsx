@@ -3,9 +3,10 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { Dashboard, DashboardConfig } from "./types";
+import type { Dashboard, DashboardConfig, WidgetConfig } from "./types";
 import { DashboardViewer } from "./DashboardViewer";
 import { AIPromptBar } from "@/components/ai/AIPromptBar";
+import { createHomePin } from "@/lib/api/home-pins";
 
 type SavedQuery = { id: number; name: string; sql_text: string | null };
 type Datasource = { viewName: string; fileName: string };
@@ -26,6 +27,7 @@ const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
 export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: Props) {
   const queryClient = useQueryClient();
   const [viewing, setViewing] = useState<Dashboard | null>(null);
+  const [pinToast, setPinToast] = useState<string | null>(null);
   const [aiDashLoading, setAiDashLoading] = useState(false);
   const [aiDashError, setAiDashError] = useState<string | null>(null);
   const [aiDashSuccess, setAiDashSuccess] = useState<string | null>(null);
@@ -89,17 +91,56 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
     },
   });
 
+  const pinMutation = useMutation({
+    mutationFn: createHomePin,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["home-pins"] });
+      setPinToast("Widget pinned to Home");
+      setTimeout(() => setPinToast(null), 3000);
+    },
+  });
+
+  const handlePinWidget = useCallback(
+    (widget: WidgetConfig, data: unknown[], dashboardId: number) => {
+      pinMutation.mutate({
+        pin_type: "live_widget",
+        pin_key: `widget:${dashboardId}:${widget.id}`,
+        title: widget.title || "Pinned widget",
+        project_id: projectId,
+        config: {
+          widget: widget as unknown as Record<string, unknown>,
+          cachedData: { columns: data.length > 0 ? Object.keys(data[0] as object) : [], rows: data },
+        },
+        layout: {
+          x: widget.gridX ?? 0,
+          y: widget.gridY ?? 0,
+          w: widget.gridW ?? widget.colSpan ?? 6,
+          h: widget.gridH ?? 4,
+        },
+      });
+    },
+    [pinMutation, projectId],
+  );
+
   // Viewing a dashboard
   if (viewing) {
     const freshDash = dashboards.find((d) => d.id === viewing.id) ?? viewing;
     return (
-      <DashboardViewer
-        dashboard={freshDash}
-        projectId={projectId}
-        savedQueries={savedQueries}
-        datasources={datasources}
-        onBack={() => setViewing(null)}
-      />
+      <>
+        <DashboardViewer
+          dashboard={freshDash}
+          projectId={projectId}
+          savedQueries={savedQueries}
+          datasources={datasources}
+          onBack={() => setViewing(null)}
+          onPinWidget={handlePinWidget}
+        />
+        {pinToast && (
+          <div className="fixed bottom-4 right-4 z-50 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-small text-emerald-800 shadow-md">
+            {pinToast}
+          </div>
+        )}
+      </>
     );
   }
 
