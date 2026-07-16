@@ -58,7 +58,8 @@ export type NavKey =
   | "project-relationship-map"
   | "project-metadata-catalog"
   | "project-reference-library"
-  | "project-audit-log";
+  | "project-audit-log"
+  | "project-business-context";
 
 export interface TenantSummary {
   name: string;

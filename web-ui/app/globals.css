@@ -76,6 +76,15 @@ body {
   }
 }
 
+@layer components {
+  .input {
+    @apply w-full rounded-md border border-line-tertiary bg-bg-primary px-2.5 py-1.5 text-[13px] text-ink-primary outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .input::placeholder {
+    @apply text-ink-tertiary;
+  }
+}
+
 @layer utilities {
   .scrollbar-none {
     scrollbar-width: none;
