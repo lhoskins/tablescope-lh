@@ -38,6 +38,7 @@ const QUICK_PROMPTS = [
 const CHART_FOLLOW_UPS = [
   "change it to a line chart",
   "change it to a bar chart",
+  "change it to a horizontal bar chart",
   "sort by value descending",
   "show as a table",
 ];
