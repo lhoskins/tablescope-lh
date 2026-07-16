@@ -217,9 +217,11 @@ class IntelligencePlanRequest(AIBaseRequest):
     # row_multiplication_risk}. The planner may only propose multi-table
     # analyses that are supported by one of these hints.
     relationship_hints: list[dict] = Field(default_factory=list)
+    reference_kpis: list[dict] = Field(default_factory=list)
     max_analyses: int = 6
     # 1 = executive/high-level (few, most leveraging) .. 5 = granular (many, detailed)
     granularity: int = 3
+    project_context: dict = Field(default_factory=dict)
 
 
 class PlannedAnalysis(BaseModel):
@@ -277,6 +279,7 @@ class InterpretAnalysisInput(BaseModel):
 class IntelligenceInterpretRequest(AIBaseRequest):
     """Turn executed query results (or document context) into business prose."""
     analyses: list[InterpretAnalysisInput] = Field(default_factory=list)
+    project_context: dict = Field(default_factory=dict)
 
 
 class InterpretedInsight(BaseModel):
@@ -354,6 +357,7 @@ class ProjectInsightRequest(AIBaseRequest):
     kpis: list[str] = Field(default_factory=list)
     knowledge_graph_context: dict = Field(default_factory=dict)
     recent_activity: dict = Field(default_factory=dict)
+    project_context: dict = Field(default_factory=dict)
 
 
 class ProjectInsightExecutiveSummary(BaseModel):

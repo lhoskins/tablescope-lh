@@ -31,7 +31,7 @@ services:
       # concurrent project analyses don't queue behind a single slot or pay
       # repeated model-load latency.
       - OLLAMA_NUM_PARALLEL=4
-      - OLLAMA_MAX_LOADED_MODELS=2
+      - OLLAMA_MAX_LOADED_MODELS=3
       - OLLAMA_KEEP_ALIVE=30m
     deploy:
       resources:

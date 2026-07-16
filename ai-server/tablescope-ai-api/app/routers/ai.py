@@ -2103,9 +2103,37 @@ async def knowledge_graph_insights(
                 severity = "info"
             # Keep only evidence keys that actually exist in the neighborhood —
             # this is the evidence gate that rejects fabricated grounding.
+            # The model may return either graph_keys or node labels; normalize
+            # to the canonical graph_key before accepting.
+            neighbor_labels = {}
+            neighbor_labels_ci = {}
+            for n in req.neighbors:
+                label = str(n.get("label") or "").strip()
+                gk = str(n.get("graph_key") or "").strip()
+                if label and gk:
+                    neighbor_labels.setdefault(label, gk)
+                    neighbor_labels_ci.setdefault(label.lower(), gk)
+            center_label = str(center.get("label") or "").strip()
+            if center_label and center_key:
+                neighbor_labels.setdefault(center_label, center_key)
+                neighbor_labels_ci.setdefault(center_label.lower(), center_key)
+
+            def _resolve_evidence_key(k: str) -> str | None:
+                k = str(k).strip()
+                if not k:
+                    return None
+                if k in allowed_keys:
+                    return k
+                if k in neighbor_labels:
+                    return neighbor_labels[k]
+                return neighbor_labels_ci.get(k.lower())
+
             evidence_keys = [
-                str(k) for k in c.get("evidenceKeys", [])
-                if str(k) in allowed_keys
+                gk for gk in {
+                    _resolve_evidence_key(k)
+                    for k in c.get("evidenceKeys", [])
+                }
+                if gk
             ]
             if not evidence_keys:
                 logger.info("Dropping KG card with no real evidence: %s", c.get("title"))
