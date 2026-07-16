@@ -39,9 +39,10 @@ class ConversationalIntent(str):
 
 # Deterministic chart-only signals. More specific patterns first.
 _CHART_CHANGE_SIGNALS = [
-    (r"\bchange\s+(?:it|this|the chart)\s+(?:to|into|as)\s+(?:a\s+)?(bar|line|pie|table|scatter|donut|area|horizontal\s+bar|stacked\s+bar|grouped\s+bar)", "chart_type"),
-    (r"\bmake\s+(?:it|this)\s+(?:a\s+)?(bar|line|pie|table|scatter|donut|area|horizontal)\b", "chart_type"),
-    (r"\bshow\s+(?:it|this)\s+as\s+(?:a\s+)?(bar|line|pie|table|scatter|donut|area)\b", "chart_type"),
+    (r"\b(?:run|show|display|plot|graph|chart)\s+(?:this|it|the\s+(?:query|chart|result|data))?\s*(?:using|as|in|with)\s+(?:a\s+)?(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|line|pie|table|scatter|donut|area)(?:\s+(?:chart|format|graph|view))?\b", "chart_type"),
+    (r"\bchange\s+(?:it|this|the chart)\s+(?:to|into|as)\s+(?:a\s+)?(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|line|pie|table|scatter|donut|area)(?:\s+(?:chart|format|graph|view))?\b", "chart_type"),
+    (r"\bmake\s+(?:it|this)\s+(?:a\s+)?(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|line|pie|table|scatter|donut|area)(?:\s+(?:chart|format|graph|view))?\b", "chart_type"),
+    (r"\bshow\s+(?:it|this)\s+as\s+(?:a\s+)?(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|line|pie|table|scatter|donut|area)(?:\s+(?:chart|format|graph|view))?\b", "chart_type"),
     (r"\b(use|make)\s+(\w+)\s+(?:the\s+)?x[- ]?axis\b", "label_column"),
     (r"\b(use|make)\s+(\w+)\s+(?:the\s+)?label\b", "label_column"),
     (r"\b(use|make)\s+(\w+)\s+(?:the\s+)?(value|y[- ]?axis|series)\b", "value_column"),
@@ -54,8 +55,8 @@ _CHART_CHANGE_SIGNALS = [
     (r"\b(sort|order)\s+(?:by\s+)?label\s+(?:z[- ]?a|descending|desc)\b", "sort_label_desc"),
     (r"\bshow\s+(?:the\s+)?legend\b", "legend_on"),
     (r"\bhide\s+(?:the\s+)?legend\b", "legend_off"),
-    (r"\bmake\s+(?:it|this)\s+horizontal\b", "horizontal"),
-    (r"\bmake\s+(?:it|this)\s+vertical\b", "vertical"),
+    (r"\bmake\s+(?:it|this)\s+horizontal(?:\s+bar)?\b", "horizontal"),
+    (r"\bmake\s+(?:it|this)\s+vertical(?:\s+bar)?\b", "vertical"),
     (r"\bswitch\s+(?:to|the\s+)?(\w+)\s*chart\b", "chart_type"),
     (r"\b(chart\s+type|visualization)\s*(?:is|:|=)?\s*(bar|line|pie|table|scatter|donut|area)\b", "chart_type"),
 ]
@@ -114,6 +115,9 @@ def _match_chart_change(q: str) -> tuple[bool, dict[str, Any]]:
         if action == "chart_type":
             chart_type = (m.group(1) if len(m.groups()) >= 1 else "").strip().lower()
             params["chartType"] = _map_chart_type(chart_type)
+            style = _map_chart_style(chart_type)
+            if style:
+                params["subtype"] = style
         elif action == "label_column":
             params["labelColumn"] = m.group(2).strip()
         elif action == "value_column":
@@ -137,9 +141,9 @@ def _match_chart_change(q: str) -> tuple[bool, dict[str, Any]]:
         elif action == "legend_off":
             params["legendVisible"] = False
         elif action == "horizontal":
-            params["subtype"] = "horizontal"
+            params["subtype"] = "horizontal_bar"
         elif action == "vertical":
-            params["subtype"] = "vertical"
+            params["clearSubtype"] = True
         return True, params
     return False, params
 
@@ -158,6 +162,18 @@ def _map_chart_type(raw: str) -> str:
         "table": "table",
     }
     return mapping.get(raw, "bar")
+
+
+def _map_chart_style(raw: str) -> str | None:
+    """Return the frontend-recognized chart subtype (e.g. horizontal_bar)."""
+    norm = raw.strip().lower()
+    if "horizontal" in norm:
+        return "horizontal_bar"
+    if "stacked" in norm:
+        return "stacked_bar"
+    if "grouped" in norm:
+        return "grouped_bar"
+    return None
 
 
 def _matches_any(q: str, patterns: list[str]) -> bool:
@@ -274,6 +290,8 @@ def apply_chart_change(chart_config: dict[str, Any], result: dict[str, Any], ins
         new_config["sort"] = params["sort"]
     if "subtype" in params:
         new_config["subtype"] = params["subtype"]
+    if params.get("clearSubtype"):
+        new_config.pop("subtype", None)
 
     # Validate: pie/donut needs one value column and a label column.
     chart_type = new_config.get("type")
@@ -283,7 +301,14 @@ def apply_chart_change(chart_config: dict[str, Any], result: dict[str, Any], ins
 
     message = "Updated the chart."
     if params.get("chartType"):
-        message = f"Changed the chart to a {new_config['type']} chart."
+        style_text = ""
+        if new_config.get("subtype") == "horizontal_bar":
+            style_text = " horizontal"
+        elif new_config.get("subtype") == "stacked_bar":
+            style_text = " stacked"
+        elif new_config.get("subtype") == "grouped_bar":
+            style_text = " grouped"
+        message = f"Changed the chart to a{style_text} {new_config['type']} chart."
     elif params.get("valueColumn"):
         message = f"Now showing {new_config['valueColumns'][0]} as the value."
     elif params.get("addValueColumn"):
@@ -296,6 +321,10 @@ def apply_chart_change(chart_config: dict[str, Any], result: dict[str, Any], ins
         message = "Legend turned {}.".format("on" if params["legendVisible"] else "off")
     elif params.get("sort"):
         message = f"Sorted by {params['sort']['column']} {params['sort']['direction']}."
+    elif params.get("subtype") == "horizontal_bar":
+        message = "Switched to a horizontal bar chart."
+    elif params.get("clearSubtype"):
+        message = "Switched to a vertical bar chart."
 
     return new_config, message
 
