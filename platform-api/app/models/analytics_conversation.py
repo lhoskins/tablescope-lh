@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -95,6 +95,9 @@ class AnalyticsConversationTurn(Base, TimestampMixin):
         nullable=True,
     )
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    project_context_version: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
 
     conversation: Mapped[AnalyticsConversation] = relationship(
         back_populates="turns",

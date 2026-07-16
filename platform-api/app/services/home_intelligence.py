@@ -50,6 +50,7 @@ from app.services.analytical_method_engine import (
 from app.services.evidence_severity import gate_severity
 from app.services.insight_explanation import build_explanation, infer_method
 from app.services.presentation_engine import PresentationMode
+from app.services.project_ai_context import build_project_ai_context
 from app.services.prompt_loader import load_prompt_reference
 from app.services.response_envelope import attach_envelope
 from app.services.teiid_sql import (
@@ -473,6 +474,7 @@ def _card(
     explanation: dict[str, Any] | None = None,
     method: str | None = None,
     governance: dict[str, Any] | None = None,
+    project_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
@@ -541,6 +543,7 @@ def _card(
             generated_at=card["executedAt"],
             method=method,
             governance=governance,
+            project_context=project_context,
         ) or {}
     if explanation:
         card["explanation"] = explanation
@@ -2010,6 +2013,7 @@ async def plan_and_execute_widgets(
     user_id: int,
     max_analyses: int,
     granularity: int,
+    session: AsyncSession | None = None,
 ) -> list[dict[str, Any]]:
     """Plan data analyses and execute each with the SAME robustness the analyst
     loop uses — real per-column samples in the schema, date-cast normalization,
@@ -2028,6 +2032,22 @@ async def plan_and_execute_widgets(
 
     if not ai.is_enabled():
         return []
+
+    project_context: dict[str, Any] | None = None
+    if session is not None:
+        try:
+            project_context = await build_project_ai_context(
+                session,
+                tenant_id=tenant_id,
+                project_id=project.id,
+                request_type="dashboard",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to build project AI context for dashboard project %s: %s",
+                project.id,
+                exc,
+            )
 
     allowed_tables = [t.view_name for t in ctx.tables]
     samples_per_table = await asyncio.gather(
@@ -2048,16 +2068,33 @@ async def plan_and_execute_widgets(
     documents = _plan_documents(ctx)
     relationship_hints = find_relationship_candidates(ctx.tables)
 
+    plan_documents = documents
+    if project_context and project_context.get("ai_context_enabled"):
+        plan_documents = [
+            {
+                "title": "Project Business Context",
+                "summary": (
+                    f"Purpose: {project_context.get('project', {}).get('purpose', 'N/A')}"
+                )[:1200],
+                "tags": ["project_context"],
+                "source": "project_context",
+                "tier": "",
+                "issuing_body": "",
+            },
+            *documents,
+        ]
+
     analyses = await ai.plan(
         tenant_id=tenant_id,
         user_id=user_id,
         project_id=project.id,
         allowed_tables=allowed_tables,
-        documents=documents,
+        documents=plan_documents,
         table_schema=table_schema,
         relationship_hints=relationship_hints,
         max_analyses=max_analyses,
         granularity=granularity,
+        project_context=project_context or {},
     )
     if not analyses:
         return []
@@ -2188,6 +2225,22 @@ async def run_ai_intelligence(
     if not ai.is_enabled():
         return None
 
+    project_context: dict[str, Any] | None = None
+    if session is not None:
+        try:
+            project_context = await build_project_ai_context(
+                session,
+                tenant_id=tenant_id,
+                project_id=project.id,
+                request_type="business_insight",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to build project AI context for project %s: %s",
+                project.id,
+                exc,
+            )
+
     ai_call_limit = max(
         1, get_settings().home_intelligence_max_concurrent_ai_calls_per_project
     )
@@ -2242,17 +2295,41 @@ async def run_ai_intelligence(
     # validated two-table insights; otherwise it stays single-table.
     relationship_hints = find_relationship_candidates(ctx.tables)
 
+    context_document: dict[str, Any] | None = None
+    if project_context:
+        context_summary = project_context.get("project", {})
+        if project_context.get("ai_context_enabled"):
+            context_document = {
+                "title": "Project Business Context",
+                "summary": (
+                    f"Purpose: {context_summary.get('purpose', 'N/A')}\n"
+                    f"Function: {context_summary.get('business_function', 'N/A')}\n"
+                    f"Industry: {context_summary.get('industry', 'N/A')}\n"
+                    f"Timezone: {context_summary.get('timezone', 'N/A')}, "
+                    f"Currency: {context_summary.get('currency', 'N/A')}, "
+                    f"Cadence: {context_summary.get('reporting_cadence', 'N/A')}"
+                )[:1200],
+                "tags": ["project_context"],
+                "source": "project_context",
+                "tier": "",
+                "issuing_body": "",
+            }
+
     async def request_plan() -> list[dict[str, Any]] | None:
+        plan_documents = documents
+        if context_document:
+            plan_documents = [context_document, *documents]
         return await ai.plan(
             tenant_id=tenant_id,
             user_id=user_id,
             project_id=project.id,
             allowed_tables=allowed_tables,
-            documents=documents,
+            documents=plan_documents,
             table_schema=table_schema,
             relationship_hints=relationship_hints,
             max_analyses=max_analyses,
             granularity=granularity,
+            project_context=project_context or {},
         )
 
     if plan_semaphore is None:
@@ -2393,6 +2470,7 @@ async def run_ai_intelligence(
                 user_id=user_id,
                 project_id=project.id,
                 analyses=chunk,
+                project_context=project_context or {},
             )
 
     chunk_results = await asyncio.gather(
@@ -2602,6 +2680,7 @@ async def run_ai_intelligence(
                 insight_id=insight_id,
                 method=effective_method,
                 governance=governance_decision.to_explanation_dict() if governance_decision else None,
+                project_context=project_context,
             )
         )
 

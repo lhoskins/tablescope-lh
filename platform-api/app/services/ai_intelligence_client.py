@@ -204,6 +204,7 @@ async def plan(
     relationship_hints: list[dict[str, Any]] | None = None,
     max_analyses: int = 6,
     granularity: int = 3,
+    project_context: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]] | None:
     """Ask the LLM to propose diagnostic analyses. Returns ``analyses`` or None."""
     settings = get_settings()
@@ -221,6 +222,7 @@ async def plan(
             "reference_kpis": [],
             "max_analyses": max_analyses,
             "granularity": granularity,
+            "project_context": project_context or {},
         },
         max_attempts=max_retries + 1,
         retry_read_timeouts=True,
@@ -247,6 +249,7 @@ async def project_insight(
     kpis: list[str],
     knowledge_graph_context: dict[str, Any] | None = None,
     recent_activity: dict[str, Any] | None = None,
+    project_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Ask the AI server for the project-scoped Project Insight report.
 
@@ -269,6 +272,7 @@ async def project_insight(
             "kpis": kpis,
             "knowledge_graph_context": knowledge_graph_context or {},
             "recent_activity": recent_activity or {},
+            "project_context": project_context or {},
         },
     )
     return result if isinstance(result, dict) else None
@@ -350,6 +354,7 @@ async def interpret(
     user_id: int,
     project_id: int,
     analyses: list[dict[str, Any]],
+    project_context: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]] | None:
     """Turn executed results into prose. Returns ``{analysis_id: insight}`` or None."""
     if not analyses:
@@ -361,6 +366,7 @@ async def interpret(
             "user_id": user_id,
             "project_id": project_id,
             "analyses": analyses,
+            "project_context": project_context or {},
         },
     )
     if result is None:

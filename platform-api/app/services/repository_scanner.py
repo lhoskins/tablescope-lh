@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.services.ai_governance import ai_governance_service
 from app.services.crypto import decrypt_secret
+from app.services.project_ai_context import build_project_ai_context
 from app.services.repository_lock import RepositoryScanHeartbeat, RepositoryScanLock
 from app.services.repository_profiler import RepositoryProfiler
 
@@ -78,6 +79,37 @@ class RepositoryScanner:
             connector = get_repository_connector(connection.connector_type)
             credentials = await self._resolve_credentials(connection)
             await connector.validate_config(connection.config_json)
+
+            # Load project business context for project-assigned connectors so
+            # repository intelligence can be grounded in business goals, metrics,
+            # and risks.  Stored on the scan and profile records for auditability.
+            project_context_summary: dict[str, Any] | None = None
+            project_context_version: int | None = None
+            if connection.project_id is not None:
+                try:
+                    ctx = await build_project_ai_context(
+                        self.session,
+                        tenant_id=tenant_id,
+                        project_id=connection.project_id,
+                        request_type="repository_intelligence",
+                    )
+                    project_context_summary = {
+                        "project": ctx.get("project"),
+                        "ai_context_enabled": ctx.get("ai_context_enabled"),
+                        "goals": [g.get("title") for g in (ctx.get("goals") or [])[:10]],
+                        "metrics": [m.get("name") for m in (ctx.get("metrics") or [])[:10]],
+                        "risks": [r.get("title") for r in (ctx.get("risks") or [])[:10]],
+                        "generated_at": ctx.get("generated_at"),
+                    }
+                    project_context_version = ctx.get("version")
+                    scan.project_context_summary = project_context_summary
+                    scan.project_context_version = project_context_version
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to build project context for repository scan %s: %s",
+                        scan_id,
+                        exc,
+                    )
 
             # Governance pre-check: metadata scanning proceeds even if document
             # synthesis is disabled, but extraction must be gated.
@@ -138,6 +170,8 @@ class RepositoryScanner:
                 connection_id,
                 scan.id,
                 tenant_id,
+                project_context_summary=project_context_summary,
+                project_context_version=project_context_version,
             )
 
             scan.status = "succeeded" if scan.error_count == 0 else "partial"

@@ -42,6 +42,9 @@ class RepositoryProfiler:
         connection_id: int,
         scan_id: int | None,
         tenant_id: int,
+        *,
+        project_context_summary: dict[str, Any] | None = None,
+        project_context_version: int | None = None,
     ) -> dict[str, Any]:
         result = await session.execute(
             select(RepositoryConnection).where(
@@ -175,11 +178,16 @@ class RepositoryProfiler:
         for prior in prior_result.scalars().all():
             prior.is_current = False
 
+        profile_json["project_context_summary"] = project_context_summary
+        profile_json["project_context_version"] = project_context_version
+
         profile = RepositoryProfile(
             tenant_id=tenant_id,
             connection_id=connection_id,
             scan_id=scan_id,
             profile_json=profile_json,
+            project_context_summary=project_context_summary,
+            project_context_version=project_context_version,
             is_current=True,
         )
         session.add(profile)

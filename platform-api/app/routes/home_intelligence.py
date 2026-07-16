@@ -639,6 +639,7 @@ async def home_dashboard_suggestions(
                     user_id=context.user_id,
                     max_analyses=req.max_per_project,
                     granularity=req.granularity,
+                    session=session,
                 )
             except Exception as exc:
                 logger.warning(
@@ -710,6 +711,7 @@ async def home_project_dashboard(
             user_id=context.user_id,
             max_analyses=req.max_widgets,
             granularity=req.granularity,
+            session=session,
         )
     except Exception as exc:
         logger.warning(

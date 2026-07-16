@@ -20,6 +20,7 @@ from app.auth.context import RequestContext
 from app.models.analytics_conversation import AnalyticsConversation, AnalyticsConversationTurn
 from app.routes.ai_proxy import _ask_and_run_core
 from app.services.ai_governance import ai_governance_service, infer_governance_key
+from app.services.project_ai_context import build_project_ai_context
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +318,41 @@ def _build_explanation(
     return exp
 
 
+def _format_context_prompt(project_context: dict[str, Any] | None) -> str:
+    """Return a concise, bounded project context block for SQL generation."""
+    if not project_context or not project_context.get("ai_context_enabled"):
+        return ""
+    project = project_context.get("project", {})
+    goals = project_context.get("goals") or []
+    metrics = project_context.get("metrics") or []
+    risks = project_context.get("risks") or []
+    instructions = project_context.get("instructions") or ""
+    interpretation = project_context.get("interpretation_notes") or ""
+
+    parts = [
+        "--- Project context ---",
+        f"Project: {project.get('name', 'Unknown')}",
+    ]
+    if project.get("purpose"):
+        parts.append(f"Purpose: {project['purpose']}")
+    if project.get("business_function"):
+        parts.append(f"Function: {project['business_function']}")
+    if project.get("industry"):
+        parts.append(f"Industry: {project['industry']}")
+    if instructions:
+        parts.append(f"AI guidance: {instructions}")
+    if interpretation:
+        parts.append(f"Interpretation notes: {interpretation}")
+    if goals:
+        parts.append("Goals: " + ", ".join(g["title"] for g in goals[:5] if g.get("title")))
+    if metrics:
+        parts.append("Metrics: " + ", ".join(m["name"] for m in metrics[:5] if m.get("name")))
+    if risks:
+        parts.append("Risks: " + ", ".join(r["title"] for r in risks[:5] if r.get("title")))
+    parts.append("--- End project context ---")
+    return "\n".join(parts)[:1200]
+
+
 async def _run_analytical_turn(
     session: AsyncSession,
     context: RequestContext,
@@ -324,18 +360,24 @@ async def _run_analytical_turn(
     question: str,
     prior_turn: AnalyticsConversationTurn | None,
     datasource_id: int | None,
+    *,
+    project_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run a data-changing turn by delegating to the existing ask-and-run core."""
+    context_block = _format_context_prompt(project_context)
     # When this is a follow-up and we have prior SQL, prepend a concise context
     # line to the question so the generator can refine instead of starting from
     # scratch. The AI query endpoint treats the prompt as the full user request.
     prompt = question
     if prior_turn and prior_turn.sql:
         prompt = (
+            f"{context_block}\n\n"
             f"Previous query: {prior_turn.sql}\n"
             f"User follow-up: {question}\n"
             "Generate a single, safe replacement query incorporating the follow-up."
         )
+    elif context_block:
+        prompt = f"{context_block}\n\nUser question: {question}"
 
     run = await _ask_and_run_core(
         session,
@@ -418,6 +460,17 @@ async def execute_turn(
         turn.assistant_message = "This conversation is not attached to a project."
         return
 
+    project_context: dict[str, Any] | None = None
+    try:
+        project_context = await build_project_ai_context(
+            session,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            request_type="conversational_analytics",
+        )
+    except Exception as exc:
+        logger.warning("Failed to build project context for conversation %s: %s", conversation.id, exc)
+
     # Pre-execution governance check: block obvious high-risk or disabled methods
     # before any SQL is generated for this turn.
     pre_method = infer_governance_key(question=question)
@@ -437,10 +490,17 @@ async def execute_turn(
         return
 
     run = await _run_analytical_turn(
-        session, context, project_id, question, prior_turn, datasource_id
+        session,
+        context,
+        project_id,
+        question,
+        prior_turn,
+        datasource_id,
+        project_context=project_context,
     )
 
     turn.sql = run.get("sql") or None
+    turn.project_context_version = project_context.get("version") if project_context else None
     turn.sql_fingerprint = _sql_fingerprint(turn.sql)
 
     if run.get("status") != "success" or not run.get("rows"):

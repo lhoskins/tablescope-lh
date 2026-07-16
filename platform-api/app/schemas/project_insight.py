@@ -63,6 +63,9 @@ class ProjectInsightResponse(BaseModel):
     # True when the AI server produced the report; False when it degraded to an
     # empty structure (AI unavailable) so the UI can show a helpful state.
     aiAvailable: bool = True
+    # Project business-context snapshot used for this report.
+    aiContextEnabled: bool = False
+    contextVersion: int = 0
 
 
 class AcknowledgeInsightRequest(BaseModel):
