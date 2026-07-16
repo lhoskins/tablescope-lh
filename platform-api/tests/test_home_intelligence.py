@@ -890,6 +890,7 @@ async def test_project_dashboard_builds_real_chart_widgets(
         user_id,
         max_analyses,
         granularity,
+        session=None,
     ):
         return [
             {

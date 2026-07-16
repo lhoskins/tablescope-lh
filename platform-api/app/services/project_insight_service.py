@@ -42,6 +42,7 @@ from app.services.ai_governance import ai_governance_service, infer_governance_k
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
+from app.services.project_ai_context import build_project_ai_context
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +392,12 @@ async def build_project_insight(
     )
 
     ctx = await hi.gather_project_context(session, project)
+    project_context = await build_project_ai_context(
+        session,
+        tenant_id=tenant_id,
+        project_id=project.id,
+        request_type="project_insight",
+    )
     grouped_cards = await _grouped_intelligence_cards(
         project, ctx, runner, session=session, tenant_id=tenant_id, user_id=user_id
     )
@@ -452,6 +459,7 @@ async def build_project_insight(
             dashboards=dashboards_payload,
             kpis=kpi_names,
             knowledge_graph_context=kg_context,
+            project_context=project_context or {},
         )
     except Exception as exc:  # never break the page on an AI failure
         logger.warning("project insight AI call failed (project %s): %s", project.id, exc)
@@ -470,6 +478,8 @@ async def build_project_insight(
             opportunities=grouped_cards["opportunities"],
             whatChangedSinceLastVisit=what_changed,
             aiAvailable=False,
+            aiContextEnabled=project_context.get("ai_context_enabled") if project_context else False,
+            contextVersion=project_context.get("version") if project_context else 0,
         )
 
     es = ai_result.get("executiveSummary") or {}
@@ -531,4 +541,6 @@ async def build_project_insight(
         whatChangedSinceLastVisit=what_changed,
         insightValidationWorkflow=workflow,
         aiAvailable=True,
+        aiContextEnabled=project_context.get("ai_context_enabled") if project_context else False,
+        contextVersion=project_context.get("version") if project_context else 0,
     )

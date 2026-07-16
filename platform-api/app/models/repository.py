@@ -126,6 +126,8 @@ class RepositoryScan(TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     retry_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    project_context_summary: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    project_context_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     connection: Mapped[RepositoryConnection] = relationship(
         "RepositoryConnection",
@@ -158,6 +160,8 @@ class RepositoryScan(TimestampMixin, Base):
             "error_message": self.error_message,
             "worker_id": self.worker_id,
             "retry_attempt": self.retry_attempt,
+            "project_context_summary": self.project_context_summary,
+            "project_context_version": self.project_context_version,
         }
 
 
@@ -264,6 +268,8 @@ class RepositoryProfile(TimestampMixin, Base):
         ForeignKey("repository_scans.id", ondelete="SET NULL"), nullable=True, index=True
     )
     profile_json: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
+    project_context_summary: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    project_context_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     __table_args__ = (
@@ -277,6 +283,8 @@ class RepositoryProfile(TimestampMixin, Base):
             "connection_id": self.connection_id,
             "scan_id": self.scan_id,
             "profile": self.profile_json,
+            "project_context_summary": self.project_context_summary,
+            "project_context_version": self.project_context_version,
             "is_current": self.is_current,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app import __version__
 from app.auth.mfa_errors import MfaRequiredError, mfa_required_handler
@@ -40,6 +41,7 @@ from app.routes import home_pins as home_pins_routes
 from app.routes import insight_feedback as insight_feedback_routes
 from app.routes import mfa as mfa_routes
 from app.routes import project_assets as project_assets_routes
+from app.routes import project_context as project_context_routes
 from app.routes import project_graph as project_graph_routes
 from app.routes import project_insight as project_insight_routes
 from app.routes import projects as projects_routes
@@ -61,6 +63,7 @@ from app.routes import upload as upload_routes
 from app.routes import user_preferences as user_preferences_routes
 from app.routes import users as users_routes
 from app.services.connection_pool import pool_manager
+from app.services.project_context import ProjectContextConcurrencyError
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +167,21 @@ def create_app() -> FastAPI:
 
     app.add_exception_handler(MfaRequiredError, mfa_required_handler)
 
+    async def _project_context_concurrency_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        error = exc if isinstance(exc, ProjectContextConcurrencyError) else None
+        status_code = error.status_code if error else 409
+        detail = error.detail if error else {"detail": "Conflict"}
+        return JSONResponse(
+            status_code=status_code,
+            content=detail,
+        )
+
+    app.add_exception_handler(
+        ProjectContextConcurrencyError, _project_context_concurrency_handler
+    )
+
     @app.middleware("http")
     async def _add_request_id(request: Request, call_next):
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
@@ -210,6 +228,7 @@ def create_app() -> FastAPI:
     app.include_router(analytical_methods_routes.router, prefix=api_prefix)
     app.include_router(ai_asset_metadata_routes.router, prefix=api_prefix)
     app.include_router(project_assets_routes.router, prefix=api_prefix)
+    app.include_router(project_context_routes.router, prefix=api_prefix)
     app.include_router(project_graph_routes.router, prefix=api_prefix)
     app.include_router(project_insight_routes.router, prefix=api_prefix)
     app.include_router(document_families_routes.router, prefix=api_prefix)

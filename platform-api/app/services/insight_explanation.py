@@ -204,6 +204,7 @@ def build_explanation(
     documents: list[str] | None = None,
     generated_at: str | None = None,
     governance: dict[str, Any] | None = None,
+    project_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build a structured explanation from the actual analysis that produced a card.
 
@@ -297,6 +298,16 @@ def build_explanation(
     }
     if governance:
         explanation["governance"] = governance
+
+    if project_context:
+        explanation["projectContext"] = {
+            "version": project_context.get("version"),
+            "aiContextEnabled": project_context.get("ai_context_enabled"),
+            "settings": project_context.get("project"),
+            "goals": project_context.get("goals") or [],
+            "metrics": project_context.get("metrics") or [],
+            "risks": project_context.get("risks") or [],
+        }
 
     if metric:
         explanation["metrics"].append(

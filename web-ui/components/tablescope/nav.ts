@@ -148,6 +148,12 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconFileText,
           countKey: "documents",
         },
+        {
+          key: "project-business-context",
+          label: "Business Context",
+          href: `${base}/business-context`,
+          icon: IconBuildingBank,
+        },
       ],
     },
     {
