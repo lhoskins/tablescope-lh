@@ -39,7 +39,7 @@ class ConversationalIntent(str):
 
 # Deterministic chart-only signals. More specific patterns first.
 _CHART_CHANGE_SIGNALS = [
-    (r"\b(?:run|show|display|plot|graph|chart)\s+(?:this|it|the\s+(?:query|chart|result|data))?\s*(?:using|as|in|with)\s+(?:a\s+)?(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|line|pie|table|scatter|donut|area)(?:\s+(?:chart|format|graph|view))?\b", "chart_type"),
+    (r"\b(?:run|show|display|plot|graph|chart|reformat)\s+(?:this|it|the\s+(?:query|chart|result|data))?(?:\s+(?:query|chart|result|data))?\s*(?:using|as|in|with)\s+(?:a\s+)?(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|line|pie|table|scatter|donut|area)(?:\s+(?:chart|format|graph|view))?\b", "chart_type"),
     (r"\bchange\s+(?:it|this|the chart)\s+(?:to|into|as)\s+(?:a\s+)?(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|line|pie|table|scatter|donut|area)(?:\s+(?:chart|format|graph|view))?\b", "chart_type"),
     (r"\bmake\s+(?:it|this)\s+(?:a\s+)?(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|line|pie|table|scatter|donut|area)(?:\s+(?:chart|format|graph|view))?\b", "chart_type"),
     (r"\bshow\s+(?:it|this)\s+as\s+(?:a\s+)?(horizontal\s+bar|stacked\s+bar|grouped\s+bar|bar|line|pie|table|scatter|donut|area)(?:\s+(?:chart|format|graph|view))?\b", "chart_type"),
