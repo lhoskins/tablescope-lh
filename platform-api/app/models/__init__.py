@@ -65,6 +65,17 @@ from app.models.mfa_sms_event import MfaSmsEvent
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_asset import ProjectAsset
+from app.models.project_context import (
+    ProjectBusinessContext,
+    ProjectContextAuditEvent,
+    ProjectGoal,
+    ProjectGoalMetricLink,
+    ProjectGoalRiskLink,
+    ProjectMetric,
+    ProjectMetricTarget,
+    ProjectRisk,
+    ProjectRiskMetricLink,
+)
 from app.models.project_insight_acknowledgement import (
     ProjectInsightAcknowledgement,
 )
@@ -156,9 +167,18 @@ __all__ = [
     "OrganizationVDB",
     "Project",
     "ProjectAsset",
+    "ProjectBusinessContext",
+    "ProjectContextAuditEvent",
+    "ProjectGoal",
+    "ProjectGoalMetricLink",
+    "ProjectGoalRiskLink",
     "ProjectInsightAcknowledgement",
     "ProjectIntelligenceSnapshot",
     "ProjectMember",
+    "ProjectMetric",
+    "ProjectMetricTarget",
+    "ProjectRisk",
+    "ProjectRiskMetricLink",
     "QueryScope",
     "ReferenceAdditionRequest",
     "ReferenceDocument",
