@@ -387,7 +387,7 @@ async def execute_turn(
         prior_turn = await session.get(AnalyticsConversationTurn, conversation.last_successful_turn_id)
     question = turn.user_message
 
-    intent, chart_params = classify_conversational_intent(question, prior_turn)
+    intent, _chart_params = classify_conversational_intent(question, prior_turn)
     turn.intent_type = intent
 
     if intent == ConversationalIntent.CHART_CHANGE:
