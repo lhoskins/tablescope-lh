@@ -154,6 +154,10 @@ export interface ProjectInsight {
   whatChangedSinceLastVisit: WhatChangedSinceLastVisit;
   insightValidationWorkflow: InsightWorkflowItem[];
   aiAvailable: boolean;
+  graphStatus: string;
+  graphMode: "full" | "limited" | "blocked";
+  graphBlockingReasons: string[];
+  graphDisclosure: string;
 }
 
 export interface AcknowledgeResponse {

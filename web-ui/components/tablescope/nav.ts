@@ -178,6 +178,12 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconTopologyStar3,
         },
         {
+          key: "project-knowledge-graph",
+          label: "Graph Lifecycle",
+          href: `${base}/knowledge-graph`,
+          icon: IconHistory,
+        },
+        {
           key: "project-metadata-catalog",
           label: "Metadata Catalog",
           href: `${base}/metadata-catalog`,

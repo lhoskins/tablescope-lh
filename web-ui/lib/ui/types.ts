@@ -56,6 +56,7 @@ export type NavKey =
   | "project-ai-assistant"
   | "project-insight"
   | "project-relationship-map"
+  | "project-knowledge-graph"
   | "project-metadata-catalog"
   | "project-reference-library"
   | "project-audit-log"

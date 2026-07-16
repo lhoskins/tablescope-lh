@@ -357,6 +357,33 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               </div>
             )}
 
+            {data.graphMode && data.graphMode !== "full" && (
+              <div
+                className={cn(
+                  "flex items-start gap-2 rounded-lg border px-3 py-2 text-[13px]",
+                  data.graphMode === "blocked"
+                    ? "border-danger/30 bg-danger-bg text-danger"
+                    : "border-warning/30 bg-warning-bg text-warning",
+                )}
+              >
+                {data.graphMode === "blocked" ? (
+                  <IconAlertTriangle size={15} className="mt-0.5 shrink-0" />
+                ) : (
+                  <IconAlertCircle size={15} className="mt-0.5 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <p>{data.graphDisclosure}</p>
+                  {data.graphBlockingReasons.length > 0 && (
+                    <ul className="mt-1 list-disc pl-4 text-[12px]">
+                      {data.graphBlockingReasons.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* 1. Executive Project Summary */}
             <section className="rounded-lg border border-line-tertiary bg-bg-primary p-5">
               <div className="mb-2 flex items-start justify-between gap-3">
