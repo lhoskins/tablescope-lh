@@ -39,6 +39,7 @@ from app.schemas.project_insight import (
 from app.services import ai_intelligence_client as ai
 from app.services import home_intelligence as hi
 from app.services.ai_governance import ai_governance_service, infer_governance_key
+from app.services.executive_insight_dependencies import ExecutiveInsightDependencyService
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
@@ -446,24 +447,36 @@ async def build_project_insight(
         kg_context.get("gaps", []) or []
     )
 
+    dep_service = ExecutiveInsightDependencyService(session)
+    dep = await dep_service.check(project.id)
+    graph_mode = dep["mode"]
+    graph_status = dep["graph_status"]
+    graph_blocking_reasons = dep["blocking_reasons"]
+    graph_disclosure = dep["disclosure"]
+
     ai_result: dict[str, Any] | None = None
-    try:
-        ai_result = await ai.project_insight(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            project_id=project.id,
-            project=project_meta.model_dump(),
-            tables=tables_payload,
-            documents=documents_payload,
-            queries=queries_payload,
-            dashboards=dashboards_payload,
-            kpis=kpi_names,
-            knowledge_graph_context=kg_context,
-            project_context=project_context or {},
+    if graph_mode == "blocked":
+        logger.info(
+            "Executive Insight blocked for project %s: %s", project.id, graph_blocking_reasons
         )
-    except Exception as exc:  # never break the page on an AI failure
-        logger.warning("project insight AI call failed (project %s): %s", project.id, exc)
-        ai_result = None
+    else:
+        try:
+            ai_result = await ai.project_insight(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                project_id=project.id,
+                project=project_meta.model_dump(),
+                tables=tables_payload,
+                documents=documents_payload,
+                queries=queries_payload,
+                dashboards=dashboards_payload,
+                kpis=kpi_names,
+                knowledge_graph_context=kg_context,
+                project_context=project_context or {},
+            )
+        except Exception as exc:  # never break the page on an AI failure
+            logger.warning("project insight AI call failed (project %s): %s", project.id, exc)
+            ai_result = None
 
     what_changed = await _what_changed(session, project.id, kg_updated)
     acks = await _acknowledgement_map(session, project.id)
@@ -480,6 +493,10 @@ async def build_project_insight(
             aiAvailable=False,
             aiContextEnabled=project_context.get("ai_context_enabled") if project_context else False,
             contextVersion=project_context.get("version") if project_context else 0,
+            graphStatus=graph_status,
+            graphMode=graph_mode,
+            graphBlockingReasons=graph_blocking_reasons,
+            graphDisclosure=graph_disclosure,
         )
 
     es = ai_result.get("executiveSummary") or {}
@@ -543,4 +560,8 @@ async def build_project_insight(
         aiAvailable=True,
         aiContextEnabled=project_context.get("ai_context_enabled") if project_context else False,
         contextVersion=project_context.get("version") if project_context else 0,
+        graphStatus=graph_status,
+        graphMode=graph_mode,
+        graphBlockingReasons=graph_blocking_reasons,
+        graphDisclosure=graph_disclosure,
     )

@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from arq import create_pool
+from arq import create_pool, cron
 from arq.connections import RedisSettings
 from arq.worker import Retry
 from sqlalchemy import select
@@ -196,6 +197,112 @@ async def scan_repository_connection(
                 "scan_id": scan_id,
                 "error": str(exc)[:500],
             }
+
+
+async def enqueue_rebuild_knowledge_graph(build_id: int) -> str:
+    """Enqueue a knowledge graph rebuild and return the job id."""
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job("rebuild_knowledge_graph", build_id)
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def enqueue_run_knowledge_graph_health_check(project_id: int) -> str:
+    """Enqueue a knowledge graph health check and return the job id."""
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "run_knowledge_graph_health_check", project_id
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[str, Any]:
+    """Execute a knowledge graph build (full or incremental) in the worker."""
+    from app.models import KnowledgeGraphBuild
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+
+    async with SessionLocal() as session:
+        lifecycle = KnowledgeGraphLifecycleManager(session)
+        try:
+            build = await session.get(KnowledgeGraphBuild, build_id)
+            if build is None:
+                return {"status": "error", "error": "build_not_found"}
+
+            worker_id = ctx.get("job_id") or str(uuid.uuid4())
+            build.worker_id = worker_id
+            await session.flush()
+
+            if build.build_type == "incremental":
+                await lifecycle.run_incremental_rebuild(build_id)
+            else:
+                await lifecycle.run_full_rebuild(build_id)
+            await session.commit()
+            return {"status": "ok", "build_id": build_id}
+        except Exception as exc:
+            logger.exception("rebuild_knowledge_graph failed for build %s", build_id)
+            await session.rollback()
+            return {"status": "error", "error": str(exc)[:500]}
+
+
+async def run_knowledge_graph_health_check(
+    ctx: dict[str, Any], project_id: int
+) -> dict[str, Any]:
+    """Run a knowledge graph health check for one project."""
+    from app.services.knowledge_graph_health import KnowledgeGraphHealthService
+
+    async with SessionLocal() as session:
+        health = KnowledgeGraphHealthService(session)
+        try:
+            hc = await health.run_health_check(project_id, check_type="scheduled")
+            await session.commit()
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "health_status": hc.status,
+            }
+        except Exception as exc:
+            logger.exception(
+                "run_knowledge_graph_health_check failed for project %s", project_id
+            )
+            await session.rollback()
+            return {"status": "error", "project_id": project_id, "error": str(exc)[:500]}
+
+
+async def recover_stale_graph_builds(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Recover knowledge graph builds with expired heartbeats."""
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+
+    async with SessionLocal() as session:
+        lifecycle = KnowledgeGraphLifecycleManager(session)
+        try:
+            recovered = await lifecycle.recover_stale_builds()
+            await session.commit()
+            return {"status": "ok", "recovered_build_ids": recovered}
+        except Exception as exc:
+            logger.exception("recover_stale_graph_builds failed")
+            await session.rollback()
+            return {"status": "error", "error": str(exc)[:500]}
+
+
+async def evaluate_stale_graphs(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Mark graphs whose source fingerprint drifted as stale."""
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+
+    async with SessionLocal() as session:
+        lifecycle = KnowledgeGraphLifecycleManager(session)
+        try:
+            marked = await lifecycle.evaluate_stale_graphs()
+            await session.commit()
+            return {"status": "ok", "marked_project_ids": marked}
+        except Exception as exc:
+            logger.exception("evaluate_stale_graphs failed")
+            await session.rollback()
+            return {"status": "error", "error": str(exc)[:500]}
 
 
 async def enqueue_sync_saas_object(
@@ -528,6 +635,19 @@ class WorkerSettings:
         sync_saas_object,
         analyze_project_intelligence,
         scan_repository_connection,
+        rebuild_knowledge_graph,
+        run_knowledge_graph_health_check,
+        recover_stale_graph_builds,
+        evaluate_stale_graphs,
+    ]
+    cron_jobs: ClassVar[list] = [
+        # Detect source drift every 15 minutes and mark affected graphs stale.
+        cron(evaluate_stale_graphs, minute=0, second=30),
+        cron(evaluate_stale_graphs, minute=15, second=30),
+        cron(evaluate_stale_graphs, minute=30, second=30),
+        cron(evaluate_stale_graphs, minute=45, second=30),
+        # Recover builds stuck without a heartbeat.
+        cron(recover_stale_graph_builds, minute=5, second=0),
     ]
     # Must exceed home_intelligence_project_analysis_timeout_seconds: a job
     # killed by arq writes no result and permanently stalls its run, so the
