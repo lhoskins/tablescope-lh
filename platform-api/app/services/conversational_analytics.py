@@ -201,24 +201,6 @@ def _fallback_classify(
     # Ambiguous follow-up: re-run through the SQL engine, the safe default.
     return ConversationalIntent.QUERY_CHANGE, {}
 
-
-def _extract_chart_request(question: str) -> dict[str, Any]:
-    """Deterministic extraction of an explicit chart type from a question.
-
-    This is a safety net for when the LLM classifier returns an empty chart
-    patch for a new-analysis or query-change turn that actually names a chart
-    style.  It mirrors the degraded-mode fallback vocabulary.
-    """
-    q = _normalize_question(question)
-    for phrase, chart_type, subtype in _FALLBACK_CHART_WORDS:
-        if re.search(rf"\b{phrase}\b", q):
-            patch: dict[str, Any] = {"type": chart_type}
-            if subtype:
-                patch["subtype"] = subtype
-            return patch
-    return {}
-
-
 def _sql_fingerprint(sql: str | None) -> str | None:
     if not sql:
         return None
@@ -779,9 +761,8 @@ async def execute_turn(
     # New-analysis/query-change turns may include a chart preference from the
     # model (e.g. "Run IT backup jobs with a horizontal bar chart"). Apply it
     # deterministically after SQL execution so the initial widget honors the
-    # user's requested format.  If the LLM returned an empty chart patch, fall
-    # back to a deterministic phrase extraction so the request is not ignored.
-    initial_patch = chart_patch or _extract_chart_request(question)
+    # user's requested format.
+    initial_patch = chart_patch
     if initial_patch:
         patched_config, patch_message = apply_chart_patch(chart_config, result_cache, initial_patch)
         if not (
