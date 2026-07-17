@@ -558,6 +558,85 @@ def _fix_string_literal_columns(sql: str, names: set[str]) -> str:
     return _process_segment(sql)
 
 
+def normalize_teiid_string_filters(
+    sql: str,
+    table_schema: list[dict[str, Any]],
+) -> str:
+    """Wrap string-column equality filters in LOWER() so natural-language values
+    match stored values regardless of capitalization.
+
+    Only rewrites comparisons where the column is known to be a string/text type
+    in the project schema and the literal is a single-quoted string.
+    """
+    if not sql or not table_schema:
+        return sql
+
+    string_types = {"string", "text", "varchar", "char", "clob", "nstring"}
+    string_cols: set[str] = set()
+    for entry in table_schema:
+        for col in entry.get("columns", []) or []:
+            ctype = ""
+            cname = ""
+            if isinstance(col, dict):
+                ctype = str(col.get("type") or "").lower()
+                cname = str(col.get("name") or "").strip().strip('"')
+            elif isinstance(col, str):
+                cname = col.strip().strip('"')
+            if cname and (ctype in string_types or not ctype):
+                string_cols.add(cname.lower())
+    if not string_cols:
+        return sql
+
+    col_token = r'"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*'
+    lit_token = r"'(?:[^']|'')*'"
+
+    def col_name(token: str) -> str | None:
+        name = token.strip().strip('"')
+        if name.lower() in string_cols:
+            return token
+        return None
+
+    def _quoted_col(token: str) -> str:
+        name = token.strip().strip('"')
+        return f'"{name}"'
+
+    # Equality / inequality: "Column" = 'value' or Column = 'value'
+    eq_re = re.compile(
+        rf"(?<![\w\"'])({col_token})\s*(=|!=|<>|<=|>=)\s*({lit_token})",
+        re.IGNORECASE,
+    )
+
+    def _eq_replace(m: re.Match[str]) -> str:
+        col = m.group(1)
+        op = m.group(2)
+        val = m.group(3)
+        if not col_name(col):
+            return m.group(0)
+        # Only rewrite equality/inequality operators, not range operators.
+        if op in ("<=", ">="):
+            return m.group(0)
+        return f"LOWER({_quoted_col(col)}) {op} LOWER({val})"
+
+    sql = eq_re.sub(_eq_replace, sql)
+
+    # IN list: "Column" IN ('a','b','c')
+    in_re = re.compile(
+        rf"(?<![\w\"'])({col_token})\s+IN\s*\(((?:\s*{lit_token}\s*,?)+)\)",
+        re.IGNORECASE,
+    )
+
+    def _in_replace(m: re.Match[str]) -> str:
+        col = m.group(1)
+        values_block = m.group(2)
+        if not col_name(col):
+            return m.group(0)
+        lit_re = re.compile(lit_token)
+        new_values = lit_re.sub(r"LOWER(\g<0>)", values_block)
+        return f"LOWER({_quoted_col(col)}) IN ({new_values})"
+
+    return in_re.sub(_in_replace, sql)
+
+
 def normalize_teiid_identifiers(
     sql: str,
     table_schema: list[dict[str, Any]],

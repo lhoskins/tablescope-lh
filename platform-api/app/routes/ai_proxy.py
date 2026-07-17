@@ -21,7 +21,7 @@ import json
 import logging
 import re
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -59,6 +59,7 @@ from app.services.presentation_engine import (
 from app.services.response_envelope import ResponseEnvelope
 from app.services.teiid_sql import (
     normalize_teiid_identifiers,
+    normalize_teiid_string_filters,
     normalize_teiid_timestamps,
 )
 from app.services.visualization_engine import ChartType, select_visualization
@@ -1266,8 +1267,8 @@ async def _analyze_project_scopes(
             continue
 
         # Check fields exist in SELECT clauses
-        src_cols = query_col_map.get(src_qid, set())
-        tgt_cols = query_col_map.get(tgt_qid, set())
+        src_cols = query_col_map.get(cast(int, src_qid), set())
+        tgt_cols = query_col_map.get(cast(int, tgt_qid), set())
         if src_field.lower() not in src_cols or tgt_field.lower() not in tgt_cols:
             continue
 
@@ -1276,8 +1277,8 @@ async def _analyze_project_scopes(
         # values including numeric ones. When names differ (e.g.
         # CategoryName↔CategoryID), only compare string values to prevent
         # false matches between text and numeric columns.
-        src_vals = query_values.get(src_qid, {}).get(src_field, set())
-        tgt_vals = query_values.get(tgt_qid, {}).get(tgt_field, set())
+        src_vals = query_values.get(cast(int, src_qid), {}).get(src_field, set())
+        tgt_vals = query_values.get(cast(int, tgt_qid), {}).get(tgt_field, set())
         names_match = src_field.lower() == tgt_field.lower()
         overlap = _value_overlap(src_vals, tgt_vals, same_column_name=names_match)
 
@@ -1298,10 +1299,10 @@ async def _analyze_project_scopes(
 
         validated_scopes.append({
             "source_query_id": src_qid,
-            "source_query_name": suggestion.get("source_query_name", query_names.get(src_qid, "")),
+            "source_query_name": suggestion.get("source_query_name", query_names.get(cast(int, src_qid), "")),
             "source_field": src_field,
             "target_query_id": tgt_qid,
-            "target_query_name": suggestion.get("target_query_name", query_names.get(tgt_qid, "")),
+            "target_query_name": suggestion.get("target_query_name", query_names.get(cast(int, tgt_qid), "")),
             "target_field": tgt_field,
             "confidence": conf,
             "reason": suggestion.get("reason", ""),
@@ -2350,6 +2351,7 @@ async def _execute_with_repair(
     last_error = ""
     for attempt in range(3):
         current = normalize_teiid_identifiers(current, table_schema)
+        current = normalize_teiid_string_filters(current, table_schema)
         bounded = _apply_row_limit(current, max_rows)
         try:
             result = await _execute_project_sql(
@@ -2828,7 +2830,7 @@ async def ai_ask_and_run(
             context, project_id=req.project_id, question=req.question
         )
         if prose:
-            prose_result = {
+            prose_result: dict[str, Any] = {
                 "question": req.question,
                 "sql": "",
                 "columns": [],

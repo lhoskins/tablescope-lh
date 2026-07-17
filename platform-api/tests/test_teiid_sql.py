@@ -8,6 +8,7 @@ from app.services.teiid_sql import (
     date_mask_for_value,
     date_masks_from_samples,
     normalize_date_casts,
+    normalize_teiid_string_filters,
     normalize_teiid_timestamps,
 )
 
@@ -101,3 +102,23 @@ def test_normalize_date_casts_known_columns() -> None:
 def test_normalize_date_casts_ignores_unknown_columns() -> None:
     sql = 'SELECT * FROM t WHERE d > CAST("OtherDate" AS timestamp)'
     assert normalize_date_casts(sql, {"ShipDate": "M/d/yyyy"}) == sql
+
+
+def test_normalize_string_filter_case_insensitive() -> None:
+    schema = [{"table": "t", "columns": [{"name": "Status", "type": "string"}]}]
+    sql = 'SELECT * FROM t WHERE "Status" = \'failed\''
+    out = normalize_teiid_string_filters(sql, schema)
+    assert 'LOWER("Status") = LOWER(\'failed\')' in out
+
+
+def test_normalize_string_filter_ignores_numeric_columns() -> None:
+    schema = [{"table": "t", "columns": [{"name": "Amount", "type": "double"}]}]
+    sql = 'SELECT * FROM t WHERE "Amount" = \'100\''
+    assert normalize_teiid_string_filters(sql, schema) == sql
+
+
+def test_normalize_string_filter_handles_in_lists() -> None:
+    schema = [{"table": "t", "columns": [{"name": "Result", "type": "string"}]}]
+    sql = 'SELECT * FROM t WHERE "Result" IN (\'failed\', \'success\')'
+    out = normalize_teiid_string_filters(sql, schema)
+    assert 'LOWER("Result") IN (LOWER(\'failed\'), LOWER(\'success\'))' in out
