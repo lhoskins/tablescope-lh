@@ -39,6 +39,7 @@ const CHART_FOLLOW_UPS = [
   "change it to a line chart",
   "change it to a bar chart",
   "change it to a horizontal bar chart",
+  "change it to a donut chart",
   "sort by value descending",
   "show as a table",
 ];
