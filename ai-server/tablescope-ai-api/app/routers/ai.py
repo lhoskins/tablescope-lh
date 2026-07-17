@@ -1935,10 +1935,12 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         "subtype, type=bar and subtype=null. If the user says 'horizontal "
         "bar chart' or 'as horizontal' or 'make it horizontal', type=bar and "
         "subtype=horizontal_bar. 'as a donut' or just 'as donut' -> pie/donut.\n"
-        "6. labelColumn and valueColumns must come from result_columns. If "
-        "the user names a column that does not exist, still return "
-        "chart_change and put the requested name in the field — the platform "
-        "will report it to the user.\n"
+        "6. labelColumn and valueColumns must come from result_columns. For "
+        "new_analysis and query_change, leave them null unless the exact columns "
+        "are already known and present in result_columns (they almost never are). "
+        "For chart_change, if the user names a column that does not exist, still "
+        "return chart_change and put the requested name in the field — the "
+        "platform will report it to the user.\n"
         "7. Output `data_question` for new_analysis and query_change: the "
         "user's underlying data question with all chart/presentation wording "
         "removed and ambiguous phrasing clarified. The SQL generator will "
@@ -2074,15 +2076,21 @@ def _sanitize_chart_patch(
         if subtype in allowed_for:
             patch["subtype"] = subtype
 
-    label = raw.get("labelColumn")
-    if isinstance(label, str) and label.strip():
-        patch["labelColumn"] = label.strip()
+    # For new_analysis / query_change there is no prior result, so the model
+    # cannot know the real column names yet. Ignore any guessed label/value
+    # columns and let the platform derive them from the executed result. For
+    # chart_change, result_columns is the prior result, so we preserve explicit
+    # (even wrong) column requests so the platform can surface a clear error.
+    if result_columns:
+        label = raw.get("labelColumn")
+        if isinstance(label, str) and label.strip():
+            patch["labelColumn"] = label.strip()
 
-    values = raw.get("valueColumns")
-    if isinstance(values, list):
-        cleaned = [v.strip() for v in values if isinstance(v, str) and v.strip()]
-        if cleaned:
-            patch["valueColumns"] = cleaned
+        values = raw.get("valueColumns")
+        if isinstance(values, list):
+            cleaned = [v.strip() for v in values if isinstance(v, str) and v.strip()]
+            if cleaned:
+                patch["valueColumns"] = cleaned
 
     sort = raw.get("sort")
     if (
