@@ -165,7 +165,10 @@ async def classify_turn(
                     decision.get("confidence"),
                     decision.get("reason"),
                 )
-                return intent, chart if intent == ConversationalIntent.CHART_CHANGE else {}
+                # New-analysis and query-change turns may also carry a chart
+                # preference from the model (e.g. "Run X with a horizontal bar
+                # chart"). Preserve it so execute_turn can apply it after SQL.
+                return intent, chart
     return _fallback_classify(question, prior_turn)
 
 
@@ -185,6 +188,15 @@ def _fallback_classify(
                     patch["subtype"] = subtype
                 return ConversationalIntent.CHART_CHANGE, patch
     if prior_turn is None:
+        # Even a brand-new question can name a chart style ("Run X with a
+        # horizontal bar chart"). Pass the preference along so the widget can
+        # honor it after SQL generation.
+        for phrase, chart_type, subtype in _FALLBACK_CHART_WORDS:
+            if re.search(rf"\b{phrase}\b", q):
+                patch: dict[str, Any] = {"type": chart_type}
+                if subtype:
+                    patch["subtype"] = subtype
+                return ConversationalIntent.NEW_ANALYSIS, patch
         return ConversationalIntent.NEW_ANALYSIS, {}
     # Ambiguous follow-up: re-run through the SQL engine, the safe default.
     return ConversationalIntent.QUERY_CHANGE, {}
@@ -626,6 +638,19 @@ async def execute_turn(
         "suggestedVisualization": run.get("suggestedVisualization"),
     }
     chart_config = _build_chart_config(run.get("suggestedVisualization"), columns, bounded_rows)
+
+    # New-analysis/query-change turns may include a chart preference from the
+    # model (e.g. "Run IT backup jobs with a horizontal bar chart"). Apply it
+    # deterministically after SQL execution so the initial widget honors the
+    # user's requested format.
+    if chart_patch:
+        patched_config, patch_message = apply_chart_patch(chart_config, result_cache, chart_patch)
+        if not (
+            patch_message.startswith("I couldn't")
+            or "not in" in patch_message
+            or "needs" in patch_message
+        ):
+            chart_config = patched_config
 
     # Post-execution governance check against the generated SQL/chart.  If the AI
     # produced a disabled analytical method, surface a governed message instead of

@@ -1919,8 +1919,11 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         "<format>', 'switch to <format>', 'make it <format>' where <format> "
         "is a chart style are chart_change — the user wants the same data "
         "re-presented.\n"
-        "4. Only populate \"chart\" when intent is chart_change. Use null for "
-        "any chart field the user did not ask to change.\n"
+        "4. Populate \"chart\" for chart_change. ALSO populate it for "
+        "new_analysis or query_change when the user explicitly names a chart "
+        "style in the same message (e.g. 'Run IT backup jobs with a horizontal "
+        "bar chart'). Use null for any chart field the user did not ask to "
+        "change.\n"
         "5. labelColumn and valueColumns must come from result_columns. If "
         "the user names a column that does not exist, still return "
         "chart_change and put the requested name in the field — the platform "
@@ -1963,6 +1966,12 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         'Message: "only show 2024" -> '
         '{"intent": "query_change", "chart": {}, "confidence": 0.9, '
         '"reason": "Needs a different filter, so new SQL."}\n'
+        'Message: "Run IT backup jobs with a horizontal bar chart" -> '
+        '{"intent": "new_analysis", "chart": {"type": "bar", "subtype": '
+        '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
+        'null, "dataLabels": null, "legendVisible": null, "title": null}, '
+        '"confidence": 0.95, "reason": "New data question that also requests a "'
+        '"horizontal bar visualization."}\n'
         'Message: "why is March so high?" -> '
         '{"intent": "explain", "chart": {}, "confidence": 0.85, '
         '"reason": "Asks about how the current result came to be."}\n'

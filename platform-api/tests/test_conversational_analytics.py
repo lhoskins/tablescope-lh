@@ -380,8 +380,8 @@ async def test_rename_and_delete_conversation(client, service_headers):
 
 
 async def test_other_user_cannot_access_conversation(client, service_headers):
-    _, user_a, project_a, headers_a = await _setup(client, service_headers, "conv-a")
-    tenant_b, user_b, project_b, headers_b = await _setup(client, service_headers, "conv-b")
+    _, _user_a, project_a, headers_a = await _setup(client, service_headers, "conv-a")
+    _tenant_b, _user_b, _project_b, headers_b = await _setup(client, service_headers, "conv-b")
 
     r = await client.post(
         "/api/conversational-analytics/conversations",
@@ -395,3 +395,73 @@ async def test_other_user_cannot_access_conversation(client, service_headers):
         headers=headers_b,
     )
     assert r.status_code == 404
+
+
+async def test_new_analysis_with_requested_chart_type(client, service_headers, monkeypatch):
+    """A brand-new question that names a chart type gets that initial chart."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-new-chart")
+
+    async def _fake(*args, **kwargs):
+        return _fake_ask_and_run_core_result(kwargs.get("question", ""))
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake,
+    )
+
+    from app.services import conversational_analytics as ca
+
+    monkeypatch.setattr(ca.ai_intelligence_client, "is_enabled", lambda: True)
+
+    async def _fake_classify(**kwargs):
+        return {
+            "intent": "new_analysis",
+            "chart": {"type": "bar", "subtype": "horizontal_bar"},
+            "confidence": 0.95,
+            "reason": "New data question with requested horizontal bar chart.",
+        }
+
+    monkeypatch.setattr(
+        ca.ai_intelligence_client, "classify_conversation_turn", _fake_classify
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={"project_id": project["id"], "initial_message": "Run IT backup jobs with a horizontal bar chart"},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["intent_type"] == "new_analysis"
+    assert turn["chart_config"]["type"] == "bar"
+    assert turn["chart_config"]["subtype"] == "horizontal_bar"
+
+
+async def test_fallback_new_analysis_with_chart_type(client, service_headers, monkeypatch):
+    """Degraded mode (AI off) also honors a chart type in a new question."""
+    _, _, project, headers = await _setup(client, service_headers, "conv-fb-new-chart")
+
+    async def _fake(*args, **kwargs):
+        return _fake_ask_and_run_core_result(kwargs.get("question", ""))
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake,
+    )
+
+    from app.services import conversational_analytics as ca
+
+    monkeypatch.setattr(ca.ai_intelligence_client, "is_enabled", lambda: False)
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={"project_id": project["id"], "initial_message": "Show me sales by month as a donut chart"},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["intent_type"] == "new_analysis"
+    assert turn["chart_config"]["type"] == "pie"
+    assert turn["chart_config"]["subtype"] == "donut"
