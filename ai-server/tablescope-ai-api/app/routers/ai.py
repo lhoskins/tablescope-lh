@@ -2079,11 +2079,11 @@ async def classify_conversation_turn(
     if intent in {"chart_change", "explain"} and not req.has_prior_result:
         intent = "new_analysis"
 
-    chart = (
-        _sanitize_chart_patch(parsed.get("chart"), req.result_columns)
-        if intent == "chart_change"
-        else {}
-    )
+    # The model may also attach a chart preference to new_analysis or
+    # query_change turns (e.g. "Run X with a horizontal bar chart"), so we
+    # always sanitize and return the chart patch. For chart_change, an empty
+    # patch means the model could not act on a presentation-only request.
+    chart = _sanitize_chart_patch(parsed.get("chart"), req.result_columns)
     if intent == "chart_change" and not chart:
         # The model said "presentation change" but produced nothing actionable.
         intent = "clarification"
