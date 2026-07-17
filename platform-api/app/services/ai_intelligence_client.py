@@ -369,3 +369,41 @@ async def interpret(
         if isinstance(ins, dict) and ins.get("id"):
             out[str(ins["id"])] = ins
     return out
+
+
+async def classify_conversation_turn(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    message: str,
+    has_prior_result: bool = False,
+    prior_sql: str = "",
+    result_columns: list[str] | None = None,
+    numeric_columns: list[str] | None = None,
+    categorical_columns: list[str] | None = None,
+    row_count: int = 0,
+    current_chart: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Ask the AI server to classify a conversational analytics turn.
+
+    Returns a dict with ``intent`` and an optional ``chart`` patch, or ``None``
+    when the AI server is disabled.
+    """
+    result = await _post(
+        "/ai/intelligence/conversation-turn",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "message": message,
+            "has_prior_result": has_prior_result,
+            "prior_sql": prior_sql,
+            "result_columns": result_columns or [],
+            "numeric_columns": numeric_columns or [],
+            "categorical_columns": categorical_columns or [],
+            "row_count": row_count,
+            "current_chart": current_chart or {},
+        },
+    )
+    return result if isinstance(result, dict) else None

@@ -295,6 +295,33 @@ class IntelligenceInterpretResponse(BaseModel):
     model_used: str = ""
 
 
+class ConversationTurnClassifyRequest(AIBaseRequest):
+    """Classify a single conversational analytics turn and optionally patch the chart.
+
+    The platform sends the user's message together with the real state of the
+    conversation (prior SQL, result columns, current chart) so the model can
+    decide whether the turn is a chart-only reformat, a query change, an
+    explanation request, or a new analysis.
+    """
+
+    message: str
+    has_prior_result: bool = False
+    prior_sql: str = ""
+    result_columns: list[str] = Field(default_factory=list)
+    numeric_columns: list[str] = Field(default_factory=list)
+    categorical_columns: list[str] = Field(default_factory=list)
+    row_count: int = 0
+    current_chart: dict = Field(default_factory=dict)
+
+
+class ConversationTurnClassifyResponse(BaseModel):
+    intent: str = "query_change"  # new_analysis | query_change | chart_change | explain | clarification | unsupported
+    chart: dict[str, Any] = Field(default_factory=dict)
+    reason: str = ""
+    request_id: str = ""
+    model_used: str = ""
+
+
 class KnowledgeGraphInsightRequest(AIBaseRequest):
     """Generate Knowledge-Graph business-insight cards for a selected node.
 
