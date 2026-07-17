@@ -1924,7 +1924,10 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         "for new_analysis or query_change when the user mentions any chart "
         "style in the same message (e.g. 'Run IT backup jobs with a horizontal "
         "bar chart', 'Count of backup jobs by status as a horizontal bar "
-        "chart'). If no chart style is mentioned, return chart as an empty "
+        "chart'). A chart style can appear anywhere in the message, including "
+        "after data constraints like 'show success vs failed ... as a "
+        "horizontal bar chart'. Do not let the data part hide the style "
+        "request. If no chart style is mentioned, return chart as an empty "
         "object {}. Use null for any chart field the user did not ask to "
         "change.\n"
         "5. When a chart style is mentioned, you MUST set type and subtype; "
@@ -1991,6 +1994,13 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         '"donut", "labelColumn": null, "valueColumns": null, "sort": null, '
         '"dataLabels": null, "legendVisible": null, "title": null}, '
         '"confidence": 0.95, "reason": "New question requesting a donut chart."}\n'
+        'Message: "Run IT backup jobs and show success vs failed counts as a "'
+        '"horizontal bar chart" -> {"intent": "new_analysis", "chart": '
+        '{"type": "bar", "subtype": "horizontal_bar", "labelColumn": null, '
+        '"valueColumns": null, "sort": null, "dataLabels": null, '
+        '"legendVisible": null, "title": null}, "confidence": 0.95, '
+        '"reason": "New question with chart style at the end; style must be "'
+        '"preserved."}\n'
         'Message: "why is March so high?" -> '
         '{"intent": "explain", "chart": {}, "confidence": 0.85, '
         '"reason": "Asks about how the current result came to be."}\n'
