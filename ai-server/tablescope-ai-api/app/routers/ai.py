@@ -1839,6 +1839,261 @@ async def intelligence_fix_sql(
     )
 
 
+# ---------------------------------------------------------------------------
+# Conversational turn classification
+# ---------------------------------------------------------------------------
+
+_CONVERSATION_INTENTS = {
+    "new_analysis",
+    "query_change",
+    "chart_change",
+    "explain",
+    "clarification",
+}
+
+# Closed chart vocabulary — mirrors what the web-ui WidgetRenderer can draw.
+# This grounds the model's output; it does NOT decide intent.
+_CHART_TYPES = {"table", "bar", "line", "pie", "scatter"}
+_CHART_SUBTYPES: dict[str, set[str]] = {
+    "bar": {
+        "column",
+        "horizontal_bar",
+        "stacked_bar",
+        "grouped_bar",
+        "stacked_horizontal",
+        "positive_negative",
+        "waterfall",
+    },
+    "line": {"smooth_line", "step_line", "dashed_line", "stacked_area"},
+    "pie": {"donut", "two_level", "gauge"},
+    "scatter": {"bubble", "best_fit"},
+    "table": set(),
+}
+
+_CONVERSATION_TURN_SYSTEM_PROMPT = (
+    "You are the routing brain of Tablescope's conversational analytics "
+    "assistant. Your ONLY job is to classify the user's latest message and, "
+    "when it is a presentation-only change, translate it into a structured "
+    "chart patch. You never write SQL, never invent data, and never invent "
+    "column names — you may only reference columns that appear in the result "
+    "columns provided. Respond with a single JSON object and nothing else."
+)
+
+
+def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
+    """Build the classification prompt: grounded state, closed vocabularies,
+    explicit decision rules, output schema, and few-shot examples."""
+    chart_json = json.dumps(req.current_chart or {}, default=str)
+    subtype_lines = "\n".join(
+        f'- "{t}": subtypes {sorted(subs) if subs else "[]"}'
+        for t, subs in _CHART_SUBTYPES.items()
+    )
+    return (
+        "## Conversation state\n"
+        f"- has_prior_result: {req.has_prior_result}\n"
+        f"- prior_sql: {req.prior_sql or '(none)'}\n"
+        f"- result_columns: {req.result_columns}\n"
+        f"- numeric_columns: {req.numeric_columns}\n"
+        f"- categorical_columns: {req.categorical_columns}\n"
+        f"- row_count: {req.row_count}\n"
+        f"- current_chart: {chart_json}\n\n"
+        "## Intents (choose exactly one)\n"
+        "- new_analysis: a brand-new question that needs new data.\n"
+        "- query_change: changes WHAT data is computed — filters, date ranges, "
+        "different metrics/dimensions, grouping, comparisons. Requires new SQL.\n"
+        "- chart_change: changes ONLY how the EXISTING result is presented — "
+        "chart type or subtype (horizontal/stacked/grouped bars, donut, line, "
+        "pie, scatter, table), which existing columns are plotted as label/"
+        "values, sorting the display, data labels, legend, or title.\n"
+        "- explain: the user asks how the current result was computed or to "
+        "see the SQL.\n"
+        "- clarification: the message is too vague to act on at all.\n\n"
+        "## Decision rules\n"
+        "1. chart_change and explain are only valid when has_prior_result is "
+        "true; otherwise prefer new_analysis.\n"
+        "2. Torn between query_change and chart_change? Ask: can the request "
+        "be satisfied by re-drawing the SAME rows and columns? If yes it is "
+        "chart_change; if it needs different rows, columns, filters, or "
+        "aggregation it is query_change.\n"
+        "3. Phrases like 'run this query as/using <format>', 'show it as "
+        "<format>', 'switch to <format>', 'make it <format>' where <format> "
+        "is a chart style are chart_change — the user wants the same data "
+        "re-presented.\n"
+        "4. Only populate \"chart\" when intent is chart_change. Use null for "
+        "any chart field the user did not ask to change.\n"
+        "5. labelColumn and valueColumns must come from result_columns. If "
+        "the user names a column that does not exist, still return "
+        "chart_change and put the requested name in the field — the platform "
+        "will report it to the user.\n\n"
+        "## Chart vocabulary (closed set)\n"
+        f"Types: {sorted(_CHART_TYPES)}\n"
+        f"{subtype_lines}\n"
+        "Mapping guidance: 'horizontal bar' -> type=bar, subtype="
+        "horizontal_bar; 'stacked bar' -> bar/stacked_bar; 'grouped bar' -> "
+        "bar/grouped_bar; 'donut'/'doughnut' -> pie/donut; 'area' -> "
+        "line/stacked_area; 'bubble' -> scatter/bubble; plain 'bar chart' -> "
+        "bar with subtype null; 'vertical bar' -> bar with subtype null.\n\n"
+        "## Output schema (JSON only, all keys required)\n"
+        "{\n"
+        '  "intent": "new_analysis|query_change|chart_change|explain|clarification",\n'
+        '  "chart": {\n'
+        '    "type": "table|bar|line|pie|scatter|null",\n'
+        '    "subtype": "one of the listed subtypes or null",\n'
+        '    "labelColumn": "column name or null",\n'
+        '    "valueColumns": ["column names"] or null,\n'
+        '    "sort": {"column": "label|value", "direction": "asc|desc"} or null,\n'
+        '    "dataLabels": true/false/null,\n'
+        '    "legendVisible": true/false/null,\n'
+        '    "title": "new chart title or null"\n'
+        "  },\n"
+        '  "confidence": 0.0-1.0,\n'
+        '  "reason": "one short sentence"\n'
+        "}\n\n"
+        "## Examples\n"
+        'Message: "run this query using horizontal bar format" -> '
+        '{"intent": "chart_change", "chart": {"type": "bar", "subtype": '
+        '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
+        'null, "dataLabels": null, "legendVisible": null, "title": null}, '
+        '"confidence": 0.95, "reason": "Same data re-presented as horizontal bars."}\n'
+        'Message: "change it to a donut" -> '
+        '{"intent": "chart_change", "chart": {"type": "pie", "subtype": '
+        '"donut", "labelColumn": null, "valueColumns": null, "sort": null, '
+        '"dataLabels": null, "legendVisible": null, "title": null}, '
+        '"confidence": 0.95, "reason": "Presentation-only switch to a donut."}\n'
+        'Message: "only show 2024" -> '
+        '{"intent": "query_change", "chart": {}, "confidence": 0.9, '
+        '"reason": "Needs a different filter, so new SQL."}\n'
+        'Message: "why is March so high?" -> '
+        '{"intent": "explain", "chart": {}, "confidence": 0.85, '
+        '"reason": "Asks about how the current result came to be."}\n'
+        'Message: "sort it highest to lowest" -> '
+        '{"intent": "chart_change", "chart": {"type": null, "subtype": null, '
+        '"labelColumn": null, "valueColumns": null, "sort": {"column": '
+        '"value", "direction": "desc"}, "dataLabels": null, "legendVisible": '
+        'null, "title": null}, "confidence": 0.9, "reason": '
+        '"Display sort of the same rows."}\n\n'
+        "## User message\n"
+        f"{req.message}\n"
+    )
+
+
+def _sanitize_chart_patch(
+    raw: Any, result_columns: list[str]
+) -> dict[str, Any]:
+    """Deterministic guardrail: keep only known keys and legal values.
+
+    The model proposes; this validates. Unknown chart types/subtypes are
+    dropped rather than guessed so the platform never receives a config the
+    renderer cannot draw. Column references are passed through even when they
+    don't exist — the platform surfaces a helpful message for those.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    patch: dict[str, Any] = {}
+
+    chart_type = raw.get("type")
+    if isinstance(chart_type, str) and chart_type.lower() in _CHART_TYPES:
+        patch["type"] = chart_type.lower()
+
+    subtype = raw.get("subtype")
+    if isinstance(subtype, str) and subtype:
+        subtype = subtype.lower()
+        allowed_for = _CHART_SUBTYPES.get(patch.get("type", ""), set())
+        if not patch.get("type"):
+            allowed_for = set().union(*_CHART_SUBTYPES.values())
+        if subtype in allowed_for:
+            patch["subtype"] = subtype
+
+    label = raw.get("labelColumn")
+    if isinstance(label, str) and label.strip():
+        patch["labelColumn"] = label.strip()
+
+    values = raw.get("valueColumns")
+    if isinstance(values, list):
+        cleaned = [v.strip() for v in values if isinstance(v, str) and v.strip()]
+        if cleaned:
+            patch["valueColumns"] = cleaned
+
+    sort = raw.get("sort")
+    if (
+        isinstance(sort, dict)
+        and sort.get("column") in ({"label", "value"} | set(result_columns))
+        and sort.get("direction") in {"asc", "desc"}
+    ):
+        patch["sort"] = {"column": sort["column"], "direction": sort["direction"]}
+
+    for key in ("dataLabels", "legendVisible"):
+        if isinstance(raw.get(key), bool):
+            patch[key] = raw[key]
+
+    title = raw.get("title")
+    if isinstance(title, str) and title.strip():
+        patch["title"] = title.strip()[:120]
+
+    return patch
+
+
+@router.post(
+    "/intelligence/conversation-turn",
+    response_model=ConversationTurnClassifyResponse,
+)
+async def classify_conversation_turn(
+    req: ConversationTurnClassifyRequest,
+) -> ConversationTurnClassifyResponse:
+    """Classify a conversational-analytics turn and emit a chart patch.
+
+    LLM-first replacement for the platform's old regex intent tables: the
+    model sees the grounded conversation state (real columns, current chart)
+    and a closed chart vocabulary, and returns strict JSON. Deterministic
+    validation afterwards guarantees the platform only ever receives legal
+    intents and renderer-supported chart configs.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    update_activity()
+
+    raw = await llm_client.generate(
+        prompt=_conversation_turn_prompt(req),
+        system_prompt=_CONVERSATION_TURN_SYSTEM_PROMPT,
+        model=settings.reasoning_model,
+        temperature=0.0,
+        max_tokens=400,
+        num_ctx=8192,
+        response_format="json",
+    )
+    parsed = _parse_json_response(raw or "") or {}
+
+    intent = str(parsed.get("intent") or "").strip().lower()
+    if intent not in _CONVERSATION_INTENTS:
+        intent = "query_change" if req.has_prior_result else "new_analysis"
+    # chart_change/explain require a prior result to act on.
+    if intent in {"chart_change", "explain"} and not req.has_prior_result:
+        intent = "new_analysis"
+
+    chart = (
+        _sanitize_chart_patch(parsed.get("chart"), req.result_columns)
+        if intent == "chart_change"
+        else {}
+    )
+    if intent == "chart_change" and not chart:
+        # The model said "presentation change" but produced nothing actionable.
+        intent = "clarification"
+
+    try:
+        confidence = min(max(float(parsed.get("confidence", 0.0)), 0.0), 1.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    return ConversationTurnClassifyResponse(
+        intent=intent,
+        chart=chart,
+        confidence=confidence,
+        reason=str(parsed.get("reason") or "")[:300],
+        request_id=request_id,
+        model_used=settings.reasoning_model,
+    )
+
+
 @router.post("/intelligence/interpret", response_model=IntelligenceInterpretResponse)
 async def intelligence_interpret(
     req: IntelligenceInterpretRequest,
@@ -1922,193 +2177,6 @@ async def intelligence_interpret(
 
     return IntelligenceInterpretResponse(
         insights=insights,
-        request_id=request_id,
-        model_used=settings.reasoning_model,
-    )
-
-
-# Conversational analytics turn classification
-_CONVERSATION_INTENTS = frozenset(
-    {"new_analysis", "query_change", "chart_change", "explain", "clarification", "unsupported"}
-)
-
-# Closed chart vocabulary shared with the dashboard WidgetRenderer.
-_CONVERSATION_CHART_TYPES = frozenset(
-    {
-        "bar",
-        "line",
-        "area",
-        "pie",
-        "scatter",
-        "combo",
-        "radar",
-        "radial_bar",
-        "treemap",
-        "funnel",
-        "sankey",
-        "kpi",
-        "table",
-    }
-)
-
-_CONVERSATION_CHART_SUBTYPES: dict[str, frozenset[str]] = {
-    "bar": frozenset({"column", "stacked_bar", "grouped_bar", "horizontal_bar", "stacked_horizontal"}),
-    "line": frozenset({"", "smooth_line"}),
-    "area": frozenset({"", "stacked_area"}),
-    "pie": frozenset({"", "donut"}),
-    "scatter": frozenset({"", "bubble"}),
-    "combo": frozenset({"bar_line"}),
-    "radar": frozenset({"", "scorecard"}),
-    "radial_bar": frozenset({"", "multi_ring"}),
-    "treemap": frozenset(),
-    "funnel": frozenset(),
-    "sankey": frozenset(),
-    "kpi": frozenset(),
-    "table": frozenset(),
-}
-
-_CONVERSATION_TURN_SYSTEM_PROMPT = (
-    "You are Tablescope's conversational analytics intent classifier. "
-    "Your job is to read the user's latest message and the current conversation "
-    "state, then return a JSON object with three keys: "
-    "intent, chart, reason. "
-    "intent must be one of: new_analysis, query_change, chart_change, explain, clarification, unsupported.\n\n"
-    "Decision rules:\n"
-    "- If the user asks a new analytical question or there is no prior result, use new_analysis.\n"
-    "- If the user wants to change the visualization of the SAME rows/columns "
-    "(chart type, subtype, label, values, sort, data labels, legend, title), use chart_change.\n"
-    "- If the user wants to filter, aggregate differently, add/remove columns, change date range, "
-    "compare, or otherwise alter the data itself, use query_change.\n"
-    "- If the user asks how/why the result was calculated or for the SQL, use explain.\n"
-    "- If the request is unclear, unsupported, or cannot be satisfied with the available columns, use clarification.\n\n"
-    "The chart patch may only contain these keys: type, subtype, labelColumn, valueColumns, sort, dataLabels, legendVisible, title.\n"
-    "Only use columns from result_columns. Never invent a column.\n\n"
-    "Closed chart vocabulary (type -> subtypes):\n"
-    "- bar: column, stacked_bar, grouped_bar, horizontal_bar, stacked_horizontal\n"
-    "- line: (empty), smooth_line\n"
-    "- area: (empty), stacked_area\n"
-    "- pie: (empty), donut\n"
-    "- scatter: (empty), bubble\n"
-    "- combo: bar_line\n"
-    "- radar: (empty), scorecard\n"
-    "- radial_bar: (empty), multi_ring\n"
-    "- treemap, funnel, sankey, kpi, table: no subtypes\n\n"
-    "Examples:\n"
-    '{"intent":"chart_change","chart":{"type":"pie","subtype":"donut"},"reason":"user requested a donut chart using existing data"}\n'
-    '{"intent":"chart_change","chart":{"type":"bar","subtype":"horizontal_bar"},"reason":"user asked for horizontal bars"}\n'
-    '{"intent":"chart_change","chart":{"sort":{"column":"value","direction":"desc"}},"reason":"sort by value descending"}\n'
-    '{"intent":"query_change","chart":{},"reason":"user wants to filter to last 30 days, which changes the rows"}\n'
-    '{"intent":"explain","chart":{},"reason":"user asked for the SQL"}\n'
-    '{"intent":"clarification","chart":{},"reason":"requested column is not in result"}'
-)
-
-
-def _sanitize_chart_patch(raw: Any, result_columns: list[str]) -> dict[str, Any]:
-    """Validate and normalize the LLM's chart patch against real columns."""
-    if not isinstance(raw, dict):
-        return {}
-
-    allowed = {"type", "subtype", "labelColumn", "valueColumns", "sort", "dataLabels", "legendVisible", "title"}
-    patch = {k: v for k, v in raw.items() if k in allowed}
-    columns = set(result_columns or [])
-
-    chart_type = patch.get("type")
-    if chart_type not in _CONVERSATION_CHART_TYPES:
-        patch.pop("type", None)
-        chart_type = None
-    if chart_type:
-        subtypes = _CONVERSATION_CHART_SUBTYPES.get(chart_type, frozenset())
-        subtype = patch.get("subtype")
-        if subtype and subtype not in subtypes:
-            patch.pop("subtype", None)
-    else:
-        patch.pop("subtype", None)
-
-    label = patch.get("labelColumn")
-    if label and label not in columns:
-        patch.pop("labelColumn", None)
-
-    value_columns = patch.get("valueColumns")
-    if isinstance(value_columns, list):
-        patch["valueColumns"] = [c for c in value_columns if c in columns]
-    else:
-        patch.pop("valueColumns", None)
-
-    sort = patch.get("sort")
-    if isinstance(sort, dict):
-        col = str(sort.get("column", ""))
-        direction = str(sort.get("direction", "")).lower()
-        if direction not in ("asc", "desc"):
-            direction = "desc"
-        if col and (col in columns or col in ("value", "label")):
-            patch["sort"] = {"column": col, "direction": direction}
-        else:
-            patch.pop("sort", None)
-    else:
-        patch.pop("sort", None)
-
-    if "dataLabels" in patch:
-        patch["dataLabels"] = bool(patch["dataLabels"])
-    if "legendVisible" in patch:
-        patch["legendVisible"] = bool(patch["legendVisible"])
-    if "title" in patch:
-        patch["title"] = str(patch["title"]).strip()
-
-    return {k: v for k, v in patch.items() if v not in (None, "", [], {})}
-
-
-def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
-    current_chart = json.dumps(req.current_chart or {}, default=str, indent=2)
-    return (
-        f"Current chart config:\n{current_chart}\n\n"
-        f"Prior SQL (if any): {req.prior_sql}\n"
-        f"Result columns: {', '.join(req.result_columns)}\n"
-        f"Numeric columns: {', '.join(req.numeric_columns)}\n"
-        f"Categorical columns: {', '.join(req.categorical_columns)}\n"
-        f"Row count: {req.row_count}\n"
-        f"Has prior result: {req.has_prior_result}\n\n"
-        f"User message: {req.message}\n\n"
-        "Return ONLY a JSON object: {\"intent\": \"...\", \"chart\": {...}, \"reason\": \"...\"}. "
-        "Do not wrap the JSON in markdown or add commentary."
-    )
-
-
-@router.post("/intelligence/conversation-turn", response_model=ConversationTurnClassifyResponse)
-async def classify_conversation_turn(
-    req: ConversationTurnClassifyRequest,
-) -> ConversationTurnClassifyResponse:
-    """Classify a conversational analytics turn and return a structured chart patch."""
-    request_id = str(uuid.uuid4())
-    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
-
-    raw = await llm_client.generate(
-        prompt=_conversation_turn_prompt(req),
-        system_prompt=_CONVERSATION_TURN_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
-        temperature=0.0,
-        max_tokens=400,
-        response_format="json",
-    )
-    parsed = _parse_json_response(raw or "") or {}
-
-    intent = str(parsed.get("intent") or "").strip().lower()
-    if intent not in _CONVERSATION_INTENTS:
-        intent = "query_change" if req.has_prior_result else "new_analysis"
-    if intent in {"chart_change", "explain"} and not req.has_prior_result:
-        intent = "new_analysis"
-
-    chart = _sanitize_chart_patch(parsed.get("chart"), req.result_columns) if intent == "chart_change" else {}
-    if intent == "chart_change" and not chart:
-        intent = "clarification"
-
-    reason = str(parsed.get("reason") or "").strip()
-    if not reason:
-        reason = f"Classified as {intent}."
-
-    return ConversationTurnClassifyResponse(
-        intent=intent,
-        chart=chart,
-        reason=reason,
         request_id=request_id,
         model_used=settings.reasoning_model,
     )
