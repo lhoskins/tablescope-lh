@@ -1,8 +1,16 @@
 """Conversational analytics orchestration.
 
-Submits analytical turns, classifies intent, delegates SQL generation/execution
-to the existing ask-and-run core, applies chart-only changes, and persists the
-conversation state so follow-ups can reuse prior successful results.
+Submits analytical turns, classifies intent LLM-first, delegates SQL
+generation/execution to the existing ask-and-run core, applies chart-only
+changes as validated structured patches, and persists the conversation state
+so follow-ups can reuse prior successful results.
+
+Intent and chart-format decisions are made by the AI server
+(``/ai/intelligence/conversation-turn``) from the grounded conversation state
+— nothing about the user's phrasing is hardcoded here. This module only
+*validates* what the model returns (renderer-supported chart types, columns
+that actually exist in the result) and provides a minimal degraded-mode
+fallback for when the AI server is disabled or unreachable.
 """
 
 from __future__ import annotations
@@ -21,6 +29,7 @@ from app.models.analytics_conversation import AnalyticsConversation, AnalyticsCo
 from app.routes.ai_proxy import _ask_and_run_core
 from app.services import ai_intelligence_client
 from app.services.ai_governance import ai_governance_service, infer_governance_key
+from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.project_ai_context import build_project_ai_context
 
 logger = logging.getLogger(__name__)
@@ -38,53 +47,53 @@ class ConversationalIntent(str):
     UNSUPPORTED = "unsupported"
 
 
-# Closed chart vocabulary enforced by the platform. The LLM may propose any
-# type/subtype in this list; the platform validates the patch against the real
-# result columns before it is persisted.
-_CHART_TYPES = frozenset(
-    {
-        "bar",
-        "line",
-        "area",
-        "pie",
-        "scatter",
-        "combo",
-        "radar",
-        "radial_bar",
-        "treemap",
-        "funnel",
-        "sankey",
-        "kpi",
-        "table",
-    }
-)
-
-_CHART_SUBTYPES: dict[str, frozenset[str]] = {
-    "bar": frozenset({"column", "stacked_bar", "grouped_bar", "horizontal_bar", "stacked_horizontal"}),
-    "line": frozenset({"", "smooth_line"}),
-    "area": frozenset({"", "stacked_area"}),
-    "pie": frozenset({"", "donut"}),
-    "scatter": frozenset({"", "bubble"}),
-    "combo": frozenset({"bar_line"}),
-    "radar": frozenset({"", "scorecard"}),
-    "radial_bar": frozenset({"", "multi_ring"}),
-    "treemap": frozenset(),
-    "funnel": frozenset(),
-    "sankey": frozenset(),
-    "kpi": frozenset(),
-    "table": frozenset(),
+# Closed chart vocabulary the web-ui WidgetRenderer supports. Used to VALIDATE
+# chart patches (whether they come from the LLM or the degraded fallback) —
+# never to decide intent.
+_CHART_TYPES = {"table", "bar", "line", "pie", "scatter"}
+_CHART_SUBTYPES: dict[str, set[str]] = {
+    "bar": {
+        "column",
+        "horizontal_bar",
+        "stacked_bar",
+        "grouped_bar",
+        "stacked_horizontal",
+        "positive_negative",
+        "waterfall",
+    },
+    "line": {"smooth_line", "step_line", "dashed_line", "stacked_area"},
+    "pie": {"donut", "two_level", "gauge"},
+    "scatter": {"bubble", "best_fit"},
+    "table": set(),
 }
 
-# Minimal degraded-mode signals used only when the AI server is disabled or
-# unreachable. They are intentionally tiny so the feature never hard-fails.
+# ---------------------------------------------------------------------------
+# Degraded-mode fallback (AI server disabled or unreachable ONLY).
+# Deliberately tiny: it recognizes an explicit chart-format mention or an
+# explain request; everything else re-runs through the SQL engine.
+# ---------------------------------------------------------------------------
+_FALLBACK_CHART_WORDS: list[tuple[str, str, str | None]] = [
+    ("horizontal bar", "bar", "horizontal_bar"),
+    ("stacked bar", "bar", "stacked_bar"),
+    ("grouped bar", "bar", "grouped_bar"),
+    ("donut", "pie", "donut"),
+    ("doughnut", "pie", "donut"),
+    ("area", "line", "stacked_area"),
+    ("bubble", "scatter", "bubble"),
+    ("bar", "bar", None),
+    ("column", "bar", None),
+    ("line", "line", None),
+    ("pie", "pie", None),
+    ("scatter", "scatter", None),
+    ("table", "table", None),
+]
 _FALLBACK_CHART_CONTEXT = re.compile(
-    r"\b(chart|graph|plot|format|visuali[sz]e|reformat|"
-    r"change\s+.*\s+to|make\s+.*\s+a|show\s+.*\s+as|"
-    r"switch\s+(?:to|the)|convert|run\s+.*\s+using|use\s+.*\s+format|as\s+a)\b"
+    r"\b(chart|graph|plot|format|visuali[sz]e|visuali[sz]ation|show|display|"
+    r"switch|change|make|turn|render|draw|convert|run)\b"
 )
 _FALLBACK_EXPLAIN = re.compile(
-    r"\b(explain|why|how\s+did\s+you|how\s+do\s+you|how\s+was\s+this|"
-    r"show\s+me\s+the\s+sql|what\s+sql|tell\s+me\s+how)\b"
+    r"\b(explain|why|how did you|how was this|show (?:me )?the sql|"
+    r"view (?:the )?sql|what sql)\b"
 )
 
 
@@ -93,22 +102,18 @@ def _normalize_question(question: str) -> str:
 
 
 def _prior_turn_state(prior_turn: AnalyticsConversationTurn | None) -> dict[str, Any]:
-    """Return grounded state for the LLM classifier."""
-    if prior_turn is None:
+    """Grounded conversation state handed to the classifier."""
+    if prior_turn is None or not prior_turn.result_cache:
         return {"has_prior_result": False}
-    result_cache = prior_turn.result_cache or {}
-    result_metadata = prior_turn.result_metadata or {}
+    profile = prior_turn.result_metadata or {}
+    cache = prior_turn.result_cache or {}
     return {
-        "has_prior_result": bool(result_cache or prior_turn.sql),
+        "has_prior_result": True,
         "prior_sql": prior_turn.sql or "",
-        "result_columns": result_metadata.get("columns")
-        or result_cache.get("columns")
-        or [],
-        "numeric_columns": result_metadata.get("numericColumns") or [],
-        "categorical_columns": result_metadata.get("categoricalColumns") or [],
-        "row_count": result_metadata.get("rowCount")
-        or result_cache.get("rowCount")
-        or 0,
+        "result_columns": cache.get("columns", []),
+        "numeric_columns": profile.get("numericColumns", []),
+        "categorical_columns": profile.get("categoricalColumns", []),
+        "row_count": cache.get("rowCount", 0),
         "current_chart": prior_turn.chart_config or {},
     }
 
@@ -119,20 +124,16 @@ async def classify_turn(
     *,
     tenant_id: int,
     user_id: int,
-    project_id: int | None,
+    project_id: int,
 ) -> tuple[str, dict[str, Any]]:
-    """Classify a turn LLM-first; degrade deterministically when AI is off."""
-    state = _prior_turn_state(prior_turn)
-    valid_intents = {
-        ConversationalIntent.NEW_ANALYSIS,
-        ConversationalIntent.QUERY_CHANGE,
-        ConversationalIntent.CHART_CHANGE,
-        ConversationalIntent.EXPLAIN,
-        ConversationalIntent.CLARIFICATION,
-        ConversationalIntent.UNSUPPORTED,
-    }
+    """Classify a turn LLM-first; degrade deterministically when AI is off.
 
-    if ai_intelligence_client.is_enabled() and project_id is not None:
+    Returns the intent and, for chart-only changes, the structured chart
+    patch produced by the model (already sanitized server-side, re-validated
+    in :func:`apply_chart_patch`).
+    """
+    state = _prior_turn_state(prior_turn)
+    if ai_intelligence_client.is_enabled():
         try:
             decision = await ai_intelligence_client.classify_conversation_turn(
                 tenant_id=tenant_id,
@@ -141,18 +142,30 @@ async def classify_turn(
                 message=question,
                 **state,
             )
-        except ai_intelligence_client.AIUnavailableError as exc:
+        except AIUnavailableError as exc:
             logger.warning("Conversation-turn classifier unavailable: %s", exc)
             decision = None
-        else:
-            if decision:
-                intent = str(decision.get("intent") or "").strip().lower()
-                if intent in valid_intents:
-                    if intent in {ConversationalIntent.CHART_CHANGE, ConversationalIntent.EXPLAIN} and not state["has_prior_result"]:
-                        intent = ConversationalIntent.NEW_ANALYSIS
-                    chart = decision.get("chart") or {} if intent == ConversationalIntent.CHART_CHANGE else {}
-                    return intent, chart
-
+        if decision:
+            intent = decision.get("intent")
+            if intent in {
+                ConversationalIntent.NEW_ANALYSIS,
+                ConversationalIntent.QUERY_CHANGE,
+                ConversationalIntent.CHART_CHANGE,
+                ConversationalIntent.EXPLAIN,
+                ConversationalIntent.CLARIFICATION,
+            }:
+                if intent in {ConversationalIntent.CHART_CHANGE, ConversationalIntent.EXPLAIN} and not state[
+                    "has_prior_result"
+                ]:
+                    intent = ConversationalIntent.NEW_ANALYSIS
+                chart = decision.get("chart") or {}
+                logger.info(
+                    "Conversation turn classified intent=%s confidence=%s reason=%s",
+                    intent,
+                    decision.get("confidence"),
+                    decision.get("reason"),
+                )
+                return intent, chart if intent == ConversationalIntent.CHART_CHANGE else {}
     return _fallback_classify(question, prior_turn)
 
 
@@ -161,44 +174,20 @@ def _fallback_classify(
 ) -> tuple[str, dict[str, Any]]:
     """Minimal deterministic classifier for degraded mode (AI off/unreachable)."""
     q = _normalize_question(question)
-
-    if prior_turn is None or not (prior_turn.result_cache or prior_turn.sql):
-        return ConversationalIntent.NEW_ANALYSIS, {}
-
-    if _FALLBACK_EXPLAIN.search(q) and prior_turn.result_cache:
+    has_result = bool(prior_turn and prior_turn.result_cache)
+    if has_result and _FALLBACK_EXPLAIN.search(q):
         return ConversationalIntent.EXPLAIN, {}
-
-    if _FALLBACK_CHART_CONTEXT.search(q) and prior_turn.result_cache:
-        patch = _crude_chart_patch(q)
-        if patch:
-            return ConversationalIntent.CHART_CHANGE, patch
-
+    if has_result and _FALLBACK_CHART_CONTEXT.search(q):
+        for phrase, chart_type, subtype in _FALLBACK_CHART_WORDS:
+            if re.search(rf"\b{phrase}\b", q):
+                patch: dict[str, Any] = {"type": chart_type}
+                if subtype:
+                    patch["subtype"] = subtype
+                return ConversationalIntent.CHART_CHANGE, patch
+    if prior_turn is None:
+        return ConversationalIntent.NEW_ANALYSIS, {}
+    # Ambiguous follow-up: re-run through the SQL engine, the safe default.
     return ConversationalIntent.QUERY_CHANGE, {}
-
-
-def _crude_chart_patch(q: str) -> dict[str, Any]:
-    """Tiny regex-free mapping for degraded-mode chart reformatting."""
-    mappings = [
-        ("horizontal bar", {"type": "bar", "subtype": "horizontal_bar"}),
-        ("stacked horizontal", {"type": "bar", "subtype": "stacked_horizontal"}),
-        ("stacked bar", {"type": "bar", "subtype": "stacked_bar"}),
-        ("grouped bar", {"type": "bar", "subtype": "grouped_bar"}),
-        ("bar", {"type": "bar"}),
-        ("column", {"type": "bar", "subtype": "column"}),
-        ("line", {"type": "line"}),
-        ("area", {"type": "area"}),
-        ("donut", {"type": "pie", "subtype": "donut"}),
-        ("pie", {"type": "pie"}),
-        ("table", {"type": "table"}),
-        ("scatter", {"type": "scatter"}),
-    ]
-    for phrase, patch in mappings:
-        if phrase in q:
-            return patch
-    # Ambiguous but clearly chart-related: default to a plain bar chart.
-    if re.search(r"\b(chart|graph|plot|format)\b", q):
-        return {"type": "bar"}
-    return {}
 
 
 def _sql_fingerprint(sql: str | None) -> str | None:
@@ -274,138 +263,129 @@ def _build_chart_config(suggested: dict[str, Any] | None, columns: list[str], ro
     return config
 
 
-def _patch_message(applied: list[str], new_config: dict[str, Any]) -> str:
-    """Return a short assistant message describing the applied chart patch."""
-    if not applied:
-        return "Updated the chart."
-
-    if "type" in applied or "subtype" in applied:
-        chart_type = new_config.get("type", "bar")
-        subtype = new_config.get("subtype")
-        style = chart_type
-        if subtype == "horizontal_bar":
-            style = "horizontal bar"
-        elif subtype == "stacked_bar":
-            style = "stacked bar"
-        elif subtype == "grouped_bar":
-            style = "grouped bar"
-        elif subtype == "stacked_horizontal":
-            style = "stacked horizontal bar"
-        elif subtype == "donut":
-            style = "donut"
-        elif subtype == "smooth_line":
-            style = "smooth line"
-        elif subtype == "stacked_area":
-            style = "stacked area"
-        elif subtype == "bubble":
-            style = "bubble"
-        elif subtype == "bar_line":
-            style = "bar + line"
-        elif subtype == "scorecard":
-            style = "scorecard"
-        elif subtype == "multi_ring":
-            style = "multi-ring"
-        return f"Changed the chart to a {style} chart."
-
-    if "label" in applied:
-        return f"Using {new_config['labelColumn']} as the label."
-    if "values" in applied:
-        return f"Now showing {', '.join(new_config['valueColumns'])} as the value(s)."
-    if "sort" in applied:
-        sort = new_config["sort"]
-        return f"Sorted by {sort['column']} {sort['direction']}."
-    if "data labels" in applied:
-        return f"Data labels turned {'on' if new_config['dataLabels'] else 'off'}."
-    if "legend" in applied:
-        visible = new_config.get("legend", {}).get("visible")
-        return f"Legend turned {'on' if visible else 'off'}."
-    if "title" in applied:
-        return f"Updated chart title to '{new_config['title']}'."
-
-    return "Updated the chart."
+_SUBTYPE_LABELS = {
+    "horizontal_bar": "horizontal bar",
+    "stacked_bar": "stacked bar",
+    "grouped_bar": "grouped bar",
+    "stacked_horizontal": "stacked horizontal bar",
+    "positive_negative": "diverging bar",
+    "waterfall": "waterfall",
+    "column": "column",
+    "smooth_line": "smooth line",
+    "step_line": "step line",
+    "dashed_line": "dashed line",
+    "stacked_area": "stacked area",
+    "donut": "donut",
+    "two_level": "two-level pie",
+    "gauge": "gauge",
+    "bubble": "bubble",
+    "best_fit": "trend-line scatter",
+}
 
 
 def apply_chart_patch(
-    chart_config: dict[str, Any] | None,
-    result: dict[str, Any] | None,
-    patch: dict[str, Any] | None,
+    chart_config: dict[str, Any],
+    result: dict[str, Any],
+    patch: dict[str, Any],
 ) -> tuple[dict[str, Any], str]:
-    """Apply a structured chart patch from the LLM classifier.
+    """Apply a structured chart patch to the existing config.
 
-    This function is the deterministic guardrail: every field is validated
-    against the renderer's closed chart vocabulary and the columns that actually
-    exist in the cached result, so the chart is always drawable and grounded.
+    The patch comes from the LLM classifier (or the degraded fallback); this
+    function is the deterministic guardrail: every field is validated against
+    the renderer's chart vocabulary and the columns that actually exist in the
+    cached result, so the chart is always drawable and always grounded.
+
+    Returns the updated config and a short assistant message.
     """
-    if not chart_config:
-        chart_config = {}
-    if not result:
-        result = {}
     if not patch:
-        return dict(chart_config), "I couldn't understand that chart change."
+        return chart_config, (
+            "I couldn't map that to a chart change. Try something like "
+            "'show it as a horizontal bar chart' or 'change it to a donut'."
+        )
 
-    columns = list(result.get("columns") or [])
     new_config = dict(chart_config)
-    applied: list[str] = []
+    columns = (result.get("columns") or []) if result else []
+    changes: list[str] = []
 
     type_changed = patch.get("type") in _CHART_TYPES
     if type_changed:
         new_config["type"] = patch["type"]
+        # A new type resets any previous style unless the patch names one, so
+        # "make it a vertical bar" clears horizontal_bar instead of keeping it.
         new_config.pop("subtype", None)
-        applied.append("type")
-
     subtype = patch.get("subtype")
-    if subtype and subtype in _CHART_SUBTYPES.get(new_config.get("type", ""), frozenset()):
+    subtype_changed = bool(
+        subtype and subtype in _CHART_SUBTYPES.get(new_config.get("type", ""), set())
+    )
+    if subtype_changed:
         new_config["subtype"] = subtype
-        applied.append("subtype")
+    if type_changed or subtype_changed:
+        style = _SUBTYPE_LABELS.get(new_config.get("subtype", ""), "")
+        if new_config.get("type") == "table" and not style:
+            changes.append("showing the result as a table")
+        else:
+            name = style or new_config.get("type", "")
+            changes.append(f"changed the chart to a {name} chart")
 
     label = patch.get("labelColumn")
     if label:
-        if label in columns:
-            new_config["labelColumn"] = label
-            applied.append("label")
-        else:
-            return chart_config, f"Column '{label}' is not in this result. Available columns: {', '.join(columns)}."
+        if label not in columns:
+            return chart_config, (
+                f"Column '{label}' is not in this result. "
+                f"Available columns: {', '.join(columns) or 'none'}."
+            )
+        new_config["labelColumn"] = label
+        changes.append(f"using {label} as the label")
 
-    value_columns = patch.get("valueColumns")
-    if isinstance(value_columns, list):
-        missing = [c for c in value_columns if c not in columns]
+    values = patch.get("valueColumns")
+    if values:
+        missing = [v for v in values if v not in columns]
         if missing:
-            return chart_config, f"Column(s) {', '.join(missing)} are not in this result. Available columns: {', '.join(columns)}."
-        new_config["valueColumns"] = value_columns
-        applied.append("values")
+            return chart_config, (
+                f"Column '{missing[0]}' is not in this result. "
+                f"Available columns: {', '.join(columns) or 'none'}."
+            )
+        new_config["valueColumns"] = list(values)
+        changes.append(f"plotting {', '.join(values)}")
 
-    sort = patch.get("sort")
-    if isinstance(sort, dict):
-        col = str(sort.get("column", ""))
-        direction = str(sort.get("direction", "")).lower()
-        if direction not in ("asc", "desc"):
-            direction = "desc"
-        if col and (col in columns or col in ("value", "label")):
-            new_config["sort"] = {"column": col, "direction": direction}
-            applied.append("sort")
-        else:
-            return chart_config, f"Sort column '{col}' is not in this result."
+    if isinstance(patch.get("sort"), dict):
+        sort = patch["sort"]
+        if sort.get("column") and sort.get("direction") in ("asc", "desc"):
+            new_config["sort"] = {"column": sort["column"], "direction": sort["direction"]}
+            direction = "descending" if sort["direction"] == "desc" else "ascending"
+            changes.append(f"sorted by {sort['column']} {direction}")
 
-    if "dataLabels" in patch:
-        new_config["dataLabels"] = bool(patch["dataLabels"])
-        applied.append("data labels")
+    if isinstance(patch.get("dataLabels"), bool):
+        new_config["dataLabels"] = patch["dataLabels"]
+        changes.append("data labels {}".format("on" if patch["dataLabels"] else "off"))
 
-    if "legendVisible" in patch:
-        new_config["legend"] = {"visible": bool(patch["legendVisible"])}
-        applied.append("legend")
+    if isinstance(patch.get("legendVisible"), bool):
+        new_config["legend"] = {"visible": patch["legendVisible"]}
+        changes.append("legend {}".format("on" if patch["legendVisible"] else "off"))
 
-    if "title" in patch:
-        title = str(patch["title"]).strip()
-        if title:
-            new_config["title"] = title
-            applied.append("title")
+    if patch.get("title"):
+        new_config["title"] = str(patch["title"])[:120]
+        changes.append("renamed the chart")
 
-    # Validate: pie/donut needs one value column and a label column.
+    # Pie/donut needs one category and one numeric value; adapt rather than fail.
     if new_config.get("type") == "pie":
-        if not new_config.get("labelColumn") or len(new_config.get("valueColumns", [])) != 1:
+        if not new_config.get("labelColumn") and columns:
+            non_numeric = [c for c in columns if c not in (new_config.get("valueColumns") or [])]
+            if non_numeric:
+                new_config["labelColumn"] = non_numeric[0]
+        current_values = new_config.get("valueColumns") or []
+        if len(current_values) > 1:
+            new_config["valueColumns"] = current_values[:1]
+        if not new_config.get("labelColumn") or not new_config.get("valueColumns"):
             return chart_config, "A pie chart needs one category column and one numeric value."
 
-    return new_config, _patch_message(applied, new_config)
+    if not changes:
+        return chart_config, (
+            "I couldn't map that to a chart change. Try something like "
+            "'show it as a horizontal bar chart' or 'change it to a donut'."
+        )
+    message = "; ".join(changes)
+    return new_config, message[0].upper() + message[1:] + "."
 
 
 def _build_explanation(
@@ -522,9 +502,18 @@ async def execute_turn(
         prior_turn,
         tenant_id=context.tenant_id,
         user_id=context.user_id,
-        project_id=conversation.project_id,
+        project_id=conversation.project_id or 0,
     )
     turn.intent_type = intent
+
+    if intent == ConversationalIntent.CLARIFICATION:
+        turn.status = "error"
+        turn.error_code = "needs_clarification"
+        turn.assistant_message = (
+            "I'm not sure what you'd like me to do. You can ask a new question, "
+            "refine the current one, or ask for a different chart format."
+        )
+        return
 
     if intent == ConversationalIntent.CHART_CHANGE:
         if prior_turn is None or prior_turn.result_cache is None:
@@ -540,15 +529,6 @@ async def execute_turn(
             result_cache.get("rows", []),
         ))
         new_config, message = apply_chart_patch(chart_config, result_cache, chart_patch)
-        if "not in this result" in message or "needs one category" in message:
-            turn.intent_type = ConversationalIntent.CLARIFICATION
-            turn.status = "clarification"
-            turn.assistant_message = message
-            turn.chart_config = chart_config
-            turn.result_cache = result_cache
-            turn.sql = prior_turn.sql
-            return
-
         turn.chart_config = new_config
         turn.result_cache = result_cache
         turn.sql = prior_turn.sql
