@@ -112,13 +112,15 @@ def _make_runner(
             session, tenant_id=context.tenant_id, project_id=project_id
         )
         allowed_tables = [
-            entry.get("table") for entry in table_schema if entry.get("table")
+            str(t)
+            for entry in table_schema
+            if (t := entry.get("table")) is not None
         ]
         column_types = {
             str(col.get("name")): str(col.get("type") or "")
             for entry in table_schema
-            for col in entry.get("columns", [])
-            if col and col.get("name")
+            for col in (entry.get("columns") or [])
+            if isinstance(col, dict) and col.get("name")
         }
         column_samples = await _sample_project_columns(
             database=database,
@@ -595,8 +597,8 @@ async def _plan_analyses(
     column_types = {
         str(col.get("name")): str(col.get("type") or "")
         for entry in table_schema
-        for col in entry.get("columns", [])
-        if col and col.get("name")
+        for col in (entry.get("columns") or [])
+        if isinstance(col, dict) and col.get("name")
     }
     valid_analyses: list[dict[str, Any]] = []
     for a in analyses:

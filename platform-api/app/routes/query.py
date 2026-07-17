@@ -426,16 +426,21 @@ async def query_datasource(
     column_types: dict[str, str] = {}
     column_samples: dict[str, str] = {}
 
-    if payload.project_id:
+    project_id = payload.project_id
+    if project_id:
         table_schema = await project_table_schema(
-            session, tenant_id=context.tenant_id, project_id=payload.project_id
+            session, tenant_id=context.tenant_id, project_id=project_id
         )
-        allowed_tables = [entry.get("table") for entry in table_schema if entry.get("table")]
+        allowed_tables = [
+            str(t)
+            for entry in table_schema
+            if (t := entry.get("table")) is not None
+        ]
         column_types = {
             str(col.get("name")): str(col.get("type") or "")
             for entry in table_schema
-            for col in entry.get("columns", [])
-            if col and col.get("name")
+            for col in (entry.get("columns") or [])
+            if isinstance(col, dict) and col.get("name")
         }
         column_samples = await _sample_project_columns(
             database=database,
@@ -445,11 +450,15 @@ async def query_datasource(
         )
 
     if payload.sql:
+        if project_id is None:
+            raise HTTPException(
+                status_code=400, detail="project_id is required when executing SQL"
+            )
         result, final_sql = await _execute_sql_with_repair(
             raw_sql=payload.sql,
             tenant_id=context.tenant_id,
             user_id=context.user_id,
-            project_id=payload.project_id,
+            project_id=project_id,
             database=database,
             endpoint=endpoint,
             table_schema=table_schema,
