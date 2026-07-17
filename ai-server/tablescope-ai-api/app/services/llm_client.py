@@ -98,10 +98,11 @@ _TEIID_RULES = (
     "and every column reference (SELECT \"Status\", COUNT(*) FROM "
     "\"it_backup_jobs_CSV\" GROUP BY \"Status\"). Do NOT quote SQL keywords, "
     "function names, string literals, or aliases.\n"
-    "13. When filtering a string/text column with a literal value from the user's "
-    "request, use case-insensitive comparison (e.g. LOWER(\"Status\") = "
-    "LOWER('failed')) so natural-language values match stored values regardless "
-    "of capitalization, unless the user explicitly asks for exact-case matching.\n"
+    "13. For any WHERE clause comparing a string/text column to a literal value, "
+    "ALWAYS use case-insensitive comparison: LOWER(\"ColumnName\") = LOWER('value'). "
+    "Example: WHERE LOWER(\"Status\") = LOWER('failed'). Never write "
+    "WHERE \"Status\" = 'failed' or WHERE \"Status\" = 'Failed'. This ensures "
+    "natural-language filters match stored values regardless of capitalization.\n"
 )
 
 _SEMANTIC_RULES = (
