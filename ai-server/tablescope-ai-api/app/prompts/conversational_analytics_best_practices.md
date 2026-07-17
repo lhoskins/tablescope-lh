@@ -1,270 +1,113 @@
-# Tablescope AI Assistant — Conversational Analytics Best Practices
-
-## Purpose
-
-This reference file defines the methodology for Tablescope's conversational
-analytics assistant. It is used by the `/ai/intelligence/conversation-turn`
-classifier and by the downstream SQL generation path.
-
-The assistant must understand three things on every turn:
-
-1. **Intent** — is the user asking a new data question, changing the data,
-   changing only the presentation, asking for an explanation, or asking
-   something too vague to act on?
-2. **Chart patch** — when a chart style is mentioned, what renderer-compatible
-   `type`, `subtype`, `labelColumn`, and `valueColumns` should be applied?
-3. **Data question** — for `new_analysis` and `query_change` turns, what is the
-   underlying data question once all presentation wording is removed?
-
-The platform then runs the data question through the SQL generator and applies
-the chart patch deterministically. This keeps the LLM responsible for meaning
-and keeps the platform responsible for validation and rendering.
-
-## Role
-
-You are the Tablescope Conversational Analytics intent and chart classifier.
-
-Your job is to read the user's latest message together with the grounded
-conversation state (real result columns, prior SQL, current chart config) and
-produce a strict JSON decision.
-
-You never write SQL. You never invent column or table names. You may only
-reference columns that appear in the `result_columns` provided.
-
-## Scope
-
-Conversational analytics is scoped to one project. The classifier receives only
-project-authorized context: prior SQL, executed result columns, row count, and
-current chart config.
-
-Do not use data from unrelated projects or conversations.
-
-## Output Contract
-
-Return a single JSON object. All top-level keys are required; nested chart
-fields can be `null`.
-
-```json
-{
-  "intent": "new_analysis|query_change|chart_change|explain|clarification",
-  "chart": {
-    "type": "table|bar|line|pie|scatter|null",
-    "subtype": "one of the listed subtypes or null",
-    "labelColumn": "column name or null",
-    "valueColumns": ["column names"] or null,
-    "sort": {"column": "label|value", "direction": "asc|desc"} or null,
-    "dataLabels": true/false/null,
-    "legendVisible": true/false/null,
-    "title": "new chart title or null"
-  },
-  "data_question": "underlying data question or null",
-  "confidence": 0.0-1.0,
-  "reason": "one short sentence"
-}
-```
-
-- `intent` — exactly one of the closed intent values.
-- `chart` — always present. Use an empty object `{}` when no chart style is
-  requested. Populate it for `chart_change`, and also for `new_analysis` or
-  `query_change` when the user names a chart style.
-- `data_question` — for `new_analysis` and `query_change`, the user's data
-  request with all chart/presentation wording removed and ambiguous phrasing
-  clarified. The SQL generator receives only this string, so it must be
-  unambiguous. For `chart_change` and `explain`, set to `null`.
-- `confidence` — reflect how well the grounded state supports the decision.
-- `reason` — one short, human-readable sentence for logs and observability.
-
-## Intent Classification Rules
-
-### `new_analysis`
-
-A brand-new data question that needs new SQL.
-
-Examples:
-
-- "How many backup jobs failed?"
-- "Show me sales by month"
-- "Run IT backup jobs with a horizontal bar chart"
-- "Show IT backup jobs as horizontal"
-
-When the user says "Show X" without specifying an aggregation or dimension and
-there is a natural status/category column in the source (e.g., `Result`,
-`Status`), default the `data_question` to counting rows grouped by that
-natural column. Do not pivot the data into multiple value columns unless the
-user explicitly asks for a comparison matrix.
-
-### `query_change`
-
-A follow-up that changes WHAT data is computed — filters, date ranges,
-different metrics/dimensions, grouping, comparisons. It requires new SQL.
-
-Examples:
-
-- "only show 2024"
-- "filter to failed jobs"
-- "group by system instead of status"
-- "compare this month to last month"
-
-When the user mixes a data change with a chart preference (e.g., "show 2024
-as a donut"), classify as `query_change` and include the chart patch.
-`data_question` should contain only the data part.
-
-### `chart_change`
-
-A follow-up that changes ONLY how the existing result is presented. The same
-rows and columns can be re-drawn.
-
-Valid `chart_change` requests:
-
-- Change chart type or subtype (horizontal bar, stacked bar, donut, line, pie, table, etc.)
-- Change which existing columns are used as labels or values
-- Sort the display
-- Toggle data labels or legend
-- Change the chart title
-
-Examples:
-
-- "change it to a donut"
-- "make it horizontal"
-- "Previous query is displaying vertical bars I want to see horizontal"
-- "flip those bars sideways"
-- "sort it highest to lowest"
-- "use Status as the label and Count as the value"
-
-Decision rule: can the request be satisfied by re-drawing the SAME rows and
-columns? If yes, it is `chart_change`; if it needs different rows, columns,
-filters, or aggregation, it is `query_change`.
-
-Complaints about the current chart followed by a chart style still count as
-`chart_change` when a prior result exists (e.g., "No it not working as
-expected. Please show it as a donut").
-
-### `explain`
-
-The user asks how the current result was computed, asks to see the SQL, or asks
-"why is X so high?"
-
-### `clarification`
-
-The message is too vague to act on and does not contain a recognizable chart
-style or data request. Examples: "make it fancier", "help", "I don't
-understand".
-
-## Chart Vocabulary (Closed Set)
-
-The classifier may only emit values the frontend `WidgetRenderer` can draw.
-
-Allowed types and subtypes:
-
-- `table`
-- `bar`: `column`, `horizontal_bar`, `stacked_bar`, `grouped_bar`, `stacked_horizontal`, `positive_negative`, `waterfall`
-- `line`: `smooth_line`, `step_line`, `dashed_line`, `stacked_area`
-- `pie`: `donut`, `two_level`, `gauge`
-- `scatter`: `bubble`, `best_fit`
-
-Mapping guidance:
-
-- "horizontal bar" / "bar chart horizontal" / "as a horizontal bar chart" /
-  "as horizontal" / "make it horizontal" -> `type=bar`, `subtype=horizontal_bar`
-- "stacked bar" -> `bar` / `stacked_bar`
-- "grouped bar" -> `bar` / `grouped_bar`
-- "donut" / "doughnut" / "as a donut" / "as donut" -> `pie` / `donut`
-- "area" -> `line` / `stacked_area`
-- "bubble" -> `scatter` / `bubble`
-- plain "bar chart" / "vertical bar" -> `type=bar` with `subtype=null`
-- "table" / "show as a table" -> `type=table`
-
-## Data Question Guidance
-
-`data_question` is the user's data intent after stripping presentation
-language. It is the only text the SQL generator sees.
-
-Rules:
-
-1. Remove all chart/presentation words: "as a horizontal bar chart",
-   "with a donut chart", "make it horizontal", "show it as", "flip", etc.
-2. Clarify vague asks. "Show IT backup jobs" should become "Count of IT backup
-   jobs grouped by Result". "Show sales" should become "Total sales by month".
-3. Preserve filters, date ranges, and explicit dimensions. "Failed backup jobs
-   as a horizontal bar chart" -> "Count of failed backup jobs grouped by
-   Result".
-4. Do not invent columns or values. Use real column names from the source
-   context. If the user references a value like "Success" and the source stores
-   "Success" (capitalized), keep the exact casing.
-5. For `chart_change` and `explain`, set `data_question` to `null`.
-
-## Source Context Requirement
-
-The classifier is grounded in the real conversation state:
-
-- `has_prior_result` — whether there is a prior successful turn.
-- `prior_sql` — the SQL of the prior successful turn.
-- `result_columns` — the actual column names from the cached result.
-- `numeric_columns` and `categorical_columns` — profiling of the result.
-- `row_count` — number of rows in the cached result.
-- `current_chart` — the chart config currently being rendered.
-
-`labelColumn` and `valueColumns` in the chart patch must reference columns in
-`result_columns`. If the user names a non-existent column, still return the
-intent and include the requested name; the platform will surface a helpful
-message.
-
-Never invent table names, column names, or metric definitions.
-
-## Examples
-
-```json
-{
-  "intent": "new_analysis",
-  "chart": {"type": "bar", "subtype": "horizontal_bar"},
-  "data_question": "Count of IT backup jobs grouped by Result",
-  "confidence": 0.95,
-  "reason": "Vague show request with horizontal bar format; default to count by Result."
-}
-```
-
-```json
-{
-  "intent": "chart_change",
-  "chart": {"type": "bar", "subtype": "horizontal_bar"},
-  "data_question": null,
-  "confidence": 0.95,
-  "reason": "Presentation-only change from vertical to horizontal bars."
-}
-```
-
-```json
-{
-  "intent": "query_change",
-  "chart": {"type": "pie", "subtype": "donut"},
-  "data_question": "Filter the prior query to only include 2024 and group by Result",
-  "confidence": 0.9,
-  "reason": "Date filter plus donut chart preference."
-}
-```
-
-```json
-{
-  "intent": "clarification",
-  "chart": {},
-  "data_question": null,
-  "confidence": 0.6,
-  "reason": "Too vague to determine data or chart intent."
-}
-```
-
-## Evidence and Confidence Rules
-
-- High confidence requires clear user wording and a matching prior result when
-  one is required (`chart_change`, `explain`).
-- Lower confidence when the message is ambiguous, references missing prior
-  results, or asks for a chart style that does not match the current data shape.
-- Do not fabriculate chart patches to force a pass.
-
-## Tone
-
-The classifier itself returns only JSON. The platform renders human-facing
-messages. Keep `reason` concise and diagnostic, not conversational.
-
-Do not overstate certainty. When the intent is unclear, prefer
-`clarification`.
+# Conversational analytics turn classification
+
+This reference is injected into the `/ai/intelligence/conversation-turn`
+classifier prompt. It defines the intent taxonomy, the decision rules, and
+illustrative examples. It must stay generic: never reference a real tenant's
+tables, columns, or business domain here — the model receives the real,
+authorized conversation state (result columns, prior SQL, current chart)
+separately on every call.
+
+## Intents (choose exactly one)
+
+- new_analysis: a brand-new question that needs new data.
+- query_change: changes WHAT data is computed — filters, date ranges, different
+  metrics/dimensions, grouping, comparisons. Requires new SQL.
+- chart_change: changes ONLY how the EXISTING result is presented — chart type
+  or subtype (horizontal/stacked/grouped bars, donut, line, pie, scatter,
+  table), which existing columns are plotted as label/values, sorting the
+  display, data labels, legend, or title.
+- explain: the user asks how the current result was computed or to see the SQL.
+- clarification: the message is too vague to act on at all.
+
+## Decision rules
+
+1. chart_change and explain are only valid when has_prior_result is true;
+   otherwise prefer new_analysis.
+2. Torn between query_change and chart_change? Ask: can the request be
+   satisfied by re-drawing the SAME rows and columns? If yes it is
+   chart_change; if it needs different rows, columns, filters, or aggregation
+   it is query_change.
+3. Phrases like "run this query as/using X", "show it as X", "switch to X",
+   "make it X", "display as X", "as a X", "in a X", "with a X" where X is a
+   chart style are chart_change when there is a prior result — the user wants
+   the same data re-presented.
+4. Populate "chart" for EVERY chart_change, and ALSO for new_analysis or
+   query_change when the user mentions any chart style in the same message.
+   The style can appear anywhere in the message, including after data
+   constraints. If no chart style is mentioned, return chart as an empty
+   object {}. Use null for any chart field the user did not ask to change.
+5. When a chart style is mentioned, you MUST set type (and subtype when one
+   applies). Plain "bar chart" or "vertical bar": type=bar, subtype=null.
+   "horizontal bar", "as horizontal", "make it horizontal": type=bar,
+   subtype=horizontal_bar. "donut"/"doughnut": type=pie, subtype=donut.
+   "area": type=line, subtype=stacked_area. "bubble": type=scatter,
+   subtype=bubble.
+6. labelColumn and valueColumns must come from result_columns. For
+   new_analysis and query_change, leave them null — the platform derives them
+   from the executed result. For chart_change, if the user names a column that
+   does not exist, still return chart_change with the requested name — the
+   platform reports it to the user.
+7. Output data_question for new_analysis and query_change: rewrite THIS user
+   message as a focused data question with all chart/presentation wording
+   removed. The SQL generator receives ONLY the data_question, so it must
+   carry the user's actual subject and constraints, in the user's own terms.
+   Never copy wording from the examples below — they are illustrative only and
+   describe other, fictional datasets. For chart_change and explain, set
+   data_question to null.
+8. Do not fabricate chart patches to force a pass. When the intent is truly
+   unclear, prefer clarification with a lower confidence.
+
+## Examples (fictional data — never copy their wording into your output)
+
+Message: "Top suppliers by spend as a horizontal bar chart" ->
+{"intent": "new_analysis", "chart": {"type": "bar", "subtype": "horizontal_bar",
+"labelColumn": null, "valueColumns": null, "sort": null, "dataLabels": null,
+"legendVisible": null, "title": null},
+"data_question": "Total spend by supplier, highest first",
+"confidence": 0.95, "reason": "New data question with an explicit horizontal bar style."}
+
+Message: "show open tickets by priority in a donut chart" ->
+{"intent": "new_analysis", "chart": {"type": "pie", "subtype": "donut",
+"labelColumn": null, "valueColumns": null, "sort": null, "dataLabels": null,
+"legendVisible": null, "title": null},
+"data_question": "Count of open tickets grouped by priority",
+"confidence": 0.95, "reason": "New question requesting a donut chart."}
+
+Message: "monthly revenue for the last year" ->
+{"intent": "new_analysis", "chart": {},
+"data_question": "Monthly revenue for the last 12 months",
+"confidence": 0.9, "reason": "New data question, no chart style mentioned."}
+
+Message: "run this query using horizontal bar format" (prior result) ->
+{"intent": "chart_change", "chart": {"type": "bar", "subtype": "horizontal_bar",
+"labelColumn": null, "valueColumns": null, "sort": null, "dataLabels": null,
+"legendVisible": null, "title": null},
+"data_question": null, "confidence": 0.95, "reason": "Same data re-presented as horizontal bars."}
+
+Message: "make it a donut" (prior result) ->
+{"intent": "chart_change", "chart": {"type": "pie", "subtype": "donut",
+"labelColumn": null, "valueColumns": null, "sort": null, "dataLabels": null,
+"legendVisible": null, "title": null},
+"data_question": null, "confidence": 0.95, "reason": "Presentation-only switch to a donut."}
+
+Message: "that looks wrong, I wanted it horizontal" (prior result) ->
+{"intent": "chart_change", "chart": {"type": "bar", "subtype": "horizontal_bar",
+"labelColumn": null, "valueColumns": null, "sort": null, "dataLabels": null,
+"legendVisible": null, "title": null},
+"data_question": null, "confidence": 0.9, "reason": "Complaint plus an explicit horizontal request; keep the data, change presentation."}
+
+Message: "only include 2024" (prior result) ->
+{"intent": "query_change", "chart": {},
+"data_question": "Filter the previous result to 2024 only",
+"confidence": 0.9, "reason": "Needs a different filter, so new SQL."}
+
+Message: "sort it highest to lowest" (prior result) ->
+{"intent": "chart_change", "chart": {"type": null, "subtype": null,
+"labelColumn": null, "valueColumns": null,
+"sort": {"column": "value", "direction": "desc"}, "dataLabels": null,
+"legendVisible": null, "title": null},
+"data_question": null, "confidence": 0.9, "reason": "Display sort of the same rows."}
+
+Message: "why is the third bar so high?" (prior result) ->
+{"intent": "explain", "chart": {}, "data_question": null,
+"confidence": 0.85, "reason": "Asks how the current result came to be."}

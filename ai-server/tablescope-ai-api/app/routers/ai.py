@@ -1881,12 +1881,16 @@ _CONVERSATION_TURN_SYSTEM_PROMPT = (
 
 
 def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
-    """Build the classification prompt: grounded state, closed vocabularies,
-    explicit decision rules, output schema, and few-shot examples."""
+    """Build the classification prompt: grounded state, shared best-practice
+    rules + examples (from the editable prompt reference), the closed chart
+    vocabulary generated from the renderer sets, and the output schema."""
     chart_json = json.dumps(req.current_chart or {}, default=str)
     subtype_lines = "\n".join(
         f'- "{t}": subtypes {sorted(subs) if subs else "[]"}'
         for t, subs in _CHART_SUBTYPES.items()
+    )
+    best_practices = load_prompt_reference(
+        "conversational_analytics_best_practices.md"
     )
     return (
         "## Conversation state\n"
@@ -1897,69 +1901,10 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         f"- categorical_columns: {req.categorical_columns}\n"
         f"- row_count: {req.row_count}\n"
         f"- current_chart: {chart_json}\n\n"
-        "## Intents (choose exactly one)\n"
-        "- new_analysis: a brand-new question that needs new data.\n"
-        "- query_change: changes WHAT data is computed — filters, date ranges, "
-        "different metrics/dimensions, grouping, comparisons. Requires new SQL.\n"
-        "- chart_change: changes ONLY how the EXISTING result is presented — "
-        "chart type or subtype (horizontal/stacked/grouped bars, donut, line, "
-        "pie, scatter, table), which existing columns are plotted as label/"
-        "values, sorting the display, data labels, legend, or title.\n"
-        "- explain: the user asks how the current result was computed or to "
-        "see the SQL.\n"
-        "- clarification: the message is too vague to act on at all.\n\n"
-        "## Decision rules\n"
-        "1. chart_change and explain are only valid when has_prior_result is "
-        "true; otherwise prefer new_analysis.\n"
-        "2. Torn between query_change and chart_change? Ask: can the request "
-        "be satisfied by re-drawing the SAME rows and columns? If yes it is "
-        "chart_change; if it needs different rows, columns, filters, or "
-        "aggregation it is query_change.\n"
-        "3. Phrases like 'run this query as/using <format>', 'show it as "
-        "<format>', 'switch to <format>', 'make it <format>', 'display as "
-        "<format>', 'as a <format>', 'in a <format>', 'with a <format>' where "
-        "<format> is a chart style are chart_change when there is a prior "
-        "result — the user wants the same data re-presented.\n"
-        "4. Populate \"chart\" for EVERY chart_change, and ALSO populate it "
-        "for new_analysis or query_change when the user mentions any chart "
-        "style in the same message (e.g. 'Run IT backup jobs with a horizontal "
-        "bar chart', 'Count of backup jobs by status as a horizontal bar "
-        "chart'). A chart style can appear anywhere in the message, including "
-        "after data constraints like 'show success vs failed ... as a "
-        "horizontal bar chart'. Do not let the data part hide the style "
-        "request. If no chart style is mentioned, return chart as an empty "
-        "object {}. Use null for any chart field the user did not ask to "
-        "change.\n"
-        "5. When a chart style is mentioned, you MUST set type and subtype; "
-        "do not leave them null. If the user only says 'bar chart' with no "
-        "subtype, type=bar and subtype=null. If the user says 'horizontal "
-        "bar chart' or 'as horizontal' or 'make it horizontal', type=bar and "
-        "subtype=horizontal_bar. 'as a donut' or just 'as donut' -> pie/donut.\n"
-        "6. labelColumn and valueColumns must come from result_columns. For "
-        "new_analysis and query_change, leave them null unless the exact columns "
-        "are already known and present in result_columns (they almost never are). "
-        "For chart_change, if the user names a column that does not exist, still "
-        "return chart_change and put the requested name in the field — the "
-        "platform will report it to the user.\n"
-        "7. Output `data_question` for new_analysis and query_change: the "
-        "user's underlying data question with all chart/presentation wording "
-        "removed and ambiguous phrasing clarified. The SQL generator will "
-        "receive ONLY this data_question, so it must be unambiguous and must "
-        "not contain chart terms. For example, 'Show IT backup jobs as "
-        "horizontal' -> data_question 'Count of IT backup jobs grouped by "
-        "Result'. 'Show IT backup jobs' -> data_question 'Count of IT backup "
-        "jobs grouped by Result'. For chart_change and explain, set "
-        "data_question to null.\n\n"
+        f"{best_practices}\n\n"
         "## Chart vocabulary (closed set)\n"
         f"Types: {sorted(_CHART_TYPES)}\n"
-        f"{subtype_lines}\n"
-        "Mapping guidance: 'horizontal bar' / 'bar chart horizontal' / 'as a "
-        "horizontal bar chart' / 'as horizontal' / 'make it horizontal' -> "
-        "type=bar, subtype=horizontal_bar; 'stacked bar' -> bar/stacked_bar; "
-        "'grouped bar' -> bar/grouped_bar; 'donut'/'doughnut'/'as a donut'/"
-        "'as donut' -> pie/donut; 'area' -> line/stacked_area; 'bubble' -> "
-        "scatter/bubble; plain 'bar chart' / 'vertical bar' -> type=bar with "
-        "subtype null.\n\n"
+        f"{subtype_lines}\n\n"
         "## Output schema (JSON only, all keys required)\n"
         "{\n"
         '  "intent": "new_analysis|query_change|chart_change|explain|clarification",\n'
@@ -1977,76 +1922,10 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         '  "confidence": 0.0-1.0,\n'
         '  "reason": "one short sentence"\n'
         "}\n\n"
-        "## Examples\n"
-        'Message: "run this query using horizontal bar format" -> '
-        '{"intent": "chart_change", "chart": {"type": "bar", "subtype": '
-        '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
-        'null, "dataLabels": null, "legendVisible": null, "title": null}, '
-        '"data_question": null, "confidence": 0.95, "reason": "Same data re-presented as horizontal bars."}\n'
-        'Message: "change it to a donut" -> '
-        '{"intent": "chart_change", "chart": {"type": "pie", "subtype": '
-        '"donut", "labelColumn": null, "valueColumns": null, "sort": null, '
-        '"dataLabels": null, "legendVisible": null, "title": null}, '
-        '"data_question": null, "confidence": 0.95, "reason": "Presentation-only switch to a donut."}\n'
-        'Message: "only show 2024" -> '
-        '{"intent": "query_change", "chart": {}, "data_question": "Filter the prior query to only include 2024", "confidence": 0.9, '
-        '"reason": "Needs a different filter, so new SQL."}\n'
-        'Message: "Run IT backup jobs with a horizontal bar chart" -> '
-        '{"intent": "new_analysis", "chart": {"type": "bar", "subtype": '
-        '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
-        'null, "dataLabels": null, "legendVisible": null, "title": null}, '
-        '"data_question": "Count of IT backup jobs grouped by Result", "confidence": 0.95, '
-        '"reason": "New data question that also requests a horizontal bar visualization."}\n'
-        'Message: "Show IT backup jobs as horizontal" -> '
-        '{"intent": "new_analysis", "chart": {"type": "bar", "subtype": '
-        '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
-        'null, "dataLabels": null, "legendVisible": null, "title": null}, '
-        '"data_question": "Count of IT backup jobs grouped by Result", "confidence": 0.95, '
-        '"reason": "Ambiguous show request with horizontal bar format; default to count by Result."}\n'
-        'Message: "Show IT backup jobs" -> '
-        '{"intent": "new_analysis", "chart": {}, "data_question": "Count of IT backup jobs grouped by Result", '
-        '"confidence": 0.9, "reason": "Vague show request; default to count by the natural status column."}\n'
-        'Message: "count of backup jobs by status as a horizontal bar chart" -> '
-        '{"intent": "new_analysis", "chart": {"type": "bar", "subtype": '
-        '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
-        'null, "dataLabels": null, "legendVisible": null, "title": null}, '
-        '"data_question": "Count of IT backup jobs grouped by Result", "confidence": 0.95, '
-        '"reason": "New data question with explicit horizontal bar chart preference."}\n'
-        'Message: "show success and failed backup job counts in a donut chart" -> '
-        '{"intent": "new_analysis", "chart": {"type": "pie", "subtype": '
-        '"donut", "labelColumn": null, "valueColumns": null, "sort": null, '
-        '"dataLabels": null, "legendVisible": null, "title": null}, '
-        '"data_question": "Count of IT backup jobs grouped by Result", "confidence": 0.95, '
-        '"reason": "New question requesting a donut chart."}\n'
-        'Message: "Run IT backup jobs and show success vs failed counts as a "'
-        '"horizontal bar chart" -> {"intent": "new_analysis", "chart": '
-        '{"type": "bar", "subtype": "horizontal_bar", "labelColumn": null, '
-        '"valueColumns": null, "sort": null, "dataLabels": null, '
-        '"legendVisible": null, "title": null}, '
-        '"data_question": "Count of IT backup jobs grouped by Result with values labelled Success and Failed", '
-        '"confidence": 0.95, "reason": "New question with chart style at the end; style must be preserved."}\n'
-        'Message: "Previous query is displaying vertical bars I want to see horizontal" -> '
-        '{"intent": "chart_change", "chart": {"type": "bar", "subtype": "horizontal_bar", '
-        '"labelColumn": null, "valueColumns": null, "sort": null, "dataLabels": null, '
-        '"legendVisible": null, "title": null}, "data_question": null, "confidence": 0.95, '
-        '"reason": "Presentation-only change from vertical to horizontal bars."}\n'
-        'Message: "No it not working as expected. Please show IT backup jobs as donut" (with prior result) -> '
-        '{"intent": "chart_change", "chart": {"type": "pie", "subtype": "donut", '
-        '"labelColumn": null, "valueColumns": null, "sort": null, "dataLabels": null, '
-        '"legendVisible": null, "title": null}, "data_question": null, "confidence": 0.9, '
-        '"reason": "Complaint + explicit donut chart request; keep same data and change presentation."}\n'
-        'Message: "why is March so high?" -> '
-        '{"intent": "explain", "chart": {}, "data_question": null, "confidence": 0.85, '
-        '"reason": "Asks about how the current result came to be."}\n'
-        'Message: "sort it highest to lowest" -> '
-        '{"intent": "chart_change", "chart": {"type": null, "subtype": null, '
-        '"labelColumn": null, "valueColumns": null, "sort": {"column": '
-        '"value", "direction": "desc"}, "dataLabels": null, "legendVisible": '
-        'null, "title": null}, "data_question": null, "confidence": 0.9, "reason": '
-        '"Display sort of the same rows."}\n\n'
         "## User message\n"
         f"{req.message}\n"
     )
+
 
 
 def _sanitize_chart_patch(

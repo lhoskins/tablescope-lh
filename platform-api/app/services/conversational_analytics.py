@@ -175,8 +175,41 @@ async def classify_turn(
                 data_question = decision.get("data_question")
                 if data_question and not isinstance(data_question, str):
                     data_question = None
-                return intent, chart, data_question
+                return intent, chart, _grounded_data_question(question, data_question)
     return _fallback_classify(question, prior_turn)
+
+
+# Generic analytics filler that appears in almost any rewritten data question;
+# grounding requires overlap on words that actually carry the user's subject.
+_DATA_QUESTION_FILLER = {
+    "a", "an", "the", "of", "by", "for", "and", "or", "to", "in", "with",
+    "count", "counts", "total", "totals", "number", "sum", "average", "avg",
+    "grouped", "group", "per", "show", "list", "all", "each", "values",
+    "labelled", "labeled", "breakdown", "distribution",
+}
+
+
+def _grounded_data_question(question: str, data_question: str | None) -> str | None:
+    """Accept the model's rewritten data question only if it stays grounded
+    in the user's actual message.
+
+    Guards against the model parroting an example or a previous project's
+    phrasing: the rewrite must share at least one non-filler content word with
+    what the user typed, otherwise the raw question is used instead.
+    """
+    if not data_question or not data_question.strip():
+        return None
+    q_tokens = set(re.findall(r"[a-z0-9]+", question.lower()))
+    dq_tokens = set(re.findall(r"[a-z0-9]+", data_question.lower()))
+    content = dq_tokens - _DATA_QUESTION_FILLER
+    if not content or not (content & q_tokens):
+        logger.warning(
+            "Discarding ungrounded data_question %r for message %r",
+            data_question,
+            question,
+        )
+        return None
+    return data_question.strip()
 
 
 def _fallback_classify(
@@ -207,6 +240,19 @@ def _fallback_classify(
         return ConversationalIntent.NEW_ANALYSIS, {}, None
     # Ambiguous follow-up: re-run through the SQL engine, the safe default.
     return ConversationalIntent.QUERY_CHANGE, {}, None
+
+def _answer_text(columns: list[str], rows: list[dict[str, Any]]) -> str:
+    """Short deterministic answer for an executed data turn.
+
+    States the single scalar for KPI-style results, otherwise the row count.
+    The chart + table carry the detail; raw model prose never reaches chat.
+    """
+    if not rows:
+        return "The query ran but returned no rows."
+    if len(rows) == 1 and len(columns) == 1:
+        return f"{columns[0]}: {rows[0].get(columns[0])}"
+    return f"Here are the results ({len(rows)} rows)."
+
 
 def _sql_fingerprint(sql: str | None) -> str | None:
     if not sql:
@@ -813,5 +859,5 @@ async def execute_turn(
         turn.sql, result_cache, chart_config, governance=post_decision.to_explanation_dict()
     )
     turn.datasource_context = {"dataSourcesUsed": run.get("dataSourcesUsed", [])}
-    turn.assistant_message = run.get("explanation") or "Here is the result."
+    turn.assistant_message = run.get("explanation") or _answer_text(columns, bounded_rows)
     turn.status = "success"

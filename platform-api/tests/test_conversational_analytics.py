@@ -280,6 +280,42 @@ async def test_fallback_chart_change_horizontal_bar(client, service_headers, mon
     assert turn["chart_config"]["subtype"] == "horizontal_bar"
 
 
+def test_grounded_data_question_rejects_parroted_rewrites():
+    from app.services.conversational_analytics import _grounded_data_question
+
+    # A faithful rewrite shares the user's subject words.
+    assert (
+        _grounded_data_question(
+            "Show backup jobs as horizontal", "Count of backup jobs grouped by Result"
+        )
+        == "Count of backup jobs grouped by Result"
+    )
+    # A parroted example about a different subject is discarded.
+    assert (
+        _grounded_data_question(
+            "top suppliers by spend", "Count of IT backup jobs grouped by Result"
+        )
+        is None
+    )
+    assert _grounded_data_question("anything", None) is None
+    assert _grounded_data_question("anything", "   ") is None
+
+
+def test_strip_model_markup_removes_code_fences():
+    from app.routes.ai_proxy import _strip_model_markup
+
+    raw = (
+        "To create a donut chart, I'll need to modify the query.\n\n"
+        "```sql\nSELECT 1;\n```\n\nLet me know if that helps."
+    )
+    cleaned = _strip_model_markup(raw)
+    assert "```" not in cleaned
+    assert "SELECT 1" not in cleaned
+    assert "donut chart" in cleaned
+    # Unterminated fences are removed too.
+    assert "```" not in _strip_model_markup("Here you go:\n```sql\nSELECT 2;")
+
+
 def test_apply_chart_patch_validates_columns():
     from app.services.conversational_analytics import apply_chart_patch
 

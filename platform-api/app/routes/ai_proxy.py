@@ -24,17 +24,15 @@ import time
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
-from app.models.ai_conversation import AiConversation, AiConversationMessage
 from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
@@ -69,10 +67,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
 
 TIMEOUT = httpx.Timeout(300.0, connect=10.0)
-
-# Bounded window of prior conversation turns forwarded to the AI server so
-# follow-up questions resolve against recent context without unbounded prompts.
-CONVERSATION_HISTORY_LIMIT = 20
 
 # Row cap for a data answer rendered inline in the AI Assistant chat.
 CHAT_ANSWER_MAX_ROWS = 100
@@ -773,6 +767,8 @@ async def ask(
         "history": [],
     }
     response = await _forward_to_ai("/ai/ask", payload)
+    if response.get("answer"):
+        response["answer"] = _strip_model_markup(str(response["answer"]))
     _attach_ask_envelope(response)
     return response
 
@@ -2754,6 +2750,21 @@ async def _attach_analytical_envelope(
         response["analyticalMethod"] = envelope
 
 
+_CODE_FENCE_RE = re.compile(r"```[a-zA-Z0-9_-]*\n[\s\S]*?(?:```|\Z)")
+
+
+def _strip_model_markup(text: str) -> str:
+    """Remove raw model markup (fenced code blocks) from a prose answer.
+
+    Chat surfaces render plain text, so a leaked ``` block (usually SQL the
+    model narrated while thinking) shows up verbatim and confuses users. The
+    SQL for data answers is carried separately in structured fields — prose
+    must stay prose.
+    """
+    cleaned = _CODE_FENCE_RE.sub("", text or "").strip()
+    return re.sub(r"\n{3,}", "\n\n", cleaned)
+
+
 async def _forward_prose_answer(
     context: RequestContext,
     *,
@@ -2779,7 +2790,7 @@ async def _forward_prose_answer(
         })
     except HTTPException:
         return ""
-    return str(result.get("answer") or "").strip()
+    return _strip_model_markup(str(result.get("answer") or ""))
 
 
 @router.post("/actions/ask-and-run")
@@ -3939,34 +3950,6 @@ def _pack_grid(widgets_config: list[dict[str, Any]]) -> None:
         row_h = max(row_h, gh)
 
 
-# ---------------------------------------------------------------------------
-# Saved AI conversations (Home AI Assistant)
-# ---------------------------------------------------------------------------
-
-
-class ConversationCreate(BaseModel):
-    title: str | None = None
-    project_id: int | None = None
-
-
-class ConversationRename(BaseModel):
-    title: str
-
-
-class ConversationMessageCreate(BaseModel):
-    question: str
-    project_id: int | None = None
-
-
-def _message_dict(m: AiConversationMessage) -> dict[str, Any]:
-    return {
-        "id": m.id,
-        "role": m.role,
-        "content": m.content,
-        "data": m.data,
-        "createdAt": m.created_at.isoformat() if m.created_at else None,
-    }
-
 
 def _chat_answer_text(question: str, run: dict[str, Any]) -> str:
     """Short natural-language answer for an executed chat query.
@@ -3987,332 +3970,3 @@ def _chat_answer_text(question: str, run: dict[str, Any]) -> str:
     summary = f"Here are the results ({len(rows)} rows)."
     return f"{explanation}\n\n{summary}".strip() if explanation else summary
 
-
-def _conversation_dict(
-    c: AiConversation, *, include_messages: bool = False
-) -> dict[str, Any]:
-    data: dict[str, Any] = {
-        "id": c.id,
-        "title": c.title,
-        "projectId": c.project_id,
-        "parentConversationId": c.parent_conversation_id,
-        "branchedFromMessageId": c.branched_from_message_id,
-        "createdAt": c.created_at.isoformat() if c.created_at else None,
-        "updatedAt": c.updated_at.isoformat() if c.updated_at else None,
-    }
-    if include_messages:
-        data["messages"] = [_message_dict(m) for m in c.messages]
-    return data
-
-
-async def _get_owned_conversation(
-    session: AsyncSession,
-    context: RequestContext,
-    conversation_id: int,
-    *,
-    with_messages: bool = False,
-) -> AiConversation:
-    stmt = select(AiConversation).where(
-        AiConversation.id == conversation_id,
-        AiConversation.tenant_id == context.tenant_id,
-        AiConversation.user_id == context.user_id,
-    )
-    if with_messages:
-        stmt = stmt.options(selectinload(AiConversation.messages))
-    convo = (await session.execute(stmt)).scalar_one_or_none()
-    if convo is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return convo
-
-
-async def _default_project_id(
-    session: AsyncSession, context: RequestContext
-) -> int | None:
-    member_sub = select(ProjectMember.project_id).where(
-        ProjectMember.user_id == context.user_id,
-        ProjectMember.is_active.is_(True),
-    )
-    return await session.scalar(
-        select(Project.id)
-        .where(
-            Project.tenant_id == context.tenant_id,
-            or_(
-                Project.owner_id == context.user_id,
-                Project.id.in_(member_sub),
-            ),
-        )
-        .order_by(Project.updated_at.desc())
-        .limit(1)
-    )
-
-
-@router.get("/conversations")
-async def list_conversations(
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> list[dict[str, Any]]:
-    """List the caller's saved AI conversations (most recent first)."""
-    rows = list(
-        await session.scalars(
-            select(AiConversation)
-            .where(
-                AiConversation.tenant_id == context.tenant_id,
-                AiConversation.user_id == context.user_id,
-            )
-            .order_by(AiConversation.updated_at.desc())
-        )
-    )
-    return [_conversation_dict(c) for c in rows]
-
-
-@router.post("/conversations")
-async def create_conversation(
-    req: ConversationCreate,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Create a new (empty) conversation."""
-    project_id = req.project_id
-    if project_id is not None:
-        await _check_project_access(session, context, project_id)
-    convo = AiConversation(
-        tenant_id=context.tenant_id,
-        user_id=context.user_id,
-        project_id=project_id,
-        title=(req.title or "New conversation")[:255],
-    )
-    session.add(convo)
-    await session.commit()
-    await session.refresh(convo)
-    data = _conversation_dict(convo)
-    data["messages"] = []
-    return data
-
-
-@router.get("/conversations/{conversation_id}")
-async def get_conversation(
-    conversation_id: int,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Fetch a conversation with its full message history."""
-    convo = await _get_owned_conversation(
-        session, context, conversation_id, with_messages=True
-    )
-    return _conversation_dict(convo, include_messages=True)
-
-
-@router.put("/conversations/{conversation_id}")
-async def rename_conversation(
-    conversation_id: int,
-    req: ConversationRename,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Rename a conversation."""
-    convo = await _get_owned_conversation(session, context, conversation_id)
-    convo.title = req.title.strip()[:255] or convo.title
-    await session.commit()
-    await session.refresh(convo)
-    return _conversation_dict(convo)
-
-
-@router.delete("/conversations/{conversation_id}", status_code=204)
-async def delete_conversation(
-    conversation_id: int,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> Response:
-    """Delete a conversation and its messages."""
-    convo = await _get_owned_conversation(session, context, conversation_id)
-    await session.delete(convo)
-    await session.commit()
-    return Response(status_code=204)
-
-
-@router.post("/conversations/{conversation_id}/messages")
-async def add_conversation_message(
-    conversation_id: int,
-    req: ConversationMessageCreate,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Append a user message, get an AI answer, and persist both."""
-    question = req.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Question is required")
-
-    convo = await _get_owned_conversation(
-        session, context, conversation_id, with_messages=True
-    )
-
-    # Prior turns (oldest→newest) so the AI can resolve follow-up references
-    # like "explain more" or "the second option" without the user restating
-    # context. Captured before the new user message is appended.
-    history = [
-        {"role": m.role, "content": m.content}
-        for m in convo.messages[-CONVERSATION_HISTORY_LIMIT:]
-        if (m.content or "").strip()
-    ]
-
-    # Resolve the project used to scope the AI answer.
-    project_id = req.project_id or convo.project_id
-    if project_id is not None:
-        await _check_project_access(session, context, project_id)
-    else:
-        project_id = await _default_project_id(session, context)
-    if project_id is not None and convo.project_id != project_id:
-        convo.project_id = project_id
-
-    # First user message becomes the conversation title.
-    if not convo.messages:
-        convo.title = question[:120]
-
-    user_msg = AiConversationMessage(
-        conversation_id=convo.id, role="user", content=question
-    )
-    session.add(user_msg)
-
-    answer: str
-    answer_data: dict[str, Any] | None = None
-    if _is_query_summary_request(question):
-        # Answered directly from the DB across all accessible projects — no
-        # AI-server call, so it never fails with a signature error and always
-        # reflects the caller's real authorized queries.
-        answer = await _build_query_summary(session, context)
-    elif project_id is None:
-        answer = (
-            "I couldn't find a project to ground my answer. Create a project "
-            "with data first, then ask again."
-        )
-    else:
-        # Answer data questions the same way the Project Insight page does:
-        # auto-resolve the source, generate + execute SQL, and return the real
-        # result (rows + suggested chart) rather than printing SQL. If the
-        # question isn't a data question the source can ground (e.g. a document
-        # or summary request), fall back to the free-text AI answer.
-        run = await _ask_and_run_core(
-            session, context,
-            project_id=project_id,
-            question=question,
-            max_rows=CHAT_ANSWER_MAX_ROWS,
-        )
-        if run.get("status") == "success":
-            answer = _chat_answer_text(question, run)
-            answer_data = {
-                "sql": run.get("sql", ""),
-                "columns": run.get("columns", []),
-                "rows": run.get("rows", []),
-                "suggestedVisualization": run.get(
-                    "suggestedVisualization", {"type": "table"}
-                ),
-                "explanation": run.get("explanation", ""),
-                "dataSourcesUsed": run.get("dataSourcesUsed", []),
-            }
-        else:
-            answer = await _forward_prose_answer(
-                context,
-                project_id=project_id,
-                question=question,
-                history=history,
-            ) or "The AI returned an empty response."
-
-    assistant_msg = AiConversationMessage(
-        conversation_id=convo.id, role="assistant", content=answer,
-        data=answer_data,
-    )
-    session.add(assistant_msg)
-    await session.commit()
-
-    # Vectorize the Q+A pair for future learning/retrieval.
-    try:
-        await _forward_to_ai("/ai/index/conversation", {
-            "tenant_id": context.tenant_id,
-            "user_id": context.user_id,
-            "project_id": project_id,
-            "conversation_id": convo.id,
-            "question": question,
-            "answer": answer,
-        })
-    except Exception:
-        pass  # best-effort — don't block the response
-
-    # Expire the (stale, empty) messages collection so the re-query below
-    # actually reloads it with the just-appended user/assistant pair — without
-    # this the identity-mapped object would return its earlier-loaded state.
-    session.expire(convo, ["messages"])
-    refreshed = await _get_owned_conversation(
-        session, context, conversation_id, with_messages=True
-    )
-    return _conversation_dict(refreshed, include_messages=True)
-
-
-class ConversationBranchCreate(BaseModel):
-    # When omitted, the branch forks from the last message of the source.
-    message_id: int | None = None
-    title: str | None = None
-
-
-@router.post("/conversations/{conversation_id}/branch")
-async def branch_conversation(
-    conversation_id: int,
-    req: ConversationBranchCreate,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Fork a new conversation from a point in an existing one.
-
-    Copies every message up to and including ``message_id`` into a fresh
-    conversation that records its parent + the branch point, so the user can
-    explore an alternative direction without disturbing the original thread.
-    """
-    source = await _get_owned_conversation(
-        session, context, conversation_id, with_messages=True
-    )
-    if req.message_id is None:
-        # Branch from the tail of the thread.
-        if not source.messages:
-            raise HTTPException(
-                status_code=400, detail="Cannot branch an empty conversation"
-            )
-        branch_point: AiConversationMessage = source.messages[-1]
-    else:
-        found: AiConversationMessage | None = None
-        for _m in source.messages:
-            if _m.id == req.message_id:
-                found = _m
-                break
-        if found is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Branch message not found in conversation",
-            )
-        branch_point = found
-
-    title = (req.title or "").strip() or f"Branch of {source.title}"
-    branch = AiConversation(
-        tenant_id=context.tenant_id,
-        user_id=context.user_id,
-        project_id=source.project_id,
-        title=title[:255],
-        parent_conversation_id=source.id,
-        branched_from_message_id=branch_point.id,
-    )
-    session.add(branch)
-    await session.flush()
-
-    for m in source.messages:
-        session.add(
-            AiConversationMessage(
-                conversation_id=branch.id, role=m.role, content=m.content,
-                data=m.data,
-            )
-        )
-        if m.id == branch_point.id:
-            break
-
-    await session.commit()
-    refreshed = await _get_owned_conversation(
-        session, context, branch.id, with_messages=True
-    )
-    return _conversation_dict(refreshed, include_messages=True)

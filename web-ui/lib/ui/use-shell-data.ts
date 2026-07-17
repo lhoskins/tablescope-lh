@@ -5,7 +5,6 @@ import { apiClient, getApiBaseUrl } from "@/lib/api-client";
 import { initials, toAiStatus } from "./format";
 import { accentFor } from "./color";
 import type { CurrentUser, ProjectSummary, TenantSummary } from "./types";
-import type { SuggestedVisualization } from "@/lib/api/ai-actions";
 
 interface CurrentUserResponse {
   user_id: number;
@@ -162,93 +161,6 @@ export function useAllDataSources() {
     queryFn: () =>
       apiClient.get<HomeDataSourceRow[]>("/api/projects/datasources-all"),
   });
-}
-
-/** Executed-query result attached to an assistant message (data answers). */
-export interface AiChatMessageData {
-  sql: string;
-  columns: string[];
-  rows: Record<string, unknown>[];
-  suggestedVisualization: SuggestedVisualization;
-  explanation: string;
-  dataSourcesUsed: string[];
-}
-
-export interface AiChatMessage {
-  id: number;
-  role: "user" | "assistant";
-  content: string;
-  data?: AiChatMessageData | null;
-  createdAt: string | null;
-}
-
-export interface AiConversation {
-  id: number;
-  title: string;
-  projectId: number | null;
-  parentConversationId?: number | null;
-  branchedFromMessageId?: number | null;
-  createdAt: string | null;
-  updatedAt: string | null;
-  messages?: AiChatMessage[];
-}
-
-export function useConversations() {
-  return useQuery({
-    queryKey: ["ai", "conversations"],
-    queryFn: () => apiClient.get<AiConversation[]>("/api/ai/conversations"),
-  });
-}
-
-export function useConversation(id: number | null) {
-  return useQuery({
-    queryKey: ["ai", "conversation", id],
-    queryFn: () =>
-      apiClient.get<AiConversation>(`/api/ai/conversations/${id}`),
-    enabled: id != null,
-  });
-}
-
-export function createConversation(
-  body: { title?: string; project_id?: number | null } = {},
-): Promise<AiConversation> {
-  return apiClient.post<AiConversation>("/api/ai/conversations", body);
-}
-
-export function sendConversationMessage(
-  conversationId: number,
-  question: string,
-  projectId?: number | null,
-): Promise<AiConversation> {
-  return apiClient.post<AiConversation>(
-    `/api/ai/conversations/${conversationId}/messages`,
-    { question, project_id: projectId ?? null },
-  );
-}
-
-export function renameConversation(
-  conversationId: number,
-  title: string,
-): Promise<AiConversation> {
-  return apiClient.put<AiConversation>(
-    `/api/ai/conversations/${conversationId}`,
-    { title },
-  );
-}
-
-export function deleteConversation(conversationId: number): Promise<void> {
-  return apiClient.delete<void>(`/api/ai/conversations/${conversationId}`);
-}
-
-export function branchConversation(
-  conversationId: number,
-  messageId?: number | null,
-  title?: string,
-): Promise<AiConversation> {
-  return apiClient.post<AiConversation>(
-    `/api/ai/conversations/${conversationId}/branch`,
-    { message_id: messageId ?? null, title },
-  );
 }
 
 export function deleteProject(projectId: number | string): Promise<void> {
