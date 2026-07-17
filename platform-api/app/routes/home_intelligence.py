@@ -35,7 +35,13 @@ from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.project import Project, ProjectMember
 from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.saved_query import SavedQuery
-from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
+from app.routes.query import (
+    _auto_cast_aggregates,
+    _execute_sql_with_repair,
+    _resolve_vdb_database,
+    _run_sql,
+    _sample_project_columns,
+)
 from app.services import dashboard_widget as dw
 from app.services import home_intel_queue as q
 from app.services import home_intelligence as hi
@@ -45,6 +51,7 @@ from app.services.response_envelope import attach_envelope
 from app.services.teiid_sql import (
     normalize_teiid_identifiers,
     normalize_teiid_timestamps,
+    project_table_schema,
 )
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.tasks.workflows import enqueue_analyze_project_intelligence
@@ -89,53 +96,71 @@ def _make_runner(
     not yet materialised), so prompts that need live data are skipped cleanly.
     """
 
-    async def runner(sql: str) -> dict[str, Any]:
+    # Lazy-load schema context once; the same project tables are reused for every
+    # plan/execute call in a single run.
+    ctx: dict[str, Any] = {}
+
+    async def _ensure_ctx() -> dict[str, Any]:
+        if ctx:
+            return ctx
         database = await _resolve_vdb_database(
             session=session, context=context, project_id=project_id
         )
         endpoint = await TenantTeiidResolver(session).resolve_for_org(
             context.tenant_id
         )
-        return await _run_sql(
+        table_schema = await project_table_schema(
+            session, tenant_id=context.tenant_id, project_id=project_id
+        )
+        allowed_tables = [
+            entry.get("table") for entry in table_schema if entry.get("table")
+        ]
+        column_types = {
+            str(col.get("name")): str(col.get("type") or "")
+            for entry in table_schema
+            for col in entry.get("columns", [])
+            if col and col.get("name")
+        }
+        column_samples = await _sample_project_columns(
             database=database,
-            sql=_auto_cast_aggregates(normalize_teiid_timestamps(sql)),
+            tables=allowed_tables,
             teiid_host=endpoint.pg_host,
             teiid_port=endpoint.pg_port,
         )
+        ctx.update(
+            {
+                "database": database,
+                "endpoint": endpoint,
+                "table_schema": table_schema,
+                "allowed_tables": allowed_tables,
+                "column_types": column_types,
+                "column_samples": column_samples,
+            }
+        )
+        return ctx
+
+    async def runner(sql: str) -> dict[str, Any]:
+        ctx_data = await _ensure_ctx()
+        result, _ = await _execute_sql_with_repair(
+            raw_sql=sql,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            database=ctx_data["database"],
+            endpoint=ctx_data["endpoint"],
+            table_schema=ctx_data["table_schema"],
+            allowed_tables=ctx_data["allowed_tables"],
+            column_types=ctx_data["column_types"],
+            column_samples=ctx_data["column_samples"],
+            max_attempts=2,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=502, detail=f"Could not execute generated SQL: {sql}"
+            )
+        return result
 
     return runner
-
-
-async def _sample_project_columns(
-    session: AsyncSession,
-    context: RequestContext,
-    project: Project,
-    tables: list[str],
-) -> dict[str, str]:
-    """Return one non-empty sample value per column across project tables.
-
-    Used to infer Teiid date-parse masks when normalizing AI-generated SQL for
-    query suggestions. Failures are swallowed so a missing VDB does not break
-    suggestion generation.
-    """
-    runner = _make_runner(session, context, project.id)
-    samples: dict[str, str] = {}
-    for view_name in tables:
-        try:
-            result = await runner(f'SELECT * FROM "{view_name}" LIMIT 25')
-        except Exception as exc:
-            logger.debug(
-                "Could not sample %s for project %s: %s", view_name, project.id, exc
-            )
-            continue
-        for row in result.get("rows", [])[:25]:
-            for col, val in row.items():
-                if col in samples:
-                    continue
-                text = str(val).strip() if val is not None else ""
-                if text:
-                    samples[col] = text[:40]
-    return samples
 
 
 async def _run_for_project(
@@ -556,16 +581,56 @@ async def _plan_analyses(
 
     # Sample live table values so generated timestamp casts can be rewritten to
     # Teiid PARSETIMESTAMP with the right mask before the preview is run.
-    column_samples = await _sample_project_columns(
-        session, context, project, allowed_tables
+    database = await _resolve_vdb_database(
+        session=session, context=context, project_id=project.id
     )
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(
+        context.tenant_id
+    )
+    column_samples = await _sample_project_columns(
+        database=database,
+        tables=allowed_tables,
+        teiid_host=endpoint.pg_host,
+        teiid_port=endpoint.pg_port,
+    )
+    column_types = {
+        str(col.get("name")): str(col.get("type") or "")
+        for entry in table_schema
+        for col in entry.get("columns", [])
+        if col and col.get("name")
+    }
+    valid_analyses: list[dict[str, Any]] = []
     for a in analyses:
         sql = (a.get("sql") or "").strip()
-        if sql:
-            sql = normalize_teiid_timestamps(sql, column_samples=column_samples)
-            sql = normalize_teiid_identifiers(sql, table_schema)
-            a["sql"] = sql
-    return analyses
+        if not sql:
+            continue
+        sql = normalize_teiid_identifiers(sql, table_schema)
+        sql = normalize_teiid_timestamps(
+            sql,
+            column_types=column_types,
+            column_samples=column_samples,
+        )
+        sql = _auto_cast_aggregates(sql).rstrip().rstrip(";")
+        # Do not surface suggestions whose SQL cannot be executed even after the
+        # repair loop; otherwise the preview modal will show a Teiid error.
+        result, final_sql = await _execute_sql_with_repair(
+            raw_sql=sql,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project.id,
+            database=database,
+            endpoint=endpoint,
+            table_schema=table_schema,
+            allowed_tables=allowed_tables,
+            column_types=column_types,
+            column_samples=column_samples,
+            max_attempts=3,
+        )
+        if result is not None:
+            a["sql"] = final_sql
+            a["result"] = result
+            valid_analyses.append(a)
+    return valid_analyses
 
 
 @router.post("/home/query-suggestions")

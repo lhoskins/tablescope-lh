@@ -30,6 +30,7 @@ from app.services.teiid_sql import (
     project_table_schema,
 )
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
+from app.services import ai_intelligence_client
 from app.services.vdb_routing import (
     VDBInactiveError,
     VDBNotConfiguredError,
@@ -129,6 +130,35 @@ async def _resolve_vdb_database(
     if not user_vdb.is_active:
         raise HTTPException(status_code=503, detail="VDB is not active.")
     return f"{user_vdb.vdb_id}.1"
+
+
+async def _sample_project_columns(
+    *,
+    database: str,
+    tables: list[str],
+    teiid_host: str | None = None,
+    teiid_port: int | None = None,
+) -> dict[str, str]:
+    """Return one non-empty sample value per column across the given tables."""
+    samples: dict[str, str] = {}
+    for view_name in tables:
+        try:
+            result = await _run_sql(
+                database=database,
+                sql=f'SELECT * FROM "{view_name}" LIMIT 25',
+                teiid_host=teiid_host,
+                teiid_port=teiid_port,
+            )
+        except Exception:
+            continue
+        for row in result.get("rows", [])[:25]:
+            for col, val in row.items():
+                if col in samples:
+                    continue
+                text = str(val).strip() if val is not None else ""
+                if text:
+                    samples[col] = text[:40]
+    return samples
 
 
 async def _run_sql(
@@ -284,6 +314,84 @@ def _auto_cast_aggregates(sql: str) -> str:
     return _cast_timestampdiff(_AGG_CAST_RE.sub(_replacer, sql))
 
 
+async def _prepare_sql(
+    sql: str,
+    *,
+    table_schema: list[dict[str, Any]],
+    column_types: dict[str, str],
+    column_samples: dict[str, str],
+) -> str:
+    """Normalize and repair common AI SQL mistakes before execution."""
+    if table_schema:
+        sql = normalize_teiid_identifiers(sql, table_schema)
+    sql = normalize_teiid_timestamps(
+        sql, column_types=column_types, column_samples=column_samples
+    )
+    sql = _auto_cast_aggregates(sql).rstrip().rstrip(";")
+    return sql
+
+
+async def _execute_sql_with_repair(
+    *,
+    raw_sql: str,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    database: str,
+    endpoint: Any,
+    table_schema: list[dict[str, Any]],
+    allowed_tables: list[str],
+    column_types: dict[str, str],
+    column_samples: dict[str, str],
+    max_attempts: int = 3,
+) -> tuple[dict[str, Any] | None, str]:
+    """Run ``raw_sql`` after normalization, calling ``fix-sql`` on failure.
+
+    Returns ``(result, final_sql)``. ``result`` is ``None`` only when every
+    repair attempt fails, in which case ``final_sql`` is the last attempted
+    SQL and the caller should surface the error.
+    """
+    final_sql = await _prepare_sql(
+        raw_sql,
+        table_schema=table_schema,
+        column_types=column_types,
+        column_samples=column_samples,
+    )
+    last_error = ""
+    for attempt in range(max_attempts):
+        try:
+            result = await _run_sql(
+                database=database,
+                sql=final_sql,
+                teiid_host=endpoint.pg_host,
+                teiid_port=endpoint.pg_port,
+            )
+            return result, final_sql
+        except HTTPException as exc:
+            last_error = str(exc.detail)
+            if attempt >= max_attempts - 1:
+                break
+            fixed = await ai_intelligence_client.fix_sql(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                project_id=project_id,
+                sql=final_sql,
+                error=last_error,
+                allowed_tables=allowed_tables,
+                table_schema=table_schema,
+            )
+            if not fixed:
+                break
+            final_sql = await _prepare_sql(
+                fixed,
+                table_schema=table_schema,
+                column_types=column_types,
+                column_samples=column_samples,
+            )
+
+    return None, final_sql
+
+
 @router.post("/datasource")
 async def query_datasource(
     payload: DatasourceQueryRequest,
@@ -295,6 +403,10 @@ async def query_datasource(
     When project_id is provided and the project is shared, the query runs
     against the project owner's VDB (where the views live). Otherwise it
     queries the current user's personal VDB.
+
+    Generated SQL is normalized against the project schema and, if it still
+    fails, repaired through the AI ``fix-sql`` endpoint so preview modals render
+    rather than surfacing raw Teiid errors.
     """
     if not payload.sql and not (
         payload.tableName and _IDENTIFIER_RE.match(payload.tableName)
@@ -309,28 +421,54 @@ async def query_datasource(
 
     endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
 
+    table_schema: list[dict[str, Any]] = []
+    allowed_tables: list[str] = []
+    column_types: dict[str, str] = {}
+    column_samples: dict[str, str] = {}
+
+    if payload.project_id:
+        table_schema = await project_table_schema(
+            session, tenant_id=context.tenant_id, project_id=payload.project_id
+        )
+        allowed_tables = [entry.get("table") for entry in table_schema if entry.get("table")]
+        column_types = {
+            str(col.get("name")): str(col.get("type") or "")
+            for entry in table_schema
+            for col in entry.get("columns", [])
+            if col and col.get("name")
+        }
+        column_samples = await _sample_project_columns(
+            database=database,
+            tables=allowed_tables,
+            teiid_host=endpoint.pg_host,
+            teiid_port=endpoint.pg_port,
+        )
+
     if payload.sql:
-        # Generated SQL may use PostgreSQL timestamp functions or literal
-        # casts that Teiid does not accept; normalize before casting aggregates.
-        # When a project is known, also quote bare identifiers against the
-        # project schema so reserved-word columns and string-literal-as-column
-        # mistakes are repaired before execution.
-        sql = normalize_teiid_timestamps(payload.sql)
-        if payload.project_id:
-            table_schema = await project_table_schema(
-                session, tenant_id=context.tenant_id, project_id=payload.project_id
-            )
-            sql = normalize_teiid_identifiers(sql, table_schema)
-        sql = _auto_cast_aggregates(sql).rstrip().rstrip(";")
+        result, final_sql = await _execute_sql_with_repair(
+            raw_sql=payload.sql,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=payload.project_id,
+            database=database,
+            endpoint=endpoint,
+            table_schema=table_schema,
+            allowed_tables=allowed_tables,
+            column_types=column_types,
+            column_samples=column_samples,
+        )
     else:
         sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
+        result = await _run_sql(
+            database=database,
+            sql=sql,
+            teiid_host=endpoint.pg_host,
+            teiid_port=endpoint.pg_port,
+        )
+        final_sql = sql
 
-    result = await _run_sql(
-        database=database,
-        sql=sql,
-        teiid_host=endpoint.pg_host,
-        teiid_port=endpoint.pg_port,
-    )
+    if result is None:
+        raise HTTPException(status_code=502, detail=f"Query failed: {final_sql}")
 
     # Attach a data-driven visualization suggestion so preview surfaces render
     # the right chart family instead of a hardcoded bar.
@@ -345,6 +483,6 @@ async def query_datasource(
             "metricField": viz.get("metricField"),
             "topN": viz.get("topN"),
         }
-        result["sql"] = sql
+        result["sql"] = final_sql
 
     return result

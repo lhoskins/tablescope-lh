@@ -148,10 +148,113 @@ _TO_DATE_RE = _build_re(
 )
 
 
+def _cleanup_stray_string_literals(sql: str) -> str:
+    """Remove LLM hallucinated string-literal fragments after function calls.
+
+    Models sometimes emit malformed expressions like
+    ``PARSETIMESTAMP("col", 'M/d/yyyy')'col', 'M/d/yyyy')`` where a stray
+    quoted literal pair is appended. This pattern never occurs in valid SQL,
+    so we safely collapse it back to the intended closing parenthesis.
+    """
+    if not sql:
+        return sql
+    # A closing `)` followed immediately by 'x', 'y') is malformed; keep the
+    # original `)` and drop the stray pair.
+    return re.sub(
+        r"(\))\s*'(?:[^']|'')*'\s*,\s*'(?:[^']|'')*'\s*\)",
+        r"\1",
+        sql,
+    )
+
+
+_DATE_TYPES = frozenset({"date", "datetime", "timestamp"})
+
+
+def _mask_or_cast_for_column(
+    raw_col: str,
+    current_mask: str,
+    *,
+    column_samples: dict[str, str],
+    lower_types: dict[str, str],
+    is_date: bool,
+) -> str:
+    """Return the best Teiid expression for parsing/formatting a column.
+
+    For ``date``/``datetime``/``timestamp`` typed columns we prefer a plain
+    ``CAST`` when we have no sample. When a sample is available we infer the
+    correct SimpleDateFormat mask and keep ``PARSETIMESTAMP`` / ``PARSEDATE``
+    so slash-formatted string columns still parse correctly.
+    """
+    col = raw_col[1:-1].replace('""', '"')
+    col_type = lower_types.get(col.lower(), "")
+    sample = column_samples.get(col)
+    if sample:
+        mask = date_mask_for_value(sample)
+        if mask is not None:
+            func = "PARSEDATE" if is_date else "PARSETIMESTAMP"
+            return f"{func}({raw_col}, '{mask}')"
+    if col_type in _DATE_TYPES:
+        cast_type = "date" if is_date else "timestamp"
+        return f"CAST({raw_col} AS {cast_type})"
+    # We cannot determine the right mask; leave the original call alone.
+    return f"{'PARSEDATE' if is_date else 'PARSETIMESTAMP'}({raw_col}, {current_mask})"
+
+
+def _normalize_existing_parse_calls(
+    sql: str,
+    column_samples: dict[str, str],
+    lower_types: dict[str, str],
+) -> str:
+    """Fix ``PARSETIMESTAMP("col", 'mask')`` / ``PARSEDATE("col", 'mask')``
+
+    The model frequently emits these with a wrong mask (e.g. ``M/d/yyyy`` on
+    an ISO date column) or on a column that is already typed as a date. We
+    rewrite the call to a ``CAST`` or to the correct mask inferred from a
+    sample value.
+    """
+
+    def _repl_parse(m: re.Match[str]) -> str:
+        raw_col = m.group(1)
+        raw_mask = m.group(2)
+        return _mask_or_cast_for_column(
+            raw_col,
+            raw_mask,
+            column_samples=column_samples,
+            lower_types=lower_types,
+            is_date=False,
+        )
+
+    def _repl_date(m: re.Match[str]) -> str:
+        raw_col = m.group(1)
+        raw_mask = m.group(2)
+        return _mask_or_cast_for_column(
+            raw_col,
+            raw_mask,
+            column_samples=column_samples,
+            lower_types=lower_types,
+            is_date=True,
+        )
+
+    sql = re.sub(
+        r"PARSETIMESTAMP\s*\(\s*(\"(?:[^\"]|\"\")*\")\s*,\s*('(?:[^']|'')*')\s*\)",
+        _repl_parse,
+        sql,
+        flags=re.IGNORECASE,
+    )
+    sql = re.sub(
+        r"PARSEDATE\s*\(\s*(\"(?:[^\"]|\"\")*\")\s*,\s*('(?:[^']|'')*')\s*\)",
+        _repl_date,
+        sql,
+        flags=re.IGNORECASE,
+    )
+    return sql
+
+
 def normalize_teiid_timestamps(
     sql: str,
     *,
     column_samples: dict[str, str] | None = None,
+    column_types: dict[str, str] | None = None,
 ) -> str:
     """Rewrite timestamp/date expressions to Teiid-parseable forms.
 
@@ -162,11 +265,17 @@ def normalize_teiid_timestamps(
       ISO/slash pattern.
     - ``CAST("col" AS timestamp|date)`` when a sample value is supplied for
       the column so a mask can be inferred.
+    - ``PARSETIMESTAMP("col", 'mask')`` / ``PARSEDATE("col", 'mask')`` when
+      the column is typed as a date or a sample reveals the real format.
 
     Unknown column casts are left as-is; the query will fail in the normal
     Teiid execution path and can be repaired by the existing AI SQL fix loop.
     """
     column_samples = column_samples or {}
+    lower_types = {k.lower(): v.lower() for k, v in (column_types or {}).items()}
+
+    # Clean duplicated string-literal fragments before parsing functions.
+    sql = _cleanup_stray_string_literals(sql)
 
     def _replace_to_timestamp(m: re.Match[str]) -> str:
         value = _extract_string(m.group(1))
@@ -217,6 +326,7 @@ def normalize_teiid_timestamps(
     sql = _TO_DATE_RE.sub(_replace_to_date, sql)
     sql = _CAST_LITERAL_RE.sub(_replace_cast_literal, sql)
     sql = _CAST_COLUMN_RE.sub(_replace_cast_column, sql)
+    sql = _normalize_existing_parse_calls(sql, column_samples, lower_types)
     return sql
 
 
@@ -370,45 +480,82 @@ def _fix_string_literal_columns(sql: str, names: set[str]) -> str:
         "timestampdiff": [1, 2],
     }
     funcs = "|".join(re.escape(f) for f in func_positions)
-    pattern = re.compile(rf"\b({funcs})\s*\(", re.IGNORECASE)
+    func_pattern = re.compile(rf"\b({funcs})\s*\(", re.IGNORECASE)
 
-    def _replace_func(m: re.Match[str]) -> str:
-        func = m.group(1).lower()
-        start = m.end()
-        depth = 1
-        i = start
-        while i < len(sql) and depth > 0:
-            if sql[i] == "(":
-                depth += 1
-            elif sql[i] == ")":
-                depth -= 1
-            i += 1
-        if depth != 0:
-            return m.group(0)
-        args_str = sql[start : i - 1]
-        args = _split_top_level(args_str)
-        allowed = func_positions[func]
-        changed = False
-        new_args: list[str] = []
-        for idx, arg in enumerate(args):
-            arg_stripped = arg.strip()
-            if (
-                idx in allowed
-                and len(arg_stripped) >= 2
-                and arg_stripped.startswith("'")
-                and arg_stripped.endswith("'")
-            ):
-                inner = arg_stripped[1:-1].replace("''", "'")
-                if inner.lower() in lower_names:
-                    new_args.append(f'"{lower_names[inner.lower()]}"')
-                    changed = True
-                    continue
-            new_args.append(arg)
-        if not changed:
-            return m.group(0)
-        return f"{m.group(1)}({', '.join(new_args)})"
+    def _quoted_if_name(text: str) -> str:
+        stripped = text.strip()
+        if (
+            len(stripped) >= 2
+            and stripped.startswith("'")
+            and stripped.endswith("'")
+        ):
+            inner = stripped[1:-1].replace("''", "'")
+            if inner.lower() in lower_names:
+                return f'"{lower_names[inner.lower()]}"'
+        return text
 
-    return pattern.sub(_replace_func, sql)
+    def _process_segment(text: str) -> str:
+        out: list[str] = []
+        i = 0
+        n = len(text)
+        while i < n:
+            m = func_pattern.search(text, i)
+            if not m:
+                out.append(text[i:])
+                break
+            out.append(text[i : m.start()])
+            func = m.group(1).lower()
+            # Find the matching closing parenthesis, respecting nested
+            # parentheses and string literals.
+            depth = 1
+            j = m.end()
+            in_str = False
+            quote = ""
+            while j < n and depth > 0:
+                ch = text[j]
+                if in_str:
+                    if ch == quote and (j == 0 or text[j - 1] != "\\"):
+                        in_str = False
+                else:
+                    if ch in ("'", '"'):
+                        in_str = True
+                        quote = ch
+                    elif ch == "(":
+                        depth += 1
+                    elif ch == ")":
+                        depth -= 1
+                j += 1
+            if depth != 0:
+                out.append(text[m.start() : j])
+                i = j
+                continue
+            args_str = _process_segment(text[m.end() : j - 1])
+            args = _split_top_level(args_str)
+            allowed = func_positions[func]
+            new_args: list[str] = []
+            for idx, arg in enumerate(args):
+                if idx in allowed:
+                    if func == "cast":
+                        # The first argument of CAST is the expression, followed
+                        # by ``AS <type>``. Only rewrite the expression part.
+                        as_match = re.search(r"\bAS\b", arg, flags=re.IGNORECASE)
+                        if as_match:
+                            expr = arg[: as_match.start()].strip()
+                            suffix = arg[as_match.start() :]
+                            new_expr = _quoted_if_name(expr)
+                            if new_expr is not expr:
+                                arg = f"{new_expr} {suffix.strip()}"
+                                arg = _quoted_if_name(arg)
+                        else:
+                            arg = _quoted_if_name(arg)
+                    else:
+                        arg = _quoted_if_name(arg)
+                new_args.append(arg)
+            out.append(f"{m.group(1)}({', '.join(new_args)})")
+            i = j
+        return "".join(out)
+
+    return _process_segment(sql)
 
 
 def normalize_teiid_identifiers(
