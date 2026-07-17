@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.user_vdb import UserVDB
 from app.schemas.query import QueryRequest, QueryResponse
+from app.services import ai_intelligence_client
 from app.services.connection_pool import pool_manager
 from app.services.query_executor import (
     QueryValidationError,
@@ -30,7 +31,6 @@ from app.services.teiid_sql import (
     project_table_schema,
 )
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
-from app.services import ai_intelligence_client
 from app.services.vdb_routing import (
     VDBInactiveError,
     VDBNotConfiguredError,

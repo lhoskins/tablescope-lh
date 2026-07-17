@@ -39,7 +39,6 @@ from app.routes.query import (
     _auto_cast_aggregates,
     _execute_sql_with_repair,
     _resolve_vdb_database,
-    _run_sql,
     _sample_project_columns,
 )
 from app.services import dashboard_widget as dw
