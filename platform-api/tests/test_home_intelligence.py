@@ -783,6 +783,96 @@ async def test_home_insights_project_id_scopes_to_one_project(
     assert [p["projectId"] for p in body["projects"]] == [str(target)]
 
 
+async def test_query_suggestions_project_id_scopes_to_one_project(
+    client, db_engine, service_headers, monkeypatch
+) -> None:
+    _, _, headers = await _setup(client, service_headers)
+    ids: list[int] = []
+    for name in ("Alpha", "Beta"):
+        r = await client.post(
+            "/api/projects",
+            json={"name": name, "description": "x", "is_shared": False},
+            headers=headers,
+        )
+        assert r.status_code == 201
+        ids.append(r.json()["id"])
+
+    import app.routes.home_intelligence as hir
+
+    monkeypatch.setattr(
+        hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
+    )
+
+    planned: list[int] = []
+
+    async def spy_plan_analyses(session, context, project, **kwargs):
+        planned.append(project.id)
+        return []
+
+    monkeypatch.setattr(hir, "_plan_analyses", spy_plan_analyses)
+
+    target = ids[0]
+    r = await client.post(
+        "/api/ai/home/query-suggestions",
+        json={"project_id": target},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert planned == [target]
+    assert [p["projectId"] for p in r.json()["projects"]] == [str(target)]
+
+    # Without project_id the original all-projects behavior is preserved.
+    planned.clear()
+    r = await client.post(
+        "/api/ai/home/query-suggestions", json={}, headers=headers
+    )
+    assert r.status_code == 200
+    assert sorted(planned) == sorted(ids)
+
+
+async def test_dashboard_suggestions_project_id_scopes_to_one_project(
+    client, db_engine, service_headers, monkeypatch
+) -> None:
+    _, _, headers = await _setup(client, service_headers)
+    ids: list[int] = []
+    for name in ("Alpha", "Beta"):
+        r = await client.post(
+            "/api/projects",
+            json={"name": name, "description": "x", "is_shared": False},
+            headers=headers,
+        )
+        assert r.status_code == 201
+        ids.append(r.json()["id"])
+
+    import app.routes.home_intelligence as hir
+
+    monkeypatch.setattr(
+        hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
+    )
+
+    gathered: list[int] = []
+
+    async def spy_gather(session, project):
+        gathered.append(project.id)
+        return {}
+
+    async def fake_plan_and_execute(project, ctx, runner, **kwargs):
+        return []
+
+    monkeypatch.setattr(hir.hi, "gather_project_context", spy_gather)
+    monkeypatch.setattr(hir.hi, "plan_and_execute_widgets", fake_plan_and_execute)
+
+    target = ids[1]
+    r = await client.post(
+        "/api/ai/home/dashboard-suggestions",
+        json={"project_id": target},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    assert gathered == [target]
+    assert [p["projectId"] for p in r.json()["projects"]] == [str(target)]
+
+
 async def test_home_insights_without_project_id_runs_all(
     client, db_engine, service_headers, monkeypatch
 ) -> None:

@@ -38,7 +38,14 @@ const PILLS: { key: Pill; label: string; icon: typeof IconBulb }[] = [
   { key: "insights", label: "Insights & Opportunities", icon: IconBulb },
 ];
 
-export function HomeAiSuggestions() {
+export function HomeAiSuggestions({
+  projectId,
+}: {
+  /** When set, every suggestion pill generates for this project only and the
+   *  per-project section headers are hidden. Omitted, the original Home
+   *  behavior (all accessible projects) applies. */
+  projectId?: number;
+} = {}) {
   const [active, setActive] = useState<Pill | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,27 +60,32 @@ export function HomeAiSuggestions() {
     ProjectResult[] | null
   >(null);
 
-  const run = useCallback(async (pill: Pill) => {
-    setActive(pill);
-    setError(null);
-    setLoading(true);
-    try {
-      if (pill === "queries") {
-        const res = await suggestQueries();
-        setQueryProjects(res.projects);
-      } else if (pill === "dashboards") {
-        const res = await suggestDashboards();
-        setDashboardProjects(res.projects);
-      } else {
-        const res = await suggestInsights();
-        setInsightProjects(res.projects);
+  const run = useCallback(
+    async (pill: Pill) => {
+      setActive(pill);
+      setError(null);
+      setLoading(true);
+      try {
+        if (pill === "queries") {
+          const res = await suggestQueries(3, projectId);
+          setQueryProjects(res.projects);
+        } else if (pill === "dashboards") {
+          const res = await suggestDashboards(3, projectId);
+          setDashboardProjects(res.projects);
+        } else {
+          const res = await suggestInsights(3, projectId);
+          setInsightProjects(res.projects);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Suggestion failed");
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Suggestion failed");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [projectId],
+  );
+
+  const scoped = projectId != null;
 
   return (
     <div className="mt-4">
@@ -104,7 +116,9 @@ export function HomeAiSuggestions() {
           {loading && (
             <div className="flex items-center justify-center gap-2 rounded-lg border border-line-tertiary bg-bg-primary py-10 text-small text-ink-tertiary">
               <IconLoader2 size={16} className="animate-spin" />
-              Generating across your projects…
+              {scoped
+                ? "Generating for this project…"
+                : "Generating across your projects…"}
             </div>
           )}
           {!loading && error && (
@@ -113,13 +127,22 @@ export function HomeAiSuggestions() {
             </div>
           )}
           {!loading && !error && active === "queries" && (
-            <QuerySuggestionsPanel projects={queryProjects ?? []} />
+            <QuerySuggestionsPanel
+              projects={queryProjects ?? []}
+              showProjectHeader={!scoped}
+            />
           )}
           {!loading && !error && active === "dashboards" && (
-            <DashboardSuggestionsPanel projects={dashboardProjects ?? []} />
+            <DashboardSuggestionsPanel
+              projects={dashboardProjects ?? []}
+              showProjectHeader={!scoped}
+            />
           )}
           {!loading && !error && active === "insights" && (
-            <InsightsPanel projects={insightProjects ?? []} />
+            <InsightsPanel
+              projects={insightProjects ?? []}
+              showProjectHeader={!scoped}
+            />
           )}
         </div>
       )}
@@ -157,8 +180,10 @@ function EmptyState({ label }: { label: string }) {
 
 function QuerySuggestionsPanel({
   projects,
+  showProjectHeader = true,
 }: {
   projects: QuerySuggestionsProject[];
+  showProjectHeader?: boolean;
 }) {
   const withResults = projects.filter((p) => p.suggestions.length > 0);
   if (withResults.length === 0) {
@@ -170,7 +195,9 @@ function QuerySuggestionsPanel({
     <div className="space-y-8">
       {withResults.map((p) => (
         <section key={p.projectId}>
-          <ProjectHeader name={p.projectName} color={p.projectColor} />
+          {showProjectHeader && (
+            <ProjectHeader name={p.projectName} color={p.projectColor} />
+          )}
           <div className="space-y-3">
             {p.suggestions.map((s, i) => (
               <QuerySuggestionCard
@@ -252,8 +279,10 @@ function QuerySuggestionCard({
 
 function DashboardSuggestionsPanel({
   projects,
+  showProjectHeader = true,
 }: {
   projects: DashboardSuggestionsProject[];
+  showProjectHeader?: boolean;
 }) {
   const withResults = projects.filter(
     (p) => p.dashboard && p.dashboard.widgets.length > 0,
@@ -269,6 +298,7 @@ function DashboardSuggestionsPanel({
         <DashboardSuggestionCard
           key={p.projectId}
           project={p}
+          showProjectHeader={showProjectHeader}
         />
       ))}
     </div>
@@ -277,8 +307,10 @@ function DashboardSuggestionsPanel({
 
 function DashboardSuggestionCard({
   project,
+  showProjectHeader = true,
 }: {
   project: DashboardSuggestionsProject;
+  showProjectHeader?: boolean;
 }) {
   const dashboard = project.dashboard!;
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
@@ -310,7 +342,12 @@ function DashboardSuggestionCard({
     <section className="rounded-lg border border-line-tertiary bg-bg-primary p-4">
       <header className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <ProjectHeader name={project.projectName} color={project.projectColor} />
+          {showProjectHeader && (
+            <ProjectHeader
+              name={project.projectName}
+              color={project.projectColor}
+            />
+          )}
           <p className="text-small text-ink-secondary">{dashboard.title}</p>
         </div>
         <button

@@ -39,7 +39,8 @@ import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewM
 import type { AiCardContext } from "@/lib/api/ai-actions";
 import { GenerateDashboardModal } from "@/components/tablescope/project-insight/generate-dashboard-modal";
 import { renderBold } from "@/components/tablescope/home/intelligence-card";
-import { InsightsPanel } from "@/components/tablescope/home/ai-suggestions";
+import { InsightsPanel, HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
+import { HeroSearch } from "@/components/tablescope/home/hero-search";
 import {
   InsightExplanationPanel,
 } from "@/components/tablescope/home/insight-explanation-panel";
@@ -383,6 +384,15 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 </div>
               </div>
             )}
+
+            {/* 0. Ask + AI suggestions — same experience as Business Insight,
+                scoped to this project. The ask box hands off to the shared
+                conversational-analytics assistant; the pills generate query/
+                dashboard/insight suggestions for this project only. */}
+            <div className="space-y-6 py-2">
+              <HeroSearch projectId={projectId} />
+              <HomeAiSuggestions projectId={Number(projectId)} />
+            </div>
 
             {/* 1. Executive Project Summary */}
             <section className="rounded-lg border border-line-tertiary bg-bg-primary p-5">

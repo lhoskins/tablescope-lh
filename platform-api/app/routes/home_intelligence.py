@@ -639,9 +639,15 @@ async def home_query_suggestions(
     req: SuggestRequest,
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
-    """AI-suggested queries for every accessible project (in memory, unsaved)."""
+    """AI-suggested queries for every accessible project (in memory, unsaved).
+
+    ``project_id`` restricts generation to that single project (Project
+    Insight page); omitted, all accessible projects are covered (Home page).
+    """
     async with SessionLocal() as session:
         projects = await _accessible_projects(session, context)
+    if req.project_id is not None:
+        projects = [p for p in projects if p.id == req.project_id]
     if not projects:
         return {"projects": []}
 
@@ -692,10 +698,13 @@ async def home_dashboard_suggestions(
 
     The plan's SQL is executed server-side against each project's own VDB and
     turned into renderable chart series so the Home can render the dashboard
-    from memory. Nothing is saved until the user clicks Save.
+    from memory. Nothing is saved until the user clicks Save. ``project_id``
+    restricts generation to that single project (Project Insight page).
     """
     async with SessionLocal() as session:
         projects = await _accessible_projects(session, context)
+    if req.project_id is not None:
+        projects = [p for p in projects if p.id == req.project_id]
     if not projects:
         return {"projects": []}
 
