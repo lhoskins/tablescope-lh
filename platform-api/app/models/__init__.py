@@ -27,6 +27,10 @@ from app.models.analytical_method_catalog import (
     MethodCatalogVersion,
     MethodSelectionMatrix,
 )
+from app.models.analytics_conversation import (
+    AnalyticsConversation,
+    AnalyticsConversationTurn,
+)
 from app.models.audit_event import AuditEvent
 from app.models.base import Base
 from app.models.billing import (
@@ -88,6 +92,8 @@ from app.models.user_vdb import UserVDB
 __all__ = [
     "AIProjectGraphEdge",
     "AIProjectGraphNode",
+    "AnalyticsConversation",
+    "AnalyticsConversationTurn",
     "AiConversation",
     "AiConversationMessage",
     "AuditEvent",
