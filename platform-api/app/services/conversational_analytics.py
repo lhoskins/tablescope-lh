@@ -193,10 +193,10 @@ def _fallback_classify(
         # honor it after SQL generation.
         for phrase, chart_type, subtype in _FALLBACK_CHART_WORDS:
             if re.search(rf"\b{phrase}\b", q):
-                patch: dict[str, Any] = {"type": chart_type}
+                initial_patch = {"type": chart_type}
                 if subtype:
-                    patch["subtype"] = subtype
-                return ConversationalIntent.NEW_ANALYSIS, patch
+                    initial_patch["subtype"] = subtype
+                return ConversationalIntent.NEW_ANALYSIS, initial_patch
         return ConversationalIntent.NEW_ANALYSIS, {}
     # Ambiguous follow-up: re-run through the SQL engine, the safe default.
     return ConversationalIntent.QUERY_CHANGE, {}
