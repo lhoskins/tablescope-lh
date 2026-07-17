@@ -438,9 +438,10 @@ async def test_new_analysis_with_requested_chart_type(client, service_headers, m
     assert turn["chart_config"]["subtype"] == "horizontal_bar"
 
 
-async def test_new_analysis_extraction_when_llm_returns_empty_chart(client, service_headers, monkeypatch):
+async def test_new_analysis_when_llm_returns_empty_chart_uses_suggested_viz(client, service_headers, monkeypatch):
     """If the LLM returns new_analysis with an empty chart patch, the platform
-    still extracts an explicit chart type phrase from the question."""
+    uses the SQL engine's suggested visualization rather than applying a
+    hardcoded phrase fallback. The LLM is the sole source of chart intent."""
     _, _, project, headers = await _setup(client, service_headers, "conv-extract")
 
     async def _fake(*args, **kwargs):
@@ -459,6 +460,7 @@ async def test_new_analysis_extraction_when_llm_returns_empty_chart(client, serv
         return {
             "intent": "new_analysis",
             "chart": {},
+            "data_question": "Show me sales by month",
             "confidence": 0.9,
             "reason": "New data question.",
         }
@@ -476,8 +478,7 @@ async def test_new_analysis_extraction_when_llm_returns_empty_chart(client, serv
     turn = r.json()["turns"][0]
     assert turn["status"] == "success"
     assert turn["intent_type"] == "new_analysis"
-    assert turn["chart_config"]["type"] == "pie"
-    assert turn["chart_config"]["subtype"] == "donut"
+    assert turn["chart_config"]["type"] == "bar"
 
 
 async def test_fallback_new_analysis_with_chart_type(client, service_headers, monkeypatch):
