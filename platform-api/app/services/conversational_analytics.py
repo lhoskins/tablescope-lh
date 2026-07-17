@@ -125,12 +125,13 @@ async def classify_turn(
     tenant_id: int,
     user_id: int,
     project_id: int,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], str | None]:
     """Classify a turn LLM-first; degrade deterministically when AI is off.
 
-    Returns the intent and, for chart-only changes, the structured chart
-    patch produced by the model (already sanitized server-side, re-validated
-    in :func:`apply_chart_patch`).
+    Returns the intent, the structured chart patch produced by the model
+    (already sanitized server-side, re-validated in :func:`apply_chart_patch`),
+    and an optional ``data_question`` to send to the SQL generator with chart
+    language removed.
     """
     state = _prior_turn_state(prior_turn)
     if ai_intelligence_client.is_enabled():
@@ -168,25 +169,31 @@ async def classify_turn(
                 # New-analysis and query-change turns may also carry a chart
                 # preference from the model (e.g. "Run X with a horizontal bar
                 # chart"). Preserve it so execute_turn can apply it after SQL.
-                return intent, chart
+                # data_question is the user's data intent with chart language
+                # removed, surfaced so the SQL generator is not confused by
+                # presentation wording.
+                data_question = decision.get("data_question")
+                if data_question and not isinstance(data_question, str):
+                    data_question = None
+                return intent, chart, data_question
     return _fallback_classify(question, prior_turn)
 
 
 def _fallback_classify(
     question: str, prior_turn: AnalyticsConversationTurn | None
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], str | None]:
     """Minimal deterministic classifier for degraded mode (AI off/unreachable)."""
     q = _normalize_question(question)
     has_result = bool(prior_turn and prior_turn.result_cache)
     if has_result and _FALLBACK_EXPLAIN.search(q):
-        return ConversationalIntent.EXPLAIN, {}
+        return ConversationalIntent.EXPLAIN, {}, None
     if has_result and _FALLBACK_CHART_CONTEXT.search(q):
         for phrase, chart_type, subtype in _FALLBACK_CHART_WORDS:
             if re.search(rf"\b{phrase}\b", q):
                 patch: dict[str, Any] = {"type": chart_type}
                 if subtype:
                     patch["subtype"] = subtype
-                return ConversationalIntent.CHART_CHANGE, patch
+                return ConversationalIntent.CHART_CHANGE, patch, None
     if prior_turn is None:
         # Even a brand-new question can name a chart style ("Run X with a
         # horizontal bar chart"). Pass the preference along so the widget can
@@ -196,10 +203,10 @@ def _fallback_classify(
                 initial_patch = {"type": chart_type}
                 if subtype:
                     initial_patch["subtype"] = subtype
-                return ConversationalIntent.NEW_ANALYSIS, initial_patch
-        return ConversationalIntent.NEW_ANALYSIS, {}
+                return ConversationalIntent.NEW_ANALYSIS, initial_patch, None
+        return ConversationalIntent.NEW_ANALYSIS, {}, None
     # Ambiguous follow-up: re-run through the SQL engine, the safe default.
-    return ConversationalIntent.QUERY_CHANGE, {}
+    return ConversationalIntent.QUERY_CHANGE, {}, None
 
 def _sql_fingerprint(sql: str | None) -> str | None:
     if not sql:
@@ -628,13 +635,17 @@ async def execute_turn(
         prior_turn = await session.get(AnalyticsConversationTurn, conversation.last_successful_turn_id)
     question = turn.user_message
 
-    intent, chart_patch = await classify_turn(
+    intent, chart_patch, data_question = await classify_turn(
         question,
         prior_turn,
         tenant_id=context.tenant_id,
         user_id=context.user_id,
         project_id=conversation.project_id or 0,
     )
+    # The classifier strips chart/presentation wording from the user message and
+    # returns a focused data_question. Use it for SQL generation so the model
+    # does not try to interpret "horizontal", "donut", etc. as data intent.
+    sql_question = data_question if data_question else question
     turn.intent_type = intent
 
     if intent == ConversationalIntent.CLARIFICATION:
@@ -727,7 +738,7 @@ async def execute_turn(
         session,
         context,
         project_id,
-        question,
+        sql_question,
         prior_turn,
         datasource_id,
         project_context=project_context,

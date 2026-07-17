@@ -286,6 +286,10 @@ class ConversationTurnClassifyRequest(AIBaseRequest):
 class ConversationTurnClassifyResponse(BaseModel):
     intent: str = "new_analysis"
     chart: dict = Field(default_factory=dict)
+    data_question: str | None = Field(
+        default=None,
+        description="The underlying data question, with chart/presentation wording removed and ambiguous phrasing clarified. Null for chart_change and explain.",
+    )
     confidence: float = 0.0
     reason: str = ""
     request_id: str = ""

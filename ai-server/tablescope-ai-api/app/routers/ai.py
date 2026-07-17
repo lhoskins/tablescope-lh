@@ -1933,18 +1933,29 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         "5. When a chart style is mentioned, you MUST set type and subtype; "
         "do not leave them null. If the user only says 'bar chart' with no "
         "subtype, type=bar and subtype=null. If the user says 'horizontal "
-        "bar chart', type=bar and subtype=horizontal_bar.\n"
+        "bar chart' or 'as horizontal' or 'make it horizontal', type=bar and "
+        "subtype=horizontal_bar. 'as a donut' or just 'as donut' -> pie/donut.\n"
         "6. labelColumn and valueColumns must come from result_columns. If "
         "the user names a column that does not exist, still return "
         "chart_change and put the requested name in the field — the platform "
-        "will report it to the user.\n\n"
+        "will report it to the user.\n"
+        "7. Output `data_question` for new_analysis and query_change: the "
+        "user's underlying data question with all chart/presentation wording "
+        "removed and ambiguous phrasing clarified. The SQL generator will "
+        "receive ONLY this data_question, so it must be unambiguous and must "
+        "not contain chart terms. For example, 'Show IT backup jobs as "
+        "horizontal' -> data_question 'Count of IT backup jobs grouped by "
+        "Result'. 'Show IT backup jobs' -> data_question 'Count of IT backup "
+        "jobs grouped by Result'. For chart_change and explain, set "
+        "data_question to null.\n\n"
         "## Chart vocabulary (closed set)\n"
         f"Types: {sorted(_CHART_TYPES)}\n"
         f"{subtype_lines}\n"
         "Mapping guidance: 'horizontal bar' / 'bar chart horizontal' / 'as a "
-        "horizontal bar chart' -> type=bar, subtype=horizontal_bar; 'stacked "
-        "bar' -> bar/stacked_bar; 'grouped bar' -> bar/grouped_bar; 'donut'/"
-        "'doughnut' -> pie/donut; 'area' -> line/stacked_area; 'bubble' -> "
+        "horizontal bar chart' / 'as horizontal' / 'make it horizontal' -> "
+        "type=bar, subtype=horizontal_bar; 'stacked bar' -> bar/stacked_bar; "
+        "'grouped bar' -> bar/grouped_bar; 'donut'/'doughnut'/'as a donut'/"
+        "'as donut' -> pie/donut; 'area' -> line/stacked_area; 'bubble' -> "
         "scatter/bubble; plain 'bar chart' / 'vertical bar' -> type=bar with "
         "subtype null.\n\n"
         "## Output schema (JSON only, all keys required)\n"
@@ -1960,6 +1971,7 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         '    "legendVisible": true/false/null,\n'
         '    "title": "new chart title or null"\n'
         "  },\n"
+        '  "data_question": "underlying data question or null",\n'
         '  "confidence": 0.0-1.0,\n'
         '  "reason": "one short sentence"\n'
         "}\n\n"
@@ -1968,47 +1980,67 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         '{"intent": "chart_change", "chart": {"type": "bar", "subtype": '
         '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
         'null, "dataLabels": null, "legendVisible": null, "title": null}, '
-        '"confidence": 0.95, "reason": "Same data re-presented as horizontal bars."}\n'
+        '"data_question": null, "confidence": 0.95, "reason": "Same data re-presented as horizontal bars."}\n'
         'Message: "change it to a donut" -> '
         '{"intent": "chart_change", "chart": {"type": "pie", "subtype": '
         '"donut", "labelColumn": null, "valueColumns": null, "sort": null, '
         '"dataLabels": null, "legendVisible": null, "title": null}, '
-        '"confidence": 0.95, "reason": "Presentation-only switch to a donut."}\n'
+        '"data_question": null, "confidence": 0.95, "reason": "Presentation-only switch to a donut."}\n'
         'Message: "only show 2024" -> '
-        '{"intent": "query_change", "chart": {}, "confidence": 0.9, '
+        '{"intent": "query_change", "chart": {}, "data_question": "Filter the prior query to only include 2024", "confidence": 0.9, '
         '"reason": "Needs a different filter, so new SQL."}\n'
         'Message: "Run IT backup jobs with a horizontal bar chart" -> '
         '{"intent": "new_analysis", "chart": {"type": "bar", "subtype": '
         '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
         'null, "dataLabels": null, "legendVisible": null, "title": null}, '
-        '"confidence": 0.95, "reason": "New data question that also requests a "'
-        '"horizontal bar visualization."}\n'
+        '"data_question": "Count of IT backup jobs grouped by Result", "confidence": 0.95, '
+        '"reason": "New data question that also requests a horizontal bar visualization."}\n'
+        'Message: "Show IT backup jobs as horizontal" -> '
+        '{"intent": "new_analysis", "chart": {"type": "bar", "subtype": '
+        '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
+        'null, "dataLabels": null, "legendVisible": null, "title": null}, '
+        '"data_question": "Count of IT backup jobs grouped by Result", "confidence": 0.95, '
+        '"reason": "Ambiguous show request with horizontal bar format; default to count by Result."}\n'
+        'Message: "Show IT backup jobs" -> '
+        '{"intent": "new_analysis", "chart": {}, "data_question": "Count of IT backup jobs grouped by Result", '
+        '"confidence": 0.9, "reason": "Vague show request; default to count by the natural status column."}\n'
         'Message: "count of backup jobs by status as a horizontal bar chart" -> '
         '{"intent": "new_analysis", "chart": {"type": "bar", "subtype": '
         '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
         'null, "dataLabels": null, "legendVisible": null, "title": null}, '
-        '"confidence": 0.95, "reason": "New data question with explicit "'
-        '"horizontal bar chart preference."}\n'
+        '"data_question": "Count of IT backup jobs grouped by Result", "confidence": 0.95, '
+        '"reason": "New data question with explicit horizontal bar chart preference."}\n'
         'Message: "show success and failed backup job counts in a donut chart" -> '
         '{"intent": "new_analysis", "chart": {"type": "pie", "subtype": '
         '"donut", "labelColumn": null, "valueColumns": null, "sort": null, '
         '"dataLabels": null, "legendVisible": null, "title": null}, '
-        '"confidence": 0.95, "reason": "New question requesting a donut chart."}\n'
+        '"data_question": "Count of IT backup jobs grouped by Result", "confidence": 0.95, '
+        '"reason": "New question requesting a donut chart."}\n'
         'Message: "Run IT backup jobs and show success vs failed counts as a "'
         '"horizontal bar chart" -> {"intent": "new_analysis", "chart": '
         '{"type": "bar", "subtype": "horizontal_bar", "labelColumn": null, '
         '"valueColumns": null, "sort": null, "dataLabels": null, '
-        '"legendVisible": null, "title": null}, "confidence": 0.95, '
-        '"reason": "New question with chart style at the end; style must be "'
-        '"preserved."}\n'
+        '"legendVisible": null, "title": null}, '
+        '"data_question": "Count of IT backup jobs grouped by Result with values labelled Success and Failed", '
+        '"confidence": 0.95, "reason": "New question with chart style at the end; style must be preserved."}\n'
+        'Message: "Previous query is displaying vertical bars I want to see horizontal" -> '
+        '{"intent": "chart_change", "chart": {"type": "bar", "subtype": "horizontal_bar", '
+        '"labelColumn": null, "valueColumns": null, "sort": null, "dataLabels": null, '
+        '"legendVisible": null, "title": null}, "data_question": null, "confidence": 0.95, '
+        '"reason": "Presentation-only change from vertical to horizontal bars."}\n'
+        'Message: "No it not working as expected. Please show IT backup jobs as donut" (with prior result) -> '
+        '{"intent": "chart_change", "chart": {"type": "pie", "subtype": "donut", '
+        '"labelColumn": null, "valueColumns": null, "sort": null, "dataLabels": null, '
+        '"legendVisible": null, "title": null}, "data_question": null, "confidence": 0.9, '
+        '"reason": "Complaint + explicit donut chart request; keep same data and change presentation."}\n'
         'Message: "why is March so high?" -> '
-        '{"intent": "explain", "chart": {}, "confidence": 0.85, '
+        '{"intent": "explain", "chart": {}, "data_question": null, "confidence": 0.85, '
         '"reason": "Asks about how the current result came to be."}\n'
         'Message: "sort it highest to lowest" -> '
         '{"intent": "chart_change", "chart": {"type": null, "subtype": null, '
         '"labelColumn": null, "valueColumns": null, "sort": {"column": '
         '"value", "direction": "desc"}, "dataLabels": null, "legendVisible": '
-        'null, "title": null}, "confidence": 0.9, "reason": '
+        'null, "title": null}, "data_question": null, "confidence": 0.9, "reason": '
         '"Display sort of the same rows."}\n\n'
         "## User message\n"
         f"{req.message}\n"
@@ -2122,9 +2154,14 @@ async def classify_conversation_turn(
     except (TypeError, ValueError):
         confidence = 0.0
 
+    data_question = str(parsed.get("data_question") or "").strip() or None
+    if data_question and intent in {"chart_change", "explain"}:
+        data_question = None
+
     return ConversationTurnClassifyResponse(
         intent=intent,
         chart=chart,
+        data_question=data_question,
         confidence=confidence,
         reason=str(parsed.get("reason") or "")[:300],
         request_id=request_id,

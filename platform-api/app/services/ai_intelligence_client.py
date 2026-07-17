@@ -331,7 +331,7 @@ async def classify_conversation_turn(
 ) -> dict[str, Any] | None:
     """Ask the LLM to classify a conversational-analytics turn.
 
-    Returns ``{"intent": ..., "chart": {...}, "confidence": ..., "reason": ...}``
+    Returns ``{"intent": ..., "chart": {...}, "data_question": ..., "confidence": ..., "reason": ...}``
     or ``None`` when AI is disabled, so the caller can fall back to its
     deterministic degraded path.
     """
