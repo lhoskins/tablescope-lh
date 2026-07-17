@@ -1916,26 +1916,34 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         "chart_change; if it needs different rows, columns, filters, or "
         "aggregation it is query_change.\n"
         "3. Phrases like 'run this query as/using <format>', 'show it as "
-        "<format>', 'switch to <format>', 'make it <format>' where <format> "
-        "is a chart style are chart_change — the user wants the same data "
-        "re-presented.\n"
-        "4. Populate \"chart\" for chart_change. ALSO populate it for "
-        "new_analysis or query_change when the user explicitly names a chart "
+        "<format>', 'switch to <format>', 'make it <format>', 'display as "
+        "<format>', 'as a <format>', 'in a <format>', 'with a <format>' where "
+        "<format> is a chart style are chart_change when there is a prior "
+        "result — the user wants the same data re-presented.\n"
+        "4. Populate \"chart\" for EVERY chart_change, and ALSO populate it "
+        "for new_analysis or query_change when the user mentions any chart "
         "style in the same message (e.g. 'Run IT backup jobs with a horizontal "
-        "bar chart'). Use null for any chart field the user did not ask to "
+        "bar chart', 'Count of backup jobs by status as a horizontal bar "
+        "chart'). If no chart style is mentioned, return chart as an empty "
+        "object {}. Use null for any chart field the user did not ask to "
         "change.\n"
-        "5. labelColumn and valueColumns must come from result_columns. If "
+        "5. When a chart style is mentioned, you MUST set type and subtype; "
+        "do not leave them null. If the user only says 'bar chart' with no "
+        "subtype, type=bar and subtype=null. If the user says 'horizontal "
+        "bar chart', type=bar and subtype=horizontal_bar.\n"
+        "6. labelColumn and valueColumns must come from result_columns. If "
         "the user names a column that does not exist, still return "
         "chart_change and put the requested name in the field — the platform "
         "will report it to the user.\n\n"
         "## Chart vocabulary (closed set)\n"
         f"Types: {sorted(_CHART_TYPES)}\n"
         f"{subtype_lines}\n"
-        "Mapping guidance: 'horizontal bar' -> type=bar, subtype="
-        "horizontal_bar; 'stacked bar' -> bar/stacked_bar; 'grouped bar' -> "
-        "bar/grouped_bar; 'donut'/'doughnut' -> pie/donut; 'area' -> "
-        "line/stacked_area; 'bubble' -> scatter/bubble; plain 'bar chart' -> "
-        "bar with subtype null; 'vertical bar' -> bar with subtype null.\n\n"
+        "Mapping guidance: 'horizontal bar' / 'bar chart horizontal' / 'as a "
+        "horizontal bar chart' -> type=bar, subtype=horizontal_bar; 'stacked "
+        "bar' -> bar/stacked_bar; 'grouped bar' -> bar/grouped_bar; 'donut'/"
+        "'doughnut' -> pie/donut; 'area' -> line/stacked_area; 'bubble' -> "
+        "scatter/bubble; plain 'bar chart' / 'vertical bar' -> type=bar with "
+        "subtype null.\n\n"
         "## Output schema (JSON only, all keys required)\n"
         "{\n"
         '  "intent": "new_analysis|query_change|chart_change|explain|clarification",\n'
@@ -1972,6 +1980,17 @@ def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
         'null, "dataLabels": null, "legendVisible": null, "title": null}, '
         '"confidence": 0.95, "reason": "New data question that also requests a "'
         '"horizontal bar visualization."}\n'
+        'Message: "count of backup jobs by status as a horizontal bar chart" -> '
+        '{"intent": "new_analysis", "chart": {"type": "bar", "subtype": '
+        '"horizontal_bar", "labelColumn": null, "valueColumns": null, "sort": '
+        'null, "dataLabels": null, "legendVisible": null, "title": null}, '
+        '"confidence": 0.95, "reason": "New data question with explicit "'
+        '"horizontal bar chart preference."}\n'
+        'Message: "show success and failed backup job counts in a donut chart" -> '
+        '{"intent": "new_analysis", "chart": {"type": "pie", "subtype": '
+        '"donut", "labelColumn": null, "valueColumns": null, "sort": null, '
+        '"dataLabels": null, "legendVisible": null, "title": null}, '
+        '"confidence": 0.95, "reason": "New question requesting a donut chart."}\n'
         'Message: "why is March so high?" -> '
         '{"intent": "explain", "chart": {}, "confidence": 0.85, '
         '"reason": "Asks about how the current result came to be."}\n'
