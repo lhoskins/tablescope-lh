@@ -56,6 +56,8 @@ separately on every call.
    data_question to null.
 8. Do not fabricate chart patches to force a pass. When the intent is truly
    unclear, prefer clarification with a lower confidence.
+9. Vague adjectives like "fancier", "nicer", "prettier", or "make it look better"
+   without a specific chart type or change are clarification, not chart_change.
 
 ## Examples (fictional data — never copy their wording into your output)
 
@@ -111,3 +113,7 @@ Message: "sort it highest to lowest" (prior result) ->
 Message: "why is the third bar so high?" (prior result) ->
 {"intent": "explain", "chart": {}, "data_question": null,
 "confidence": 0.85, "reason": "Asks how the current result came to be."}
+
+Message: "make it fancier" (prior result) ->
+{"intent": "clarification", "chart": {}, "data_question": null,
+"confidence": 0.8, "reason": "Vague presentation request with no specific chart type."}
