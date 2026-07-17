@@ -93,6 +93,11 @@ _TEIID_RULES = (
     "AVG(CAST(TIMESTAMPDIFF(SQL_TSI_DAY, "
     "PARSETIMESTAMP(\"ShipDate\", 'M/d/yyyy'), "
     "PARSETIMESTAMP(\"DeliveryDate\", 'M/d/yyyy')) AS double)).\n"
+    "12. Wrap every table and column identifier in double quotes to avoid "
+    "Teiid reserved-word errors. Quote table names (FROM \"it_backup_jobs_CSV\") "
+    "and every column reference (SELECT \"Status\", COUNT(*) FROM "
+    "\"it_backup_jobs_CSV\" GROUP BY \"Status\"). Do NOT quote SQL keywords, "
+    "function names, string literals, or aliases.\n"
 )
 
 _SEMANTIC_RULES = (
