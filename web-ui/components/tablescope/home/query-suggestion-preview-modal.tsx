@@ -17,7 +17,21 @@ import { runDatasourceSql } from "@/lib/api/data-source-builder";
 import { saveQuerySuggestion } from "@/lib/api/home-intelligence";
 import type { SuggestedVisualization } from "@/lib/api/ai-actions";
 
-type RunResult = { columns: string[]; rows: Record<string, unknown>[] };
+type BackendViz = {
+  type: string;
+  chartStyle?: string;
+  xField?: string;
+  yField?: string;
+  metricField?: string;
+  topN?: number;
+};
+
+type RunResult = {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  sql?: string;
+  suggestedVisualization?: BackendViz;
+};
 
 function isNumeric(value: unknown): boolean {
   if (typeof value === "number") return Number.isFinite(value);
@@ -86,7 +100,7 @@ export function QuerySuggestionPreviewModal({
         project_id: projectId,
         name: title,
         description,
-        sql_text: sql,
+        sql_text: result?.sql || sql,
       }),
     onSuccess: () => {
       setSaved(true);
@@ -105,7 +119,11 @@ export function QuerySuggestionPreviewModal({
   if (!open) return null;
 
   const result = run.data;
-  const viz = result ? inferViz(result.columns, result.rows) : { type: "table" as const };
+  const viz: SuggestedVisualization = result?.suggestedVisualization
+    ? (result.suggestedVisualization as SuggestedVisualization)
+    : result
+      ? inferViz(result.columns, result.rows)
+      : { type: "table" as const };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4">
@@ -176,7 +194,7 @@ export function QuerySuggestionPreviewModal({
             </button>
             {showSql && (
               <pre className="mt-1.5 overflow-auto rounded-md bg-bg-secondary p-2.5 text-[11px] leading-relaxed text-ink-primary">
-                {sql}
+                {result?.sql || sql}
               </pre>
             )}
           </div>

@@ -159,7 +159,19 @@ export function previewCreatedSource(body: {
 export function runDatasourceSql(body: {
   sql: string;
   project_id?: number;
-}): Promise<{ columns: string[]; rows: Record<string, unknown>[] }> {
+}): Promise<{
+  columns: string[];
+  rows: Record<string, unknown>[];
+  sql?: string;
+  suggestedVisualization?: {
+    type: string;
+    chartStyle?: string;
+    xField?: string;
+    yField?: string;
+    metricField?: string;
+    topN?: number;
+  };
+}> {
   return apiClient.post("/api/query/datasource", {
     sql: body.sql,
     project_id: body.project_id,

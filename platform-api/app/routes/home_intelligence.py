@@ -42,7 +42,10 @@ from app.services import home_intelligence as hi
 from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.presentation_engine import PresentationMode
 from app.services.response_envelope import attach_envelope
-from app.services.teiid_sql import normalize_teiid_timestamps
+from app.services.teiid_sql import (
+    normalize_teiid_identifiers,
+    normalize_teiid_timestamps,
+)
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.tasks.workflows import enqueue_analyze_project_intelligence
 
@@ -559,7 +562,9 @@ async def _plan_analyses(
     for a in analyses:
         sql = (a.get("sql") or "").strip()
         if sql:
-            a["sql"] = normalize_teiid_timestamps(sql, column_samples=column_samples)
+            sql = normalize_teiid_timestamps(sql, column_samples=column_samples)
+            sql = normalize_teiid_identifiers(sql, table_schema)
+            a["sql"] = sql
     return analyses
 
 
@@ -594,6 +599,9 @@ async def home_query_suggestions(
                 "title": a.get("title") or "Query",
                 "description": a.get("rationale") or "",
                 "sql": (a.get("sql") or "").strip(),
+                "chartType": a.get("chart_type") or "",
+                "labelColumn": a.get("label_column") or "",
+                "valueColumn": a.get("value_column") or "",
             }
             for a in analyses
             if (a.get("sql") or "").strip()

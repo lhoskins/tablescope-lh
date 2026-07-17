@@ -403,6 +403,9 @@ export interface QuerySuggestion {
   title: string;
   description: string;
   sql: string;
+  chartType?: string;
+  labelColumn?: string;
+  valueColumn?: string;
 }
 
 export interface QuerySuggestionsProject {

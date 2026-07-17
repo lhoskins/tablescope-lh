@@ -264,7 +264,105 @@ def _profile_result(columns: list[str], rows: list[dict[str, Any]]) -> dict[str,
     }
 
 
-def _build_chart_config(suggested: dict[str, Any] | None, columns: list[str], rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _to_float(value: Any) -> float | None:
+    """Parse a scalar value to float, tolerating numeric strings."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        text = value.replace(",", "").strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    return None
+
+
+def _is_period_values(values: list[Any]) -> bool:
+    """True when most non-null values look like sortable period labels."""
+    non_null = [v for v in values if v is not None and v != ""]
+    if not non_null:
+        return False
+    period_re = re.compile(r"^\s*(\d{4}|\d{4}[-/]\d{1,2}([-/]\d{1,2})?|q[1-4][\s-]?\d{2,4})\s*$", re.IGNORECASE)
+    return sum(1 for v in non_null if period_re.match(str(v))) >= max(1, len(non_null) // 2)
+
+
+def _column_data_profile(columns: list[str], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Classify each column as numeric, period, or categorical from its values."""
+    profile: dict[str, Any] = {"numeric": [], "period": [], "categorical": []}
+    for col in columns:
+        values = [r.get(col) for r in rows]
+        non_null = [v for v in values if v is not None and v != ""]
+        if not non_null:
+            profile["categorical"].append(col)
+            continue
+        numeric_count = sum(1 for v in non_null if _to_float(v) is not None)
+        if numeric_count >= len(non_null) / 2:
+            profile["numeric"].append(col)
+        elif _is_period_values(non_null):
+            profile["period"].append(col)
+        else:
+            profile["categorical"].append(col)
+    return profile
+
+
+def _pick_chart_fields(
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    chart_type: str,
+    subtype: str | None = None,
+) -> dict[str, Any]:
+    """Choose grounded label/value/metric columns for a chart type."""
+    profile = _column_data_profile(columns, rows)
+    numeric = profile["numeric"]
+    period = profile["period"]
+    categorical = profile["categorical"]
+    result: dict[str, Any] = {}
+
+    if chart_type == "kpi":
+        result["metricField"] = numeric[0] if numeric else (columns[-1] if columns else None)
+        return result
+
+    if chart_type in ("line", "area"):
+        # Prefer a period axis, then a categorical axis, then the first column.
+        label = period[0] if period else (categorical[0] if categorical else columns[0] if columns else None)
+        value = numeric[0] if numeric else (columns[-1] if columns else None)
+        if label:
+            result["labelColumn"] = label
+        if value:
+            result["valueColumns"] = [value]
+        return result
+
+    if chart_type == "scatter":
+        if len(numeric) >= 2:
+            result["labelColumn"] = numeric[0]
+            result["valueColumns"] = numeric[1:]
+        elif numeric:
+            result["valueColumns"] = [numeric[0]]
+        return result
+
+    # bar / pie and all other chart types need a categorical label + numeric value.
+    # Prefer categorical labels, then period labels (which work as bar categories),
+    # then fall back to the first column.
+    label = categorical[0] if categorical else (period[0] if period else (columns[0] if columns else None))
+    value = numeric[0] if numeric else (columns[-1] if columns else None)
+    if label:
+        result["labelColumn"] = label
+    if value:
+        result["valueColumns"] = [value]
+    return result
+
+
+def _build_chart_config(
+    suggested: dict[str, Any] | None,
+    columns: list[str],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Normalize the ask-and-run visualization suggestion into a stable chart config."""
     if not suggested:
         suggested = {}
@@ -273,22 +371,28 @@ def _build_chart_config(suggested: dict[str, Any] | None, columns: list[str], ro
         "type": chart_type,
         "title": suggested.get("title", "Chart"),
     }
-    # Pick sensible defaults from result shape
-    label_candidates = [c for c in columns if c.lower() in ("month", "period", "date", "category", "region", "status", "supplier", "entity")]
-    value_candidates = [c for c in columns if c.lower() in ("value", "n", "metric", "revenue", "total", "count", "sum", "amount")]
-    remaining = [c for c in columns if c not in label_candidates and c not in value_candidates]
-    if not label_candidates and remaining:
-        label_candidates = [remaining[0]]
-    if not value_candidates and remaining:
-        value_candidates = remaining[:1]
-    if not value_candidates:
-        value_candidates = columns[-1:] if columns else []
-    if label_candidates:
-        config["labelColumn"] = label_candidates[0]
-    if value_candidates:
-        config["valueColumns"] = value_candidates
-    if chart_type in ("line", "bar", "scatter") and len(value_candidates) > 1:
-        config["seriesColumn"] = label_candidates[0] if label_candidates else None
+    if suggested.get("chartStyle"):
+        config["subtype"] = suggested["chartStyle"]
+    if suggested.get("topN") is not None:
+        config["topN"] = suggested["topN"]
+
+    # Prefer the engine's explicit x/y/metric mapping when it is grounded in the
+    # actual result columns.
+    x_field = suggested.get("xField")
+    y_field = suggested.get("yField")
+    metric_field = suggested.get("metricField") or y_field
+    if x_field in columns:
+        config["labelColumn"] = x_field
+    if y_field in columns:
+        config["valueColumns"] = [y_field]
+    if metric_field in columns and chart_type == "kpi":
+        config["metricField"] = metric_field
+
+    # If the suggestion did not include usable fields, derive them from the data.
+    if chart_type != "table" and "valueColumns" not in config and "metricField" not in config:
+        derived = _pick_chart_fields(columns, rows, chart_type, config.get("subtype"))
+        config.update(derived)
+
     return config
 
 
@@ -355,6 +459,22 @@ def apply_chart_patch(
         else:
             name = style or new_config.get("type", "")
             changes.append(f"changed the chart to a {name} chart")
+
+    # Re-derive grounded label/value/metric columns whenever the chart type
+    # changed or no drawable fields are present, but never overwrite an explicit
+    # label/value choice from the patch.
+    if new_config.get("type") not in ("table",) and columns:
+        rows_for_fields = (result.get("rows") or []) if result else []
+        derived = _pick_chart_fields(
+            columns,
+            rows_for_fields,
+            new_config["type"],
+            new_config.get("subtype"),
+        )
+        if "labelColumn" not in new_config and "metricField" not in new_config:
+            new_config.setdefault("labelColumn", derived.get("labelColumn"))
+        new_config.setdefault("valueColumns", derived.get("valueColumns"))
+        new_config.setdefault("metricField", derived.get("metricField"))
 
     label = patch.get("labelColumn")
     if label:

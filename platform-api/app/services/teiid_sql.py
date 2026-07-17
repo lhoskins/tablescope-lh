@@ -16,6 +16,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.file_source_meta import FileSourceMeta
+
 # ISO/SimpleDateFormat letters are case sensitive.
 # PostgreSQL-style templates are mapped onto Java SimpleDateFormat masks.
 _PSQL_MASK_TOKENS = {
@@ -268,6 +273,144 @@ def normalize_date_casts(sql: str, date_masks: dict[str, str]) -> str:
     return sql
 
 
+async def project_table_schema(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int,
+) -> list[dict[str, Any]]:
+    """Build the exact per-source column schema for SQL repair/normalization.
+
+    Shape: ``[{"table": view, "columns": [{"name", "type"}]}]`` — the same
+    contract the AI server's ``fix-sql`` endpoint consumes.
+    """
+    rows = (
+        await session.scalars(
+            select(FileSourceMeta).where(
+                FileSourceMeta.project_id == project_id,
+                FileSourceMeta.tenant_id == tenant_id,
+                FileSourceMeta.archived.is_(False),
+            )
+        )
+    ).all()
+    schema: list[dict[str, Any]] = []
+    for ds in rows:
+        columns = [
+            {"name": str(c.get("name")), "type": str(c.get("type") or "")}
+            for c in (ds.column_types or [])
+            if isinstance(c, dict) and c.get("name")
+        ]
+        schema.append({"table": ds.view_name, "columns": columns})
+    return schema
+
+
+def _split_top_level(text: str, delimiter: str = ",") -> list[str]:
+    """Split ``text`` by ``delimiter`` respecting nested parentheses and strings."""
+    parts: list[str] = []
+    current = ""
+    depth = 0
+    in_str = False
+    quote = ""
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if not in_str and ch in ("'", '"'):
+            in_str = True
+            quote = ch
+        elif in_str:
+            # Handle escaped quotes inside SQL string literals.
+            escapes = 0
+            j = i - 1
+            while j >= 0 and text[j] == "\\":
+                escapes += 1
+                j -= 1
+            if ch == quote and escapes % 2 == 0:
+                in_str = False
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == delimiter and depth == 0:
+            parts.append(current)
+            current = ""
+            i += 1
+            continue
+        current += ch
+        i += 1
+    parts.append(current)
+    return parts
+
+
+def _fix_string_literal_columns(sql: str, names: set[str]) -> str:
+    """Replace string literals that are actually column names inside functions.
+
+    The AI sometimes emits ``CAST('LaborCostUSD' AS double)`` or
+    ``PARSETIMESTAMP('Month', 'M/d/yyyy')`` because it mis-quotes the column.
+    This rewrites those string-literal placeholders to double-quoted
+    identifiers when the literal matches a real column/table name in the
+    schema, but only inside function argument positions where a column/expression
+    is expected (not in ``WHERE Status = 'At Risk'`` comparisons).
+    """
+    if not sql or not names:
+        return sql
+
+    lower_names = {n.lower(): n for n in names}
+    func_positions: dict[str, list[int]] = {
+        "cast": [0],
+        "parsetimestamp": [0],
+        "parsedate": [0],
+        "formatdate": [0],
+        "formattimestamp": [0],
+        "sum": [0],
+        "avg": [0],
+        "min": [0],
+        "max": [0],
+        "count": [0],
+        "timestampdiff": [1, 2],
+    }
+    funcs = "|".join(re.escape(f) for f in func_positions)
+    pattern = re.compile(rf"\b({funcs})\s*\(", re.IGNORECASE)
+
+    def _replace_func(m: re.Match[str]) -> str:
+        func = m.group(1).lower()
+        start = m.end()
+        depth = 1
+        i = start
+        while i < len(sql) and depth > 0:
+            if sql[i] == "(":
+                depth += 1
+            elif sql[i] == ")":
+                depth -= 1
+            i += 1
+        if depth != 0:
+            return m.group(0)
+        args_str = sql[start : i - 1]
+        args = _split_top_level(args_str)
+        allowed = func_positions[func]
+        changed = False
+        new_args: list[str] = []
+        for idx, arg in enumerate(args):
+            arg_stripped = arg.strip()
+            if (
+                idx in allowed
+                and len(arg_stripped) >= 2
+                and arg_stripped.startswith("'")
+                and arg_stripped.endswith("'")
+            ):
+                inner = arg_stripped[1:-1].replace("''", "'")
+                if inner.lower() in lower_names:
+                    new_args.append(f'"{lower_names[inner.lower()]}"')
+                    changed = True
+                    continue
+            new_args.append(arg)
+        if not changed:
+            return m.group(0)
+        return f"{m.group(1)}({', '.join(new_args)})"
+
+    return pattern.sub(_replace_func, sql)
+
+
 def normalize_teiid_identifiers(
     sql: str,
     table_schema: list[dict[str, Any]],
@@ -295,6 +438,10 @@ def normalize_teiid_identifiers(
                 names.add(str(cname))
     if not names:
         return sql
+
+    # Fix the common AI mistake of using a single-quoted string literal where a
+    # column identifier was intended (e.g. CAST('Month' AS date)).
+    sql = _fix_string_literal_columns(sql, names)
 
     # Longest first so multi-word names match before their substrings.
     sorted_names = sorted(names, key=len, reverse=True)

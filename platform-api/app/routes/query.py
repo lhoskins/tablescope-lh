@@ -24,7 +24,11 @@ from app.services.query_executor import (
     TeiidQueryExecutor,
 )
 from app.services.scope_proxy import ScopeProxyService
-from app.services.teiid_sql import normalize_teiid_timestamps
+from app.services.teiid_sql import (
+    normalize_teiid_identifiers,
+    normalize_teiid_timestamps,
+    project_table_schema,
+)
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.services.vdb_routing import (
     VDBInactiveError,
@@ -32,6 +36,7 @@ from app.services.vdb_routing import (
     VDBNotFoundError,
     VDBRoutingService,
 )
+from app.services.visualization_engine import select_visualization
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/query", tags=["query"])
@@ -307,14 +312,39 @@ async def query_datasource(
     if payload.sql:
         # Generated SQL may use PostgreSQL timestamp functions or literal
         # casts that Teiid does not accept; normalize before casting aggregates.
+        # When a project is known, also quote bare identifiers against the
+        # project schema so reserved-word columns and string-literal-as-column
+        # mistakes are repaired before execution.
         sql = normalize_teiid_timestamps(payload.sql)
+        if payload.project_id:
+            table_schema = await project_table_schema(
+                session, tenant_id=context.tenant_id, project_id=payload.project_id
+            )
+            sql = normalize_teiid_identifiers(sql, table_schema)
         sql = _auto_cast_aggregates(sql).rstrip().rstrip(";")
     else:
         sql = f'SELECT * FROM "{payload.tableName}" LIMIT {payload.limit}'
 
-    return await _run_sql(
+    result = await _run_sql(
         database=database,
         sql=sql,
         teiid_host=endpoint.pg_host,
         teiid_port=endpoint.pg_port,
     )
+
+    # Attach a data-driven visualization suggestion so preview surfaces render
+    # the right chart family instead of a hardcoded bar.
+    if payload.sql and result.get("columns"):
+        decision = select_visualization(result["columns"], result.get("rows", []))
+        viz = decision.to_dict()
+        result["suggestedVisualization"] = {
+            "type": viz.get("chartType", "table"),
+            "chartStyle": viz.get("chartStyle"),
+            "xField": viz.get("xField"),
+            "yField": viz.get("yField"),
+            "metricField": viz.get("metricField"),
+            "topN": viz.get("topN"),
+        }
+        result["sql"] = sql
+
+    return result

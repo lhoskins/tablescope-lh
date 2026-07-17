@@ -90,6 +90,9 @@ class VizDecision:
             out["xField"] = self.x_field
         if self.y_field is not None:
             out["yField"] = self.y_field
+        if self.chart_type == ChartType.KPI:
+            # Surfaces that only look for metricField need the single metric too.
+            out["metricField"] = self.y_field
         if self.y2_field is not None:
             out["y2Field"] = self.y2_field
         if self.top_n is not None:
