@@ -14,6 +14,7 @@ patterns that the preview execution path actually sees are handled here.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # ISO/SimpleDateFormat letters are case sensitive.
 # PostgreSQL-style templates are mapped onto Java SimpleDateFormat masks.
@@ -265,3 +266,83 @@ def normalize_date_casts(sql: str, date_masks: dict[str, str]) -> str:
         )
         sql = pat.sub(f'PARSETIMESTAMP("{col}", \'{mask}\')', sql)
     return sql
+
+
+def normalize_teiid_identifiers(
+    sql: str,
+    table_schema: list[dict[str, Any]],
+) -> str:
+    """Quote bare table/column identifiers that conflict with Teiid reserved words.
+
+    Uses the project schema so only real table/column names are quoted.  Tokens
+    immediately after an ``AS`` alias clause are left unquoted, and tokens inside
+    string literals are ignored.
+    """
+    if not sql or not table_schema:
+        return sql
+
+    names: set[str] = set()
+    for entry in table_schema:
+        table = entry.get("table")
+        if table:
+            names.add(str(table))
+        for col in entry.get("columns", []):
+            if isinstance(col, dict):
+                cname = col.get("name")
+            else:
+                cname = col
+            if cname:
+                names.add(str(cname))
+    if not names:
+        return sql
+
+    # Longest first so multi-word names match before their substrings.
+    sorted_names = sorted(names, key=len, reverse=True)
+    pattern = re.compile(
+        r'(?<![\w"])(' + "|".join(re.escape(n) for n in sorted_names) + r')(?![\w("])',
+        re.IGNORECASE,
+    )
+
+    def _escaped(text: str, pos: int) -> bool:
+        escapes = 0
+        i = pos - 1
+        while i >= 0 and text[i] == "\\":
+            escapes += 1
+            i -= 1
+        return escapes % 2 == 1
+
+    def _in_string(text: str, end: int) -> bool:
+        in_str = False
+        quote = ""
+        i = 0
+        while i < end:
+            ch = text[i]
+            if not in_str:
+                if ch in ("'", '"'):
+                    in_str = True
+                    quote = ch
+            else:
+                if ch == quote and not _escaped(text, i):
+                    in_str = False
+            i += 1
+        return in_str
+
+    out: list[str] = []
+    prev = 0
+    for m in pattern.finditer(sql):
+        start = m.start()
+        if _in_string(sql, start):
+            # Append the segment up to and including this match unchanged.
+            out.append(sql[prev : m.end()])
+            prev = m.end()
+            continue
+        out.append(sql[prev:start])
+        token = m.group(1)
+        prefix = sql[:start]
+        if re.search(r"\bAS\s+$", prefix, re.IGNORECASE):
+            out.append(token)
+        else:
+            out.append(f'"{token}"')
+        prev = m.end()
+    out.append(sql[prev:])
+    return "".join(out)

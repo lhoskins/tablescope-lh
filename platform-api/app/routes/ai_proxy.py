@@ -59,7 +59,10 @@ from app.services.presentation_engine import (
     describe as describe_presentation,
 )
 from app.services.response_envelope import ResponseEnvelope
-from app.services.teiid_sql import normalize_teiid_timestamps
+from app.services.teiid_sql import (
+    normalize_teiid_identifiers,
+    normalize_teiid_timestamps,
+)
 from app.services.visualization_engine import ChartType, select_visualization
 
 logger = logging.getLogger(__name__)
@@ -2350,6 +2353,7 @@ async def _execute_with_repair(
     current = sql
     last_error = ""
     for attempt in range(3):
+        current = normalize_teiid_identifiers(current, table_schema)
         bounded = _apply_row_limit(current, max_rows)
         try:
             result = await _execute_project_sql(
