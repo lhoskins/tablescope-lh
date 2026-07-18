@@ -14,7 +14,7 @@ export function ProjectFileDropzone({
   project,
   tenantName,
 }: {
-  project: ProjectSummary;
+  project?: ProjectSummary;
   tenantName: string;
 }) {
   const router = useRouter();
@@ -31,19 +31,6 @@ export function ProjectFileDropzone({
   }, [ensureTenant, tenantName]);
 
   const handleDone = () => {
-    const base: ProjectAssignment = {
-      projectId: project.id,
-      projectName: project.name,
-      color: project.accent ?? "#185FA5",
-      isToggled: true,
-      existingSources: [],
-      sourcesToRemove: [],
-      scopeIds: [],
-    };
-
-    // Pre-select the current project in the builder. If the full project
-    // summary list is already loaded, include the rest un-selected so the
-    // builder's assignment view is complete from the start.
     if (summaries) {
       const prev = new Map(
         useBuilderStore.getState().projects.map((p) => [p.projectId, p]),
@@ -55,19 +42,31 @@ export function ProjectFileDropzone({
             projectId: p.id,
             projectName: p.name,
             color: p.accent ?? "#185FA5",
-            isToggled: p.id === project.id || existing?.isToggled || false,
+            isToggled:
+              (project && p.id === project.id) || existing?.isToggled || false,
             existingSources: existing?.existingSources ?? [],
             sourcesToRemove: existing?.sourcesToRemove ?? [],
             scopeIds: existing?.scopeIds ?? [],
           };
         }),
       );
-    } else {
-      setProjects([base]);
+    } else if (project) {
+      setProjects([
+        {
+          projectId: project.id,
+          projectName: project.name,
+          color: project.accent ?? "#185FA5",
+          isToggled: true,
+          existingSources: [],
+          sourcesToRemove: [],
+          scopeIds: [],
+        },
+      ]);
     }
 
     // "Replace the current window" with the Data Source Builder, where the
-    // uploaded file is already staged and the current project is selected.
+    // uploaded file is already staged and the current project is selected when
+    // one was provided.
     router.push("/data-source-builder");
   };
 
