@@ -1,9 +1,15 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ResponsiveGridLayout, type Layout, type LayoutItem } from "react-grid-layout";
+import {
+  ResponsiveGridLayout,
+  useContainerWidth,
+  type Layout,
+  type LayoutItem,
+} from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
+import { getColsForWidth, packGridItems } from "@/lib/ui/grid-layout";
 import {
   IconLoader2,
   IconPinnedOff,
@@ -210,6 +216,25 @@ export function HomePinsGrid() {
     });
   };
 
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { width: containerWidth } = useContainerWidth({
+    initialWidth: 1280,
+    measureBeforeMount: true,
+  });
+
+  const breakpoints = useMemo(
+    () => ({ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }),
+    [],
+  );
+  const colsConfig = useMemo(
+    () => ({ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }),
+    [],
+  );
+  const currentCols = useMemo(
+    () => getColsForWidth(containerWidth, breakpoints, colsConfig),
+    [containerWidth, breakpoints, colsConfig],
+  );
+
   const handleFeedbackRemove = (pin: HomePinItem) => {
     const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
     const insightId = card.insightId || card.id;
@@ -246,20 +271,30 @@ export function HomePinsGrid() {
   });
 
   const layouts = useMemo(() => {
-    const lg: LayoutItem[] = pins.map((pin) => {
-      const layout = pin.layout || {};
-      return {
-        i: String(pin.id),
-        x: typeof layout.x === "number" ? layout.x : 0,
-        y: typeof layout.y === "number" ? layout.y : 0,
-        w: typeof layout.w === "number" ? layout.w : 6,
-        h: typeof layout.h === "number" ? layout.h : 4,
-        minW: 2,
-        minH: 2,
-      };
-    });
+    const packed = packGridItems(
+      pins.map((pin) => {
+        const layout = pin.layout || {};
+        return {
+          id: pin.id,
+          x: typeof layout.x === "number" ? layout.x : undefined,
+          y: typeof layout.y === "number" ? layout.y : undefined,
+          w: typeof layout.w === "number" ? layout.w : 6,
+          h: typeof layout.h === "number" ? layout.h : 4,
+        };
+      }),
+      currentCols,
+    );
+    const lg: LayoutItem[] = packed.map((item) => ({
+      i: item.i,
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      minW: 2,
+      minH: 2,
+    }));
     return { lg };
-  }, [pins]);
+  }, [pins, currentCols]);
 
   const handleLayoutChange = useCallback(
     (layout: Layout) => {
@@ -305,18 +340,21 @@ export function HomePinsGrid() {
           Refresh live widgets
         </button>
       </div>
-      <ResponsiveGridLayout
-        className="layout"
-        layouts={displayLayout}
-        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-        cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
-        rowHeight={80}
-        onLayoutChange={handleLayoutChange}
-        dragConfig={{ enabled: true, handle: ".widget-drag-handle", bounded: false, threshold: 3 }}
-        resizeConfig={{ enabled: true }}
-        width={1200}
-      >
-        {pins.map((pin) => {
+      <div ref={containerRef} className="w-full">
+        <ResponsiveGridLayout
+          className="layout"
+          layouts={displayLayout}
+          breakpoints={breakpoints}
+          cols={colsConfig}
+          rowHeight={80}
+          margin={[10, 10]}
+          containerPadding={[0, 0]}
+          onLayoutChange={handleLayoutChange}
+          dragConfig={{ enabled: true, handle: ".widget-drag-handle", bounded: false, threshold: 3 }}
+          resizeConfig={{ enabled: true, handles: ["se", "e", "s"] }}
+          width={containerWidth}
+        >
+          {pins.map((pin) => {
           const insightId = getPinInsightId(pin);
           return (
             <div key={pin.id}>
@@ -332,7 +370,8 @@ export function HomePinsGrid() {
             </div>
           );
         })}
-      </ResponsiveGridLayout>
+        </ResponsiveGridLayout>
+      </div>
     </div>
   );
 }
