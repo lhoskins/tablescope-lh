@@ -9,6 +9,7 @@ import {
   IconDatabase,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
+import { ProjectFileDropzone } from "@/components/tablescope/project/project-file-dropzone";
 import { MembersDialog } from "@/components/tablescope/project/members-dialog";
 import { ShareToggle } from "@/components/tablescope/project/share-toggle";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
@@ -342,6 +343,22 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             hintTone="success"
           />
         </div>
+
+        {project && (
+          <section className="space-y-2">
+            <div>
+              <h3 className="text-h3 text-ink-primary">Add a data source</h3>
+              <p className="text-small text-ink-tertiary">
+                Upload a CSV or Excel file; you will continue in the Data Source
+                Builder to assign it to this project.
+              </p>
+            </div>
+            <ProjectFileDropzone
+              project={project}
+              tenantName={tenant.name}
+            />
+          </section>
+        )}
 
         <OverviewAccordionSection
           type="tables"
