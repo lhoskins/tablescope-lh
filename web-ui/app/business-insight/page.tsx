@@ -70,7 +70,7 @@ export default function BusinessInsightPage() {
         title: card.title,
         project_id: Number(card.projectId),
         frozen_payload: card as unknown as Record<string, unknown>,
-        layout: { w: 6, h: 5 },
+        layout: { x: 0, y: 0, w: 6, h: 5 },
       });
     },
     [pinMutation],
