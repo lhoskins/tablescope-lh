@@ -375,13 +375,23 @@ async def delete_conversation(
     cid = conversation.id
     tid = context.tenant_id
     uid = context.user_id
+    is_admin = context.role in (
+        Role.ROOT_ADMIN.value,
+        Role.TENANT_ADMIN.value,
+        Role.ADMIN.value,
+    )
+    where_sql = "id = :id AND tenant_id = :tid"
+    params: dict[str, Any] = {"id": cid, "tid": tid}
+    if not is_admin:
+        where_sql += " AND user_id = :uid"
+        params["uid"] = uid
 
     await session.execute(
         text(
             "UPDATE analytics_conversations SET last_successful_turn_id = NULL "
-            "WHERE id = :id AND tenant_id = :tid AND user_id = :uid"
+            f"WHERE {where_sql}"
         ),
-        {"id": cid, "tid": tid, "uid": uid},
+        params,
     )
     await session.execute(
         text("DELETE FROM analytics_conversation_turns WHERE conversation_id = :id"),
@@ -389,9 +399,9 @@ async def delete_conversation(
     )
     await session.execute(
         text(
-            "DELETE FROM analytics_conversations WHERE id = :id "
-            "AND tenant_id = :tid AND user_id = :uid"
+            "DELETE FROM analytics_conversations "
+            f"WHERE {where_sql}"
         ),
-        {"id": cid, "tid": tid, "uid": uid},
+        params,
     )
     await session.commit()
