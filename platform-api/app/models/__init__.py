@@ -41,6 +41,7 @@ from app.models.billing import (
     SubscriptionTierCatalog,
     TenantProvisioningRequest,
 )
+from app.models.business_insight_result import BusinessInsightResult
 from app.models.connector_credential import ConnectorCredential
 from app.models.dashboard import Dashboard
 from app.models.data_source_ai_profile import (
@@ -162,6 +163,7 @@ __all__ = [
     "DataSourceColumn",
     "DatabaseDataSource",
     "DatabaseDataSourceAssignment",
+    "BusinessInsightResult",
     "FileSourceMeta",
     "GridPreference",
     "HomePin",

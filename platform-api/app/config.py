@@ -143,6 +143,27 @@ class Settings(BaseSettings):
     # cancelled by arq. Keep below home_intelligence_job_timeout_seconds.
     home_intelligence_project_analysis_timeout_seconds: int = 2400
 
+    # --- Shared per-project Business Insight result cache (Phase 2) ---
+    # When enabled, analyze_project_intelligence serves a project's cards from
+    # the tenant-shared business_insight_results cache when it is still keyed
+    # to the project's active Knowledge Graph version, so a project is
+    # analysed once per data change instead of once per user. Project
+    # membership is the visibility boundary: everyone who can open a project
+    # sees the same cards.
+    business_insight_shared_cache_enabled: bool = False
+    # When enabled, a successful Knowledge Graph build enqueues a debounced
+    # background re-analysis of that project (attributed to the project
+    # owner) so the cache is warm before any user opens Home.
+    business_insight_event_refresh_enabled: bool = False
+    # Safety-net freshness bound for cached results, covering data paths no
+    # graph fingerprint watches. A cached result older than this is rebuilt
+    # even if its KG version still matches.
+    business_insight_result_ttl_seconds: int = 86400
+    # Activity gate for event-driven refresh: skip the background analysis
+    # unless someone in the tenant ran Home within this many days, so idle
+    # tenants consume zero AI capacity.
+    business_insight_refresh_activity_days: int = 7
+
     # --- Supabase authentication ---
     # Single environment-configured auth provider (NOT one project per tenant).
     supabase_env: Literal["test", "staging", "production"] = "test"

@@ -465,12 +465,63 @@ async def _save_snapshot(
         await session.commit()
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Normalize a possibly-naive DB timestamp to aware UTC for comparison."""
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
+async def _stale_project_ids(
+    session: AsyncSession,
+    context: RequestContext,
+    snap: IntelligenceSnapshot,
+) -> list[str]:
+    """Projects whose Knowledge Graph rebuilt after this briefing was written.
+
+    The KG lifecycle already rebuilds on every data change, so "a KG build
+    postdates the snapshot" is a faithful, DB-only proxy for "the data behind
+    this briefing changed" — no AI calls, one indexed query.
+    """
+    from app.models import KnowledgeGraph
+
+    project_ids: list[int] = []
+    for p in (snap.payload or {}).get("projects") or []:
+        try:
+            project_ids.append(int(p.get("id")))
+        except (TypeError, ValueError):
+            continue
+    snap_time = _as_utc(snap.updated_at)
+    if not project_ids or snap_time is None:
+        return []
+
+    graphs = (
+        await session.scalars(
+            select(KnowledgeGraph).where(
+                KnowledgeGraph.tenant_id == context.tenant_id,
+                KnowledgeGraph.project_id.in_(project_ids),
+            )
+        )
+    ).all()
+    stale: list[str] = []
+    for graph in graphs:
+        built = _as_utc(graph.last_successful_build_at)
+        if built is not None and built > snap_time:
+            stale.append(str(graph.project_id))
+    return stale
+
+
 @router.get("/home-intelligence/snapshot")
 async def get_intelligence_snapshot(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
-    """Return the caller's latest persisted run (or ``snapshot: null``)."""
+    """Return the caller's latest persisted run (or ``snapshot: null``).
+
+    ``stale``/``staleProjects`` flag projects whose data changed (Knowledge
+    Graph rebuilt) after this briefing was written, so the UI can nudge a
+    refresh without spending any AI capacity.
+    """
     snap = await session.scalar(
         select(IntelligenceSnapshot).where(
             IntelligenceSnapshot.user_id == context.user_id
@@ -478,11 +529,20 @@ async def get_intelligence_snapshot(
     )
     if snap is None:
         return {"snapshot": None}
+
+    stale_projects: list[str] = []
+    try:
+        stale_projects = await _stale_project_ids(session, context, snap)
+    except Exception:  # staleness is advisory — never break the snapshot read
+        logger.exception("Failed to compute snapshot staleness")
+
     return {
         "snapshot": {
             "granularity": snap.granularity,
             "updatedAt": snap.updated_at.isoformat() if snap.updated_at else None,
             **snap.payload,
+            "stale": bool(stale_projects),
+            "staleProjects": stale_projects,
         }
     }
 

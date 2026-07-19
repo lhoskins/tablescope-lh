@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 from arq import create_pool, cron
@@ -249,6 +249,25 @@ async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[st
             else:
                 await lifecycle.run_full_rebuild(build_id)
             await session.commit()
+
+            # Downstream consumers: a successful (activated) build means the
+            # project's data view changed, so warm the shared Business Insight
+            # cache. Best-effort — the graph build result stands regardless.
+            try:
+                await session.refresh(build)
+                if (
+                    build.status == "succeeded"
+                    and get_settings().business_insight_event_refresh_enabled
+                ):
+                    await enqueue_refresh_business_insight_result(
+                        tenant_id=build.tenant_id, project_id=build.project_id
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to enqueue business insight refresh after build %s: %s",
+                    build_id,
+                    exc,
+                )
             return {"status": "ok", "build_id": build_id}
         except Exception as exc:
             logger.exception("rebuild_knowledge_graph failed for build %s", build_id)
@@ -536,6 +555,170 @@ async def reprocess_project(
     }
 
 
+# Granularity the event-driven background refresh analyses at — the Home
+# stream's default, so warmed results serve the common case.
+BUSINESS_INSIGHT_REFRESH_GRANULARITY = 3
+
+
+async def enqueue_refresh_business_insight_result(
+    *, tenant_id: int, project_id: int
+) -> str:
+    """Enqueue a debounced background refresh of one project's shared cards.
+
+    The deterministic per-project job id plus the defer window coalesce bursts
+    (e.g. several KG builds from a multi-file upload) into one analysis.
+    """
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "refresh_business_insight_result",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            _job_id=f"bi-result:{tenant_id}:{project_id}",
+            _defer_by=120,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def refresh_business_insight_result(
+    ctx: dict[str, Any],
+    *,
+    tenant_id: int,
+    project_id: int,
+) -> dict[str, Any]:
+    """Re-analyse one project into the shared Business Insight cache.
+
+    Runs after a successful Knowledge Graph build so every user's next Home
+    open assembles from warm, current results. Attributed to the project owner
+    (the SQL runs as them), gated on recent tenant Home activity so idle
+    tenants consume zero AI capacity, and bounded by the same per-tenant
+    capacity slots as interactive runs — background refresh can never outspend
+    user-facing load.
+    """
+    from app.models.intelligence_snapshot import IntelligenceSnapshot
+    from app.models.project import Project
+    from app.routes import home_intelligence as hir
+    from app.services import business_insight_cache as bi_cache
+    from app.services import home_intel_queue as q
+    from app.services import home_intelligence as hi
+    from app.services.ai_intelligence_client import AIUnavailableError
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+
+    settings = get_settings()
+    if not settings.business_insight_event_refresh_enabled:
+        return {"status": "disabled", "project_id": project_id}
+
+    async with SessionLocal() as session:
+        # Activity gate: only spend AI on tenants where someone actually uses
+        # Home. Snapshot rows are written on every completed run, so their
+        # recency is a faithful usage signal.
+        cutoff = datetime.now(UTC) - timedelta(
+            days=max(0, settings.business_insight_refresh_activity_days)
+        )
+        recent = await session.scalar(
+            select(IntelligenceSnapshot.id)
+            .where(
+                IntelligenceSnapshot.tenant_id == tenant_id,
+                IntelligenceSnapshot.updated_at >= cutoff,
+            )
+            .limit(1)
+        )
+        if recent is None:
+            return {
+                "status": "skipped",
+                "reason": "no_recent_activity",
+                "project_id": project_id,
+            }
+
+        project = await session.get(Project, project_id)
+        if project is None or project.tenant_id != tenant_id:
+            return {
+                "status": "skipped",
+                "reason": "project_not_found",
+                "project_id": project_id,
+            }
+        owner_id = await KnowledgeGraphLifecycleManager(
+            session
+        ).resolve_representative_user(project_id)
+        if owner_id is None:
+            return {"status": "skipped", "reason": "no_owner", "project_id": project_id}
+
+    job_try = int(ctx.get("job_try", 1) or 1)
+    max_tries = max(1, settings.home_intelligence_job_max_tries)
+    cap = max(1, settings.home_intelligence_max_concurrent_projects_per_tenant)
+    if not await q.acquire_tenant_slot(tenant_id, cap=cap):
+        if job_try < max_tries:
+            raise Retry(defer=settings.home_intelligence_tenant_slot_retry_seconds)
+        return {"status": "skipped", "reason": "capacity", "project_id": project_id}
+
+    try:
+        async with SessionLocal() as session:
+            project = await session.get(Project, project_id)
+            if project is None:
+                return {
+                    "status": "skipped",
+                    "reason": "project_not_found",
+                    "project_id": project_id,
+                }
+            context = _worker_context(tenant_id, owner_id)
+            try:
+                cards = await asyncio.wait_for(
+                    hir._run_for_project(
+                        session,
+                        context,
+                        project,
+                        hi.ALL_PROMPT_TYPES,
+                        # Audit rows describe user-initiated analysis; a
+                        # background cache warm would only add noise.
+                        write_audit=False,
+                        granularity=BUSINESS_INSIGHT_REFRESH_GRANULARITY,
+                    ),
+                    timeout=settings.home_intelligence_project_analysis_timeout_seconds,
+                )
+            except AIUnavailableError as exc:
+                if exc.retryable and job_try < max_tries:
+                    defer = (
+                        exc.retry_after
+                        if exc.retry_after is not None
+                        else settings.home_intelligence_busy_retry_seconds
+                    )
+                    raise Retry(defer=defer) from exc
+                return {
+                    "status": "error",
+                    "project_id": project_id,
+                    "error": str(exc)[:500],
+                }
+            except Exception as exc:
+                logger.warning(
+                    "business insight refresh failed for project %s: %s",
+                    project_id,
+                    exc,
+                )
+                return {
+                    "status": "error",
+                    "project_id": project_id,
+                    "error": str(exc)[:500],
+                }
+
+            await bi_cache.store_result(
+                session,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                granularity=BUSINESS_INSIGHT_REFRESH_GRANULARITY,
+                cards=cards,
+                built_by=owner_id,
+            )
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "card_count": len(cards),
+            }
+    finally:
+        await q.release_tenant_slot(tenant_id)
+
+
 async def index_for_search(
     ctx: dict[str, Any],
     *,
@@ -738,6 +921,30 @@ async def analyze_project_intelligence(
                         "error": "no_access",
                     }
                 )
+
+            # Shared per-project cache: cards are identical for every user who
+            # can open the project (membership is the visibility boundary), so
+            # serve them when still keyed to the active KG version. Access was
+            # verified above — the cache never widens visibility.
+            if settings.business_insight_shared_cache_enabled:
+                from app.services import business_insight_cache as bi_cache
+
+                cached_cards = await bi_cache.get_fresh_result(
+                    session,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    granularity=granularity,
+                )
+                if cached_cards is not None:
+                    return await _record_and_finalize(
+                        {
+                            "projectId": str(project.id),
+                            "projectName": project.name,
+                            "projectColor": hi.project_color(project.id),
+                            "insights": cached_cards,
+                            "fromCache": True,
+                        }
+                    )
             try:
                 cards = await asyncio.wait_for(
                     hir._run_for_project(
@@ -808,6 +1015,18 @@ async def analyze_project_intelligence(
                     }
                 )
 
+            if settings.business_insight_shared_cache_enabled:
+                from app.services import business_insight_cache as bi_cache
+
+                await bi_cache.store_result(
+                    session,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    granularity=granularity,
+                    cards=cards,
+                    built_by=user_id,
+                )
+
             return await _record_and_finalize(
                 {
                     "projectId": str(project.id),
@@ -835,6 +1054,7 @@ class WorkerSettings:
         recover_stale_graph_builds,
         evaluate_stale_graphs,
         reprocess_project,
+        refresh_business_insight_result,
     ]
     cron_jobs: ClassVar[list] = [
         # Detect source drift every 15 minutes and mark affected graphs stale.

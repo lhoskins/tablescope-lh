@@ -223,6 +223,11 @@ class IntelligencePlanRequest(AIBaseRequest):
     # 1 = executive/high-level (few, most leveraging) .. 5 = granular (many, detailed)
     granularity: int = 3
     project_context: dict = Field(default_factory=dict)
+    # Compact Knowledge Graph digest from the platform (risks, gaps,
+    # opportunities, warnings, recommended KPIs). Injected into the plan
+    # prompt as HYPOTHESES the planner should validate/quantify/refute with
+    # SQL — never asserted as findings without a query result behind them.
+    knowledge_graph_context: dict = Field(default_factory=dict)
 
 
 class PlannedAnalysis(BaseModel):
