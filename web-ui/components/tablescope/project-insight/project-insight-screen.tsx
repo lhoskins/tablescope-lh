@@ -40,7 +40,6 @@ import type { AiCardContext } from "@/lib/api/ai-actions";
 import { GenerateDashboardModal } from "@/components/tablescope/project-insight/generate-dashboard-modal";
 import { renderBold } from "@/components/tablescope/home/intelligence-card";
 import { InsightsPanel, HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
-import { HeroSearch } from "@/components/tablescope/home/hero-search";
 import {
   InsightExplanationPanel,
 } from "@/components/tablescope/home/insight-explanation-panel";
@@ -71,6 +70,34 @@ function cardContextFromCard(card: ProjectInsightCard): AiCardContext {
     source_columns: card.sourceColumns,
     metric: card.metric,
     period_column: card.periodColumn,
+  };
+}
+
+function toProjectInsightCard(card: InsightCardData): ProjectInsightCard {
+  const supporting: string[] = [
+    ...(card.sources?.tables ?? []),
+    ...(card.sources?.documents ?? []),
+  ];
+  const severity =
+    card.severity === "info" ? "informational" : card.severity;
+  return {
+    id: card.insightId ?? card.id,
+    insightId: card.insightId ?? card.id,
+    insightType: card.insightType,
+    title: card.title,
+    summary: card.summary,
+    severity: severity as ProjectInsightCard["severity"],
+    recommendedAction: card.callout?.text,
+    question: card.question || card.title || card.summary,
+    supportingSources: supporting,
+    sourceTables: card.sources?.tables,
+    explanation: card.explanation as unknown as Record<string, unknown>,
+    sql: card.sql,
+    chartType: card.chartType,
+    labelColumn: card.labelColumn,
+    valueColumn: card.valueColumn,
+    valueColumn2: card.valueColumn2,
+    executedAt: card.executedAt,
   };
 }
 
@@ -200,9 +227,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const questionsNeedingData = (data?.questionsNeedingData ?? []).filter((q) =>
     (q.question || q.businessQuestion || q.title)?.trim(),
   );
-  const trends = (data?.trendDetection ?? []).filter((t) =>
-    (t.label || t.title || t.description)?.trim(),
-  );
   const dashboards = (data?.recommendedDashboards ?? []).filter((d) =>
     d.title?.trim(),
   );
@@ -213,53 +237,47 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const reviewedItems: ReviewedInsight[] = reviewedQuery.data?.items ?? [];
   const reviewedIds = new Set(reviewedItems.map((i) => i.insightId));
 
-  const riskCards = (data?.risks ?? []).filter((c) => c.title?.trim());
-  const trendCards = (data?.trends ?? []).filter((c) => c.title?.trim());
-  const opportunityCards = (data?.opportunities ?? []).filter((c) =>
-    c.title?.trim(),
+  // Derive risks/trends/opportunities from the shared AI insight backend
+  // (`/home/insights` → `_run_for_project`) instead of deterministic arrays.
+  const allAiCards = useMemo(
+    () =>
+      insightsQuery.data?.projects?.flatMap((p) =>
+        p.insights.map(toProjectInsightCard),
+      ) ?? [],
+    [insightsQuery.data],
   );
+  const riskCards = useMemo(
+    () =>
+      allAiCards.filter(
+        (c) =>
+          c.insightType.startsWith("risk_") ||
+          c.severity === "critical" ||
+          c.severity === "urgent" ||
+          c.severity === "warning",
+      ),
+    [allAiCards],
+  );
+  const trendCards = useMemo(
+    () =>
+      allAiCards.filter(
+        (c) => c.insightType.startsWith("trend_") && !riskCards.includes(c),
+      ),
+    [allAiCards, riskCards],
+  );
+  const opportunityCards = useMemo(
+    () =>
+      allAiCards.filter(
+        (c) =>
+          (c.insightType.startsWith("opportunity_") ||
+            c.severity === "opportunity") &&
+          !riskCards.includes(c) &&
+          !trendCards.includes(c),
+      ),
+    [allAiCards, riskCards, trendCards],
+  );
+  const allTrendCards = trendCards;
 
-  // Consolidate the former standalone "Trend Detection" panel into the Trends
-  // column: each detected trend becomes a project insight card (blue accent).
-  const trendDetectionCards: ProjectInsightCard[] = trends
-    .filter((t) => (t.label || t.title)?.trim())
-    .map((t) => ({
-      id: t.id,
-      insightType: "trend",
-      title: (t.label || t.title || "").trim(),
-      summary: [
-        t.description,
-        t.possibleCause && `Possible cause: ${t.possibleCause}`,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      severity: "trend" as const,
-      question: t.title || t.label || "",
-      supportingSources: t.sourceSummary ? [t.sourceSummary] : [],
-    }));
-  const allTrendCards = [...trendCards, ...trendDetectionCards];
-
-  const allInsightCards = useMemo(() => {
-    const risks = (data?.risks ?? []).filter((c) => c.title?.trim());
-    const trends = (data?.trends ?? []).filter((c) => c.title?.trim());
-    const opportunities = (data?.opportunities ?? []).filter((c) =>
-      c.title?.trim(),
-    );
-    const detectionCards: ProjectInsightCard[] = (data?.trendDetection ?? [])
-      .filter((t) => (t.label || t.title || t.description)?.trim())
-      .map((t) => ({
-        id: t.id,
-        insightType: "trend",
-        title: (t.label || t.title || "").trim(),
-        summary: [t.description, t.possibleCause && `Possible cause: ${t.possibleCause}`]
-          .filter(Boolean)
-          .join(" "),
-        severity: "trend" as const,
-        question: t.title || t.label || "",
-        supportingSources: t.sourceSummary ? [t.sourceSummary] : [],
-      }));
-    return [...risks, ...trends, ...opportunities, ...detectionCards];
-  }, [data]);
+  const allInsightCards = allAiCards;
   const insightIds = useMemo(
     () => allInsightCards.map((c) => c.id).filter(Boolean),
     [allInsightCards],
@@ -315,7 +333,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   return (
     <ProjectShell
       projectId={projectId}
-      activeNav="project-insight"
+      activeNav="project-insights"
       breadcrumbLabel="Project Insight"
       actions={
         <div className="flex items-center gap-3">
@@ -390,7 +408,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 conversational-analytics assistant; the pills generate query/
                 dashboard/insight suggestions for this project only. */}
             <div className="space-y-6 py-2">
-              <HeroSearch projectId={projectId} />
               <HomeAiSuggestions projectId={Number(projectId)} />
             </div>
 
@@ -937,7 +954,6 @@ function InsightCardItem({
     <article className="rounded-md border border-line-tertiary bg-bg-primary p-3">
       <header className="flex items-start justify-between gap-2">
         <h4 className="min-w-0 text-[13px] font-semibold text-ink-primary">
-          <span className="font-normal text-ink-tertiary">Title: </span>
           {card.title}
         </h4>
         <span

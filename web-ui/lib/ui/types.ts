@@ -54,7 +54,7 @@ export type NavKey =
   | "project-documents"
   | "project-ask-tablescope"
   | "project-ai-assistant"
-  | "project-insight"
+  | "project-insights"
   | "project-relationship-map"
   | "project-knowledge-graph"
   | "project-metadata-catalog"

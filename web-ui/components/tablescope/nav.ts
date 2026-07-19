@@ -117,6 +117,12 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconLayoutGrid,
         },
         {
+          key: "project-insights",
+          label: "Project Insights",
+          href: `${base}/insight`,
+          icon: IconSparkles,
+        },
+        {
           key: "project-data-sources",
           label: "Data Sources",
           href: `${base}/data-sources`,
@@ -136,19 +142,6 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconBinaryTree,
         },
         {
-          key: "project-dashboards",
-          label: "Dashboards",
-          href: `${base}/dashboards`,
-          icon: IconLayoutDashboard,
-        },
-        {
-          key: "project-documents",
-          label: "Documents",
-          href: `${base}/documents`,
-          icon: IconFileText,
-          countKey: "documents",
-        },
-        {
           key: "project-business-context",
           label: "Business Context",
           href: `${base}/business-context`,
@@ -164,12 +157,6 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           label: "Ask TableScope",
           href: `${base}/ai`,
           icon: IconMessage,
-        },
-        {
-          key: "project-insight",
-          label: "Project Insight",
-          href: `${base}/insight`,
-          icon: IconSparkles,
         },
         {
           key: "project-relationship-map",

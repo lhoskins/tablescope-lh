@@ -936,6 +936,29 @@ async def generate_relationships(
     return await _forward_to_ai("/ai/project/relationships/generate", payload)
 
 
+def _derive_dashboard_title(
+    project_name: str, widgets: list[dict[str, Any]]
+) -> str:
+    """Build a descriptive, non-generic dashboard title from the widget content."""
+    titles = [
+        str(w.get("title") or "").strip()
+        for w in widgets
+        if w.get("title") and str(w.get("title")).strip() not in ("", "Widget")
+    ]
+    seen: list[str] = []
+    for t in titles:
+        if t not in seen:
+            seen.append(t)
+        if len(seen) == 2:
+            break
+    if seen:
+        base = " & ".join(seen)
+        if "dashboard" not in base.lower():
+            base = f"{base} Dashboard"
+        return base
+    return f"{project_name} — AI Dashboard"
+
+
 def _shorten_ai_name(prompt: str) -> str:
     """Convert an AI prompt into a short, clean query/widget title.
 
@@ -3011,10 +3034,14 @@ async def ai_generate_and_save_dashboard(
     suggestion = suggestions[0]
     if req.name:
         dashboard_title = req.name
+    elif suggestion.get("title"):
+        dashboard_title = str(suggestion["title"])
     elif req.prompt:
         dashboard_title = _shorten_ai_name(req.prompt)
     else:
-        dashboard_title = suggestion.get("title", "AI - Dashboard")
+        dashboard_title = _derive_dashboard_title(
+            project.name, suggestion.get("widgets", [])
+        )
 
     widget_defs = list(suggestion.get("widgets", []))
     # Highest-priority widgets first (executive reading path top-left → bottom-right).
@@ -3421,7 +3448,7 @@ async def ai_suggest_dashboards(
     the existing ``/actions/generate-and-save-dashboard`` pipeline, which runs the
     full SQL validation/judge and drops empty widgets.
     """
-    await _check_project_access(session, context, req.project_id)
+    project = await _check_project_access(session, context, req.project_id)
 
     # Allowed tables = the project's real datasources (reference docs excluded).
     ds_stmt = select(FileSourceMeta).where(
@@ -3480,16 +3507,23 @@ async def ai_suggest_dashboards(
     for idx, s in enumerate(raw_suggestions):
         if not isinstance(s, dict):
             continue
-        widgets = await _render_preview_widgets(runner, s.get("widgets", []))
         # Only surface allowed tables as data sources (defence in depth).
         data_sources = [
             str(d) for d in s.get("data_sources", []) if str(d) in allowed_tables
         ]
-        title = str(s.get("title") or "AI Dashboard")
+        title = str(
+            s.get("title")
+            or s.get("business_purpose")
+            or _derive_dashboard_title(
+                project.name, list(s.get("widgets", []))
+            )
+            or "AI Dashboard"
+        )
         description = str(s.get("description", ""))
         business_purpose = str(s.get("business_purpose", ""))
         audience = str(s.get("audience") or req.audience or "")
         kpi_names = [str(k) for k in s.get("kpis", []) if k]
+        widgets = await _render_preview_widgets(runner, s.get("widgets", []))
         # savePayload is echoed back verbatim on Save so the save stage persists
         # *this* selected suggestion (its real widget SQL) rather than
         # re-deriving a plan from scratch.

@@ -6,6 +6,7 @@ import { IconHelpCircle } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
+import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { HomePinsGrid } from "@/components/tablescope/home/home-pins-grid";
 import { getUserMeta } from "@/lib/auth";
 import { greeting } from "@/lib/ui/format";
@@ -71,6 +72,7 @@ export default function HomePage() {
             personal overview.
           </p>
         </div>
+        <HomeAiSuggestions />
         <HomePinsGrid />
       </div>
     </AppShell>

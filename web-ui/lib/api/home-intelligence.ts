@@ -150,6 +150,8 @@ export interface InsightCard {
   insightType: string;
   severity: InsightSeverity;
   title: string;
+  /** Optional natural-language question that investigating this card should ask. */
+  question?: string;
   summary: string;
   chart: InsightChart | null;
   callout: InsightCallout | null;

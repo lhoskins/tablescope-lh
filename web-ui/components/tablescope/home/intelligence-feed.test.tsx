@@ -142,7 +142,7 @@ describe("IntelligenceFeed", () => {
     expect(opportunities.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("renders analytical method metadata on chart cards", async () => {
+  it("renders analytical method metadata behind the Explain panel on chart cards", async () => {
     const chartCard: InsightCard = {
       ...TREND,
       id: "trend-method",
@@ -184,6 +184,8 @@ describe("IntelligenceFeed", () => {
       },
     });
     renderFeed();
+    await screen.findByText("Spend concentrated");
+    fireEvent.click(screen.getByRole("button", { name: /Explain/i }));
     expect(await screen.findByText("Analytical method: Pareto analysis")).toBeTruthy();
     expect(screen.getByText("Quality: reliable")).toBeTruthy();
   });

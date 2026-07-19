@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  IconArrowUp,
   IconUsers,
   IconTable,
   IconDatabase,
@@ -23,7 +22,7 @@ import {
 import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { cn } from "@/lib/cn";
 import { timeAgo } from "@/lib/ui/format";
 import {
@@ -38,13 +37,6 @@ import {
   type DataSource,
 } from "@/lib/ui/use-project-data";
 import { useAccordion } from "@/lib/ui/use-accordion";
-
-const QUICK_PROMPTS = [
-  "Supplier delay trends",
-  "Top suppliers by spend",
-  "Quality trends",
-  "Compare by region",
-];
 
 function isDatabase(s: DataSource): boolean {
   return s.sourceType === "database_table";
@@ -68,7 +60,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const { data: activity } = useProjectActivity(projectId);
   const { data: graph } = useProjectGraph(projectId);
 
-  const [ask, setAsk] = useState("");
   const [showMembers, setShowMembers] = useState(false);
   // Single-expand accordion: at most one section open, all may be collapsed.
   const { toggle, isOpen } = useAccordion();
@@ -276,39 +267,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
 
 
-        <Card className="space-y-3 p-4">
-          <div className="flex items-center gap-2 rounded-lg border border-line-secondary bg-bg-primary px-3 py-2.5">
-            <input
-              value={ask}
-              onChange={(e) => setAsk(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") goAsk(ask);
-              }}
-              placeholder="Ask about your data, documents, or dashboards…"
-              className="min-w-0 flex-1 bg-transparent text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none"
-            />
-            <button
-              type="button"
-              onClick={() => goAsk(ask)}
-              aria-label="Ask AI"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-brand text-brand-fg hover:bg-brand-700"
-            >
-              <IconArrowUp size={15} />
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {QUICK_PROMPTS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => goAsk(p)}
-                className="rounded-full border border-line-secondary bg-bg-primary px-3 py-1 text-[12px] text-ink-secondary hover:border-brand-500 hover:bg-brand-50/40"
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </Card>
+        <HomeAiSuggestions projectId={Number(projectId)} />
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <StatTile

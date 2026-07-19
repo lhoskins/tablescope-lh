@@ -946,7 +946,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         "bottom-right reading path. Aim for 4-8 strong widgets.\n\n"
         "Return ONLY a JSON object:\n"
         "{\n"
-        '  "title": "dashboard name",\n'
+        '  "title": "specific, descriptive dashboard name (never generic like AI Dashboard)",\n'
         '  "description": "one-line description",\n'
         '  "business_domain": "",\n'
         '  "intended_audience": "executive|manager|analyst|operational",\n'
@@ -1131,7 +1131,7 @@ async def suggest_dashboards_multi(
         f"Return ONLY a JSON object with at least {desired} suggestions:\n"
         "{\n"
         '  "suggestions": [ {\n'
-        '    "title": "dashboard name",\n'
+        '    "title": "specific, descriptive dashboard name (unique, never generic like AI Dashboard)",\n'
         '    "description": "one-line description",\n'
         '    "business_purpose": "the decision/question this dashboard drives",\n'
         '    "audience": "executive|manager|analyst|operational",\n'

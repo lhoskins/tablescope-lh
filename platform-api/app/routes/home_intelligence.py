@@ -634,6 +634,29 @@ async def _plan_analyses(
     return valid_analyses
 
 
+def _derive_dashboard_title(
+    project_name: str, widgets: list[dict[str, Any]]
+) -> str:
+    """Build a descriptive, non-generic dashboard title from the widget content."""
+    titles = [
+        str(w.get("title") or "").strip()
+        for w in widgets
+        if w.get("title") and str(w.get("title")).strip() not in ("", "Widget")
+    ]
+    seen: list[str] = []
+    for t in titles:
+        if t not in seen:
+            seen.append(t)
+        if len(seen) == 2:
+            break
+    if seen:
+        base = " & ".join(seen)
+        if "dashboard" not in base.lower():
+            base = f"{base} Dashboard"
+        return base
+    return f"{project_name} — AI Dashboard"
+
+
 @router.post("/home/query-suggestions")
 async def home_query_suggestions(
     req: SuggestRequest,
@@ -757,7 +780,10 @@ async def home_dashboard_suggestions(
             "projectName": project.name,
             "projectColor": hi.project_color(project.id),
             "dashboard": (
-                {"title": f"{project.name} — AI Dashboard", "widgets": widgets}
+                {
+                    "title": _derive_dashboard_title(project.name, widgets),
+                    "widgets": widgets,
+                }
                 if widgets
                 else None
             ),
@@ -846,7 +872,7 @@ async def home_project_dashboard(
     narrative = hi.build_dashboard_narrative(widgets)
     dashboard = (
         {
-            "title": f"{project.name} — AI Dashboard",
+            "title": _derive_dashboard_title(project.name, widgets),
             "summary": narrative["summary"],
             "keyFindings": narrative["keyFindings"],
             "recommendedActions": narrative["recommendedActions"],
@@ -1049,7 +1075,7 @@ async def home_save_dashboard(
         project_id=project.id,
         owner_id=context.user_id,
         tenant_id=context.tenant_id,
-        name=req.title or "AI Dashboard",
+        name=req.title or _derive_dashboard_title(project.name, [w.model_dump() for w in req.widgets]),
         description="",
         status="draft",
         config={

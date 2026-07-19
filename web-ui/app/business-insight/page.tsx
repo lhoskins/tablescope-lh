@@ -7,7 +7,6 @@ import { IconHelpCircle } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
-import { HeroSearch } from "@/components/tablescope/home/hero-search";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { IntelligenceFeed } from "@/components/tablescope/home/intelligence-feed";
 import { getUserMeta } from "@/lib/auth";
@@ -107,7 +106,6 @@ export default function BusinessInsightPage() {
     >
       <div className="space-y-10 py-6">
         <div className="mx-auto w-full max-w-content space-y-6">
-          <HeroSearch />
           <HomeAiSuggestions />
         </div>
         <IntelligenceFeed onPin={handlePinInsight} />
