@@ -26,6 +26,14 @@ from app.models import BusinessInsightResult, KnowledgeGraph
 
 logger = logging.getLogger(__name__)
 
+# Bump when the analysis pipeline's output quality changes (prompt fixes,
+# planner behavior, card shape) so cached cards built by the older pipeline
+# are treated as stale instead of being served until their KG version drifts
+# or the TTL expires. Rows without a version (or with an older one) miss.
+#   2: planner regression fix — relationship-analysis floor, additive KG
+#      hypotheses framing, larger plan context window.
+ANALYSIS_VERSION = 2
+
 
 async def _active_kg_version_id(
     session: AsyncSession, *, tenant_id: int, project_id: int
@@ -73,7 +81,11 @@ async def get_fresh_result(
         if row.kg_version_id != active_version_id:
             return None
 
-        cards = (row.payload or {}).get("insights")
+        payload = row.payload or {}
+        if payload.get("analysis_version") != ANALYSIS_VERSION:
+            return None
+
+        cards = payload.get("insights")
         return cards if isinstance(cards, list) else None
     except Exception:
         logger.exception(
@@ -128,7 +140,7 @@ async def store_result(
             session.add(row)
         row.kg_version_id = active_version_id
         row.source_fingerprint = fingerprint
-        row.payload = {"insights": cards}
+        row.payload = {"insights": cards, "analysis_version": ANALYSIS_VERSION}
         row.built_by = built_by
         # Freshness is judged on updated_at; touch it explicitly so an upsert
         # that changes nothing else still renews the TTL window.

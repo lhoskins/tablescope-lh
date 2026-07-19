@@ -1301,7 +1301,7 @@ def _build_kg_hypothesis_lines(kg: dict) -> str:
     if not kg:
         return ""
 
-    def _fmt(items: list | None, cap: int = 10) -> list[str]:
+    def _fmt(items: list | None, cap: int = 5) -> list[str]:
         lines: list[str] = []
         for it in (items or [])[:cap]:
             if not isinstance(it, dict):
@@ -1310,7 +1310,7 @@ def _build_kg_hypothesis_lines(kg: dict) -> str:
             if not title:
                 continue
             severity = str(it.get("severity") or "").strip()
-            summary = str(it.get("summary") or "").strip()[:200]
+            summary = str(it.get("summary") or "").strip()[:160]
             line = f"  - {title}"
             if severity:
                 line += f" [{severity}]"
@@ -1347,8 +1347,42 @@ def _build_kg_hypothesis_lines(kg: dict) -> str:
         "the magnitude and trend of a flagged risk. NEVER assert a graph item "
         "as a finding without a query result behind it. Ignore items the "
         "available data cannot address.\n"
+        "These hypotheses are ADDITIVE context only — they must NOT displace "
+        "the required analysis mix. Still cover risks, trends, opportunities, "
+        "AND relationship analyses (single-table column pairs, and multi-table "
+        "joins whenever RELATIONSHIP EVIDENCE is listed). Where a hypothesis "
+        "spans two related tables, prefer testing it WITH a relationship "
+        "analysis. Dedicate at most half of the proposed analyses to graph "
+        "hypotheses.\n"
         + "\n\n".join(sections)
         + "\n"
+    )
+
+
+def _build_relationship_floor_line(has_relationship_evidence: bool, granularity: int) -> str:
+    """A hard floor for complex analyses so advisory context can't crowd them out.
+
+    Relationship (and especially multi-table) analyses are the most valuable
+    output of the planner and the first thing a longer prompt or extra
+    advisory sections (documents, knowledge-graph hypotheses) tends to
+    displace. When verified join evidence exists, make them required output
+    rather than an optional extra.
+    """
+    if not has_relationship_evidence:
+        return (
+            "Always look for the single-table relationship analyses described "
+            "below where the data supports them — they are part of the "
+            "required mix, not an optional extra.\n"
+        )
+    minimum = "TWO" if granularity >= 4 else "ONE"
+    return (
+        "The RELATIONSHIP EVIDENCE list above is non-empty: include at least "
+        f"{minimum} multi-table relationship analys"
+        f"{'es' if minimum == 'TWO' else 'is'} using those verified joins, in "
+        "addition to the single-table relationship analyses described below. "
+        "These complex analyses are REQUIRED output whenever the data "
+        "supports them — no other section of this prompt (documents, "
+        "knowledge-graph hypotheses, depth guidance) may displace them.\n"
     )
 
 
@@ -1589,14 +1623,24 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             "and a few more specific, detailed insights."
         )
 
+    relationship_floor = _build_relationship_floor_line(
+        bool(relationship_lines), granularity
+    )
+
+    # Section order matters: schema and RELATIONSHIP EVIDENCE stay contiguous
+    # and the KG hypotheses come after them, closest to the instructions, so
+    # advisory graph context can never separate the evidence from the rules
+    # that reference it.
     prompt = (
-        f"{context_text}\n{doc_lines}\n{kg_lines}\n{schema_lines}\n{relationship_lines}\n"
+        f"{context_text}\n{doc_lines}\n{schema_lines}\n{relationship_lines}\n{kg_lines}\n"
         f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
         f"{teiid_rules}\n"
         f"{depth_guidance}\n\n"
         f"Propose up to {target_count} of the most valuable analyses for this "
         "project at this level of detail. Cover a mix of risks, trends, "
-        "opportunities, and relationships where the data supports it. Each "
+        "opportunities, and relationships where the data supports it. "
+        f"{relationship_floor}"
+        "Each "
         "analysis must be answerable from the allowed tables OR grounded in a "
         "listed document.\n\n"
         "RELATIONSHIP ANALYSES (category \"relationship\"):\n"
@@ -1785,10 +1829,14 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         system_prompt=_INTEL_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.2,
-        # Larger window so the prompt (schema + documents + relationship rules)
-        # plus the full JSON array of analyses fits without the response being
-        # truncated into invalid JSON.
-        num_ctx=16384,
+        # Larger window so the prompt (schema + documents + relationship rules
+        # + knowledge-graph hypotheses) plus the full JSON array of analyses
+        # fits without silent truncation. Truncation eats the tail — the
+        # relationship rules and output format — which shows up as projects
+        # losing their multi-table/complex analyses, so this must comfortably
+        # exceed the largest real prompt (matches the 24576 used by the
+        # heaviest endpoints).
+        num_ctx=24576,
         response_format="json",
     )
 
@@ -2369,7 +2417,7 @@ async def knowledge_graph_insights(
         system_prompt=_KG_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.2,
-        num_ctx=16384,
+        num_ctx=24576,
         response_format="json",
     )
 
@@ -2620,7 +2668,7 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
         system_prompt=_PROJECT_INSIGHT_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.2,
-        num_ctx=16384,
+        num_ctx=24576,
         response_format="json",
     )
 

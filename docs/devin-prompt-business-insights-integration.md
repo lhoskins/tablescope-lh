@@ -38,9 +38,9 @@ frontend, rollout, and verification.
 ## Your tasks
 
 1. **Merge** `claude/validate-enhance-logic-r2fyy1` into the target feature
-   branch. Then from `platform-api/`: `pytest` (697 tests must pass) and
+   branch. Then from `platform-api/`: `pytest` (698 tests must pass) and
    `ruff check app tests`; from `ai-server/tablescope-ai-api/`: `pytest`
-   (43 tests must pass).
+   (47 tests must pass).
 2. **Frontend — Home staleness banner**: read `stale`/`staleProjects` from
    `GET /api/ai/home-intelligence/snapshot`. When stale, show a non-blocking
    banner "Data changed in N project(s) since this briefing" with the
