@@ -368,8 +368,9 @@ def date_masks_from_samples(
 
 
 def normalize_date_casts(sql: str, date_masks: dict[str, str]) -> str:
-    """Rewrite ``CAST("col" AS date|timestamp)`` to ``PARSETIMESTAMP(...)``
-    for columns whose sample value matches a known mask.
+    """Rewrite ``CAST("col" AS date|timestamp)`` and existing
+    ``PARSETIMESTAMP("col", 'mask')`` calls to use the mask inferred from the
+    column's sample value.
 
     This is the same helper used by the Business Insight analyst loop so the
     query-suggestion and datasource-execution paths behave consistently.
@@ -380,6 +381,33 @@ def normalize_date_casts(sql: str, date_masks: dict[str, str]) -> str:
             re.IGNORECASE,
         )
         sql = pat.sub(f'PARSETIMESTAMP("{col}", \'{mask}\')', sql)
+
+    # The small model often emits PARSETIMESTAMP with a hard-coded M/d/yyyy mask
+    # from the prompt examples; override it with the measured mask when known.
+    def _col_from_arg(arg: str) -> str:
+        return arg.split(".")[-1].strip().strip('"').replace('""', '"')
+
+    def _replace_parse(m: re.Match[str]) -> str:
+        arg = m.group(1).strip()
+        col = _col_from_arg(arg)
+        mask = date_masks.get(col)
+        if not mask:
+            return m.group(0)
+        func = m.group(0).split("(", 1)[0]
+        return f"{func}({arg}, '{mask}')"
+
+    sql = re.sub(
+        r"PARSETIMESTAMP\s*\(\s*([^,]+?)\s*,\s*'(?:[^']|'')*'\s*\)",
+        _replace_parse,
+        sql,
+        flags=re.IGNORECASE,
+    )
+    sql = re.sub(
+        r"PARSEDATE\s*\(\s*([^,]+?)\s*,\s*'(?:[^']|'')*'\s*\)",
+        _replace_parse,
+        sql,
+        flags=re.IGNORECASE,
+    )
     return sql
 
 

@@ -316,6 +316,87 @@ def _is_join_key(col: str) -> bool:
     )
 
 
+# Audit-stamp names that happen to contain period keywords but are not the
+# time-series grain we want to join on.
+_AUDIT_PERIOD_EXCLUSIONS = {"created", "modified", "lastupdated", "updated", "deleted"}
+
+
+def _period_grain(col: str) -> str | None:
+    """Return the implied time grain ('week', 'month', etc.) of a column name."""
+    n = _norm(col)
+    for grain in ("week", "month", "quarter", "year", "day"):
+        if grain in n:
+            return grain
+    if "period" in n or "fiscal" in n:
+        return "period"
+    return None
+
+
+def _is_period_column(col: str, col_type: str, date_masks: dict[str, str] | None) -> bool:
+    """A column that can serve as a time-series grain in a composite join key."""
+    n = _norm(col)
+    type_norm = _norm(col_type)
+    # Strong signal from the database/Teiid type or a parsed date mask.
+    if any(t in type_norm for t in ("timestamp", "date", "time")):
+        return not any(ex in n for ex in _AUDIT_PERIOD_EXCLUSIONS)
+    if date_masks and col in date_masks:
+        return True
+    # Name-only fallback: period keywords, but not audit stamps.
+    if any(kw in n for kw in _PERIOD_KEYWORDS):
+        if any(ex in n for ex in _AUDIT_PERIOD_EXCLUSIONS):
+            return False
+        return True
+    return False
+
+
+def _period_columns_for_table(
+    table: TableInfo, date_masks: dict[str, str] | None
+) -> list[str]:
+    return [
+        n for (n, ty) in table.columns if _is_period_column(n, ty, date_masks)
+    ]
+
+
+def _enrich_period_keys(
+    cand: dict[str, Any],
+    tables_by_view: dict[str, TableInfo],
+    date_masks: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Extend a relationship candidate with same-grain period equality pairs.
+
+    When two fact tables both carry the same period column (e.g. WeekStart),
+    joining on the entity key alone fans out rows across time.  Add the shared
+    period column as an additional equality in the composite join key.
+    """
+    left = tables_by_view.get(cand["left_table"])
+    right = tables_by_view.get(cand["right_table"])
+    if left is None or right is None:
+        cand["join_key_pairs"] = [
+            {"left": cand["left_join_key"], "right": cand["right_join_key"], "is_period": False}
+        ]
+        return cand
+
+    left_periods = _period_columns_for_table(left, date_masks)
+    right_periods_set = set(_period_columns_for_table(right, date_masks))
+
+    pairs: list[dict[str, Any]] = [
+        {"left": cand["left_join_key"], "right": cand["right_join_key"], "is_period": False}
+    ]
+    period_matched = False
+    for lp in left_periods:
+        if lp in right_periods_set:
+            pairs.append({"left": lp, "right": lp, "is_period": True})
+            period_matched = True
+
+    # If each side has period columns but none share a name, the grains likely
+    # differ (e.g. weekly vs monthly).  Flag the pair so dual_line joins avoid it.
+    if left_periods and right_periods_set and not period_matched:
+        cand["grain_mismatch"] = True
+
+    cand["join_key_pairs"] = pairs
+    return cand
+
+
 def detect_entities(tables: list[TableInfo]) -> dict[str, list[str]]:
     """Map each table view to the candidate entity columns it contains."""
     out: dict[str, list[str]] = {}
@@ -437,6 +518,7 @@ def find_relationship_candidates(
     *,
     scope_links: list[ScopeLink] | None = None,
     key_values: dict[str, dict[str, set[str]]] | None = None,
+    date_masks: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Discover evidence-backed join candidates between table pairs.
 
@@ -461,6 +543,7 @@ def find_relationship_candidates(
     best: dict[tuple[str, str], dict[str, Any]] = {}
 
     def _consider(cand: dict[str, Any]) -> None:
+        _enrich_period_keys(cand, by_view, date_masks)
         lo, hi_ = sorted([cand["left_table"], cand["right_table"]])
         pair = (lo, hi_)
         prior = best.get(pair)
@@ -1355,7 +1438,10 @@ _PERIOD_KEYWORDS = [
 _MEASURE_KEYWORDS = [
     "count", "qty", "quantity", "amount", "total", "sum", "duration",
     "hours", "days", "minutes", "score", "rate", "age", "volume", "num",
-    "utilization", "usage", "capacity",
+    "utilization", "usage", "capacity", "units", "produced", "scrapped",
+    "scrap", "planned", "actual", "forecast", "demand", "onhand",
+    "safety", "stock", "reject", "defect", "backorder", "shipped",
+    "received",
 ]
 
 
@@ -2066,6 +2152,186 @@ def _build_chart(
     }
 
 
+def _series_is_constant(rows: list[dict], col: str) -> bool:
+    vals = [round(v, 6) for r in rows if (v := _to_float(r.get(col))) is not None]
+    return len(vals) > 1 and len(set(vals)) == 1
+
+
+def _extract_join_qualifiers(sql: str) -> tuple[str, str] | None:
+    """Return the (left, right) table/alias qualifiers for the join ON clause."""
+    parts = re.split(r'\bON\b', sql, maxsplit=1, flags=re.IGNORECASE)
+    if len(parts) < 2:
+        return None
+    prefix = parts[0]
+    sources = list(
+        re.finditer(
+            r'(?:FROM|JOIN)\s+("?\w+"?)(?:\s+(?:AS\s+)?("?\w+"?))?',
+            prefix,
+            re.IGNORECASE,
+        )
+    )
+    if len(sources) < 2:
+        return None
+    left = (sources[-2].group(2) or sources[-2].group(1) or "").strip().strip('"')
+    right = (sources[-1].group(2) or sources[-1].group(1) or "").strip().strip('"')
+    return left, right
+
+
+async def _repair_fanned_out_join(
+    a: dict[str, Any],
+    result: dict[str, Any],
+    relationship_meta: dict[str, Any],
+    date_masks: dict[str, str],
+    runner: QueryRunner,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Attempt to fix a constant second series by adding the shared period equality."""
+    period_pair = next(
+        (p for p in relationship_meta.get("join_key_pairs", []) if p.get("is_period")),
+        None,
+    )
+    if not period_pair:
+        return None, None
+    sql = a.get("sql", "")
+    quals = _extract_join_qualifiers(sql)
+    if not quals:
+        return None, None
+    left_qual, right_qual = quals
+    left_period = period_pair["left"]
+    right_period = period_pair["right"]
+    cond = f'"{left_qual}"."{left_period}" = "{right_qual}"."{right_period}"'
+    if re.search(r'\bON\b', sql, re.IGNORECASE):
+        m = re.search(
+            r'\bON\b(.+?)(?=\s+(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT)\b|;|$)',
+            sql,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if m:
+            on_text = m.group(1)
+            if (
+                left_period.lower() in on_text.lower()
+                and right_period.lower() in on_text.lower()
+                and "=" in on_text
+            ):
+                return None, None
+            new_on = on_text.rstrip() + f" AND {cond}"
+            new_sql = sql[: m.start()] + "ON " + new_on + sql[m.end() :]
+        else:
+            return None, None
+    else:
+        new_sql = re.sub(
+            r'(\bJOIN\s+"?\w+"?(?:\s+(?:AS\s+)?"?\w+"?)?)(?=\s+(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT)\b|;|$)',
+            rf'\1 ON {cond}',
+            sql,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if new_sql == sql:
+            return None, None
+    new_sql = normalize_date_casts(new_sql, date_masks)
+    new_result, _err = await _query_with_error(runner, new_sql)
+    if not new_result or not new_result.get("rows"):
+        return None, None
+    value2_col = a.get("value_column_2", "")
+    if value2_col and _series_is_constant(new_result.get("rows", []), value2_col):
+        return None, None
+    return {**a, "sql": new_sql}, new_result
+
+
+def _period_expression(col: str, qualifier: str, date_masks: dict[str, str]) -> str:
+    mask = date_masks.get(col)
+    if mask:
+        return f"FORMATTIMESTAMP(PARSETIMESTAMP(\"{qualifier}\".\"{col}\", '{mask}'), 'yyyy-MM')"
+    # When the date format is unknown, avoid a CAST that Teiid may reject
+    # (e.g. text-backed "2025-01").  ISO date strings group and sort correctly.
+    return f'"{qualifier}"."{col}"'
+
+
+async def _synthesize_templated_join(
+    relationship_hints: list[dict[str, Any]],
+    ctx: ProjectContext,
+    date_masks: dict[str, str],
+    runner: QueryRunner,
+    avoid_pairs: set[frozenset[str]] | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Build and run a deterministic two-table join from the top evidence pair."""
+    avoid_pairs = avoid_pairs or set()
+    for hint in sorted(
+        relationship_hints,
+        key=lambda h: float(h.get("join_confidence") or 0),
+        reverse=True,
+    ):
+        if hint.get("grain_mismatch"):
+            continue
+        left_table = hint.get("left_table", "")
+        right_table = hint.get("right_table", "")
+        if frozenset({left_table, right_table}) in avoid_pairs:
+            continue
+        left_t = next((t for t in ctx.tables if t.view_name == left_table), None)
+        right_t = next((t for t in ctx.tables if t.view_name == right_table), None)
+        if not left_t or not right_t:
+            continue
+        period_pair = next(
+            (p for p in hint.get("join_key_pairs", []) if p.get("is_period")),
+            None,
+        )
+        if not period_pair:
+            left_periods = _period_columns_for_table(left_t, date_masks)
+            right_periods = _period_columns_for_table(right_t, date_masks)
+            shared = set(left_periods) & set(right_periods)
+            if shared:
+                pc = next(iter(shared))
+                period_pair = {"left": pc, "right": pc, "is_period": True}
+            else:
+                continue
+        left_measure = _measure_col(left_t)
+        right_measure = _measure_col(right_t)
+        if not left_measure or not right_measure:
+            continue
+        key_conds = [
+            f'"{left_table}"."{p["left"]}" = "{right_table}"."{p["right"]}"'
+            for p in hint.get("join_key_pairs", [])
+            if not p.get("is_period")
+        ]
+        if not key_conds:
+            continue
+        period_cond = (
+            f'"{left_table}"."{period_pair["left"]}" = '
+            f'"{right_table}"."{period_pair["right"]}"'
+        )
+        on_clause = " AND ".join([*key_conds, period_cond])
+        period_expr = _period_expression(period_pair["left"], left_table, date_masks)
+        sql = (
+            f'SELECT {period_expr} AS "Period", '
+            f'AVG(CAST("{left_table}"."{left_measure}" AS double)) AS "MetricA", '
+            f'AVG(CAST("{right_table}"."{right_measure}" AS double)) AS "MetricB" '
+            f'FROM "{left_table}" JOIN "{right_table}" ON {on_clause} '
+            f'GROUP BY {period_expr} ORDER BY "Period"'
+        )
+        sql = normalize_date_casts(sql, date_masks)
+        result, _err = await _query_with_error(runner, sql)
+        if not result or not result.get("rows"):
+            continue
+        if _series_is_constant(result.get("rows", []), "MetricB"):
+            continue
+        analysis = {
+            "id": f"templated_join_{left_table}_{right_table}",
+            "category": "relationship",
+            "title": f"{left_measure} and {right_measure} over {period_pair['left']}",
+            "rationale": (
+                f"Deterministic cross-table trend joining {left_table} and "
+                f"{right_table} on the verified keys plus shared period."
+            ),
+            "sql": sql,
+            "chart_type": "dual_line",
+            "label_column": "Period",
+            "value_column": "MetricA",
+            "value_column_2": "MetricB",
+            "severity_hint": "watch",
+        }
+        return analysis, result
+    return None, None
+
+
 def _fmt_num(v: float) -> str:
     if abs(v) >= 1_000_000:
         return f"{v / 1_000_000:.1f}M"
@@ -2133,7 +2399,7 @@ def _fmt_value(v: float, fmt: str) -> str:
     if fmt == "currency":
         return f"${_fmt_num(v)}"
     if fmt == "count":
-        return f"{int(round(v)):,}"
+        return f"{round(v):,}"
     return _fmt_num(v)
 
 
@@ -2335,6 +2601,7 @@ async def plan_and_execute_widgets(
         ctx.tables,
         scope_links=ctx.scope_links,
         key_values=key_values_by_table,
+        date_masks=date_masks,
     )
 
     plan_documents = documents
@@ -2598,6 +2865,7 @@ async def run_ai_intelligence(
         ctx.tables,
         scope_links=ctx.scope_links,
         key_values=key_values_by_table,
+        date_masks=date_masks,
     )
 
     context_document: dict[str, Any] | None = None
@@ -2656,6 +2924,32 @@ async def run_ai_intelligence(
         for h in relationship_hints
     }
 
+    def _relationship_meta_for(a: dict[str, Any]) -> dict[str, Any] | None:
+        tables = _tables_in_sql(a.get("sql", ""), ctx.tables)
+        if len(tables) < 2:
+            return None
+        return hint_by_pair.get(frozenset(tables[:2]))
+
+    async def _execute_and_guard(
+        a: dict[str, Any],
+        result: dict[str, Any],
+    ) -> None:
+        """Record a successful query, dropping it if the second series is constant."""
+        if (
+            a.get("chart_type") in _TWO_VALUE_TYPES
+            and a.get("value_column_2")
+            and _series_is_constant(result.get("rows", []), a["value_column_2"])
+        ):
+            rel_meta = _relationship_meta_for(a)
+            if rel_meta:
+                repaired_a, repaired_result = await _repair_fanned_out_join(
+                    a, result, rel_meta, date_masks, runner
+                )
+                if repaired_a and repaired_result:
+                    _record_data_analysis(repaired_a, repaired_result)
+            return
+        _record_data_analysis(a, result)
+
     # Execute each analysis against real data; gather interpret inputs.
     executed: list[dict[str, Any]] = []
     interpret_inputs: list[dict[str, Any]] = []
@@ -2682,9 +2976,10 @@ async def run_ai_intelligence(
         sql = (a.get("sql") or "").strip()
         if sql:
             sql = normalize_date_casts(sql, date_masks)
+            a["sql"] = sql
             result, err = await _query_with_error(runner, sql)
             if result and result.get("rows"):
-                _record_data_analysis(a, result)
+                await _execute_and_guard(a, result)
             elif err:
                 to_repair.append((a, sql, err))
             # else: ran but returned no rows -> skip, never fabricate
@@ -2747,7 +3042,54 @@ async def run_ai_intelligence(
             fixed = normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
-                _record_data_analysis({**a, "sql": fixed}, result)
+                await _execute_and_guard({**a, "sql": fixed}, result)
+
+    # Deduplicate multi-table analyses by the table pair they join so a
+    # model that emits two identical joins does not crowd out other evidence.
+    _seen_pairs: set[frozenset[str]] = set()
+    _deduped: list[dict[str, Any]] = []
+    _deduped_inputs: list[dict[str, Any]] = []
+    for item, inp in zip(executed, interpret_inputs, strict=True):
+        pair_tables = _tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)
+        if len(pair_tables) >= 2:
+            pair = frozenset(pair_tables[:2])
+            if pair in _seen_pairs:
+                continue
+            _seen_pairs.add(pair)
+        _deduped.append(item)
+        _deduped_inputs.append(inp)
+    executed = _deduped
+    interpret_inputs = _deduped_inputs
+
+    # Deterministic floor: if the plan didn't produce enough multi-table
+    # relationship analyses, synthesize additional ones from the evidence list.
+    relationship_floor = 0
+    if relationship_hints:
+        relationship_floor = 2 if granularity >= 4 else 1
+
+    def _relationship_dual_count(items: list[dict[str, Any]]) -> int:
+        return sum(
+            1
+            for item in items
+            if item["analysis"].get("chart_type") in ("dual_line", "scatter")
+            and item["analysis"].get("value_column_2")
+            and len(_tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)) >= 2
+        )
+
+    while _relationship_dual_count(executed) < relationship_floor:
+        used_pairs = {
+            frozenset(_tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)[:2])
+            for item in executed
+            if len(_tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)) >= 2
+        }
+        templated = await _synthesize_templated_join(
+            relationship_hints, ctx, date_masks, runner, avoid_pairs=used_pairs
+        )
+        if not (templated and templated[0] and templated[1]):
+            break
+        analysis, result = templated
+        assert analysis is not None and result is not None
+        _record_data_analysis(analysis, result)
 
     if not executed:
         return []

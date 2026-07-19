@@ -60,7 +60,7 @@ class AIUnavailableError(RuntimeError):
 
 
 def _sign_payload(payload: dict[str, Any], secret: str) -> str:
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
 
 
@@ -110,8 +110,13 @@ async def _post(
             signed_payload["signature"] = _sign_payload(
                 signed_payload, settings.tablescope_ai_signing_secret
             )
+            body = json.dumps(signed_payload, default=str, ensure_ascii=False)
             try:
-                resp = await client.post(url, json=signed_payload)
+                resp = await client.post(
+                    url,
+                    content=body.encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
             except httpx.ReadTimeout as exc:
                 if retry_read_timeouts and attempt < attempts:
                     retry_seconds = _retry_seconds(

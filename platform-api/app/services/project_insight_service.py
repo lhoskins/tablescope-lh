@@ -206,7 +206,7 @@ def _card_group(insight_type: str) -> str | None:
     """Map a built-in insight type onto risks / trends / opportunities."""
     if insight_type.startswith("risk"):
         return "risks"
-    if insight_type.startswith("trend"):
+    if insight_type.startswith(("trend", "relationship")):
         return "trends"
     if insight_type.startswith("opportunity"):
         return "opportunities"
@@ -271,6 +271,15 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
     }
 
 
+def _is_relationship_card(card: dict[str, Any]) -> bool:
+    """A multi-table relationship analysis with two populated series."""
+    if not str(card.get("insightType", "")).startswith("relationship"):
+        return False
+    if card.get("chartType") not in ("dual_line", "scatter"):
+        return False
+    return bool(card.get("valueColumn2"))
+
+
 async def _grouped_intelligence_cards(
     project: Project,
     ctx: hi.ProjectContext,
@@ -283,14 +292,18 @@ async def _grouped_intelligence_cards(
     """Generate Business Insight-style cards grouped by risk/trend/opportunity.
 
     Deterministic and project-scoped: reuses the existing Business Insight card
-    generators against this project's real data via its VDB runner. Returns
-    empty groups (clean empty state) when the data does not support any card.
+    generators against this project's real data via its VDB runner. When the
+    deterministic suite does not emit any multi-table relationship cards but
+    the project has join evidence, we run the AI-driven analyst loop with the
+    relationship floor so Project Insight also surfaces cross-table dual-line
+    analyses.
     """
     grouped: dict[str, list[dict[str, Any]]] = {
         "risks": [],
         "trends": [],
         "opportunities": [],
     }
+    cards: list[dict[str, Any]] = []
     try:
         if session is not None:
             cards = await hi.run_intelligence_suite(
@@ -308,9 +321,40 @@ async def _grouped_intelligence_cards(
             )
     except Exception as exc:
         logger.warning(
-            "project insight cards failed for project %s: %s", project.id, exc
+            "project insight deterministic cards failed for project %s: %s",
+            project.id,
+            exc,
         )
-        return grouped
+
+    if session is not None and tenant_id is not None and user_id is not None:
+        has_relationship = any(
+            _is_relationship_card(c) for c in cards if isinstance(c, dict)
+        )
+        if not has_relationship:
+            try:
+                relationship_cards = await hi.run_ai_intelligence(
+                    project,
+                    ctx,
+                    runner,
+                    session=session,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    granularity=3,
+                    max_analyses=4,
+                )
+                if relationship_cards:
+                    cards.extend(
+                        c
+                        for c in relationship_cards
+                        if isinstance(c, dict) and _is_relationship_card(c)
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "project insight relationship floor failed for project %s: %s",
+                    project.id,
+                    exc,
+                )
+
     for card in cards:
         if not isinstance(card, dict):
             continue
