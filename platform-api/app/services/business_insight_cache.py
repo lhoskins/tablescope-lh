@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 #      relationship SQL shape now explicitly allow verified two-table joins,
 #      so planners stop borrowing columns into single-table queries and
 #      multi-table cards survive validation.
-ANALYSIS_VERSION = 3
+#   4: ported the PR #44/#47/#48/#49 multi-table stack — tiered relationship
+#      evidence, per-pair join budgets with a join-protecting parse slice,
+#      truncated-JSON salvage, join-preserving SQL repair, and uncapped
+#      multi-table ranking.
+ANALYSIS_VERSION = 4
 
 
 async def _active_kg_version_id(
