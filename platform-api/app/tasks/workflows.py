@@ -302,6 +302,10 @@ async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[st
             return {"status": "error", "error": str(exc)[:500]}
 
 
+# Deterministic job id may be reused; don't keep results so re-enqueue works.
+rebuild_knowledge_graph.keep_result = 0  # type: ignore[attr-defined]
+
+
 async def run_knowledge_graph_health_check(
     ctx: dict[str, Any], project_id: int
 ) -> dict[str, Any]:
@@ -582,6 +586,10 @@ async def reprocess_project(
     }
 
 
+# Deterministic per-project job id is reused across reprocess triggers.
+reprocess_project.keep_result = 0  # type: ignore[attr-defined]
+
+
 # Granularity the event-driven background refresh analyses at — the Home
 # stream's default, so warmed results serve the common case.
 BUSINESS_INSIGHT_REFRESH_GRANULARITY = 3
@@ -744,6 +752,10 @@ async def refresh_business_insight_result(
             }
     finally:
         await q.release_tenant_slot(tenant_id)
+
+
+# Deterministic per-project job id is reused across downstream KG triggers.
+refresh_business_insight_result.keep_result = 0  # type: ignore[attr-defined]
 
 
 # Granularity the event-driven Project Insight rebuild analyses at.
@@ -912,6 +924,10 @@ async def rebuild_project_insight(
             }
     finally:
         await q.release_tenant_slot(tenant_id)
+
+
+# Deterministic per-project job id is reused across downstream KG triggers.
+rebuild_project_insight.keep_result = 0  # type: ignore[attr-defined]
 
 
 async def index_for_search(

@@ -1123,7 +1123,22 @@ class KnowledgeGraphLifecycleManager:
             recovered.append(build.id)
             graph = await self.session.get(KnowledgeGraph, build.graph_id)
             if graph and graph.lifecycle_status in ("building", "validating", "requested"):
-                graph.lifecycle_status = "degraded"
+                # Only degrade if no other build is still in flight for this
+                # graph; a newer active build may have taken over since this
+                # stale one got stuck.
+                in_flight = await self.session.scalar(
+                    select(func.count())
+                    .select_from(KnowledgeGraphBuild)
+                    .where(
+                        KnowledgeGraphBuild.graph_id == build.graph_id,
+                        KnowledgeGraphBuild.id != build.id,
+                        KnowledgeGraphBuild.status.in_(
+                            ["queued", "building", "validating"]
+                        ),
+                    )
+                )
+                if in_flight == 0:
+                    graph.lifecycle_status = "degraded"
         return recovered
 
     async def evaluate_stale_graphs(self) -> list[int]:
