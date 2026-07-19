@@ -125,7 +125,7 @@ export function DocumentsTab({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [subTab, setSubTab] = useState<"documents" | "graph">("documents");
-  const [forceReprocess, setForceReprocess] = useState(false);
+  const [forceReprocess, setForceReprocess] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(
     initialExpandedId ?? null,
   );
