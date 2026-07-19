@@ -32,7 +32,11 @@ logger = logging.getLogger(__name__)
 # or the TTL expires. Rows without a version (or with an older one) miss.
 #   2: planner regression fix — relationship-analysis floor, additive KG
 #      hypotheses framing, larger plan context window.
-ANALYSIS_VERSION = 2
+#   3: resolved the join contradiction — Teiid rules and the mandatory
+#      relationship SQL shape now explicitly allow verified two-table joins,
+#      so planners stop borrowing columns into single-table queries and
+#      multi-table cards survive validation.
+ANALYSIS_VERSION = 3
 
 
 async def _active_kg_version_id(
