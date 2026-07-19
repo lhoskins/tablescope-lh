@@ -786,6 +786,9 @@ class KnowledgeGraphLifecycleManager:
 
             version.status = "ready"
             await self.activate_version(graph.id, version.id)
+            await self._transition_build(
+                build, status="succeeded", stage="completed", progress=100
+            )
 
             graph.current_source_fingerprint = fingerprint
             graph.last_successful_build_at = datetime.now(UTC)
