@@ -275,18 +275,22 @@ async def process_reference_document(document_id: int) -> None:
 
         # Reference metadata changed; cached insights/opportunities that depend on
         # this tenant/project are now stale. Mark them for background rebuild.
-        try:
-            await mark_project_insight_stale(
-                session, tenant_id=doc.tenant_id, project_id=doc.project_id
-            )
-            if get_settings().project_insight_event_rebuild_enabled and doc.project_id:
-                from app.tasks.workflows import enqueue_rebuild_project_insight
-
-                await enqueue_rebuild_project_insight(
-                    tenant_id=doc.tenant_id, project_id=doc.project_id
+        if doc.tenant_id is not None:
+            try:
+                await mark_project_insight_stale(
+                    session, tenant_id=doc.tenant_id, project_id=doc.project_id
                 )
-        except Exception:
-            logger.exception("Failed to invalidate project intelligence snapshots")
+                if (
+                    get_settings().project_insight_event_rebuild_enabled
+                    and doc.project_id is not None
+                ):
+                    from app.tasks.workflows import enqueue_rebuild_project_insight
+
+                    await enqueue_rebuild_project_insight(
+                        tenant_id=doc.tenant_id, project_id=doc.project_id
+                    )
+            except Exception:
+                logger.exception("Failed to invalidate project intelligence snapshots")
 
         # ── Step 3: embed into the shared reference vector store ──
         indexed = False
