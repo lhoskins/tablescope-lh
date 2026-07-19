@@ -1288,6 +1288,70 @@ def _build_schema_lines(table_schema: list[dict]) -> str:
     )
 
 
+def _build_kg_hypothesis_lines(kg: dict) -> str:
+    """Render the platform's Knowledge Graph digest as hypotheses to test.
+
+    The graph's risk/gap/opportunity/warning nodes are themselves AI-derived
+    from the project's documents, so the framing matters: every item is a
+    HYPOTHESIS the planner should validate, quantify, or refute with real SQL
+    — never assert one as a finding without a query result behind it.
+    Returns "" when the graph contributes nothing, leaving the prompt
+    unchanged for projects without a graph.
+    """
+    if not kg:
+        return ""
+
+    def _fmt(items: list | None, cap: int = 10) -> list[str]:
+        lines: list[str] = []
+        for it in (items or [])[:cap]:
+            if not isinstance(it, dict):
+                continue
+            title = str(it.get("title") or "").strip()
+            if not title:
+                continue
+            severity = str(it.get("severity") or "").strip()
+            summary = str(it.get("summary") or "").strip()[:200]
+            line = f"  - {title}"
+            if severity:
+                line += f" [{severity}]"
+            if summary:
+                line += f": {summary}"
+            lines.append(line)
+        return lines
+
+    sections: list[str] = []
+    for key, label in (
+        ("risks", "Risks"),
+        ("warnings", "Warnings"),
+        ("gaps", "Gaps"),
+        ("opportunities", "Opportunities"),
+    ):
+        lines = _fmt(kg.get(key))
+        if lines:
+            sections.append(f"{label}:\n" + "\n".join(lines))
+    kpi_lines = _fmt(kg.get("recommended_kpis"))
+    if kpi_lines:
+        sections.append(
+            "Recommended-but-unmeasured KPIs (no query or dashboard measures "
+            "these yet):\n" + "\n".join(kpi_lines)
+        )
+    if not sections:
+        return ""
+    return (
+        "\nKNOWLEDGE GRAPH HYPOTHESES — the project's knowledge graph "
+        "surfaces the items below, derived from its documents and metadata. "
+        "Treat every item as a HYPOTHESIS, not an established fact: where the "
+        "allowed tables contain relevant data, plan analyses whose SQL "
+        "validates, quantifies, or refutes the item against the real data — "
+        "for example, measure a recommended-but-unmeasured KPI, or quantify "
+        "the magnitude and trend of a flagged risk. NEVER assert a graph item "
+        "as a finding without a query result behind it. Ignore items the "
+        "available data cannot address.\n"
+        + "\n\n".join(sections)
+        + "\n"
+    )
+
+
 def _build_relationship_hint_lines(hints: list[dict]) -> str:
     """Render verified join candidates the platform discovered.
 
@@ -1498,6 +1562,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
 
     schema_lines = _build_schema_lines(req.table_schema)
     relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
+    kg_lines = _build_kg_hypothesis_lines(req.knowledge_graph_context)
     teiid_rules = _TEIID_SQL_RULES
 
     # Granularity (1 executive .. 5 granular) steers count + depth + how
@@ -1525,7 +1590,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         )
 
     prompt = (
-        f"{context_text}\n{doc_lines}\n{schema_lines}\n{relationship_lines}\n"
+        f"{context_text}\n{doc_lines}\n{kg_lines}\n{schema_lines}\n{relationship_lines}\n"
         f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
         f"{teiid_rules}\n"
         f"{depth_guidance}\n\n"

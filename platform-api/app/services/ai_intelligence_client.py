@@ -205,6 +205,7 @@ async def plan(
     max_analyses: int = 6,
     granularity: int = 3,
     project_context: dict[str, Any] | None = None,
+    knowledge_graph_context: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]] | None:
     """Ask the LLM to propose diagnostic analyses. Returns ``analyses`` or None."""
     settings = get_settings()
@@ -223,6 +224,7 @@ async def plan(
             "max_analyses": max_analyses,
             "granularity": granularity,
             "project_context": project_context or {},
+            "knowledge_graph_context": knowledge_graph_context or {},
         },
         max_attempts=max_retries + 1,
         retry_read_timeouts=True,

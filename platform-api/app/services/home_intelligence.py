@@ -2241,6 +2241,32 @@ async def run_ai_intelligence(
                 exc,
             )
 
+    # Knowledge Graph grounding: give the planner the graph's risks, gaps,
+    # opportunities, and recommended-but-unmeasured KPIs as HYPOTHESES to test
+    # with SQL (the AI-server plan prompt enforces that framing), so planned
+    # analyses target what the graph says matters instead of re-deriving
+    # salience from raw schema every run. Fail-open: a missing or failed graph
+    # yields an empty block, never a failed run. Capped tighter than Project
+    # Insight (10 vs 20 items) to protect the plan prompt's schema budget.
+    kg_context: dict[str, Any] = {}
+    if session is not None:
+        try:
+            from app.services.knowledge_graph_ai_context import (
+                collect_knowledge_graph_ai_context,
+            )
+
+            kg_context = await collect_knowledge_graph_ai_context(
+                session,
+                tenant_id=tenant_id,
+                project_id=project.id,
+                user_id=user_id,
+                max_items=10,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to collect KG context for project %s: %s", project.id, exc
+            )
+
     ai_call_limit = max(
         1, get_settings().home_intelligence_max_concurrent_ai_calls_per_project
     )
@@ -2330,6 +2356,7 @@ async def run_ai_intelligence(
             max_analyses=max_analyses,
             granularity=granularity,
             project_context=project_context or {},
+            knowledge_graph_context=kg_context,
         )
 
     if plan_semaphore is None:
