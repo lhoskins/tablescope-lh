@@ -86,6 +86,10 @@ services:
       TWILIO_VERIFY_SERVICE_SID: ${TWILIO_VERIFY_SERVICE_SID:-}
       MFA_ENFORCEMENT_ENABLED: ${MFA_ENFORCEMENT_ENABLED:-false}
       MFA_SESSION_TTL_MINUTES: ${MFA_SESSION_TTL_MINUTES:-720}
+      # Business Insight / Project Insight feature flags (off by default)
+      BUSINESS_INSIGHT_SHARED_CACHE_ENABLED: ${BUSINESS_INSIGHT_SHARED_CACHE_ENABLED:-false}
+      BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED: ${BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED:-false}
+      PROJECT_INSIGHT_EVENT_REBUILD_ENABLED: ${PROJECT_INSIGHT_EVENT_REBUILD_ENABLED:-false}
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       # Read-write access to per-tenant root so the platform API can manage
