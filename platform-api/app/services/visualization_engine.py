@@ -399,8 +399,8 @@ def select_visualization(
     vfmt = detect_value_format(value_col, values)
 
     # 2) Correlation of two measures with no meaningful dimension -> scatter.
-    if hint == "scatter" or (
-        len(shape.measures) >= 2 and label_col is None
+    if len(shape.measures) >= 2 and (
+        hint == "scatter" or label_col is None
     ):
         return VizDecision(
             ChartType.SCATTER,
