@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -137,25 +137,20 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       // Hydrate instantly from the saved server snapshot (no forced run).
       queryFn: () => projectInsightApi.get(projectId),
       staleTime: 5 * 60_000,
+      refetchInterval: (query) => {
+        const latest = query.state.data as ProjectInsight | undefined;
+        return latest?.stale ? 5_000 : false;
+      },
     });
 
-  // Snapshot behavior mirroring Business Insight: after hydrating from the
-  // saved snapshot, re-run in the background and commit the fresh result only
-  // once the run completes — the visible cards are never blanked mid-refresh.
-  const backgroundRef = useRef(false);
+  // Explicit refresh only: a stale snapshot triggers the "updating…" indicator
+  // and polls the snapshot GET until the background rebuild completes.
   const refresh = useMutation({
     mutationFn: () => projectInsightApi.refresh(projectId),
     onSuccess: (fresh) => {
       queryClient.setQueryData(INSIGHT_KEY(projectId), fresh);
     },
   });
-
-  useEffect(() => {
-    if (data && !backgroundRef.current) {
-      backgroundRef.current = true;
-      refresh.mutate();
-    }
-  }, [data, refresh]);
 
   // Insights & opportunities — the same content as the Home page's
   // "Suggest Insights" pill, scoped to this project, rendered inline.
@@ -165,8 +160,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     staleTime: 5 * 60_000,
   });
 
-  const analyzing =
-    isFetching || refresh.isPending || insightsQuery.isFetching;
+  const analyzing = refresh.isPending || insightsQuery.isFetching;
+  const updating = Boolean(data?.stale && isFetching);
   const handleRefresh = () => {
     refresh.mutate();
     insightsQuery.refetch();
@@ -340,9 +335,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
           <span className="text-small text-ink-tertiary">
             {analyzing
               ? "Analyzing…"
-              : formatLastUpdated(
-                  dataUpdatedAt ? new Date(dataUpdatedAt) : null,
-                )}
+              : updating
+                ? "Updating…"
+                : formatLastUpdated(
+                    dataUpdatedAt ? new Date(dataUpdatedAt) : null,
+                  )}
           </span>
           <Button
             variant="secondary"
@@ -373,6 +370,13 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 <IconAlertCircle size={15} />
                 AI insight is temporarily unavailable — showing activity only.
                 Try Refresh in a moment.
+              </div>
+            )}
+
+            {data.stale && (
+              <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[13px] text-ink-secondary">
+                <IconLoader2 size={15} className="animate-spin" />
+                Updating project insight to reflect the latest data…
               </div>
             )}
 

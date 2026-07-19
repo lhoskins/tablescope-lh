@@ -41,6 +41,8 @@ class ProjectInsightResponse(BaseModel):
     project: ProjectInsightProject
     generatedAt: str = ""
     lastUpdatedAt: str = ""
+    # True when the snapshot is stale and a rebuild is in progress/queued.
+    stale: bool = False
     executiveSummary: ExecutiveSummary = Field(default_factory=ExecutiveSummary)
     questionsToAsk: list[dict[str, Any]] = Field(default_factory=list)
     # Suggested questions the project's current authorized sources cannot answer.

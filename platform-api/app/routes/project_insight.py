@@ -83,6 +83,8 @@ async def _save_snapshot(
     project_id: int,
     payload: dict,
     suite: str = "project_insight",
+    *,
+    is_stale: bool = False,
 ) -> None:
     """Upsert the caller's latest completed run for one project suite.
 
@@ -99,6 +101,7 @@ async def _save_snapshot(
         )
         session.add(snap)
     snap.payload = payload
+    snap.is_stale = is_stale
     await session.commit()
 
 
@@ -123,7 +126,17 @@ async def get_project_insight(
     if not refresh:
         snap = await _get_snapshot(session, context, project_id)
         if snap is not None:
-            return ProjectInsightResponse.model_validate(snap.payload)
+            payload = dict(snap.payload)
+            payload["stale"] = snap.is_stale
+            if "project" not in payload:
+                payload["project"] = {
+                    "id": project.id,
+                    "name": project.name,
+                    "status": project.type or "Active",
+                }
+            if snap.updated_at:
+                payload["generatedAt"] = snap.updated_at.isoformat()
+            return ProjectInsightResponse.model_validate(payload)
 
     runner = _make_runner(session, context, project.id)
     report = await build_project_insight(
@@ -139,6 +152,7 @@ async def get_project_insight(
         project_id,
         report.model_dump(mode="json"),
         suite="project_insight",
+        is_stale=False,
     )
     return report
 

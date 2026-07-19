@@ -25,20 +25,20 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from app.models.reference_library import ReferenceDocument
 
-from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
+from app.config import get_settings
 from app.services import reference_library_ai_client as ai_client
 from app.services.document_extraction_service import extract_text
 from app.services.document_processing_service import (
     DocumentProfileError,
     call_document_profiler,
 )
+from app.services.project_insight_service import mark_project_insight_stale
 from app.services.reference_library_service import domain_storage_key
 
 logger = logging.getLogger(__name__)
@@ -274,14 +274,17 @@ async def process_reference_document(document_id: int) -> None:
             doc.ai_summary = summary
 
         # Reference metadata changed; cached insights/opportunities that depend on
-        # this tenant/project are now stale. Clear them before the final commit.
+        # this tenant/project are now stale. Mark them for background rebuild.
         try:
-            stmt = delete(ProjectIntelligenceSnapshot).where(
-                ProjectIntelligenceSnapshot.tenant_id == doc.tenant_id
+            await mark_project_insight_stale(
+                session, tenant_id=doc.tenant_id, project_id=doc.project_id
             )
-            if doc.project_id:
-                stmt = stmt.where(ProjectIntelligenceSnapshot.project_id == doc.project_id)
-            await session.execute(stmt)
+            if get_settings().project_insight_event_rebuild_enabled and doc.project_id:
+                from app.tasks.workflows import enqueue_rebuild_project_insight
+
+                await enqueue_rebuild_project_insight(
+                    tenant_id=doc.tenant_id, project_id=doc.project_id
+                )
         except Exception:
             logger.exception("Failed to invalidate project intelligence snapshots")
 

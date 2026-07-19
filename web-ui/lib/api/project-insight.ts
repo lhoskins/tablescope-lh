@@ -141,6 +141,8 @@ export interface ProjectInsight {
   project: { id: number; name: string; status: string };
   generatedAt: string;
   lastUpdatedAt: string;
+  /** True when the snapshot is stale and a rebuild is in progress/queued. */
+  stale?: boolean;
   executiveSummary: ExecutiveSummary;
   questionsToAsk: QuestionToAsk[];
   questionsNeedingData: QuestionNeedingData[];

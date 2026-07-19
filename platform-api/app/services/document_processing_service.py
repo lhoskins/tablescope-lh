@@ -13,15 +13,15 @@ import time
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.project_asset import ProjectAsset
-from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.services.document_chunking_service import chunk_document
 from app.services.document_extraction_service import extract_text
 from app.services.project_graph_service import apply_document_family
+from app.services.project_insight_service import mark_project_insight_stale
 
 logger = logging.getLogger(__name__)
 
@@ -237,15 +237,18 @@ async def process_document_asset(
     await session.commit()
 
     # Document metadata changed, so any cached project insights/opportunities
-    # for this project are now stale. Clear them so the next request refreshes.
+    # for this project are now stale. Mark them for background rebuild.
     try:
-        await session.execute(
-            delete(ProjectIntelligenceSnapshot).where(
-                ProjectIntelligenceSnapshot.tenant_id == tenant_id,
-                ProjectIntelligenceSnapshot.project_id == project_id,
-            )
+        await mark_project_insight_stale(
+            session, tenant_id=tenant_id, project_id=project_id
         )
         await session.commit()
+        if get_settings().project_insight_event_rebuild_enabled:
+            from app.tasks.workflows import enqueue_rebuild_project_insight
+
+            await enqueue_rebuild_project_insight(
+                tenant_id=tenant_id, project_id=project_id
+            )
     except Exception:
         logger.exception("Failed to invalidate project intelligence snapshots")
 

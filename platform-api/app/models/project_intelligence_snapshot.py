@@ -7,7 +7,7 @@ run rebuilds in the background.
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,6 +37,8 @@ class ProjectIntelligenceSnapshot(TimestampMixin, Base):
     )
     # The serialized response of the last completed run for this suite.
     payload: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
+    # True when the data behind this snapshot changed and a rebuild is needed.
+    is_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True, server_default="false")
 
     __table_args__ = (
         UniqueConstraint(

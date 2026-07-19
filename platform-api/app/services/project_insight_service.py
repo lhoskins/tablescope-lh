@@ -17,7 +17,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dashboard import Dashboard
@@ -28,6 +28,7 @@ from app.models.project_asset import ProjectAsset
 from app.models.project_insight_acknowledgement import (
     ProjectInsightAcknowledgement,
 )
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.saved_query import SavedQuery
 from app.models.user import User
 from app.schemas.project_insight import (
@@ -49,6 +50,23 @@ logger = logging.getLogger(__name__)
 
 # Window used for the deterministic "What Changed Since Last Visit" deltas.
 _ACTIVITY_WINDOW = timedelta(days=7)
+
+
+async def mark_project_insight_stale(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int | None = None,
+) -> None:
+    """Mark all Project Insight snapshots for a tenant/project as stale."""
+    stmt = (
+        update(ProjectIntelligenceSnapshot)
+        .where(ProjectIntelligenceSnapshot.tenant_id == tenant_id)
+        .values(is_stale=True)
+    )
+    if project_id is not None:
+        stmt = stmt.where(ProjectIntelligenceSnapshot.project_id == project_id)
+    await session.execute(stmt)
 
 
 def _missing_data_hint(result: Any) -> str:

@@ -164,6 +164,15 @@ class Settings(BaseSettings):
     # tenants consume zero AI capacity.
     business_insight_refresh_activity_days: int = 7
 
+    # --- Project Insight event-driven rebuild ---
+    # When enabled, a successful Knowledge Graph build (or document/reference
+    # change) marks the project insight snapshot stale and enqueues a debounced
+    # rebuild. The rebuild runs as the snapshot owner and refreshes the cache.
+    project_insight_event_rebuild_enabled: bool = False
+    # Maximum number of users who already have a Project Insight snapshot that a
+    # background rebuild will refresh for one project.
+    project_insight_max_rebuild_users: int = 10
+
     # --- Supabase authentication ---
     # Single environment-configured auth provider (NOT one project per tenant).
     supabase_env: Literal["test", "staging", "production"] = "test"

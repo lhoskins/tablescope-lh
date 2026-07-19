@@ -268,6 +268,33 @@ async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[st
                     build_id,
                     exc,
                 )
+
+            # Sibling consumer: Project Insight snapshots become stale whenever
+            # the KG view changes, so mark them and queue a debounced rebuild.
+            try:
+                await session.refresh(build)
+                if build.status == "succeeded":
+                    from app.services.project_insight_service import (
+                        mark_project_insight_stale,
+                    )
+
+                    await mark_project_insight_stale(
+                        session,
+                        tenant_id=build.tenant_id,
+                        project_id=build.project_id,
+                    )
+                    await session.commit()
+                    if get_settings().project_insight_event_rebuild_enabled:
+                        await enqueue_rebuild_project_insight(
+                            tenant_id=build.tenant_id,
+                            project_id=build.project_id,
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to enqueue project insight rebuild after build %s: %s",
+                    build_id,
+                    exc,
+                )
             return {"status": "ok", "build_id": build_id}
         except Exception as exc:
             logger.exception("rebuild_knowledge_graph failed for build %s", build_id)
@@ -719,6 +746,174 @@ async def refresh_business_insight_result(
         await q.release_tenant_slot(tenant_id)
 
 
+# Granularity the event-driven Project Insight rebuild analyses at.
+PROJECT_INSIGHT_REBUILD_GRANULARITY = 3
+
+
+async def enqueue_rebuild_project_insight(
+    *, tenant_id: int, project_id: int
+) -> str:
+    """Enqueue a debounced background rebuild of Project Insight snapshots.
+
+    The deterministic per-project job id plus the defer window coalesce bursts
+    (e.g. several KG builds from a multi-file upload) into one rebuild after
+    the dust settles.
+    """
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "rebuild_project_insight",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            _job_id=f"project-insight:{tenant_id}:{project_id}",
+            _defer_by=60,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def rebuild_project_insight(
+    ctx: dict[str, Any], *, tenant_id: int, project_id: int
+) -> dict[str, Any]:
+    """Rebuild stale Project Insight snapshots for a project.
+
+    Runs after a data change (document, reference-library update, or successful
+    Knowledge Graph build). Rebuilds only for users who already have a snapshot
+    row, most recently updated first, capped by ``project_insight_max_rebuild_users``.
+    Each build runs as the snapshot-owning user so acknowledgement state is
+    preserved. Per-user failures are logged and skipped.
+    """
+    from app.models.project import Project
+    from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
+    from app.routes import home_intelligence as hir
+    from app.services import home_intel_queue as q
+    from app.services import project_insight_service as pi
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    settings = get_settings()
+    if not settings.project_insight_event_rebuild_enabled:
+        return {"status": "disabled", "project_id": project_id}
+
+    job_try = int(ctx.get("job_try", 1) or 1)
+    max_tries = max(1, settings.home_intelligence_job_max_tries)
+    cap = max(1, settings.home_intelligence_max_concurrent_projects_per_tenant)
+
+    if not await q.acquire_tenant_slot(tenant_id, cap=cap):
+        if job_try < max_tries:
+            raise Retry(defer=settings.home_intelligence_tenant_slot_retry_seconds)
+        return {
+            "status": "skipped",
+            "reason": "capacity",
+            "project_id": project_id,
+        }
+
+    try:
+        async with SessionLocal() as session:
+            # Stale gate: nothing to do if a fresher run already handled it.
+            stale_rows = (
+                await session.scalars(
+                    select(ProjectIntelligenceSnapshot)
+                    .where(
+                        ProjectIntelligenceSnapshot.tenant_id == tenant_id,
+                        ProjectIntelligenceSnapshot.project_id == project_id,
+                        ProjectIntelligenceSnapshot.is_stale.is_(True),
+                        ProjectIntelligenceSnapshot.suite == "project_insight",
+                    )
+                    .order_by(ProjectIntelligenceSnapshot.updated_at.desc())
+                    .limit(settings.project_insight_max_rebuild_users)
+                )
+            ).all()
+            if not stale_rows:
+                return {
+                    "status": "skipped",
+                    "reason": "not_stale",
+                    "project_id": project_id,
+                }
+
+            project = await session.get(Project, project_id)
+            if project is None or project.tenant_id != tenant_id:
+                return {
+                    "status": "skipped",
+                    "reason": "project_not_found",
+                    "project_id": project_id,
+                }
+
+            audience = [snap.user_id for snap in stale_rows]
+            refreshed = 0
+            failed = 0
+
+            for user_id in audience:
+                # The project instance can be expired by a previous rollback,
+                # so refresh it before each per-user build.
+                await session.refresh(project)
+                try:
+                    context = _worker_context(tenant_id, user_id)
+                    runner = hir._make_runner(session, context, project.id)
+                    report = await pi.build_project_insight(
+                        session,
+                        project=project,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        runner=runner,
+                    )
+                    payload = report.model_dump(mode="json")
+                    snap = await session.scalar(
+                        select(ProjectIntelligenceSnapshot).where(
+                            ProjectIntelligenceSnapshot.tenant_id == tenant_id,
+                            ProjectIntelligenceSnapshot.user_id == user_id,
+                            ProjectIntelligenceSnapshot.project_id == project_id,
+                            ProjectIntelligenceSnapshot.suite == "project_insight",
+                        )
+                    )
+                    if snap is None:
+                        snap = ProjectIntelligenceSnapshot(
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            project_id=project_id,
+                            suite="project_insight",
+                        )
+                        session.add(snap)
+                    snap.payload = payload
+                    snap.is_stale = False
+                    await session.commit()
+                    refreshed += 1
+                except AIUnavailableError as exc:
+                    await session.rollback()
+                    if exc.retryable and job_try < max_tries:
+                        defer = (
+                            exc.retry_after
+                            if exc.retry_after is not None
+                            else settings.home_intelligence_busy_retry_seconds
+                        )
+                        raise Retry(defer=defer) from exc
+                    logger.warning(
+                        "project insight rebuild failed for project %s user %s: %s",
+                        project_id,
+                        user_id,
+                        exc,
+                    )
+                    failed += 1
+                except Exception as exc:
+                    await session.rollback()
+                    logger.warning(
+                        "project insight rebuild failed for project %s user %s: %s",
+                        project_id,
+                        user_id,
+                        exc,
+                    )
+                    failed += 1
+
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "refreshed": refreshed,
+                "failed": failed,
+            }
+    finally:
+        await q.release_tenant_slot(tenant_id)
+
+
 async def index_for_search(
     ctx: dict[str, Any],
     *,
@@ -1055,6 +1250,7 @@ class WorkerSettings:
         evaluate_stale_graphs,
         reprocess_project,
         refresh_business_insight_result,
+        rebuild_project_insight,
     ]
     cron_jobs: ClassVar[list] = [
         # Detect source drift every 15 minutes and mark affected graphs stale.
