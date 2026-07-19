@@ -79,18 +79,29 @@ def test_floor_and_teiid_rules_are_not_contradictory() -> None:
     """Regression guard for the borrowed-column hallucination.
 
     The floor demands multi-table joins while the Teiid rules used to flatly
-    ban ALL joins ("Do NOT write JOINs" with no exception) — a direct
-    contradiction the model resolved by selecting another table's columns
-    inside single-table queries, which then failed validation and dropped the
-    relationship cards. The rules must carve out verified relationship
-    evidence, and the floor must demand explicit joins.
+    ban ALL joins with no exception — a direct contradiction the model
+    resolved by selecting another table's columns inside single-table
+    queries, which then failed validation and dropped the relationship cards.
+    The rules are now split (PR #49's design): the strict single-table rule
+    stays the default, and a join-exception variant is swapped in whenever
+    the plan prompt carries RELATIONSHIP EVIDENCE, so the floor and the
+    rules can never contradict each other in the same prompt.
     """
-    # The shared Teiid rules allow exactly the verified-evidence joins.
-    assert "RELATIONSHIP EVIDENCE" in _TEIID_SQL_RULES
-    assert "exception" in _TEIID_SQL_RULES
-    assert "FROM/JOIN" in _TEIID_SQL_RULES
-    # The old unconditional ban must not survive verbatim.
-    assert "Do NOT write JOINs. (" not in _TEIID_SQL_RULES
+    from app.routers.ai import _TEIID_FIX_JOIN_RULE, _TEIID_JOIN_EXCEPTION_RULE
+
+    # The evidence-aware variant carves out exactly the verified joins.
+    assert "RELATIONSHIP EVIDENCE" in _TEIID_JOIN_EXCEPTION_RULE
+    assert "exception" in _TEIID_JOIN_EXCEPTION_RULE
+    assert "FROM/JOIN" in _TEIID_JOIN_EXCEPTION_RULE
+
+    # The default rules stay strictly single-table for evidence-less prompts
+    # (dashboards, scope analysis) — the ban is fine there because no floor
+    # demands joins in those prompts.
+    assert "RELATIONSHIP EVIDENCE" not in _TEIID_SQL_RULES
+
+    # The repair prompt must preserve intentional joins instead of "fixing"
+    # them back to single-table queries.
+    assert "KEEP the same two tables" in _TEIID_FIX_JOIN_RULE
 
     # The floor tells the model HOW to satisfy it: an explicit join, never a
     # borrowed column in a single-table query.

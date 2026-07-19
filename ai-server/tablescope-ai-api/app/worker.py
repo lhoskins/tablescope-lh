@@ -13,7 +13,6 @@ but NOT exposed to any external network.
 
 import asyncio
 import logging
-import time
 
 logging.basicConfig(
     level=logging.INFO,
