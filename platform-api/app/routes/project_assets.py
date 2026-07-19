@@ -134,7 +134,13 @@ def _store_file_locally(
 
 # ── Background processing ────────────────────────────────────────────
 
-async def _process_asset_background(asset_id: int, project_id: int, tenant_id: int, user_id: int) -> None:
+async def _process_asset_background(
+    asset_id: int,
+    project_id: int,
+    tenant_id: int,
+    user_id: int,
+    force: bool = False,
+) -> None:
     """Run extraction → chunking → profiling in background."""
     from app.database import SessionLocal
     from app.services.document_processing_service import process_document_asset
@@ -144,10 +150,11 @@ async def _process_asset_background(asset_id: int, project_id: int, tenant_id: i
             asset = await session.get(ProjectAsset, asset_id)
             if not asset:
                 return
-            asset.ai_status = "extracting"
-            await session.commit()
-
-            await process_document_asset(session, asset, tenant_id, project_id, user_id)
+            # The pipeline owns status transitions: it leaves the asset
+            # untouched when the file-hash gate skips an unchanged document.
+            await process_document_asset(
+                session, asset, tenant_id, project_id, user_id, force=force,
+            )
     except Exception:
         logger.exception("Background processing failed for asset %d", asset_id)
         try:
@@ -375,22 +382,77 @@ async def trigger_ai_processing(
     project_id: int,
     asset_id: int,
     background_tasks: BackgroundTasks,
+    force: bool = True,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ):
+    """Reprocess one document.
+
+    A user-initiated Reprocess forces the full pipeline by default; pass
+    ``force=false`` to honor the file-hash gate (skip when the stored bytes are
+    unchanged and the asset is already profiled), which is what automated
+    cascades use.
+    """
     await _require_project_access(project_id, session, context)
     asset = await session.get(ProjectAsset, asset_id)
     if not asset or asset.project_id != project_id or asset.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    asset.ai_status = "pending"
-    asset.ai_error_message = None
-    await session.commit()
+    if force:
+        # Only reset status when we know the pipeline will run; a gated skip
+        # must leave a profiled asset's status untouched.
+        asset.ai_status = "pending"
+        asset.ai_error_message = None
+        await session.commit()
 
     background_tasks.add_task(
-        _process_asset_background, asset.id, project_id, context.tenant_id, context.user_id,
+        _process_asset_background,
+        asset.id, project_id, context.tenant_id, context.user_id, force,
     )
-    return {"status": "processing", "asset_id": asset_id}
+    return {"status": "processing", "asset_id": asset_id, "force": force}
+
+
+@router.post("/reprocess")
+async def trigger_project_reprocess(
+    project_id: int,
+    force: bool = False,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+):
+    """Reprocess every document in the project, then rebuild its knowledge graph.
+
+    Enqueues the worker-side cascade: each document is re-run through
+    extraction → profiling → graph rows (skipping files whose bytes are
+    unchanged unless ``force=true``), and the knowledge-graph snapshot is
+    rebuilt as the terminal stage only if something actually changed. Repeat
+    triggers coalesce onto the in-flight job for this project.
+    """
+    await _require_project_access(project_id, session, context)
+    from app.tasks.workflows import enqueue_reprocess_project
+
+    try:
+        job_id = await enqueue_reprocess_project(
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            user_id=context.user_id,
+            force=force,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to enqueue project reprocess for project %d", project_id
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Background worker is unavailable; try again shortly.",
+        ) from None
+
+    # An empty job id means an identical cascade is already queued or running.
+    return {
+        "status": "queued" if job_id else "already_running",
+        "project_id": project_id,
+        "job_id": job_id or None,
+        "force": force,
+    }
 
 
 @router.get("/{asset_id}/ai/profile")

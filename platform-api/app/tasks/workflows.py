@@ -200,10 +200,17 @@ async def scan_repository_connection(
 
 
 async def enqueue_rebuild_knowledge_graph(build_id: int) -> str:
-    """Enqueue a knowledge graph rebuild and return the job id."""
+    """Enqueue a knowledge graph rebuild and return the job id.
+
+    The deterministic job id makes enqueueing idempotent per build: event
+    triggers that coalesce onto an already-queued build re-enqueue the same id
+    and arq drops the duplicate instead of running the build twice.
+    """
     pool = await create_pool(_redis_settings())
     try:
-        job = await pool.enqueue_job("rebuild_knowledge_graph", build_id)
+        job = await pool.enqueue_job(
+            "rebuild_knowledge_graph", build_id, _job_id=f"kg-build:{build_id}"
+        )
         return job.job_id if job else ""
     finally:
         await pool.close()
@@ -290,7 +297,13 @@ async def recover_stale_graph_builds(ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 async def evaluate_stale_graphs(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Mark graphs whose source fingerprint drifted as stale."""
+    """Mark graphs whose source fingerprint drifted as stale, then rebuild them.
+
+    Staleness detection alone leaves a graph stale until a user manually hits
+    rebuild; queueing the rebuild here closes the loop so drifted graphs heal
+    without user intervention. Each project is attributed to its owner so AI
+    enrichment still runs in this userless context.
+    """
     from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
 
     async with SessionLocal() as session:
@@ -298,11 +311,35 @@ async def evaluate_stale_graphs(ctx: dict[str, Any]) -> dict[str, Any]:
         try:
             marked = await lifecycle.evaluate_stale_graphs()
             await session.commit()
-            return {"status": "ok", "marked_project_ids": marked}
         except Exception as exc:
             logger.exception("evaluate_stale_graphs failed")
             await session.rollback()
             return {"status": "error", "error": str(exc)[:500]}
+
+        enqueued: list[int] = []
+        for project_id in marked:
+            try:
+                requested_by = await lifecycle.resolve_representative_user(project_id)
+                build, _ = await lifecycle.request_full_rebuild(
+                    project_id, trigger="source_drift", requested_by=requested_by
+                )
+                await session.commit()
+                await enqueue_rebuild_knowledge_graph(build.id)
+                enqueued.append(build.id)
+            except Exception as exc:
+                # Fail-open per project: one broken project must not block the
+                # rest of the fleet from healing.
+                logger.warning(
+                    "Auto-rebuild for stale graph project %s failed: %s",
+                    project_id,
+                    exc,
+                )
+                await session.rollback()
+        return {
+            "status": "ok",
+            "marked_project_ids": marked,
+            "enqueued_build_ids": enqueued,
+        }
 
 
 async def enqueue_sync_saas_object(
@@ -326,6 +363,9 @@ async def sync_saas_object(
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Sync a SaaS object (HubSpot/Salesforce) into its Postgres staging table."""
+    from app.models.database_data_source import DatabaseDataSource
+    from app.models.saas_object_data_source import SaasObjectDataSource
+    from app.services.knowledge_graph_lifecycle import request_event_driven_rebuild
     from app.services.saas_source_service import run_sync
 
     async with SessionLocal() as session:
@@ -338,7 +378,162 @@ async def sync_saas_object(
                 "sync_saas_object failed for source %s: %s", saas_source_id, exc
             )
             return {"status": "error", "saas_source_id": saas_source_id}
+
+        # Synced data changed the project's sources; refresh its knowledge
+        # graph. The staging rows are committed by run_sync, so the rebuild
+        # observes them (producer-before-consumer ordering). Best-effort: the
+        # helper never raises.
+        try:
+            saas = await session.get(SaasObjectDataSource, saas_source_id)
+            data_source = (
+                await session.get(DatabaseDataSource, saas.database_data_source_id)
+                if saas
+                else None
+            )
+        except Exception:
+            data_source = None
+        if data_source is not None and data_source.project_id is not None:
+            await request_event_driven_rebuild(
+                session,
+                project_id=data_source.project_id,
+                change_set=[
+                    {
+                        "entity_type": "data_source",
+                        "entity_id": data_source.id,
+                        "action": "synced",
+                        "change_scope": "content",
+                    }
+                ],
+                trigger="saas_sync",
+            )
     return {"status": "ok", "saas_source_id": saas_source_id, **result}
+
+
+async def enqueue_reprocess_project(
+    *,
+    tenant_id: int,
+    project_id: int,
+    user_id: int,
+    force: bool = False,
+) -> str:
+    """Enqueue a project-wide document reprocess + graph rebuild cascade.
+
+    The deterministic per-project job id coalesces rapid repeat triggers: while
+    one cascade is queued/running for a project, further enqueues are dropped
+    by arq instead of stacking duplicate full-project reprocesses.
+    """
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "reprocess_project",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            user_id=user_id,
+            force=force,
+            _job_id=f"reprocess:{tenant_id}:{project_id}",
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+REPROCESS_DOCUMENT_CONCURRENCY = 2
+
+
+async def reprocess_project(
+    ctx: dict[str, Any],
+    *,
+    tenant_id: int,
+    project_id: int,
+    user_id: int,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Reprocess every project document, then rebuild the knowledge graph last.
+
+    Stage order is the correctness constraint: documents (and the relationship/
+    family edges their profiles produce) are the graph's upstream producers, so
+    the snapshot rebuild must run as the terminal stage or it re-caches stale
+    rows. Each document honors the file-hash gate — unchanged files are skipped
+    unless ``force`` — and the graph rebuild only runs when something actually
+    changed (or on ``force``). Every stage is fail-open: one bad document never
+    blocks the rest, and a graph failure never fails the reprocess.
+    """
+    from app.models.project_asset import ProjectAsset
+    from app.services.document_processing_service import process_document_asset
+    from app.services.knowledge_graph_lifecycle import request_event_driven_rebuild
+
+    async with SessionLocal() as session:
+        asset_ids = (
+            await session.scalars(
+                select(ProjectAsset.id).where(
+                    ProjectAsset.tenant_id == tenant_id,
+                    ProjectAsset.project_id == project_id,
+                )
+            )
+        ).all()
+
+    statuses: dict[int, str] = {}
+    # Document profiling fans out to the AI server, so bound how many documents
+    # run at once. Each document gets its own session: the pipeline commits at
+    # every stage and AsyncSession is not safe for concurrent use.
+    semaphore = asyncio.Semaphore(REPROCESS_DOCUMENT_CONCURRENCY)
+
+    async def _one(asset_id: int) -> None:
+        async with semaphore:
+            try:
+                async with SessionLocal() as session:
+                    asset = await session.get(ProjectAsset, asset_id)
+                    if asset is None:
+                        statuses[asset_id] = "missing"
+                        return
+                    statuses[asset_id] = await process_document_asset(
+                        session,
+                        asset,
+                        tenant_id,
+                        project_id,
+                        user_id,
+                        force=force,
+                        trigger_graph_rebuild=False,
+                    )
+            except Exception:
+                logger.exception(
+                    "reprocess_project: document %s failed for project %s",
+                    asset_id,
+                    project_id,
+                )
+                statuses[asset_id] = "error"
+
+    await asyncio.gather(*(_one(aid) for aid in asset_ids))
+
+    changed = [aid for aid, s in statuses.items() if s == "processed"]
+    build_id: int | None = None
+    if changed or force:
+        async with SessionLocal() as session:
+            build = await request_event_driven_rebuild(
+                session,
+                project_id=project_id,
+                change_set=[
+                    {
+                        "entity_type": "document",
+                        "entity_id": aid,
+                        "action": "reprocessed",
+                        "change_scope": "content",
+                    }
+                    for aid in (changed or asset_ids)
+                ],
+                trigger="project_reprocess",
+                requested_by=user_id,
+            )
+            build_id = build.id if build else None
+
+    return {
+        "status": "ok",
+        "tenant_id": tenant_id,
+        "project_id": project_id,
+        "documents": statuses,
+        "changed_count": len(changed),
+        "graph_build_id": build_id,
+    }
 
 
 async def index_for_search(
@@ -639,6 +834,7 @@ class WorkerSettings:
         run_knowledge_graph_health_check,
         recover_stale_graph_builds,
         evaluate_stale_graphs,
+        reprocess_project,
     ]
     cron_jobs: ClassVar[list] = [
         # Detect source drift every 15 minutes and mark affected graphs stale.

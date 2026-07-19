@@ -190,6 +190,12 @@ class KnowledgeGraphLifecycleManager:
         if not write:
             return project
 
+        # No request context means a system-initiated call (worker task, event
+        # trigger). Those are already tenant-scoped above and carry no user to
+        # authorize, so they are allowed to schedule rebuilds.
+        if self.context is None:
+            return project
+
         user_id = self.context.user_id if self.context else None
         role = self.context.role if self.context else None
         if project.owner_id == user_id or has_role(role or "", Role.ADMIN):
@@ -360,11 +366,23 @@ class KnowledgeGraphLifecycleManager:
 
     # ── Build scheduling ──────────────────────────────────────────────────
 
+    def _resolve_requested_by(self, requested_by: int | None) -> int | None:
+        """Attribute a build to a user: explicit override, else the request user.
+
+        ``requested_by`` drives AI enrichment in the worker (cards are only
+        pre-cached when a user id is present), so headless callers pass an
+        explicit representative user (e.g. the project owner).
+        """
+        if requested_by is not None:
+            return requested_by
+        return self.context.user_id if self.context else None
+
     async def request_full_rebuild(
         self,
         project_id: int,
         *,
         trigger: str = "manual",
+        requested_by: int | None = None,
     ) -> tuple[KnowledgeGraphBuild, str]:
         """Create a full rebuild build record and return it with the chosen build type.
 
@@ -392,7 +410,7 @@ class KnowledgeGraphLifecycleManager:
             project_id=project_id,
             trigger_type=trigger,
             build_type="full",
-            requested_by=self.context.user_id if self.context else None,
+            requested_by=self._resolve_requested_by(requested_by),
             status="queued",
             queued_at=datetime.now(UTC),
             stage="queued",
@@ -417,10 +435,29 @@ class KnowledgeGraphLifecycleManager:
         *,
         change_set: list[dict[str, Any]],
         trigger: str = "change_event",
+        requested_by: int | None = None,
     ) -> tuple[KnowledgeGraphBuild, str]:
-        """Analyze the change set and create an incremental (or full fallback) build."""
+        """Analyze the change set and create an incremental (or full fallback) build.
+
+        Rapid successive change events coalesce onto an already-queued build for
+        the project instead of stacking duplicates: an incremental run re-reads
+        current source state at execution time, so one queued build covers every
+        change that lands before it starts.
+        """
         await self._require_project(project_id, write=True)
         graph = await self.ensure_graph(project_id, reason="Incremental rebuild requested")
+
+        pending = await self.session.scalar(
+            select(KnowledgeGraphBuild)
+            .where(
+                KnowledgeGraphBuild.project_id == project_id,
+                KnowledgeGraphBuild.status == "queued",
+            )
+            .order_by(KnowledgeGraphBuild.id.desc())
+        )
+        if pending is not None:
+            return pending, pending.build_type
+
         analysis = await self.impact_analyzer.analyze(change_set, current_graph=graph)
         build_type = "full" if not analysis["safe_incremental"] else "incremental"
 
@@ -430,7 +467,7 @@ class KnowledgeGraphLifecycleManager:
             project_id=project_id,
             trigger_type=trigger,
             build_type=build_type,
-            requested_by=self.context.user_id if self.context else None,
+            requested_by=self._resolve_requested_by(requested_by),
             status="queued",
             queued_at=datetime.now(UTC),
             stage="queued",
@@ -666,6 +703,20 @@ class KnowledgeGraphLifecycleManager:
             affected = build.affected_entity_summary or {}
             affected_types = affected.get("affected_types", [])
             affected_ids = affected.get("affected_ids", [])
+
+            # Reload the stored graph rows plus the structural Evidence graph so
+            # content changes (new/updated documents, data sources, queries) are
+            # reflected in the new version. The expensive part of a full rebuild
+            # is AI enrichment, which stays cached: ``aiCardsByCenter`` carries
+            # over from the active snapshot unchanged.
+            fresh_nodes, fresh_edges = await _load_stored_graph(
+                self.session,
+                tenant_id=build.tenant_id,
+                project_id=build.project_id,
+            )
+            payload["fullGraph"] = _json_safe(
+                {"nodes": fresh_nodes, "edges": fresh_edges}
+            )
 
             # Patch the payload for affected project-context entities.
             if "goal" in affected_types or "metric" in affected_types or "risk" in affected_types:
@@ -1091,6 +1142,16 @@ class KnowledgeGraphLifecycleManager:
                 marked.append(graph.project_id)
         return marked
 
+    async def resolve_representative_user(self, project_id: int) -> int | None:
+        """Pick a user id to attribute a headless build to (project owner).
+
+        AI enrichment only runs when a build has a ``requested_by`` user, so
+        system-triggered rebuilds borrow the project owner rather than silently
+        producing structural-only snapshots with no insight cards.
+        """
+        project = await self.session.get(Project, project_id)
+        return project.owner_id if project else None
+
     async def get_active_snapshot_payload(
         self, project_id: int
     ) -> dict[str, Any] | None:
@@ -1109,3 +1170,75 @@ class KnowledgeGraphLifecycleManager:
         if snapshot is None:
             return None
         return _json_safe(snapshot.payload)
+
+
+async def request_event_driven_rebuild(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    change_set: list[dict[str, Any]],
+    trigger: str,
+    requested_by: int | None = None,
+) -> KnowledgeGraphBuild | None:
+    """Best-effort: request a rebuild for a data-change event and enqueue it.
+
+    This is the single entry point every "project data changed" site calls
+    (document processed, SaaS sync completed, project-wide reprocess). It runs
+    headlessly (no request context), commits the build record, and enqueues the
+    worker job. It never raises — a graph-lifecycle failure must not poison the
+    data-change flow that triggered it. Returns the build, or ``None`` when the
+    request could not be recorded.
+
+    Ordering contract: call this only AFTER the underlying source rows
+    (``ai_project_graph_nodes``/``ai_project_graph_edges``, staging tables) are
+    committed, because the rebuild reads them; the graph is strictly a
+    downstream consumer of document/relationship/family data, never a producer.
+    """
+    try:
+        lifecycle = KnowledgeGraphLifecycleManager(session)
+        if requested_by is None:
+            requested_by = await lifecycle.resolve_representative_user(project_id)
+        build, build_type = await lifecycle.request_incremental_rebuild(
+            project_id,
+            change_set=change_set,
+            trigger=trigger,
+            requested_by=requested_by,
+        )
+        await session.commit()
+    except Exception:
+        logger.exception(
+            "Failed to record event-driven graph rebuild for project %s (%s)",
+            project_id,
+            trigger,
+        )
+        try:
+            await session.rollback()
+        except Exception:  # pragma: no cover - defensive
+            pass
+        return None
+
+    # request_incremental_rebuild coalesces onto an already-queued build, so
+    # this may re-enqueue an existing build id; the deterministic arq job id
+    # in enqueue_rebuild_knowledge_graph makes that a no-op.
+    try:
+        from app.tasks.workflows import enqueue_rebuild_knowledge_graph
+
+        await enqueue_rebuild_knowledge_graph(build.id)
+    except Exception as exc:
+        # Fail-open: the build row stays queued; the stale-build recovery cron
+        # will surface it if no worker ever picks it up.
+        logger.warning(
+            "Failed to enqueue graph rebuild %s for project %s (%s): %s",
+            build.id,
+            project_id,
+            trigger,
+            exc,
+        )
+    logger.info(
+        "Event-driven graph rebuild requested: project=%s build=%s type=%s trigger=%s",
+        project_id,
+        build.id,
+        build_type,
+        trigger,
+    )
+    return build
