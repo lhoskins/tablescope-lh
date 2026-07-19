@@ -6,7 +6,10 @@ Run from the ``tablescope-ai-api`` directory: ``pytest -q``.
 from __future__ import annotations
 
 from app.models.schemas import IntelligencePlanRequest
-from app.routers.ai import _build_kg_hypothesis_lines
+from app.routers.ai import (
+    _build_kg_hypothesis_lines,
+    _build_relationship_floor_line,
+)
 
 KG = {
     "risks": [
@@ -43,6 +46,39 @@ def test_renders_hypothesis_framing_and_items() -> None:
     assert "No incident log" in block
     assert "Defect rate" in block
     assert "Revenue" not in block
+
+
+def test_hypotheses_are_additive_and_never_displace_the_mix() -> None:
+    """The regression guard: KG hypotheses must not crowd out complex analyses."""
+    block = _build_kg_hypothesis_lines(KG)
+    assert "ADDITIVE context only" in block
+    assert "must NOT displace" in block
+    assert "multi-table" in block
+    assert "at most half" in block
+
+
+def test_items_are_capped_to_five_per_bucket() -> None:
+    many = {"risks": [{"title": f"Risk {i}"} for i in range(8)]}
+    block = _build_kg_hypothesis_lines(many)
+    assert "Risk 4" in block
+    assert "Risk 5" not in block
+
+
+def test_relationship_floor_with_evidence() -> None:
+    floor = _build_relationship_floor_line(True, granularity=3)
+    assert "at least ONE multi-table relationship analysis" in floor
+    assert "REQUIRED output" in floor
+    assert "knowledge-graph hypotheses" in floor
+
+    granular = _build_relationship_floor_line(True, granularity=4)
+    assert "at least TWO multi-table relationship analyses" in granular
+
+
+def test_relationship_floor_without_evidence_keeps_single_table_mandate() -> None:
+    floor = _build_relationship_floor_line(False, granularity=3)
+    assert "single-table relationship analyses" in floor
+    assert "required mix" in floor
+    assert "multi-table" not in floor
 
 
 def test_malformed_items_are_skipped() -> None:

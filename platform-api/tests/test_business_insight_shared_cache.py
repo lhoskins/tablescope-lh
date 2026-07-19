@@ -143,6 +143,35 @@ async def test_cache_ttl_expiry(db_session, monkeypatch):
     )
 
 
+async def test_cache_rejects_rows_from_older_analysis_pipeline(db_session):
+    """Cards cached before an ANALYSIS_VERSION bump must miss, not serve.
+
+    This is how a planner-quality fix (e.g. the multi-table regression fix)
+    propagates through the shared cache immediately instead of pinning
+    degraded cards until KG drift or TTL expiry.
+    """
+    project = await _project(db_session, 1, 1, "version-gate")
+    await bi_cache.store_result(
+        db_session,
+        tenant_id=1,
+        project_id=project.id,
+        granularity=3,
+        cards=CARDS,
+        built_by=1,
+    )
+    row = await db_session.scalar(select(BusinessInsightResult))
+    # Simulate a row written by the previous pipeline version.
+    row.payload = {"insights": CARDS, "analysis_version": bi_cache.ANALYSIS_VERSION - 1}
+    await db_session.commit()
+
+    assert (
+        await bi_cache.get_fresh_result(
+            db_session, tenant_id=1, project_id=project.id, granularity=3
+        )
+        is None
+    )
+
+
 # ── Cache-aware analyze_project_intelligence ─────────────────────────
 
 

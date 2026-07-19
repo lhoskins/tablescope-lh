@@ -77,7 +77,7 @@ deterministic job ids + defer + the stale gate; builds run as the snapshot's
 owning user, never a synthetic admin. Preserve stable `insightId` handling —
 acknowledgements are keyed by it.
 
-**Verification:** from `platform-api/` run `pytest` (697 tests currently pass
+**Verification:** from `platform-api/` run `pytest` (698 tests currently pass
 — all must still pass plus your new ones) and `ruff check app tests`. Do not
 modify the Business Insights code paths except the one hook addition in
 `rebuild_knowledge_graph`.
