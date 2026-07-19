@@ -261,3 +261,28 @@ project:
 - Frontend: `tsc --noEmit` clean; `next lint` clean (one pre-existing
   unrelated warning); `vitest` — **33 passed** across the project-insight and
   home component suites.
+
+---
+
+## Addendum — post-merge restructure (cf407eb)
+
+A follow-up commit consolidated the standalone `HeroSearch` component into
+`HomeAiSuggestions` itself (as an internal `HomeAskBox`), on **both** Business
+Insight and Project Insight, so the two pages can never drift apart. The
+behavior described above is unchanged:
+
+- `HomeAskBox` renders the same "What would you like to analyze?" hero and
+  posts to `/api/ai/route-prompt` with `project_id` — on Project Insight the
+  router opens that project's shared conversational-analytics assistant
+  pre-filled, preserving the project-grounded handoff.
+- The three pills continue to call `suggestQueries(3, projectId)`,
+  `suggestDashboards(3, projectId)`, and `suggestInsights(3, projectId)`, and
+  the backend `project_id` filters from this change remain in place.
+
+Project Insight therefore renders one line where the two components used to be:
+
+```tsx
+<div className="space-y-6 py-2">
+  <HomeAiSuggestions projectId={Number(projectId)} />
+</div>
+```
