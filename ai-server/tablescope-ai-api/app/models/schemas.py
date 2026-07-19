@@ -177,6 +177,7 @@ class DocumentProfileRequest(BaseModel):
     chunks: list[dict] = []
     enabled_reference_tags: list[str] = []
     enabled_reference_kpis: list[str] = []
+    include_family: bool = True
     signature: str = ""
     timestamp: float = 0.0
 
