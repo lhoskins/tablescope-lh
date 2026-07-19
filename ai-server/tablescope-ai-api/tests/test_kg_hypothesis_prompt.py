@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from app.models.schemas import IntelligencePlanRequest
 from app.routers.ai import (
+    _TEIID_SQL_RULES,
     _build_kg_hypothesis_lines,
     _build_relationship_floor_line,
 )
@@ -72,6 +73,30 @@ def test_relationship_floor_with_evidence() -> None:
 
     granular = _build_relationship_floor_line(True, granularity=4)
     assert "at least TWO multi-table relationship analyses" in granular
+
+
+def test_floor_and_teiid_rules_are_not_contradictory() -> None:
+    """Regression guard for the borrowed-column hallucination.
+
+    The floor demands multi-table joins while the Teiid rules used to flatly
+    ban ALL joins ("Do NOT write JOINs" with no exception) — a direct
+    contradiction the model resolved by selecting another table's columns
+    inside single-table queries, which then failed validation and dropped the
+    relationship cards. The rules must carve out verified relationship
+    evidence, and the floor must demand explicit joins.
+    """
+    # The shared Teiid rules allow exactly the verified-evidence joins.
+    assert "RELATIONSHIP EVIDENCE" in _TEIID_SQL_RULES
+    assert "exception" in _TEIID_SQL_RULES
+    assert "FROM/JOIN" in _TEIID_SQL_RULES
+    # The old unconditional ban must not survive verbatim.
+    assert "Do NOT write JOINs. (" not in _TEIID_SQL_RULES
+
+    # The floor tells the model HOW to satisfy it: an explicit join, never a
+    # borrowed column in a single-table query.
+    floor = _build_relationship_floor_line(True, granularity=4)
+    assert "EXPLICIT JOIN" in floor
+    assert "NEVER satisfy this requirement by selecting" in floor
 
 
 def test_relationship_floor_without_evidence_keeps_single_table_mandate() -> None:
