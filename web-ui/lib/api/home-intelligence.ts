@@ -310,6 +310,10 @@ export interface IntelligenceSnapshot {
   projects: StreamProject[];
   results: ProjectResult[];
   synthesis: CrossProjectSynthesis | null;
+  /** True when the Knowledge Graph for one or more projects rebuilt after this briefing. */
+  stale?: boolean;
+  /** Project IDs whose data changed after this briefing was generated. */
+  staleProjects?: string[];
 }
 
 export function getIntelligenceSnapshot(): Promise<{
