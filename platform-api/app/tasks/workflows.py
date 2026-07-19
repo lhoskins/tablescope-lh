@@ -1250,9 +1250,17 @@ async def analyze_project_intelligence(
         await q.release_tenant_slot(tenant_id)
 
 
+async def _configure_worker_logging(ctx: dict[str, Any]) -> None:
+    """Configure structured logging for the arq worker."""
+    from app.logging_config import configure_logging
+
+    configure_logging(get_settings().log_level)
+
+
 class WorkerSettings:
     """arq worker entrypoint."""
 
+    on_startup: ClassVar = _configure_worker_logging
     redis_settings: ClassVar[RedisSettings] = _redis_settings()
     functions: ClassVar[list] = [
         process_upload,
