@@ -665,6 +665,15 @@ def normalize_teiid_string_filters(
     return in_re.sub(_in_replace, sql)
 
 
+# Teiid reserved words that the model often uses as aliases.  They must be
+# quoted when emitted as column/output aliases (``AS Year``, ``AS Quarter``).
+_TEIID_RESERVED_ALIASES = {
+    "YEAR", "MONTH", "DAY", "HOUR", "MINUTE", "SECOND", "QUARTER", "WEEK",
+    "YEAROFERA", "MONTHOFYEAR", "WEEKOFYEAR", "DAYOFWEEK", "DAYOFMONTH",
+    "DAYOFYEAR", "EPOCH", "MILLISECOND", "NANOSECOND",
+}
+
+
 def normalize_teiid_identifiers(
     sql: str,
     table_schema: list[dict[str, Any]],
@@ -672,8 +681,8 @@ def normalize_teiid_identifiers(
     """Quote bare table/column identifiers that conflict with Teiid reserved words.
 
     Uses the project schema so only real table/column names are quoted.  Tokens
-    immediately after an ``AS`` alias clause are left unquoted, and tokens inside
-    string literals are ignored.
+    immediately after an ``AS`` alias clause are left unquoted unless the alias
+    is a Teiid reserved word, and tokens inside string literals are ignored.
     """
     if not sql or not table_schema:
         return sql
@@ -740,10 +749,24 @@ def normalize_teiid_identifiers(
         out.append(sql[prev:start])
         token = m.group(1)
         prefix = sql[:start]
-        if re.search(r"\bAS\s+$", prefix, re.IGNORECASE):
+        if re.search(r"\bAS\s+$", prefix, re.IGNORECASE) and token.upper() not in _TEIID_RESERVED_ALIASES:
             out.append(token)
         else:
             out.append(f'"{token}"')
         prev = m.end()
     out.append(sql[prev:])
-    return "".join(out)
+    sql = "".join(out)
+
+    # Final pass: quote any remaining reserved-word aliases and their uses in
+    # GROUP BY / ORDER BY.  The schema-name pass above skips tokens not present
+    # in the project schema, so aliases like ``AS Year`` or ``GROUP BY Year``
+    # (common model output) must be handled explicitly.
+    alias_re = re.compile(r'\b(AS|GROUP\s+BY|ORDER\s+BY)\s+([A-Za-z_]\w*)', re.IGNORECASE)
+
+    def _quote_alias_ref(m: re.Match[str]) -> str:
+        token = m.group(2)
+        if token.upper() in _TEIID_RESERVED_ALIASES:
+            return f'{m.group(1)} "{token}"'
+        return m.group(0)
+
+    return alias_re.sub(_quote_alias_ref, sql)
