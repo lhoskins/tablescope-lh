@@ -23,6 +23,7 @@ export type NavKey =
   | "business-insight"
   | "projects"
   | "ai-assistant"
+  | "insight-feedback-review"
   | "activity"
   | "data-connections"
   | "data-sources"
@@ -84,4 +85,6 @@ export interface CurrentUser {
   id?: number;
   /** Safe served avatar URL, or null when the user has no picture. */
   avatarUrl?: string | null;
+  /** Fine-grained permissions granted to the user (e.g. "insight_feedback.review"). */
+  permissions?: string[];
 }

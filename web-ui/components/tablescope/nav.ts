@@ -16,9 +16,10 @@ import {
   IconLibrary,
   IconBuildingBank,
   IconMessage,
+  IconShieldCheck,
   type Icon,
 } from "@tabler/icons-react";
-import type { NavKey } from "@/lib/ui/types";
+import type { CurrentUser, NavKey } from "@/lib/ui/types";
 
 export interface NavItem {
   key: NavKey;
@@ -34,7 +35,16 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-export function homeNavGroups(): NavGroup[] {
+const REVIEW_PERMISSION = "insight_feedback.review";
+
+function isInsightReviewer(user?: CurrentUser): boolean {
+  if (!user) return false;
+  if (user.permissions?.includes(REVIEW_PERMISSION)) return true;
+  const adminRoles = ["admin", "tenant_admin", "root_admin"];
+  return adminRoles.includes(user.rawRole ?? "");
+}
+
+export function homeNavGroups(user?: CurrentUser): NavGroup[] {
   return [
     {
       items: [
@@ -58,6 +68,16 @@ export function homeNavGroups(): NavGroup[] {
           href: "/ai",
           icon: IconSparkles,
         },
+        ...(isInsightReviewer(user)
+          ? [
+              {
+                key: "insight-feedback-review" as NavKey,
+                label: "Insight Review",
+                href: "/insight-feedback/review",
+                icon: IconShieldCheck,
+              },
+            ]
+          : []),
       ],
     },
     {

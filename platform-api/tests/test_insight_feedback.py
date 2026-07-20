@@ -275,20 +275,22 @@ async def test_feedback_api_upsert_get_batch_delete(client, service_headers):
     assert len(items) == 1
     assert items[0]["insight_id"] == insight_id
 
-    # Update to agree.
+    # Update to agree; comment is now required for all feedback.
     r = await client.put(
         f"/api/insight-feedback/{insight_id}",
         json={
             "project_id": project["id"],
             "sentiment": "agree",
             "reason_codes": [],
-            "comment": "",
+            "comment": "After review, the numbers look correct.",
             "insight_type": "risk_sla",
         },
         headers=headers,
     )
     assert r.status_code == 200
-    assert r.json()["sentiment"] == "agree"
+    body = r.json()
+    assert body["sentiment"] == "agree"
+    assert body["review_status"] == "pending"
 
     # Delete withdraws the feedback.
     r = await client.delete(
@@ -311,6 +313,7 @@ async def test_feedback_api_rejects_invalid_sentiment_and_reasons(client, servic
             "project_id": project["id"],
             "sentiment": "maybe",
             "reason_codes": ["invalid_code"],
+            "comment": "Some comment.",
         },
         headers=headers,
     )
@@ -328,6 +331,7 @@ async def test_feedback_api_is_isolated_by_tenant_and_user(client, service_heade
             "project_id": project_a["id"],
             "sentiment": "agree",
             "reason_codes": [],
+            "comment": "Agree.",
         },
         headers=headers_a,
     )
@@ -345,6 +349,7 @@ async def test_feedback_api_cannot_write_to_missing_project(client, service_head
             "project_id": 999999,
             "sentiment": "agree",
             "reason_codes": [],
+            "comment": "Looks correct.",
         },
         headers=headers,
     )
@@ -414,3 +419,133 @@ def test_build_feedback_training_record_is_privacy_safe():
     assert "chainOfThought" not in record["explanation"]
     assert record["card"]["sql"] == 'SELECT "x" FROM "y"'
     assert record["privacy_safe"] is True
+
+
+# ──────────────────────────── reviewer workflow ───────────────────────────
+
+
+async def _setup_reviewer(client, service_headers, slug: str):
+    r = await client.post(
+        "/api/tenants",
+        json={"slug": slug, "name": f"{slug} tenant"},
+        headers=service_headers,
+    )
+    assert r.status_code == 201
+    tenant = r.json()
+
+    r = await client.post(
+        f"/api/tenants/{tenant['id']}/users",
+        json={
+            "email": f"{slug}-reviewer@test.com",
+            "display_name": "Reviewer User",
+            "role": "admin",
+            "external_id": f"ext-{slug}-reviewer",
+        },
+        headers=service_headers,
+    )
+    assert r.status_code == 201
+    reviewer = r.json()
+    reviewer_headers = _headers(tenant["id"], reviewer["id"], "admin")
+
+    r = await client.post(
+        f"/api/tenants/{tenant['id']}/users",
+        json={
+            "email": f"{slug}-user@test.com",
+            "display_name": "Feedback User",
+            "role": "editor",
+            "external_id": f"ext-{slug}-user",
+        },
+        headers=service_headers,
+    )
+    assert r.status_code == 201
+    user = r.json()
+    user_headers = _headers(tenant["id"], user["id"], "editor")
+
+    r = await client.post(
+        "/api/projects",
+        json={"name": "Feedback Project", "description": "x", "is_shared": False},
+        headers=user_headers,
+    )
+    assert r.status_code == 201
+    project = r.json()
+    return tenant, reviewer, reviewer_headers, user, user_headers, project
+
+
+async def test_review_queue_requires_reviewer_role(client, service_headers):
+    _, _, _, _, user_headers, _ = await _setup_reviewer(client, service_headers, "fb-req")
+    r = await client.get("/api/insight-feedback/review/queue", headers=user_headers)
+    assert r.status_code == 403
+
+
+async def test_review_queue_lists_feedback_for_review(client, service_headers):
+    _, _, reviewer_headers, _, user_headers, project = await _setup_reviewer(
+        client, service_headers, "fb-queue"
+    )
+
+    insight_id = "insight-review-1"
+    r = await client.put(
+        f"/api/insight-feedback/{insight_id}",
+        json={
+            "project_id": project["id"],
+            "sentiment": "disagree",
+            "reason_codes": ["incorrect_data"],
+            "comment": "The numbers look wrong.",
+            "insight_type": "risk_sla",
+        },
+        headers=user_headers,
+    )
+    assert r.status_code == 200
+
+    r = await client.get("/api/insight-feedback/review/queue", headers=reviewer_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["insight_id"] == insight_id
+    assert body["items"][0]["review_status"] == "pending"
+
+
+async def test_review_claim_and_disposition_requires_comment(client, service_headers):
+    _, _, reviewer_headers, _, user_headers, project = await _setup_reviewer(
+        client, service_headers, "fb-disp"
+    )
+
+    insight_id = "insight-review-2"
+    r = await client.put(
+        f"/api/insight-feedback/{insight_id}",
+        json={
+            "project_id": project["id"],
+            "sentiment": "disagree",
+            "reason_codes": [],
+            "comment": "Disagree.",
+            "insight_type": "risk_sla",
+        },
+        headers=user_headers,
+    )
+    assert r.status_code == 200
+    feedback_id = r.json()["id"]
+
+    r = await client.post(
+        f"/api/insight-feedback/review/{feedback_id}/claim",
+        headers=reviewer_headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["reviewer_user_id"] is not None
+
+    # Final disposition without reviewer comment is rejected.
+    r = await client.post(
+        f"/api/insight-feedback/review/{feedback_id}/disposition",
+        json={"review_status": "accepted"},
+        headers=reviewer_headers,
+    )
+    assert r.status_code == 422
+
+    r = await client.post(
+        f"/api/insight-feedback/review/{feedback_id}/disposition",
+        json={"review_status": "accepted", "reviewer_comment": "Approved."},
+        headers=reviewer_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["review_status"] == "accepted"
+    assert body["reviewer_comment"] == "Approved."
+    assert body["reviewed_at"] is not None
