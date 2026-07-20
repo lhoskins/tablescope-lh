@@ -23,6 +23,7 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
+import { ProjectOverviewChat } from "./project-overview-chat";
 import { cn } from "@/lib/cn";
 import { timeAgo } from "@/lib/ui/format";
 import {
@@ -267,7 +268,8 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
 
 
-        <HomeAiSuggestions projectId={Number(projectId)} />
+        <ProjectOverviewChat projectId={projectId} />
+        <HomeAiSuggestions projectId={Number(projectId)} showAskBox={false} />
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <StatTile

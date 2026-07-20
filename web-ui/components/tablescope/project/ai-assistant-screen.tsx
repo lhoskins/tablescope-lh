@@ -12,6 +12,7 @@ import { ProjectShell } from "@/components/tablescope/project-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
 import { cn } from "@/lib/cn";
 import { useProjectShell, askProjectAi } from "@/lib/ui/use-project-data";
 import { ResponsePresenter } from "@/components/ai/ResponsePresenter";
@@ -145,7 +146,7 @@ export function AiAssistantScreen({ projectId }: { projectId: string }) {
 
         <div className="border-t border-line-tertiary pt-3">
           <div className="flex items-end gap-2 rounded-lg border border-line-secondary bg-bg-primary px-3 py-2">
-            <textarea
+            <AutosizeTextarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -154,9 +155,11 @@ export function AiAssistantScreen({ projectId }: { projectId: string }) {
                   send(input);
                 }
               }}
-              rows={1}
+              minRows={2}
+              maxRows={8}
               placeholder={`Ask about your data, documents, or dashboards in ${project?.name ?? "this project"}…`}
-              className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none"
+              aria-label="Ask about your project"
+              className="flex-1 text-[13px] text-ink-primary placeholder:text-ink-tertiary"
             />
             <button
               type="button"
