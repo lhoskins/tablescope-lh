@@ -77,7 +77,7 @@ export function ProjectOverviewChat({ projectId }: ProjectOverviewChatProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasResumed, setHasResumed] = useState(false);
+  const hasResumedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isComposing, setIsComposing] = useState(false);
@@ -98,10 +98,11 @@ export function ProjectOverviewChat({ projectId }: ProjectOverviewChatProps) {
   useEffect(() => {
     let cancelled = false;
     async function resume() {
+      if (hasResumedRef.current) return;
       const data = await loadConversations();
       if (cancelled) return;
-      if (data.length > 0 && !hasResumed) {
-        setHasResumed(true);
+      if (data.length > 0) {
+        hasResumedRef.current = true;
         try {
           const full = await getConversation(data[0].id);
           if (!cancelled) setConversation(full);
@@ -116,7 +117,7 @@ export function ProjectOverviewChat({ projectId }: ProjectOverviewChatProps) {
     return () => {
       cancelled = true;
     };
-  }, [loadConversations, hasResumed]);
+  }, [loadConversations]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -162,7 +163,7 @@ export function ProjectOverviewChat({ projectId }: ProjectOverviewChatProps) {
     setConversation(null);
     setInput("");
     setError(null);
-    setHasResumed(true);
+    hasResumedRef.current = true;
   }
 
   const openInAssistant = () => {
