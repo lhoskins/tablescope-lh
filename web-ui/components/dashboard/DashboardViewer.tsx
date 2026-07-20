@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/rea
 import {
   ResponsiveGridLayout,
   useContainerWidth,
+  type EventCallback,
   type Layout,
   type LayoutItem,
   type ResponsiveLayouts,
@@ -395,7 +396,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     return { lg };
   }, [widgets]);
 
-  const handleLayoutChange = useCallback((layout: Layout, _layouts: ResponsiveLayouts) => {
+  const persistLayout = useCallback((layout: Layout) => {
     const prev = layoutRef.current;
     const changed = layout.some((l) => {
       const p = prev.find((pl) => pl.i === l.i);
@@ -410,6 +411,16 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     });
     updateMutation.mutate({ config: { widgets: updatedWidgets, globalFilters } });
   }, [widgets, globalFilters, updateMutation]);
+
+  const handleDragStop: EventCallback = useCallback(
+    (layout) => persistLayout(layout as unknown as Layout),
+    [persistLayout],
+  );
+
+  const handleResizeStop: EventCallback = useCallback(
+    (layout) => persistLayout(layout as unknown as Layout),
+    [persistLayout],
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -529,7 +540,8 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                 rowHeight={GRID_ROW_HEIGHT}
                 margin={GRID_MARGIN}
                 containerPadding={GRID_CONTAINER_PADDING}
-                onLayoutChange={handleLayoutChange}
+                onDragStop={handleDragStop}
+                onResizeStop={handleResizeStop}
                 dragConfig={GRID_DRAG_CONFIG}
                 resizeConfig={GRID_RESIZE_CONFIG}
                 width={containerWidth}
