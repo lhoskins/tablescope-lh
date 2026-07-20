@@ -157,7 +157,7 @@ export function Sidebar({
   const groups =
     mode === "project" && project
       ? projectNavGroups(project.id)
-      : homeNavGroups();
+      : homeNavGroups(user);
 
   const canManageUsers =
     Boolean(user.isSuperAdmin) ||

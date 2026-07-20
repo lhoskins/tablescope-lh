@@ -7,7 +7,9 @@ users, and it is never used to automatically retrain the model.
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -50,6 +52,16 @@ class InsightFeedback(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active"
     )
+    review_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )
+    reviewer_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reviewer_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -62,5 +74,6 @@ class InsightFeedback(TimestampMixin, Base):
         return (
             f"InsightFeedback(id={self.id}, tenant_id={self.tenant_id}, "
             f"user_id={self.user_id}, insight_id={self.insight_id!r}, "
-            f"sentiment={self.sentiment!r}, status={self.status!r})"
+            f"sentiment={self.sentiment!r}, status={self.status!r}, "
+            f"review_status={self.review_status!r})"
         )
