@@ -321,6 +321,11 @@ async def ask(req: AskRequest) -> AskResponse:
 
     # 3. Send ONLY allowed context to LLM
     context_text = context_builder.context_to_prompt_text(ctx)
+    # Fold in the Knowledge Graph context so prose answers cite validated
+    # risks/gaps/measured KPIs surfaced by the graph (not Reference Library docs).
+    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+    if kg_block:
+        context_text = f"{context_text}\n\n{kg_block}"
     history_text = _format_conversation_history(req.history)
     prompt = f"{context_text}\n\n{history_text}User question: {req.question}"
 

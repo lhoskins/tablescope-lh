@@ -28,6 +28,9 @@ class AskRequest(AIBaseRequest):
     # {"role": "user"|"assistant", "content": "..."}. Lets the model resolve
     # follow-up references ("explain more", "the second option").
     history: list[dict[str, Any]] = Field(default_factory=list)
+    # Compact, AI-safe Knowledge Graph summary; grounds prose answers in the
+    # same measured risks/gaps/KPIs used by dashboard and query generation.
+    knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class IndexDocumentRequest(AIBaseRequest):

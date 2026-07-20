@@ -38,6 +38,7 @@ from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
+from app.services import ai_intelligence_client as ai
 from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.analytical_method_engine import data_profiler
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
@@ -83,6 +84,7 @@ class AIAskRequest(BaseModel):
     scope: str = "project"
     include_query_history: bool = True
     include_dashboard_context: bool = True
+    history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AIGenerateSQLRequest(BaseModel):
@@ -757,19 +759,24 @@ async def ask(
     if data_response is not None:
         return data_response
 
-    payload = {
-        "tenant_id": context.tenant_id,
-        "user_id": context.user_id,
-        "project_id": req.project_id,
-        "question": req.question,
-        "scope": req.scope,
-        "include_query_history": req.include_query_history,
-        "include_dashboard_context": req.include_dashboard_context,
-        "history": [],
+    answer = await _forward_prose_answer(
+        session,
+        context,
+        project_id=req.project_id,
+        question=req.question,
+        history=req.history,
+        scope=req.scope,
+        include_query_history=req.include_query_history,
+        include_dashboard_context=req.include_dashboard_context,
+    )
+    if not answer:
+        answer = "The AI service is temporarily unavailable. Please try again shortly."
+    response = {
+        "answer": answer,
+        "model_used": "tablescope-prose",
+        "request_id": "",
+        "context_summary": {},
     }
-    response = await _forward_to_ai("/ai/ask", payload)
-    if response.get("answer"):
-        response["answer"] = _strip_model_markup(str(response["answer"]))
     _attach_ask_envelope(response)
     return response
 
@@ -2478,20 +2485,28 @@ async def _generate_sql_for_question(
     source_catalog = await _build_source_catalog(
         session, tenant_id=context.tenant_id, project_id=project_id
     )
-    payload = {
-        "tenant_id": context.tenant_id,
-        "user_id": context.user_id,
-        "project_id": project_id,
-        "prompt": question,
-        "allowed_tables": allowed_tables,
-        "source_catalog": source_catalog,
-        "preferred_sources": preferred_sources or [],
-        "relevant_columns": relevant_columns or [],
-        "knowledge_graph_context": await _kg_context(
-            session, context, project_id
-        ),
-    }
-    ai_result = await _forward_to_ai("/ai/query/generate", payload)
+    try:
+        ai_result = await ai.generate_sql(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            prompt=question,
+            allowed_tables=allowed_tables,
+            source_catalog=source_catalog,
+            preferred_sources=preferred_sources or [],
+            relevant_columns=relevant_columns or [],
+            knowledge_graph_context=await _kg_context(session, context, project_id),
+        )
+    except ai.AIUnavailableError as exc:
+        raise HTTPException(
+            status_code=exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    if not isinstance(ai_result, dict):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI server is unavailable",
+        )
     ai_result["_allowed_tables"] = allowed_tables
     return ai_result
 
@@ -2791,31 +2806,37 @@ def _strip_model_markup(text: str) -> str:
 
 
 async def _forward_prose_answer(
+    session: AsyncSession,
     context: RequestContext,
     *,
     project_id: int,
     question: str,
     history: list[dict[str, str]] | None = None,
+    scope: str = "project",
+    include_query_history: bool = True,
+    include_dashboard_context: bool = True,
 ) -> str:
     """Free-text answer from the AI server's documents + knowledge-graph path.
 
     Used as a fallback for analytical/document questions that don't map to a
     single SQL source, so they get a real answer instead of a hard error.
+    Grounds the answer in the project's Knowledge Graph when one exists.
     """
     try:
-        result = await _forward_to_ai("/ai/ask", {
-            "tenant_id": context.tenant_id,
-            "user_id": context.user_id,
-            "project_id": project_id,
-            "question": question,
-            "scope": "project",
-            "include_query_history": True,
-            "include_dashboard_context": True,
-            "history": history or [],
-        })
-    except HTTPException:
+        result = await ai.ask(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            question=question,
+            scope=scope,
+            include_query_history=include_query_history,
+            include_dashboard_context=include_dashboard_context,
+            history=history or [],
+            knowledge_graph_context=await _kg_context(session, context, project_id),
+        )
+    except ai.AIUnavailableError:
         return ""
-    return _strip_model_markup(str(result.get("answer") or ""))
+    return _strip_model_markup(str((result or {}).get("answer") or ""))
 
 
 @router.post("/actions/ask-and-run")
@@ -2850,7 +2871,10 @@ async def ai_ask_and_run(
         return result
     if result.get("status") == "generation_error":
         prose = await _forward_prose_answer(
-            context, project_id=req.project_id, question=req.question
+            session,
+            context,
+            project_id=req.project_id,
+            question=req.question,
         )
         if prose:
             prose_result: dict[str, Any] = {

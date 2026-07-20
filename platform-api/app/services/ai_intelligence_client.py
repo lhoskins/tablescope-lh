@@ -31,6 +31,13 @@ _BUSY_MAX_ATTEMPTS = 3
 _BUSY_DEFAULT_RETRY_SECONDS = 5.0
 _BUSY_MAX_RETRY_SECONDS = 30.0
 
+# Bounded concurrency for chat-style SQL generation and prose answers.
+# These calls must remain responsive while the KG precache pipeline fans out
+# plan/fix/interpret work, so they share a separate gate from the per-project
+# home-intelligence semaphore.
+_CHAT_MAX_CONCURRENT = 4
+_chat_semaphore: asyncio.Semaphore | None = None
+
 
 class AIUnavailableError(RuntimeError):
     """The enabled AI service could not complete a request.
@@ -67,6 +74,14 @@ def _sign_payload(payload: dict[str, Any], secret: str) -> str:
 def is_enabled() -> bool:
     settings = get_settings()
     return bool(settings.tablescope_ai_enabled and settings.tablescope_ai_api_url)
+
+
+def _chat_sem() -> asyncio.Semaphore:
+    """Lazy chat-call semaphore to avoid creating it at import time."""
+    global _chat_semaphore
+    if _chat_semaphore is None:
+        _chat_semaphore = asyncio.Semaphore(_CHAT_MAX_CONCURRENT)
+    return _chat_semaphore
 
 
 def _retry_seconds(
@@ -424,3 +439,73 @@ async def interpret(
         if isinstance(ins, dict) and ins.get("id"):
             out[str(ins["id"])] = ins
     return out
+
+
+async def generate_sql(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    prompt: str,
+    allowed_tables: list[str],
+    source_catalog: list[dict[str, Any]] | None = None,
+    preferred_sources: list[str] | None = None,
+    relevant_columns: list[str] | None = None,
+    knowledge_graph_context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Generate SQL for a natural-language question.
+
+    Routed through the same signed, retry-aware client as plan/interpret calls.
+    Bounded concurrency prevents KG-precache traffic from starving chat answers.
+    Returns ``None`` when the AI service is disabled or unreachable.
+    """
+    async with _chat_sem():
+        return await _post(
+            "/ai/query/generate",
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "project_id": project_id,
+                "prompt": prompt,
+                "allowed_tables": allowed_tables,
+                "source_catalog": source_catalog or [],
+                "preferred_sources": preferred_sources or [],
+                "relevant_columns": relevant_columns or [],
+                "knowledge_graph_context": knowledge_graph_context or {},
+            },
+        )
+
+
+async def ask(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    question: str,
+    scope: str = "project",
+    include_query_history: bool = True,
+    include_dashboard_context: bool = True,
+    history: list[dict[str, Any]] | None = None,
+    knowledge_graph_context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Free-text answer from the AI server's documents + knowledge-graph path.
+
+    Used for non-data questions and as a fallback when a question cannot be
+    grounded on an authorized source. Bounded and retry-aware for the same KG
+    contention reason as :func:`generate_sql`.
+    """
+    async with _chat_sem():
+        return await _post(
+            "/ai/ask",
+            {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "project_id": project_id,
+                "question": question,
+                "scope": scope,
+                "include_query_history": include_query_history,
+                "include_dashboard_context": include_dashboard_context,
+                "history": history or [],
+                "knowledge_graph_context": knowledge_graph_context or {},
+            },
+        )

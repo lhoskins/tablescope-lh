@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
+import app.services.ai_intelligence_client as aic
 from app.auth.jwt import create_access_token
 from app.routes import ai_proxy
 from app.routes.ai_proxy import (
@@ -197,12 +198,11 @@ async def test_ask_and_run_falls_back_to_prose_when_no_source(
             "project source",
         )
 
-    async def fake_forward(path, payload):
-        assert path == "/ai/ask"
+    async def fake_ask(*, question, **kwargs):
         return {"answer": "Late deliveries stem from port congestion..."}
 
     monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
-    monkeypatch.setattr(ai_proxy, "_forward_to_ai", fake_forward)
+    monkeypatch.setattr(ai_proxy.ai, "ask", fake_ask)
 
     r = await client.post(
         "/api/ai/actions/ask-and-run",
@@ -273,11 +273,11 @@ async def test_intent_classification_never_forces_hard_failure(
             "project source",
         )
 
-    async def fake_forward(path, payload):
+    async def fake_ask(*, question, **kwargs):
         return {"answer": "Late shipments cluster around two carriers..."}
 
     monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
-    monkeypatch.setattr(ai_proxy, "_forward_to_ai", fake_forward)
+    monkeypatch.setattr(ai_proxy.ai, "ask", fake_ask)
 
     r = await client.post(
         "/api/ai/actions/ask-and-run",
@@ -605,3 +605,37 @@ async def test_generate_query_preview_success(
     assert body["title"] == "Monthly Revenue"
     assert body["suggestedVisualization"]["type"] == "line"
     assert body["rows"][0]["revenue"] == 10
+
+
+async def test_ask_and_run_degrades_to_prose_when_ai_is_busy(
+    client, service_headers, monkeypatch
+):
+    """KG-precache contention must not hard-fail ask-and-run.
+
+    When the SQL generation path returns a retryable 503/busy error (after the
+    client has exhausted its own retries), the endpoint falls back to the
+    KG-grounded prose path and returns a successful text answer.
+    """
+    _, _, project, headers = await _setup(client, service_headers, "askbusy")
+
+    async def fake_generate(*args, **kwargs):
+        raise aic.AIUnavailableError(
+            "AI server is busy; retry shortly.", status_code=503, retryable=True
+        )
+
+    async def fake_ask(*args, **kwargs):
+        return {"answer": "Carrier shortages are the main driver."}
+
+    monkeypatch.setattr(aic, "generate_sql", fake_generate)
+    monkeypatch.setattr(aic, "ask", fake_ask)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "Why are shipments late?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "success"
+    assert body["answerType"] == "text"
+    assert "Carrier shortages" in body["explanation"]

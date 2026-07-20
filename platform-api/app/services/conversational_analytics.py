@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.models.analytics_conversation import AnalyticsConversation, AnalyticsConversationTurn
-from app.routes.ai_proxy import _ask_and_run_core
+from app.routes.ai_proxy import _ask_and_run_core, _forward_prose_answer
 from app.services import ai_intelligence_client
 from app.services.ai_governance import ai_governance_service, infer_governance_key
 from app.services.ai_intelligence_client import AIUnavailableError
@@ -794,7 +794,27 @@ async def execute_turn(
     turn.project_context_version = project_context.get("version") if project_context else None
     turn.sql_fingerprint = _sql_fingerprint(turn.sql)
 
-    if run.get("status") != "success" or not run.get("rows"):
+    if run.get("status") == "generation_error":
+        # A question that cannot be grounded on an authorized source may still
+        # be a document/KG question; answer it with a prose fallback instead of
+        # a hard SQL error. Degrades gracefully if the AI service is busy.
+        prose = await _forward_prose_answer(
+            session,
+            context,
+            project_id=project_id,
+            question=question,
+        )
+        if prose:
+            turn.assistant_message = prose
+            turn.chart_config = None
+            turn.result_cache = None
+            turn.sql = None
+            turn.sql_fingerprint = None
+            turn.datasource_context = {"dataSourcesUsed": []}
+            turn.status = "success"
+            return
+
+    if run.get("status") != "success":
         turn.status = "error"
         turn.error_code = run.get("status", "unknown")
         turn.assistant_message = run.get("error") or "I could not answer that question with the available data."
