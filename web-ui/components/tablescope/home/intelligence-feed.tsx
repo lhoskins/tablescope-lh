@@ -48,6 +48,7 @@ function Section({
   cards,
   emptyText,
   loading,
+  defaultOpen,
   feedbackById,
   savingFeedback,
   onSaveToDashboard,
@@ -60,6 +61,7 @@ function Section({
   cards: InsightCard[];
   emptyText: string;
   loading: boolean;
+  defaultOpen?: boolean;
   feedbackById: Record<string, InsightFeedbackRecord>;
   savingFeedback: boolean;
   onSaveToDashboard?: (card: InsightCard) => void;
@@ -68,7 +70,7 @@ function Section({
   onFeedbackRemove?: (card: InsightCard) => void;
 }) {
   return (
-    <InsightPanel title={title} icon={icon} collapsible count={cards.length}>
+    <InsightPanel title={title} icon={icon} collapsible defaultOpen={defaultOpen} count={cards.length}>
       {cards.length === 0 ? (
         loading ? null : <PanelEmpty text={emptyText} />
       ) : (
@@ -429,6 +431,7 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
           title="Risks"
           icon={<IconAlertTriangle size={16} className="text-warning" />}
           cards={risks}
+          defaultOpen={false}
           emptyText="No risks detected from your projects yet."
           loading={running}
           feedbackById={feedbackById}
@@ -442,6 +445,7 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
           title="Trends"
           icon={<IconTrendingUp size={16} className="text-ink-secondary" />}
           cards={trends}
+          defaultOpen={false}
           emptyText="No trends detected from your projects yet."
           loading={running}
           feedbackById={feedbackById}
@@ -455,6 +459,7 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
           title="Opportunities"
           icon={<IconBulb size={16} className="text-success" />}
           cards={opportunities}
+          defaultOpen={false}
           emptyText="No opportunities detected from your projects yet."
           loading={running}
           feedbackById={feedbackById}
