@@ -34,7 +34,7 @@ import {
   type SaveInsightFeedbackArgs,
 } from "@/lib/hooks/use-insight-feedback";
 import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
-import { IntelligenceStrip } from "./intelligence-strip";
+import { IntelligenceStrip, type FilterableProject } from "./intelligence-strip";
 import {
   InsightPanel,
   PanelEmpty,
@@ -97,7 +97,28 @@ function Section({
   );
 }
 
-export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => void } = {}) {
+export interface IntelligenceFeedProps {
+  onPin?: (card: InsightCard) => void;
+  /** Accessible projects used to populate the filter and default selection. */
+  availableProjects?: FilterableProject[];
+}
+
+const EMPTY_PROJECTS: FilterableProject[] = [];
+
+export function IntelligenceFeed({
+  onPin,
+  availableProjects: propAvailableProjects,
+}: IntelligenceFeedProps = {}) {
+  // Normalize the accessible project list to a stable reference so the filter
+  // state and memoized derived lists don't churn when the parent passes a new
+  // empty array each render while loading.
+  const availableProjects = useMemo(
+    () =>
+      propAvailableProjects && propAvailableProjects.length > 0
+        ? propAvailableProjects
+        : EMPTY_PROJECTS,
+    [propAvailableProjects],
+  );
   const { toasts, push: pushToast, dismiss } = useToasts();
   const [saveCard, setSaveCard] = useState<InsightCard | null>(null);
   const [status, setStatus] = useState<Status>("idle");
@@ -110,6 +131,92 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
   const [, forceTick] = useState(0);
   const [stale, setStale] = useState(false);
   const [staleProjectIds, setStaleProjectIds] = useState<string[]>([]);
+
+  interface ProjectSelection {
+    ids: Set<string>;
+    allSelected: boolean;
+  }
+
+  const [selection, setSelection] = useState<ProjectSelection>({
+    ids: new Set(),
+    allSelected: true,
+  });
+
+  // Build the authoritative list of filterable projects from the accessible
+  // project list and from any projects already present in the stream/snapshot.
+  const knownProjects = useMemo<FilterableProject[]>(() => {
+    const map = new Map<string, FilterableProject>();
+    for (const p of availableProjects) map.set(p.id, p);
+    for (const p of projects) {
+      if (!map.has(p.id)) {
+        map.set(p.id, { id: p.id, name: p.name, accent: p.color });
+      }
+    }
+    for (const [id, r] of Object.entries(results)) {
+      if (!map.has(id)) {
+        map.set(id, { id, name: r.projectName, accent: r.projectColor });
+      }
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [availableProjects, projects, results]);
+
+  const availableProjectIds = useMemo(
+    () => new Set(knownProjects.map((p) => p.id)),
+    [knownProjects],
+  );
+
+  // Reconcile the selection when the project list changes. Keep the
+  // all-selected state expanded to include newly discovered projects; otherwise
+  // preserve the user's explicit subset.
+  useEffect(() => {
+    if (availableProjectIds.size === 0) return;
+    setSelection((prev) => {
+      if (prev.allSelected) return { ...prev, ids: new Set(availableProjectIds) };
+      return {
+        ...prev,
+        ids: new Set([...prev.ids].filter((id) => availableProjectIds.has(id))),
+      };
+    });
+  }, [availableProjectIds]);
+
+  const selectedProjectIds = useMemo<Set<string>>(() => {
+    if (
+      selection.allSelected &&
+      availableProjectIds.size > 0 &&
+      selection.ids.size === 0
+    ) {
+      return availableProjectIds;
+    }
+    return selection.ids;
+  }, [selection, availableProjectIds]);
+
+  const isAllSelected = useMemo(
+    () =>
+      availableProjectIds.size > 0 &&
+      availableProjectIds.size === selectedProjectIds.size &&
+      [...availableProjectIds].every((id) => selectedProjectIds.has(id)),
+    [availableProjectIds, selectedProjectIds],
+  );
+
+  const toggleProject = useCallback((id: string) => {
+    setSelection((prev) => {
+      const nextIds = new Set(prev.ids);
+      if (nextIds.has(id)) nextIds.delete(id);
+      else nextIds.add(id);
+      const allSelected =
+        availableProjectIds.size > 0 &&
+        [...availableProjectIds].every((pid) => nextIds.has(pid));
+      return { ids: nextIds, allSelected };
+    });
+  }, [availableProjectIds]);
+
+  const selectAllProjects = useCallback(() => {
+    setSelection({ ids: new Set(availableProjectIds), allSelected: true });
+  }, [availableProjectIds]);
+
+  const clearProjects = useCallback(() => {
+    setSelection({ ids: new Set(), allSelected: false });
+  }, []);
 
   const controllerRef = useRef<AbortController | null>(null);
   // Background re-run accumulates into these buffers and commits at "done" so
@@ -272,8 +379,11 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
   }, []);
 
   const allInsights = useMemo(
-    () => Object.values(results).flatMap((r) => r.insights),
-    [results],
+    () =>
+      Object.values(results)
+        .filter((r) => selectedProjectIds.has(r.projectId))
+        .flatMap((r) => r.insights),
+    [results, selectedProjectIds],
   );
 
   const insightIds = useMemo(
@@ -343,7 +453,12 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
       !trends.includes(c),
   );
 
-  const pending = projects.filter((p) => !completed.has(p.id));
+  const visibleProjects = useMemo(
+    () => projects.filter((p) => selectedProjectIds.has(p.id)),
+    [projects, selectedProjectIds],
+  );
+
+  const pending = visibleProjects.filter((p) => !completed.has(p.id));
   const running = status === "streaming";
 
   const granularity = settings?.granularity ?? 3;
@@ -375,18 +490,26 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
   );
 
   const empty =
-    status === "complete" && allInsights.length === 0 && projects.length === 0;
+    status === "complete" &&
+    allInsights.length === 0 &&
+    visibleProjects.length === 0;
 
   return (
     <div className="space-y-4">
       <IntelligenceStrip
-        projectCount={projects.length}
+        projectCount={selectedProjectIds.size}
+        totalProjectCount={availableProjectIds.size}
         running={running}
         lastUpdatedLabel={formatLastUpdated(lastUpdated)}
         onRefresh={handleRefresh}
         granularity={granularity}
         onGranularityChange={handleGranularity}
         synthesisHeadline={synthesis ? stripStars(synthesis.headline) : null}
+        availableProjects={knownProjects}
+        selectedProjectIds={selectedProjectIds}
+        onToggleProject={toggleProject}
+        onSelectAll={selectAllProjects}
+        onClear={clearProjects}
       />
 
       {stale && (
@@ -414,79 +537,87 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
       )}
 
       <div className="space-y-6">
-        {synthesis?.body && (
-          <div className="rounded-lg border border-brand/30 bg-ai-bg p-4">
-            <div className="flex items-start gap-2 text-ai">
-              <IconSparkles size={18} className="mt-0.5 shrink-0" />
-              <p className="text-body text-ink-secondary">
-                {renderBold(synthesis.body)}
-              </p>
-            </div>
-          </div>
-        )}
-
-        <Section
-          title="Risks"
-          icon={<IconAlertTriangle size={16} className="text-warning" />}
-          cards={risks}
-          emptyText="No risks detected from your projects yet."
-          loading={running}
-          feedbackById={feedbackById}
-          savingFeedback={savingFeedback}
-          onSaveToDashboard={handleSaveToDashboard}
-          onPin={onPin}
-          onFeedbackSave={handleFeedbackSave}
-          onFeedbackRemove={handleFeedbackRemove}
-        />
-        <Section
-          title="Trends"
-          icon={<IconTrendingUp size={16} className="text-ink-secondary" />}
-          cards={trends}
-          emptyText="No trends detected from your projects yet."
-          loading={running}
-          feedbackById={feedbackById}
-          savingFeedback={savingFeedback}
-          onSaveToDashboard={handleSaveToDashboard}
-          onPin={onPin}
-          onFeedbackSave={handleFeedbackSave}
-          onFeedbackRemove={handleFeedbackRemove}
-        />
-        <Section
-          title="Opportunities"
-          icon={<IconBulb size={16} className="text-success" />}
-          cards={opportunities}
-          emptyText="No opportunities detected from your projects yet."
-          loading={running}
-          feedbackById={feedbackById}
-          savingFeedback={savingFeedback}
-          onSaveToDashboard={handleSaveToDashboard}
-          onPin={onPin}
-          onFeedbackSave={handleFeedbackSave}
-          onFeedbackRemove={handleFeedbackRemove}
-        />
-
-        {pending.length > 0 && (
-          <div className="space-y-3">
-            {pending.map((p) => (
-              <LoadingCard key={p.id} projectName={p.name} />
-            ))}
-          </div>
-        )}
-
-        {empty && (
+        {selectedProjectIds.size === 0 && knownProjects.length > 0 ? (
           <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
-            No projects to analyze yet. Create a project and connect data to
-            see AI intelligence here.
+            Select one or more projects to view Business Insights.
           </div>
-        )}
+        ) : (
+          <>
+            {isAllSelected && synthesis?.body && (
+              <div className="rounded-lg border border-brand/30 bg-ai-bg p-4">
+                <div className="flex items-start gap-2 text-ai">
+                  <IconSparkles size={18} className="mt-0.5 shrink-0" />
+                  <p className="text-body text-ink-secondary">
+                    {renderBold(synthesis.body)}
+                  </p>
+                </div>
+              </div>
+            )}
 
-        {status === "complete" &&
-          allInsights.length === 0 &&
-          projects.length > 0 && (
-            <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
-              No new insights are available right now.
-            </div>
-          )}
+            <Section
+              title="Risks"
+              icon={<IconAlertTriangle size={16} className="text-warning" />}
+              cards={risks}
+              emptyText="No risks detected from your projects yet."
+              loading={running}
+              feedbackById={feedbackById}
+              savingFeedback={savingFeedback}
+              onSaveToDashboard={handleSaveToDashboard}
+              onPin={onPin}
+              onFeedbackSave={handleFeedbackSave}
+              onFeedbackRemove={handleFeedbackRemove}
+            />
+            <Section
+              title="Trends"
+              icon={<IconTrendingUp size={16} className="text-ink-secondary" />}
+              cards={trends}
+              emptyText="No trends detected from your projects yet."
+              loading={running}
+              feedbackById={feedbackById}
+              savingFeedback={savingFeedback}
+              onSaveToDashboard={handleSaveToDashboard}
+              onPin={onPin}
+              onFeedbackSave={handleFeedbackSave}
+              onFeedbackRemove={handleFeedbackRemove}
+            />
+            <Section
+              title="Opportunities"
+              icon={<IconBulb size={16} className="text-success" />}
+              cards={opportunities}
+              emptyText="No opportunities detected from your projects yet."
+              loading={running}
+              feedbackById={feedbackById}
+              savingFeedback={savingFeedback}
+              onSaveToDashboard={handleSaveToDashboard}
+              onPin={onPin}
+              onFeedbackSave={handleFeedbackSave}
+              onFeedbackRemove={handleFeedbackRemove}
+            />
+
+            {pending.length > 0 && (
+              <div className="space-y-3">
+                {pending.map((p) => (
+                  <LoadingCard key={p.id} projectName={p.name} />
+                ))}
+              </div>
+            )}
+
+            {empty && (
+              <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
+                No projects to analyze yet. Create a project and connect data to
+                see AI intelligence here.
+              </div>
+            )}
+
+            {status === "complete" &&
+              allInsights.length === 0 &&
+              visibleProjects.length > 0 && (
+                <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
+                  No new insights are available right now.
+                </div>
+              )}
+          </>
+        )}
       </div>
 
       {saveCard && (
