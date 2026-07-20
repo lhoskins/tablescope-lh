@@ -216,7 +216,11 @@ export function IntelligenceCard({
 
   return (
     <article
-      className={`rounded-lg border border-line-tertiary bg-bg-primary p-4`}
+      className={
+        frozen
+          ? "flex h-full flex-col p-3"
+          : "rounded-lg border border-line-tertiary bg-bg-primary p-4"
+      }
     >
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
