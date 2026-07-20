@@ -2,7 +2,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { IntelligenceFeed } from "./intelligence-feed";
-import type { InsightCard } from "@/lib/api/home-intelligence";
+import type { FilterableProject } from "./intelligence-strip";
+import type { InsightCard, IntelligenceSnapshot } from "@/lib/api/home-intelligence";
 
 const { streamHomeIntelligence, getIntelligenceSnapshot, getPreferences, updatePreferences } = vi.hoisted(() => ({
   streamHomeIntelligence: vi.fn(() => ({ abort: vi.fn() })),
@@ -56,7 +57,7 @@ const OPPORTUNITY: InsightCard = {
   summary: "Top suppliers account for most spend.",
 };
 
-const SNAPSHOT = {
+const SNAPSHOT: IntelligenceSnapshot = {
   granularity: 3,
   updatedAt: "2026-01-01T00:00:00Z",
   generatedAt: "2026-01-01T00:00:00Z",
@@ -72,13 +73,22 @@ const SNAPSHOT = {
   synthesis: null,
 };
 
-function renderFeed() {
+function renderFeed({
+  snapshot,
+  availableProjects,
+}: {
+  snapshot?: IntelligenceSnapshot;
+  availableProjects?: FilterableProject[];
+} = {}) {
+  if (snapshot) {
+    getIntelligenceSnapshot.mockResolvedValue({ snapshot });
+  }
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <IntelligenceFeed />
+      <IntelligenceFeed availableProjects={availableProjects} />
     </QueryClientProvider>,
   );
 }
@@ -200,5 +210,108 @@ describe("IntelligenceFeed", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Opportunities/ }));
     expect(streamHomeIntelligence.mock.calls.length).toBe(before);
+  });
+
+  it("starts with all projects selected and filters cards when a project is deselected", async () => {
+    const snapshot = {
+      ...SNAPSHOT,
+      projects: [
+        { id: "1", name: "Project A", color: "#123456" },
+        { id: "2", name: "Project B", color: "#654321" },
+      ],
+      results: [
+        SNAPSHOT.results[0],
+        {
+          projectId: "2",
+          projectName: "Project B",
+          projectColor: "#654321",
+          insights: [
+            {
+              ...RISK,
+              id: "risk-2",
+              projectId: "2",
+              projectName: "Project B",
+              title: "Risk B",
+            },
+          ],
+        },
+      ],
+    };
+    renderFeed({ snapshot });
+    await screen.findByRole("button", { name: /Risks/ });
+
+    expect(screen.getByText("All projects")).toBeTruthy();
+    expect(screen.getByText("SLA breach")).toBeTruthy();
+    expect(screen.getByText("Risk B")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter by project" }));
+    const checkbox = await screen.findByLabelText("Project A");
+    fireEvent.click(checkbox);
+
+    await waitFor(() => expect(screen.queryByText("SLA breach")).toBeNull());
+    expect(screen.getByText("Risk B")).toBeTruthy();
+    expect(screen.getByText("1 project")).toBeTruthy();
+  });
+
+  it("shows empty state and hides sections when all projects are cleared", async () => {
+    renderFeed();
+    await screen.findByRole("button", { name: /Risks/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter by project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Select one or more projects to view Business Insights.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByRole("button", { name: /Risks/ })).toBeNull();
+    expect(screen.getByText("0 projects")).toBeTruthy();
+  });
+
+  it("hides cross-project synthesis when a subset of projects is selected", async () => {
+    const snapshot = {
+      ...SNAPSHOT,
+      projects: [
+        { id: "1", name: "Project A", color: "#123456" },
+        { id: "2", name: "Project B", color: "#654321" },
+      ],
+      results: [
+        SNAPSHOT.results[0],
+        {
+          projectId: "2",
+          projectName: "Project B",
+          projectColor: "#654321",
+          insights: [
+            {
+              ...RISK,
+              id: "risk-2",
+              projectId: "2",
+              projectName: "Project B",
+              title: "Risk B",
+            },
+          ],
+        },
+      ],
+      synthesis: {
+        headline: "Cross-project headline",
+        body: "Cross-project synthesis body.",
+        projectIds: ["1", "2"],
+      },
+    };
+    renderFeed({ snapshot });
+    await screen.findByText("Cross-project synthesis body.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter by project" }));
+    const checkbox = await screen.findByLabelText("Project A");
+    fireEvent.click(checkbox);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Cross-project synthesis body."),
+      ).toBeNull(),
+    );
   });
 });

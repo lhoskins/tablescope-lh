@@ -108,7 +108,10 @@ export default function BusinessInsightPage() {
         <div className="mx-auto w-full max-w-content space-y-6">
           <HomeAiSuggestions />
         </div>
-        <IntelligenceFeed onPin={handlePinInsight} />
+        <IntelligenceFeed
+          onPin={handlePinInsight}
+          availableProjects={allProjects ?? []}
+        />
       </div>
 
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
