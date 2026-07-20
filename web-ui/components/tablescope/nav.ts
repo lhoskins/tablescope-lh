@@ -142,6 +142,13 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconBinaryTree,
         },
         {
+          key: "project-documents",
+          label: "Documents",
+          href: `${base}/documents`,
+          icon: IconFileText,
+          countKey: "documents",
+        },
+        {
           key: "project-business-context",
           label: "Business Context",
           href: `${base}/business-context`,
@@ -157,12 +164,6 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           label: "Ask TableScope",
           href: `${base}/ai`,
           icon: IconMessage,
-        },
-        {
-          key: "project-relationship-map",
-          label: "Knowledge Graph",
-          href: `${base}/relationship-map`,
-          icon: IconTopologyStar3,
         },
         {
           key: "project-knowledge-graph",
