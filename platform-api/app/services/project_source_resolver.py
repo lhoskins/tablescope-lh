@@ -120,7 +120,7 @@ class ResolverCandidate:
 class ResolverResult:
     """Outcome of resolving a request onto authorized project sources."""
 
-    status: str  # "resolved" | "ambiguous" | "no_match"
+    status: str  # "resolved" | "no_match"
     preferred_sources: list[str] = field(default_factory=list)
     relevant_columns: list[str] = field(default_factory=list)
     intent: str = ""

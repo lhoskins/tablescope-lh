@@ -21,25 +21,24 @@ import json
 import logging
 import re
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
-from app.models.ai_conversation import AiConversation, AiConversationMessage
 from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
+from app.services import ai_intelligence_client as ai
 from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.analytical_method_engine import data_profiler
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
@@ -59,17 +58,18 @@ from app.services.presentation_engine import (
     describe as describe_presentation,
 )
 from app.services.response_envelope import ResponseEnvelope
-from app.services.teiid_sql import normalize_teiid_timestamps
+from app.services.teiid_sql import (
+    collapse_bare_following_parens,
+    normalize_teiid_identifiers,
+    normalize_teiid_string_filters,
+    normalize_teiid_timestamps,
+)
 from app.services.visualization_engine import ChartType, select_visualization
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI"])
 
 TIMEOUT = httpx.Timeout(300.0, connect=10.0)
-
-# Bounded window of prior conversation turns forwarded to the AI server so
-# follow-up questions resolve against recent context without unbounded prompts.
-CONVERSATION_HISTORY_LIMIT = 20
 
 # Row cap for a data answer rendered inline in the AI Assistant chat.
 CHAT_ANSWER_MAX_ROWS = 100
@@ -85,6 +85,7 @@ class AIAskRequest(BaseModel):
     scope: str = "project"
     include_query_history: bool = True
     include_dashboard_context: bool = True
+    history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AIGenerateSQLRequest(BaseModel):
@@ -759,17 +760,24 @@ async def ask(
     if data_response is not None:
         return data_response
 
-    payload = {
-        "tenant_id": context.tenant_id,
-        "user_id": context.user_id,
-        "project_id": req.project_id,
-        "question": req.question,
-        "scope": req.scope,
-        "include_query_history": req.include_query_history,
-        "include_dashboard_context": req.include_dashboard_context,
-        "history": [],
+    answer = await _forward_prose_answer(
+        session,
+        context,
+        project_id=req.project_id,
+        question=req.question,
+        history=req.history,
+        scope=req.scope,
+        include_query_history=req.include_query_history,
+        include_dashboard_context=req.include_dashboard_context,
+    )
+    if not answer:
+        answer = "The AI service is temporarily unavailable. Please try again shortly."
+    response = {
+        "answer": answer,
+        "model_used": "tablescope-prose",
+        "request_id": "",
+        "context_summary": {},
     }
-    response = await _forward_to_ai("/ai/ask", payload)
     _attach_ask_envelope(response)
     return response
 
@@ -934,6 +942,29 @@ async def generate_relationships(
         "project_id": req.project_id,
     }
     return await _forward_to_ai("/ai/project/relationships/generate", payload)
+
+
+def _derive_dashboard_title(
+    project_name: str, widgets: list[dict[str, Any]]
+) -> str:
+    """Build a descriptive, non-generic dashboard title from the widget content."""
+    titles = [
+        str(w.get("title") or "").strip()
+        for w in widgets
+        if w.get("title") and str(w.get("title")).strip() not in ("", "Widget")
+    ]
+    seen: list[str] = []
+    for t in titles:
+        if t not in seen:
+            seen.append(t)
+        if len(seen) == 2:
+            break
+    if seen:
+        base = " & ".join(seen)
+        if "dashboard" not in base.lower():
+            base = f"{base} Dashboard"
+        return base
+    return f"{project_name} — AI Dashboard"
 
 
 def _shorten_ai_name(prompt: str) -> str:
@@ -1267,8 +1298,8 @@ async def _analyze_project_scopes(
             continue
 
         # Check fields exist in SELECT clauses
-        src_cols = query_col_map.get(src_qid, set())
-        tgt_cols = query_col_map.get(tgt_qid, set())
+        src_cols = query_col_map.get(cast(int, src_qid), set())
+        tgt_cols = query_col_map.get(cast(int, tgt_qid), set())
         if src_field.lower() not in src_cols or tgt_field.lower() not in tgt_cols:
             continue
 
@@ -1277,8 +1308,8 @@ async def _analyze_project_scopes(
         # values including numeric ones. When names differ (e.g.
         # CategoryName↔CategoryID), only compare string values to prevent
         # false matches between text and numeric columns.
-        src_vals = query_values.get(src_qid, {}).get(src_field, set())
-        tgt_vals = query_values.get(tgt_qid, {}).get(tgt_field, set())
+        src_vals = query_values.get(cast(int, src_qid), {}).get(src_field, set())
+        tgt_vals = query_values.get(cast(int, tgt_qid), {}).get(tgt_field, set())
         names_match = src_field.lower() == tgt_field.lower()
         overlap = _value_overlap(src_vals, tgt_vals, same_column_name=names_match)
 
@@ -1299,10 +1330,10 @@ async def _analyze_project_scopes(
 
         validated_scopes.append({
             "source_query_id": src_qid,
-            "source_query_name": suggestion.get("source_query_name", query_names.get(src_qid, "")),
+            "source_query_name": suggestion.get("source_query_name", query_names.get(cast(int, src_qid), "")),
             "source_field": src_field,
             "target_query_id": tgt_qid,
-            "target_query_name": suggestion.get("target_query_name", query_names.get(tgt_qid, "")),
+            "target_query_name": suggestion.get("target_query_name", query_names.get(cast(int, tgt_qid), "")),
             "target_field": tgt_field,
             "confidence": conf,
             "reason": suggestion.get("reason", ""),
@@ -2327,6 +2358,54 @@ async def _project_table_schema(
     return schema
 
 
+async def _column_samples_for_tables(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    allowed_tables: list[str],
+    table_schema: list[dict[str, Any]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Build per-column type and one sample-value map for the allowed tables.
+
+    The sample values drive ``normalize_teiid_timestamps`` so the AI's guessed
+    date masks (e.g. ``'M/d/yyyy'`` on an ISO column) are corrected to the
+    column's real format before Teiid sees them.
+    """
+    column_types: dict[str, str] = {}
+    for entry in table_schema:
+        table = entry.get("table")
+        if table not in allowed_tables:
+            continue
+        for col in entry.get("columns", []):
+            if isinstance(col, dict):
+                name = col.get("name")
+                col_type = col.get("type") or ""
+            else:
+                name = col
+                col_type = ""
+            if name:
+                column_types[str(name)] = str(col_type)
+
+    column_samples: dict[str, str] = {}
+    for table in allowed_tables:
+        try:
+            probe = await _execute_project_sql(
+                session, context, project_id,
+                f'SELECT * FROM "{table}" LIMIT 1',
+            )
+            if not probe or not probe.get("rows"):
+                continue
+            for col, val in probe["rows"][0].items():
+                if val is not None:
+                    column_samples[str(col)] = str(val)
+        except Exception as exc:
+            logger.warning(
+                "Could not sample table %s for date masks: %s", table, exc
+            )
+
+    return column_samples, column_types
+
+
 async def _execute_with_repair(
     session: AsyncSession,
     context: RequestContext,
@@ -2347,9 +2426,21 @@ async def _execute_with_repair(
     """
     from app.services import ai_intelligence_client as ai
 
+    column_samples, column_types = await _column_samples_for_tables(
+        session, context, project_id, allowed_tables, table_schema
+    )
+
     current = sql
     last_error = ""
     for attempt in range(3):
+        current = normalize_teiid_identifiers(current, table_schema)
+        current = normalize_teiid_string_filters(current, table_schema)
+        current = normalize_teiid_timestamps(
+            current,
+            column_samples=column_samples,
+            column_types=column_types,
+        )
+        current = collapse_bare_following_parens(current)
         bounded = _apply_row_limit(current, max_rows)
         try:
             result = await _execute_project_sql(
@@ -2453,20 +2544,28 @@ async def _generate_sql_for_question(
     source_catalog = await _build_source_catalog(
         session, tenant_id=context.tenant_id, project_id=project_id
     )
-    payload = {
-        "tenant_id": context.tenant_id,
-        "user_id": context.user_id,
-        "project_id": project_id,
-        "prompt": question,
-        "allowed_tables": allowed_tables,
-        "source_catalog": source_catalog,
-        "preferred_sources": preferred_sources or [],
-        "relevant_columns": relevant_columns or [],
-        "knowledge_graph_context": await _kg_context(
-            session, context, project_id
-        ),
-    }
-    ai_result = await _forward_to_ai("/ai/query/generate", payload)
+    try:
+        ai_result = await ai.generate_sql(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            prompt=question,
+            allowed_tables=allowed_tables,
+            source_catalog=source_catalog,
+            preferred_sources=preferred_sources or [],
+            relevant_columns=relevant_columns or [],
+            knowledge_graph_context=await _kg_context(session, context, project_id),
+        )
+    except ai.AIUnavailableError as exc:
+        raise HTTPException(
+            status_code=exc.status_code or status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    if not isinstance(ai_result, dict):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI server is unavailable",
+        )
     ai_result["_allowed_tables"] = allowed_tables
     return ai_result
 
@@ -2750,32 +2849,53 @@ async def _attach_analytical_envelope(
         response["analyticalMethod"] = envelope
 
 
+_CODE_FENCE_RE = re.compile(r"```[a-zA-Z0-9_-]*\n[\s\S]*?(?:```|\Z)")
+
+
+def _strip_model_markup(text: str) -> str:
+    """Remove raw model markup (fenced code blocks) from a prose answer.
+
+    Chat surfaces render plain text, so a leaked ``` block (usually SQL the
+    model narrated while thinking) shows up verbatim and confuses users. The
+    SQL for data answers is carried separately in structured fields — prose
+    must stay prose.
+    """
+    cleaned = _CODE_FENCE_RE.sub("", text or "").strip()
+    return re.sub(r"\n{3,}", "\n\n", cleaned)
+
+
 async def _forward_prose_answer(
+    session: AsyncSession,
     context: RequestContext,
     *,
     project_id: int,
     question: str,
     history: list[dict[str, str]] | None = None,
+    scope: str = "project",
+    include_query_history: bool = True,
+    include_dashboard_context: bool = True,
 ) -> str:
     """Free-text answer from the AI server's documents + knowledge-graph path.
 
     Used as a fallback for analytical/document questions that don't map to a
     single SQL source, so they get a real answer instead of a hard error.
+    Grounds the answer in the project's Knowledge Graph when one exists.
     """
     try:
-        result = await _forward_to_ai("/ai/ask", {
-            "tenant_id": context.tenant_id,
-            "user_id": context.user_id,
-            "project_id": project_id,
-            "question": question,
-            "scope": "project",
-            "include_query_history": True,
-            "include_dashboard_context": True,
-            "history": history or [],
-        })
-    except HTTPException:
+        result = await ai.ask(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            question=question,
+            scope=scope,
+            include_query_history=include_query_history,
+            include_dashboard_context=include_dashboard_context,
+            history=history or [],
+            knowledge_graph_context=await _kg_context(session, context, project_id),
+        )
+    except ai.AIUnavailableError:
         return ""
-    return str(result.get("answer") or "").strip()
+    return _strip_model_markup(str((result or {}).get("answer") or ""))
 
 
 @router.post("/actions/ask-and-run")
@@ -2810,10 +2930,13 @@ async def ai_ask_and_run(
         return result
     if result.get("status") == "generation_error":
         prose = await _forward_prose_answer(
-            context, project_id=req.project_id, question=req.question
+            session,
+            context,
+            project_id=req.project_id,
+            question=req.question,
         )
         if prose:
-            prose_result = {
+            prose_result: dict[str, Any] = {
                 "question": req.question,
                 "sql": "",
                 "columns": [],
@@ -2994,10 +3117,14 @@ async def ai_generate_and_save_dashboard(
     suggestion = suggestions[0]
     if req.name:
         dashboard_title = req.name
+    elif suggestion.get("title"):
+        dashboard_title = str(suggestion["title"])
     elif req.prompt:
         dashboard_title = _shorten_ai_name(req.prompt)
     else:
-        dashboard_title = suggestion.get("title", "AI - Dashboard")
+        dashboard_title = _derive_dashboard_title(
+            project.name, suggestion.get("widgets", [])
+        )
 
     widget_defs = list(suggestion.get("widgets", []))
     # Highest-priority widgets first (executive reading path top-left → bottom-right).
@@ -3404,7 +3531,7 @@ async def ai_suggest_dashboards(
     the existing ``/actions/generate-and-save-dashboard`` pipeline, which runs the
     full SQL validation/judge and drops empty widgets.
     """
-    await _check_project_access(session, context, req.project_id)
+    project = await _check_project_access(session, context, req.project_id)
 
     # Allowed tables = the project's real datasources (reference docs excluded).
     ds_stmt = select(FileSourceMeta).where(
@@ -3463,16 +3590,23 @@ async def ai_suggest_dashboards(
     for idx, s in enumerate(raw_suggestions):
         if not isinstance(s, dict):
             continue
-        widgets = await _render_preview_widgets(runner, s.get("widgets", []))
         # Only surface allowed tables as data sources (defence in depth).
         data_sources = [
             str(d) for d in s.get("data_sources", []) if str(d) in allowed_tables
         ]
-        title = str(s.get("title") or "AI Dashboard")
+        title = str(
+            s.get("title")
+            or s.get("business_purpose")
+            or _derive_dashboard_title(
+                project.name, list(s.get("widgets", []))
+            )
+            or "AI Dashboard"
+        )
         description = str(s.get("description", ""))
         business_purpose = str(s.get("business_purpose", ""))
         audience = str(s.get("audience") or req.audience or "")
         kpi_names = [str(k) for k in s.get("kpis", []) if k]
+        widgets = await _render_preview_widgets(runner, s.get("widgets", []))
         # savePayload is echoed back verbatim on Save so the save stage persists
         # *this* selected suggestion (its real widget SQL) rather than
         # re-deriving a plan from scratch.
@@ -3935,34 +4069,6 @@ def _pack_grid(widgets_config: list[dict[str, Any]]) -> None:
         row_h = max(row_h, gh)
 
 
-# ---------------------------------------------------------------------------
-# Saved AI conversations (Home AI Assistant)
-# ---------------------------------------------------------------------------
-
-
-class ConversationCreate(BaseModel):
-    title: str | None = None
-    project_id: int | None = None
-
-
-class ConversationRename(BaseModel):
-    title: str
-
-
-class ConversationMessageCreate(BaseModel):
-    question: str
-    project_id: int | None = None
-
-
-def _message_dict(m: AiConversationMessage) -> dict[str, Any]:
-    return {
-        "id": m.id,
-        "role": m.role,
-        "content": m.content,
-        "data": m.data,
-        "createdAt": m.created_at.isoformat() if m.created_at else None,
-    }
-
 
 def _chat_answer_text(question: str, run: dict[str, Any]) -> str:
     """Short natural-language answer for an executed chat query.
@@ -3983,332 +4089,3 @@ def _chat_answer_text(question: str, run: dict[str, Any]) -> str:
     summary = f"Here are the results ({len(rows)} rows)."
     return f"{explanation}\n\n{summary}".strip() if explanation else summary
 
-
-def _conversation_dict(
-    c: AiConversation, *, include_messages: bool = False
-) -> dict[str, Any]:
-    data: dict[str, Any] = {
-        "id": c.id,
-        "title": c.title,
-        "projectId": c.project_id,
-        "parentConversationId": c.parent_conversation_id,
-        "branchedFromMessageId": c.branched_from_message_id,
-        "createdAt": c.created_at.isoformat() if c.created_at else None,
-        "updatedAt": c.updated_at.isoformat() if c.updated_at else None,
-    }
-    if include_messages:
-        data["messages"] = [_message_dict(m) for m in c.messages]
-    return data
-
-
-async def _get_owned_conversation(
-    session: AsyncSession,
-    context: RequestContext,
-    conversation_id: int,
-    *,
-    with_messages: bool = False,
-) -> AiConversation:
-    stmt = select(AiConversation).where(
-        AiConversation.id == conversation_id,
-        AiConversation.tenant_id == context.tenant_id,
-        AiConversation.user_id == context.user_id,
-    )
-    if with_messages:
-        stmt = stmt.options(selectinload(AiConversation.messages))
-    convo = (await session.execute(stmt)).scalar_one_or_none()
-    if convo is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return convo
-
-
-async def _default_project_id(
-    session: AsyncSession, context: RequestContext
-) -> int | None:
-    member_sub = select(ProjectMember.project_id).where(
-        ProjectMember.user_id == context.user_id,
-        ProjectMember.is_active.is_(True),
-    )
-    return await session.scalar(
-        select(Project.id)
-        .where(
-            Project.tenant_id == context.tenant_id,
-            or_(
-                Project.owner_id == context.user_id,
-                Project.id.in_(member_sub),
-            ),
-        )
-        .order_by(Project.updated_at.desc())
-        .limit(1)
-    )
-
-
-@router.get("/conversations")
-async def list_conversations(
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> list[dict[str, Any]]:
-    """List the caller's saved AI conversations (most recent first)."""
-    rows = list(
-        await session.scalars(
-            select(AiConversation)
-            .where(
-                AiConversation.tenant_id == context.tenant_id,
-                AiConversation.user_id == context.user_id,
-            )
-            .order_by(AiConversation.updated_at.desc())
-        )
-    )
-    return [_conversation_dict(c) for c in rows]
-
-
-@router.post("/conversations")
-async def create_conversation(
-    req: ConversationCreate,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Create a new (empty) conversation."""
-    project_id = req.project_id
-    if project_id is not None:
-        await _check_project_access(session, context, project_id)
-    convo = AiConversation(
-        tenant_id=context.tenant_id,
-        user_id=context.user_id,
-        project_id=project_id,
-        title=(req.title or "New conversation")[:255],
-    )
-    session.add(convo)
-    await session.commit()
-    await session.refresh(convo)
-    data = _conversation_dict(convo)
-    data["messages"] = []
-    return data
-
-
-@router.get("/conversations/{conversation_id}")
-async def get_conversation(
-    conversation_id: int,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Fetch a conversation with its full message history."""
-    convo = await _get_owned_conversation(
-        session, context, conversation_id, with_messages=True
-    )
-    return _conversation_dict(convo, include_messages=True)
-
-
-@router.put("/conversations/{conversation_id}")
-async def rename_conversation(
-    conversation_id: int,
-    req: ConversationRename,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Rename a conversation."""
-    convo = await _get_owned_conversation(session, context, conversation_id)
-    convo.title = req.title.strip()[:255] or convo.title
-    await session.commit()
-    await session.refresh(convo)
-    return _conversation_dict(convo)
-
-
-@router.delete("/conversations/{conversation_id}", status_code=204)
-async def delete_conversation(
-    conversation_id: int,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> Response:
-    """Delete a conversation and its messages."""
-    convo = await _get_owned_conversation(session, context, conversation_id)
-    await session.delete(convo)
-    await session.commit()
-    return Response(status_code=204)
-
-
-@router.post("/conversations/{conversation_id}/messages")
-async def add_conversation_message(
-    conversation_id: int,
-    req: ConversationMessageCreate,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Append a user message, get an AI answer, and persist both."""
-    question = req.question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Question is required")
-
-    convo = await _get_owned_conversation(
-        session, context, conversation_id, with_messages=True
-    )
-
-    # Prior turns (oldest→newest) so the AI can resolve follow-up references
-    # like "explain more" or "the second option" without the user restating
-    # context. Captured before the new user message is appended.
-    history = [
-        {"role": m.role, "content": m.content}
-        for m in convo.messages[-CONVERSATION_HISTORY_LIMIT:]
-        if (m.content or "").strip()
-    ]
-
-    # Resolve the project used to scope the AI answer.
-    project_id = req.project_id or convo.project_id
-    if project_id is not None:
-        await _check_project_access(session, context, project_id)
-    else:
-        project_id = await _default_project_id(session, context)
-    if project_id is not None and convo.project_id != project_id:
-        convo.project_id = project_id
-
-    # First user message becomes the conversation title.
-    if not convo.messages:
-        convo.title = question[:120]
-
-    user_msg = AiConversationMessage(
-        conversation_id=convo.id, role="user", content=question
-    )
-    session.add(user_msg)
-
-    answer: str
-    answer_data: dict[str, Any] | None = None
-    if _is_query_summary_request(question):
-        # Answered directly from the DB across all accessible projects — no
-        # AI-server call, so it never fails with a signature error and always
-        # reflects the caller's real authorized queries.
-        answer = await _build_query_summary(session, context)
-    elif project_id is None:
-        answer = (
-            "I couldn't find a project to ground my answer. Create a project "
-            "with data first, then ask again."
-        )
-    else:
-        # Answer data questions the same way the Project Insight page does:
-        # auto-resolve the source, generate + execute SQL, and return the real
-        # result (rows + suggested chart) rather than printing SQL. If the
-        # question isn't a data question the source can ground (e.g. a document
-        # or summary request), fall back to the free-text AI answer.
-        run = await _ask_and_run_core(
-            session, context,
-            project_id=project_id,
-            question=question,
-            max_rows=CHAT_ANSWER_MAX_ROWS,
-        )
-        if run.get("status") == "success":
-            answer = _chat_answer_text(question, run)
-            answer_data = {
-                "sql": run.get("sql", ""),
-                "columns": run.get("columns", []),
-                "rows": run.get("rows", []),
-                "suggestedVisualization": run.get(
-                    "suggestedVisualization", {"type": "table"}
-                ),
-                "explanation": run.get("explanation", ""),
-                "dataSourcesUsed": run.get("dataSourcesUsed", []),
-            }
-        else:
-            answer = await _forward_prose_answer(
-                context,
-                project_id=project_id,
-                question=question,
-                history=history,
-            ) or "The AI returned an empty response."
-
-    assistant_msg = AiConversationMessage(
-        conversation_id=convo.id, role="assistant", content=answer,
-        data=answer_data,
-    )
-    session.add(assistant_msg)
-    await session.commit()
-
-    # Vectorize the Q+A pair for future learning/retrieval.
-    try:
-        await _forward_to_ai("/ai/index/conversation", {
-            "tenant_id": context.tenant_id,
-            "user_id": context.user_id,
-            "project_id": project_id,
-            "conversation_id": convo.id,
-            "question": question,
-            "answer": answer,
-        })
-    except Exception:
-        pass  # best-effort — don't block the response
-
-    # Expire the (stale, empty) messages collection so the re-query below
-    # actually reloads it with the just-appended user/assistant pair — without
-    # this the identity-mapped object would return its earlier-loaded state.
-    session.expire(convo, ["messages"])
-    refreshed = await _get_owned_conversation(
-        session, context, conversation_id, with_messages=True
-    )
-    return _conversation_dict(refreshed, include_messages=True)
-
-
-class ConversationBranchCreate(BaseModel):
-    # When omitted, the branch forks from the last message of the source.
-    message_id: int | None = None
-    title: str | None = None
-
-
-@router.post("/conversations/{conversation_id}/branch")
-async def branch_conversation(
-    conversation_id: int,
-    req: ConversationBranchCreate,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> dict[str, Any]:
-    """Fork a new conversation from a point in an existing one.
-
-    Copies every message up to and including ``message_id`` into a fresh
-    conversation that records its parent + the branch point, so the user can
-    explore an alternative direction without disturbing the original thread.
-    """
-    source = await _get_owned_conversation(
-        session, context, conversation_id, with_messages=True
-    )
-    if req.message_id is None:
-        # Branch from the tail of the thread.
-        if not source.messages:
-            raise HTTPException(
-                status_code=400, detail="Cannot branch an empty conversation"
-            )
-        branch_point: AiConversationMessage = source.messages[-1]
-    else:
-        found: AiConversationMessage | None = None
-        for _m in source.messages:
-            if _m.id == req.message_id:
-                found = _m
-                break
-        if found is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Branch message not found in conversation",
-            )
-        branch_point = found
-
-    title = (req.title or "").strip() or f"Branch of {source.title}"
-    branch = AiConversation(
-        tenant_id=context.tenant_id,
-        user_id=context.user_id,
-        project_id=source.project_id,
-        title=title[:255],
-        parent_conversation_id=source.id,
-        branched_from_message_id=branch_point.id,
-    )
-    session.add(branch)
-    await session.flush()
-
-    for m in source.messages:
-        session.add(
-            AiConversationMessage(
-                conversation_id=branch.id, role=m.role, content=m.content,
-                data=m.data,
-            )
-        )
-        if m.id == branch_point.id:
-            break
-
-    await session.commit()
-    refreshed = await _get_owned_conversation(
-        session, context, branch.id, with_messages=True
-    )
-    return _conversation_dict(refreshed, include_messages=True)

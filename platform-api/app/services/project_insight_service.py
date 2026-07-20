@@ -17,7 +17,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dashboard import Dashboard
@@ -28,6 +28,7 @@ from app.models.project_asset import ProjectAsset
 from app.models.project_insight_acknowledgement import (
     ProjectInsightAcknowledgement,
 )
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.saved_query import SavedQuery
 from app.models.user import User
 from app.schemas.project_insight import (
@@ -39,6 +40,7 @@ from app.schemas.project_insight import (
 from app.services import ai_intelligence_client as ai
 from app.services import home_intelligence as hi
 from app.services.ai_governance import ai_governance_service, infer_governance_key
+from app.services.executive_insight_dependencies import ExecutiveInsightDependencyService
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
@@ -48,6 +50,23 @@ logger = logging.getLogger(__name__)
 
 # Window used for the deterministic "What Changed Since Last Visit" deltas.
 _ACTIVITY_WINDOW = timedelta(days=7)
+
+
+async def mark_project_insight_stale(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int | None = None,
+) -> None:
+    """Mark all Project Insight snapshots for a tenant/project as stale."""
+    stmt = (
+        update(ProjectIntelligenceSnapshot)
+        .where(ProjectIntelligenceSnapshot.tenant_id == tenant_id)
+        .values(is_stale=True)
+    )
+    if project_id is not None:
+        stmt = stmt.where(ProjectIntelligenceSnapshot.project_id == project_id)
+    await session.execute(stmt)
 
 
 def _missing_data_hint(result: Any) -> str:
@@ -187,7 +206,7 @@ def _card_group(insight_type: str) -> str | None:
     """Map a built-in insight type onto risks / trends / opportunities."""
     if insight_type.startswith("risk"):
         return "risks"
-    if insight_type.startswith("trend"):
+    if insight_type.startswith(("trend", "relationship")):
         return "trends"
     if insight_type.startswith("opportunity"):
         return "opportunities"
@@ -252,6 +271,15 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
     }
 
 
+def _is_relationship_card(card: dict[str, Any]) -> bool:
+    """A multi-table relationship analysis with two populated series."""
+    if not str(card.get("insightType", "")).startswith("relationship"):
+        return False
+    if card.get("chartType") not in ("dual_line", "scatter"):
+        return False
+    return bool(card.get("valueColumn2"))
+
+
 async def _grouped_intelligence_cards(
     project: Project,
     ctx: hi.ProjectContext,
@@ -264,14 +292,18 @@ async def _grouped_intelligence_cards(
     """Generate Business Insight-style cards grouped by risk/trend/opportunity.
 
     Deterministic and project-scoped: reuses the existing Business Insight card
-    generators against this project's real data via its VDB runner. Returns
-    empty groups (clean empty state) when the data does not support any card.
+    generators against this project's real data via its VDB runner. When the
+    deterministic suite does not emit any multi-table relationship cards but
+    the project has join evidence, we run the AI-driven analyst loop with the
+    relationship floor so Project Insight also surfaces cross-table dual-line
+    analyses.
     """
     grouped: dict[str, list[dict[str, Any]]] = {
         "risks": [],
         "trends": [],
         "opportunities": [],
     }
+    cards: list[dict[str, Any]] = []
     try:
         if session is not None:
             cards = await hi.run_intelligence_suite(
@@ -289,9 +321,40 @@ async def _grouped_intelligence_cards(
             )
     except Exception as exc:
         logger.warning(
-            "project insight cards failed for project %s: %s", project.id, exc
+            "project insight deterministic cards failed for project %s: %s",
+            project.id,
+            exc,
         )
-        return grouped
+
+    if session is not None and tenant_id is not None and user_id is not None:
+        has_relationship = any(
+            _is_relationship_card(c) for c in cards if isinstance(c, dict)
+        )
+        if not has_relationship:
+            try:
+                relationship_cards = await hi.run_ai_intelligence(
+                    project,
+                    ctx,
+                    runner,
+                    session=session,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    granularity=3,
+                    max_analyses=4,
+                )
+                if relationship_cards:
+                    cards.extend(
+                        c
+                        for c in relationship_cards
+                        if isinstance(c, dict) and _is_relationship_card(c)
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "project insight relationship floor failed for project %s: %s",
+                    project.id,
+                    exc,
+                )
+
     for card in cards:
         if not isinstance(card, dict):
             continue
@@ -446,24 +509,36 @@ async def build_project_insight(
         kg_context.get("gaps", []) or []
     )
 
+    dep_service = ExecutiveInsightDependencyService(session)
+    dep = await dep_service.check(project.id)
+    graph_mode = dep["mode"]
+    graph_status = dep["graph_status"]
+    graph_blocking_reasons = dep["blocking_reasons"]
+    graph_disclosure = dep["disclosure"]
+
     ai_result: dict[str, Any] | None = None
-    try:
-        ai_result = await ai.project_insight(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            project_id=project.id,
-            project=project_meta.model_dump(),
-            tables=tables_payload,
-            documents=documents_payload,
-            queries=queries_payload,
-            dashboards=dashboards_payload,
-            kpis=kpi_names,
-            knowledge_graph_context=kg_context,
-            project_context=project_context or {},
+    if graph_mode == "blocked":
+        logger.info(
+            "Executive Insight blocked for project %s: %s", project.id, graph_blocking_reasons
         )
-    except Exception as exc:  # never break the page on an AI failure
-        logger.warning("project insight AI call failed (project %s): %s", project.id, exc)
-        ai_result = None
+    else:
+        try:
+            ai_result = await ai.project_insight(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                project_id=project.id,
+                project=project_meta.model_dump(),
+                tables=tables_payload,
+                documents=documents_payload,
+                queries=queries_payload,
+                dashboards=dashboards_payload,
+                kpis=kpi_names,
+                knowledge_graph_context=kg_context,
+                project_context=project_context or {},
+            )
+        except Exception as exc:  # never break the page on an AI failure
+            logger.warning("project insight AI call failed (project %s): %s", project.id, exc)
+            ai_result = None
 
     what_changed = await _what_changed(session, project.id, kg_updated)
     acks = await _acknowledgement_map(session, project.id)
@@ -480,6 +555,10 @@ async def build_project_insight(
             aiAvailable=False,
             aiContextEnabled=project_context.get("ai_context_enabled") if project_context else False,
             contextVersion=project_context.get("version") if project_context else 0,
+            graphStatus=graph_status,
+            graphMode=graph_mode,
+            graphBlockingReasons=graph_blocking_reasons,
+            graphDisclosure=graph_disclosure,
         )
 
     es = ai_result.get("executiveSummary") or {}
@@ -543,4 +622,8 @@ async def build_project_insight(
         aiAvailable=True,
         aiContextEnabled=project_context.get("ai_context_enabled") if project_context else False,
         contextVersion=project_context.get("version") if project_context else 0,
+        graphStatus=graph_status,
+        graphMode=graph_mode,
+        graphBlockingReasons=graph_blocking_reasons,
+        graphDisclosure=graph_disclosure,
     )

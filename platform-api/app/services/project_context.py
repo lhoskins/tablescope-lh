@@ -42,6 +42,7 @@ from app.schemas.project_context import (
     ProjectRiskUpdate,
     ReorderRequest,
 )
+from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
 from app.services.project_ai_context import invalidate_project_ai_context
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,16 @@ class ProjectContextService:
     def __init__(self, session: AsyncSession, context: RequestContext) -> None:
         self.session = session
         self.context = context
+
+    async def _mark_knowledge_graph_stale(self, project_id: int, reason: str) -> None:
+        """Mark the project's knowledge graph stale when authoritative context changes."""
+        try:
+            lifecycle = KnowledgeGraphLifecycleManager(self.session, self.context)
+            await lifecycle.mark_stale(project_id, reason)
+            await self.session.flush()
+        except Exception as exc:
+            # Never fail a context mutation because the graph lifecycle hook failed.
+            logger.warning("Failed to mark knowledge graph stale: %s", exc)
 
     async def _require_project(self, project_id: int, write: bool = False) -> Project:
         """Verify project access and return the project.
@@ -216,6 +227,7 @@ class ProjectContextService:
 
         new = settings.to_redacted_dict()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
         await self._audit(
             project_id=project_id,
             event_type="project_context.settings_updated",
@@ -330,6 +342,7 @@ class ProjectContextService:
         await self._sync_goal_links(goal, payload.linked_metric_ids, payload.linked_risk_ids)
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
 
         await self._audit(
             project_id=project_id,
@@ -393,6 +406,7 @@ class ProjectContextService:
 
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
 
         await self._audit(
             project_id=project_id,
@@ -415,6 +429,7 @@ class ProjectContextService:
         goal.version += 1
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
         await self._audit(
             project_id=project_id,
             event_type="project_context.goal_archived",
@@ -444,6 +459,7 @@ class ProjectContextService:
             goal_map[goal_id].version += 1
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
 
     # ── Metrics ───────────────────────────────────────────────────────────
 
@@ -543,6 +559,7 @@ class ProjectContextService:
 
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
 
         await self._audit(
             project_id=project_id,
@@ -610,6 +627,7 @@ class ProjectContextService:
         metric.version += 1
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
 
         await self._audit(
             project_id=project_id,
@@ -632,6 +650,7 @@ class ProjectContextService:
         metric.version += 1
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
         await self._audit(
             project_id=project_id,
             event_type="project_context.metric_archived",
@@ -661,6 +680,7 @@ class ProjectContextService:
             metric_map[metric_id].version += 1
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
 
     # ── Targets ──────────────────────────────────────────────────────────
 
@@ -732,6 +752,7 @@ class ProjectContextService:
         await self.session.flush()
         await self.session.refresh(target)
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
         await self._audit(
             project_id=project_id,
             event_type="project_context.target_created",
@@ -792,6 +813,7 @@ class ProjectContextService:
         await self.session.flush()
         await self.session.refresh(target)
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
         await self._audit(
             project_id=project_id,
             event_type="project_context.target_updated"
@@ -821,6 +843,7 @@ class ProjectContextService:
         target.version += 1
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
         await self._audit(
             project_id=project_id,
             event_type="project_context.target_archived",
@@ -927,6 +950,7 @@ class ProjectContextService:
         await self._sync_risk_links(risk, payload.linked_goal_ids, payload.linked_metric_ids)
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
 
         await self._audit(
             project_id=project_id,
@@ -994,6 +1018,7 @@ class ProjectContextService:
 
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
         await self._audit(
             project_id=project_id,
             event_type="project_context.risk_updated"
@@ -1015,6 +1040,7 @@ class ProjectContextService:
         risk.version += 1
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
         await self._audit(
             project_id=project_id,
             event_type="project_context.risk_archived",
@@ -1044,6 +1070,7 @@ class ProjectContextService:
             risk_map[risk_id].version += 1
         await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
+        await self._mark_knowledge_graph_stale(project_id, "Project context updated")
 
     # ── Full context and permissions ────────────────────────────────────
 

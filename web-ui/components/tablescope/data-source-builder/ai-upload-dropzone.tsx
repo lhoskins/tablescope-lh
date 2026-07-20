@@ -12,7 +12,12 @@ import { analyzeFile } from "@/lib/api/data-source-builder";
 const MAX_BYTES = 100 * 1024 * 1024;
 const ALLOWED = ["csv", "xlsx", "xls"];
 
-export function AiUploadDropzone() {
+interface AiUploadDropzoneProps {
+  /** Called after all selected files have been processed and at least one was ingested without error. */
+  onUploadsDone?: () => void;
+}
+
+export function AiUploadDropzone({ onUploadsDone }: AiUploadDropzoneProps = {}) {
   const addSource = useBuilderStore((s) => s.addSource);
   const hasSource = useBuilderStore((s) => s.hasSource);
   const markCreated = useBuilderStore((s) => s.markCreated);
@@ -77,11 +82,15 @@ export function AiUploadDropzone() {
     if (!files || files.length === 0) return;
     setError(null);
     setBusy(true);
+    let added = false;
+    let hadError = false;
     try {
       for (const file of Array.from(files)) {
         try {
           await ingest(file);
+          added = true;
         } catch (err) {
+          hadError = true;
           setError(
             err instanceof Error
               ? err.message
@@ -93,6 +102,7 @@ export function AiUploadDropzone() {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
     }
+    if (added && !hadError) onUploadsDone?.();
   };
 
   return (

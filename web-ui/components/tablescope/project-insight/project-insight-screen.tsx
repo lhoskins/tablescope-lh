@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -39,7 +39,7 @@ import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewM
 import type { AiCardContext } from "@/lib/api/ai-actions";
 import { GenerateDashboardModal } from "@/components/tablescope/project-insight/generate-dashboard-modal";
 import { renderBold } from "@/components/tablescope/home/intelligence-card";
-import { InsightsPanel } from "@/components/tablescope/home/ai-suggestions";
+import { InsightsPanel, HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import {
   InsightExplanationPanel,
 } from "@/components/tablescope/home/insight-explanation-panel";
@@ -70,6 +70,34 @@ function cardContextFromCard(card: ProjectInsightCard): AiCardContext {
     source_columns: card.sourceColumns,
     metric: card.metric,
     period_column: card.periodColumn,
+  };
+}
+
+function toProjectInsightCard(card: InsightCardData): ProjectInsightCard {
+  const supporting: string[] = [
+    ...(card.sources?.tables ?? []),
+    ...(card.sources?.documents ?? []),
+  ];
+  const severity =
+    card.severity === "info" ? "informational" : card.severity;
+  return {
+    id: card.insightId ?? card.id,
+    insightId: card.insightId ?? card.id,
+    insightType: card.insightType,
+    title: card.title,
+    summary: card.summary,
+    severity: severity as ProjectInsightCard["severity"],
+    recommendedAction: card.callout?.text,
+    question: card.question || card.title || card.summary,
+    supportingSources: supporting,
+    sourceTables: card.sources?.tables,
+    explanation: card.explanation as unknown as Record<string, unknown>,
+    sql: card.sql,
+    chartType: card.chartType,
+    labelColumn: card.labelColumn,
+    valueColumn: card.valueColumn,
+    valueColumn2: card.valueColumn2,
+    executedAt: card.executedAt,
   };
 }
 
@@ -109,25 +137,20 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       // Hydrate instantly from the saved server snapshot (no forced run).
       queryFn: () => projectInsightApi.get(projectId),
       staleTime: 5 * 60_000,
+      refetchInterval: (query) => {
+        const latest = query.state.data as ProjectInsight | undefined;
+        return latest?.stale ? 5_000 : false;
+      },
     });
 
-  // Snapshot behavior mirroring Business Insight: after hydrating from the
-  // saved snapshot, re-run in the background and commit the fresh result only
-  // once the run completes — the visible cards are never blanked mid-refresh.
-  const backgroundRef = useRef(false);
+  // Explicit refresh only: a stale snapshot triggers the "updating…" indicator
+  // and polls the snapshot GET until the background rebuild completes.
   const refresh = useMutation({
     mutationFn: () => projectInsightApi.refresh(projectId),
     onSuccess: (fresh) => {
       queryClient.setQueryData(INSIGHT_KEY(projectId), fresh);
     },
   });
-
-  useEffect(() => {
-    if (data && !backgroundRef.current) {
-      backgroundRef.current = true;
-      refresh.mutate();
-    }
-  }, [data, refresh]);
 
   // Insights & opportunities — the same content as the Home page's
   // "Suggest Insights" pill, scoped to this project, rendered inline.
@@ -137,8 +160,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     staleTime: 5 * 60_000,
   });
 
-  const analyzing =
-    isFetching || refresh.isPending || insightsQuery.isFetching;
+  const analyzing = refresh.isPending || insightsQuery.isFetching;
+  const updating = Boolean(data?.stale && isFetching);
   const handleRefresh = () => {
     refresh.mutate();
     insightsQuery.refetch();
@@ -199,9 +222,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const questionsNeedingData = (data?.questionsNeedingData ?? []).filter((q) =>
     (q.question || q.businessQuestion || q.title)?.trim(),
   );
-  const trends = (data?.trendDetection ?? []).filter((t) =>
-    (t.label || t.title || t.description)?.trim(),
-  );
   const dashboards = (data?.recommendedDashboards ?? []).filter((d) =>
     d.title?.trim(),
   );
@@ -212,53 +232,47 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const reviewedItems: ReviewedInsight[] = reviewedQuery.data?.items ?? [];
   const reviewedIds = new Set(reviewedItems.map((i) => i.insightId));
 
-  const riskCards = (data?.risks ?? []).filter((c) => c.title?.trim());
-  const trendCards = (data?.trends ?? []).filter((c) => c.title?.trim());
-  const opportunityCards = (data?.opportunities ?? []).filter((c) =>
-    c.title?.trim(),
+  // Derive risks/trends/opportunities from the shared AI insight backend
+  // (`/home/insights` → `_run_for_project`) instead of deterministic arrays.
+  const allAiCards = useMemo(
+    () =>
+      insightsQuery.data?.projects?.flatMap((p) =>
+        p.insights.map(toProjectInsightCard),
+      ) ?? [],
+    [insightsQuery.data],
   );
+  const riskCards = useMemo(
+    () =>
+      allAiCards.filter(
+        (c) =>
+          c.insightType.startsWith("risk_") ||
+          c.severity === "critical" ||
+          c.severity === "urgent" ||
+          c.severity === "warning",
+      ),
+    [allAiCards],
+  );
+  const trendCards = useMemo(
+    () =>
+      allAiCards.filter(
+        (c) => c.insightType.startsWith("trend_") && !riskCards.includes(c),
+      ),
+    [allAiCards, riskCards],
+  );
+  const opportunityCards = useMemo(
+    () =>
+      allAiCards.filter(
+        (c) =>
+          (c.insightType.startsWith("opportunity_") ||
+            c.severity === "opportunity") &&
+          !riskCards.includes(c) &&
+          !trendCards.includes(c),
+      ),
+    [allAiCards, riskCards, trendCards],
+  );
+  const allTrendCards = trendCards;
 
-  // Consolidate the former standalone "Trend Detection" panel into the Trends
-  // column: each detected trend becomes a project insight card (blue accent).
-  const trendDetectionCards: ProjectInsightCard[] = trends
-    .filter((t) => (t.label || t.title)?.trim())
-    .map((t) => ({
-      id: t.id,
-      insightType: "trend",
-      title: (t.label || t.title || "").trim(),
-      summary: [
-        t.description,
-        t.possibleCause && `Possible cause: ${t.possibleCause}`,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      severity: "trend" as const,
-      question: t.title || t.label || "",
-      supportingSources: t.sourceSummary ? [t.sourceSummary] : [],
-    }));
-  const allTrendCards = [...trendCards, ...trendDetectionCards];
-
-  const allInsightCards = useMemo(() => {
-    const risks = (data?.risks ?? []).filter((c) => c.title?.trim());
-    const trends = (data?.trends ?? []).filter((c) => c.title?.trim());
-    const opportunities = (data?.opportunities ?? []).filter((c) =>
-      c.title?.trim(),
-    );
-    const detectionCards: ProjectInsightCard[] = (data?.trendDetection ?? [])
-      .filter((t) => (t.label || t.title || t.description)?.trim())
-      .map((t) => ({
-        id: t.id,
-        insightType: "trend",
-        title: (t.label || t.title || "").trim(),
-        summary: [t.description, t.possibleCause && `Possible cause: ${t.possibleCause}`]
-          .filter(Boolean)
-          .join(" "),
-        severity: "trend" as const,
-        question: t.title || t.label || "",
-        supportingSources: t.sourceSummary ? [t.sourceSummary] : [],
-      }));
-    return [...risks, ...trends, ...opportunities, ...detectionCards];
-  }, [data]);
+  const allInsightCards = allAiCards;
   const insightIds = useMemo(
     () => allInsightCards.map((c) => c.id).filter(Boolean),
     [allInsightCards],
@@ -314,16 +328,18 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   return (
     <ProjectShell
       projectId={projectId}
-      activeNav="project-insight"
+      activeNav="project-insights"
       breadcrumbLabel="Project Insight"
       actions={
         <div className="flex items-center gap-3">
           <span className="text-small text-ink-tertiary">
             {analyzing
               ? "Analyzing…"
-              : formatLastUpdated(
-                  dataUpdatedAt ? new Date(dataUpdatedAt) : null,
-                )}
+              : updating
+                ? "Updating…"
+                : formatLastUpdated(
+                    dataUpdatedAt ? new Date(dataUpdatedAt) : null,
+                  )}
           </span>
           <Button
             variant="secondary"
@@ -356,6 +372,48 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 Try Refresh in a moment.
               </div>
             )}
+
+            {data.stale && (
+              <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[13px] text-ink-secondary">
+                <IconLoader2 size={15} className="animate-spin" />
+                Updating project insight to reflect the latest data…
+              </div>
+            )}
+
+            {data.graphMode && data.graphMode !== "full" && (
+              <div
+                className={cn(
+                  "flex items-start gap-2 rounded-lg border px-3 py-2 text-[13px]",
+                  data.graphMode === "blocked"
+                    ? "border-danger/30 bg-danger-bg text-danger"
+                    : "border-warning/30 bg-warning-bg text-warning",
+                )}
+              >
+                {data.graphMode === "blocked" ? (
+                  <IconAlertTriangle size={15} className="mt-0.5 shrink-0" />
+                ) : (
+                  <IconAlertCircle size={15} className="mt-0.5 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <p>{data.graphDisclosure}</p>
+                  {data.graphBlockingReasons.length > 0 && (
+                    <ul className="mt-1 list-disc pl-4 text-[12px]">
+                      {data.graphBlockingReasons.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 0. Ask + AI suggestions — same experience as Business Insight,
+                scoped to this project. The ask box hands off to the shared
+                conversational-analytics assistant; the pills generate query/
+                dashboard/insight suggestions for this project only. */}
+            <div className="space-y-6 py-2">
+              <HomeAiSuggestions projectId={Number(projectId)} />
+            </div>
 
             {/* 1. Executive Project Summary */}
             <section className="rounded-lg border border-line-tertiary bg-bg-primary p-5">
@@ -900,7 +958,6 @@ function InsightCardItem({
     <article className="rounded-md border border-line-tertiary bg-bg-primary p-3">
       <header className="flex items-start justify-between gap-2">
         <h4 className="min-w-0 text-[13px] font-semibold text-ink-primary">
-          <span className="font-normal text-ink-tertiary">Title: </span>
           {card.title}
         </h4>
         <span

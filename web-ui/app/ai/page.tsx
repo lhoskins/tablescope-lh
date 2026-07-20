@@ -2,14 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconArrowUp,
   IconSparkles,
   IconPlus,
   IconTrash,
   IconMessageCircle,
-  IconGitBranch,
   IconRefresh,
   IconDots,
   IconPencil,
@@ -19,21 +18,20 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/cn";
 import { getUserMeta } from "@/lib/auth";
+import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
 import {
-  useCurrentUser,
-  useProjectSummaries,
-  useConversations,
-  useConversation,
   createConversation,
-  sendConversationMessage,
+  listConversations,
+  getConversation,
+  submitTurn,
   renameConversation,
   deleteConversation,
-  branchConversation,
-  type AiChatMessage,
-  type AiChatMessageData,
-  type AiConversation,
-} from "@/lib/ui/use-shell-data";
+  type Conversation,
+  type ConversationSummary,
+  type ConversationTurn,
+} from "@/lib/api/conversational-analytics";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
+import type { SuggestedVisualization } from "@/lib/api/ai-actions";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 
 const FALLBACK_USER: CurrentUser = {
@@ -49,34 +47,55 @@ const FALLBACK_TENANT: TenantSummary = {
   initials: "TS",
 };
 
+const CHART_FOLLOW_UPS = [
+  "change it to a line chart",
+  "change it to a horizontal bar chart",
+  "change it to a donut chart",
+  "sort by value descending",
+  "show as a table",
+];
+
 export default function AiAssistantPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: identity } = useCurrentUser();
   const { data: projects } = useProjectSummaries();
-  const { data: conversations } = useConversations();
+  const { data: conversations } = useQuery({
+    queryKey: ["conversational-analytics", "conversations"],
+    queryFn: () => listConversations(),
+  });
 
   const [activeId, setActiveId] = useState<number | null>(null);
   const [input, setInput] = useState("");
   const [projectId, setProjectId] = useState<number | null>(null);
   const [needsProject, setNeedsProject] = useState(false);
-  const { data: active } = useConversation(activeId);
-  const messages = active?.messages ?? [];
+  const { data: active } = useQuery({
+    queryKey: ["conversational-analytics", "conversation", activeId],
+    queryFn: () => getConversation(activeId as number),
+    enabled: activeId != null,
+  });
+  const turns = active?.turns ?? [];
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Reflect the active conversation's project (if any) in the picker so a
-  // returning thread stays scoped to the source it was answered against.
+  // A conversation is scoped to one project for grounded answers; reflect it
+  // in the picker (and lock the picker) while that thread is open.
   useEffect(() => {
-    setProjectId(active?.projectId ?? null);
+    if (active?.project_id != null) setProjectId(active.project_id);
     setNeedsProject(false);
-  }, [active?.id, active?.projectId]);
+  }, [active?.id, active?.project_id]);
 
   useEffect(() => {
     if (!getUserMeta()) router.replace("/login");
   }, [router]);
 
   const invalidateConvos = () =>
-    queryClient.invalidateQueries({ queryKey: ["ai", "conversations"] });
+    queryClient.invalidateQueries({
+      queryKey: ["conversational-analytics", "conversations"],
+    });
+  const invalidateActive = (id: number) =>
+    queryClient.invalidateQueries({
+      queryKey: ["conversational-analytics", "conversation", id],
+    });
 
   const sendMutation = useMutation({
     mutationFn: async ({
@@ -84,29 +103,29 @@ export default function AiAssistantPage() {
       pid,
     }: {
       question: string;
-      pid: number | null;
-    }) => {
-      let id = activeId;
-      if (id == null) {
-        const convo = await createConversation({ project_id: pid });
-        id = convo.id;
-        setActiveId(id);
+      pid: number;
+    }): Promise<Conversation | { conversation_id: number }> => {
+      if (activeId == null) {
+        const convo = await createConversation({
+          project_id: pid,
+          initial_message: question,
+        });
+        setActiveId(convo.id);
+        return convo;
       }
-      return sendConversationMessage(id, question, pid);
+      return submitTurn(activeId, { message: question });
     },
-    onSuccess: (convo) => {
-      queryClient.setQueryData(["ai", "conversation", convo.id], convo);
+    onSuccess: (res) => {
+      const id = "conversation_id" in res ? res.conversation_id : res.id;
+      invalidateActive(id);
       invalidateConvos();
     },
   });
 
   const renameMutation = useMutation({
     mutationFn: ({ id, title }: { id: number; title: string }) =>
-      renameConversation(id, title),
-    onSuccess: (convo) => {
-      queryClient.setQueryData(["ai", "conversation", convo.id], convo);
-      invalidateConvos();
-    },
+      renameConversation(id, { title }),
+    onSuccess: () => invalidateConvos(),
   });
 
   const deleteMutation = useMutation({
@@ -117,28 +136,18 @@ export default function AiAssistantPage() {
     },
   });
 
-  const branchMutation = useMutation({
-    mutationFn: ({ id, messageId }: { id: number; messageId?: number }) =>
-      branchConversation(id, messageId),
-    onSuccess: (convo) => {
-      queryClient.setQueryData(["ai", "conversation", convo.id], convo);
-      setActiveId(convo.id);
-      invalidateConvos();
-    },
-  });
-
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const busy = sendMutation.isPending;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages.length, busy]);
+  }, [turns.length, busy]);
 
   const send = (raw: string) => {
     const question = raw.trim();
     if (!question || busy) return;
-    const pid = projectId ?? active?.projectId ?? null;
+    const pid = active?.project_id ?? projectId;
     if (pid == null) {
       // Prompt for the project instead of silently guessing one.
       setNeedsProject(true);
@@ -159,6 +168,10 @@ export default function AiAssistantPage() {
 
   const pendingQuestion =
     busy && sendMutation.variables ? sendMutation.variables.question : null;
+
+  const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+  const showFollowUps =
+    !busy && lastTurn?.status === "success" && !!lastTurn?.chart_config;
 
   return (
     <AppShell
@@ -181,6 +194,7 @@ export default function AiAssistantPage() {
               onClick={() => {
                 setActiveId(null);
                 setInput("");
+                setProjectId(null);
               }}
             >
               <IconPlus size={14} />
@@ -202,7 +216,6 @@ export default function AiAssistantPage() {
                 onRename={(title) =>
                   renameMutation.mutate({ id: c.id, title })
                 }
-                onBranch={() => branchMutation.mutate({ id: c.id })}
                 onDelete={() => setConfirmDeleteId(c.id)}
               />
             ))}
@@ -216,7 +229,7 @@ export default function AiAssistantPage() {
             ref={scrollRef}
             className="flex-1 overflow-y-auto px-6 py-5"
           >
-            {messages.length === 0 && !pendingQuestion ? (
+            {turns.length === 0 && !pendingQuestion ? (
               <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center text-center">
                 <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-500">
                   <IconSparkles size={24} />
@@ -225,38 +238,18 @@ export default function AiAssistantPage() {
                   How can I help you?
                 </h2>
                 <p className="mt-1.5 text-small text-ink-tertiary">
-                  Ask questions about your data, documents, or dashboards.
-                  Conversations are saved automatically and used to improve
-                  future answers.
+                  Ask a data question and I&apos;ll answer with a real query,
+                  chart, and table. Follow up in plain language to refine the
+                  data or change the chart format.
                 </p>
               </div>
             ) : (
               <div className="mx-auto max-w-3xl space-y-5">
-                {messages.map((m) => (
-                  <ChatBubble
-                    key={m.id}
-                    message={m}
-                    onBranch={
-                      activeId != null && m.id > 0
-                        ? () =>
-                            branchMutation.mutate({
-                              id: activeId,
-                              messageId: m.id,
-                            })
-                        : undefined
-                    }
-                    branching={branchMutation.isPending}
-                  />
+                {turns.map((t) => (
+                  <TurnBubbles key={t.id} turn={t} />
                 ))}
                 {pendingQuestion && (
-                  <ChatBubble
-                    message={{
-                      id: -1,
-                      role: "user",
-                      content: pendingQuestion,
-                      createdAt: null,
-                    }}
-                  />
+                  <UserBubble content={pendingQuestion} />
                 )}
                 {busy && (
                   <div className="flex items-start gap-3">
@@ -294,17 +287,32 @@ export default function AiAssistantPage() {
 
           {/* Input area — bottom */}
           <div className="border-t border-line-tertiary px-6 py-4">
+            {showFollowUps && (
+              <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-1.5">
+                {CHART_FOLLOW_UPS.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => send(chip)}
+                    className="rounded-full border border-line-secondary bg-bg-primary px-2.5 py-1 text-[12px] text-ink-secondary hover:border-brand-500 hover:text-brand-700"
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2">
               <label className="text-[12px] text-ink-tertiary">Project</label>
               <select
-                value={projectId ?? ""}
+                value={active?.project_id ?? projectId ?? ""}
+                disabled={active != null}
                 onChange={(e) => {
                   const v = e.target.value;
                   setProjectId(v === "" ? null : Number(v));
                   if (v !== "") setNeedsProject(false);
                 }}
                 className={cn(
-                  "min-w-0 flex-1 rounded-md border bg-bg-primary px-2 py-1.5 text-[12px] text-ink-primary focus:outline-none",
+                  "min-w-0 flex-1 rounded-md border bg-bg-primary px-2 py-1.5 text-[12px] text-ink-primary focus:outline-none disabled:opacity-60",
                   needsProject
                     ? "border-danger focus:border-danger"
                     : "border-line-secondary focus:border-brand-500",
@@ -374,14 +382,12 @@ function ConversationRow({
   active,
   onSelect,
   onRename,
-  onBranch,
   onDelete,
 }: {
-  conversation: AiConversation;
+  conversation: ConversationSummary;
   active: boolean;
   onSelect: () => void;
   onRename: (title: string) => void;
-  onBranch: () => void;
   onDelete: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -413,11 +419,7 @@ function ConversationRow({
         setMenuOpen(true);
       }}
     >
-      {conversation.parentConversationId ? (
-        <IconGitBranch size={14} className="shrink-0" />
-      ) : (
-        <IconMessageCircle size={14} className="shrink-0" />
-      )}
+      <IconMessageCircle size={14} className="shrink-0" />
       {editing ? (
         <input
           autoFocus
@@ -469,14 +471,6 @@ function ConversationRow({
               onClick={startRename}
             />
             <MenuItem
-              icon={<IconGitBranch size={14} />}
-              label="Branch"
-              onClick={() => {
-                onBranch();
-                setMenuOpen(false);
-              }}
-            />
-            <MenuItem
               icon={<IconTrash size={14} />}
               label="Delete"
               danger
@@ -518,76 +512,68 @@ function MenuItem({
   );
 }
 
-function BranchButton({
-  onBranch,
-  branching,
-}: {
-  onBranch?: () => void;
-  branching?: boolean;
-}) {
-  if (!onBranch) return null;
+function UserBubble({ content }: { content: string }) {
   return (
-    <button
-      type="button"
-      onClick={onBranch}
-      disabled={branching}
-      title="Branch a new conversation from here"
-      className="mt-1 inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-[11px] text-ink-tertiary opacity-0 transition-opacity hover:bg-bg-secondary hover:text-ink-secondary group-hover:opacity-100 disabled:opacity-50"
-    >
-      <IconGitBranch size={12} />
-      Branch
-    </button>
-  );
-}
-
-function ChatBubble({
-  message,
-  onBranch,
-  branching,
-}: {
-  message: AiChatMessage;
-  onBranch?: () => void;
-  branching?: boolean;
-}) {
-  if (message.role === "user") {
-    return (
-      <div className="group flex flex-col items-end gap-0">
-        <div className="max-w-[75%] rounded-xl bg-brand px-4 py-3 text-[13px] leading-relaxed text-brand-fg">
-          <span className="whitespace-pre-wrap">{message.content}</span>
-        </div>
-        <BranchButton onBranch={onBranch} branching={branching} />
-      </div>
-    );
-  }
-  const data = message.data;
-  const hasData = !!data && (data.rows?.length ?? 0) > 0;
-  return (
-    <div className="group flex items-start gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
-        <IconSparkles size={16} />
-      </div>
-      <div className={cn("flex flex-col", hasData ? "w-full" : "max-w-[75%]")}>
-        <div className="rounded-xl bg-bg-secondary px-4 py-3 text-[13px] leading-relaxed text-ink-primary">
-          <span className="whitespace-pre-wrap">{message.content}</span>
-        </div>
-        {hasData && data && <ChatResult data={data} />}
-        <BranchButton onBranch={onBranch} branching={branching} />
+    <div className="flex flex-col items-end">
+      <div className="max-w-[75%] rounded-xl bg-brand px-4 py-3 text-[13px] leading-relaxed text-brand-fg">
+        <span className="whitespace-pre-wrap">{content}</span>
       </div>
     </div>
   );
 }
 
-function ChatResult({ data }: { data: AiChatMessageData }) {
+/** One conversational-analytics turn: the user's message + the AI answer. */
+function TurnBubbles({ turn }: { turn: ConversationTurn }) {
+  const result = turn.result;
+  const hasData = (result?.rows?.length ?? 0) > 0;
+  return (
+    <>
+      <UserBubble content={turn.user_message} />
+      <div className="flex items-start gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
+          <IconSparkles size={16} />
+        </div>
+        <div className={cn("flex flex-col", hasData ? "w-full" : "max-w-[75%]")}>
+          <div
+            className={cn(
+              "rounded-xl bg-bg-secondary px-4 py-3 text-[13px] leading-relaxed",
+              turn.status === "error" ? "text-danger" : "text-ink-primary",
+            )}
+          >
+            <span className="whitespace-pre-wrap">
+              {turn.assistant_message ??
+                (turn.status === "pending" ? "Working on it…" : "")}
+            </span>
+          </div>
+          {hasData && result && <TurnResult turn={turn} />}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function TurnResult({ turn }: { turn: ConversationTurn }) {
   const [showSql, setShowSql] = useState(false);
+  const result = turn.result;
+  if (!result) return null;
+  const chart = turn.chart_config;
+  // Map the persisted chart config onto the shared renderer contract; the
+  // subtype (horizontal_bar, donut, …) rides through as chartStyle.
+  const viz: SuggestedVisualization = chart
+    ? {
+        type: chart.type as SuggestedVisualization["type"],
+        xField: chart.labelColumn,
+        yField: chart.valueColumns?.[0],
+        chartStyle: chart.subtype,
+      }
+    : { type: "table" };
   return (
     <div className="mt-2 rounded-xl border border-line-tertiary bg-bg-primary p-3">
-      <ResultChart
-        columns={data.columns}
-        rows={data.rows}
-        viz={data.suggestedVisualization}
-      />
-      <ResultTable columns={data.columns} rows={data.rows} />
-      {data.sql && (
+      {chart && chart.type !== "table" && (
+        <ResultChart columns={result.columns} rows={result.rows} viz={viz} />
+      )}
+      <ResultTable columns={result.columns} rows={result.rows} />
+      {turn.sql && (
         <div className="mt-2">
           <button
             type="button"
@@ -598,7 +584,7 @@ function ChatResult({ data }: { data: AiChatMessageData }) {
           </button>
           {showSql && (
             <pre className="mt-1 overflow-auto rounded-md bg-bg-secondary p-2 text-[11px] text-ink-secondary">
-              {data.sql}
+              {turn.sql}
             </pre>
           )}
         </div>

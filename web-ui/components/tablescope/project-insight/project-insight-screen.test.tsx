@@ -251,11 +251,35 @@ describe("ProjectInsightScreen", () => {
     ).toBeTruthy();
   });
 
-  it("folds trend-detection items into the Trends column as cards", async () => {
+  it("derives trend cards from the shared AI insight backend", async () => {
+    suggestInsights.mockResolvedValue({
+      projects: [
+        {
+          projectId: "42",
+          projectName: "Boeing",
+          projectColor: "#123456",
+          insights: [
+            {
+              id: "trend-1",
+              projectId: "42",
+              projectName: "Boeing",
+              projectColor: "#123456",
+              insightType: "trend_spend",
+              severity: "trend",
+              title: "Spend up",
+              summary: "MoM +12%",
+              chart: null,
+              callout: null,
+              sources: { tables: [], documents: [] },
+              executedAt: "2026-06-25T00:00:00Z",
+            },
+          ],
+        },
+      ],
+    });
     renderScreen();
     await screen.findByText("Executive Project Summary");
-    // The former Trend Detection panel is gone; its item now renders as a
-    // trend card in the always-visible Trends column.
+    // The former Trend Detection panel is gone; trends come from AI insights.
     expect(screen.queryByText("Trend Detection")).toBeNull();
     expect(await screen.findByText("Spend up")).toBeTruthy();
     expect(screen.getByText("Trend")).toBeTruthy();
@@ -357,31 +381,46 @@ describe("ProjectInsightScreen", () => {
     ).toBeTruthy();
   });
 
-  it("renders risk/opportunity cards with severity badges", async () => {
-    getInsight.mockResolvedValue({
-      ...INSIGHT,
-      trendDetection: [],
-      risks: [
+  it("renders AI-derived risk/opportunity cards with severity badges", async () => {
+    suggestInsights.mockResolvedValue({
+      projects: [
         {
-          id: "risk-1",
-          insightType: "risk_sla",
-          title: "Delivery lead time exceeds SLA threshold",
-          summary: "Average lead time is high.",
-          severity: "critical",
-          recommendedAction: "Escalate with the supplier.",
-          question: "Which suppliers exceed the SLA threshold?",
-          supportingSources: ["SUP_Quality_CSV"],
-        },
-      ],
-      opportunities: [
-        {
-          id: "opp-1",
-          insightType: "opportunity_supplier",
-          title: "Top-performing suppliers identified",
-          summary: "Consolidate with the strongest suppliers.",
-          severity: "recommendation",
-          question: "Which suppliers have the highest performance scores?",
-          supportingSources: [],
+          projectId: "42",
+          projectName: "Boeing",
+          projectColor: "#123456",
+          insights: [
+            {
+              id: "risk-1",
+              projectId: "42",
+              projectName: "Boeing",
+              projectColor: "#123456",
+              insightType: "risk_sla",
+              severity: "critical",
+              title: "Delivery lead time exceeds SLA threshold",
+              summary: "Average lead time is high.",
+              chart: null,
+              callout: {
+                type: "risk",
+                text: "Escalate with the supplier.",
+              },
+              sources: { tables: ["SUP_Quality_CSV"], documents: [] },
+              executedAt: "2026-06-25T00:00:00Z",
+            },
+            {
+              id: "opp-1",
+              projectId: "42",
+              projectName: "Boeing",
+              projectColor: "#123456",
+              insightType: "opportunity_supplier",
+              severity: "recommendation",
+              title: "Top-performing suppliers identified",
+              summary: "Consolidate with the strongest suppliers.",
+              chart: null,
+              callout: null,
+              sources: { tables: [], documents: [] },
+              executedAt: "2026-06-25T00:00:00Z",
+            },
+          ],
         },
       ],
     });
@@ -394,19 +433,30 @@ describe("ProjectInsightScreen", () => {
     expect(screen.getByText("SUP_Quality_CSV")).toBeTruthy();
   });
 
-  it("opens the AI answer modal when a card is investigated", async () => {
-    getInsight.mockResolvedValue({
-      ...INSIGHT,
-      trendDetection: [],
-      trends: [
+  it("opens the AI answer modal when an AI-derived card is investigated", async () => {
+    suggestInsights.mockResolvedValue({
+      projects: [
         {
-          id: "trend-1",
-          insightType: "trend_spend",
-          title: "Spend tracking over budget",
-          summary: "Spend is up.",
-          severity: "warning",
-          question: "How has total spend changed across recent periods?",
-          supportingSources: ["FIN_Spend_CSV"],
+          projectId: "42",
+          projectName: "Boeing",
+          projectColor: "#123456",
+          insights: [
+            {
+              id: "trend-1",
+              projectId: "42",
+              projectName: "Boeing",
+              projectColor: "#123456",
+              insightType: "trend_spend",
+              severity: "trend",
+              title: "Spend tracking over budget",
+              summary: "Spend is up.",
+              question: "How has total spend changed across recent periods?",
+              chart: null,
+              callout: null,
+              sources: { tables: ["FIN_Spend_CSV"], documents: [] },
+              executedAt: "2026-06-25T00:00:00Z",
+            },
+          ],
         },
       ],
     });
@@ -470,15 +520,17 @@ describe("ProjectInsightScreen", () => {
     });
     renderScreen();
     // The Insights & Opportunities section is collapsed by default.
-    expect(
-      await screen.findByRole("heading", { name: "Insights & Opportunities" }),
-    ).toBeTruthy();
+    const heading = await screen.findByRole("heading", {
+      name: "Insights & Opportunities",
+    });
+    expect(heading).toBeTruthy();
     await waitFor(() =>
       expect(suggestInsights).toHaveBeenCalledWith(3, 42),
     );
     expandSection("Insights & Opportunities");
+    const panel = heading.closest("section") as HTMLElement;
     expect(
-      await screen.findByText("Consolidate spend with top suppliers"),
+      await within(panel).findByText("Consolidate spend with top suppliers"),
     ).toBeTruthy();
   });
 

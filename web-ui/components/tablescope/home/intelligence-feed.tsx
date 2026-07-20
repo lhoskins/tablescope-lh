@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconAlertTriangle,
   IconBulb,
+  IconRefresh,
   IconSparkles,
   IconTrendingUp,
 } from "@tabler/icons-react";
@@ -107,6 +108,8 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [settings, setSettings] = useState<IntelligenceSettings | null>(null);
   const [, forceTick] = useState(0);
+  const [stale, setStale] = useState(false);
+  const [staleProjectIds, setStaleProjectIds] = useState<string[]>([]);
 
   const controllerRef = useRef<AbortController | null>(null);
   // Background re-run accumulates into these buffers and commits at "done" so
@@ -202,6 +205,7 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
     (crossProject: boolean, granularity: number, background = false) => {
       controllerRef.current?.abort();
       backgroundRef.current = background;
+      setStale(false);
       setStatus("streaming");
       if (!background) {
         setProjects([]);
@@ -234,6 +238,8 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
       setSettings(intel);
 
       const snap = snapRes?.snapshot ?? null;
+      setStale(Boolean(snap?.stale));
+      setStaleProjectIds(snap?.staleProjects ?? []);
       let hydrated = false;
       if (snap && snap.results.length > 0) {
         setProjects(snap.projects);
@@ -382,6 +388,30 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
         onGranularityChange={handleGranularity}
         synthesisHeadline={synthesis ? stripStars(synthesis.headline) : null}
       />
+
+      {stale && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-small text-ink-secondary">
+          <div className="flex items-start gap-2">
+            <IconAlertTriangle size={18} className="mt-0.5 shrink-0 text-warning" />
+            <span>
+              Data changed in {staleProjectIds.length} project
+              {staleProjectIds.length === 1 ? "" : "s"} since this briefing.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={running}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium text-warning hover:bg-warning/20 disabled:opacity-50"
+          >
+            <IconRefresh
+              size={15}
+              className={running ? "animate-spin" : undefined}
+            />
+            Refresh
+          </button>
+        </div>
+      )}
 
       <div className="space-y-6">
         {synthesis?.body && (

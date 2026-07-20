@@ -112,8 +112,8 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
           cachedData: { columns: data.length > 0 ? Object.keys(data[0] as object) : [], rows: data },
         },
         layout: {
-          x: widget.gridX ?? 0,
-          y: widget.gridY ?? 0,
+          x: 0,
+          y: 0,
           w: widget.gridW ?? widget.colSpan ?? 6,
           h: widget.gridH ?? 4,
         },

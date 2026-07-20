@@ -49,6 +49,45 @@ _TABLE_ALIAS_RE = re.compile(
 _OUTPUT_ALIAS_RE = re.compile(r'\bAS\s+"?(\w+)"?', re.IGNORECASE)
 _BARE_IDENT_RE = re.compile(r'(?<![\w."])"?([A-Za-z_]\w*)"?(?![\w("])')
 
+# Keywords that precede a ``(`` for a subquery or clause, not a function call.
+_NON_FUNCTION_OPENERS = {
+    "SELECT", "WITH", "FROM", "JOIN", "WHERE", "GROUP", "ORDER", "HAVING",
+    "ON", "AS", "CASE", "WHEN", "THEN", "ELSE", "UNION", "INTERSECT",
+    "EXCEPT", "OVER", "PARTITION", "LIMIT", "OFFSET",
+}
+
+
+def _is_inside_function_call(sql: str, pos: int) -> bool:
+    """Return True if ``pos`` is inside a parenthesised function argument list.
+
+    Scans backward from ``pos`` to find the nearest unmatched ``(``. If that
+    paren was opened by a function name (a word, not a SQL clause keyword),
+    the position is inside a function call and ``FROM``/``JOIN`` tokens there
+    are not table references (e.g. ``EXTRACT(YEAR FROM "Month")``).
+    """
+    depth = 0
+    i = pos - 1
+    while i >= 0:
+        ch = sql[i]
+        if ch == ")":
+            depth += 1
+        elif ch == "(":
+            if depth > 0:
+                depth -= 1
+            else:
+                # Found the enclosing paren. Check what token precedes it.
+                j = i - 1
+                while j >= 0 and sql[j].isspace():
+                    j -= 1
+                m = re.match(r"[A-Za-z_]\w*$", sql[: j + 1])
+                if m:
+                    token = m.group(0).upper()
+                    if token not in _NON_FUNCTION_OPENERS:
+                        return True
+                break
+        i -= 1
+    return False
+
 
 def _validate_columns(
     sql: str,
@@ -188,14 +227,17 @@ def validate_sql(
     if allowed_tables:
         # Normalize table names for comparison
         allowed_upper = {t.upper() for t in allowed_tables}
-        # Extract table references from FROM and JOIN clauses. The negative
-        # lookahead skips identifiers that are actually function calls, so the
-        # "FROM" inside EXTRACT(YEAR FROM CAST("col" AS date)) is not mistaken
-        # for a table reference named CAST.
+        # Extract table references from FROM and JOIN clauses.  Ignore matches
+        # that sit inside a function call's argument list (e.g. the ``FROM`` in
+        # ``EXTRACT(YEAR FROM "Month")`` or ``SUBSTRING(col FROM 1 FOR 5)``).
         table_pattern = re.compile(
             r"(?:FROM|JOIN)\s+\"?(\w+)\"?(?![\w(])", re.IGNORECASE
         )
-        referenced = table_pattern.findall(sql)
+        referenced = [
+            m.group(1)
+            for m in table_pattern.finditer(sql)
+            if not _is_inside_function_call(sql, m.start())
+        ]
         for table in referenced:
             if table.upper() not in allowed_upper:
                 violations.append(f"Unauthorized table reference: {table}")

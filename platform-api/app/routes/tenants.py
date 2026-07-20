@@ -27,6 +27,7 @@ from app.auth.rbac import Role, require_role
 from app.auth.tenant_roles import to_tenant_role, validate_tenant_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.project import Project
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant, TenantAllowedDomain
 from app.models.tenant_data_plane import TenantDataPlane
@@ -854,3 +855,63 @@ async def delete_user_permanently(
     await session.delete(user)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{tenant_id}/reprocess-documents")
+async def reprocess_tenant_documents(
+    tenant_id: int,
+    force: bool = False,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(_require_user_management),
+) -> dict:
+    """Reprocess every document in every project for a tenant.
+
+    Enqueues one project-wide reprocess cascade per project.  Each cascade
+    profiles changed documents (or all documents when ``force=true``) and
+    rebuilds the project's knowledge graph last.  Duplicate enqueues for a
+    project coalesce onto its in-flight job.
+    """
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    if (
+        not context.is_service
+        and context.tenant_id != tenant_id
+        and context.role != Role.ROOT_ADMIN
+        and not await _is_super_admin(session, context)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot reprocess documents for another tenant",
+        )
+
+    project_ids = (
+        await session.scalars(select(Project.id).where(Project.tenant_id == tenant_id))
+    ).all()
+
+    from app.tasks.workflows import enqueue_reprocess_project
+
+    job_ids: list[str] = []
+    skipped = 0
+    for project_id in project_ids:
+        job_id = await enqueue_reprocess_project(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            user_id=context.user_id,
+            force=force,
+        )
+        if job_id:
+            job_ids.append(job_id)
+        else:
+            skipped += 1
+
+    return {
+        "tenant_id": tenant_id,
+        "status": "queued",
+        "total_projects": len(project_ids),
+        "projects_queued": len(job_ids),
+        "projects_skipped": skipped,
+        "job_ids": job_ids,
+        "force": force,
+    }

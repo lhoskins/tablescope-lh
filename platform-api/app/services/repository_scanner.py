@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.services.ai_governance import ai_governance_service
 from app.services.crypto import decrypt_secret
+from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
 from app.services.project_ai_context import build_project_ai_context
 from app.services.repository_lock import RepositoryScanHeartbeat, RepositoryScanLock
 from app.services.repository_profiler import RepositoryProfiler
@@ -179,6 +180,18 @@ class RepositoryScanner:
             connection.last_scan_id = scan.id
             connection.last_successful_scan_at = datetime.now(UTC)
             connection.status = "active"
+
+            if connection.project_id is not None:
+                try:
+                    lifecycle = KnowledgeGraphLifecycleManager(self.session)
+                    await lifecycle.mark_stale(
+                        connection.project_id,
+                        f"Repository scan {scan.id} completed for connection {connection.id}",
+                    )
+                    await self._persist()
+                except Exception as exc:
+                    logger.warning("Failed to mark graph stale after repository scan: %s", exc)
+
             await self._persist()
 
             await self._audit(

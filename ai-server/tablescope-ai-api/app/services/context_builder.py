@@ -99,24 +99,6 @@ async def _verify_permissions(
     }
 
 
-async def _fetch_project_metadata(
-    tenant_id: int,
-    project_id: int,
-) -> list[dict[str, Any]]:
-    """Fetch table/column metadata for the project from the app server."""
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.get(
-                f"{settings.tablescope_app_url}/api/projects/{project_id}/datasources",
-                params={"tenant_id": tenant_id},
-            )
-            if resp.status_code == 200:
-                return resp.json()
-    except httpx.RequestError:
-        logger.warning("Could not fetch project metadata")
-    return []
-
-
 async def build_context(
     tenant_id: int,
     user_id: int,
@@ -165,10 +147,10 @@ async def build_context(
     # --- Retrieve allowed context ---
 
     # 1. Project metadata (tables, columns)
-    metadata = await _fetch_project_metadata(tenant_id, project_id)
-    # Use datasources from permissions as fallback/supplement if metadata is empty
-    if not metadata and perms.get("datasources"):
-        metadata = perms["datasources"]
+    # The /api/ai/permissions response already carries the authorized datasource
+    # metadata, so use that directly. The legacy /api/projects/{id}/datasources
+    # endpoint requires user authentication which the AI service cannot provide.
+    metadata = perms.get("datasources", [])
 
     # 2. Vector search (if question provided)
     documents: list[dict[str, Any]] = []

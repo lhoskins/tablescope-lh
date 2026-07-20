@@ -10,7 +10,13 @@ interface RoutePromptResponse {
   prefilled: string;
 }
 
-export function HeroSearch() {
+export function HeroSearch({
+  projectId,
+}: {
+  /** When set, prompts go straight to this project's AI assistant so the
+   *  conversation is grounded in (and isolated to) that project's data. */
+  projectId?: string | number;
+} = {}) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
@@ -26,6 +32,10 @@ export function HeroSearch() {
     if (!q || submitting) return;
     setSubmitting(true);
     setError(null);
+    if (projectId != null) {
+      router.push(`/projects/${projectId}/ai?q=${encodeURIComponent(q)}`);
+      return;
+    }
     try {
       const res = await apiClient.post<RoutePromptResponse>(
         "/api/ai/route-prompt",

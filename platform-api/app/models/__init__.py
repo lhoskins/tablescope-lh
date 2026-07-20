@@ -41,6 +41,7 @@ from app.models.billing import (
     SubscriptionTierCatalog,
     TenantProvisioningRequest,
 )
+from app.models.business_insight_result import BusinessInsightResult
 from app.models.connector_credential import ConnectorCredential
 from app.models.dashboard import Dashboard
 from app.models.data_source_ai_profile import (
@@ -59,6 +60,12 @@ from app.models.grid_preference import GridPreference
 from app.models.home_pin import HomePin
 from app.models.insight_feedback import InsightFeedback
 from app.models.intelligence_snapshot import IntelligenceSnapshot
+from app.models.knowledge_graph_lifecycle import (
+    KnowledgeGraph,
+    KnowledgeGraphBuild,
+    KnowledgeGraphHealthCheck,
+    KnowledgeGraphVersion,
+)
 from app.models.knowledge_graph_snapshot import AIProjectGraphSnapshot
 from app.models.mfa_phone_factor import MfaPhoneFactor
 from app.models.mfa_sms_event import MfaSmsEvent
@@ -156,11 +163,16 @@ __all__ = [
     "DataSourceColumn",
     "DatabaseDataSource",
     "DatabaseDataSourceAssignment",
+    "BusinessInsightResult",
     "FileSourceMeta",
     "GridPreference",
     "HomePin",
     "InsightFeedback",
     "IntelligenceSnapshot",
+    "KnowledgeGraph",
+    "KnowledgeGraphBuild",
+    "KnowledgeGraphHealthCheck",
+    "KnowledgeGraphVersion",
     "AIProjectGraphSnapshot",
     "MfaPhoneFactor",
     "MfaSmsEvent",

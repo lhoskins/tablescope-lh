@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { ToastViewport, useToasts } from "@/components/ui/toast";
 
 const KnowledgeGraphScreen = lazy(() =>
   import("@/components/tablescope/project/knowledge-graph-screen").then((m) => ({
@@ -120,9 +121,11 @@ export function DocumentsTab({
   initialExpandedId?: number;
 }) {
   const queryClient = useQueryClient();
+  const { toasts, push, dismiss } = useToasts();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [subTab, setSubTab] = useState<"documents" | "graph">("documents");
+  const [forceReprocess, setForceReprocess] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(
     initialExpandedId ?? null,
   );
@@ -202,10 +205,40 @@ export function DocumentsTab({
 
   // ── Trigger AI processing ──────────────────────────────────────
   const processMutation = useMutation({
-    mutationFn: (assetId: number) =>
-      apiClient.post(`/api/projects/${projectId}/assets/${assetId}/ai/process`, {}),
+    mutationFn: ({ assetId, force }: { assetId: number; force?: boolean }) =>
+      apiClient.post(
+        `/api/projects/${projectId}/assets/${assetId}/ai/process?force=${force ? "true" : "false"}`,
+        {},
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project-documents", projectId] });
+    },
+  });
+
+  // ── Reprocess every project document ───────────────────────────
+  type ReprocessAllResponse = {
+    status: "queued" | "already_running";
+    job_id: string | null;
+    project_id: number;
+    force: boolean;
+  };
+
+  const reprocessAllMutation = useMutation({
+    mutationFn: (force: boolean) =>
+      apiClient.post<ReprocessAllResponse>(
+        `/api/projects/${projectId}/assets/reprocess?force=${force ? "true" : "false"}`,
+        {},
+      ),
+    onSuccess: (data) => {
+      if (data.status === "already_running") {
+        push("Reprocess already in progress", "info");
+      } else {
+        push("Project reprocess queued", "success");
+      }
+      queryClient.invalidateQueries({ queryKey: ["project-documents", projectId] });
+    },
+    onError: (err: unknown) => {
+      push(err instanceof Error ? err.message : "Failed to queue reprocess", "error");
     },
   });
 
@@ -274,7 +307,7 @@ export function DocumentsTab({
       {/* Documents list view */}
       {subTab === "documents" && (
       <div>
-      {/* Upload button */}
+      {/* Upload / bulk reprocess controls */}
       {canEdit && (
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <button
@@ -296,6 +329,25 @@ export function DocumentsTab({
           <span className="text-xs text-slate-400">
             PDF, DOCX, PPTX, TXT, MD
           </span>
+          <div className="ml-auto flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={forceReprocess}
+                onChange={(e) => setForceReprocess(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-brand"
+              />
+              Force reprocess unchanged files
+            </label>
+            <button
+              type="button"
+              onClick={() => reprocessAllMutation.mutate(forceReprocess)}
+              disabled={reprocessAllMutation.isPending}
+              className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
+            >
+              {reprocessAllMutation.isPending ? "Queueing..." : "Reprocess all documents"}
+            </button>
+          </div>
         </div>
       )}
       {uploadError && (
@@ -598,7 +650,7 @@ export function DocumentsTab({
                       {doc.ai_status !== "profiled" && doc.ai_status !== "profiling" && canEdit && (
                         <button
                           type="button"
-                          onClick={() => processMutation.mutate(doc.id)}
+                          onClick={() => processMutation.mutate({ assetId: doc.id, force: forceReprocess })}
                           disabled={processMutation.isPending}
                           className="rounded-md bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700 disabled:opacity-50"
                         >
@@ -608,7 +660,7 @@ export function DocumentsTab({
                       {doc.ai_status === "profiled" && canEdit && (
                         <button
                           type="button"
-                          onClick={() => processMutation.mutate(doc.id)}
+                          onClick={() => processMutation.mutate({ assetId: doc.id, force: forceReprocess })}
                           disabled={processMutation.isPending}
                           className="rounded-md bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-50"
                         >
@@ -650,6 +702,8 @@ export function DocumentsTab({
           />
         </Suspense>
       )}
+
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }

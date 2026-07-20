@@ -33,12 +33,14 @@ from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
 from app.models.project_asset import ProjectAsset
+from app.models.query_scope import QueryScope
 from app.models.reference_library import (
     TIER_COMPANY,
     TIER_INDUSTRY,
     TIER_PROJECT,
     ReferenceDocument,
 )
+from app.models.saved_query import SavedQuery
 from app.services.ai_governance import ai_governance_service
 from app.services.analytical_method_engine import (
     EngineMode,
@@ -105,9 +107,26 @@ class DocInfo:
 
 
 @dataclass
+class ScopeLink:
+    """A user/AI-curated drill-down relationship resolved to view names.
+
+    Sourced from enabled ``QueryScope`` rows and mapped from saved-query ids
+    onto the concrete Teiid view names the planner reasons about, so a curated
+    relationship becomes strong join evidence.
+    """
+
+    left_table: str
+    right_table: str
+    left_column: str
+    right_column: str
+    created_by_ai: bool
+
+
+@dataclass
 class ProjectContext:
     tables: list[TableInfo]
     documents: list[DocInfo]
+    scope_links: list[ScopeLink] = field(default_factory=list)
 
 
 async def gather_project_context(
@@ -203,7 +222,23 @@ async def gather_project_context(
             )
         )
 
-    return ProjectContext(tables=tables, documents=documents)
+    scope_links: list[ScopeLink] = []
+    try:
+        scope_links = await _resolve_scope_links(
+            session,
+            project_id=project.id,
+            allowed_tables=[t.view_name for t in tables],
+        )
+    except Exception as exc:  # fail-open: enrichment must never break context
+        logger.warning(
+            "Scope-link enrichment skipped for project %s: %s", project.id, exc
+        )
+
+    return ProjectContext(
+        tables=tables,
+        documents=documents,
+        scope_links=scope_links,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -281,6 +316,87 @@ def _is_join_key(col: str) -> bool:
     )
 
 
+# Audit-stamp names that happen to contain period keywords but are not the
+# time-series grain we want to join on.
+_AUDIT_PERIOD_EXCLUSIONS = {"created", "modified", "lastupdated", "updated", "deleted"}
+
+
+def _period_grain(col: str) -> str | None:
+    """Return the implied time grain ('week', 'month', etc.) of a column name."""
+    n = _norm(col)
+    for grain in ("week", "month", "quarter", "year", "day"):
+        if grain in n:
+            return grain
+    if "period" in n or "fiscal" in n:
+        return "period"
+    return None
+
+
+def _is_period_column(col: str, col_type: str, date_masks: dict[str, str] | None) -> bool:
+    """A column that can serve as a time-series grain in a composite join key."""
+    n = _norm(col)
+    type_norm = _norm(col_type)
+    # Strong signal from the database/Teiid type or a parsed date mask.
+    if any(t in type_norm for t in ("timestamp", "date", "time")):
+        return not any(ex in n for ex in _AUDIT_PERIOD_EXCLUSIONS)
+    if date_masks and col in date_masks:
+        return True
+    # Name-only fallback: period keywords, but not audit stamps.
+    if any(kw in n for kw in _PERIOD_KEYWORDS):
+        if any(ex in n for ex in _AUDIT_PERIOD_EXCLUSIONS):
+            return False
+        return True
+    return False
+
+
+def _period_columns_for_table(
+    table: TableInfo, date_masks: dict[str, str] | None
+) -> list[str]:
+    return [
+        n for (n, ty) in table.columns if _is_period_column(n, ty, date_masks)
+    ]
+
+
+def _enrich_period_keys(
+    cand: dict[str, Any],
+    tables_by_view: dict[str, TableInfo],
+    date_masks: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Extend a relationship candidate with same-grain period equality pairs.
+
+    When two fact tables both carry the same period column (e.g. WeekStart),
+    joining on the entity key alone fans out rows across time.  Add the shared
+    period column as an additional equality in the composite join key.
+    """
+    left = tables_by_view.get(cand["left_table"])
+    right = tables_by_view.get(cand["right_table"])
+    if left is None or right is None:
+        cand["join_key_pairs"] = [
+            {"left": cand["left_join_key"], "right": cand["right_join_key"], "is_period": False}
+        ]
+        return cand
+
+    left_periods = _period_columns_for_table(left, date_masks)
+    right_periods_set = set(_period_columns_for_table(right, date_masks))
+
+    pairs: list[dict[str, Any]] = [
+        {"left": cand["left_join_key"], "right": cand["right_join_key"], "is_period": False}
+    ]
+    period_matched = False
+    for lp in left_periods:
+        if lp in right_periods_set:
+            pairs.append({"left": lp, "right": lp, "is_period": True})
+            period_matched = True
+
+    # If each side has period columns but none share a name, the grains likely
+    # differ (e.g. weekly vs monthly).  Flag the pair so dual_line joins avoid it.
+    if left_periods and right_periods_set and not period_matched:
+        cand["grain_mismatch"] = True
+
+    cand["join_key_pairs"] = pairs
+    return cand
+
+
 def detect_entities(tables: list[TableInfo]) -> dict[str, list[str]]:
     """Map each table view to the candidate entity columns it contains."""
     out: dict[str, list[str]] = {}
@@ -295,45 +411,250 @@ def detect_entities(tables: list[TableInfo]) -> dict[str, list[str]]:
     return out
 
 
-def find_relationship_candidates(tables: list[TableInfo]) -> list[dict[str, Any]]:
+def _detect_view_strict(
+    sql: str | None, allowed_tables: list[str]
+) -> str | None:
+    """Which allowed view a query's SQL references — ``None`` when ambiguous.
+
+    A curated scope is only trustworthy as a view-to-view link when its
+    source/target query unambiguously reads a single project view. Zero or
+    multiple matches are ambiguous and rejected so we never fabricate a pair.
+    """
+    if not sql:
+        return None
+    sql_upper = sql.upper()
+    matches = [t for t in allowed_tables if t.upper() in sql_upper]
+    return matches[0] if len(matches) == 1 else None
+
+
+async def _resolve_scope_links(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    allowed_tables: list[str],
+) -> list[ScopeLink]:
+    """Map this project's enabled ``QueryScope`` rows onto view-to-view links.
+
+    Only enabled scopes for *this* project are read (never crossing project
+    boundaries). Each scope's source and target saved query is resolved to a
+    single allowed view via :func:`_detect_view_strict`; scopes whose SQL is
+    missing, matches zero or multiple views, or self-references are skipped.
+    Links are de-duplicated by (sorted view pair, normalized source field).
+    """
+    scopes = (
+        await session.scalars(
+            select(QueryScope).where(
+                QueryScope.project_id == project_id,
+                QueryScope.enabled.is_(True),
+            )
+        )
+    ).all()
+    if not scopes:
+        return []
+
+    query_ids = {s.query_id for s in scopes} | {
+        s.target_query_id for s in scopes
+    }
+    queries = (
+        await session.scalars(
+            select(SavedQuery).where(SavedQuery.id.in_(query_ids))
+        )
+    ).all()
+    sql_by_id = {q.id: q.sql_text for q in queries}
+
+    links: list[ScopeLink] = []
+    seen: set[tuple[str, str, str]] = set()
+    for s in scopes:
+        left = _detect_view_strict(sql_by_id.get(s.query_id), allowed_tables)
+        right = _detect_view_strict(
+            sql_by_id.get(s.target_query_id), allowed_tables
+        )
+        if not left or not right or left == right:
+            continue
+        lo, hi_ = sorted([left, right])
+        key = (lo, hi_, _norm(s.source_field))
+        if key in seen:
+            continue
+        seen.add(key)
+        links.append(
+            ScopeLink(
+                left_table=left,
+                right_table=right,
+                left_column=s.source_field.strip('"'),
+                right_column=s.target_field.strip('"'),
+                created_by_ai=bool(s.created_by_ai),
+            )
+        )
+    return links
+
+
+def _containment(left: set[str], right: set[str]) -> float:
+    """Fraction of the smaller value set contained in the larger.
+
+    A measured signal that two columns actually share values — the basis for
+    upgrading confidence beyond a name match and for inferring cardinality.
+    """
+    if not left or not right:
+        return 0.0
+    small, large = (left, right) if len(left) <= len(right) else (right, left)
+    return len(small & large) / len(small)
+
+
+def _cardinality(
+    left: set[str], right: set[str], overlap: float
+) -> tuple[str, str]:
+    """Infer (relationship_type, row_multiplication_risk) from value overlap."""
+    if not left or not right or overlap <= 0.0:
+        return "unknown", "medium"
+    if overlap >= 0.8:
+        return "one_to_many", "low"
+    if overlap >= 0.5:
+        return "one_to_many", "medium"
+    return "many_to_many", "high"
+
+
+def find_relationship_candidates(
+    tables: list[TableInfo],
+    *,
+    scope_links: list[ScopeLink] | None = None,
+    key_values: dict[str, dict[str, set[str]]] | None = None,
+    date_masks: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     """Discover evidence-backed join candidates between table pairs.
 
-    Evidence today is an exact key-name match (e.g. both tables expose a
-    ``SupplierID`` column). Each candidate carries the relationship metadata the
-    planner and card config expect. Name-only matches with no key shape are
-    deliberately excluded so unrelated tables are never joined.
+    Tiered evidence, strongest first; the best evidence per table-pair wins:
+
+    - **Tier 1 — curated scope links**: an enabled drill-down relationship
+      (user-created → 0.9, AI-created → 0.85).
+    - **Tier 3 — exact key-name match**: both tables expose the same join key
+      (e.g. ``SupplierID``), base confidence 0.6.
+    - **Tier 4 — differently-named join keys** whose *sampled* values overlap
+      (e.g. ``SupplierCode`` vs ``VendorCode``), requiring ≥0.3 containment.
+
+    When sampled ``key_values`` are supplied, measured containment upgrades a
+    candidate's confidence and derives its cardinality / row-multiplication
+    risk. Name-only matches with no key shape are still excluded so unrelated
+    tables are never joined; the resolver never fabricates a pair.
     """
+    key_values = key_values or {}
+    by_view = {t.view_name: t for t in tables}
+
+    # best[(sorted view pair)] -> candidate dict (higher confidence wins)
+    best: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def _consider(cand: dict[str, Any]) -> None:
+        _enrich_period_keys(cand, by_view, date_masks)
+        lo, hi_ = sorted([cand["left_table"], cand["right_table"]])
+        pair = (lo, hi_)
+        prior = best.get(pair)
+        if prior is None or cand["join_confidence"] > prior["join_confidence"]:
+            best[pair] = cand
+
+    def _kv(view: str, col: str) -> set[str]:
+        return key_values.get(view, {}).get(_norm(col), set())
+
+    def _measured(
+        left_view: str,
+        left_col: str,
+        right_view: str,
+        right_col: str,
+        base_conf: float,
+        base_reason: str,
+    ) -> dict[str, Any]:
+        lv, rv = _kv(left_view, left_col), _kv(right_view, right_col)
+        overlap = _containment(lv, rv)
+        confidence = base_conf
+        reason = base_reason
+        rel_type, risk = "unknown", "medium"
+        if lv and rv:
+            rel_type, risk = _cardinality(lv, rv, overlap)
+            if overlap > confidence:
+                confidence = round(overlap, 2)
+            reason = (
+                f"{base_reason}; measured value containment {overlap:.0%}"
+            )
+        return {
+            "left_table": left_view,
+            "right_table": right_view,
+            "left_join_key": left_col,
+            "right_join_key": right_col,
+            "relationship_type": rel_type,
+            "join_confidence": confidence,
+            "confidence_reason": reason,
+            "row_multiplication_risk": risk,
+        }
+
+    # Tier 1 — curated scope relationships.
+    for link in scope_links or []:
+        if link.left_table not in by_view or link.right_table not in by_view:
+            continue
+        base = 0.85 if link.created_by_ai else 0.9
+        origin = "AI-suggested" if link.created_by_ai else "user-defined"
+        _consider(
+            _measured(
+                link.left_table,
+                link.left_column,
+                link.right_table,
+                link.right_column,
+                base,
+                f"curated scope relationship ({origin})",
+            )
+        )
+
+    # Tier 3 — exact key-name matches across tables.
     by_key: dict[str, list[tuple[TableInfo, str]]] = {}
     for t in tables:
         for c in t.column_names:
             if _is_join_key(c):
                 by_key.setdefault(_norm(c), []).append((t, c))
-
-    candidates: list[dict[str, Any]] = []
-    seen: set[tuple[str, ...]] = set()
     for occ in by_key.values():
         for i in range(len(occ)):
             for j in range(i + 1, len(occ)):
                 (lt, lc), (rt, rc) = occ[i], occ[j]
                 if lt.view_name == rt.view_name:
                     continue
-                pair = (*sorted([lt.view_name, rt.view_name]), _norm(lc))
-                if pair in seen:
-                    continue
-                seen.add(pair)
-                candidates.append(
-                    {
-                        "left_table": lt.view_name,
-                        "right_table": rt.view_name,
-                        "left_join_key": lc,
-                        "right_join_key": rc,
-                        "relationship_type": "unknown",
-                        "join_confidence": 0.6,
-                        "confidence_reason": f"exact key-name match on '{lc}'",
-                        "row_multiplication_risk": "medium",
-                    }
+                _consider(
+                    _measured(
+                        lt.view_name,
+                        lc,
+                        rt.view_name,
+                        rc,
+                        0.6,
+                        f"exact key-name match on '{lc}'",
+                    )
                 )
-    return candidates
+
+    # Tier 4 — differently-named join keys with sampled value overlap.
+    join_cols_by_view = {
+        t.view_name: [c for c in t.column_names if _is_join_key(c)]
+        for t in tables
+    }
+    view_names = [t.view_name for t in tables]
+    for a in range(len(view_names)):
+        for b in range(a + 1, len(view_names)):
+            lv_name, rv_name = view_names[a], view_names[b]
+            for lc in join_cols_by_view[lv_name]:
+                for rc in join_cols_by_view[rv_name]:
+                    if _norm(lc) == _norm(rc):
+                        continue  # covered by Tier 3
+                    lv, rv = _kv(lv_name, lc), _kv(rv_name, rc)
+                    if not lv or not rv:
+                        continue
+                    overlap = _containment(lv, rv)
+                    if overlap < 0.3:
+                        continue
+                    _consider(
+                        _measured(
+                            lv_name,
+                            lc,
+                            rv_name,
+                            rc,
+                            round(overlap, 2),
+                            f"sampled value overlap ('{lc}' ~ '{rc}')",
+                        )
+                    )
+
+    return list(best.values())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -366,7 +687,10 @@ def _card_priority(card: dict[str, Any]) -> float:
     if card.get("kpiReferences") or card.get("referenceDocuments"):
         score += 2.0
     if card.get("relationshipMetadata"):
-        score += 1.0
+        # Evidence-backed cross-table findings are the scarcest signal class;
+        # weight them so they rank alongside same-severity single-table cards
+        # rather than at the bottom of the page.
+        score += 2.5
     pri = card.get("priorityScore")
     if isinstance(pri, int | float) and pri > 0:
         return float(pri)
@@ -385,7 +709,13 @@ def rank_and_dedupe_cards(
 ) -> list[dict[str, Any]]:
     """Return the strongest, de-duplicated cards (best-practices §Insight
     Selection / §Card Ranking). Duplicates that share project + insight type +
-    source tables + title are collapsed to the highest-scoring one."""
+    source tables + title are collapsed to the highest-scoring one.
+
+    Multi-table (relationship-evidence) cards are exempt from the cap: they
+    are the rarest, highest-effort findings, so every one that executed and
+    passed the quality gates is surfaced. Only single-table cards compete for
+    the ``max_cards`` slots.
+    """
     seen: set[tuple[Any, ...]] = set()
     unique: list[dict[str, Any]] = []
     for c in sorted(cards, key=_card_priority, reverse=True):
@@ -394,7 +724,13 @@ def rank_and_dedupe_cards(
             continue
         seen.add(key)
         unique.append(c)
-    return unique[:max_cards]
+
+    def _is_multi(c: dict[str, Any]) -> bool:
+        return len(c.get("sources", {}).get("tables", [])) >= 2
+
+    multi = [c for c in unique if _is_multi(c)]
+    single = [c for c in unique if not _is_multi(c)]
+    return sorted(multi + single[:max_cards], key=_card_priority, reverse=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -575,27 +911,34 @@ async def _safe_query(runner: QueryRunner, sql: str) -> dict[str, Any] | None:
         return None
 
 
-async def _sample_values(runner: QueryRunner, view_name: str) -> dict[str, str]:
-    """Return one real example value per column for a table.
+async def _sample_values(
+    runner: QueryRunner, view_name: str
+) -> tuple[dict[str, str], dict[str, set[str]]]:
+    """Sample a table: (one example per column, distinct join-key values).
 
-    The planner uses these to detect each column's true format (e.g. a date
-    stored as ``"1/19/2026"`` vs ISO, or whether text is numeric) so it can
-    CAST/parse correctly. Best-effort: returns ``{}`` if the probe query fails.
+    The first mapping is one real example value per column, used by the planner
+    to detect each column's true format (e.g. a date stored as ``"1/19/2026"``
+    vs ISO). The second collects the *distinct* values seen (over the same 25
+    probe rows) for columns recognised as join keys, keyed by normalised name —
+    the measured evidence relationship discovery uses to score value overlap.
+    Best-effort: returns ``({}, {})`` if the probe query fails.
     """
     result = await _safe_query(runner, f'SELECT * FROM "{view_name}"')
     if not result:
-        return {}
+        return {}, {}
     samples: dict[str, str] = {}
+    key_values: dict[str, set[str]] = {}
     for row in result.get("rows", [])[:25]:
         for col, val in row.items():
-            if col in samples:
-                continue
             if val is None:
                 continue
             text = str(val).strip()
-            if text:
-                samples[col] = text[:40]
-    return samples
+            if not text:
+                continue
+            samples.setdefault(col, text[:40])
+            if _is_join_key(col):
+                key_values.setdefault(_norm(col), set()).add(text[:80])
+    return samples, key_values
 
 
 # Timestamp/date normalization is shared with the query preview routes via
@@ -1095,7 +1438,10 @@ _PERIOD_KEYWORDS = [
 _MEASURE_KEYWORDS = [
     "count", "qty", "quantity", "amount", "total", "sum", "duration",
     "hours", "days", "minutes", "score", "rate", "age", "volume", "num",
-    "utilization", "usage", "capacity",
+    "utilization", "usage", "capacity", "units", "produced", "scrapped",
+    "scrap", "planned", "actual", "forecast", "demand", "onhand",
+    "safety", "stock", "reject", "defect", "backorder", "shipped",
+    "received",
 ]
 
 
@@ -1806,6 +2152,186 @@ def _build_chart(
     }
 
 
+def _series_is_constant(rows: list[dict], col: str) -> bool:
+    vals = [round(v, 6) for r in rows if (v := _to_float(r.get(col))) is not None]
+    return len(vals) > 1 and len(set(vals)) == 1
+
+
+def _extract_join_qualifiers(sql: str) -> tuple[str, str] | None:
+    """Return the (left, right) table/alias qualifiers for the join ON clause."""
+    parts = re.split(r'\bON\b', sql, maxsplit=1, flags=re.IGNORECASE)
+    if len(parts) < 2:
+        return None
+    prefix = parts[0]
+    sources = list(
+        re.finditer(
+            r'(?:FROM|JOIN)\s+("?\w+"?)(?:\s+(?:AS\s+)?("?\w+"?))?',
+            prefix,
+            re.IGNORECASE,
+        )
+    )
+    if len(sources) < 2:
+        return None
+    left = (sources[-2].group(2) or sources[-2].group(1) or "").strip().strip('"')
+    right = (sources[-1].group(2) or sources[-1].group(1) or "").strip().strip('"')
+    return left, right
+
+
+async def _repair_fanned_out_join(
+    a: dict[str, Any],
+    result: dict[str, Any],
+    relationship_meta: dict[str, Any],
+    date_masks: dict[str, str],
+    runner: QueryRunner,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Attempt to fix a constant second series by adding the shared period equality."""
+    period_pair = next(
+        (p for p in relationship_meta.get("join_key_pairs", []) if p.get("is_period")),
+        None,
+    )
+    if not period_pair:
+        return None, None
+    sql = a.get("sql", "")
+    quals = _extract_join_qualifiers(sql)
+    if not quals:
+        return None, None
+    left_qual, right_qual = quals
+    left_period = period_pair["left"]
+    right_period = period_pair["right"]
+    cond = f'"{left_qual}"."{left_period}" = "{right_qual}"."{right_period}"'
+    if re.search(r'\bON\b', sql, re.IGNORECASE):
+        m = re.search(
+            r'\bON\b(.+?)(?=\s+(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT)\b|;|$)',
+            sql,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if m:
+            on_text = m.group(1)
+            if (
+                left_period.lower() in on_text.lower()
+                and right_period.lower() in on_text.lower()
+                and "=" in on_text
+            ):
+                return None, None
+            new_on = on_text.rstrip() + f" AND {cond}"
+            new_sql = sql[: m.start()] + "ON " + new_on + sql[m.end() :]
+        else:
+            return None, None
+    else:
+        new_sql = re.sub(
+            r'(\bJOIN\s+"?\w+"?(?:\s+(?:AS\s+)?"?\w+"?)?)(?=\s+(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT)\b|;|$)',
+            rf'\1 ON {cond}',
+            sql,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if new_sql == sql:
+            return None, None
+    new_sql = normalize_date_casts(new_sql, date_masks)
+    new_result, _err = await _query_with_error(runner, new_sql)
+    if not new_result or not new_result.get("rows"):
+        return None, None
+    value2_col = a.get("value_column_2", "")
+    if value2_col and _series_is_constant(new_result.get("rows", []), value2_col):
+        return None, None
+    return {**a, "sql": new_sql}, new_result
+
+
+def _period_expression(col: str, qualifier: str, date_masks: dict[str, str]) -> str:
+    mask = date_masks.get(col)
+    if mask:
+        return f"FORMATTIMESTAMP(PARSETIMESTAMP(\"{qualifier}\".\"{col}\", '{mask}'), 'yyyy-MM')"
+    # When the date format is unknown, avoid a CAST that Teiid may reject
+    # (e.g. text-backed "2025-01").  ISO date strings group and sort correctly.
+    return f'"{qualifier}"."{col}"'
+
+
+async def _synthesize_templated_join(
+    relationship_hints: list[dict[str, Any]],
+    ctx: ProjectContext,
+    date_masks: dict[str, str],
+    runner: QueryRunner,
+    avoid_pairs: set[frozenset[str]] | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Build and run a deterministic two-table join from the top evidence pair."""
+    avoid_pairs = avoid_pairs or set()
+    for hint in sorted(
+        relationship_hints,
+        key=lambda h: float(h.get("join_confidence") or 0),
+        reverse=True,
+    ):
+        if hint.get("grain_mismatch"):
+            continue
+        left_table = hint.get("left_table", "")
+        right_table = hint.get("right_table", "")
+        if frozenset({left_table, right_table}) in avoid_pairs:
+            continue
+        left_t = next((t for t in ctx.tables if t.view_name == left_table), None)
+        right_t = next((t for t in ctx.tables if t.view_name == right_table), None)
+        if not left_t or not right_t:
+            continue
+        period_pair = next(
+            (p for p in hint.get("join_key_pairs", []) if p.get("is_period")),
+            None,
+        )
+        if not period_pair:
+            left_periods = _period_columns_for_table(left_t, date_masks)
+            right_periods = _period_columns_for_table(right_t, date_masks)
+            shared = set(left_periods) & set(right_periods)
+            if shared:
+                pc = next(iter(shared))
+                period_pair = {"left": pc, "right": pc, "is_period": True}
+            else:
+                continue
+        left_measure = _measure_col(left_t)
+        right_measure = _measure_col(right_t)
+        if not left_measure or not right_measure:
+            continue
+        key_conds = [
+            f'"{left_table}"."{p["left"]}" = "{right_table}"."{p["right"]}"'
+            for p in hint.get("join_key_pairs", [])
+            if not p.get("is_period")
+        ]
+        if not key_conds:
+            continue
+        period_cond = (
+            f'"{left_table}"."{period_pair["left"]}" = '
+            f'"{right_table}"."{period_pair["right"]}"'
+        )
+        on_clause = " AND ".join([*key_conds, period_cond])
+        period_expr = _period_expression(period_pair["left"], left_table, date_masks)
+        sql = (
+            f'SELECT {period_expr} AS "Period", '
+            f'AVG(CAST("{left_table}"."{left_measure}" AS double)) AS "MetricA", '
+            f'AVG(CAST("{right_table}"."{right_measure}" AS double)) AS "MetricB" '
+            f'FROM "{left_table}" JOIN "{right_table}" ON {on_clause} '
+            f'GROUP BY {period_expr} ORDER BY "Period"'
+        )
+        sql = normalize_date_casts(sql, date_masks)
+        result, _err = await _query_with_error(runner, sql)
+        if not result or not result.get("rows"):
+            continue
+        if _series_is_constant(result.get("rows", []), "MetricB"):
+            continue
+        analysis = {
+            "id": f"templated_join_{left_table}_{right_table}",
+            "category": "relationship",
+            "title": f"{left_measure} and {right_measure} over {period_pair['left']}",
+            "rationale": (
+                f"Deterministic cross-table trend joining {left_table} and "
+                f"{right_table} on the verified keys plus shared period."
+            ),
+            "sql": sql,
+            "chart_type": "dual_line",
+            "label_column": "Period",
+            "value_column": "MetricA",
+            "value_column_2": "MetricB",
+            "severity_hint": "watch",
+        }
+        return analysis, result
+    return None, None
+
+
 def _fmt_num(v: float) -> str:
     if abs(v) >= 1_000_000:
         return f"{v / 1_000_000:.1f}M"
@@ -1873,7 +2399,7 @@ def _fmt_value(v: float, fmt: str) -> str:
     if fmt == "currency":
         return f"${_fmt_num(v)}"
     if fmt == "count":
-        return f"{int(round(v)):,}"
+        return f"{round(v):,}"
     return _fmt_num(v)
 
 
@@ -2050,9 +2576,14 @@ async def plan_and_execute_widgets(
             )
 
     allowed_tables = [t.view_name for t in ctx.tables]
-    samples_per_table = await asyncio.gather(
+    sample_results = await asyncio.gather(
         *(_sample_values(runner, t.view_name) for t in ctx.tables)
     )
+    samples_per_table = [s for (s, _) in sample_results]
+    key_values_by_table = {
+        t.view_name: kv
+        for t, (_, kv) in zip(ctx.tables, sample_results, strict=False)
+    }
     table_schema = [
         {
             "table": t.view_name,
@@ -2066,7 +2597,12 @@ async def plan_and_execute_widgets(
     ]
     date_masks = date_masks_from_samples(samples_per_table)
     documents = _plan_documents(ctx)
-    relationship_hints = find_relationship_candidates(ctx.tables)
+    relationship_hints = find_relationship_candidates(
+        ctx.tables,
+        scope_links=ctx.scope_links,
+        key_values=key_values_by_table,
+        date_masks=date_masks,
+    )
 
     plan_documents = documents
     if project_context and project_context.get("ai_context_enabled"):
@@ -2241,6 +2777,32 @@ async def run_ai_intelligence(
                 exc,
             )
 
+    # Knowledge Graph grounding: give the planner the graph's risks, gaps,
+    # opportunities, and recommended-but-unmeasured KPIs as HYPOTHESES to test
+    # with SQL (the AI-server plan prompt enforces that framing), so planned
+    # analyses target what the graph says matters instead of re-deriving
+    # salience from raw schema every run. Fail-open: a missing or failed graph
+    # yields an empty block, never a failed run. Capped tighter than Project
+    # Insight (10 vs 20 items) to protect the plan prompt's schema budget.
+    kg_context: dict[str, Any] = {}
+    if session is not None:
+        try:
+            from app.services.knowledge_graph_ai_context import (
+                collect_knowledge_graph_ai_context,
+            )
+
+            kg_context = await collect_knowledge_graph_ai_context(
+                session,
+                tenant_id=tenant_id,
+                project_id=project.id,
+                user_id=user_id,
+                max_items=10,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to collect KG context for project %s: %s", project.id, exc
+            )
+
     ai_call_limit = max(
         1, get_settings().home_intelligence_max_concurrent_ai_calls_per_project
     )
@@ -2248,10 +2810,16 @@ async def run_ai_intelligence(
 
     allowed_tables = [t.view_name for t in ctx.tables]
     # Pull a real example value per column so the planner can see each column's
-    # actual format (date masks, numeric-vs-text) and generate valid SQL.
-    samples_per_table = await asyncio.gather(
+    # actual format (date masks, numeric-vs-text) and generate valid SQL; the
+    # same probe collects distinct join-key values for relationship scoring.
+    sample_results = await asyncio.gather(
         *(_sample_values(runner, t.view_name) for t in ctx.tables)
     )
+    samples_per_table = [s for (s, _) in sample_results]
+    key_values_by_table = {
+        t.view_name: kv
+        for t, (_, kv) in zip(ctx.tables, sample_results, strict=False)
+    }
     table_schema = [
         {
             "table": t.view_name,
@@ -2293,7 +2861,12 @@ async def run_ai_intelligence(
     # Evidence-backed join candidates (best-practices §Multi-Table
     # Relationship Policy). When present, the planner is allowed to propose
     # validated two-table insights; otherwise it stays single-table.
-    relationship_hints = find_relationship_candidates(ctx.tables)
+    relationship_hints = find_relationship_candidates(
+        ctx.tables,
+        scope_links=ctx.scope_links,
+        key_values=key_values_by_table,
+        date_masks=date_masks,
+    )
 
     context_document: dict[str, Any] | None = None
     if project_context:
@@ -2330,6 +2903,7 @@ async def run_ai_intelligence(
             max_analyses=max_analyses,
             granularity=granularity,
             project_context=project_context or {},
+            knowledge_graph_context=kg_context,
         )
 
     if plan_semaphore is None:
@@ -2349,6 +2923,32 @@ async def run_ai_intelligence(
         frozenset({h["left_table"], h["right_table"]}): h
         for h in relationship_hints
     }
+
+    def _relationship_meta_for(a: dict[str, Any]) -> dict[str, Any] | None:
+        tables = _tables_in_sql(a.get("sql", ""), ctx.tables)
+        if len(tables) < 2:
+            return None
+        return hint_by_pair.get(frozenset(tables[:2]))
+
+    async def _execute_and_guard(
+        a: dict[str, Any],
+        result: dict[str, Any],
+    ) -> None:
+        """Record a successful query, dropping it if the second series is constant."""
+        if (
+            a.get("chart_type") in _TWO_VALUE_TYPES
+            and a.get("value_column_2")
+            and _series_is_constant(result.get("rows", []), a["value_column_2"])
+        ):
+            rel_meta = _relationship_meta_for(a)
+            if rel_meta:
+                repaired_a, repaired_result = await _repair_fanned_out_join(
+                    a, result, rel_meta, date_masks, runner
+                )
+                if repaired_a and repaired_result:
+                    _record_data_analysis(repaired_a, repaired_result)
+            return
+        _record_data_analysis(a, result)
 
     # Execute each analysis against real data; gather interpret inputs.
     executed: list[dict[str, Any]] = []
@@ -2376,9 +2976,10 @@ async def run_ai_intelligence(
         sql = (a.get("sql") or "").strip()
         if sql:
             sql = normalize_date_casts(sql, date_masks)
+            a["sql"] = sql
             result, err = await _query_with_error(runner, sql)
             if result and result.get("rows"):
-                _record_data_analysis(a, result)
+                await _execute_and_guard(a, result)
             elif err:
                 to_repair.append((a, sql, err))
             # else: ran but returned no rows -> skip, never fabricate
@@ -2441,7 +3042,54 @@ async def run_ai_intelligence(
             fixed = normalize_date_casts(fixed, date_masks)
             result, _ = await _query_with_error(runner, fixed)
             if result and result.get("rows"):
-                _record_data_analysis({**a, "sql": fixed}, result)
+                await _execute_and_guard({**a, "sql": fixed}, result)
+
+    # Deduplicate multi-table analyses by the table pair they join so a
+    # model that emits two identical joins does not crowd out other evidence.
+    _seen_pairs: set[frozenset[str]] = set()
+    _deduped: list[dict[str, Any]] = []
+    _deduped_inputs: list[dict[str, Any]] = []
+    for item, inp in zip(executed, interpret_inputs, strict=True):
+        pair_tables = _tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)
+        if len(pair_tables) >= 2:
+            pair = frozenset(pair_tables[:2])
+            if pair in _seen_pairs:
+                continue
+            _seen_pairs.add(pair)
+        _deduped.append(item)
+        _deduped_inputs.append(inp)
+    executed = _deduped
+    interpret_inputs = _deduped_inputs
+
+    # Deterministic floor: if the plan didn't produce enough multi-table
+    # relationship analyses, synthesize additional ones from the evidence list.
+    relationship_floor = 0
+    if relationship_hints:
+        relationship_floor = 2 if granularity >= 4 else 1
+
+    def _relationship_dual_count(items: list[dict[str, Any]]) -> int:
+        return sum(
+            1
+            for item in items
+            if item["analysis"].get("chart_type") in ("dual_line", "scatter")
+            and item["analysis"].get("value_column_2")
+            and len(_tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)) >= 2
+        )
+
+    while _relationship_dual_count(executed) < relationship_floor:
+        used_pairs = {
+            frozenset(_tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)[:2])
+            for item in executed
+            if len(_tables_in_sql(item["analysis"].get("sql", ""), ctx.tables)) >= 2
+        }
+        templated = await _synthesize_templated_join(
+            relationship_hints, ctx, date_masks, runner, avoid_pairs=used_pairs
+        )
+        if not (templated and templated[0] and templated[1]):
+            break
+        analysis, result = templated
+        assert analysis is not None and result is not None
+        _record_data_analysis(analysis, result)
 
     if not executed:
         return []
@@ -2684,9 +3332,36 @@ async def run_ai_intelligence(
             )
         )
 
-    # Rank by severity + evidence strength and drop duplicates, returning the
-    # strongest few (best-practices §Insight Selection / §Card Ranking).
-    return rank_and_dedupe_cards(cards)
+
+    # Rank by severity + evidence strength and drop duplicates. Single-table
+    # cards compete for the cap; multi-table cards are always surfaced.
+    ranked = rank_and_dedupe_cards(cards)
+    if not ranked:
+        logger.info(
+            "home-intel project %s AI-empty: %s analyses executed but 0 cards "
+            "survived building / quality gates",
+            project.id, len(executed),
+        )
+
+    def _n_tables(sql: str) -> int:
+        return len(_tables_in_sql(sql, ctx.tables))
+
+    logger.info(
+        "home-intel project %s multi-table funnel: hints=%s planned=%s "
+        "executed=%s surfaced=%s",
+        project.id,
+        len(relationship_hints),
+        sum(1 for a in analyses if _n_tables(a.get("sql", "")) >= 2),
+        sum(
+            1 for item in executed
+            if _n_tables(item["analysis"].get("sql", "")) >= 2
+        ),
+        sum(
+            1 for c in ranked
+            if len(c.get("sources", {}).get("tables", [])) >= 2
+        ),
+    )
+    return ranked
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -49,7 +49,7 @@ MAX_CARDS = 8
 # snapshot-rebuild time (bounds rebuild cost on very large graphs).
 MAX_PRECACHE_CENTERS = 120
 # Number of centres enriched concurrently during a snapshot rebuild.
-PRECACHE_CONCURRENCY = 6
+PRECACHE_CONCURRENCY = 3
 
 # ── Node taxonomy ────────────────────────────────────────────────────
 
@@ -1467,19 +1467,45 @@ def _snapshot_source_counts(raw_nodes: list[dict[str, Any]]) -> dict[str, int]:
 async def get_project_graph_snapshot(
     session: AsyncSession, *, tenant_id: int, project_id: int,
 ) -> dict[str, Any] | None:
-    """Return the latest cached full-graph snapshot, or ``None`` if absent."""
+    """Return the cached full-graph snapshot for a project.
+
+    Prefers the active knowledge-graph version (produced by the lifecycle
+    manager), then falls back to the legacy ``full_project_graph`` snapshot.
+    This keeps the Insight-First Knowledge Graph canvas in sync with the
+    lifecycle-managed rebuild.
+    """
+    from app.models.knowledge_graph_lifecycle import KnowledgeGraphVersion
     from app.models.knowledge_graph_snapshot import (
         SNAPSHOT_KEY_FULL,
         AIProjectGraphSnapshot,
     )
 
-    row = await session.scalar(
-        select(AIProjectGraphSnapshot).where(
-            AIProjectGraphSnapshot.tenant_id == tenant_id,
-            AIProjectGraphSnapshot.project_id == project_id,
-            AIProjectGraphSnapshot.snapshot_key == SNAPSHOT_KEY_FULL,
-        )
+    # Prefer the active lifecycle version so the graph UI shows the latest
+    # validated rebuild.
+    active_version = await session.scalar(
+        select(KnowledgeGraphVersion).where(
+            KnowledgeGraphVersion.tenant_id == tenant_id,
+            KnowledgeGraphVersion.project_id == project_id,
+            KnowledgeGraphVersion.status == "active",
+        ).order_by(KnowledgeGraphVersion.version_number.desc())
     )
+    row: AIProjectGraphSnapshot | None = None
+    if active_version and active_version.storage_reference:
+        row = await session.scalar(
+            select(AIProjectGraphSnapshot).where(
+                AIProjectGraphSnapshot.tenant_id == tenant_id,
+                AIProjectGraphSnapshot.project_id == project_id,
+                AIProjectGraphSnapshot.snapshot_key == active_version.storage_reference,
+            )
+        )
+    if row is None:
+        row = await session.scalar(
+            select(AIProjectGraphSnapshot).where(
+                AIProjectGraphSnapshot.tenant_id == tenant_id,
+                AIProjectGraphSnapshot.project_id == project_id,
+                AIProjectGraphSnapshot.snapshot_key == SNAPSHOT_KEY_FULL,
+            )
+        )
     if row is None:
         return None
     payload = dict(row.payload or {})
@@ -1515,17 +1541,46 @@ def build_node_centric_graph_from_snapshot(
     fallback). Both canvas and cards are served entirely from the snapshot.
     """
     full = snapshot.get("fullGraph") or {"nodes": [], "edges": []}
+    nodes = full.get("nodes", [])
+    edges = full.get("edges", [])
+    by_center = snapshot.get("aiCardsByCenter") or {}
+
+    # When no explicit centre is requested, prefer a centre that actually has
+    # AI-generated insight cards so the initial canvas load is useful. If the
+    # default centre has cards we keep it; otherwise fall back to the centre
+    # with the richest cached bundle.
+    chosen_center = center_node
+    if not chosen_center and by_center:
+        first_payload = build_graph_payload(
+            nodes, edges,
+            center_node=None,
+            lens=lens,
+            min_confidence=min_confidence,
+            include_inferred=include_inferred,
+            severity=severity,
+        )
+        default_center = first_payload.get("centerNode")
+        default_key = default_center.get("graphKey") if default_center else None
+        default_bundle = by_center.get(default_key) if default_key else None
+        if not (default_bundle and default_bundle.get("insightCards")):
+            best_key = max(
+                by_center,
+                key=lambda k: len((by_center[k] or {}).get("insightCards", [])),
+                default=None,
+            )
+            if best_key:
+                chosen_center = best_key
+
     payload = build_graph_payload(
-        full.get("nodes", []),
-        full.get("edges", []),
-        center_node=center_node,
+        nodes,
+        edges,
+        center_node=chosen_center,
         lens=lens,
         min_confidence=min_confidence,
         include_inferred=include_inferred,
         severity=severity,
     )
     center = payload.get("centerNode")
-    by_center = snapshot.get("aiCardsByCenter") or {}
     bundle = by_center.get(center.get("graphKey")) if center else None
     if bundle:
         _overlay_card_bundle(payload, bundle)

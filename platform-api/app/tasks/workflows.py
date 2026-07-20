@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
-from arq import create_pool
+from arq import create_pool, cron
 from arq.connections import RedisSettings
 from arq.worker import Retry
 from sqlalchemy import select
@@ -198,6 +199,199 @@ async def scan_repository_connection(
             }
 
 
+async def enqueue_rebuild_knowledge_graph(build_id: int) -> str:
+    """Enqueue a knowledge graph rebuild and return the job id.
+
+    The deterministic job id makes enqueueing idempotent per build: event
+    triggers that coalesce onto an already-queued build re-enqueue the same id
+    and arq drops the duplicate instead of running the build twice.
+    """
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "rebuild_knowledge_graph", build_id, _job_id=f"kg-build:{build_id}"
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def enqueue_run_knowledge_graph_health_check(project_id: int) -> str:
+    """Enqueue a knowledge graph health check and return the job id."""
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "run_knowledge_graph_health_check", project_id
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[str, Any]:
+    """Execute a knowledge graph build (full or incremental) in the worker."""
+    from app.models import KnowledgeGraphBuild
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+
+    async with SessionLocal() as session:
+        lifecycle = KnowledgeGraphLifecycleManager(session)
+        try:
+            build = await session.get(KnowledgeGraphBuild, build_id)
+            if build is None:
+                return {"status": "error", "error": "build_not_found"}
+
+            worker_id = ctx.get("job_id") or str(uuid.uuid4())
+            build.worker_id = worker_id
+            await session.flush()
+
+            if build.build_type == "incremental":
+                await lifecycle.run_incremental_rebuild(build_id)
+            else:
+                await lifecycle.run_full_rebuild(build_id)
+            await session.commit()
+
+            # Downstream consumers: a successful (activated) build means the
+            # project's data view changed, so warm the shared Business Insight
+            # cache. Best-effort — the graph build result stands regardless.
+            try:
+                await session.refresh(build)
+                if (
+                    build.status == "succeeded"
+                    and get_settings().business_insight_event_refresh_enabled
+                ):
+                    await enqueue_refresh_business_insight_result(
+                        tenant_id=build.tenant_id, project_id=build.project_id
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to enqueue business insight refresh after build %s: %s",
+                    build_id,
+                    exc,
+                )
+
+            # Sibling consumer: Project Insight snapshots become stale whenever
+            # the KG view changes, so mark them and queue a debounced rebuild.
+            try:
+                await session.refresh(build)
+                if build.status == "succeeded":
+                    from app.services.project_insight_service import (
+                        mark_project_insight_stale,
+                    )
+
+                    await mark_project_insight_stale(
+                        session,
+                        tenant_id=build.tenant_id,
+                        project_id=build.project_id,
+                    )
+                    await session.commit()
+                    if get_settings().project_insight_event_rebuild_enabled:
+                        await enqueue_rebuild_project_insight(
+                            tenant_id=build.tenant_id,
+                            project_id=build.project_id,
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to enqueue project insight rebuild after build %s: %s",
+                    build_id,
+                    exc,
+                )
+            return {"status": "ok", "build_id": build_id}
+        except Exception as exc:
+            logger.exception("rebuild_knowledge_graph failed for build %s", build_id)
+            await session.rollback()
+            return {"status": "error", "error": str(exc)[:500]}
+
+
+# Deterministic job id may be reused; don't keep results so re-enqueue works.
+rebuild_knowledge_graph.keep_result = 0  # type: ignore[attr-defined]
+
+
+async def run_knowledge_graph_health_check(
+    ctx: dict[str, Any], project_id: int
+) -> dict[str, Any]:
+    """Run a knowledge graph health check for one project."""
+    from app.services.knowledge_graph_health import KnowledgeGraphHealthService
+
+    async with SessionLocal() as session:
+        health = KnowledgeGraphHealthService(session)
+        try:
+            hc = await health.run_health_check(project_id, check_type="scheduled")
+            await session.commit()
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "health_status": hc.status,
+            }
+        except Exception as exc:
+            logger.exception(
+                "run_knowledge_graph_health_check failed for project %s", project_id
+            )
+            await session.rollback()
+            return {"status": "error", "project_id": project_id, "error": str(exc)[:500]}
+
+
+async def recover_stale_graph_builds(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Recover knowledge graph builds with expired heartbeats."""
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+
+    async with SessionLocal() as session:
+        lifecycle = KnowledgeGraphLifecycleManager(session)
+        try:
+            recovered = await lifecycle.recover_stale_builds()
+            await session.commit()
+            return {"status": "ok", "recovered_build_ids": recovered}
+        except Exception as exc:
+            logger.exception("recover_stale_graph_builds failed")
+            await session.rollback()
+            return {"status": "error", "error": str(exc)[:500]}
+
+
+async def evaluate_stale_graphs(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Mark graphs whose source fingerprint drifted as stale, then rebuild them.
+
+    Staleness detection alone leaves a graph stale until a user manually hits
+    rebuild; queueing the rebuild here closes the loop so drifted graphs heal
+    without user intervention. Each project is attributed to its owner so AI
+    enrichment still runs in this userless context.
+    """
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+
+    async with SessionLocal() as session:
+        lifecycle = KnowledgeGraphLifecycleManager(session)
+        try:
+            marked = await lifecycle.evaluate_stale_graphs()
+            await session.commit()
+        except Exception as exc:
+            logger.exception("evaluate_stale_graphs failed")
+            await session.rollback()
+            return {"status": "error", "error": str(exc)[:500]}
+
+        enqueued: list[int] = []
+        for project_id in marked:
+            try:
+                requested_by = await lifecycle.resolve_representative_user(project_id)
+                build, _ = await lifecycle.request_full_rebuild(
+                    project_id, trigger="source_drift", requested_by=requested_by
+                )
+                await session.commit()
+                await enqueue_rebuild_knowledge_graph(build.id)
+                enqueued.append(build.id)
+            except Exception as exc:
+                # Fail-open per project: one broken project must not block the
+                # rest of the fleet from healing.
+                logger.warning(
+                    "Auto-rebuild for stale graph project %s failed: %s",
+                    project_id,
+                    exc,
+                )
+                await session.rollback()
+        return {
+            "status": "ok",
+            "marked_project_ids": marked,
+            "enqueued_build_ids": enqueued,
+        }
+
+
 async def enqueue_sync_saas_object(
     *, saas_source_id: int, limit: int | None = None
 ) -> str:
@@ -219,6 +413,9 @@ async def sync_saas_object(
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Sync a SaaS object (HubSpot/Salesforce) into its Postgres staging table."""
+    from app.models.database_data_source import DatabaseDataSource
+    from app.models.saas_object_data_source import SaasObjectDataSource
+    from app.services.knowledge_graph_lifecycle import request_event_driven_rebuild
     from app.services.saas_source_service import run_sync
 
     async with SessionLocal() as session:
@@ -231,7 +428,506 @@ async def sync_saas_object(
                 "sync_saas_object failed for source %s: %s", saas_source_id, exc
             )
             return {"status": "error", "saas_source_id": saas_source_id}
+
+        # Synced data changed the project's sources; refresh its knowledge
+        # graph. The staging rows are committed by run_sync, so the rebuild
+        # observes them (producer-before-consumer ordering). Best-effort: the
+        # helper never raises.
+        try:
+            saas = await session.get(SaasObjectDataSource, saas_source_id)
+            data_source = (
+                await session.get(DatabaseDataSource, saas.database_data_source_id)
+                if saas
+                else None
+            )
+        except Exception:
+            data_source = None
+        if data_source is not None and data_source.project_id is not None:
+            await request_event_driven_rebuild(
+                session,
+                project_id=data_source.project_id,
+                change_set=[
+                    {
+                        "entity_type": "data_source",
+                        "entity_id": data_source.id,
+                        "action": "synced",
+                        "change_scope": "content",
+                    }
+                ],
+                trigger="saas_sync",
+            )
     return {"status": "ok", "saas_source_id": saas_source_id, **result}
+
+
+async def enqueue_reprocess_project(
+    *,
+    tenant_id: int,
+    project_id: int,
+    user_id: int,
+    force: bool = False,
+) -> str:
+    """Enqueue a project-wide document reprocess + graph rebuild cascade.
+
+    The deterministic per-project job id coalesces rapid repeat triggers: while
+    one cascade is queued/running for a project, further enqueues are dropped
+    by arq instead of stacking duplicate full-project reprocesses.
+    """
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "reprocess_project",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            user_id=user_id,
+            force=force,
+            _job_id=f"reprocess:{tenant_id}:{project_id}",
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+REPROCESS_DOCUMENT_CONCURRENCY = 2
+
+
+async def reprocess_project(
+    ctx: dict[str, Any],
+    *,
+    tenant_id: int,
+    project_id: int,
+    user_id: int,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Reprocess every project document, then rebuild the knowledge graph last.
+
+    Stage order is the correctness constraint: documents (and the relationship/
+    family edges their profiles produce) are the graph's upstream producers, so
+    the snapshot rebuild must run as the terminal stage or it re-caches stale
+    rows. Each document honors the file-hash gate — unchanged files are skipped
+    unless ``force`` — and the graph rebuild only runs when something actually
+    changed (or on ``force``). Every stage is fail-open: one bad document never
+    blocks the rest, and a graph failure never fails the reprocess.
+    """
+    from app.models.project_asset import ProjectAsset
+    from app.services.document_processing_service import process_document_asset
+    from app.services.knowledge_graph_lifecycle import request_event_driven_rebuild
+
+    async with SessionLocal() as session:
+        asset_ids = (
+            await session.scalars(
+                select(ProjectAsset.id).where(
+                    ProjectAsset.tenant_id == tenant_id,
+                    ProjectAsset.project_id == project_id,
+                )
+            )
+        ).all()
+
+    statuses: dict[int, str] = {}
+    # Document profiling fans out to the AI server, so bound how many documents
+    # run at once. Each document gets its own session: the pipeline commits at
+    # every stage and AsyncSession is not safe for concurrent use.
+    semaphore = asyncio.Semaphore(REPROCESS_DOCUMENT_CONCURRENCY)
+
+    async def _one(asset_id: int) -> None:
+        async with semaphore:
+            try:
+                async with SessionLocal() as session:
+                    asset = await session.get(ProjectAsset, asset_id)
+                    if asset is None:
+                        statuses[asset_id] = "missing"
+                        return
+                    statuses[asset_id] = await process_document_asset(
+                        session,
+                        asset,
+                        tenant_id,
+                        project_id,
+                        user_id,
+                        force=force,
+                        trigger_graph_rebuild=False,
+                    )
+            except Exception:
+                logger.exception(
+                    "reprocess_project: document %s failed for project %s",
+                    asset_id,
+                    project_id,
+                )
+                statuses[asset_id] = "error"
+
+    await asyncio.gather(*(_one(aid) for aid in asset_ids))
+
+    changed = [aid for aid, s in statuses.items() if s == "processed"]
+    build_id: int | None = None
+    if changed or force:
+        async with SessionLocal() as session:
+            build = await request_event_driven_rebuild(
+                session,
+                project_id=project_id,
+                change_set=[
+                    {
+                        "entity_type": "document",
+                        "entity_id": aid,
+                        "action": "reprocessed",
+                        "change_scope": "content",
+                    }
+                    for aid in (changed or asset_ids)
+                ],
+                trigger="project_reprocess",
+                requested_by=user_id,
+            )
+            build_id = build.id if build else None
+
+    return {
+        "status": "ok",
+        "tenant_id": tenant_id,
+        "project_id": project_id,
+        "documents": statuses,
+        "changed_count": len(changed),
+        "graph_build_id": build_id,
+    }
+
+
+# Deterministic per-project job id is reused across reprocess triggers.
+reprocess_project.keep_result = 0  # type: ignore[attr-defined]
+
+
+# Granularity the event-driven background refresh analyses at — the Home
+# stream's default, so warmed results serve the common case.
+BUSINESS_INSIGHT_REFRESH_GRANULARITY = 3
+
+
+async def enqueue_refresh_business_insight_result(
+    *, tenant_id: int, project_id: int
+) -> str:
+    """Enqueue a debounced background refresh of one project's shared cards.
+
+    The deterministic per-project job id plus the defer window coalesce bursts
+    (e.g. several KG builds from a multi-file upload) into one analysis.
+    """
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "refresh_business_insight_result",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            _job_id=f"bi-result:{tenant_id}:{project_id}",
+            _defer_by=120,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def refresh_business_insight_result(
+    ctx: dict[str, Any],
+    *,
+    tenant_id: int,
+    project_id: int,
+) -> dict[str, Any]:
+    """Re-analyse one project into the shared Business Insight cache.
+
+    Runs after a successful Knowledge Graph build so every user's next Home
+    open assembles from warm, current results. Attributed to the project owner
+    (the SQL runs as them), gated on recent tenant Home activity so idle
+    tenants consume zero AI capacity, and bounded by the same per-tenant
+    capacity slots as interactive runs — background refresh can never outspend
+    user-facing load.
+    """
+    from app.models.intelligence_snapshot import IntelligenceSnapshot
+    from app.models.project import Project
+    from app.routes import home_intelligence as hir
+    from app.services import business_insight_cache as bi_cache
+    from app.services import home_intel_queue as q
+    from app.services import home_intelligence as hi
+    from app.services.ai_intelligence_client import AIUnavailableError
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+
+    settings = get_settings()
+    if not settings.business_insight_event_refresh_enabled:
+        return {"status": "disabled", "project_id": project_id}
+
+    async with SessionLocal() as session:
+        # Activity gate: only spend AI on tenants where someone actually uses
+        # Home. Snapshot rows are written on every completed run, so their
+        # recency is a faithful usage signal.
+        cutoff = datetime.now(UTC) - timedelta(
+            days=max(0, settings.business_insight_refresh_activity_days)
+        )
+        recent = await session.scalar(
+            select(IntelligenceSnapshot.id)
+            .where(
+                IntelligenceSnapshot.tenant_id == tenant_id,
+                IntelligenceSnapshot.updated_at >= cutoff,
+            )
+            .limit(1)
+        )
+        if recent is None:
+            return {
+                "status": "skipped",
+                "reason": "no_recent_activity",
+                "project_id": project_id,
+            }
+
+        project = await session.get(Project, project_id)
+        if project is None or project.tenant_id != tenant_id:
+            return {
+                "status": "skipped",
+                "reason": "project_not_found",
+                "project_id": project_id,
+            }
+        owner_id = await KnowledgeGraphLifecycleManager(
+            session
+        ).resolve_representative_user(project_id)
+        if owner_id is None:
+            return {"status": "skipped", "reason": "no_owner", "project_id": project_id}
+
+    job_try = int(ctx.get("job_try", 1) or 1)
+    max_tries = max(1, settings.home_intelligence_job_max_tries)
+    cap = max(1, settings.home_intelligence_max_concurrent_projects_per_tenant)
+    if not await q.acquire_tenant_slot(tenant_id, cap=cap):
+        if job_try < max_tries:
+            raise Retry(defer=settings.home_intelligence_tenant_slot_retry_seconds)
+        return {"status": "skipped", "reason": "capacity", "project_id": project_id}
+
+    try:
+        async with SessionLocal() as session:
+            project = await session.get(Project, project_id)
+            if project is None:
+                return {
+                    "status": "skipped",
+                    "reason": "project_not_found",
+                    "project_id": project_id,
+                }
+            context = _worker_context(tenant_id, owner_id)
+            try:
+                cards = await asyncio.wait_for(
+                    hir._run_for_project(
+                        session,
+                        context,
+                        project,
+                        hi.ALL_PROMPT_TYPES,
+                        # Audit rows describe user-initiated analysis; a
+                        # background cache warm would only add noise.
+                        write_audit=False,
+                        granularity=BUSINESS_INSIGHT_REFRESH_GRANULARITY,
+                    ),
+                    timeout=settings.home_intelligence_project_analysis_timeout_seconds,
+                )
+            except AIUnavailableError as exc:
+                if exc.retryable and job_try < max_tries:
+                    defer = (
+                        exc.retry_after
+                        if exc.retry_after is not None
+                        else settings.home_intelligence_busy_retry_seconds
+                    )
+                    raise Retry(defer=defer) from exc
+                return {
+                    "status": "error",
+                    "project_id": project_id,
+                    "error": str(exc)[:500],
+                }
+            except Exception as exc:
+                logger.warning(
+                    "business insight refresh failed for project %s: %s",
+                    project_id,
+                    exc,
+                )
+                return {
+                    "status": "error",
+                    "project_id": project_id,
+                    "error": str(exc)[:500],
+                }
+
+            await bi_cache.store_result(
+                session,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                granularity=BUSINESS_INSIGHT_REFRESH_GRANULARITY,
+                cards=cards,
+                built_by=owner_id,
+            )
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "card_count": len(cards),
+            }
+    finally:
+        await q.release_tenant_slot(tenant_id)
+
+
+# Deterministic per-project job id is reused across downstream KG triggers.
+refresh_business_insight_result.keep_result = 0  # type: ignore[attr-defined]
+
+
+# Granularity the event-driven Project Insight rebuild analyses at.
+PROJECT_INSIGHT_REBUILD_GRANULARITY = 3
+
+
+async def enqueue_rebuild_project_insight(
+    *, tenant_id: int, project_id: int
+) -> str:
+    """Enqueue a debounced background rebuild of Project Insight snapshots.
+
+    The deterministic per-project job id plus the defer window coalesce bursts
+    (e.g. several KG builds from a multi-file upload) into one rebuild after
+    the dust settles.
+    """
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "rebuild_project_insight",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            _job_id=f"project-insight:{tenant_id}:{project_id}",
+            _defer_by=60,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def rebuild_project_insight(
+    ctx: dict[str, Any], *, tenant_id: int, project_id: int
+) -> dict[str, Any]:
+    """Rebuild stale Project Insight snapshots for a project.
+
+    Runs after a data change (document, reference-library update, or successful
+    Knowledge Graph build). Rebuilds only for users who already have a snapshot
+    row, most recently updated first, capped by ``project_insight_max_rebuild_users``.
+    Each build runs as the snapshot-owning user so acknowledgement state is
+    preserved. Per-user failures are logged and skipped.
+    """
+    from app.models.project import Project
+    from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
+    from app.routes import home_intelligence as hir
+    from app.services import home_intel_queue as q
+    from app.services import project_insight_service as pi
+    from app.services.ai_intelligence_client import AIUnavailableError
+
+    settings = get_settings()
+    if not settings.project_insight_event_rebuild_enabled:
+        return {"status": "disabled", "project_id": project_id}
+
+    job_try = int(ctx.get("job_try", 1) or 1)
+    max_tries = max(1, settings.home_intelligence_job_max_tries)
+    cap = max(1, settings.home_intelligence_max_concurrent_projects_per_tenant)
+
+    if not await q.acquire_tenant_slot(tenant_id, cap=cap):
+        if job_try < max_tries:
+            raise Retry(defer=settings.home_intelligence_tenant_slot_retry_seconds)
+        return {
+            "status": "skipped",
+            "reason": "capacity",
+            "project_id": project_id,
+        }
+
+    try:
+        async with SessionLocal() as session:
+            # Stale gate: nothing to do if a fresher run already handled it.
+            stale_rows = (
+                await session.scalars(
+                    select(ProjectIntelligenceSnapshot)
+                    .where(
+                        ProjectIntelligenceSnapshot.tenant_id == tenant_id,
+                        ProjectIntelligenceSnapshot.project_id == project_id,
+                        ProjectIntelligenceSnapshot.is_stale.is_(True),
+                        ProjectIntelligenceSnapshot.suite == "project_insight",
+                    )
+                    .order_by(ProjectIntelligenceSnapshot.updated_at.desc())
+                    .limit(settings.project_insight_max_rebuild_users)
+                )
+            ).all()
+            if not stale_rows:
+                return {
+                    "status": "skipped",
+                    "reason": "not_stale",
+                    "project_id": project_id,
+                }
+
+            project = await session.get(Project, project_id)
+            if project is None or project.tenant_id != tenant_id:
+                return {
+                    "status": "skipped",
+                    "reason": "project_not_found",
+                    "project_id": project_id,
+                }
+
+            audience = [snap.user_id for snap in stale_rows]
+            refreshed = 0
+            failed = 0
+
+            for user_id in audience:
+                # The project instance can be expired by a previous rollback,
+                # so refresh it before each per-user build.
+                await session.refresh(project)
+                try:
+                    context = _worker_context(tenant_id, user_id)
+                    runner = hir._make_runner(session, context, project.id)
+                    report = await pi.build_project_insight(
+                        session,
+                        project=project,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        runner=runner,
+                    )
+                    payload = report.model_dump(mode="json")
+                    snap = await session.scalar(
+                        select(ProjectIntelligenceSnapshot).where(
+                            ProjectIntelligenceSnapshot.tenant_id == tenant_id,
+                            ProjectIntelligenceSnapshot.user_id == user_id,
+                            ProjectIntelligenceSnapshot.project_id == project_id,
+                            ProjectIntelligenceSnapshot.suite == "project_insight",
+                        )
+                    )
+                    if snap is None:
+                        snap = ProjectIntelligenceSnapshot(
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            project_id=project_id,
+                            suite="project_insight",
+                        )
+                        session.add(snap)
+                    snap.payload = payload
+                    snap.is_stale = False
+                    await session.commit()
+                    refreshed += 1
+                except AIUnavailableError as exc:
+                    await session.rollback()
+                    if exc.retryable and job_try < max_tries:
+                        defer = (
+                            exc.retry_after
+                            if exc.retry_after is not None
+                            else settings.home_intelligence_busy_retry_seconds
+                        )
+                        raise Retry(defer=defer) from exc
+                    logger.warning(
+                        "project insight rebuild failed for project %s user %s: %s",
+                        project_id,
+                        user_id,
+                        exc,
+                    )
+                    failed += 1
+                except Exception as exc:
+                    await session.rollback()
+                    logger.warning(
+                        "project insight rebuild failed for project %s user %s: %s",
+                        project_id,
+                        user_id,
+                        exc,
+                    )
+                    failed += 1
+
+            return {
+                "status": "ok",
+                "project_id": project_id,
+                "refreshed": refreshed,
+                "failed": failed,
+            }
+    finally:
+        await q.release_tenant_slot(tenant_id)
+
+
+# Deterministic per-project job id is reused across downstream KG triggers.
+rebuild_project_insight.keep_result = 0  # type: ignore[attr-defined]
 
 
 async def index_for_search(
@@ -436,6 +1132,30 @@ async def analyze_project_intelligence(
                         "error": "no_access",
                     }
                 )
+
+            # Shared per-project cache: cards are identical for every user who
+            # can open the project (membership is the visibility boundary), so
+            # serve them when still keyed to the active KG version. Access was
+            # verified above — the cache never widens visibility.
+            if settings.business_insight_shared_cache_enabled:
+                from app.services import business_insight_cache as bi_cache
+
+                cached_cards = await bi_cache.get_fresh_result(
+                    session,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    granularity=granularity,
+                )
+                if cached_cards is not None:
+                    return await _record_and_finalize(
+                        {
+                            "projectId": str(project.id),
+                            "projectName": project.name,
+                            "projectColor": hi.project_color(project.id),
+                            "insights": cached_cards,
+                            "fromCache": True,
+                        }
+                    )
             try:
                 cards = await asyncio.wait_for(
                     hir._run_for_project(
@@ -506,6 +1226,18 @@ async def analyze_project_intelligence(
                     }
                 )
 
+            if settings.business_insight_shared_cache_enabled:
+                from app.services import business_insight_cache as bi_cache
+
+                await bi_cache.store_result(
+                    session,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    granularity=granularity,
+                    cards=cards,
+                    built_by=user_id,
+                )
+
             return await _record_and_finalize(
                 {
                     "projectId": str(project.id),
@@ -518,9 +1250,17 @@ async def analyze_project_intelligence(
         await q.release_tenant_slot(tenant_id)
 
 
+async def _configure_worker_logging(ctx: dict[str, Any]) -> None:
+    """Configure structured logging for the arq worker."""
+    from app.logging_config import configure_logging
+
+    configure_logging(get_settings().log_level)
+
+
 class WorkerSettings:
     """arq worker entrypoint."""
 
+    on_startup: ClassVar = _configure_worker_logging
     redis_settings: ClassVar[RedisSettings] = _redis_settings()
     functions: ClassVar[list] = [
         process_upload,
@@ -528,6 +1268,22 @@ class WorkerSettings:
         sync_saas_object,
         analyze_project_intelligence,
         scan_repository_connection,
+        rebuild_knowledge_graph,
+        run_knowledge_graph_health_check,
+        recover_stale_graph_builds,
+        evaluate_stale_graphs,
+        reprocess_project,
+        refresh_business_insight_result,
+        rebuild_project_insight,
+    ]
+    cron_jobs: ClassVar[list] = [
+        # Detect source drift every 15 minutes and mark affected graphs stale.
+        cron(evaluate_stale_graphs, minute=0, second=30),
+        cron(evaluate_stale_graphs, minute=15, second=30),
+        cron(evaluate_stale_graphs, minute=30, second=30),
+        cron(evaluate_stale_graphs, minute=45, second=30),
+        # Recover builds stuck without a heartbeat.
+        cron(recover_stale_graph_builds, minute=5, second=0),
     ]
     # Must exceed home_intelligence_project_analysis_timeout_seconds: a job
     # killed by arq writes no result and permanently stalls its run, so the

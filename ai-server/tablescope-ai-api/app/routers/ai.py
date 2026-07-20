@@ -28,6 +28,8 @@ from app.models.schemas import (
     AnalyzeScopesResponse,
     AskRequest,
     AskResponse,
+    ConversationTurnClassifyRequest,
+    ConversationTurnClassifyResponse,
     DocumentProfileRequest,
     DocumentProfileResponse,
     FamilySummarizeRequest,
@@ -110,7 +112,10 @@ def _fix_teiid_group_by(sql: str) -> str:
     parts.append(''.join(current).strip())
 
     for part in parts:
-        as_match = re.match(r'(.+?)\s+AS\s+(\w+)\s*$', part, re.IGNORECASE)
+        # Support both quoted and unquoted aliases: ``AS Month`` and ``AS "Month"``.
+        as_match = re.match(
+            r'(.+?)\s+AS\s+["\[]?(\w+)["\]]?\s*$', part, re.IGNORECASE
+        )
         if as_match:
             expr = as_match.group(1).strip()
             alias = as_match.group(2).strip()
@@ -123,8 +128,9 @@ def _fix_teiid_group_by(sql: str) -> str:
         keyword = clause_match.group(1)
         body = clause_match.group(2)
         for alias_upper, expr in aliases.items():
+            # Replace the alias whether it is bare or double-quoted/bracketed.
             body = re.sub(
-                rf'\b{re.escape(alias_upper)}\b',
+                rf'(?:"{re.escape(alias_upper)}"|\[{re.escape(alias_upper)}\]|\b{re.escape(alias_upper)}\b)',
                 expr,
                 body,
                 flags=re.IGNORECASE,
@@ -150,6 +156,52 @@ def _clean_sql(raw: str) -> str:
         sql = sql.strip()
     sql = _fix_teiid_group_by(sql)
     return sql
+
+
+def _infer_chart_columns(sql: str) -> tuple[str | None, str | None, str | None]:
+    """Infer label, value, and second value column names from SELECT aliases.
+
+    The first non-aggregate alias is the label (usually ``Period``); the first
+    one or two aggregate aliases are the value columns.  ``dual_line`` and
+    ``scatter`` require two aggregate measures.
+    """
+    select_match = re.search(
+        r"SELECT\s+(.*?)\s+FROM\s", sql, re.IGNORECASE | re.DOTALL
+    )
+    if not select_match:
+        return None, None, None
+    select_body = select_match.group(1)
+    # Split on top-level commas, respecting nested parentheses.
+    depth = 0
+    parts: list[str] = []
+    current: list[str] = []
+    for ch in select_body:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+            continue
+        current.append(ch)
+    parts.append("".join(current).strip())
+
+    agg_re = re.compile(r"\b(?:AVG|SUM|COUNT|MIN|MAX)\s*\(", re.IGNORECASE)
+    label_col: str | None = None
+    value_cols: list[str] = []
+    for part in parts:
+        as_match = re.search(r"\bAS\s+(\w+)\s*$", part, re.IGNORECASE)
+        if not as_match:
+            continue
+        alias = as_match.group(1).strip()
+        if agg_re.search(part):
+            value_cols.append(alias)
+        elif label_col is None:
+            label_col = alias
+    return label_col, (
+        value_cols[0] if value_cols else None
+    ), (value_cols[1] if len(value_cols) > 1 else None)
 
 
 # A CTE starts with ``WITH <name> AS (`` — matching that (rather than a bare
@@ -269,6 +321,11 @@ async def ask(req: AskRequest) -> AskResponse:
 
     # 3. Send ONLY allowed context to LLM
     context_text = context_builder.context_to_prompt_text(ctx)
+    # Fold in the Knowledge Graph context so prose answers cite validated
+    # risks/gaps/measured KPIs surfaced by the graph (not Reference Library docs).
+    kg_block = format_knowledge_graph_context(req.knowledge_graph_context)
+    if kg_block:
+        context_text = f"{context_text}\n\n{kg_block}"
     history_text = _format_conversation_history(req.history)
     prompt = f"{context_text}\n\n{history_text}User question: {req.question}"
 
@@ -944,7 +1001,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
         "bottom-right reading path. Aim for 4-8 strong widgets.\n\n"
         "Return ONLY a JSON object:\n"
         "{\n"
-        '  "title": "dashboard name",\n'
+        '  "title": "specific, descriptive dashboard name (never generic like AI Dashboard)",\n'
         '  "description": "one-line description",\n'
         '  "business_domain": "",\n'
         '  "intended_audience": "executive|manager|analyst|operational",\n'
@@ -1129,7 +1186,7 @@ async def suggest_dashboards_multi(
         f"Return ONLY a JSON object with at least {desired} suggestions:\n"
         "{\n"
         '  "suggestions": [ {\n'
-        '    "title": "dashboard name",\n'
+        '    "title": "specific, descriptive dashboard name (unique, never generic like AI Dashboard)",\n'
         '    "description": "one-line description",\n'
         '    "business_purpose": "the decision/question this dashboard drives",\n'
         '    "audience": "executive|manager|analyst|operational",\n'
@@ -1286,6 +1343,108 @@ def _build_schema_lines(table_schema: list[dict]) -> str:
     )
 
 
+def _build_kg_hypothesis_lines(kg: dict) -> str:
+    """Render the platform's Knowledge Graph digest as hypotheses to test.
+
+    The graph's risk/gap/opportunity/warning nodes are themselves AI-derived
+    from the project's documents, so the framing matters: every item is a
+    HYPOTHESIS the planner should validate, quantify, or refute with real SQL
+    — never assert one as a finding without a query result behind it.
+    Returns "" when the graph contributes nothing, leaving the prompt
+    unchanged for projects without a graph.
+    """
+    if not kg:
+        return ""
+
+    def _fmt(items: list | None, cap: int = 5) -> list[str]:
+        lines: list[str] = []
+        for it in (items or [])[:cap]:
+            if not isinstance(it, dict):
+                continue
+            title = str(it.get("title") or "").strip()
+            if not title:
+                continue
+            severity = str(it.get("severity") or "").strip()
+            summary = str(it.get("summary") or "").strip()[:160]
+            line = f"  - {title}"
+            if severity:
+                line += f" [{severity}]"
+            if summary:
+                line += f": {summary}"
+            lines.append(line)
+        return lines
+
+    sections: list[str] = []
+    for key, label in (
+        ("risks", "Risks"),
+        ("warnings", "Warnings"),
+        ("gaps", "Gaps"),
+        ("opportunities", "Opportunities"),
+    ):
+        lines = _fmt(kg.get(key))
+        if lines:
+            sections.append(f"{label}:\n" + "\n".join(lines))
+    kpi_lines = _fmt(kg.get("recommended_kpis"))
+    if kpi_lines:
+        sections.append(
+            "Recommended-but-unmeasured KPIs (no query or dashboard measures "
+            "these yet):\n" + "\n".join(kpi_lines)
+        )
+    if not sections:
+        return ""
+    return (
+        "\nKNOWLEDGE GRAPH HYPOTHESES — the project's knowledge graph "
+        "surfaces the items below, derived from its documents and metadata. "
+        "Treat every item as a HYPOTHESIS, not an established fact: where the "
+        "allowed tables contain relevant data, plan analyses whose SQL "
+        "validates, quantifies, or refutes the item against the real data — "
+        "for example, measure a recommended-but-unmeasured KPI, or quantify "
+        "the magnitude and trend of a flagged risk. NEVER assert a graph item "
+        "as a finding without a query result behind it. Ignore items the "
+        "available data cannot address.\n"
+        "These hypotheses are ADDITIVE context only — they must NOT displace "
+        "the required analysis mix. Still cover risks, trends, opportunities, "
+        "AND relationship analyses (single-table column pairs, and multi-table "
+        "joins whenever RELATIONSHIP EVIDENCE is listed). Where a hypothesis "
+        "spans two related tables, prefer testing it WITH a relationship "
+        "analysis. Dedicate at most half of the proposed analyses to graph "
+        "hypotheses.\n"
+        + "\n\n".join(sections)
+        + "\n"
+    )
+
+
+def _build_relationship_floor_line(has_relationship_evidence: bool, granularity: int) -> str:
+    """A hard floor for complex analyses so advisory context can't crowd them out.
+
+    Relationship (and especially multi-table) analyses are the most valuable
+    output of the planner and the first thing a longer prompt or extra
+    advisory sections (documents, knowledge-graph hypotheses) tends to
+    displace. When verified join evidence exists, make them required output
+    rather than an optional extra.
+    """
+    if not has_relationship_evidence:
+        return (
+            "Always look for the single-table relationship analyses described "
+            "below where the data supports them — they are part of the "
+            "required mix, not an optional extra.\n"
+        )
+    minimum = "TWO" if granularity >= 4 else "ONE"
+    return (
+        "The RELATIONSHIP EVIDENCE list above is non-empty: include at least "
+        f"{minimum} multi-table relationship analys"
+        f"{'es' if minimum == 'TWO' else 'is'} using those verified joins, in "
+        "addition to the single-table relationship analyses described below. "
+        "These complex analyses are REQUIRED output whenever the data "
+        "supports them — no other section of this prompt (documents, "
+        "knowledge-graph hypotheses, depth guidance) may displace them. "
+        "Write each one as an EXPLICIT JOIN (FROM table1 JOIN table2 ON the "
+        "exact keys listed in the evidence) with every column qualified by "
+        "its table name — NEVER satisfy this requirement by selecting "
+        "another table's column inside a single-table query.\n"
+    )
+
+
 def _build_relationship_hint_lines(hints: list[dict]) -> str:
     """Render verified join candidates the platform discovered.
 
@@ -1294,8 +1453,15 @@ def _build_relationship_hint_lines(hints: list[dict]) -> str:
     there is no relationship evidence, which leaves single-table behaviour
     completely unchanged.
     """
+    def _conf(h: dict) -> float:
+        c = h.get("join_confidence")
+        return float(c) if isinstance(c, int | float) else 0.0
+
     rows: list[str] = []
-    for h in hints:
+    # Strongest evidence first: the prompt tells the planner to prefer the
+    # highest-confidence pairs, and if a response is ever truncated the
+    # weakest pairs are the ones nearest the cut.
+    for h in sorted(hints, key=_conf, reverse=True):
         left = h.get("left_table") or ""
         right = h.get("right_table") or ""
         lkey = h.get("left_join_key") or ""
@@ -1303,44 +1469,577 @@ def _build_relationship_hint_lines(hints: list[dict]) -> str:
         if not (left and right and lkey and rkey):
             continue
         rel = h.get("relationship_type") or "unknown"
-        conf = h.get("join_confidence")
-        reason = h.get("confidence_reason") or ""
+        reason = str(h.get("confidence_reason") or "")[:60]
         risk = h.get("row_multiplication_risk") or "unknown"
-        conf_str = f"{conf:.2f}" if isinstance(conf, int | float) else "n/a"
+        conf_str = f"{_conf(h):.2f}" if h.get("join_confidence") is not None else "n/a"
         rows.append(
             f'  - "{left}"."{lkey}" = "{right}"."{rkey}" '
-            f"(relationship={rel}, confidence={conf_str}, "
-            f"row_multiplication_risk={risk}{f'; {reason}' if reason else ''})"
+            f"(rel={rel}, conf={conf_str}, risk={risk}"
+            f"{f'; {reason}' if reason else ''})"
         )
     if not rows:
         return ""
     return (
-        "\nRELATIONSHIP EVIDENCE — verified joins you MAY use (exception to the "
-        "single-table rule below):\n" + "\n".join(rows) + "\n"
+        "\nRELATIONSHIP EVIDENCE — verified joins your cross-table analyses "
+        "MUST build on (the one exception to the single-table rule below):\n"
+        + "\n".join(rows) + "\n"
         "Multi-table join rules:\n"
-        "- You may JOIN a pair of tables ONLY when the exact pair and keys "
-        "appear in the list above. Never invent a join or join on matching "
-        "names that are not listed here.\n"
-        "- Default to at most TWO tables per analysis. Aggregate the detail/fact "
-        "table to one row per key in a derived step expressed as a single "
-        "GROUP BY before relating it to the master/entity table, so a "
-        "one-to-many join cannot multiply rows.\n"
-        "- Prefer a join only when it produces a genuinely cross-table insight "
-        "(e.g. high-spend suppliers with elevated defect rates, single-source "
-        "dependency, concentration risk). Otherwise stay single-table.\n"
-        "- Skip any join whose row_multiplication_risk is high unless you "
-        "aggregate first.\n"
+        "- JOIN a pair of tables ONLY when the exact pair and keys appear in "
+        "the list above. Never invent a join or join on matching names that "
+        "are not listed here.\n"
+        "- At most TWO tables per analysis. Write ONE flat SELECT (no "
+        "subqueries, no derived tables): JOIN the two tables directly on the "
+        "listed keys, GROUP BY label columns from the entity/master side, and "
+        "aggregate (SUM/AVG/COUNT) ONLY numeric columns from the detail/fact "
+        "side. Never SUM or AVG a master-side numeric column after the join — "
+        "the row fan-out inflates it.\n"
+        '- Alias both tables and table-qualify every column (e.g. '
+        'i."DefectQty", s."Region").\n'
+        "- When row_multiplication_risk is high, GROUP BY the join key itself "
+        "and aggregate measures from only one side — or skip the pair.\n"
+        "- A join must produce a genuinely cross-table insight (e.g. "
+        "high-spend suppliers with elevated defect rates, single-source "
+        "dependency, concentration risk) — not a restated single-table "
+        "metric.\n"
     )
 
 
-_TEIID_SQL_RULES = (
+# Table references in FROM/JOIN clauses; the negative lookahead skips function
+# calls so the FROM inside EXTRACT(... FROM ...) is not counted (same pattern
+# the SQL validator uses).
+_SQL_TABLE_REF_RE = re.compile(r'(?:FROM|JOIN)\s+"?(\w+)"?(?![\w(])', re.IGNORECASE)
+
+
+def _sql_table_count(sql: str, allowed_tables: list[str]) -> int:
+    """Number of distinct allowed tables a query reads — ≥2 means cross-table."""
+    allowed = {t.upper() for t in allowed_tables}
+    return len(
+        {m.upper() for m in _SQL_TABLE_REF_RE.findall(sql) if m.upper() in allowed}
+    )
+
+
+_JOIN_TYPE_RE = r'(?:LEFT(?:\s+OUTER)?|RIGHT(?:\s+OUTER)?|FULL(?:\s+OUTER)?|INNER|CROSS)'
+
+# Match a single JOIN clause and its optional ON clause, stopping before the next
+# JOIN/WHERE/GROUP/HAVING/ORDER/LIMIT or end of statement.
+# Group 1 = optional join-type keyword (INNER, LEFT OUTER, ...), group 2 = table,
+# group 3 = alias, group 4 = existing ON clause.
+_JOIN_CLAUSE_RE = re.compile(
+    rf'\b(?:({_JOIN_TYPE_RE})\s+)?JOIN\s+("?\w+"?)(?:\s+(?:AS\s+)?("?\w+"?))?\s*(?:ON\b([^,]+?))?'
+    rf'(?=\s+(?:{_JOIN_TYPE_RE}\s+)?JOIN\b|WHERE\b|GROUP\s+BY\b|HAVING\b|ORDER\s+BY\b|LIMIT\b|;|$)',
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Declarations before the current JOIN: FROM table [alias] and JOIN table [alias].
+# The last one before the JOIN is the left side of that join.  The alias group
+# excludes reserved SQL keywords so ``FROM t JOIN u`` is parsed as two sources.
+_SOURCE_DECL_RE = re.compile(
+    r'(?:FROM|JOIN)\s+("?\w+"?)(?:\s+(?:AS\s+)?((?!(?:JOIN|ON|WHERE|GROUP|ORDER|'
+    r'LIMIT|HAVING|FROM|SELECT|INNER|LEFT|RIGHT|FULL|CROSS)\b)"?\w+"?))?',
+    re.IGNORECASE,
+)
+
+# A single equality in an ON clause, possibly table-qualified/quoted.
+_EQ_RE = re.compile(
+    r'("?\w+"?)\s*(?:\.\s*("?\w+"?))?\s*=\s*("?\w+"?)\s*(?:\.\s*("?\w+"?))?',
+    re.IGNORECASE,
+)
+
+
+def _strip_quotes(s: str) -> str:
+    return s.strip().strip('"')
+
+
+def _is_inside_parens(text: str, pos: int) -> bool:
+    """True if pos is inside an unclosed open parenthesis (function/subquery)."""
+    return text[:pos].count("(") != text[:pos].count(")")
+
+
+def _on_has_pair(on_text: str, left_col: str, right_col: str) -> bool:
+    """Check whether an ON clause already contains a real cross-table equality.
+
+    A condition like ``WorkCenterID = WorkCenterID`` (same bare column on both
+    sides, or the same table qualifier on both sides) is a tautology, not a join.
+    """
+    want = {_strip_quotes(left_col).lower(), _strip_quotes(right_col).lower()}
+    for m in _EQ_RE.finditer(on_text):
+        c1 = _strip_quotes(m.group(2) or m.group(1) or "").lower()
+        c2 = _strip_quotes(m.group(4) or m.group(3) or "").lower()
+        if {c1, c2} != want:
+            continue
+        q1 = _strip_quotes(m.group(1) or "").lower() if m.group(2) else ""
+        q2 = _strip_quotes(m.group(3) or "").lower() if m.group(4) else ""
+        # Same bare column or same qualifier on both sides is not a cross-table join.
+        if not q1 and not q2 and c1 == c2:
+            continue
+        if q1 and q2 and q1 == q2:
+            continue
+        return True
+    return False
+
+
+def _join_conditions_for_hint(
+    hint: dict[str, Any], left_qual: str, right_qual: str
+) -> list[str]:
+    """Build ON equality terms from a relationship hint's composite key pairs."""
+    pairs: list[tuple[str, str]] = []
+    join_key_pairs = hint.get("join_key_pairs")
+    if isinstance(join_key_pairs, list):
+        for p in join_key_pairs:
+            if not isinstance(p, dict):
+                continue
+            # Skip period equality for weekly/monthly mismatched pairs.
+            if hint.get("grain_mismatch") and p.get("is_period"):
+                continue
+            lcol = p.get("left")
+            rcol = p.get("right")
+            if lcol and rcol:
+                pairs.append((lcol, rcol))
+    if not pairs and hint.get("left_join_key") and hint.get("right_join_key"):
+        pairs.append((hint["left_join_key"], hint["right_join_key"]))
+    return [f'{left_qual}."{lcol}" = {right_qual}."{rcol}"' for (lcol, rcol) in pairs]
+
+
+def _qualify_shared_columns(
+    sql: str, left_qual: str, right_qual: str, hint: dict[str, Any]
+) -> str:
+    """Prefix unqualified shared column references with the left table qualifier.
+
+    When two joined tables share a column name (e.g. WorkCenterID or WeekStart),
+    unqualified references in SELECT/GROUP BY/ORDER BY/WHERE are ambiguous.  This
+    is a deterministic rewrite; it assumes the left side of the join owns the
+    reference, which is safe because the ON clause enforces equality.
+    """
+    pairs = hint.get("join_key_pairs") or []
+    if not isinstance(pairs, list):
+        pairs = []
+    shared = set()
+    for p in pairs:
+        if isinstance(p, dict) and p.get("left") == p.get("right"):
+            shared.add(str(p["left"]))
+    if not shared and hint.get("left_join_key") == hint.get("right_join_key"):
+        shared.add(str(hint["left_join_key"]))
+    if not shared:
+        return sql
+
+    out = sql
+    for col in sorted(shared, key=len, reverse=True):
+        # Replace bare column references that are not already table-qualified or
+        # inside a quoted identifier.  Use a function to avoid lookbehind length
+        # limits across Python versions.
+        pattern = re.compile(rf'(?<![\w."]){re.escape(col)}(?![\w."])', re.IGNORECASE)
+
+        def _repl(m: re.Match[str]) -> str:
+            # Double-check the char before the match is not a dot or quote.
+            start = m.start()
+            if start > 0 and out[m.start() - 1] in '."':
+                return m.group(0)
+            return f'{left_qual}."{col}"'
+
+        out = pattern.sub(_repl, out)
+    return out
+
+
+def _qualify_bare_shared_columns(
+    sql: str, table_schema: list[dict] | None = None
+) -> str:
+    """Qualify unqualified shared columns in a single-join query.
+
+    After the ON clause has been injected, the SELECT/GROUP BY/ORDER BY/WHERE
+    clauses may still contain bare references to columns that exist on both sides
+    of the join (e.g. WeekStart, WorkCenterID, SiteID).  Teiid rejects those as
+    ambiguous.  This function finds the one FROM ... JOIN ... ON ... block,
+    determines the left and right qualifiers, and prefixes any unqualified shared
+    columns with the left qualifier.  It is safe because the ON clause enforces
+    equality.
+    """
+    # Locate the FROM ... JOIN ... ON ... block, stopping at the next major
+    # clause keyword or end of statement.
+    m = re.search(
+        r'\bFROM\b\s*(.+?)\s*\bJOIN\b\s*(.+?)\s*\bON\b\s*(.+?)'
+        r'(?=\s+\b(?:WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT)\b|;|$)',
+        sql,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return sql
+
+    from_part = m.group(1)
+    join_part = m.group(2)
+    on_part = m.group(3)
+
+    # Resolve qualifiers from the source declarations.
+    from_sources = list(_SOURCE_DECL_RE.finditer("FROM " + from_part))
+    join_sources = list(_SOURCE_DECL_RE.finditer("JOIN " + join_part))
+    if not from_sources or not join_sources:
+        return sql
+
+    left_match = from_sources[-1]
+    left_raw = left_match.group(2) or left_match.group(1) or ""
+    left_table = _strip_quotes(left_match.group(1) or "")
+    right_match = join_sources[-1]
+    right_table = _strip_quotes(right_match.group(1) or "")
+    left_qual = _strip_quotes(left_raw)
+
+    # Discover shared column names from the ON clause equalities.
+    shared: set[str] = set()
+    for eq in _EQ_RE.finditer(on_part):
+        c1 = _strip_quotes(eq.group(2) or eq.group(1) or "")
+        c2 = _strip_quotes(eq.group(4) or eq.group(3) or "")
+        if c1.lower() == c2.lower():
+            shared.add(c1)
+
+    # Also include any column that exists in both tables according to the
+    # supplied schema.  This catches shared keys the model uses in SELECT/GROUP
+    # BY but did not place in the ON clause.
+    if table_schema:
+        cols_by_table: dict[str, set[str]] = {}
+        for entry in table_schema:
+            t = _strip_quotes(str(entry.get("table") or "")).lower()
+            cols = entry.get("columns") or []
+            if t not in cols_by_table:
+                cols_by_table[t] = set()
+            for col in cols:
+                name = _strip_quotes(str(col.get("name") or ""))
+                if name:
+                    cols_by_table[t].add(name.lower())
+        left_cols = cols_by_table.get(left_table.lower(), set())
+        right_cols = cols_by_table.get(right_table.lower(), set())
+        shared.update(
+            c
+            for c in left_cols & right_cols
+            if c
+        )
+
+    if not shared:
+        return sql
+
+    def _inside_single_quotes(text: str, pos: int) -> bool:
+        """True when pos is inside an unclosed single-quoted string literal."""
+        count = 0
+        for i, ch in enumerate(text[:pos]):
+            if ch == "'" and (i == 0 or text[i - 1] != "\\"):
+                count += 1
+        return count % 2 == 1
+
+    def _prev_token_is_as(text: str, pos: int) -> bool:
+        """True when the token immediately before pos is ``AS`` (an alias)."""
+        return bool(re.search(r"\bAS\s+$", text[:pos], re.IGNORECASE))
+
+    def _rewrite(text: str) -> str:
+        out = text
+        for col in sorted(shared, key=len, reverse=True):
+            # Match bare identifiers or double-quoted identifiers that are not
+            # already table-qualified.  Shared columns inside string literals or
+            # ``AS`` aliases are left unchanged.
+            pattern = re.compile(
+                rf'(?<![\w.])"{re.escape(col)}"(?![\w.])|'
+                rf'(?<![\w."]){re.escape(col)}(?![\w."])',
+                re.IGNORECASE,
+            )
+
+            def _repl(match: re.Match[str]) -> str:
+                start = match.start()
+                if _inside_single_quotes(out, start) or _prev_token_is_as(out, start):
+                    return match.group(0)
+                return f'{left_qual}."{col}"'
+
+            out = pattern.sub(_repl, out)
+        return out
+
+    return _rewrite(sql)
+
+
+def _split_select_expressions(select_body: str) -> list[str]:
+    """Split a SELECT list on top-level commas, respecting parentheses."""
+    depth = 0
+    parts: list[str] = []
+    current: list[str] = []
+    for ch in select_body:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+            continue
+        current.append(ch)
+    parts.append("".join(current).strip())
+    return parts
+
+
+def _normalize_expr(expr: str) -> str:
+    """Lowercase and remove double quotes for comparison."""
+    return re.sub(r'"', "", expr).strip().lower()
+
+
+def _ensure_group_by(sql: str) -> str:
+    """Make sure every non-aggregate SELECT expression appears in GROUP BY.
+
+    The small model frequently emits aggregate queries that group by only the
+    first dimension (e.g. ``GROUP BY WeekStart``) while also selecting
+    ``WorkCenterID`` and ``SiteID``.  Teiid rejects the ungrouped columns.
+    We extend or replace the GROUP BY list with all non-aggregate SELECT items.
+    """
+    has_group_by = re.search(r"\bGROUP\s+BY\b", sql, re.IGNORECASE) is not None
+    if (
+        not re.search(r"\b(?:AVG|SUM|COUNT|MIN|MAX)\s*\(", sql, re.IGNORECASE)
+        and not has_group_by
+    ):
+        return sql
+
+    select_match = re.search(
+        r"SELECT\s+(.*?)\s+FROM\s", sql, re.IGNORECASE | re.DOTALL
+    )
+    if not select_match:
+        return sql
+    select_body = select_match.group(1)
+    parts = _split_select_expressions(select_body)
+
+    agg_re = re.compile(r"\b(?:AVG|SUM|COUNT|MIN|MAX)\s*\(", re.IGNORECASE)
+    required_exprs: list[str] = []
+    for part in parts:
+        if agg_re.search(part):
+            continue
+        expr = re.sub(r'\s+AS\s+["\[]?\w+["\]]?\s*$', "", part, flags=re.IGNORECASE).strip()
+        if expr and expr != "*":
+            required_exprs.append(expr)
+
+    if not required_exprs:
+        return sql
+
+    # Existing GROUP BY, if any.
+    group_match = re.search(
+        r"\bGROUP\s+BY\b(.+?)(?=\s+\b(?:HAVING|ORDER\s+BY|LIMIT)\b|;|$)",
+        sql,
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    existing: list[str] = []
+    if group_match:
+        existing = _split_select_expressions(group_match.group(1).strip())
+
+    existing_norm = {_normalize_expr(e) for e in existing}
+    missing = [
+        e
+        for e in required_exprs
+        if _normalize_expr(e) not in existing_norm
+        and not (e.strip().isdigit() and int(e.strip()) <= len(parts))
+    ]
+
+    # If the GROUP BY is only positional (e.g. ``GROUP BY 1``), replace it with
+    # the full expression list. Otherwise extend it with any missing columns.
+    if existing and all(e.strip().isdigit() for e in existing):
+        new_group = required_exprs
+    else:
+        new_group = existing + missing
+
+    if not new_group:
+        new_group = ["1"]
+
+    group_clause = ", ".join(new_group)
+    if group_match:
+        start = group_match.start()
+        end = group_match.end()
+        sql = sql[:start] + f"GROUP BY {group_clause}" + sql[end:]
+    else:
+        order_match = re.search(r"\s+\bORDER\s+BY\b", sql, re.IGNORECASE)
+        if order_match:
+            sql = (
+                sql[: order_match.start()]
+                + f" GROUP BY {group_clause}"
+                + sql[order_match.start() :]
+            )
+        else:
+            sql = sql + f" GROUP BY {group_clause}"
+    return sql
+
+
+def _ensure_join_on_clause(
+    sql: str, relationship_hints: list[dict], allowed_tables: list[str]
+) -> str:
+    """Inject or correct ON clauses for joins that use a listed evidence pair.
+
+    The platform's relationship evidence already contains the exact join keys
+    (including shared period columns for time-series joins).  When a planned
+    join references two allowed tables and a hint exists for that pair, the SQL
+    is rewritten so its ON clause contains every key pair from the evidence.
+    """
+    if not relationship_hints or _sql_table_count(sql, allowed_tables) < 2:
+        return sql
+
+    allowed_upper = {t.upper() for t in allowed_tables}
+    hint_by_pair: dict[frozenset[str], dict] = {}
+    for h in relationship_hints:
+        lt = h.get("left_table") or ""
+        rt = h.get("right_table") or ""
+        if not lt or not rt:
+            continue
+        if lt.upper() not in allowed_upper or rt.upper() not in allowed_upper:
+            continue
+        hint_by_pair[frozenset({lt.upper(), rt.upper()})] = h
+    if not hint_by_pair:
+        return sql
+
+    def _replace_join(m: re.Match[str]) -> str:
+        prefix = (m.group(1) or "").strip()
+        if prefix.upper() == "CROSS":
+            return m.group(0)
+        right_raw = m.group(2)
+        right_table = _strip_quotes(right_raw)
+        right_alias_raw = m.group(3) or ""
+
+        # The left table is the last source declared before this JOIN.
+        prefix_text = m.string[:m.start()]
+        sources = [
+            sm
+            for sm in _SOURCE_DECL_RE.finditer(prefix_text)
+            if not _is_inside_parens(prefix_text, sm.start())
+        ]
+        if not sources:
+            return m.group(0)
+        left_table_raw = sources[-1].group(1) or ""
+        left_alias_raw = sources[-1].group(2) or ""
+        left_table = _strip_quotes(left_table_raw)
+
+        pair = frozenset({left_table.upper(), right_table.upper()})
+        hint = hint_by_pair.get(pair)
+        if not hint:
+            return m.group(0)
+
+        # Use the exact qualifier text (quoted or unquoted) as it appears so the
+        # injected ON clause matches the source declaration's case/quoting.
+        left_qual = left_alias_raw if left_alias_raw else left_table_raw
+        right_qual = right_alias_raw if right_alias_raw else right_raw
+
+        conds = _join_conditions_for_hint(hint, left_qual, right_qual)
+        if not conds:
+            return m.group(0)
+
+        existing_on = (m.group(4) or "").strip()
+        if existing_on:
+            join_key_pairs = hint.get("join_key_pairs") or []
+            if isinstance(join_key_pairs, list):
+                required = [
+                    (p.get("left"), p.get("right"))
+                    for p in join_key_pairs
+                    if isinstance(p, dict) and p.get("left") and p.get("right")
+                    and not (hint.get("grain_mismatch") and p.get("is_period"))
+                ]
+                if not required:
+                    required = [(hint.get("left_join_key"), hint.get("right_join_key"))]
+            else:
+                required = [(hint.get("left_join_key"), hint.get("right_join_key"))]
+            missing = [
+                c for (lcol, rcol), c in zip(required, conds)
+                if lcol and rcol and not _on_has_pair(existing_on, lcol, rcol)
+            ]
+            if not missing:
+                return m.group(0)
+            # If none of the required cross-table equalities are present, the ON
+            # clause is bogus (e.g. ``WorkCenterID = WorkCenterID``).  Replace it
+            # entirely with the qualified conditions.  Otherwise append missing keys.
+            if len(missing) == len(required):
+                new_on = " AND ".join(conds)
+            else:
+                new_on = existing_on + ("" if existing_on.endswith("(") else " AND ") + " AND ".join(missing)
+        else:
+            new_on = " AND ".join(conds)
+
+        alias_part = f" {right_alias_raw}" if right_alias_raw else ""
+        replacement = f'{prefix + " " if prefix else ""}JOIN {right_raw}{alias_part} ON {new_on}'
+        # The lookahead can consume the whitespace separating the ON clause from
+        # the next keyword; add it back when missing so the SQL stays valid.
+        tail = m.string[m.end():]
+        if tail and not tail[0].isspace() and not tail.startswith(";"):
+            replacement += " "
+        return replacement
+
+    return _JOIN_CLAUSE_RE.sub(_replace_join, sql)
+
+
+def _join_tables_are_evidence_backed(
+    sql: str, relationship_hints: list[dict[str, Any]]
+) -> tuple[bool, frozenset[str] | None, dict[str, Any] | None]:
+    """Return whether every top-level JOIN pair is listed in the evidence hints.
+
+    Also returns the first pair and its hint so callers can check grain-mismatch
+    or other hint-level constraints.  Subqueries and function parentheses are
+    ignored.
+    """
+    allowed_pairs: dict[frozenset[str], dict[str, Any]] = {}
+    for h in relationship_hints:
+        lt = h.get("left_table") or ""
+        rt = h.get("right_table") or ""
+        if not lt or not rt:
+            continue
+        allowed_pairs[frozenset({str(lt), str(rt)})] = h
+
+    if not allowed_pairs:
+        # No evidence -> multi-table joins are not authorized.
+        return (_sql_table_count(sql, []) < 2, None, None)
+
+    tables = [
+        m.group(1)
+        for m in _SQL_TABLE_REF_RE.finditer(sql)
+        if not _is_inside_parens(sql, m.start())
+    ]
+    if len(tables) < 2:
+        return (True, None, None)
+
+    for i in range(len(tables) - 1):
+        pair = frozenset({tables[i], tables[i + 1]})
+        if pair not in allowed_pairs:
+            return (False, pair, None)
+    first_pair = frozenset({tables[0], tables[1]})
+    return (True, first_pair, allowed_pairs.get(first_pair))
+
+
+_TEIID_RULES_HEADER = (
     "This database uses Teiid (not MySQL/PostgreSQL). Text-backed (CSV/file) "
     "columns are stored as STRINGS no matter what logical type is shown.\n"
+)
+
+# Default table rule: strictly one table per query. Used verbatim whenever no
+# relationship evidence is in play (dashboard suggestion, scope analysis, and
+# any plan request without hints), so single-table behaviour never changes.
+_TEIID_SINGLE_TABLE_RULE = (
     "- Query a SINGLE table per analysis. Do NOT write JOINs. (Many tables "
     'share column names like "SupplierID" — joining causes ambiguity errors. '
     "One table per query avoids this entirely.)\n"
     "- Reference ONLY columns listed under the table you select FROM; never "
     "invent columns and never borrow a column from another table.\n"
+)
+
+# Swapped in for the rule above ONLY when the plan prompt carries a
+# RELATIONSHIP EVIDENCE block. Without this, the unconditional "Do NOT write
+# JOINs" sits later in the prompt than the cross-table mandate and suppresses
+# the very joins the mandate asks for.
+_TEIID_JOIN_EXCEPTION_RULE = (
+    "- Query a SINGLE table per analysis, with ONE exception: a cross-table "
+    "analysis may JOIN exactly the two tables of a pair listed in "
+    "RELATIONSHIP EVIDENCE, on exactly the listed keys. Alias both tables "
+    'and table-qualify EVERY column reference (e.g. i."DefectQty", '
+    's."Region") — many tables share column names and an unqualified column '
+    "in a join is an ambiguity error.\n"
+    "- Reference ONLY columns listed under the table(s) in your FROM/JOIN; "
+    "never invent columns and never borrow a column from any other table.\n"
+)
+
+# Used by the SQL repair endpoint when the failing query already joins two
+# tables (a planner-mandated cross-table analysis): the repair must keep the
+# join rather than "fixing" it back to a single-table query.
+_TEIID_FIX_JOIN_RULE = (
+    "- This query intentionally JOINs two tables (a verified relationship). "
+    "KEEP the same two tables and the same join keys — do NOT rewrite it as "
+    "a single-table query and do NOT add more tables. Alias both tables and "
+    "table-qualify EVERY column reference to avoid ambiguity errors.\n"
+    "- Reference ONLY columns listed under the two joined tables; never "
+    "invent columns.\n"
+)
+
+_TEIID_RULES_COMMON = (
     '- Quote every table and column name with double quotes: "ColName".\n'
     "- Only CAST columns that hold NUMERIC values (quantities, amounts, counts, "
     "prices). Do NOT CAST categorical/label text (status, type, rating, name, "
@@ -1373,6 +2072,10 @@ _TEIID_SQL_RULES = (
     "allowed tables directly with WHERE/GROUP BY/aggregations only.\n"
     "- GROUP BY must repeat the full SELECT expression (Teiid forbids alias "
     "references in GROUP BY). Never use SELECT *.\n"
+)
+
+_TEIID_SQL_RULES = (
+    _TEIID_RULES_HEADER + _TEIID_SINGLE_TABLE_RULE + _TEIID_RULES_COMMON
 )
 
 # Chart families the planner may request. These map onto the dashboard's chart
@@ -1496,12 +2199,25 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
 
     schema_lines = _build_schema_lines(req.table_schema)
     relationship_lines = _build_relationship_hint_lines(req.relationship_hints)
-    teiid_rules = _TEIID_SQL_RULES
+    kg_lines = _build_kg_hypothesis_lines(req.knowledge_graph_context)
+    # With relationship evidence in play, the flat "Do NOT write JOINs" rule
+    # would contradict (and, sitting later in the prompt, override) the
+    # cross-table mandate — swap in the exception-aware variant. Without
+    # evidence the rules are byte-identical to the single-table original.
+    teiid_rules = (
+        _TEIID_RULES_HEADER + _TEIID_JOIN_EXCEPTION_RULE + _TEIID_RULES_COMMON
+        if relationship_lines
+        else _TEIID_SQL_RULES
+    )
 
     # Granularity (1 executive .. 5 granular) steers count + depth + how
     # aggressively to surface smaller, lower-severity signals.
     granularity = max(1, min(5, req.granularity))
     target_count = max(1, min(req.max_analyses, {1: 3, 2: 5, 3: 8, 4: 11, 5: 15}[granularity]))
+    # Cross-table analyses per evidence pair: executive levels get the single
+    # strongest comparison per pair; balanced/granular levels may develop two
+    # genuinely different insights on the same verified join.
+    per_pair = 1 if granularity <= 2 else 2
     if granularity <= 2:
         depth_guidance = (
             "Operate at an EXECUTIVE level. Surface ONLY the few most material, "
@@ -1522,16 +2238,39 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             "and a few more specific, detailed insights."
         )
 
+    relationship_floor = _build_relationship_floor_line(
+        bool(relationship_lines), granularity
+    )
+
+    # Section order matters: schema and RELATIONSHIP EVIDENCE stay contiguous
+    # and the KG hypotheses come after them, closest to the instructions, so
+    # advisory graph context can never separate the evidence from the rules
+    # that reference it.
     prompt = (
-        f"{context_text}\n{doc_lines}\n{schema_lines}\n{relationship_lines}\n"
+        f"{context_text}\n{doc_lines}\n{schema_lines}\n{relationship_lines}\n{kg_lines}\n"
         f"Allowed tables (use ONLY these, exact names): {', '.join(allowed_tables)}\n\n"
         f"{teiid_rules}\n"
         f"{depth_guidance}\n\n"
         f"Propose up to {target_count} of the most valuable analyses for this "
         "project at this level of detail. Cover a mix of risks, trends, "
-        "opportunities, and relationships where the data supports it. Each "
+        "opportunities, and relationships where the data supports it. "
+        f"{relationship_floor}"
+        "Each "
         "analysis must be answerable from the allowed tables OR grounded in a "
-        "listed document.\n\n"
+        "listed document.\n"
+        + (
+            "IN ADDITION to those, propose "
+            + (
+                "one CROSS-TABLE analysis"
+                if per_pair == 1
+                else "one CROSS-TABLE analysis — or TWO genuinely different "
+                "ones when the pair's data supports both —"
+            )
+            + " for EACH table pair listed in RELATIONSHIP EVIDENCE whose "
+            "data supports a genuine insight. Cross-table analyses are extra "
+            f"— they do NOT count toward the {target_count} limit, and you "
+            "must not drop a supportable evidence pair to stay under it.\n\n"
+        ) +
         "RELATIONSHIP ANALYSES (category \"relationship\"):\n"
         "In addition to single-metric risks/trends/opportunities, actively look "
         "for pairs of columns within ONE allowed table whose relationship to each "
@@ -1540,10 +2279,34 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "Examples of what counts: a cost metric and a quality metric that used to "
         "track together but no longer do; one category's share of a total "
         "shrinking while another grows; a rate (e.g. defects per unit) drifting "
-        "away from its historical band. By default the two variables should be "
-        "columns on the SAME table. Only relate columns across two tables when "
-        "that exact table pair and join keys appear in the RELATIONSHIP EVIDENCE "
-        "list above — never join on matching names that are not listed there.\n"
+        "away from its historical band. The two variables may be columns on "
+        "the SAME table, or on TWO tables joined per the CROSS-TABLE rules "
+        "below.\n"
+        "CROSS-TABLE ANALYSES (category \"relationship\"):\n"
+        + (
+            "For each pair in the RELATIONSHIP EVIDENCE list above, propose "
+            + (
+                "one analysis"
+                if per_pair == 1
+                else "one analysis — or two that answer genuinely different "
+                "business questions —"
+            )
+            + " that JOINs exactly that pair on exactly the listed keys. "
+        ) +
+        "Write ONE flat SELECT: JOIN the two tables directly, GROUP BY label "
+        "columns from the entity/master side, and aggregate ONLY numeric "
+        "columns from the detail/fact side (never SUM/AVG a master-side "
+        "number after the join — row fan-out inflates it). Example shape:\n"
+        'SELECT s."SupplierName" AS Supplier, '
+        'SUM(CAST(i."DefectQty" AS double)) AS TotalDefects '
+        'FROM "Inspections" i JOIN "Suppliers" s '
+        'ON i."SupplierID" = s."SupplierID" '
+        'GROUP BY s."SupplierName" ORDER BY TotalDefects DESC\n'
+        "Prefer the highest-confidence pairs first and skip a pair only "
+        "when its data genuinely supports no insight (e.g. the joined result "
+        "would be a single row or empty). Never join a pair that is not "
+        "listed, and never join on matching column names that are not listed "
+        "there.\n"
         "For each relationship analysis, decide which shape best reveals the "
         "change and choose accordingly:\n"
         "- If both variables are naturally plotted on a shared timeline → use "
@@ -1561,16 +2324,29 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "changing relationship.\n"
         "MANDATORY SQL SHAPE for every dual_line / scatter / time-based "
         "relationship — get this exactly right or the chart cannot be drawn:\n"
-        "0. Pick ONE table from the schema that itself lists BOTH metric columns "
-        "you want (and a date column when plotting over time). Every column you "
-        "reference — both metrics, the date, anything in WHERE/GROUP BY — MUST "
-        "appear under that exact table in the schema above. NEVER borrow a "
-        "column from another table (e.g. do not use a Suppliers column while "
-        "selecting FROM the Inspections table); single-table queries only, so a "
-        "column that is not listed under your FROM table does not exist for this "
-        "query. The Inspections-style table that holds two numeric quantities "
+        "0. Choose your source, then stay strictly inside it:\n"
+        "   (a) SINGLE TABLE — preferred when one table itself lists BOTH "
+        "metric columns you want (and a date column when plotting over time). "
+        "Every column you reference — both metrics, the date, anything in "
+        "WHERE/GROUP BY — MUST appear under that exact table in the schema "
+        "above. The Inspections-style table that holds two numeric quantities "
         "(e.g. a received quantity and a defect quantity) is usually the best "
-        "single source for a real two-metric relationship.\n"
+        "single source.\n"
+        "   (b) VERIFIED TWO-TABLE JOIN — when the two metrics live in "
+        "DIFFERENT tables and that exact table pair appears in the "
+        "RELATIONSHIP EVIDENCE list, write the join EXPLICITLY: FROM "
+        "\"table1\" JOIN \"table2\" ON the exact listed keys. Fully qualify "
+        "EVERY column with its table name, aggregate both metrics (AVG/SUM) "
+        "grouped by the period expression so a one-to-many join cannot "
+        "multiply rows, and reference only columns listed under those two "
+        "tables.\n"
+        "   NEVER mix the two: a single-table query must not select a column "
+        "that belongs to a different table (e.g. do not select "
+        "\"UnitsScrapped\" while selecting FROM a labor table that does not "
+        "list it) — a column not listed under your FROM/JOIN tables does not "
+        "exist for this query. If the pair you want is not in the "
+        "RELATIONSHIP EVIDENCE list, change the analysis to columns that "
+        "share a table instead of borrowing.\n"
         "1. The period/time column MUST appear in the SELECT list as the FIRST "
         "column, not only in GROUP BY. A query like 'SELECT metric_a, metric_b "
         "... GROUP BY period' is WRONG because the result then has no time axis. "
@@ -1613,7 +2389,17 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "FROM \"some_table\" "
         "GROUP BY FORMATTIMESTAMP(PARSETIMESTAMP(\"date_col\", 'M/d/yyyy'), "
         "'yyyy-MM') ORDER BY Period — with label_column=Period, "
-        "value_column=MetricA, value_column_2=MetricB, chart_type=dual_line.\n\n"
+        "value_column=MetricA, value_column_2=MetricB, chart_type=dual_line.\n"
+        "Example (two metrics from DIFFERENT tables via a verified join from "
+        "the RELATIONSHIP EVIDENCE list, ISO month column):\n"
+        "SELECT FORMATTIMESTAMP(CAST(\"t1\".\"Month\" AS timestamp), "
+        "'yyyy-MM') AS Period, AVG(CAST(\"t1\".\"metric_a\" AS double)) AS "
+        "MetricA, AVG(CAST(\"t2\".\"metric_b\" AS double)) AS MetricB "
+        "FROM \"t1\" JOIN \"t2\" ON \"t1\".\"KeyCol\" = \"t2\".\"KeyCol\" "
+        "GROUP BY FORMATTIMESTAMP(CAST(\"t1\".\"Month\" AS timestamp), "
+        "'yyyy-MM') ORDER BY Period — every column qualified with its table, "
+        "join keys exactly as listed in the evidence, both metrics "
+        "aggregated.\n\n"
         "DOCUMENT-GROUNDED RELATIONSHIPS:\n"
         "Relationships are NOT limited to two table columns — also look for how "
         "the project's DATA relates to its DOCUMENTS, and how documents relate to "
@@ -1692,7 +2478,8 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "analysis in its place — do not include an analysis you expect to come "
         "back empty, and do not fill a gap with placeholder, sample, or invented "
         "figures.\n"
-        f"- Aim to deliver the full {target_count} analyses this way; if the data "
+        f"- Aim to deliver the full {target_count} analyses PLUS the "
+        "cross-table analyses this way; if the data "
         "genuinely can't support that many non-empty analyses, return fewer rather "
         "than padding with weak or empty ones.\n\n"
         "Return ONLY a JSON object: {\"analyses\": [ {\n"
@@ -1718,21 +2505,57 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         system_prompt=_INTEL_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.2,
-        # Larger window so the prompt (schema + documents + relationship rules)
-        # plus the full JSON array of analyses fits without the response being
-        # truncated into invalid JSON.
-        num_ctx=16384,
+        # The window is shared by the prompt AND the generated JSON. The plan
+        # prompt (schema + documents + relationship evidence + knowledge-graph
+        # hypotheses + rules) plus target_count + one-per-evidence-pair
+        # analyses is the largest prompt+output pair in the pipeline. Silent
+        # truncation eats the tail — the relationship rules and output format
+        # — which shows up as projects losing their multi-table/complex
+        # analyses, so run at the same 24576 the heaviest endpoints already
+        # use on this model.
+        num_ctx=24576,
         response_format="json",
     )
 
     parsed = _parse_json_response(raw)
+    if parsed is None and raw:
+        logger.warning(
+            "intelligence plan JSON unparseable (len=%s, tail=%r) — "
+            "attempting truncation salvage",
+            len(raw), raw[-80:],
+        )
     analyses: list[PlannedAnalysis] = []
+    # Cross-table analyses are additive: reserve per_pair slots per evidence
+    # pair on top of target_count. When the model overproduces, single-table
+    # and cross-table analyses each compete only for their OWN budget — a
+    # blind head-slice would cut mandated joins from the tail whenever the
+    # model over-delivered single-table analyses first.
+    join_budget = per_pair * len(req.relationship_hints or [])
+    plan_budget = target_count + join_budget
     if parsed and isinstance(parsed.get("analyses"), list):
-        for i, a in enumerate(parsed["analyses"][:target_count]):
-            if not isinstance(a, dict):
-                continue
+        raw_items = [a for a in parsed["analyses"] if isinstance(a, dict)]
+        if len(raw_items) > plan_budget:
+            selected: list[dict] = []
+            kept_single = kept_cross = 0
+            for a in raw_items:
+                if _sql_table_count(a.get("sql", "") or "", allowed_tables) >= 2:
+                    if kept_cross < join_budget:
+                        selected.append(a)
+                        kept_cross += 1
+                elif kept_single < target_count:
+                    selected.append(a)
+                    kept_single += 1
+            raw_items = selected
+        for i, a in enumerate(raw_items):
             sql = _clean_sql(a.get("sql", "") or "")
             if sql:
+                sql = _ensure_join_on_clause(
+                    sql, req.relationship_hints or [], allowed_tables
+                )
+                sql = _qualify_bare_shared_columns(
+                    sql, req.table_schema or None
+                )
+                sql = _ensure_group_by(sql)
                 try:
                     validate_sql(sql, allowed_tables)
                 except SQLValidationError as e:
@@ -1744,6 +2567,50 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             chart_type = str(a.get("chart_type", "bar")).lower()
             if chart_type not in _ALLOWED_PLAN_CHART_TYPES:
                 chart_type = "bar"
+
+            label_col, value_col, value2_col = _infer_chart_columns(sql)
+            if chart_type in ("dual_line", "scatter"):
+                if not value_col or not value2_col:
+                    logger.warning(
+                        "Dropping analysis %s: %s requires two measures",
+                        a.get("title"),
+                        chart_type,
+                    )
+                    continue
+                a["value_column"] = value_col
+                a["value_column_2"] = value2_col
+                a["label_column"] = label_col or a.get("label_column", "")
+            elif chart_type == "line" and value_col:
+                a["value_column"] = value_col
+                a["label_column"] = label_col or a.get("label_column", "")
+
+            if (
+                category == "relationship"
+                and chart_type in ("dual_line", "scatter")
+                and _sql_table_count(sql, allowed_tables) < 2
+            ):
+                logger.warning(
+                    "Dropping analysis %s: relationship %s must be multi-table",
+                    a.get("title"),
+                    chart_type,
+                )
+                continue
+            if sql and _sql_table_count(sql, allowed_tables) >= 2:
+                backed, _pair, hint = _join_tables_are_evidence_backed(
+                    sql, req.relationship_hints or []
+                )
+                if not backed:
+                    logger.warning(
+                        "Dropping analysis %s: join pair not in relationship evidence",
+                        a.get("title"),
+                    )
+                    continue
+                if chart_type == "dual_line" and hint and hint.get("grain_mismatch"):
+                    logger.warning(
+                        "Dropping analysis %s: dual_line join on grain-mismatched pair",
+                        a.get("title"),
+                    )
+                    continue
             # An analysis must have either runnable SQL or document grounding.
             if not sql and not a.get("source_documents"):
                 continue
@@ -1784,12 +2651,23 @@ async def intelligence_fix_sql(
     This closes the analyst loop: when generated SQL fails (CAST on the wrong
     type, alias-in-GROUP BY, an unsupported function, a wrong-table column, …),
     the model is shown the precise engine error and asked to return a corrected
-    single-table query. Returns empty SQL if it can't be fixed.
+    query — keeping a cross-table query's verified join joined. Returns empty
+    SQL if it can't be fixed.
     """
     request_id = str(uuid.uuid4())
     verify_signature(req.model_dump(exclude={"signature"}), req.signature)
 
     schema_lines = _build_schema_lines(req.table_schema)
+    # A failing query that already JOINs two tables is a planner-mandated
+    # cross-table analysis. The default rules' "Do NOT write JOINs" would make
+    # the repair strip the join (silently demoting the card to single-table or
+    # to nothing) — use the keep-the-join variant instead.
+    is_join_repair = bool(re.search(r"\bJOIN\b", req.sql or "", re.IGNORECASE))
+    teiid_rules = (
+        _TEIID_RULES_HEADER + _TEIID_FIX_JOIN_RULE + _TEIID_RULES_COMMON
+        if is_join_repair
+        else _TEIID_SQL_RULES
+    )
     prompt = (
         "A read-only SQL query failed against a Teiid database. Rewrite it so it "
         "runs, keeping the SAME analytical intent. Fix ONLY what the error "
@@ -1807,7 +2685,7 @@ async def intelligence_fix_sql(
         "PARSETIMESTAMP(\"col\", 'M/d/yyyy'), never CAST(\"col\" AS date).\n\n"
         f"Allowed tables (use ONLY these): {', '.join(req.allowed_tables)}\n"
         f"{schema_lines}\n\n"
-        f"{_TEIID_SQL_RULES}\n"
+        f"{teiid_rules}\n"
         f"Failing SQL:\n{req.sql}\n\n"
         f"Engine error:\n{req.error[:800]}\n\n"
         "Return ONLY the corrected SQL query (no markdown, no commentary), or an "
@@ -1832,6 +2710,223 @@ async def intelligence_fix_sql(
 
     return IntelligenceFixSQLResponse(
         sql=fixed,
+        request_id=request_id,
+        model_used=settings.reasoning_model,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Conversational turn classification
+# ---------------------------------------------------------------------------
+
+_CONVERSATION_INTENTS = {
+    "new_analysis",
+    "query_change",
+    "chart_change",
+    "explain",
+    "clarification",
+}
+
+# Closed chart vocabulary — mirrors what the web-ui WidgetRenderer can draw.
+# This grounds the model's output; it does NOT decide intent.
+_CHART_TYPES = {"table", "bar", "line", "pie", "scatter"}
+_CHART_SUBTYPES: dict[str, set[str]] = {
+    "bar": {
+        "column",
+        "horizontal_bar",
+        "stacked_bar",
+        "grouped_bar",
+        "stacked_horizontal",
+        "positive_negative",
+        "waterfall",
+    },
+    "line": {"smooth_line", "step_line", "dashed_line", "stacked_area"},
+    "pie": {"donut", "two_level", "gauge"},
+    "scatter": {"bubble", "best_fit"},
+    "table": set(),
+}
+
+_CONVERSATION_TURN_SYSTEM_PROMPT = (
+    "You are the routing brain of Tablescope's conversational analytics "
+    "assistant. Your ONLY job is to classify the user's latest message and, "
+    "when it is a presentation-only change, translate it into a structured "
+    "chart patch. You never write SQL, never invent data, and never invent "
+    "column names — you may only reference columns that appear in the result "
+    "columns provided. Respond with a single JSON object and nothing else."
+)
+
+
+def _conversation_turn_prompt(req: ConversationTurnClassifyRequest) -> str:
+    """Build the classification prompt: grounded state, shared best-practice
+    rules + examples (from the editable prompt reference), the closed chart
+    vocabulary generated from the renderer sets, and the output schema."""
+    chart_json = json.dumps(req.current_chart or {}, default=str)
+    subtype_lines = "\n".join(
+        f'- "{t}": subtypes {sorted(subs) if subs else "[]"}'
+        for t, subs in _CHART_SUBTYPES.items()
+    )
+    best_practices = load_prompt_reference(
+        "conversational_analytics_best_practices.md"
+    )
+    return (
+        "## Conversation state\n"
+        f"- has_prior_result: {req.has_prior_result}\n"
+        f"- prior_sql: {req.prior_sql or '(none)'}\n"
+        f"- result_columns: {req.result_columns}\n"
+        f"- numeric_columns: {req.numeric_columns}\n"
+        f"- categorical_columns: {req.categorical_columns}\n"
+        f"- row_count: {req.row_count}\n"
+        f"- current_chart: {chart_json}\n\n"
+        f"{best_practices}\n\n"
+        "## Chart vocabulary (closed set)\n"
+        f"Types: {sorted(_CHART_TYPES)}\n"
+        f"{subtype_lines}\n\n"
+        "## Output schema (JSON only, all keys required)\n"
+        "{\n"
+        '  "intent": "new_analysis|query_change|chart_change|explain|clarification",\n'
+        '  "chart": {\n'
+        '    "type": "table|bar|line|pie|scatter|null",\n'
+        '    "subtype": "one of the listed subtypes or null",\n'
+        '    "labelColumn": "column name or null",\n'
+        '    "valueColumns": ["column names"] or null,\n'
+        '    "sort": {"column": "label|value", "direction": "asc|desc"} or null,\n'
+        '    "dataLabels": true/false/null,\n'
+        '    "legendVisible": true/false/null,\n'
+        '    "title": "new chart title or null"\n'
+        "  },\n"
+        '  "data_question": "underlying data question or null",\n'
+        '  "confidence": 0.0-1.0,\n'
+        '  "reason": "one short sentence"\n'
+        "}\n\n"
+        "## User message\n"
+        f"{req.message}\n"
+    )
+
+
+
+def _sanitize_chart_patch(
+    raw: Any, result_columns: list[str]
+) -> dict[str, Any]:
+    """Deterministic guardrail: keep only known keys and legal values.
+
+    The model proposes; this validates. Unknown chart types/subtypes are
+    dropped rather than guessed so the platform never receives a config the
+    renderer cannot draw. Column references are passed through even when they
+    don't exist — the platform surfaces a helpful message for those.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    patch: dict[str, Any] = {}
+
+    chart_type = raw.get("type")
+    if isinstance(chart_type, str) and chart_type.lower() in _CHART_TYPES:
+        patch["type"] = chart_type.lower()
+
+    subtype = raw.get("subtype")
+    if isinstance(subtype, str) and subtype:
+        subtype = subtype.lower()
+        allowed_for = _CHART_SUBTYPES.get(patch.get("type", ""), set())
+        if not patch.get("type"):
+            allowed_for = set().union(*_CHART_SUBTYPES.values())
+        if subtype in allowed_for:
+            patch["subtype"] = subtype
+
+    # For new_analysis / query_change there is no prior result, so the model
+    # cannot know the real column names yet. Ignore any guessed label/value
+    # columns and let the platform derive them from the executed result. For
+    # chart_change, result_columns is the prior result, so we preserve explicit
+    # (even wrong) column requests so the platform can surface a clear error.
+    if result_columns:
+        label = raw.get("labelColumn")
+        if isinstance(label, str) and label.strip():
+            patch["labelColumn"] = label.strip()
+
+        values = raw.get("valueColumns")
+        if isinstance(values, list):
+            cleaned = [v.strip() for v in values if isinstance(v, str) and v.strip()]
+            if cleaned:
+                patch["valueColumns"] = cleaned
+
+    sort = raw.get("sort")
+    if (
+        isinstance(sort, dict)
+        and sort.get("column") in ({"label", "value"} | set(result_columns))
+        and sort.get("direction") in {"asc", "desc"}
+    ):
+        patch["sort"] = {"column": sort["column"], "direction": sort["direction"]}
+
+    for key in ("dataLabels", "legendVisible"):
+        if isinstance(raw.get(key), bool):
+            patch[key] = raw[key]
+
+    title = raw.get("title")
+    if isinstance(title, str) and title.strip():
+        patch["title"] = title.strip()[:120]
+
+    return patch
+
+
+@router.post(
+    "/intelligence/conversation-turn",
+    response_model=ConversationTurnClassifyResponse,
+)
+async def classify_conversation_turn(
+    req: ConversationTurnClassifyRequest,
+) -> ConversationTurnClassifyResponse:
+    """Classify a conversational-analytics turn and emit a chart patch.
+
+    LLM-first replacement for the platform's old regex intent tables: the
+    model sees the grounded conversation state (real columns, current chart)
+    and a closed chart vocabulary, and returns strict JSON. Deterministic
+    validation afterwards guarantees the platform only ever receives legal
+    intents and renderer-supported chart configs.
+    """
+    request_id = str(uuid.uuid4())
+    verify_signature(req.model_dump(exclude={"signature"}), req.signature)
+    update_activity()
+
+    raw = await llm_client.generate(
+        prompt=_conversation_turn_prompt(req),
+        system_prompt=_CONVERSATION_TURN_SYSTEM_PROMPT,
+        model=settings.reasoning_model,
+        temperature=0.0,
+        max_tokens=400,
+        num_ctx=8192,
+        response_format="json",
+    )
+    parsed = _parse_json_response(raw or "") or {}
+
+    intent = str(parsed.get("intent") or "").strip().lower()
+    if intent not in _CONVERSATION_INTENTS:
+        intent = "query_change" if req.has_prior_result else "new_analysis"
+    # chart_change/explain require a prior result to act on.
+    if intent in {"chart_change", "explain"} and not req.has_prior_result:
+        intent = "new_analysis"
+
+    # The model may also attach a chart preference to new_analysis or
+    # query_change turns (e.g. "Run X with a horizontal bar chart"), so we
+    # always sanitize and return the chart patch. For chart_change, an empty
+    # patch means the model could not act on a presentation-only request.
+    chart = _sanitize_chart_patch(parsed.get("chart"), req.result_columns)
+    if intent == "chart_change" and not chart:
+        # The model said "presentation change" but produced nothing actionable.
+        intent = "clarification"
+
+    try:
+        confidence = min(max(float(parsed.get("confidence", 0.0)), 0.0), 1.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    data_question = str(parsed.get("data_question") or "").strip() or None
+    if data_question and intent in {"chart_change", "explain"}:
+        data_question = None
+
+    return ConversationTurnClassifyResponse(
+        intent=intent,
+        chart=chart,
+        data_question=data_question,
+        confidence=confidence,
+        reason=str(parsed.get("reason") or "")[:300],
         request_id=request_id,
         model_used=settings.reasoning_model,
     )
@@ -2085,7 +3180,7 @@ async def knowledge_graph_insights(
         system_prompt=_KG_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.2,
-        num_ctx=16384,
+        num_ctx=24576,
         response_format="json",
     )
 
@@ -2103,9 +3198,37 @@ async def knowledge_graph_insights(
                 severity = "info"
             # Keep only evidence keys that actually exist in the neighborhood —
             # this is the evidence gate that rejects fabricated grounding.
+            # The model may return either graph_keys or node labels; normalize
+            # to the canonical graph_key before accepting.
+            neighbor_labels = {}
+            neighbor_labels_ci = {}
+            for n in req.neighbors:
+                label = str(n.get("label") or "").strip()
+                gk = str(n.get("graph_key") or "").strip()
+                if label and gk:
+                    neighbor_labels.setdefault(label, gk)
+                    neighbor_labels_ci.setdefault(label.lower(), gk)
+            center_label = str(center.get("label") or "").strip()
+            if center_label and center_key:
+                neighbor_labels.setdefault(center_label, center_key)
+                neighbor_labels_ci.setdefault(center_label.lower(), center_key)
+
+            def _resolve_evidence_key(k: str) -> str | None:
+                k = str(k).strip()
+                if not k:
+                    return None
+                if k in allowed_keys:
+                    return k
+                if k in neighbor_labels:
+                    return neighbor_labels[k]
+                return neighbor_labels_ci.get(k.lower())
+
             evidence_keys = [
-                str(k) for k in c.get("evidenceKeys", [])
-                if str(k) in allowed_keys
+                gk for gk in {
+                    _resolve_evidence_key(k)
+                    for k in c.get("evidenceKeys", [])
+                }
+                if gk
             ]
             if not evidence_keys:
                 logger.info("Dropping KG card with no real evidence: %s", c.get("title"))
@@ -2308,7 +3431,7 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
         system_prompt=_PROJECT_INSIGHT_SYSTEM_PROMPT,
         model=settings.reasoning_model,
         temperature=0.2,
-        num_ctx=16384,
+        num_ctx=24576,
         response_format="json",
     )
 
@@ -2943,4 +4066,37 @@ def _parse_json_response(text: str) -> dict | None:
         except _json.JSONDecodeError:
             pass
 
+    # Truncation salvage: a response cut off mid-generation (context window
+    # exhausted) is prefix-valid JSON. Trim back to the last complete object
+    # boundary and close the open brackets, so every COMPLETE analysis in a
+    # truncated plan survives instead of the whole plan degrading to [].
+    return _repair_truncated_json(text)
+
+
+def _repair_truncated_json(text: str) -> dict | None:
+    """Best-effort recovery of a JSON object truncated mid-stream."""
+    import json as _json
+
+    start = text.find("{")
+    if start == -1:
+        return None
+    snippet = text[start:]
+    cut = snippet.rfind("}")
+    while cut != -1:
+        candidate = snippet[: cut + 1]
+        open_braces = candidate.count("{") - candidate.count("}")
+        open_arrays = candidate.count("[") - candidate.count("]")
+        if open_braces >= 0 and open_arrays >= 0:
+            try:
+                repaired = _json.loads(
+                    candidate + "]" * open_arrays + "}" * open_braces
+                )
+                logger.warning(
+                    "Salvaged truncated JSON response: kept %s of %s chars",
+                    cut + 1, len(snippet),
+                )
+                return repaired
+            except _json.JSONDecodeError:
+                pass
+        cut = snippet.rfind("}", 0, cut)
     return None

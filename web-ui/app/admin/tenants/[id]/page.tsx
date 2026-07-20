@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import { ToastViewport, useToasts } from "@/components/ui/toast";
 
 type VDBInfo = {
   vdb_id: string;
@@ -45,6 +47,16 @@ type TenantDetails = {
   shared_vdbs: SharedVDB[];
 };
 
+type TenantReprocessResponse = {
+  tenant_id: number;
+  status: string;
+  total_projects: number;
+  projects_queued: number;
+  projects_skipped: number;
+  job_ids: string[];
+  force: boolean;
+};
+
 function HealthBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     deployed: "bg-emerald-50 text-emerald-700",
@@ -63,7 +75,26 @@ function HealthBadge({ status }: { status: string }) {
 export default function TenantDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { toasts, push, dismiss } = useToasts();
+  const [forceReprocess, setForceReprocess] = useState(true);
   const tenantId = Number(params.id);
+
+  const reprocessMutation = useMutation({
+    mutationFn: () =>
+      apiClient.post<TenantReprocessResponse>(
+        `/api/tenants/${tenantId}/reprocess-documents?force=${forceReprocess ? "true" : "false"}`,
+        {},
+      ),
+    onSuccess: (data) => {
+      push(
+        `Queued ${data.projects_queued} project reprocess(s)${data.projects_skipped > 0 ? `, ${data.projects_skipped} already running` : ""}`,
+        "success",
+      );
+    },
+    onError: (err: unknown) => {
+      push(err instanceof Error ? err.message : "Failed to queue tenant reprocess", "error");
+    },
+  });
 
   const detailsQuery = useQuery<TenantDetails>({
     queryKey: ["tenant-details", tenantId],
@@ -100,6 +131,25 @@ export default function TenantDetailPage() {
         <p className="mt-1 text-sm text-slate-500">
           Login URL: <a href={`/${tenant.slug}/login`} className="text-brand underline" target="_blank" rel="noopener noreferrer">/{tenant.slug}/login</a>
         </p>
+        <div className="mt-4 flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={forceReprocess}
+              onChange={(e) => setForceReprocess(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-brand"
+            />
+            Force reprocess unchanged files
+          </label>
+          <button
+            type="button"
+            onClick={() => reprocessMutation.mutate()}
+            disabled={reprocessMutation.isPending}
+            className="rounded-md bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
+          >
+            {reprocessMutation.isPending ? "Queueing..." : "Reprocess all tenant documents"}
+          </button>
+        </div>
       </header>
 
       {/* Users with VDB info */}
@@ -200,6 +250,7 @@ export default function TenantDetailPage() {
           </div>
         )}
       </div>
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </section>
   );
 }

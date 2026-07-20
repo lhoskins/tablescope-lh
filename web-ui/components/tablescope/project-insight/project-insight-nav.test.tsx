@@ -2,16 +2,14 @@ import { describe, expect, it } from "vitest";
 import { IconSparkles } from "@tabler/icons-react";
 import { projectNavGroups } from "@/components/tablescope/nav";
 
-describe("Project Insight sidebar entry", () => {
+describe("Project Insights sidebar entry", () => {
   const groups = projectNavGroups("42");
-  const intelligence = groups.find((g) => g.heading === "Intelligence");
-  const insight = intelligence?.items.find(
-    (i) => i.key === "project-insight",
-  );
+  const project = groups.find((g) => g.heading === "Project");
+  const insight = project?.items.find((i) => i.key === "project-insights");
 
-  it("appears under Intelligence labelled 'Project Insight'", () => {
+  it("appears under Project labelled 'Project Insights'", () => {
     expect(insight).toBeTruthy();
-    expect(insight?.label).toBe("Project Insight");
+    expect(insight?.label).toBe("Project Insights");
   });
 
   it("routes to the project insight page", () => {

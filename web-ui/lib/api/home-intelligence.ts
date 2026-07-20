@@ -150,6 +150,8 @@ export interface InsightCard {
   insightType: string;
   severity: InsightSeverity;
   title: string;
+  /** Optional natural-language question that investigating this card should ask. */
+  question?: string;
   summary: string;
   chart: InsightChart | null;
   callout: InsightCallout | null;
@@ -308,6 +310,10 @@ export interface IntelligenceSnapshot {
   projects: StreamProject[];
   results: ProjectResult[];
   synthesis: CrossProjectSynthesis | null;
+  /** True when the Knowledge Graph for one or more projects rebuilt after this briefing. */
+  stale?: boolean;
+  /** Project IDs whose data changed after this briefing was generated. */
+  staleProjects?: string[];
 }
 
 export function getIntelligenceSnapshot(): Promise<{
@@ -403,6 +409,9 @@ export interface QuerySuggestion {
   title: string;
   description: string;
   sql: string;
+  chartType?: string;
+  labelColumn?: string;
+  valueColumn?: string;
 }
 
 export interface QuerySuggestionsProject {
@@ -414,10 +423,12 @@ export interface QuerySuggestionsProject {
 
 export function suggestQueries(
   granularity = 3,
+  projectId?: number,
 ): Promise<{ projects: QuerySuggestionsProject[] }> {
   return apiClient.post("/api/ai/home/query-suggestions", {
     granularity,
     max_per_project: 5,
+    project_id: projectId ?? null,
   });
 }
 
@@ -455,10 +466,12 @@ export interface DashboardSuggestionsProject {
 
 export function suggestDashboards(
   granularity = 3,
+  projectId?: number,
 ): Promise<{ projects: DashboardSuggestionsProject[] }> {
   return apiClient.post("/api/ai/home/dashboard-suggestions", {
     granularity,
     max_per_project: 6,
+    project_id: projectId ?? null,
   });
 }
 

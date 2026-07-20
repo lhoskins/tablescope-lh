@@ -28,6 +28,9 @@ class AskRequest(AIBaseRequest):
     # {"role": "user"|"assistant", "content": "..."}. Lets the model resolve
     # follow-up references ("explain more", "the second option").
     history: list[dict[str, Any]] = Field(default_factory=list)
+    # Compact, AI-safe Knowledge Graph summary; grounds prose answers in the
+    # same measured risks/gaps/KPIs used by dashboard and query generation.
+    knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class IndexDocumentRequest(AIBaseRequest):
@@ -177,6 +180,7 @@ class DocumentProfileRequest(BaseModel):
     chunks: list[dict] = []
     enabled_reference_tags: list[str] = []
     enabled_reference_kpis: list[str] = []
+    include_family: bool = True
     signature: str = ""
     timestamp: float = 0.0
 
@@ -217,9 +221,16 @@ class IntelligencePlanRequest(AIBaseRequest):
     # row_multiplication_risk}. The planner may only propose multi-table
     # analyses that are supported by one of these hints.
     relationship_hints: list[dict] = Field(default_factory=list)
+    reference_kpis: list[dict] = Field(default_factory=list)
     max_analyses: int = 6
     # 1 = executive/high-level (few, most leveraging) .. 5 = granular (many, detailed)
     granularity: int = 3
+    project_context: dict = Field(default_factory=dict)
+    # Compact Knowledge Graph digest from the platform (risks, gaps,
+    # opportunities, warnings, recommended KPIs). Injected into the plan
+    # prompt as HYPOTHESES the planner should validate/quantify/refute with
+    # SQL — never asserted as findings without a query result behind them.
+    knowledge_graph_context: dict = Field(default_factory=dict)
 
 
 class PlannedAnalysis(BaseModel):
@@ -262,6 +273,38 @@ class IntelligenceFixSQLResponse(BaseModel):
     model_used: str = ""
 
 
+class ConversationTurnClassifyRequest(AIBaseRequest):
+    """Classify a conversational-analytics follow-up turn.
+
+    The platform sends the user's latest message plus the grounded state of the
+    conversation (prior SQL, the executed result's real columns, the chart that
+    is currently rendered). The model decides the intent and, for chart-only
+    changes, emits a structured chart patch limited to the closed vocabulary the
+    frontend renderer supports.
+    """
+    message: str = ""
+    has_prior_result: bool = False
+    prior_sql: str = ""
+    result_columns: list[str] = Field(default_factory=list)
+    numeric_columns: list[str] = Field(default_factory=list)
+    categorical_columns: list[str] = Field(default_factory=list)
+    row_count: int = 0
+    current_chart: dict = Field(default_factory=dict)
+
+
+class ConversationTurnClassifyResponse(BaseModel):
+    intent: str = "new_analysis"
+    chart: dict = Field(default_factory=dict)
+    data_question: str | None = Field(
+        default=None,
+        description="The underlying data question, with chart/presentation wording removed and ambiguous phrasing clarified. Null for chart_change and explain.",
+    )
+    confidence: float = 0.0
+    reason: str = ""
+    request_id: str = ""
+    model_used: str = ""
+
+
 class InterpretAnalysisInput(BaseModel):
     id: str
     category: str = "trend"
@@ -277,6 +320,7 @@ class InterpretAnalysisInput(BaseModel):
 class IntelligenceInterpretRequest(AIBaseRequest):
     """Turn executed query results (or document context) into business prose."""
     analyses: list[InterpretAnalysisInput] = Field(default_factory=list)
+    project_context: dict = Field(default_factory=dict)
 
 
 class InterpretedInsight(BaseModel):
@@ -354,6 +398,7 @@ class ProjectInsightRequest(AIBaseRequest):
     kpis: list[str] = Field(default_factory=list)
     knowledge_graph_context: dict = Field(default_factory=dict)
     recent_activity: dict = Field(default_factory=dict)
+    project_context: dict = Field(default_factory=dict)
 
 
 class ProjectInsightExecutiveSummary(BaseModel):

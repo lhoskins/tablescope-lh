@@ -13,15 +13,15 @@ import time
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.project_asset import ProjectAsset
-from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.services.document_chunking_service import chunk_document
 from app.services.document_extraction_service import extract_text
 from app.services.project_graph_service import apply_document_family
+from app.services.project_insight_service import mark_project_insight_stale
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +30,64 @@ class DocumentProfileError(Exception):
     """Raised when the AI document profiler cannot produce a profile."""
 
 
+def _hash_stored_file(storage_location: str | None) -> str | None:
+    """SHA-256 of the file currently at the asset's storage location."""
+    if not storage_location:
+        return None
+    try:
+        with open(storage_location, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
+
+
 async def process_document_asset(
     session: AsyncSession,
     asset: ProjectAsset,
     tenant_id: int,
     project_id: int,
     user_id: int,
-) -> None:
-    """Full pipeline: extract → chunk → persist chunks → AI profile → graph."""
+    *,
+    force: bool = False,
+    trigger_graph_rebuild: bool = True,
+) -> str:
+    """Full pipeline: extract → chunk → persist chunks → AI profile → graph.
+
+    Returns a status string: ``"processed"``, ``"skipped_unchanged"``, or
+    ``"failed"``. A document whose bytes match the stored ``file_hash`` and
+    that is already profiled is skipped so reprocessing only does work on real
+    file changes; ``force=True`` (a user's explicit Reprocess) bypasses the
+    gate. ``trigger_graph_rebuild=False`` lets a project-wide cascade suppress
+    per-document rebuild events in favor of one terminal rebuild.
+    """
+
+    # ── Step 0: File-hash gate ───────────────────────────────────────
+    current_hash = _hash_stored_file(asset.storage_location)
+    if (
+        not force
+        and current_hash is not None
+        and current_hash == asset.file_hash
+        and asset.ai_status == "profiled"
+    ):
+        logger.info(
+            "Skipping reprocess of asset %d: file unchanged and already profiled",
+            asset.id,
+        )
+        return "skipped_unchanged"
+    if current_hash is not None and current_hash != asset.file_hash:
+        # The stored bytes changed (file replaced on disk); persist the new
+        # hash so the gate and source fingerprinting see the change.
+        asset.file_hash = current_hash
+        try:
+            await session.execute(
+                text(
+                    "UPDATE ai_documents SET file_hash=:fh "
+                    "WHERE source_type='project_asset' AND source_id=:sid"
+                ),
+                {"fh": current_hash, "sid": asset.id},
+            )
+        except Exception:
+            logger.exception("Failed to update ai_documents hash for asset %d", asset.id)
 
     # ── Step 1: Extract text ─────────────────────────────────────────
     asset.ai_status = "extracting"
@@ -50,14 +100,14 @@ async def process_document_asset(
         asset.ai_status = "failed"
         asset.ai_error_message = f"Extraction failed: {exc}"
         await session.commit()
-        return
+        return "failed"
 
     doc_text = extraction.get("document_text", "")
     if not doc_text.strip():
         asset.ai_status = "failed"
         asset.ai_error_message = "No text could be extracted from this document"
         await session.commit()
-        return
+        return "failed"
 
     # ── Step 2: Chunk text ───────────────────────────────────────────
     asset.ai_status = "chunking"
@@ -68,7 +118,7 @@ async def process_document_asset(
         asset.ai_status = "failed"
         asset.ai_error_message = "Chunking produced no chunks"
         await session.commit()
-        return
+        return "failed"
 
     # ── Step 3: Persist chunks to ai_document_chunks ─────────────────
     # Find the ai_documents row for this asset
@@ -166,7 +216,7 @@ async def process_document_asset(
                 {"did": ai_doc_id},
             )
         await session.commit()
-        return
+        return "failed"
 
     # ── Step 5: Persist profile ──────────────────────────────────────
     asset.ai_summary = profile.get("summary", asset.ai_summary or "")
@@ -187,15 +237,18 @@ async def process_document_asset(
     await session.commit()
 
     # Document metadata changed, so any cached project insights/opportunities
-    # for this project are now stale. Clear them so the next request refreshes.
+    # for this project are now stale. Mark them for background rebuild.
     try:
-        await session.execute(
-            delete(ProjectIntelligenceSnapshot).where(
-                ProjectIntelligenceSnapshot.tenant_id == tenant_id,
-                ProjectIntelligenceSnapshot.project_id == project_id,
-            )
+        await mark_project_insight_stale(
+            session, tenant_id=tenant_id, project_id=project_id
         )
         await session.commit()
+        if get_settings().project_insight_event_rebuild_enabled:
+            from app.tasks.workflows import enqueue_rebuild_project_insight
+
+            await enqueue_rebuild_project_insight(
+                tenant_id=tenant_id, project_id=project_id
+            )
     except Exception:
         logger.exception("Failed to invalidate project intelligence snapshots")
 
@@ -228,6 +281,32 @@ async def process_document_asset(
         )
     except Exception:
         logger.exception("Vector indexing failed for asset %d", asset.id)
+
+    # ── Step 9: Trigger a knowledge-graph snapshot rebuild ───────────
+    # The graph rows written above (Steps 6-7) are committed, so a rebuild now
+    # observes the fresh document/relationship/family edges. Best-effort and
+    # last: the graph is a downstream consumer and must never fail the pipeline.
+    if trigger_graph_rebuild:
+        from app.services.knowledge_graph_lifecycle import (
+            request_event_driven_rebuild,
+        )
+
+        await request_event_driven_rebuild(
+            session,
+            project_id=project_id,
+            change_set=[
+                {
+                    "entity_type": "document",
+                    "entity_id": asset.id,
+                    "action": "processed",
+                    "change_scope": "content",
+                }
+            ],
+            trigger="document_processed",
+            requested_by=user_id,
+        )
+
+    return "processed"
 
 
 async def call_document_profiler(

@@ -35,14 +35,23 @@ from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.project import Project, ProjectMember
 from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.saved_query import SavedQuery
-from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
+from app.routes.query import (
+    _auto_cast_aggregates,
+    _execute_sql_with_repair,
+    _resolve_vdb_database,
+    _sample_project_columns,
+)
 from app.services import dashboard_widget as dw
 from app.services import home_intel_queue as q
 from app.services import home_intelligence as hi
 from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.presentation_engine import PresentationMode
 from app.services.response_envelope import attach_envelope
-from app.services.teiid_sql import normalize_teiid_timestamps
+from app.services.teiid_sql import (
+    normalize_teiid_identifiers,
+    normalize_teiid_timestamps,
+    project_table_schema,
+)
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 from app.tasks.workflows import enqueue_analyze_project_intelligence
 
@@ -86,53 +95,73 @@ def _make_runner(
     not yet materialised), so prompts that need live data are skipped cleanly.
     """
 
-    async def runner(sql: str) -> dict[str, Any]:
+    # Lazy-load schema context once; the same project tables are reused for every
+    # plan/execute call in a single run.
+    ctx: dict[str, Any] = {}
+
+    async def _ensure_ctx() -> dict[str, Any]:
+        if ctx:
+            return ctx
         database = await _resolve_vdb_database(
             session=session, context=context, project_id=project_id
         )
         endpoint = await TenantTeiidResolver(session).resolve_for_org(
             context.tenant_id
         )
-        return await _run_sql(
+        table_schema = await project_table_schema(
+            session, tenant_id=context.tenant_id, project_id=project_id
+        )
+        allowed_tables = [
+            str(t)
+            for entry in table_schema
+            if (t := entry.get("table")) is not None
+        ]
+        column_types = {
+            str(col.get("name")): str(col.get("type") or "")
+            for entry in table_schema
+            for col in (entry.get("columns") or [])
+            if isinstance(col, dict) and col.get("name")
+        }
+        column_samples = await _sample_project_columns(
             database=database,
-            sql=_auto_cast_aggregates(normalize_teiid_timestamps(sql)),
+            tables=allowed_tables,
             teiid_host=endpoint.pg_host,
             teiid_port=endpoint.pg_port,
         )
+        ctx.update(
+            {
+                "database": database,
+                "endpoint": endpoint,
+                "table_schema": table_schema,
+                "allowed_tables": allowed_tables,
+                "column_types": column_types,
+                "column_samples": column_samples,
+            }
+        )
+        return ctx
+
+    async def runner(sql: str) -> dict[str, Any]:
+        ctx_data = await _ensure_ctx()
+        result, _ = await _execute_sql_with_repair(
+            raw_sql=sql,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            database=ctx_data["database"],
+            endpoint=ctx_data["endpoint"],
+            table_schema=ctx_data["table_schema"],
+            allowed_tables=ctx_data["allowed_tables"],
+            column_types=ctx_data["column_types"],
+            column_samples=ctx_data["column_samples"],
+            max_attempts=2,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=502, detail=f"Could not execute generated SQL: {sql}"
+            )
+        return result
 
     return runner
-
-
-async def _sample_project_columns(
-    session: AsyncSession,
-    context: RequestContext,
-    project: Project,
-    tables: list[str],
-) -> dict[str, str]:
-    """Return one non-empty sample value per column across project tables.
-
-    Used to infer Teiid date-parse masks when normalizing AI-generated SQL for
-    query suggestions. Failures are swallowed so a missing VDB does not break
-    suggestion generation.
-    """
-    runner = _make_runner(session, context, project.id)
-    samples: dict[str, str] = {}
-    for view_name in tables:
-        try:
-            result = await runner(f'SELECT * FROM "{view_name}" LIMIT 25')
-        except Exception as exc:
-            logger.debug(
-                "Could not sample %s for project %s: %s", view_name, project.id, exc
-            )
-            continue
-        for row in result.get("rows", [])[:25]:
-            for col, val in row.items():
-                if col in samples:
-                    continue
-                text = str(val).strip() if val is not None else ""
-                if text:
-                    samples[col] = text[:40]
-    return samples
 
 
 async def _run_for_project(
@@ -436,12 +465,63 @@ async def _save_snapshot(
         await session.commit()
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Normalize a possibly-naive DB timestamp to aware UTC for comparison."""
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
+async def _stale_project_ids(
+    session: AsyncSession,
+    context: RequestContext,
+    snap: IntelligenceSnapshot,
+) -> list[str]:
+    """Projects whose Knowledge Graph rebuilt after this briefing was written.
+
+    The KG lifecycle already rebuilds on every data change, so "a KG build
+    postdates the snapshot" is a faithful, DB-only proxy for "the data behind
+    this briefing changed" — no AI calls, one indexed query.
+    """
+    from app.models import KnowledgeGraph
+
+    project_ids: list[int] = []
+    for p in (snap.payload or {}).get("projects") or []:
+        try:
+            project_ids.append(int(p.get("id")))
+        except (TypeError, ValueError):
+            continue
+    snap_time = _as_utc(snap.updated_at)
+    if not project_ids or snap_time is None:
+        return []
+
+    graphs = (
+        await session.scalars(
+            select(KnowledgeGraph).where(
+                KnowledgeGraph.tenant_id == context.tenant_id,
+                KnowledgeGraph.project_id.in_(project_ids),
+            )
+        )
+    ).all()
+    stale: list[str] = []
+    for graph in graphs:
+        built = _as_utc(graph.last_successful_build_at)
+        if built is not None and built > snap_time:
+            stale.append(str(graph.project_id))
+    return stale
+
+
 @router.get("/home-intelligence/snapshot")
 async def get_intelligence_snapshot(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
-    """Return the caller's latest persisted run (or ``snapshot: null``)."""
+    """Return the caller's latest persisted run (or ``snapshot: null``).
+
+    ``stale``/``staleProjects`` flag projects whose data changed (Knowledge
+    Graph rebuilt) after this briefing was written, so the UI can nudge a
+    refresh without spending any AI capacity.
+    """
     snap = await session.scalar(
         select(IntelligenceSnapshot).where(
             IntelligenceSnapshot.user_id == context.user_id
@@ -449,11 +529,20 @@ async def get_intelligence_snapshot(
     )
     if snap is None:
         return {"snapshot": None}
+
+    stale_projects: list[str] = []
+    try:
+        stale_projects = await _stale_project_ids(session, context, snap)
+    except Exception:  # staleness is advisory — never break the snapshot read
+        logger.exception("Failed to compute snapshot staleness")
+
     return {
         "snapshot": {
             "granularity": snap.granularity,
             "updatedAt": snap.updated_at.isoformat() if snap.updated_at else None,
             **snap.payload,
+            "stale": bool(stale_projects),
+            "staleProjects": stale_projects,
         }
     }
 
@@ -553,14 +642,79 @@ async def _plan_analyses(
 
     # Sample live table values so generated timestamp casts can be rewritten to
     # Teiid PARSETIMESTAMP with the right mask before the preview is run.
-    column_samples = await _sample_project_columns(
-        session, context, project, allowed_tables
+    database = await _resolve_vdb_database(
+        session=session, context=context, project_id=project.id
     )
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(
+        context.tenant_id
+    )
+    column_samples = await _sample_project_columns(
+        database=database,
+        tables=allowed_tables,
+        teiid_host=endpoint.pg_host,
+        teiid_port=endpoint.pg_port,
+    )
+    column_types = {
+        str(col.get("name")): str(col.get("type") or "")
+        for entry in table_schema
+        for col in (entry.get("columns") or [])
+        if isinstance(col, dict) and col.get("name")
+    }
+    valid_analyses: list[dict[str, Any]] = []
     for a in analyses:
         sql = (a.get("sql") or "").strip()
-        if sql:
-            a["sql"] = normalize_teiid_timestamps(sql, column_samples=column_samples)
-    return analyses
+        if not sql:
+            continue
+        sql = normalize_teiid_identifiers(sql, table_schema)
+        sql = normalize_teiid_timestamps(
+            sql,
+            column_types=column_types,
+            column_samples=column_samples,
+        )
+        sql = _auto_cast_aggregates(sql).rstrip().rstrip(";")
+        # Do not surface suggestions whose SQL cannot be executed even after the
+        # repair loop; otherwise the preview modal will show a Teiid error.
+        result, final_sql = await _execute_sql_with_repair(
+            raw_sql=sql,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project.id,
+            database=database,
+            endpoint=endpoint,
+            table_schema=table_schema,
+            allowed_tables=allowed_tables,
+            column_types=column_types,
+            column_samples=column_samples,
+            max_attempts=3,
+        )
+        if result is not None:
+            a["sql"] = final_sql
+            a["result"] = result
+            valid_analyses.append(a)
+    return valid_analyses
+
+
+def _derive_dashboard_title(
+    project_name: str, widgets: list[dict[str, Any]]
+) -> str:
+    """Build a descriptive, non-generic dashboard title from the widget content."""
+    titles = [
+        str(w.get("title") or "").strip()
+        for w in widgets
+        if w.get("title") and str(w.get("title")).strip() not in ("", "Widget")
+    ]
+    seen: list[str] = []
+    for t in titles:
+        if t not in seen:
+            seen.append(t)
+        if len(seen) == 2:
+            break
+    if seen:
+        base = " & ".join(seen)
+        if "dashboard" not in base.lower():
+            base = f"{base} Dashboard"
+        return base
+    return f"{project_name} — AI Dashboard"
 
 
 @router.post("/home/query-suggestions")
@@ -568,9 +722,15 @@ async def home_query_suggestions(
     req: SuggestRequest,
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> dict[str, Any]:
-    """AI-suggested queries for every accessible project (in memory, unsaved)."""
+    """AI-suggested queries for every accessible project (in memory, unsaved).
+
+    ``project_id`` restricts generation to that single project (Project
+    Insight page); omitted, all accessible projects are covered (Home page).
+    """
     async with SessionLocal() as session:
         projects = await _accessible_projects(session, context)
+    if req.project_id is not None:
+        projects = [p for p in projects if p.id == req.project_id]
     if not projects:
         return {"projects": []}
 
@@ -594,6 +754,9 @@ async def home_query_suggestions(
                 "title": a.get("title") or "Query",
                 "description": a.get("rationale") or "",
                 "sql": (a.get("sql") or "").strip(),
+                "chartType": a.get("chart_type") or "",
+                "labelColumn": a.get("label_column") or "",
+                "valueColumn": a.get("value_column") or "",
             }
             for a in analyses
             if (a.get("sql") or "").strip()
@@ -618,10 +781,13 @@ async def home_dashboard_suggestions(
 
     The plan's SQL is executed server-side against each project's own VDB and
     turned into renderable chart series so the Home can render the dashboard
-    from memory. Nothing is saved until the user clicks Save.
+    from memory. Nothing is saved until the user clicks Save. ``project_id``
+    restricts generation to that single project (Project Insight page).
     """
     async with SessionLocal() as session:
         projects = await _accessible_projects(session, context)
+    if req.project_id is not None:
+        projects = [p for p in projects if p.id == req.project_id]
     if not projects:
         return {"projects": []}
 
@@ -674,7 +840,10 @@ async def home_dashboard_suggestions(
             "projectName": project.name,
             "projectColor": hi.project_color(project.id),
             "dashboard": (
-                {"title": f"{project.name} — AI Dashboard", "widgets": widgets}
+                {
+                    "title": _derive_dashboard_title(project.name, widgets),
+                    "widgets": widgets,
+                }
                 if widgets
                 else None
             ),
@@ -763,7 +932,7 @@ async def home_project_dashboard(
     narrative = hi.build_dashboard_narrative(widgets)
     dashboard = (
         {
-            "title": f"{project.name} — AI Dashboard",
+            "title": _derive_dashboard_title(project.name, widgets),
             "summary": narrative["summary"],
             "keyFindings": narrative["keyFindings"],
             "recommendedActions": narrative["recommendedActions"],
@@ -966,7 +1135,7 @@ async def home_save_dashboard(
         project_id=project.id,
         owner_id=context.user_id,
         tenant_id=context.tenant_id,
-        name=req.title or "AI Dashboard",
+        name=req.title or _derive_dashboard_title(project.name, [w.model_dump() for w in req.widgets]),
         description="",
         status="draft",
         config={

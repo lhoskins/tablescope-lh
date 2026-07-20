@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -366,7 +366,42 @@ async def delete_conversation(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> None:
-    """Delete a conversation and all its turns."""
+    """Delete a conversation and all its turns.
+
+    Uses raw DML to avoid SQLAlchemy ORM circular-dependency ordering when
+    ``last_successful_turn_id`` and ``conversation_id`` reference each other.
+    """
     conversation = await _load_conversation(session, context, conversation_id)
-    await session.delete(conversation)
-    await session.flush()
+    cid = conversation.id
+    tid = context.tenant_id
+    uid = context.user_id
+    is_admin = context.role in (
+        Role.ROOT_ADMIN.value,
+        Role.TENANT_ADMIN.value,
+        Role.ADMIN.value,
+    )
+    where_sql = "id = :id AND tenant_id = :tid"
+    params: dict[str, Any] = {"id": cid, "tid": tid}
+    if not is_admin:
+        where_sql += " AND user_id = :uid"
+        params["uid"] = uid
+
+    await session.execute(
+        text(
+            "UPDATE analytics_conversations SET last_successful_turn_id = NULL "
+            f"WHERE {where_sql}"
+        ),
+        params,
+    )
+    await session.execute(
+        text("DELETE FROM analytics_conversation_turns WHERE conversation_id = :id"),
+        {"id": cid},
+    )
+    await session.execute(
+        text(
+            "DELETE FROM analytics_conversations "
+            f"WHERE {where_sql}"
+        ),
+        params,
+    )
+    await session.commit()

@@ -41,6 +41,8 @@ class ProjectInsightResponse(BaseModel):
     project: ProjectInsightProject
     generatedAt: str = ""
     lastUpdatedAt: str = ""
+    # True when the snapshot is stale and a rebuild is in progress/queued.
+    stale: bool = False
     executiveSummary: ExecutiveSummary = Field(default_factory=ExecutiveSummary)
     questionsToAsk: list[dict[str, Any]] = Field(default_factory=list)
     # Suggested questions the project's current authorized sources cannot answer.
@@ -66,6 +68,11 @@ class ProjectInsightResponse(BaseModel):
     # Project business-context snapshot used for this report.
     aiContextEnabled: bool = False
     contextVersion: int = 0
+    # Knowledge graph lifecycle readiness for Executive Insight.
+    graphStatus: str = "unknown"
+    graphMode: str = "full"
+    graphBlockingReasons: list[str] = Field(default_factory=list)
+    graphDisclosure: str = ""
 
 
 class AcknowledgeInsightRequest(BaseModel):

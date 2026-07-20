@@ -4,7 +4,7 @@ import {
   IconSparkles,
   IconBulb,
   IconFileText,
-  IconLayoutDashboard,
+
   IconTopologyStar3,
   IconHistory,
   IconLayoutGrid,
@@ -51,18 +51,6 @@ export function homeNavGroups(): NavGroup[] {
           href: "/projects",
           icon: IconFolders,
           countKey: "projects",
-        },
-        {
-          key: "documents",
-          label: "Documents",
-          href: "/documents",
-          icon: IconFileText,
-        },
-        {
-          key: "dashboards",
-          label: "Dashboards",
-          href: "/dashboards",
-          icon: IconLayoutDashboard,
         },
         {
           key: "ai-assistant",
@@ -117,6 +105,12 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconLayoutGrid,
         },
         {
+          key: "project-insights",
+          label: "Project Insights",
+          href: `${base}/insight`,
+          icon: IconSparkles,
+        },
+        {
           key: "project-data-sources",
           label: "Data Sources",
           href: `${base}/data-sources`,
@@ -134,12 +128,6 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           label: "Scopes",
           href: `${base}/scopes`,
           icon: IconBinaryTree,
-        },
-        {
-          key: "project-dashboards",
-          label: "Dashboards",
-          href: `${base}/dashboards`,
-          icon: IconLayoutDashboard,
         },
         {
           key: "project-documents",
@@ -166,16 +154,10 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconMessage,
         },
         {
-          key: "project-insight",
-          label: "Project Insight",
-          href: `${base}/insight`,
-          icon: IconSparkles,
-        },
-        {
-          key: "project-relationship-map",
-          label: "Knowledge Graph",
-          href: `${base}/relationship-map`,
-          icon: IconTopologyStar3,
+          key: "project-knowledge-graph",
+          label: "Graph Lifecycle",
+          href: `${base}/knowledge-graph`,
+          icon: IconHistory,
         },
         {
           key: "project-metadata-catalog",
