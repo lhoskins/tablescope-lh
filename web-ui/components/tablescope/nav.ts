@@ -142,6 +142,19 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconBinaryTree,
         },
         {
+          key: "project-documents",
+          label: "Documents",
+          href: `${base}/documents`,
+          icon: IconFileText,
+          countKey: "documents",
+        },
+        {
+          key: "project-dashboards",
+          label: "Dashboards",
+          href: `${base}/dashboards`,
+          icon: IconLayoutDashboard,
+        },
+        {
           key: "project-business-context",
           label: "Business Context",
           href: `${base}/business-context`,
