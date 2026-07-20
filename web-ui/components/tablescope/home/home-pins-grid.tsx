@@ -100,8 +100,8 @@ function PinCard({
 
   if (isInsight) {
     return (
-      <div className="flex h-full flex-col">
-        <div className="widget-drag-handle flex items-center justify-between rounded-t-xl border-x border-t border-line-tertiary bg-bg-secondary/50 px-3 py-2">
+      <div className="flex h-full flex-col rounded-xl border border-line-tertiary bg-white">
+        <div className="widget-drag-handle flex items-center justify-between rounded-t-xl border-b border-line-tertiary bg-bg-secondary/50 px-3 py-2">
           <IconGripVertical size={14} className="shrink-0 text-ink-tertiary" />
           {actions}
         </div>
@@ -124,7 +124,7 @@ function PinCard({
   }
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-line-tertiary bg-bg-primary shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border border-line-tertiary bg-white shadow-sm">
       <div className="widget-drag-handle flex items-center justify-between border-b border-line-tertiary bg-bg-secondary/50 px-3 py-2">
         <div className="flex items-center gap-2 overflow-hidden">
           <IconGripVertical size={14} className="shrink-0 text-ink-tertiary" />

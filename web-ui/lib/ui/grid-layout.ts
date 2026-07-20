@@ -30,16 +30,7 @@ export const GRID_ROW_HEIGHT = 80;
 export const GRID_MARGIN: [number, number] = [10, 10];
 export const GRID_CONTAINER_PADDING: [number, number] = [0, 0];
 export const GRID_DRAG_HANDLE = ".widget-drag-handle";
-export const GRID_RESIZE_HANDLES: ResizeHandleAxis[] = [
-  "se",
-  "e",
-  "w",
-  "s",
-  "n",
-  "sw",
-  "nw",
-  "ne",
-];
+export const GRID_RESIZE_HANDLES: ResizeHandleAxis[] = [];
 
 export const GRID_DRAG_CONFIG = {
   enabled: true,
@@ -49,7 +40,7 @@ export const GRID_DRAG_CONFIG = {
 } as const;
 
 export const GRID_RESIZE_CONFIG = {
-  enabled: true,
+  enabled: false,
   handles: GRID_RESIZE_HANDLES,
 } as const;
 

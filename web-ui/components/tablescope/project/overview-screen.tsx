@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   IconUsers,
   IconTable,
   IconDatabase,
+  IconLoader2,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { MembersDialog } from "@/components/tablescope/project/members-dialog";
@@ -23,7 +24,14 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
-import { ProjectOverviewChat } from "./project-overview-chat";
+import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
+import {
+  createConversation,
+  getConversation,
+  submitTurn,
+  type Conversation,
+  type ConversationTurn,
+} from "@/lib/api/conversational-analytics";
 import { cn } from "@/lib/cn";
 import { timeAgo } from "@/lib/ui/format";
 import {
@@ -114,6 +122,49 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   );
 
 
+
+  const [chatTurns, setChatTurns] = useState<ConversationTurn[]>([]);
+  const [chatConversationId, setChatConversationId] = useState<number | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  const pollConversation = useCallback(async (id: number): Promise<Conversation> => {
+    for (let i = 0; i < 60; i++) {
+      const data = await getConversation(id);
+      const last = data.turns[data.turns.length - 1];
+      if (!last || last.status !== "pending") return data;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return getConversation(id);
+  }, []);
+
+  const handleAsk = useCallback(
+    async (message: string) => {
+      setChatBusy(true);
+      setChatError(null);
+      try {
+        if (chatConversationId == null) {
+          const created = await createConversation({
+            project_id: Number(projectId),
+            initial_message: message,
+          });
+          const polled = await pollConversation(created.id);
+          setChatConversationId(created.id);
+          setChatTurns(polled.turns);
+        } else {
+          const res = await submitTurn(chatConversationId, { message });
+          setChatTurns((prev) => [...prev, res.turn]);
+          const polled = await pollConversation(res.conversation_id);
+          setChatTurns(polled.turns);
+        }
+      } catch (err) {
+        setChatError(err instanceof Error ? err.message : "Ask failed");
+      } finally {
+        setChatBusy(false);
+      }
+    },
+    [chatConversationId, projectId, pollConversation],
+  );
 
   const goAsk = (prompt: string) => {
     const q = prompt.trim();
@@ -268,8 +319,32 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
 
 
-        <ProjectOverviewChat projectId={projectId} />
-        <HomeAiSuggestions projectId={Number(projectId)} showAskBox={false} />
+        <HomeAiSuggestions
+          projectId={Number(projectId)}
+          showAskBox={true}
+          onAsk={handleAsk}
+        />
+        {(chatTurns.length > 0 || chatBusy || chatError) && (
+          <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
+            {chatTurns.map((t, i) => (
+              <TurnBubble
+                key={t.id}
+                turn={t}
+                isLast={i === chatTurns.length - 1}
+                onFollowUp={handleAsk}
+              />
+            ))}
+            {chatBusy && (
+              <div className="flex items-center gap-2 text-small text-ink-tertiary">
+                <IconLoader2 size={16} className="animate-spin" />
+                TableScope is thinking…
+              </div>
+            )}
+            {chatError && (
+              <p className="text-small text-danger">{chatError}</p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <StatTile

@@ -48,7 +48,13 @@ const PILLS: { key: Pill; label: string; icon: typeof IconBulb }[] = [
   { key: "insights", label: "Insights & Opportunities", icon: IconBulb },
 ];
 
-function HomeAskBox({ projectId }: { projectId?: number }) {
+function HomeAskBox({
+  projectId,
+  onAsk,
+}: {
+  projectId?: number;
+  onAsk?: (prompt: string) => void | Promise<void>;
+}) {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -60,6 +66,11 @@ function HomeAskBox({ projectId }: { projectId?: number }) {
     setSubmitting(true);
     setError(null);
     try {
+      if (onAsk) {
+        await onAsk(q);
+        setValue("");
+        return;
+      }
       const res = await apiClient.post<RoutePromptResponse>(
         "/api/ai/route-prompt",
         { prompt: q, project_id: projectId ?? null },
@@ -68,6 +79,7 @@ function HomeAskBox({ projectId }: { projectId?: number }) {
       router.push(`${res.route}${sep}q=${encodeURIComponent(res.prefilled)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ask failed");
+    } finally {
       setSubmitting(false);
     }
   }
@@ -117,6 +129,7 @@ function HomeAskBox({ projectId }: { projectId?: number }) {
 export function HomeAiSuggestions({
   projectId,
   showAskBox,
+  onAsk,
 }: {
   /** When set, every suggestion pill generates for this project only and the
    *  per-project section headers are hidden. Omitted, the original Home
@@ -124,6 +137,8 @@ export function HomeAiSuggestions({
   projectId?: number;
   /** Render the ask input. Defaults to true for Home and false for a project-scoped view. */
   showAskBox?: boolean;
+  /** Optional ask handler. When provided, the ask box calls this instead of routing via /api/ai/route-prompt. */
+  onAsk?: (prompt: string) => void | Promise<void>;
 } = {}) {
   const scoped = projectId != null;
   const askVisible = showAskBox ?? !scoped;
@@ -168,7 +183,7 @@ export function HomeAiSuggestions({
 
   return (
     <div className="space-y-4">
-      {askVisible && <HomeAskBox projectId={projectId} />}
+      {askVisible && <HomeAskBox projectId={projectId} onAsk={onAsk} />}
       <div className="flex flex-wrap justify-center gap-2">
         {PILLS.map((p) => {
           const Icon = p.icon;

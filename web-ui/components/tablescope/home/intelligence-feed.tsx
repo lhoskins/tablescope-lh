@@ -5,7 +5,6 @@ import {
   IconAlertTriangle,
   IconBulb,
   IconRefresh,
-  IconSparkles,
   IconTrendingUp,
 } from "@tabler/icons-react";
 import {
@@ -23,12 +22,7 @@ import {
 import { SaveInsightToDashboardModal } from "./save-insight-to-dashboard-modal";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { formatLastUpdated } from "@/lib/format-datetime";
-import {
-  IntelligenceCard,
-  LoadingCard,
-  renderBold,
-  stripStars,
-} from "./intelligence-card";
+import { IntelligenceCard, LoadingCard } from "./intelligence-card";
 import {
   useInsightFeedback,
   type SaveInsightFeedbackArgs,
@@ -48,6 +42,7 @@ function Section({
   cards,
   emptyText,
   loading,
+  defaultOpen,
   feedbackById,
   savingFeedback,
   onSaveToDashboard,
@@ -60,6 +55,7 @@ function Section({
   cards: InsightCard[];
   emptyText: string;
   loading: boolean;
+  defaultOpen?: boolean;
   feedbackById: Record<string, InsightFeedbackRecord>;
   savingFeedback: boolean;
   onSaveToDashboard?: (card: InsightCard) => void;
@@ -68,7 +64,7 @@ function Section({
   onFeedbackRemove?: (card: InsightCard) => void;
 }) {
   return (
-    <InsightPanel title={title} icon={icon} collapsible count={cards.length}>
+    <InsightPanel title={title} icon={icon} collapsible defaultOpen={defaultOpen} count={cards.length}>
       {cards.length === 0 ? (
         loading ? null : <PanelEmpty text={emptyText} />
       ) : (
@@ -504,37 +500,12 @@ export function IntelligenceFeed({
         onRefresh={handleRefresh}
         granularity={granularity}
         onGranularityChange={handleGranularity}
-        synthesisHeadline={synthesis ? stripStars(synthesis.headline) : null}
         availableProjects={knownProjects}
         selectedProjectIds={selectedProjectIds}
         onToggleProject={toggleProject}
         onSelectAll={selectAllProjects}
         onClear={clearProjects}
       />
-
-      {stale && (
-        <div className="flex items-start justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-small text-ink-secondary">
-          <div className="flex items-start gap-2">
-            <IconAlertTriangle size={18} className="mt-0.5 shrink-0 text-warning" />
-            <span>
-              Data changed in {staleProjectIds.length} project
-              {staleProjectIds.length === 1 ? "" : "s"} since this briefing.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={running}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium text-warning hover:bg-warning/20 disabled:opacity-50"
-          >
-            <IconRefresh
-              size={15}
-              className={running ? "animate-spin" : undefined}
-            />
-            Refresh
-          </button>
-        </div>
-      )}
 
       <div className="space-y-6">
         {selectedProjectIds.size === 0 && knownProjects.length > 0 ? (
@@ -543,21 +514,11 @@ export function IntelligenceFeed({
           </div>
         ) : (
           <>
-            {isAllSelected && synthesis?.body && (
-              <div className="rounded-lg border border-brand/30 bg-ai-bg p-4">
-                <div className="flex items-start gap-2 text-ai">
-                  <IconSparkles size={18} className="mt-0.5 shrink-0" />
-                  <p className="text-body text-ink-secondary">
-                    {renderBold(synthesis.body)}
-                  </p>
-                </div>
-              </div>
-            )}
-
             <Section
               title="Risks"
               icon={<IconAlertTriangle size={16} className="text-warning" />}
               cards={risks}
+              defaultOpen={false}
               emptyText="No risks detected from your projects yet."
               loading={running}
               feedbackById={feedbackById}
@@ -571,6 +532,7 @@ export function IntelligenceFeed({
               title="Trends"
               icon={<IconTrendingUp size={16} className="text-ink-secondary" />}
               cards={trends}
+              defaultOpen={false}
               emptyText="No trends detected from your projects yet."
               loading={running}
               feedbackById={feedbackById}
@@ -584,6 +546,7 @@ export function IntelligenceFeed({
               title="Opportunities"
               icon={<IconBulb size={16} className="text-success" />}
               cards={opportunities}
+              defaultOpen={false}
               emptyText="No opportunities detected from your projects yet."
               loading={running}
               feedbackById={feedbackById}

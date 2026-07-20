@@ -2,11 +2,7 @@
 
 import { useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import {
-  IconFilter,
-  IconRefresh,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconFilter, IconRefresh } from "@tabler/icons-react";
 
 export interface FilterableProject {
   id: string;
@@ -31,8 +27,6 @@ export interface IntelligenceStripProps {
   onRefresh: () => void;
   granularity: number;
   onGranularityChange: (value: number) => void;
-  /** Cross-project synthesis headline, folded into the band across the width. */
-  synthesisHeadline: string | null;
   availableProjects: FilterableProject[];
   selectedProjectIds: Set<string>;
   onToggleProject: (id: string) => void;
@@ -66,14 +60,14 @@ function ProjectFilter({
           type="button"
           aria-label="Filter by project"
           title="Filter by project"
-          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-small font-medium text-brand-fg transition-colors hover:bg-white/15"
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-small font-medium text-ink-secondary transition-colors hover:bg-bg-tertiary"
         >
           <IconFilter size={16} />
           <span className="hidden sm:inline">
             {allSelected ? "All projects" : `${selectedCount} project${selectedCount === 1 ? "" : "s"}`}
           </span>
           {!allSelected && selectedCount > 0 && (
-            <span className="rounded-full bg-white/20 px-1.5 py-0 text-[11px]">
+            <span className="rounded-full bg-bg-tertiary px-1.5 py-0 text-[11px] text-ink-secondary">
               {selectedCount}
             </span>
           )}
@@ -150,7 +144,6 @@ export function IntelligenceStrip({
   onRefresh,
   granularity,
   onGranularityChange,
-  synthesisHeadline,
   availableProjects,
   selectedProjectIds,
   onToggleProject,
@@ -161,23 +154,7 @@ export function IntelligenceStrip({
     totalProjectCount != null && totalProjectCount > 0 && projectCount < totalProjectCount;
 
   return (
-    <div className="flex items-center gap-4 rounded-lg bg-brand px-4 py-2.5 text-brand-fg">
-      <div className="flex shrink-0 items-center gap-2 text-small font-medium">
-        <IconSparkles
-          size={16}
-          className={running ? "animate-pulse" : undefined}
-        />
-        <span>
-          {isFiltered
-            ? "Showing"
-            : running
-              ? "AI running across"
-              : "AI analyzed"}{" "}
-          {projectCount} project{projectCount === 1 ? "" : "s"}
-          {isFiltered && ` of ${totalProjectCount}`}
-        </span>
-      </div>
-
+    <div className="flex items-center gap-3 rounded-lg border border-line-tertiary bg-bg-primary px-4 py-2.5 text-ink-primary">
       <ProjectFilter
         availableProjects={availableProjects}
         selectedProjectIds={selectedProjectIds}
@@ -186,24 +163,20 @@ export function IntelligenceStrip({
         onClear={onClear}
       />
 
-      <div className="min-w-0 flex-1">
-        {synthesisHeadline ? (
-          <span className="block truncate text-small font-medium text-brand-fg">
-            {synthesisHeadline}
-          </span>
-        ) : running ? (
-          <span className="text-small text-brand-fg/70">
-            Gathering insights…
-          </span>
-        ) : null}
-      </div>
+      {isFiltered && (
+        <span className="text-small text-ink-tertiary">
+          {projectCount} of {totalProjectCount} projects
+        </span>
+      )}
 
-      <div className="flex shrink-0 items-center gap-2 text-small text-brand-fg/90">
+      <div className="min-w-0 flex-1" />
+
+      <div className="flex shrink-0 items-center gap-2 text-small text-ink-secondary">
         <label
           className="flex items-center gap-2"
           title="Slide from high-level executive insights to fine-grained, detailed analyses"
         >
-          <span className="hidden sm:inline text-brand-fg/70">Depth</span>
+          <span className="hidden sm:inline text-ink-tertiary">Depth</span>
           <input
             type="range"
             min={1}
@@ -212,21 +185,23 @@ export function IntelligenceStrip({
             value={granularity}
             onChange={(e) => onGranularityChange(Number(e.target.value))}
             aria-label="Insight granularity"
-            className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/30 accent-white"
+            className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-line-tertiary accent-brand"
           />
-          <span className="w-16 text-brand-fg">
+          <span className="w-16 text-ink-primary">
             {GRANULARITY_LABELS[granularity] ?? "Balanced"}
           </span>
         </label>
       </div>
 
-      <div className="flex shrink-0 items-center gap-3 text-small text-brand-fg/80">
-        {lastUpdatedLabel && <span>{lastUpdatedLabel}</span>}
+      <div className="flex shrink-0 items-center gap-3 text-small text-ink-secondary">
+        {lastUpdatedLabel && (
+          <span className="text-ink-tertiary">{lastUpdatedLabel}</span>
+        )}
         <button
           type="button"
           onClick={onRefresh}
           aria-label="Refresh intelligence"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors hover:bg-white/15"
+          className="inline-flex items-center gap-1 rounded-md p-1 transition-colors hover:bg-bg-tertiary"
         >
           <IconRefresh
             size={15}
