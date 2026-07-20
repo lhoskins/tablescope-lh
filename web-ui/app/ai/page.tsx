@@ -16,6 +16,7 @@ import {
 import { AppShell } from "@/components/tablescope/app-shell";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
 import { cn } from "@/lib/cn";
 import { getUserMeta } from "@/lib/auth";
 import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
@@ -332,7 +333,7 @@ export default function AiAssistantPage() {
               </p>
             )}
             <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border border-line-secondary bg-bg-primary px-4 py-3 shadow-sm">
-              <textarea
+              <AutosizeTextarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -341,9 +342,11 @@ export default function AiAssistantPage() {
                     send(input);
                   }
                 }}
-                rows={1}
+                minRows={2}
+                maxRows={8}
                 placeholder="Message Tablescope AI…"
-                className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none"
+                aria-label="Message Tablescope AI"
+                className="flex-1 text-[13px] text-ink-primary placeholder:text-ink-tertiary"
               />
               <button
                 type="button"

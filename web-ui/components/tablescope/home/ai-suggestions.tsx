@@ -15,6 +15,7 @@ import {
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { apiClient } from "@/lib/api-client";
+import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
 import {
   suggestQueries,
   suggestDashboards,
@@ -81,21 +82,22 @@ function HomeAskBox({ projectId }: { projectId?: number }) {
           Ask anything across your connected data, documents, and dashboards
         </p>
       </div>
-      <div className="mx-auto flex w-full max-w-2xl items-center gap-2 rounded-xl border border-line-secondary bg-bg-primary px-4 py-2.5 focus-within:border-brand-100 focus-within:ring-2 focus-within:ring-brand-100">
-        <IconSparkles size={18} className="shrink-0 text-ai" />
-        <input
-          type="text"
+      <div className="mx-auto flex w-full max-w-2xl items-end gap-2 rounded-xl border border-line-secondary bg-bg-primary px-4 py-2.5 focus-within:border-brand-100 focus-within:ring-2 focus-within:ring-brand-100">
+        <IconSparkles size={18} className="shrink-0 pb-1.5 text-ai" />
+        <AutosizeTextarea
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               void submit(value);
             }
           }}
+          minRows={1}
+          maxRows={8}
           placeholder="Ask anything across your connected data, documents, and dashboards"
           aria-label="Ask anything across your connected data, documents, and dashboards"
-          className="min-w-0 flex-1 bg-transparent text-[14px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none"
+          className="min-w-0 flex-1 text-[14px] text-ink-primary placeholder:text-ink-tertiary"
         />
         <button
           type="button"
