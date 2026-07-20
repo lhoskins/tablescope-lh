@@ -1,15 +1,26 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ResponsiveGridLayout,
   useContainerWidth,
+  type EventCallback,
   type Layout,
   type LayoutItem,
+  type ResponsiveLayouts,
 } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
-import { getColsForWidth, packGridItems } from "@/lib/ui/grid-layout";
+import {
+  GRID_BREAKPOINTS,
+  GRID_COLS,
+  GRID_CONTAINER_PADDING,
+  GRID_DRAG_CONFIG,
+  GRID_MARGIN,
+  GRID_RESIZE_CONFIG,
+  GRID_ROW_HEIGHT,
+  buildResponsiveHomeLayouts,
+} from "@/lib/ui/grid-layout";
 import {
   IconLoader2,
   IconPinnedOff,
@@ -62,6 +73,56 @@ function PinCard({
   onFeedbackRemove?: (pin: HomePinItem) => void;
 }) {
   const isLive = pin.pin_type === "live_widget";
+  const isInsight = pin.pin_type === "insight_card";
+
+  const actions = (
+    <div className="flex items-center gap-1">
+      {isLive && (
+        <button
+          type="button"
+          onClick={() => onRefresh(pin)}
+          title="Refresh"
+          className="rounded p-1 text-ink-tertiary hover:bg-bg-tertiary hover:text-ink-primary"
+        >
+          <IconRefresh size={14} />
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => onUnpin(pin)}
+        title="Unpin"
+        className="rounded p-1 text-ink-tertiary hover:bg-bg-tertiary hover:text-danger"
+      >
+        <IconPinnedOff size={14} />
+      </button>
+    </div>
+  );
+
+  if (isInsight) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="widget-drag-handle flex items-center justify-between rounded-t-xl border-x border-t border-line-tertiary bg-bg-secondary/50 px-3 py-2">
+          <IconGripVertical size={14} className="shrink-0 text-ink-tertiary" />
+          {actions}
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          <PinContent
+            pin={pin}
+            feedback={feedback}
+            savingFeedback={savingFeedback}
+            onFeedbackSave={onFeedbackSave}
+            onFeedbackRemove={onFeedbackRemove}
+          />
+        </div>
+        {pin.refresh_error && (
+          <div className="px-3 py-1.5 text-[11px] text-red-600">
+            {pin.refresh_error}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col rounded-xl border border-line-tertiary bg-bg-primary shadow-sm">
       <div className="widget-drag-handle flex items-center justify-between border-b border-line-tertiary bg-bg-secondary/50 px-3 py-2">
@@ -71,26 +132,7 @@ function PinCard({
             {pin.title || "Untitled"}
           </span>
         </div>
-        <div className="flex items-center gap-1">
-          {isLive && (
-            <button
-              type="button"
-              onClick={() => onRefresh(pin)}
-              title="Refresh"
-              className="rounded p-1 text-ink-tertiary hover:bg-bg-tertiary hover:text-ink-primary"
-            >
-              <IconRefresh size={14} />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => onUnpin(pin)}
-            title="Unpin"
-            className="rounded p-1 text-ink-tertiary hover:bg-bg-tertiary hover:text-danger"
-          >
-            <IconPinnedOff size={14} />
-          </button>
-        </div>
+        {actions}
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         <PinContent
@@ -216,24 +258,15 @@ export function HomePinsGrid() {
     });
   };
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const { width: containerWidth } = useContainerWidth({
+  const { width: containerWidth, containerRef, mounted } = useContainerWidth({
     initialWidth: 1280,
-    measureBeforeMount: true,
   });
 
-  const breakpoints = useMemo(
-    () => ({ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }),
-    [],
-  );
-  const colsConfig = useMemo(
-    () => ({ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }),
-    [],
-  );
-  const currentCols = useMemo(
-    () => getColsForWidth(containerWidth, breakpoints, colsConfig),
-    [containerWidth, breakpoints, colsConfig],
-  );
+  const [currentBreakpoint, setCurrentBreakpoint] = useState<
+    keyof typeof GRID_BREAKPOINTS
+  >("lg");
+  const [localLayouts, setLocalLayouts] = useState<ResponsiveLayouts | null>(null);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
 
   const handleFeedbackRemove = (pin: HomePinItem) => {
     const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
@@ -242,8 +275,6 @@ export function HomePinsGrid() {
     if (!insightId || !projectId) return;
     void removeFeedback({ insightId, projectId });
   };
-
-  const [optimisticLayout, setOptimisticLayout] = useState<LayoutItem[] | null>(null);
 
   const deleteMutation = useMutation({
     mutationFn: (pin: HomePinItem) => deleteHomePin(pin.id),
@@ -267,51 +298,96 @@ export function HomePinsGrid() {
           position: l.y * 12 + l.x,
         })),
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["home-pins"] }),
+    onSuccess: () => {
+      setLayoutError(null);
+      queryClient.invalidateQueries({ queryKey: ["home-pins"] });
+    },
+    onError: () => {
+      setLayoutError("Could not save layout");
+      setLocalLayouts(null);
+    },
   });
 
-  const layouts = useMemo(() => {
-    const packed = packGridItems(
-      pins.map((pin) => {
-        const layout = pin.layout || {};
-        return {
-          id: pin.id,
-          x: typeof layout.x === "number" ? layout.x : undefined,
-          y: typeof layout.y === "number" ? layout.y : undefined,
-          w: typeof layout.w === "number" ? layout.w : 6,
-          h: typeof layout.h === "number" ? layout.h : 4,
-        };
-      }),
-      currentCols,
-    );
-    const lg: LayoutItem[] = packed.map((item) => ({
-      i: item.i,
-      x: item.x,
-      y: item.y,
-      w: item.w,
-      h: item.h,
-      minW: 2,
-      minH: 2,
-    }));
-    return { lg };
-  }, [pins, currentCols]);
-
-  const handleLayoutChange = useCallback(
-    (layout: Layout) => {
-      if (!layout.length) return;
-      const mutable = [...layout] as LayoutItem[];
-      setOptimisticLayout(mutable);
-      layoutMutation.mutate(mutable);
-    },
-    [layoutMutation],
+  const savedLayouts = useMemo(
+    () => buildResponsiveHomeLayouts(pins),
+    [pins],
   );
 
-  const displayLayout = useMemo(() => {
-    if (optimisticLayout && optimisticLayout.length === pins.length) {
-      return { lg: optimisticLayout };
+  const displayLayouts = useMemo(() => {
+    if (localLayouts?.lg && localLayouts.lg.length === pins.length) {
+      return localLayouts;
     }
-    return layouts;
-  }, [optimisticLayout, pins.length, layouts]);
+    return savedLayouts;
+  }, [localLayouts, savedLayouts, pins.length]);
+
+  // Reconcile optimistic layout with the server state once the saved layout
+  // catches up to what we submitted.
+  useEffect(() => {
+    if (!localLayouts?.lg || layoutMutation.isPending) return;
+    const saved = savedLayouts.lg;
+    if (!saved || saved.length !== localLayouts.lg.length) return;
+
+    const match = saved.every((item, idx) => {
+      const local = localLayouts.lg![idx];
+      return (
+        local &&
+        item.i === local.i &&
+        item.x === local.x &&
+        item.y === local.y &&
+        item.w === local.w &&
+        item.h === local.h
+      );
+    });
+
+    if (match) {
+      setLocalLayouts(null);
+    }
+  }, [savedLayouts, localLayouts, layoutMutation.isPending]);
+
+  const handleLayoutChange = useCallback(
+    (_layout: Layout, _allLayouts: ResponsiveLayouts) => {
+      // Layout changes are committed only on drag/resize stop so we do not
+      // overwrite the saved layout with intermediate compaction results.
+      setLayoutError(null);
+    },
+    [],
+  );
+
+  const persistLayout = useCallback(
+    (lg: LayoutItem[] | undefined) => {
+      if (!lg || currentBreakpoint !== "lg") return;
+      layoutMutation.mutate([...lg]);
+    },
+    [currentBreakpoint, layoutMutation],
+  );
+
+  const updateOptimisticLayouts = useCallback(
+    (bpLayout: LayoutItem[]) => {
+      setLocalLayouts((prev) => {
+        const base = prev ?? savedLayouts;
+        return { ...base, [currentBreakpoint]: [...bpLayout] };
+      });
+    },
+    [currentBreakpoint, savedLayouts],
+  );
+
+  const handleDragStop: EventCallback = useCallback(
+    (layout) => {
+      const bpLayout = layout as unknown as LayoutItem[];
+      updateOptimisticLayouts(bpLayout);
+      persistLayout(bpLayout);
+    },
+    [persistLayout, updateOptimisticLayouts],
+  );
+
+  const handleResizeStop: EventCallback = useCallback(
+    (layout) => {
+      const bpLayout = layout as unknown as LayoutItem[];
+      updateOptimisticLayouts(bpLayout);
+      persistLayout(bpLayout);
+    },
+    [persistLayout, updateOptimisticLayouts],
+  );
 
   if (isLoading) {
     return (
@@ -340,37 +416,47 @@ export function HomePinsGrid() {
           Refresh live widgets
         </button>
       </div>
+      {layoutError && (
+        <p className="text-small text-red-600">{layoutError}</p>
+      )}
       <div ref={containerRef} className="w-full">
-        <ResponsiveGridLayout
-          className="layout"
-          layouts={displayLayout}
-          breakpoints={breakpoints}
-          cols={colsConfig}
-          rowHeight={80}
-          margin={[10, 10]}
-          containerPadding={[0, 0]}
-          onLayoutChange={handleLayoutChange}
-          dragConfig={{ enabled: true, handle: ".widget-drag-handle", bounded: false, threshold: 3 }}
-          resizeConfig={{ enabled: true, handles: ["se", "e", "s"] }}
-          width={containerWidth}
-        >
-          {pins.map((pin) => {
-          const insightId = getPinInsightId(pin);
-          return (
-            <div key={pin.id}>
-              <PinCard
-                pin={pin}
-                feedback={feedbackById[insightId]}
-                savingFeedback={savingFeedback}
-                onUnpin={(p) => deleteMutation.mutate(p)}
-                onRefresh={() => refreshMutation.mutate()}
-                onFeedbackSave={handleFeedbackSave}
-                onFeedbackRemove={handleFeedbackRemove}
-              />
-            </div>
-          );
-        })}
-        </ResponsiveGridLayout>
+        {mounted && (
+          <ResponsiveGridLayout
+            className="layout"
+            layouts={displayLayouts}
+            breakpoints={GRID_BREAKPOINTS}
+            cols={GRID_COLS}
+            rowHeight={GRID_ROW_HEIGHT}
+            margin={GRID_MARGIN}
+            containerPadding={GRID_CONTAINER_PADDING}
+            onLayoutChange={handleLayoutChange}
+            onDragStop={handleDragStop}
+            onResizeStop={handleResizeStop}
+            onBreakpointChange={(bp) =>
+              setCurrentBreakpoint(bp as keyof typeof GRID_BREAKPOINTS)
+            }
+            dragConfig={GRID_DRAG_CONFIG}
+            resizeConfig={GRID_RESIZE_CONFIG}
+            width={containerWidth}
+          >
+            {pins.map((pin) => {
+              const insightId = getPinInsightId(pin);
+              return (
+                <div key={pin.id} className="h-full w-full">
+                  <PinCard
+                    pin={pin}
+                    feedback={feedbackById[insightId]}
+                    savingFeedback={savingFeedback}
+                    onUnpin={(p) => deleteMutation.mutate(p)}
+                    onRefresh={() => refreshMutation.mutate()}
+                    onFeedbackSave={handleFeedbackSave}
+                    onFeedbackRemove={handleFeedbackRemove}
+                  />
+                </div>
+              );
+            })}
+          </ResponsiveGridLayout>
+        )}
       </div>
     </div>
   );

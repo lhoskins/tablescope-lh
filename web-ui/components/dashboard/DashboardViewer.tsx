@@ -2,8 +2,24 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
-import { ResponsiveGridLayout, type Layout, type LayoutItem } from "react-grid-layout";
+import {
+  ResponsiveGridLayout,
+  useContainerWidth,
+  type EventCallback,
+  type Layout,
+  type LayoutItem,
+  type ResponsiveLayouts,
+} from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
+import {
+  GRID_BREAKPOINTS,
+  GRID_COLS,
+  GRID_CONTAINER_PADDING,
+  GRID_DRAG_CONFIG,
+  GRID_MARGIN,
+  GRID_RESIZE_CONFIG,
+  GRID_ROW_HEIGHT,
+} from "@/lib/ui/grid-layout";
 import { apiClient } from "@/lib/api-client";
 import type {
   Dashboard,
@@ -45,6 +61,9 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const queryClient = useQueryClient();
   const widgets = useMemo(() => dashboard.config?.widgets ?? [], [dashboard.config?.widgets]);
   const globalFilters = useMemo(() => dashboard.config?.globalFilters ?? [], [dashboard.config?.globalFilters]);
+  const { width: containerWidth, containerRef, mounted } = useContainerWidth({
+    initialWidth: 1280,
+  });
 
   const [widgetData, setWidgetData] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const [showConfigPanel, setShowConfigPanel] = useState(false);
@@ -377,7 +396,7 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     return { lg };
   }, [widgets]);
 
-  const handleLayoutChange = useCallback((layout: Layout, _layouts: Record<string, Layout>) => {
+  const persistLayout = useCallback((layout: Layout) => {
     const prev = layoutRef.current;
     const changed = layout.some((l) => {
       const p = prev.find((pl) => pl.i === l.i);
@@ -392,6 +411,16 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
     });
     updateMutation.mutate({ config: { widgets: updatedWidgets, globalFilters } });
   }, [widgets, globalFilters, updateMutation]);
+
+  const handleDragStop: EventCallback = useCallback(
+    (layout) => persistLayout(layout as unknown as Layout),
+    [persistLayout],
+  );
+
+  const handleResizeStop: EventCallback = useCallback(
+    (layout) => persistLayout(layout as unknown as Layout),
+    [persistLayout],
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -501,17 +530,22 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
             <p className="mt-1 text-xs text-slate-400">Click &quot;+ Add Widget&quot; to start building your dashboard</p>
           </div>
         ) : widgets.length > 0 ? (
-          <ResponsiveGridLayout
-            className="layout"
-            layouts={layouts}
-            breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-            cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
-            rowHeight={80}
-            onLayoutChange={handleLayoutChange}
-            dragConfig={{ enabled: true, handle: ".widget-drag-handle", bounded: false, threshold: 3 }}
-            resizeConfig={{ enabled: true }}
-            width={1200}
-          >
+          <div ref={containerRef} className="w-full">
+            {mounted && (
+              <ResponsiveGridLayout
+                className="layout"
+                layouts={layouts}
+                breakpoints={GRID_BREAKPOINTS}
+                cols={GRID_COLS}
+                rowHeight={GRID_ROW_HEIGHT}
+                margin={GRID_MARGIN}
+                containerPadding={GRID_CONTAINER_PADDING}
+                onDragStop={handleDragStop}
+                onResizeStop={handleResizeStop}
+                dragConfig={GRID_DRAG_CONFIG}
+                resizeConfig={GRID_RESIZE_CONFIG}
+                width={containerWidth}
+              >
             {widgets.map((w) => (
               <div key={w.id}>
                 <div className="h-full rounded-lg border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden">
@@ -580,7 +614,9 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
                 </div>
               </div>
             ))}
-          </ResponsiveGridLayout>
+              </ResponsiveGridLayout>
+            )}
+          </div>
         ) : null}
       </div>
 
