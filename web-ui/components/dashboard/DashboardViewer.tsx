@@ -62,7 +62,6 @@ export function DashboardViewer({ dashboard, projectId, savedQueries, datasource
   const globalFilters = useMemo(() => dashboard.config?.globalFilters ?? [], [dashboard.config?.globalFilters]);
   const { width: containerWidth, containerRef, mounted } = useContainerWidth({
     initialWidth: 1280,
-    measureBeforeMount: true,
   });
 
   const [widgetData, setWidgetData] = useState<Record<string, Array<Record<string, unknown>>>>({});

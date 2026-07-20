@@ -260,7 +260,6 @@ export function HomePinsGrid() {
 
   const { width: containerWidth, containerRef, mounted } = useContainerWidth({
     initialWidth: 1280,
-    measureBeforeMount: true,
   });
 
   const [currentBreakpoint, setCurrentBreakpoint] = useState<
