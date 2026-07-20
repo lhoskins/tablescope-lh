@@ -114,12 +114,17 @@ function HomeAskBox({ projectId }: { projectId?: number }) {
 
 export function HomeAiSuggestions({
   projectId,
+  showAskBox,
 }: {
   /** When set, every suggestion pill generates for this project only and the
    *  per-project section headers are hidden. Omitted, the original Home
    *  behavior (all accessible projects) applies. */
   projectId?: number;
+  /** Render the ask input. Defaults to true for Home and false for a project-scoped view. */
+  showAskBox?: boolean;
 } = {}) {
+  const scoped = projectId != null;
+  const askVisible = showAskBox ?? !scoped;
   const [active, setActive] = useState<Pill | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -159,11 +164,9 @@ export function HomeAiSuggestions({
     [projectId],
   );
 
-  const scoped = projectId != null;
-
   return (
     <div className="space-y-4">
-      <HomeAskBox projectId={projectId} />
+      {askVisible && <HomeAskBox projectId={projectId} />}
       <div className="flex flex-wrap justify-center gap-2">
         {PILLS.map((p) => {
           const Icon = p.icon;
