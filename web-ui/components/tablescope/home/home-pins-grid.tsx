@@ -345,8 +345,9 @@ export function HomePinsGrid() {
   }, [savedLayouts, localLayouts, layoutMutation.isPending]);
 
   const handleLayoutChange = useCallback(
-    (_layout: Layout, allLayouts: ResponsiveLayouts) => {
-      setLocalLayouts(allLayouts);
+    (_layout: Layout, _allLayouts: ResponsiveLayouts) => {
+      // Layout changes are committed only on drag/resize stop so we do not
+      // overwrite the saved layout with intermediate compaction results.
       setLayoutError(null);
     },
     [],
@@ -360,18 +361,32 @@ export function HomePinsGrid() {
     [currentBreakpoint, layoutMutation],
   );
 
+  const updateOptimisticLayouts = useCallback(
+    (bpLayout: LayoutItem[]) => {
+      setLocalLayouts((prev) => {
+        const base = prev ?? savedLayouts;
+        return { ...base, [currentBreakpoint]: [...bpLayout] };
+      });
+    },
+    [currentBreakpoint, savedLayouts],
+  );
+
   const handleDragStop: EventCallback = useCallback(
     (layout) => {
-      persistLayout(layout as unknown as LayoutItem[]);
+      const bpLayout = layout as unknown as LayoutItem[];
+      updateOptimisticLayouts(bpLayout);
+      persistLayout(bpLayout);
     },
-    [persistLayout],
+    [persistLayout, updateOptimisticLayouts],
   );
 
   const handleResizeStop: EventCallback = useCallback(
     (layout) => {
-      persistLayout(layout as unknown as LayoutItem[]);
+      const bpLayout = layout as unknown as LayoutItem[];
+      updateOptimisticLayouts(bpLayout);
+      persistLayout(bpLayout);
     },
-    [persistLayout],
+    [persistLayout, updateOptimisticLayouts],
   );
 
   if (isLoading) {
