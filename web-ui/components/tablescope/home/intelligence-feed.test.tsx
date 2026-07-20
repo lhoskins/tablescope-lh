@@ -104,42 +104,52 @@ describe("IntelligenceFeed", () => {
     expect(screen.getByRole("button", { name: /Opportunities/ })).toBeTruthy();
   });
 
-  it("starts with sections expanded", async () => {
+  it("starts with Risks, Trends, and Opportunities collapsed", async () => {
     renderFeed();
     const risks = await screen.findByRole("button", { name: /Risks/ });
-    expect(risks.getAttribute("aria-expanded")).toBe("true");
-    expect(await screen.findByText("SLA breach")).toBeTruthy();
-    expect(await screen.findByText("Spend trending up")).toBeTruthy();
-    expect(await screen.findByText("Consolidate suppliers")).toBeTruthy();
+    const trends = screen.getByRole("button", { name: /Trends/ });
+    const opportunities = screen.getByRole("button", { name: /Opportunities/ });
+
+    expect(risks.getAttribute("aria-expanded")).toBe("false");
+    expect(trends.getAttribute("aria-expanded")).toBe("false");
+    expect(opportunities.getAttribute("aria-expanded")).toBe("false");
+
+    expect(screen.queryByText("SLA breach")).toBeNull();
+    expect(screen.queryByText("Spend trending up")).toBeNull();
+    expect(screen.queryByText("Consolidate suppliers")).toBeNull();
   });
 
-  it("collapses and re-expands Risks independently", async () => {
+  it("expands and re-collapses Risks independently", async () => {
     renderFeed();
     const risks = await screen.findByRole("button", { name: /Risks/ });
+    expect(risks.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("SLA breach")).toBeNull();
+
+    fireEvent.click(risks);
     expect(await screen.findByText("SLA breach")).toBeTruthy();
+    expect(risks.getAttribute("aria-expanded")).toBe("true");
 
     fireEvent.click(risks);
     await waitFor(() => expect(screen.queryByText("SLA breach")).toBeNull());
     expect(risks.getAttribute("aria-expanded")).toBe("false");
-
-    fireEvent.click(risks);
-    expect(await screen.findByText("SLA breach")).toBeTruthy();
-    expect(risks.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("collapsing Risks does not collapse Trends or Opportunities", async () => {
+  it("expanding one section does not expand the others", async () => {
     renderFeed();
     const risks = await screen.findByRole("button", { name: /Risks/ });
     const trends = screen.getByRole("button", { name: /Trends/ });
     const opportunities = screen.getByRole("button", { name: /Opportunities/ });
 
     fireEvent.click(risks);
-    await waitFor(() => expect(screen.queryByText("SLA breach")).toBeNull());
+    expect(await screen.findByText("SLA breach")).toBeTruthy();
+    expect(risks.getAttribute("aria-expanded")).toBe("true");
+    expect(trends.getAttribute("aria-expanded")).toBe("false");
+    expect(opportunities.getAttribute("aria-expanded")).toBe("false");
 
+    fireEvent.click(trends);
     expect(await screen.findByText("Spend trending up")).toBeTruthy();
-    expect(await screen.findByText("Consolidate suppliers")).toBeTruthy();
     expect(trends.getAttribute("aria-expanded")).toBe("true");
-    expect(opportunities.getAttribute("aria-expanded")).toBe("true");
+    expect(opportunities.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("renders analytical method metadata behind the Explain panel on chart cards", async () => {
@@ -184,6 +194,7 @@ describe("IntelligenceFeed", () => {
       },
     });
     renderFeed();
+    fireEvent.click(screen.getByRole("button", { name: /Trends/ }));
     await screen.findByText("Spend concentrated");
     fireEvent.click(screen.getByRole("button", { name: /Explain/i }));
     expect(await screen.findByText("Analytical method: Pareto analysis")).toBeTruthy();
