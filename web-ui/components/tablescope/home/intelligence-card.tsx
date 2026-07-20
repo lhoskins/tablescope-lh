@@ -13,6 +13,7 @@ import {
   IconThumbDown,
   IconThumbUp,
 } from "@tabler/icons-react";
+import { cn } from "@/lib/cn";
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
 import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import type {
@@ -204,6 +205,8 @@ export function IntelligenceCard({
 }: IntelligenceCardProps) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackInitial, setFeedbackInitial] =
+    useState<InsightSentiment>("agree");
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.info;
   const canSaveToDashboard = Boolean(
     card.sql?.trim() && card.valueColumn?.trim(),
@@ -311,24 +314,60 @@ export function IntelligenceCard({
           </button>
 
           {onFeedbackSave && stableInsightId && (
-            <button
-              type="button"
-              onClick={() => setFeedbackOpen(true)}
-              aria-label={hasFeedback ? "Edit feedback" : "Give feedback"}
-              title={hasFeedback ? "Edit feedback" : "Give feedback"}
-              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-small font-medium transition-colors ${
-                hasFeedback
-                  ? "border-brand-500 bg-brand-50 text-brand-700 hover:bg-brand-100"
-                  : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
-              }`}
-            >
-              {feedback?.sentiment === "disagree" ? (
-                <IconThumbDown size={14} />
-              ) : (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setFeedbackInitial("agree");
+                  setFeedbackOpen(true);
+                }}
+                aria-label={
+                  hasFeedback && feedback?.sentiment === "agree"
+                    ? "Edit agree feedback"
+                    : "Agree"
+                }
+                title={
+                  hasFeedback && feedback?.sentiment === "agree"
+                    ? "Edit agree feedback"
+                    : "Agree"
+                }
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-l-md border px-2.5 py-1 text-small font-medium transition-colors",
+                  hasFeedback && feedback?.sentiment === "agree"
+                    ? "border-success bg-success/10 text-success hover:bg-success/20"
+                    : "border-line-tertiary bg-bg-primary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary",
+                )}
+              >
                 <IconThumbUp size={14} />
-              )}
-              {hasFeedback ? "Feedback saved" : "Agree"}
-            </button>
+                Agree
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFeedbackInitial("disagree");
+                  setFeedbackOpen(true);
+                }}
+                aria-label={
+                  hasFeedback && feedback?.sentiment === "disagree"
+                    ? "Edit disagree feedback"
+                    : "Disagree"
+                }
+                title={
+                  hasFeedback && feedback?.sentiment === "disagree"
+                    ? "Edit disagree feedback"
+                    : "Disagree"
+                }
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-r-md border border-l-0 px-2.5 py-1 text-small font-medium transition-colors",
+                  hasFeedback && feedback?.sentiment === "disagree"
+                    ? "border-danger bg-danger/10 text-danger hover:bg-danger/20"
+                    : "border-line-tertiary bg-bg-primary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary",
+                )}
+              >
+                <IconThumbDown size={14} />
+                Disagree
+              </button>
+            </div>
           )}
 
           {!hideActions && (
@@ -396,6 +435,7 @@ export function IntelligenceCard({
           open={feedbackOpen}
           onClose={() => setFeedbackOpen(false)}
           feedback={feedback || null}
+          initialSentiment={feedbackInitial}
           onSave={onFeedbackSave}
           onRemove={async () => {
             await onFeedbackRemove?.();

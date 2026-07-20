@@ -47,6 +47,26 @@ export interface BatchInsightFeedbackResponse {
   items: InsightFeedbackRecord[];
 }
 
+export interface InsightFeedbackReviewItem {
+  id: number;
+  insight_id: string;
+  project_id: number | null;
+  project_name: string | null;
+  user_id: number;
+  user_email: string;
+  sentiment: InsightSentiment;
+  reason_codes: string[];
+  comment: string | null;
+  insight_type: string | null;
+  card_title: string | null;
+  created_at: string;
+}
+
+export interface InsightFeedbackReviewResponse {
+  items: InsightFeedbackReviewItem[];
+  total: number;
+}
+
 export function getInsightFeedback(
   insightId: string,
 ): Promise<InsightFeedbackRecord | null> {
@@ -72,4 +92,16 @@ export function deleteInsightFeedback(
 ): Promise<void> {
   const qs = projectId != null ? `?project_id=${projectId}` : "";
   return apiClient.delete<void>(`/api/insight-feedback/${insightId}${qs}`);
+}
+
+export function getInsightFeedbackReview(
+  params?: { sentiment?: string; projectId?: number; limit?: number; offset?: number },
+): Promise<InsightFeedbackReviewResponse> {
+  const search = new URLSearchParams();
+  if (params?.sentiment) search.set("sentiment", params.sentiment);
+  if (params?.projectId != null) search.set("project_id", String(params.projectId));
+  if (params?.limit != null) search.set("limit", String(params.limit));
+  if (params?.offset != null) search.set("offset", String(params.offset));
+  const qs = search.toString();
+  return apiClient.get<InsightFeedbackReviewResponse>(`/api/insight-feedback/review${qs ? `?${qs}` : ""}`);
 }

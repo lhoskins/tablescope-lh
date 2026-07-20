@@ -16,7 +16,6 @@ import {
   IconBook2,
   IconLibrary,
   IconBuildingBank,
-  IconMessage,
   type Icon,
 } from "@tabler/icons-react";
 import type { NavKey } from "@/lib/ui/types";
@@ -154,12 +153,6 @@ export function projectNavGroups(projectId: string): NavGroup[] {
     {
       heading: "Intelligence",
       items: [
-        {
-          key: "project-ask-tablescope",
-          label: "Ask TableScope",
-          href: `${base}/ai`,
-          icon: IconMessage,
-        },
         {
           key: "project-knowledge-graph",
           label: "Graph Lifecycle",

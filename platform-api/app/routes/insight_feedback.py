@@ -9,15 +9,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.insight_feedback import InsightFeedback
+from app.models.project import Project
+from app.models.user import User
 from app.routes.home_pins import _require_project_access
 
 router = APIRouter(prefix="/insight-feedback", tags=["Insight Feedback"])
@@ -259,3 +261,86 @@ async def delete_insight_feedback(
     row.comment = None
     row.reason_codes = []
     await session.commit()
+
+
+class InsightFeedbackReviewItem(BaseModel):
+    id: int
+    insight_id: str
+    project_id: int | None
+    project_name: str | None
+    user_id: int
+    user_email: str
+    sentiment: str
+    reason_codes: list[str] = Field(default_factory=list)
+    comment: str | None
+    insight_type: str | None
+    card_title: str | None
+    created_at: str
+
+
+class InsightFeedbackReviewResponse(BaseModel):
+    items: list[InsightFeedbackReviewItem]
+    total: int
+
+
+@router.get("/review", response_model=InsightFeedbackReviewResponse)
+async def review_insight_feedback(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    sentiment: str | None = Query(None),
+    project_id: int | None = Query(None),
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> InsightFeedbackReviewResponse:
+    """Return tenant-scoped insight feedback for review by administrators."""
+    base = (
+        select(InsightFeedback, User.email.label("user_email"), Project.name.label("project_name"))
+        .join(User, InsightFeedback.user_id == User.id)
+        .join(Project, InsightFeedback.project_id == Project.id, isouter=True)
+        .where(
+            InsightFeedback.tenant_id == context.tenant_id,
+            InsightFeedback.status == _STATUS_ACTIVE,
+        )
+    )
+    if sentiment:
+        base = base.where(InsightFeedback.sentiment == sentiment)
+    if project_id is not None:
+        base = base.where(InsightFeedback.project_id == project_id)
+
+    total = (
+        await session.scalar(select(func.count()).select_from(base.subquery()))
+    ) or 0
+
+    rows = (
+        await session.execute(
+            base.order_by(InsightFeedback.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).all()
+
+    def _card_title(card: dict[str, Any] | None) -> str | None:
+        if not card:
+            return None
+        return card.get("title") or card.get("summary") or None
+
+    items = [
+        InsightFeedbackReviewItem(
+            id=row.InsightFeedback.id,
+            insight_id=row.InsightFeedback.insight_id,
+            project_id=row.InsightFeedback.project_id,
+            project_name=row.project_name,
+            user_id=row.InsightFeedback.user_id,
+            user_email=row.user_email,
+            sentiment=row.InsightFeedback.sentiment,
+            reason_codes=row.InsightFeedback.reason_codes or [],
+            comment=row.InsightFeedback.comment,
+            insight_type=row.InsightFeedback.insight_type,
+            card_title=_card_title(row.InsightFeedback.card_snapshot),
+            created_at=row.InsightFeedback.created_at.isoformat()
+            if row.InsightFeedback.created_at
+            else "",
+        )
+        for row in rows
+    ]
+    return InsightFeedbackReviewResponse(items=items, total=total)

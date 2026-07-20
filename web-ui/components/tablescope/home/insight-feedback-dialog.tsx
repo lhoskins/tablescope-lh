@@ -27,6 +27,8 @@ export interface InsightFeedbackDialogProps {
     comment: string;
   }) => void | Promise<void>;
   onRemove: () => void | Promise<void>;
+  /** Pre-selected sentiment when opening the dialog for a new feedback action. */
+  initialSentiment?: InsightSentiment;
   /** Whether the save/remove mutation is in flight. */
   saving?: boolean;
 }
@@ -38,6 +40,7 @@ export function InsightFeedbackDialog({
   feedback,
   onSave,
   onRemove,
+  initialSentiment,
   saving = false,
 }: InsightFeedbackDialogProps) {
   const [sentiment, setSentiment] = useState<InsightSentiment>("agree");
@@ -46,10 +49,20 @@ export function InsightFeedbackDialog({
 
   useEffect(() => {
     if (!open) return;
-    setSentiment((feedback?.sentiment as InsightSentiment) || "agree");
+    setSentiment(
+      initialSentiment ||
+        (feedback?.sentiment as InsightSentiment) ||
+        "agree",
+    );
     setReasonCodes(feedback?.reason_codes ?? []);
     setComment(feedback?.comment ?? "");
-  }, [open, feedback?.sentiment, feedback?.reason_codes, feedback?.comment]);
+  }, [
+    open,
+    initialSentiment,
+    feedback?.sentiment,
+    feedback?.reason_codes,
+    feedback?.comment,
+  ]);
 
   if (!open) return null;
 

@@ -16,6 +16,7 @@ import {
   IconMathFunction,
   IconBrain,
   IconFolders,
+  IconThumbUp,
   IconUserCircle,
   IconLogout,
   IconLayoutSidebarLeftCollapse,
@@ -214,6 +215,12 @@ export function Sidebar({
           label: "Repositories",
           href: "/admin/repositories",
           icon: IconFolders,
+        },
+        {
+          key: "admin-insight-feedback",
+          label: "Insight Review",
+          href: "/admin/insight-feedback",
+          icon: IconThumbUp,
         },
       ]
     : [];

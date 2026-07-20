@@ -500,6 +500,7 @@ export function IntelligenceFeed({
         onRefresh={handleRefresh}
         granularity={granularity}
         onGranularityChange={handleGranularity}
+        synthesisHeadline={synthesis?.headline ?? null}
         availableProjects={knownProjects}
         selectedProjectIds={selectedProjectIds}
         onToggleProject={toggleProject}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { IconHelpCircle } from "@tabler/icons-react";
@@ -19,6 +19,15 @@ import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
 import { createHomePin } from "@/lib/api/home-pins";
 import type { InsightCard } from "@/lib/api/home-intelligence";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
+import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
+import {
+  createConversation,
+  getConversation,
+  submitTurn,
+  type Conversation,
+  type ConversationTurn,
+} from "@/lib/api/conversational-analytics";
+import { IconLoader2 } from "@tabler/icons-react";
 
 const FALLBACK_USER: CurrentUser = {
   name: "",
@@ -75,6 +84,51 @@ export default function BusinessInsightPage() {
     [pinMutation],
   );
 
+  const [chatTurns, setChatTurns] = useState<ConversationTurn[]>([]);
+  const [chatConversationId, setChatConversationId] = useState<number | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  const pollConversation = useCallback(
+    async (id: number): Promise<Conversation> => {
+      for (let i = 0; i < 60; i++) {
+        const data = await getConversation(id);
+        const last = data.turns[data.turns.length - 1];
+        if (!last || last.status !== "pending") return data;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      return getConversation(id);
+    },
+    [],
+  );
+
+  const handleAsk = useCallback(
+    async (message: string) => {
+      setChatBusy(true);
+      setChatError(null);
+      try {
+        if (chatConversationId == null) {
+          const created = await createConversation({
+            initial_message: message,
+          });
+          const polled = await pollConversation(created.id);
+          setChatConversationId(created.id);
+          setChatTurns(polled.turns);
+        } else {
+          const res = await submitTurn(chatConversationId, { message });
+          setChatTurns((prev) => [...prev, res.turn]);
+          const polled = await pollConversation(res.conversation_id);
+          setChatTurns(polled.turns);
+        }
+      } catch (err) {
+        setChatError(err instanceof Error ? err.message : "Ask failed");
+      } finally {
+        setChatBusy(false);
+      }
+    },
+    [chatConversationId, pollConversation],
+  );
+
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
 
@@ -106,7 +160,28 @@ export default function BusinessInsightPage() {
     >
       <div className="space-y-10 py-6">
         <div className="mx-auto w-full max-w-content space-y-6">
-          <HomeAiSuggestions />
+          <HomeAiSuggestions onAsk={handleAsk} />
+          {(chatTurns.length > 0 || chatBusy || chatError) && (
+            <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
+              {chatTurns.map((t, i) => (
+                <TurnBubble
+                  key={t.id}
+                  turn={t}
+                  isLast={i === chatTurns.length - 1}
+                  onFollowUp={handleAsk}
+                />
+              ))}
+              {chatBusy && (
+                <div className="flex items-center gap-2 text-small text-ink-tertiary">
+                  <IconLoader2 size={16} className="animate-spin" />
+                  TableScope is thinking…
+                </div>
+              )}
+              {chatError && (
+                <p className="text-small text-danger">{chatError}</p>
+              )}
+            </div>
+          )}
         </div>
         <IntelligenceFeed
           onPin={handlePinInsight}
