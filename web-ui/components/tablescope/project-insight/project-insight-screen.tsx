@@ -29,6 +29,7 @@ import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
+import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
 import { cn } from "@/lib/cn";
 import {
   InsightPanel as Panel,
@@ -604,30 +605,33 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
             </Panel>
 
             {/* Ask box — always visible between Questions and Recommendations */}
-            <div className="flex items-center gap-2 rounded-lg border border-line-tertiary bg-bg-primary px-4 py-3">
-              <input
-                type="text"
+            <div className="flex items-end gap-2 rounded-lg border border-line-tertiary bg-bg-primary px-4 py-3">
+              <AutosizeTextarea
                 value={customQuestion}
                 onChange={(e) => setCustomQuestion(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     submitCustomQuestion();
                   }
                 }}
+                minRows={2}
+                maxRows={8}
                 placeholder="Ask a question about this project..."
                 aria-label="Ask a question about this project"
-                className="min-w-0 flex-1 rounded-md border border-line-tertiary bg-bg-primary px-2.5 py-1.5 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+                className="min-w-0 flex-1 text-[13px] text-ink-primary placeholder:text-ink-tertiary"
               />
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={!customQuestion.trim()}
-                onClick={submitCustomQuestion}
-              >
-                <IconSparkles size={14} />
-                Ask
-              </Button>
+              <div className="pb-0.5">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={!customQuestion.trim()}
+                  onClick={submitCustomQuestion}
+                >
+                  <IconSparkles size={14} />
+                  Ask
+                </Button>
+              </div>
             </div>
 
             {/* Recommendations (collapsed by default) — Dashboards | Queries | KPIs */}
