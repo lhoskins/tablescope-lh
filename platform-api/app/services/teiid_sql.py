@@ -760,8 +760,13 @@ def normalize_teiid_identifiers(
     # Final pass: quote any remaining reserved-word aliases and their uses in
     # GROUP BY / ORDER BY.  The schema-name pass above skips tokens not present
     # in the project schema, so aliases like ``AS Year`` or ``GROUP BY Year``
-    # (common model output) must be handled explicitly.
-    alias_re = re.compile(r'\b(AS|GROUP\s+BY|ORDER\s+BY)\s+([A-Za-z_]\w*)', re.IGNORECASE)
+    # (common model output) must be handled explicitly.  Skip tokens that are
+    # actually function calls (``GROUP BY QUARTER(...)``) so we do not split the
+    # expression.
+    alias_re = re.compile(
+        r'\b(AS|GROUP\s+BY|ORDER\s+BY)\s+([A-Za-z_]\w*)(?!\s*\()',
+        re.IGNORECASE,
+    )
 
     def _quote_alias_ref(m: re.Match[str]) -> str:
         token = m.group(2)
