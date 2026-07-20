@@ -4,7 +4,7 @@ import {
   IconSparkles,
   IconBulb,
   IconFileText,
-  IconLayoutDashboard,
+
   IconTopologyStar3,
   IconHistory,
   IconLayoutGrid,
@@ -51,18 +51,6 @@ export function homeNavGroups(): NavGroup[] {
           href: "/projects",
           icon: IconFolders,
           countKey: "projects",
-        },
-        {
-          key: "documents",
-          label: "Documents",
-          href: "/documents",
-          icon: IconFileText,
-        },
-        {
-          key: "dashboards",
-          label: "Dashboards",
-          href: "/dashboards",
-          icon: IconLayoutDashboard,
         },
         {
           key: "ai-assistant",
