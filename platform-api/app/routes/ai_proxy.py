@@ -59,6 +59,7 @@ from app.services.presentation_engine import (
 )
 from app.services.response_envelope import ResponseEnvelope
 from app.services.teiid_sql import (
+    collapse_bare_following_parens,
     normalize_teiid_identifiers,
     normalize_teiid_string_filters,
     normalize_teiid_timestamps,
@@ -2357,6 +2358,54 @@ async def _project_table_schema(
     return schema
 
 
+async def _column_samples_for_tables(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int,
+    allowed_tables: list[str],
+    table_schema: list[dict[str, Any]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Build per-column type and one sample-value map for the allowed tables.
+
+    The sample values drive ``normalize_teiid_timestamps`` so the AI's guessed
+    date masks (e.g. ``'M/d/yyyy'`` on an ISO column) are corrected to the
+    column's real format before Teiid sees them.
+    """
+    column_types: dict[str, str] = {}
+    for entry in table_schema:
+        table = entry.get("table")
+        if table not in allowed_tables:
+            continue
+        for col in entry.get("columns", []):
+            if isinstance(col, dict):
+                name = col.get("name")
+                col_type = col.get("type") or ""
+            else:
+                name = col
+                col_type = ""
+            if name:
+                column_types[str(name)] = str(col_type)
+
+    column_samples: dict[str, str] = {}
+    for table in allowed_tables:
+        try:
+            probe = await _execute_project_sql(
+                session, context, project_id,
+                f'SELECT * FROM "{table}" LIMIT 1',
+            )
+            if not probe or not probe.get("rows"):
+                continue
+            for col, val in probe["rows"][0].items():
+                if val is not None:
+                    column_samples[str(col)] = str(val)
+        except Exception as exc:
+            logger.warning(
+                "Could not sample table %s for date masks: %s", table, exc
+            )
+
+    return column_samples, column_types
+
+
 async def _execute_with_repair(
     session: AsyncSession,
     context: RequestContext,
@@ -2377,11 +2426,21 @@ async def _execute_with_repair(
     """
     from app.services import ai_intelligence_client as ai
 
+    column_samples, column_types = await _column_samples_for_tables(
+        session, context, project_id, allowed_tables, table_schema
+    )
+
     current = sql
     last_error = ""
     for attempt in range(3):
         current = normalize_teiid_identifiers(current, table_schema)
         current = normalize_teiid_string_filters(current, table_schema)
+        current = normalize_teiid_timestamps(
+            current,
+            column_samples=column_samples,
+            column_types=column_types,
+        )
+        current = collapse_bare_following_parens(current)
         bounded = _apply_row_limit(current, max_rows)
         try:
             result = await _execute_project_sql(

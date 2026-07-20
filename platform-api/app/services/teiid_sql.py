@@ -775,3 +775,95 @@ def normalize_teiid_identifiers(
         return m.group(0)
 
     return alias_re.sub(_quote_alias_ref, sql)
+
+
+def collapse_bare_following_parens(sql: str) -> str:
+    """Remove spurious ``) ( ... )`` sequences the small model sometimes emits.
+
+    In valid SQL a closing parenthesis is never immediately followed by an
+    opening parenthesis without an operator or comma.  The LLM occasionally
+    hallucinates constructions like
+    ``GROUP BY QUARTER(PARSETIMESTAMP(...))(PARSETIMESTAMP(...))``; this
+    collapses the trailing bare paren group so the expression is valid.
+    String literals and SQL comments are left untouched.
+    """
+    if not sql:
+        return sql
+
+    out: list[str] = []
+    i = 0
+    n = len(sql)
+    in_str = False
+    quote = ""
+    in_line_comment = False
+    in_block_comment = False
+
+    while i < n:
+        ch = sql[i]
+
+        if in_line_comment:
+            out.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        if in_block_comment:
+            out.append(ch)
+            if ch == "*" and i + 1 < n and sql[i + 1] == "/":
+                out.append(sql[i + 1])
+                in_block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+
+        if in_str:
+            out.append(ch)
+            if ch == quote:
+                in_str = False
+            i += 1
+            continue
+
+        if ch == "'" or ch == '"':
+            out.append(ch)
+            in_str = True
+            quote = ch
+            i += 1
+            continue
+
+        if ch == "-" and i + 1 < n and sql[i + 1] == "-":
+            out.append(ch)
+            in_line_comment = True
+            i += 1
+            continue
+
+        if ch == "/" and i + 1 < n and sql[i + 1] == "*":
+            out.append(ch)
+            in_block_comment = True
+            i += 1
+            continue
+
+        if ch == ")":
+            j = i + 1
+            while j < n and sql[j].isspace():
+                j += 1
+            if j < n and sql[j] == "(":
+                depth = 1
+                j += 1
+                while j < n and depth > 0:
+                    if sql[j] == "(":
+                        depth += 1
+                    elif sql[j] == ")":
+                        depth -= 1
+                    if depth == 0:
+                        break
+                    j += 1
+                out.append(")")
+                i = j + 1
+                continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
