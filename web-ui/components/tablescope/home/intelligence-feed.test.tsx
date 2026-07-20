@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { IntelligenceFeed } from "./intelligence-feed";
 import type { FilterableProject } from "./intelligence-strip";
-import type { InsightCard } from "@/lib/api/home-intelligence";
+import type { InsightCard, IntelligenceSnapshot } from "@/lib/api/home-intelligence";
 
 const { streamHomeIntelligence, getIntelligenceSnapshot, getPreferences, updatePreferences } = vi.hoisted(() => ({
   streamHomeIntelligence: vi.fn(() => ({ abort: vi.fn() })),
@@ -57,7 +57,7 @@ const OPPORTUNITY: InsightCard = {
   summary: "Top suppliers account for most spend.",
 };
 
-const SNAPSHOT = {
+const SNAPSHOT: IntelligenceSnapshot = {
   granularity: 3,
   updatedAt: "2026-01-01T00:00:00Z",
   generatedAt: "2026-01-01T00:00:00Z",
@@ -77,7 +77,7 @@ function renderFeed({
   snapshot,
   availableProjects,
 }: {
-  snapshot?: typeof SNAPSHOT;
+  snapshot?: IntelligenceSnapshot;
   availableProjects?: FilterableProject[];
 } = {}) {
   if (snapshot) {
