@@ -132,3 +132,21 @@ body {
     font-size: 12px;
   }
 }
+
+/* Make react-grid-layout resize handles permanently visible and easier to hit.
+   The default handles are tiny and only appear on hover. */
+.react-grid-item > .react-resizable-handle {
+  opacity: 1 !important;
+  width: 12px !important;
+  height: 12px !important;
+  background: rgba(24, 95, 165, 0.45) !important;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  border-radius: 2px !important;
+  z-index: 10 !important;
+}
+.react-grid-item > .react-resizable-handle::after {
+  display: none !important;
+}
+.react-grid-item > .react-resizable-handle:hover {
+  background: rgba(24, 95, 165, 0.75) !important;
+}
