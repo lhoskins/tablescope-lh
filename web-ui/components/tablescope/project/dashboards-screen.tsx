@@ -22,6 +22,8 @@ import {
 import { DashboardDetailView } from "@/components/tablescope/project/detail-views";
 import { AIDashboardSuggestionsModal } from "@/components/tablescope/project/ai-dashboard-suggestions-modal";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
+import { createHomePin } from "@/lib/api/home-pins";
+import type { WidgetConfig } from "@/components/dashboard/types";
 
 function isPublished(d: Dashboard): boolean {
   return d.status.toLowerCase() === "published";
@@ -101,6 +103,39 @@ export function DashboardsScreen({
     draftIdRef.current = null;
   }, []);
 
+  const pinMutation = useMutation({
+    mutationFn: createHomePin,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["home-pins"] });
+      push("Widget pinned to Home", "success");
+    },
+    onError: (err: unknown) => {
+      push(err instanceof Error ? err.message : "Pin failed", "error");
+    },
+  });
+
+  const handlePinWidget = useCallback(
+    (widget: WidgetConfig, data: unknown[], dashboardId: number) => {
+      pinMutation.mutate({
+        pin_type: "live_widget",
+        pin_key: `widget:${dashboardId}:${widget.id}`,
+        title: widget.title || "Pinned widget",
+        project_id: Number(projectId),
+        config: {
+          widget: widget as unknown as Record<string, unknown>,
+          cachedData: { columns: data.length > 0 ? Object.keys(data[0] as object) : [], rows: data },
+        },
+        layout: {
+          x: 0,
+          y: 0,
+          w: widget.gridW ?? widget.colSpan ?? 6,
+          h: widget.gridH ?? 4,
+        },
+      });
+    },
+    [pinMutation, projectId],
+  );
+
   // Close the editor. If the open dashboard is still an untouched draft, delete it.
   const handleCloseViewer = useCallback(() => {
     const id = viewingId;
@@ -177,6 +212,7 @@ export function DashboardsScreen({
           datasources={sources ?? []}
           onBack={handleCloseViewer}
           onPersisted={handlePersisted}
+          onPinWidget={handlePinWidget}
         />
       ) : (
       <div className="space-y-4">
