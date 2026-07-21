@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconArrowUp,
@@ -56,8 +56,9 @@ const CHART_FOLLOW_UPS = [
   "show as a table",
 ];
 
-export default function AiAssistantPage() {
+function AiAssistantPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { data: identity } = useCurrentUser();
   const { data: projects } = useProjectSummaries();
@@ -70,6 +71,8 @@ export default function AiAssistantPage() {
   const [input, setInput] = useState("");
   const [projectId, setProjectId] = useState<number | null>(null);
   const [needsProject, setNeedsProject] = useState(false);
+  const [paramsRead, setParamsRead] = useState(false);
+  const [autoStarted, setAutoStarted] = useState(false);
   const { data: active } = useQuery({
     queryKey: ["conversational-analytics", "conversation", activeId],
     queryFn: () => getConversation(activeId as number),
@@ -89,10 +92,42 @@ export default function AiAssistantPage() {
     if (!getUserMeta()) router.replace("/login");
   }, [router]);
 
-  const invalidateConvos = () =>
-    queryClient.invalidateQueries({
-      queryKey: ["conversational-analytics", "conversations"],
-    });
+  // Hydrate project + prompt from a deep link (e.g. "Open in AI Assistant").
+  useEffect(() => {
+    if (paramsRead) return;
+    const q = searchParams.get("q");
+    const pid = searchParams.get("projectId");
+    if (q) setInput(q);
+    if (pid) {
+      const n = Number(pid);
+      if (!Number.isNaN(n)) setProjectId(n);
+    }
+    setParamsRead(true);
+  }, [searchParams, paramsRead]);
+
+  const invalidateConvos = useCallback(
+    () =>
+      queryClient.invalidateQueries({
+        queryKey: ["conversational-analytics", "conversations"],
+      }),
+    [queryClient],
+  );
+
+  // Auto-start a conversation seeded from the deep-link parameters once.
+  useEffect(() => {
+    if (!paramsRead || autoStarted || !input.trim() || projectId == null || activeId != null)
+      return;
+    setAutoStarted(true);
+    const question = input.trim();
+    setInput("");
+    createConversation({ project_id: projectId, initial_message: question })
+      .then((convo) => {
+        setActiveId(convo.id);
+        invalidateConvos();
+      })
+      .catch(() => setInput(question));
+  }, [paramsRead, autoStarted, input, projectId, activeId, invalidateConvos]);
+
   const invalidateActive = (id: number) =>
     queryClient.invalidateQueries({
       queryKey: ["conversational-analytics", "conversation", id],
@@ -593,5 +628,19 @@ function TurnResult({ turn }: { turn: ConversationTurn }) {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AiAssistantPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center text-ink-secondary">
+          Loading AI Assistant…
+        </div>
+      }
+    >
+      <AiAssistantPageInner />
+    </Suspense>
   );
 }

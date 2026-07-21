@@ -133,25 +133,24 @@ body {
   }
 }
 
-/* Make react-grid-layout resize handles larger and only visible on hover/focus
-   so they are easy to grab without being permanently distracting. */
+/* Make react-grid-layout resize handles invisible but keep them interactive.
+   The package renders a 20x20px absolutely-positioned handle on each edge/corner;
+   we remove the diamond marker and background so it never distracts, while the
+   hit area and cursor remain usable for resizing. */
 .react-grid-item > .react-resizable-handle {
   opacity: 0;
-  transition: opacity 0.15s ease-in-out;
-  width: 12px;
-  height: 12px;
-  background: rgba(24, 95, 165, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  border-radius: 2px;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  pointer-events: auto;
   z-index: 10;
 }
 .react-grid-item:hover > .react-resizable-handle,
 .react-grid-item > .react-resizable-handle:active,
 .react-grid-item > .react-resizable-handle:focus {
-  opacity: 1;
-}
-.react-grid-item > .react-resizable-handle:hover {
-  background: rgba(24, 95, 165, 0.75);
+  opacity: 0;
+  background: transparent;
 }
 .react-grid-item > .react-resizable-handle::after {
   display: none;

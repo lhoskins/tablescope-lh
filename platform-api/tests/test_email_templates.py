@@ -39,6 +39,9 @@ _SAMPLE: dict[str, str] = {
     "billing_portal_link": "https://billing.tablescope.cloud/portal",
     "reset_link": "https://app.tablescope.cloud/reset?token=t",
     "data_source_name": "sales_data.csv",
+    "project_url": "https://app.tablescope.cloud/projects/1",
+    "project_name": "Boeing",
+    "actor_name": "Dana",
 }
 
 

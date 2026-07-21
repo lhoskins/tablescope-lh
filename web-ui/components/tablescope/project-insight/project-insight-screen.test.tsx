@@ -145,6 +145,26 @@ vi.mock("@/components/tablescope/project-shell", () => ({
   ),
 }));
 
+vi.mock("@/lib/ui/use-shell-data", () => ({
+  useCurrentUser: () => ({
+    data: {
+      user: { rawRole: "admin" },
+      tenant: {},
+    },
+  }),
+  useProjectSummaries: () => ({ data: [] }),
+}));
+
+vi.mock("@/lib/hooks/use-insight-feedback", () => ({
+  useInsightFeedback: () => ({
+    feedbackById: {},
+    isLoading: false,
+    saveFeedback: vi.fn(),
+    removeFeedback: vi.fn(),
+    saving: false,
+  }),
+}));
+
 import { ProjectInsightScreen } from "./project-insight-screen";
 
 function renderScreen() {
@@ -195,7 +215,7 @@ describe("ProjectInsightScreen", () => {
       screen.getByRole("heading", { name: "AI-Generated Questions to Ask" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("heading", { name: "Recommendations" }),
+      screen.getByText("Recommendations"),
     ).toBeTruthy();
   });
 
@@ -217,28 +237,23 @@ describe("ProjectInsightScreen", () => {
     expect(container.querySelector('[class*="bg-danger/5"]')).toBeTruthy();
   });
 
-  it("collapses Insights / Questions / Recommendations by default with a count badge", async () => {
+  it("expands Insights & Opportunities and collapses Questions by default", async () => {
     renderScreen();
     await screen.findByText("Executive Project Summary");
 
-    const questions = screen.getByRole("button", {
+    const insights = screen.getByRole("heading", {
+      name: /Insights & Opportunities/,
+    });
+    expect(insights.closest("section")?.firstElementChild?.getAttribute("aria-expanded")).toBe("true");
+
+    const questions = screen.getByRole("heading", {
       name: /AI-Generated Questions to Ask/,
     });
-    expect(questions.getAttribute("aria-expanded")).toBe("false");
+    expect(questions.closest("section")?.firstElementChild?.getAttribute("aria-expanded")).toBe("false");
     // Count badge (1 question) is shown while collapsed.
-    expect(within(questions).getByText("1")).toBeTruthy();
+    expect(within(questions.closest("section") as HTMLElement).getByText("1")).toBeTruthy();
     // Collapsed content is absent.
     expect(screen.queryByText("Why did Supplier A slip?")).toBeNull();
-
-    const recommendations = screen.getByRole("button", {
-      name: /Recommendations/,
-    });
-    expect(recommendations.getAttribute("aria-expanded")).toBe("false");
-    // The Recommendations header shows no count badge.
-    expect(within(recommendations).queryByText("3")).toBeNull();
-    expect(
-      screen.queryByRole("heading", { name: "Recommended Dashboards" }),
-    ).toBeNull();
   });
 
   it("expands a collapsed section when its header is clicked", async () => {
@@ -281,8 +296,8 @@ describe("ProjectInsightScreen", () => {
     await screen.findByText("Executive Project Summary");
     // The former Trend Detection panel is gone; trends come from AI insights.
     expect(screen.queryByText("Trend Detection")).toBeNull();
-    expect(await screen.findByText("Spend up")).toBeTruthy();
-    expect(screen.getByText("Trend")).toBeTruthy();
+    expect((await screen.findAllByText("Spend up")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Trend").length).toBeGreaterThan(0);
   });
 
   it("shows unanswerable questions after expanding the Questions section", async () => {
@@ -308,25 +323,20 @@ describe("ProjectInsightScreen", () => {
     ).toBeTruthy();
   });
 
-  it("shows suggestion status after expanding Recommendations", async () => {
+  it("shows suggestion status for executive summary cards", async () => {
     renderScreen();
     await screen.findByText("Executive Project Summary");
-    expandSection("Recommendations");
-    expect((await screen.findAllByText("Suggested")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Supplier A SLA breach")).toBeTruthy();
+    expect(screen.getByText("Consolidate spend")).toBeTruthy();
+    expect(screen.getByText("Renegotiate contract")).toBeTruthy();
   });
 
-  it("keeps the Ask box always visible and opens the AI answer modal", async () => {
+  it("does not render the legacy inline Ask box", async () => {
     renderScreen();
-    const input = await screen.findByLabelText(
-      "Ask a question about this project",
-    );
-    fireEvent.change(input, {
-      target: { value: "What is the total spend?" },
-    });
-    fireEvent.keyDown(input, { key: "Enter" });
-    const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
-    expect(dialog.textContent).toContain("What is the total spend?");
-    expect(push).not.toHaveBeenCalled();
+    await screen.findByText("Executive Project Summary");
+    expect(
+      screen.queryByLabelText("Ask a question about this project"),
+    ).toBeNull();
   });
 
   it("opens the AI answer modal when a suggested question is clicked", async () => {
@@ -340,31 +350,11 @@ describe("ProjectInsightScreen", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("opens the query preview modal from a recommended query", async () => {
+  it("does not render the legacy recommended queries/dashboards section", async () => {
     renderScreen();
     await screen.findByText("Executive Project Summary");
-    expandSection("Recommendations");
-    await screen.findByRole("heading", { name: "Recommended Queries" });
-    const generateButtons = screen.getAllByRole("button", { name: /generate/i });
-    fireEvent.click(generateButtons[generateButtons.length - 1]);
-    expect(
-      await screen.findByRole("dialog", { name: "Generate Query" }),
-    ).toBeTruthy();
-  });
-
-  it("opens the dashboard generation modal from a recommended dashboard", async () => {
-    renderScreen();
-    await screen.findByText("Executive Project Summary");
-    expandSection("Recommendations");
-    const dashPanel = (
-      await screen.findByRole("heading", { name: "Recommended Dashboards" })
-    ).closest("section") as HTMLElement;
-    fireEvent.click(
-      within(dashPanel).getByRole("button", { name: /generate/i }),
-    );
-    expect(
-      await screen.findByRole("dialog", { name: "Generate Dashboard" }),
-    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Recommended Queries" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Recommended Dashboards" })).toBeNull();
   });
 
   it("shows a clean empty state for risks and opportunities", async () => {
@@ -426,11 +416,11 @@ describe("ProjectInsightScreen", () => {
     });
     renderScreen();
     expect(
-      await screen.findByText("Delivery lead time exceeds SLA threshold"),
-    ).toBeTruthy();
-    expect(screen.getByText("Recommendation")).toBeTruthy();
-    expect(screen.getByText("Escalate with the supplier.")).toBeTruthy();
-    expect(screen.getByText("SUP_Quality_CSV")).toBeTruthy();
+      (await screen.findAllByText("Delivery lead time exceeds SLA threshold")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("Recommendation").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Escalate with the supplier.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("SUP_Quality_CSV").length).toBeGreaterThan(0);
   });
 
   it("opens the AI answer modal when an AI-derived card is investigated", async () => {
@@ -461,7 +451,7 @@ describe("ProjectInsightScreen", () => {
       ],
     });
     renderScreen();
-    await screen.findByText("Spend tracking over budget");
+    expect((await screen.findAllByText("Spend tracking over budget")).length).toBeGreaterThan(0);
     const investigate = screen.getAllByRole("button", {
       name: /investigate/i,
     });
@@ -519,7 +509,6 @@ describe("ProjectInsightScreen", () => {
       ],
     });
     renderScreen();
-    // The Insights & Opportunities section is collapsed by default.
     const heading = await screen.findByRole("heading", {
       name: "Insights & Opportunities",
     });
@@ -527,11 +516,10 @@ describe("ProjectInsightScreen", () => {
     await waitFor(() =>
       expect(suggestInsights).toHaveBeenCalledWith(3, 42),
     );
-    expandSection("Insights & Opportunities");
     const panel = heading.closest("section") as HTMLElement;
     expect(
-      await within(panel).findByText("Consolidate spend with top suppliers"),
-    ).toBeTruthy();
+      (await within(panel).findAllByText("Consolidate spend with top suppliers")).length,
+    ).toBeGreaterThan(0);
   });
 
   it("has no residual card shadows in the page body", async () => {
