@@ -513,6 +513,15 @@ export function IntelligenceFeed({
         onClear={clearProjects}
       />
 
+      {synthesis && selectedProjectIds.size > 0 &&
+        synthesis.projectIds.length === selectedProjectIds.size &&
+        synthesis.projectIds.every((id) => selectedProjectIds.has(id)) && (
+        <div className="rounded-md border border-line-tertiary bg-bg-primary p-3 text-[13px] text-ink-secondary">
+          <p className="font-medium text-ink-primary">{synthesis.headline}</p>
+          <p className="mt-1">{synthesis.body}</p>
+        </div>
+      )}
+
       <div className="space-y-6">
         {selectedProjectIds.size === 0 && knownProjects.length > 0 ? (
           <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
