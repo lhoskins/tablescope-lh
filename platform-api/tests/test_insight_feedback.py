@@ -361,6 +361,91 @@ async def test_feedback_batch_enforces_max_ids(client, service_headers):
     assert r.status_code == 422
 
 
+# ───────────────────────────── review endpoint ───────────────────────────────
+
+
+async def _create_user(client, service_headers, tenant_id: int, email: str, role: str):
+    r = await client.post(
+        f"/api/tenants/{tenant_id}/users",
+        json={
+            "email": email,
+            "display_name": email.split("@")[0],
+            "role": role,
+            "external_id": f"ext-{email}",
+        },
+        headers=service_headers,
+    )
+    assert r.status_code == 201
+    return r.json()
+
+
+async def test_feedback_review_lists_other_users_feedback_for_admin(client, service_headers):
+    tenant, editor, project, editor_headers = await _setup(client, service_headers, "fb-review")
+    admin = await _create_user(client, service_headers, tenant["id"], "admin@fb-review.com", "admin")
+    admin_headers = _headers(tenant["id"], admin["id"], "admin")
+
+    # Editor leaves feedback.
+    r = await client.put(
+        "/api/insight-feedback/insight-1",
+        json={
+            "project_id": project["id"],
+            "sentiment": "disagree",
+            "reason_codes": ["incorrect_data"],
+            "comment": "Numbers look off.",
+            "card_snapshot": {"title": "Test insight"},
+        },
+        headers=editor_headers,
+    )
+    assert r.status_code == 200
+
+    r = await client.get("/api/insight-feedback/review", headers=admin_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+    item = data["items"][0]
+    assert item["sentiment"] == "disagree"
+    assert item["user_id"] == editor["id"]
+    assert item["project_id"] == project["id"]
+    assert item["card_title"] == "Test insight"
+    assert item["project_name"] == "Feedback Project"
+
+
+async def test_feedback_review_forbidden_for_non_admin(client, service_headers):
+    _, _, _, headers = await _setup(client, service_headers, "fb-review-editor")
+    r = await client.get("/api/insight-feedback/review", headers=headers)
+    assert r.status_code == 403
+
+
+async def test_feedback_review_is_tenant_isolated(client, service_headers):
+    tenant_a, _, project_a, _ = await _setup(client, service_headers, "fb-review-a")
+    tenant_b, user_b, project_b, _ = await _setup(client, service_headers, "fb-review-b")
+
+    admin_a = await _create_user(client, service_headers, tenant_a["id"], "admin@a.com", "admin")
+    admin_a_headers = _headers(tenant_a["id"], admin_a["id"], "admin")
+
+    # Feedback in tenant B.
+    headers_b = _headers(tenant_b["id"], user_b["id"], "editor")
+    r = await client.put(
+        "/api/insight-feedback/insight-b",
+        json={
+            "project_id": project_b["id"],
+            "sentiment": "agree",
+            "reason_codes": [],
+            "comment": "Looks good.",
+            "card_snapshot": {"title": "B insight"},
+        },
+        headers=headers_b,
+    )
+    assert r.status_code == 200
+
+    r = await client.get("/api/insight-feedback/review", headers=admin_a_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 0
+    assert data["items"] == []
+
+
 # ───────────────────────────── learning export ──────────────────────────────
 
 

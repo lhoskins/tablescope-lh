@@ -103,6 +103,13 @@ _TEIID_RULES = (
     "Example: WHERE LOWER(\"Status\") = LOWER('failed'). Never write "
     "WHERE \"Status\" = 'failed' or WHERE \"Status\" = 'Failed'. This ensures "
     "natural-language filters match stored values regardless of capitalization.\n"
+    "14. Never place an aggregate function (SUM, AVG, COUNT, MIN, MAX) in the "
+    "GROUP BY clause. GROUP BY must contain ONLY the non-aggregated SELECT "
+    "expressions, repeated verbatim.\n"
+    "15. Never wrap PARSETIMESTAMP, PARSEDATE, FORMATDATE, or CAST around an "
+    "expression that is already a date/timestamp (e.g. do NOT write "
+    "PARSETIMESTAMP(PARSETIMESTAMP(\"Month\", 'yyyy-MM-dd'), 'M/d/yyyy')). "
+    "Use the exact same date expression in SELECT, GROUP BY, and ORDER BY.\n"
 )
 
 _SEMANTIC_RULES = (

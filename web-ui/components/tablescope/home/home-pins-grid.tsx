@@ -14,7 +14,6 @@ import "react-grid-layout/css/styles.css";
 import {
   GRID_BREAKPOINTS,
   GRID_COLS,
-  GRID_CONTAINER_PADDING,
   GRID_DRAG_CONFIG,
   GRID_MARGIN,
   GRID_RESIZE_CONFIG,
@@ -443,8 +442,11 @@ export function HomePinsGrid() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
+    <div
+      ref={containerRef}
+      className="-mx-5 w-[calc(100%+2.5rem)] space-y-3"
+    >
+      <div className="flex items-center justify-between px-5">
         <h2 className="text-h3 text-ink-primary">Pinned to Home</h2>
         <button
           type="button"
@@ -457,9 +459,9 @@ export function HomePinsGrid() {
         </button>
       </div>
       {layoutError && (
-        <p className="text-small text-red-600">{layoutError}</p>
+        <p className="px-5 text-small text-red-600">{layoutError}</p>
       )}
-      <div ref={containerRef} className="w-full">
+      <div className="w-full">
         {mounted && (
           <ResponsiveGridLayout
             className="layout"
@@ -468,7 +470,7 @@ export function HomePinsGrid() {
             cols={GRID_COLS}
             rowHeight={GRID_ROW_HEIGHT}
             margin={GRID_MARGIN}
-            containerPadding={GRID_CONTAINER_PADDING}
+            containerPadding={[20, 10]}
             onLayoutChange={handleLayoutChange}
             onDragStop={handleDragStop}
             onResizeStop={handleResizeStop}

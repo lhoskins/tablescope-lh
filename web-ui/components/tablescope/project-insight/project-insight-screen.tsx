@@ -54,7 +54,7 @@ import {
   type InsightCard as InsightCardData,
   type InsightExplanation,
 } from "@/lib/api/home-intelligence";
-import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
+import type { InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import {
@@ -815,6 +815,7 @@ function InsightCardItem({
 }) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackInitial, setFeedbackInitial] = useState<InsightSentiment>("agree");
   const hasFeedback = feedback != null && feedback.status === "active";
   const { data: identity } = useCurrentUser();
   const canCreateAction =
@@ -929,24 +930,58 @@ function InsightCardItem({
           </button>
         )}
         {onFeedbackSave && (
-          <button
-            type="button"
-            onClick={() => setFeedbackOpen(true)}
-            aria-label={hasFeedback ? "Edit feedback" : "Give feedback"}
-            title={hasFeedback ? "Edit feedback" : "Give feedback"}
-            className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              hasFeedback
-                ? "border-brand-500 bg-brand-50 text-brand-700 hover:bg-brand-100"
-                : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
-            }`}
-          >
-            {feedback?.sentiment === "disagree" ? (
-              <IconThumbDown size={13} />
-            ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setFeedbackInitial("agree");
+                setFeedbackOpen(true);
+              }}
+              aria-label={
+                hasFeedback && feedback?.sentiment === "agree"
+                  ? "Edit agree feedback"
+                  : "Agree"
+              }
+              title={
+                hasFeedback && feedback?.sentiment === "agree"
+                  ? "Edit agree feedback"
+                  : "Agree"
+              }
+              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                hasFeedback && feedback?.sentiment === "agree"
+                  ? "border-success bg-success/10 text-success hover:bg-success/20"
+                  : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
+              }`}
+            >
               <IconThumbUp size={13} />
-            )}
-            {hasFeedback ? "Feedback saved" : "Agree"}
-          </button>
+              Agree
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFeedbackInitial("disagree");
+                setFeedbackOpen(true);
+              }}
+              aria-label={
+                hasFeedback && feedback?.sentiment === "disagree"
+                  ? "Edit disagree feedback"
+                  : "Disagree"
+              }
+              title={
+                hasFeedback && feedback?.sentiment === "disagree"
+                  ? "Edit disagree feedback"
+                  : "Disagree"
+              }
+              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                hasFeedback && feedback?.sentiment === "disagree"
+                  ? "border-danger bg-danger/10 text-danger hover:bg-danger/20"
+                  : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
+              }`}
+            >
+              <IconThumbDown size={13} />
+              Disagree
+            </button>
+          </div>
         )}
       </div>
 
@@ -961,6 +996,7 @@ function InsightCardItem({
           open={feedbackOpen}
           onClose={() => setFeedbackOpen(false)}
           feedback={feedback || null}
+          initialSentiment={feedbackInitial}
           onSave={onFeedbackSave}
           onRemove={async () => {
             await onFeedbackRemove?.();
