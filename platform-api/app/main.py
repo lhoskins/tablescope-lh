@@ -41,10 +41,10 @@ from app.routes import home_pins as home_pins_routes
 from app.routes import insight_feedback as insight_feedback_routes
 from app.routes import knowledge_graph as knowledge_graph_routes
 from app.routes import mfa as mfa_routes
+from app.routes import project_actions as project_actions_routes
 from app.routes import project_assets as project_assets_routes
 from app.routes import project_context as project_context_routes
 from app.routes import project_graph as project_graph_routes
-from app.routes import project_actions as project_actions_routes
 from app.routes import project_insight as project_insight_routes
 from app.routes import projects as projects_routes
 from app.routes import provisioning as provisioning_routes
