@@ -49,6 +49,7 @@ function Section({
   onPin,
   onFeedbackSave,
   onFeedbackRemove,
+  onCreateAction,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -62,6 +63,7 @@ function Section({
   onPin?: (card: InsightCard) => void;
   onFeedbackSave?: (card: InsightCard, payload: Omit<SaveInsightFeedbackArgs, "insightId" | "projectId" | "insightType" | "cardSnapshot" | "explanationSnapshot">) => void;
   onFeedbackRemove?: (card: InsightCard) => void;
+  onCreateAction?: (card: InsightCard) => void;
 }) {
   return (
     <InsightPanel title={title} icon={icon} collapsible defaultOpen={defaultOpen} count={cards.length}>
@@ -85,6 +87,7 @@ function Section({
               onFeedbackRemove={
                 onFeedbackRemove ? () => onFeedbackRemove(card) : undefined
               }
+              onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
             />
           ))}
         </div>
@@ -95,6 +98,7 @@ function Section({
 
 export interface IntelligenceFeedProps {
   onPin?: (card: InsightCard) => void;
+  onCreateAction?: (card: InsightCard) => void;
   /** Accessible projects used to populate the filter and default selection. */
   availableProjects?: FilterableProject[];
 }
@@ -103,6 +107,7 @@ const EMPTY_PROJECTS: FilterableProject[] = [];
 
 export function IntelligenceFeed({
   onPin,
+  onCreateAction,
   availableProjects: propAvailableProjects,
 }: IntelligenceFeedProps = {}) {
   // Normalize the accessible project list to a stable reference so the filter
@@ -508,6 +513,15 @@ export function IntelligenceFeed({
         onClear={clearProjects}
       />
 
+      {synthesis && selectedProjectIds.size > 0 &&
+        synthesis.projectIds.length === selectedProjectIds.size &&
+        synthesis.projectIds.every((id) => selectedProjectIds.has(id)) && (
+        <div className="rounded-md border border-line-tertiary bg-bg-primary p-3 text-[13px] text-ink-secondary">
+          <p className="font-medium text-ink-primary">{synthesis.headline}</p>
+          <p className="mt-1">{synthesis.body}</p>
+        </div>
+      )}
+
       <div className="space-y-6">
         {selectedProjectIds.size === 0 && knownProjects.length > 0 ? (
           <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
@@ -528,6 +542,7 @@ export function IntelligenceFeed({
               onPin={onPin}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
+              onCreateAction={onCreateAction}
             />
             <Section
               title="Trends"
@@ -542,6 +557,7 @@ export function IntelligenceFeed({
               onPin={onPin}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
+              onCreateAction={onCreateAction}
             />
             <Section
               title="Opportunities"
@@ -556,6 +572,7 @@ export function IntelligenceFeed({
               onPin={onPin}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
+              onCreateAction={onCreateAction}
             />
 
             {pending.length > 0 && (

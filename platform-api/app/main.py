@@ -41,6 +41,7 @@ from app.routes import home_pins as home_pins_routes
 from app.routes import insight_feedback as insight_feedback_routes
 from app.routes import knowledge_graph as knowledge_graph_routes
 from app.routes import mfa as mfa_routes
+from app.routes import project_actions as project_actions_routes
 from app.routes import project_assets as project_assets_routes
 from app.routes import project_context as project_context_routes
 from app.routes import project_graph as project_graph_routes
@@ -231,6 +232,7 @@ def create_app() -> FastAPI:
     app.include_router(project_assets_routes.router, prefix=api_prefix)
     app.include_router(project_context_routes.router, prefix=api_prefix)
     app.include_router(project_graph_routes.router, prefix=api_prefix)
+    app.include_router(project_actions_routes.router, prefix=api_prefix)
     app.include_router(project_insight_routes.router, prefix=api_prefix)
     app.include_router(knowledge_graph_routes.router, prefix=api_prefix)
     app.include_router(document_families_routes.router, prefix=api_prefix)

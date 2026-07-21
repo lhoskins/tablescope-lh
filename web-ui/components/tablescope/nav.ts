@@ -16,6 +16,7 @@ import {
   IconBook2,
   IconLibrary,
   IconBuildingBank,
+  IconClipboardList,
   type Icon,
 } from "@tabler/icons-react";
 import type { NavKey } from "@/lib/ui/types";
@@ -26,7 +27,7 @@ export interface NavItem {
   href: string;
   icon: Icon;
   /** Optional numeric badge (e.g. project count, query count). */
-  countKey?: "projects" | "queries" | "documents";
+  countKey?: "projects" | "queries" | "documents" | "actionCount";
 }
 
 export interface NavGroup {
@@ -109,6 +110,13 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           label: "Project Insights",
           href: `${base}/insight`,
           icon: IconSparkles,
+        },
+        {
+          key: "project-actions",
+          label: "Project Actions",
+          href: `${base}/actions`,
+          icon: IconClipboardList,
+          countKey: "actionCount",
         },
         {
           key: "project-data-sources",

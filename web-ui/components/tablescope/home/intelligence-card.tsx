@@ -3,6 +3,7 @@
 import { Fragment, type ReactNode, useState } from "react";
 import {
   IconChevronRight,
+  IconClipboardList,
   IconFileText,
   IconInfoCircle,
   IconLayoutDashboard,
@@ -14,6 +15,8 @@ import {
   IconThumbUp,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
+import { useCurrentUser } from "@/lib/ui/use-shell-data";
+import { canManageProjectActions } from "@/lib/auth";
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
 import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import type {
@@ -187,6 +190,8 @@ export interface IntelligenceCardProps {
   }) => void | Promise<void>;
   onFeedbackRemove?: () => void | Promise<void>;
   savingFeedback?: boolean;
+  /** If provided and the user may create actions, shows a "+ Action" button. */
+  onCreateAction?: () => void;
 }
 
 export function IntelligenceCard({
@@ -202,11 +207,16 @@ export function IntelligenceCard({
   onFeedbackSave,
   onFeedbackRemove,
   savingFeedback = false,
+  onCreateAction,
 }: IntelligenceCardProps) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackInitial, setFeedbackInitial] =
     useState<InsightSentiment>("agree");
+  const { data: identity } = useCurrentUser();
+  const canCreateAction =
+    onCreateAction &&
+    canManageProjectActions(identity?.user?.rawRole, identity?.user?.isSuperAdmin);
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.info;
   const canSaveToDashboard = Boolean(
     card.sql?.trim() && card.valueColumn?.trim(),
@@ -312,6 +322,17 @@ export function IntelligenceCard({
             <IconInfoCircle size={14} />
             Explain
           </button>
+
+          {canCreateAction && (
+            <button
+              type="button"
+              onClick={onCreateAction}
+              className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+            >
+              <IconClipboardList size={14} />
+              Action
+            </button>
+          )}
 
           {onFeedbackSave && stableInsightId && (
             <div className="flex items-center gap-1">

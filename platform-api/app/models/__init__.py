@@ -71,6 +71,7 @@ from app.models.mfa_phone_factor import MfaPhoneFactor
 from app.models.mfa_sms_event import MfaSmsEvent
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
+from app.models.project_action import ProjectAction, ProjectActionSubtask
 from app.models.project_asset import ProjectAsset
 from app.models.project_context import (
     ProjectBusinessContext,
@@ -186,6 +187,8 @@ __all__ = [
     "ProjectGoalRiskLink",
     "ProjectInsightAcknowledgement",
     "ProjectIntelligenceSnapshot",
+    "ProjectAction",
+    "ProjectActionSubtask",
     "ProjectMember",
     "ProjectMetric",
     "ProjectMetricTarget",

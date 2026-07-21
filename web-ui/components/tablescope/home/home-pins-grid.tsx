@@ -40,6 +40,10 @@ import {
 import type { InsightCard } from "@/lib/api/home-intelligence";
 import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
+import {
+  CreateActionFromInsightDialog,
+  type ActionableInsight,
+} from "@/components/tablescope/project-actions/create-action-from-insight-dialog";
 
 type HomePinItem = HomePin;
 
@@ -59,6 +63,7 @@ function PinCard({
   onRefresh,
   onFeedbackSave,
   onFeedbackRemove,
+  onCreateAction,
 }: {
   pin: HomePinItem;
   feedback?: InsightFeedbackRecord | null;
@@ -71,6 +76,7 @@ function PinCard({
     comment: string;
   }) => void;
   onFeedbackRemove?: (pin: HomePinItem) => void;
+  onCreateAction?: (pin: HomePinItem) => void;
 }) {
   const isLive = pin.pin_type === "live_widget";
   const isInsight = pin.pin_type === "insight_card";
@@ -112,6 +118,7 @@ function PinCard({
             savingFeedback={savingFeedback}
             onFeedbackSave={onFeedbackSave}
             onFeedbackRemove={onFeedbackRemove}
+            onCreateAction={onCreateAction}
           />
         </div>
         {pin.refresh_error && (
@@ -141,6 +148,7 @@ function PinCard({
           savingFeedback={savingFeedback}
           onFeedbackSave={onFeedbackSave}
           onFeedbackRemove={onFeedbackRemove}
+          onCreateAction={onCreateAction}
         />
       </div>
       {pin.refresh_error && (
@@ -158,6 +166,7 @@ function PinContent({
   savingFeedback,
   onFeedbackSave,
   onFeedbackRemove,
+  onCreateAction,
 }: {
   pin: HomePinItem;
   feedback?: InsightFeedbackRecord | null;
@@ -168,6 +177,7 @@ function PinContent({
     comment: string;
   }) => void;
   onFeedbackRemove?: (pin: HomePinItem) => void;
+  onCreateAction?: (pin: HomePinItem) => void;
 }) {
   if (pin.pin_type === "insight_card") {
     const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
@@ -188,6 +198,9 @@ function PinContent({
         }
         onFeedbackRemove={
           onFeedbackRemove ? () => onFeedbackRemove(pin) : undefined
+        }
+        onCreateAction={
+          onCreateAction ? () => onCreateAction(pin) : undefined
         }
       />
     );
@@ -267,6 +280,8 @@ export function HomePinsGrid() {
   >("lg");
   const [localLayouts, setLocalLayouts] = useState<ResponsiveLayouts | null>(null);
   const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [createActionOpen, setCreateActionOpen] = useState(false);
+  const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
 
   const handleFeedbackRemove = (pin: HomePinItem) => {
     const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
@@ -274,6 +289,31 @@ export function HomePinsGrid() {
     const projectId = pin.project_id ?? Number(card.projectId);
     if (!insightId || !projectId) return;
     void removeFeedback({ insightId, projectId });
+  };
+
+  const handleCreateAction = (pin: HomePinItem) => {
+    const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
+    if (!card.title || !card.projectId) return;
+    const projectId = String(card.projectId ?? pin.project_id ?? "");
+    const projectName = card.projectName ?? "";
+    const insight: ActionableInsight = {
+      insightId: card.insightId || card.id,
+      insightType: card.insightType,
+      title: card.title,
+      summary: card.summary,
+      severity: card.severity,
+      projectId,
+      projectName,
+      recommendedAction: card.callout?.text || null,
+      sources: card.sources,
+      supportingSources: [
+        ...(card.sources?.tables ?? []),
+        ...(card.sources?.documents ?? []),
+      ],
+      explanation: card.explanation as Record<string, unknown> | undefined,
+    };
+    setSelectedInsight(insight);
+    setCreateActionOpen(true);
   };
 
   const deleteMutation = useMutation({
@@ -451,6 +491,7 @@ export function HomePinsGrid() {
                     onRefresh={() => refreshMutation.mutate()}
                     onFeedbackSave={handleFeedbackSave}
                     onFeedbackRemove={handleFeedbackRemove}
+                    onCreateAction={handleCreateAction}
                   />
                 </div>
               );
@@ -458,6 +499,12 @@ export function HomePinsGrid() {
           </ResponsiveGridLayout>
         )}
       </div>
+
+      <CreateActionFromInsightDialog
+        open={createActionOpen}
+        onClose={() => setCreateActionOpen(false)}
+        insight={selectedInsight}
+      />
     </div>
   );
 }

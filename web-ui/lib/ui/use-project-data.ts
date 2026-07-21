@@ -47,6 +47,7 @@ export function useProjectShell(projectId: string) {
     counts: {
       queries: project?.queryCount,
       documents: project?.documentCount,
+      actionCount: project?.actionCount,
     },
     isLoading,
   };

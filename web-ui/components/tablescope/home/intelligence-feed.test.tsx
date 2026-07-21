@@ -250,6 +250,7 @@ describe("IntelligenceFeed", () => {
     };
     renderFeed({ snapshot });
     await screen.findByRole("button", { name: /Risks/ });
+    fireEvent.click(screen.getByRole("button", { name: /Risks/ }));
 
     expect(screen.getByText("All projects")).toBeTruthy();
     expect(screen.getByText("SLA breach")).toBeTruthy();

@@ -182,6 +182,22 @@ export function startIdleTimer() {
   resetIdleTimer();
 }
 
+export function canManageProjectActions(
+  role?: string,
+  isSuperAdmin?: boolean,
+): boolean {
+  if (isSuperAdmin) return true;
+  const allowed = [
+    "member",
+    "editor",
+    "db_admin",
+    "admin",
+    "tenant_admin",
+    "root_admin",
+  ];
+  return Boolean(role && allowed.includes(role.toLowerCase()));
+}
+
 export function stopIdleTimer() {
   if (typeof window === "undefined") return;
   if (idleTimer) {

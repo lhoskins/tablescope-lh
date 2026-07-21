@@ -12,6 +12,7 @@ export interface ProjectSummary {
   documentCount: number;
   queryCount: number;
   dashboardCount: number;
+  actionCount?: number;
   aiStatus: AiStatus;
   /** Stable accent color derived from the project id (deterministic). */
   accent?: string;
@@ -55,6 +56,7 @@ export type NavKey =
   | "project-documents"
   | "project-ai-assistant"
   | "project-insights"
+  | "project-actions"
   | "project-relationship-map"
   | "project-knowledge-graph"
   | "project-metadata-catalog"

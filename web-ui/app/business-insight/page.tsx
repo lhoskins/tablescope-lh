@@ -28,6 +28,10 @@ import {
   type ConversationTurn,
 } from "@/lib/api/conversational-analytics";
 import { IconLoader2 } from "@tabler/icons-react";
+import {
+  CreateActionFromInsightDialog,
+  type ActionableInsight,
+} from "@/components/tablescope/project-actions/create-action-from-insight-dialog";
 
 const FALLBACK_USER: CurrentUser = {
   name: "",
@@ -88,6 +92,29 @@ export default function BusinessInsightPage() {
   const [chatConversationId, setChatConversationId] = useState<number | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [createActionOpen, setCreateActionOpen] = useState(false);
+  const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
+
+  const handleCreateAction = useCallback((card: InsightCard) => {
+    const insight: ActionableInsight = {
+      insightId: card.insightId || card.id,
+      insightType: card.insightType,
+      title: card.title,
+      summary: card.summary,
+      severity: card.severity,
+      projectId: card.projectId,
+      projectName: card.projectName,
+      recommendedAction: card.callout?.text || null,
+      sources: card.sources,
+      supportingSources: [
+        ...(card.sources?.tables ?? []),
+        ...(card.sources?.documents ?? []),
+      ],
+      explanation: card.explanation as Record<string, unknown> | undefined,
+    };
+    setSelectedInsight(insight);
+    setCreateActionOpen(true);
+  }, []);
 
   const pollConversation = useCallback(
     async (id: number): Promise<Conversation> => {
@@ -185,9 +212,16 @@ export default function BusinessInsightPage() {
         </div>
         <IntelligenceFeed
           onPin={handlePinInsight}
+          onCreateAction={handleCreateAction}
           availableProjects={allProjects ?? []}
         />
       </div>
+
+      <CreateActionFromInsightDialog
+        open={createActionOpen}
+        onClose={() => setCreateActionOpen(false)}
+        insight={selectedInsight}
+      />
 
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </AppShell>
