@@ -180,3 +180,86 @@ async def test_save_card_rejects_both_dashboard_id_and_name(
         headers=headers,
     )
     assert r.status_code == 422
+
+
+async def test_save_card_allows_source_project_id(client, service_headers) -> None:
+    _, _, project, headers = await _setup(client, service_headers, "save-source")
+
+    payload = {
+        "project_id": project["id"],
+        "source_project_id": project["id"],
+        "dashboard_name": "Sourced dashboard",
+        "title": "SLA breach",
+        "sql": 'SELECT month, amount FROM "sales" ORDER BY month',
+        "chartType": "bar",
+        "labelColumn": "month",
+        "valueColumn": "amount",
+    }
+    r = await client.post(
+        "/api/ai/home/save-card-to-dashboard",
+        json=payload,
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+
+
+async def test_save_card_rejects_source_project_mismatch(
+    client, service_headers
+) -> None:
+    _, _, project_a, headers = await _setup(
+        client, service_headers, "save-source-a"
+    )
+
+    r = await client.post(
+        "/api/projects",
+        json={"name": "Project B", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert r.status_code == 201
+    project_b = r.json()
+
+    # New-dashboard path: the card claims project A as its source but targets B.
+    payload = {
+        "project_id": project_b["id"],
+        "source_project_id": project_a["id"],
+        "dashboard_name": "Cross-project dashboard",
+        "title": "SLA breach",
+        "sql": 'SELECT 1',
+    }
+    r = await client.post(
+        "/api/ai/home/save-card-to-dashboard",
+        json=payload,
+        headers=headers,
+    )
+    assert r.status_code == 400, r.text
+    assert "source project" in r.text.lower()
+
+    # Existing-dashboard path: create a dashboard in B, then try to save a card
+    # sourced from A into it.
+    r = await client.post(
+        "/api/ai/home/save-card-to-dashboard",
+        json={
+            "project_id": project_b["id"],
+            "dashboard_name": "B dashboard",
+            "title": "First widget",
+            "sql": 'SELECT 1',
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    dashboard_id = r.json()["dashboard_id"]
+
+    payload = {
+        "project_id": project_b["id"],
+        "source_project_id": project_a["id"],
+        "dashboard_id": dashboard_id,
+        "title": "Second widget",
+        "sql": 'SELECT 1',
+    }
+    r = await client.post(
+        "/api/ai/home/save-card-to-dashboard",
+        json=payload,
+        headers=headers,
+    )
+    assert r.status_code == 400, r.text
+    assert "source project" in r.text.lower()

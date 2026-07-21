@@ -52,6 +52,7 @@ from app.services.customer_folders import CustomerFolderService
 from app.services.database_introspection_service import (
     map_to_teiid_type as _map_teiid_type,
 )
+from app.services.email_service import EmailService
 from app.services.file_sources import display_source
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
@@ -1379,23 +1380,46 @@ async def add_member(
             existing.is_active = True
             existing.role = role
             await session.commit()
-            return ProjectMemberRead(
-                project_id=project_id, user_id=user_id, role=role,
-                is_active=True,
-                email=user.email, display_name=user.display_name,
-            )
-        raise HTTPException(status_code=409, detail="User is already a member")
+        else:
+            raise HTTPException(status_code=409, detail="User is already a member")
+    else:
+        member = ProjectMember(
+            project_id=project_id, user_id=user_id, role=role, is_active=True,
+        )
+        session.add(member)
+        await session.commit()
 
-    member = ProjectMember(
-        project_id=project_id, user_id=user_id, role=role, is_active=True,
-    )
-    session.add(member)
-    await session.commit()
-    return ProjectMemberRead(
+    result = ProjectMemberRead(
         project_id=project_id, user_id=user_id, role=role,
         is_active=True,
         email=user.email, display_name=user.display_name,
     )
+
+    # Best-effort membership email; failures must not roll back the membership.
+    try:
+        tenant = await session.get(Tenant, project.tenant_id)
+        actor = await session.get(User, context.user_id)
+        settings = get_settings()
+        await EmailService().send_transactional_email(
+            to=user.email,
+            template="project_membership",
+            variables={
+                "first_name": user.display_name or "",
+                "project_name": project.name,
+                "actor_name": (actor.display_name or actor.email if actor else None) or "A Tablescope user",
+                "role_name": role.replace("_", " ").title(),
+                "workspace_name": tenant.name if tenant else "Tablescope",
+                "project_url": f"{settings.app_base_url}/projects/{project.id}",
+            },
+            tenant_id=project.tenant_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to send project membership email to %s for project %s: %s",
+            user.email, project.id, exc,
+        )
+
+    return result
 
 
 @router.put("/{project_id}/members/{user_id}/role")

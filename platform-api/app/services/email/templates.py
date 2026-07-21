@@ -352,6 +352,29 @@ def _data_source_processing_failed(v: dict[str, str]) -> EmailContent:
     )
 
 
+def _project_membership(v: dict[str, str]) -> EmailContent:
+    project = (v.get("project_name") or "a project").strip()
+    actor = (v.get("actor_name") or "A Tablescope user").strip()
+    return EmailContent(
+        title=f"You have been added to {project}",
+        preview_text=f"{actor} added you to the {project} project on Tablescope.",
+        greeting=_greeting(v),
+        paragraphs=[
+            f"{actor} added you to the {project} project on Tablescope.",
+        ],
+        details=_opt_details(
+            v,
+            [
+                ("Project", "project_name"),
+                ("Added by", "actor_name"),
+                ("Role", "role_name"),
+                ("Workspace", "workspace_name"),
+            ],
+        ),
+        cta=CallToAction("Open project", v["project_url"]),
+    )
+
+
 _TEMPLATE_LIST: tuple[EmailTemplate, ...] = (
     EmailTemplate(
         "account_confirmation",
@@ -424,6 +447,12 @@ _TEMPLATE_LIST: tuple[EmailTemplate, ...] = (
         "Tablescope data source processing failed",
         ("workspace_url",),
         _data_source_processing_failed,
+    ),
+    EmailTemplate(
+        "project_membership",
+        "You have been added to a Tablescope project",
+        ("project_url",),
+        _project_membership,
     ),
 )
 

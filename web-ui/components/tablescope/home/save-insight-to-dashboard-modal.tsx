@@ -1,19 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   IconX,
   IconLoader2,
   IconDeviceFloppy,
   IconCheck,
-  IconAlertTriangle,
   IconFolderPlus,
   IconLayoutDashboard,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
-import { useProjectSummaries } from "@/lib/ui/use-shell-data";
 import {
   saveCardToDashboard,
   type InsightCard,
@@ -39,38 +37,30 @@ export function SaveInsightToDashboardModal({
   onSaved?: (dashboardId: number, dashboardName: string) => void;
 }) {
   const sourceProjectId = String(card.projectId);
-  const { data: projects = [] } = useProjectSummaries();
 
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(sourceProjectId);
   const [mode, setMode] = useState<"existing" | "new">("new");
   const [selectedDashboardId, setSelectedDashboardId] = useState<number | null>(null);
   const [newDashboardName, setNewDashboardName] = useState<string>("");
   const [widgetTitle, setWidgetTitle] = useState<string>(card.title || "");
   const [error, setError] = useState<string | null>(null);
 
-  const selectedProjectName = useMemo(
-    () => projects.find((p) => p.id === selectedProjectId)?.name,
-    [projects, selectedProjectId],
-  );
-
   const {
     data: dashboards = [],
     isLoading: dashboardsLoading,
     error: dashboardsError,
   } = useQuery({
-    queryKey: ["projects", selectedProjectId, "dashboards"],
+    queryKey: ["projects", sourceProjectId, "dashboards"],
     queryFn: async () => {
       const rows = await apiClient.get<DashboardListItem[]>(
-        `/api/projects/${selectedProjectId}/dashboards`,
+        `/api/projects/${sourceProjectId}/dashboards`,
       );
       return rows;
     },
-    enabled: !!selectedProjectId,
+    enabled: !!sourceProjectId,
   });
 
   useEffect(() => {
     if (!open) return;
-    setSelectedProjectId(sourceProjectId);
     setMode("new");
     setSelectedDashboardId(null);
     setNewDashboardName(`${card.title || "Insight"} Dashboard`.slice(0, 80));
@@ -96,8 +86,6 @@ export function SaveInsightToDashboardModal({
 
   if (!open) return null;
 
-  const isDifferentProject = selectedProjectId !== sourceProjectId;
-
   const canSubmit =
     widgetTitle.trim() &&
     (mode === "existing"
@@ -107,7 +95,8 @@ export function SaveInsightToDashboardModal({
   const handleSave = () => {
     if (!card.sql) return;
     const payload: SaveCardToDashboardPayload = {
-      project_id: Number(selectedProjectId),
+      project_id: Number(sourceProjectId),
+      source_project_id: Number(sourceProjectId),
       title: widgetTitle.trim(),
       sql: card.sql,
       chartType: card.chartType || "bar",
@@ -150,24 +139,13 @@ export function SaveInsightToDashboardModal({
             <label className="mb-1.5 block text-small font-medium text-ink-secondary">
               Project
             </label>
-            <select
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="h-9 w-full rounded-md border border-line-secondary bg-bg-primary px-3 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            {isDifferentProject && selectedProjectName && (
-              <p className="mt-1.5 flex items-start gap-1.5 text-small text-amber-600">
-                <IconAlertTriangle size={14} className="mt-0.5 shrink-0" />
-                Saving to a different project ({selectedProjectName}) from where this
-                insight was generated may require compatible data sources.
-              </p>
-            )}
+            <div className="flex items-center gap-2 rounded-md border border-line-tertiary bg-bg-secondary/50 px-3 py-2 text-[13px] text-ink-primary">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: card.projectColor }}
+              />
+              {card.projectName}
+            </div>
           </div>
 
           <div>

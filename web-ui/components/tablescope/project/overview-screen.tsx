@@ -12,6 +12,7 @@ import { ProjectShell } from "@/components/tablescope/project-shell";
 import { MembersDialog } from "@/components/tablescope/project/members-dialog";
 import { ShareToggle } from "@/components/tablescope/project/share-toggle";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
+import { ProjectFileDropzone } from "@/components/tablescope/project/project-file-dropzone";
 import {
   DataSourceResultView,
 } from "@/components/tablescope/project/detail-views";
@@ -484,6 +485,20 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             </>
           )}
         </OverviewAccordionSection>
+
+        <section className="space-y-2 rounded-xl border border-line-tertiary bg-bg-primary p-4">
+          <div>
+            <h3 className="text-h3 text-ink-primary">Add a data source</h3>
+            <p className="text-small text-ink-tertiary">
+              Upload a CSV or Excel file to this project; you will continue in
+              the Data Source Builder.
+            </p>
+          </div>
+          <ProjectFileDropzone
+            project={project ?? undefined}
+            tenantName={tenant.name}
+          />
+        </section>
       </div>
       )}
       <MembersDialog

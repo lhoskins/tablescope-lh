@@ -179,3 +179,73 @@ async def test_addable_users_forbidden_for_non_manager(
         headers=member_headers,
     )
     assert r.status_code == 403
+
+
+class _RecordingEmail:
+    calls: list[dict]
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def send_transactional_email(
+        self, *, to, template, variables, subject=None, reply_to=None, tenant_id=None
+    ) -> bool:
+        self.calls.append(
+            {
+                "to": to,
+                "template": template,
+                "variables": variables,
+                "tenant_id": tenant_id,
+            }
+        )
+        return True
+
+
+async def test_add_member_sends_project_membership_email(
+    client, service_headers, monkeypatch
+) -> None:
+    tenant, owner, member, owner_headers, project = await _setup(
+        client, service_headers
+    )
+
+    fake = _RecordingEmail()
+    monkeypatch.setattr("app.routes.projects.EmailService", lambda: fake)
+
+    r = await client.post(
+        f"/api/projects/{project['id']}/members",
+        json={"user_id": member["id"], "role": "editor"},
+        headers=owner_headers,
+    )
+    assert r.status_code == 201
+    assert r.json()["is_active"] is True
+
+    assert len(fake.calls) == 1
+    call = fake.calls[0]
+    assert call["to"] == member["email"]
+    assert call["template"] == "project_membership"
+    assert call["variables"]["project_name"] == project["name"]
+    assert call["tenant_id"] == tenant["id"]
+    assert "project_url" in call["variables"]
+
+
+class _FailingEmail:
+    async def send_transactional_email(self, **kwargs) -> bool:
+        raise RuntimeError("SMTP down")
+
+
+async def test_add_member_survives_email_failure(
+    client, service_headers, monkeypatch
+) -> None:
+    tenant, owner, member, owner_headers, project = await _setup(
+        client, service_headers
+    )
+
+    monkeypatch.setattr("app.routes.projects.EmailService", lambda: _FailingEmail())
+
+    r = await client.post(
+        f"/api/projects/{project['id']}/members",
+        json={"user_id": member["id"], "role": "viewer"},
+        headers=owner_headers,
+    )
+    assert r.status_code == 201
+    assert r.json()["is_active"] is True

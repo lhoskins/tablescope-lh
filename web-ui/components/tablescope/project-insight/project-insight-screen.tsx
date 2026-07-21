@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -12,12 +12,10 @@ import {
   IconBulb,
   IconTrendingUp,
   IconHelpCircle,
-  IconLayoutDashboard,
-  IconCode,
-  IconTargetArrow,
   IconCheck,
   IconChevronRight,
   IconSearch,
+  IconX,
   IconTable,
   IconFileText,
   IconLoader2,
@@ -32,16 +30,13 @@ import { canManageProjectActions } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
-import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
 import { cn } from "@/lib/cn";
 import {
   InsightPanel as Panel,
   PanelEmpty,
 } from "@/components/tablescope/insight-panel";
 import { AIQuestionResultModal } from "@/components/ai/AIQuestionResultModal";
-import { GenerateQueryPreviewModal } from "@/components/ai/GenerateQueryPreviewModal";
 import type { AiCardContext } from "@/lib/api/ai-actions";
-import { GenerateDashboardModal } from "@/components/tablescope/project-insight/generate-dashboard-modal";
 import { renderBold } from "@/components/tablescope/home/intelligence-card";
 import { InsightsPanel, HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import {
@@ -127,19 +122,12 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     source: string;
     cardContext?: AiCardContext;
   }>({ open: false, question: "", source: "" });
-  const [queryPreview, setQueryPreview] = useState<{
-    open: boolean;
-    question: string;
-    title: string;
-    description: string;
-    cardContext?: AiCardContext;
-  }>({ open: false, question: "", title: "", description: "" });
-  const [dashboardGen, setDashboardGen] = useState<{ open: boolean }>({
-    open: false,
-  });
-  const [customQuestion, setCustomQuestion] = useState("");
   const [createActionOpen, setCreateActionOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
+  const [dismissedAiUnavailable, setDismissedAiUnavailable] = useState(false);
+  const [dismissedGraphDisclosure, setDismissedGraphDisclosure] = useState(false);
+  const [loadErrorToasted, setLoadErrorToasted] = useState(false);
+  const [refreshErrorToasted, setRefreshErrorToasted] = useState(false);
 
   const { data, isLoading, isError, isFetching, dataUpdatedAt } =
     useQuery<ProjectInsight>({
@@ -176,6 +164,21 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     refresh.mutate();
     insightsQuery.refetch();
   };
+
+  useEffect(() => {
+    if (isError && !loadErrorToasted) {
+      push("Couldn't load Project Insight. Try refreshing.", "error");
+      setLoadErrorToasted(true);
+    }
+  }, [isError, loadErrorToasted, push]);
+
+  useEffect(() => {
+    if (refresh.isPending) setRefreshErrorToasted(false);
+    if (refresh.isError && !refreshErrorToasted) {
+      push("Project Insight refresh failed. Try again later.", "error");
+      setRefreshErrorToasted(true);
+    }
+  }, [refresh.isPending, refresh.isError, refreshErrorToasted, push]);
 
   const acknowledge = useMutation({
     mutationFn: (item: InsightWorkflowItem) =>
@@ -231,16 +234,9 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     setCreateActionOpen(true);
   };
 
-  const submitCustomQuestion = () => {
-    const q = customQuestion.trim();
-    if (!q) return;
-    askQuestion(q, "project_custom_question");
-    setCustomQuestion("");
-  };
-
   const openInAssistant = (question: string) => {
     setAskModal((m) => ({ ...m, open: false }));
-    router.push(`/projects/${projectId}/ai?q=${encodeURIComponent(question)}`);
+    router.push(`/ai?projectId=${projectId}&q=${encodeURIComponent(question)}`);
   };
 
   const es = data?.executiveSummary;
@@ -251,13 +247,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const questionsNeedingData = (data?.questionsNeedingData ?? []).filter((q) =>
     (q.question || q.businessQuestion || q.title)?.trim(),
   );
-  const dashboards = (data?.recommendedDashboards ?? []).filter((d) =>
-    d.title?.trim(),
-  );
-  const queries = (data?.recommendedQueries ?? []).filter((q) =>
-    q.title?.trim(),
-  );
-  const kpis = (data?.recommendedKpis ?? []).filter((k) => k.name?.trim());
+
   const reviewedItems: ReviewedInsight[] = reviewedQuery.data?.items ?? [];
   const reviewedIds = new Set(reviewedItems.map((i) => i.insightId));
 
@@ -394,11 +384,21 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
           />
         ) : !data ? null : (
           <>
-            {data.aiAvailable === false && (
-              <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-[13px] text-warning">
-                <IconAlertCircle size={15} />
-                AI insight is temporarily unavailable — showing activity only.
-                Try Refresh in a moment.
+            {data.aiAvailable === false && !dismissedAiUnavailable && (
+              <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-[13px] text-warning">
+                <IconAlertCircle size={15} className="mt-0.5 shrink-0" />
+                <p className="min-w-0 flex-1">
+                  AI insight is temporarily unavailable — showing activity only.
+                  Try Refresh in a moment.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setDismissedAiUnavailable(true)}
+                  className="shrink-0 text-warning hover:text-ink-primary"
+                  aria-label="Dismiss"
+                >
+                  <IconX size={14} />
+                </button>
               </div>
             )}
 
@@ -409,7 +409,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               </div>
             )}
 
-            {data.graphMode && data.graphMode !== "full" && (
+            {data.graphMode && data.graphMode !== "full" && !dismissedGraphDisclosure && (
               <div
                 className={cn(
                   "flex items-start gap-2 rounded-lg border px-3 py-2 text-[13px]",
@@ -423,7 +423,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 ) : (
                   <IconAlertCircle size={15} className="mt-0.5 shrink-0" />
                 )}
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p>{data.graphDisclosure}</p>
                   {data.graphBlockingReasons.length > 0 && (
                     <ul className="mt-1 list-disc pl-4 text-[12px]">
@@ -433,6 +433,17 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                     </ul>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setDismissedGraphDisclosure(true)}
+                  className={cn(
+                    "shrink-0 hover:text-ink-primary",
+                    data.graphMode === "blocked" ? "text-danger" : "text-warning",
+                  )}
+                  aria-label="Dismiss"
+                >
+                  <IconX size={14} />
+                </button>
               </div>
             )}
 
@@ -556,12 +567,12 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               />
             </div>
 
-            {/* Insights & Opportunities (collapsed by default) */}
+            {/* Insights & Opportunities (expanded by default) */}
             <Panel
               title="Insights & Opportunities"
               icon={<IconSparkles size={16} className="text-brand-500" />}
               collapsible
-              defaultOpen={false}
+              defaultOpen={true}
               count={insightCount}
             >
               {insightsQuery.isFetching && !insightsQuery.data ? (
@@ -635,144 +646,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               )}
             </Panel>
 
-            {/* Ask box — always visible between Questions and Recommendations */}
-            <div className="flex items-end gap-2 rounded-lg border border-line-tertiary bg-bg-primary px-4 py-3">
-              <AutosizeTextarea
-                value={customQuestion}
-                onChange={(e) => setCustomQuestion(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    submitCustomQuestion();
-                  }
-                }}
-                minRows={2}
-                maxRows={8}
-                placeholder="Ask a question about this project..."
-                aria-label="Ask a question about this project"
-                className="min-w-0 flex-1 text-[13px] text-ink-primary placeholder:text-ink-tertiary"
-              />
-              <div className="pb-0.5">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={!customQuestion.trim()}
-                  onClick={submitCustomQuestion}
-                >
-                  <IconSparkles size={14} />
-                  Ask
-                </Button>
-              </div>
-            </div>
 
-            {/* Recommendations (collapsed by default) — Dashboards | Queries | KPIs */}
-            <Panel
-              title="Recommendations"
-              icon={<IconBulb size={16} className="text-brand-500" />}
-              collapsible
-              defaultOpen={false}
-            >
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                <Panel
-                  title="Recommended Dashboards"
-                  icon={
-                    <IconLayoutDashboard
-                      size={16}
-                      className="text-brand-500"
-                    />
-                  }
-                >
-                  {dashboards.length === 0 ? (
-                    <PanelEmpty text="No dashboard suggestions." />
-                ) : (
-                  <div className="space-y-2.5">
-                    {dashboards.map((d) => (
-                      <SuggestionRow
-                        key={d.id}
-                        title={d.title ?? ""}
-                        subtitle={d.description || d.reason}
-                        status={d.status}
-                        action={d.action}
-                        onGenerate={() => setDashboardGen({ open: true })}
-                      />
-                    ))}
-                  </div>
-                )}
-              </Panel>
-
-              <Panel
-                title="Recommended Queries"
-                icon={<IconCode size={16} className="text-brand-500" />}
-              >
-                {queries.length === 0 ? (
-                  <PanelEmpty text="No query suggestions." />
-                ) : (
-                  <div className="space-y-2.5">
-                    {queries.map((q) => (
-                      <SuggestionRow
-                        key={q.id}
-                        title={q.title ?? ""}
-                        subtitle={q.businessQuestion || q.reason}
-                        status={q.status}
-                        action={q.action}
-                        onGenerate={() =>
-                          setQueryPreview({
-                            open: true,
-                            question:
-                              q.businessQuestion || q.title || "",
-                            title: q.title ?? "",
-                            description: q.businessQuestion || q.reason || "",
-                            cardContext: {
-                              source_tables: q.recommendedTables,
-                              source_columns: q.sourceColumns,
-                              metric: q.metric,
-                            },
-                          })
-                        }
-                      />
-                    ))}
-                  </div>
-                )}
-              </Panel>
-
-              <Panel
-                title="Recommended KPIs"
-                icon={<IconTargetArrow size={16} className="text-brand-500" />}
-              >
-                {kpis.length === 0 ? (
-                  <PanelEmpty text="No KPI suggestions." />
-                ) : (
-                  <div className="space-y-2.5">
-                    {kpis.map((k) => (
-                      <div
-                        key={k.id}
-                        className="rounded-md border border-line-tertiary px-3 py-2"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[13px] font-medium text-ink-primary">
-                            {k.name}
-                          </span>
-                          <KpiStatusBadge status={k.status} />
-                        </div>
-                        {(k.currentValue !== null &&
-                          k.currentValue !== undefined) && (
-                          <div className="mt-0.5 text-[15px] font-semibold text-ink-primary">
-                            {k.currentValue}
-                            {k.unit ? ` ${k.unit}` : ""}
-                          </div>
-                        )}
-                        {k.description && (
-                          <div className="mt-0.5 text-small text-ink-tertiary">
-                            {k.description}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Panel>
-              </div>
-            </Panel>
           </>
         )}
       </div>
@@ -786,34 +660,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
         onOpenAssistant={openInAssistant}
         notify={push}
       />
-      <GenerateQueryPreviewModal
-        open={queryPreview.open}
-        projectId={projectId}
-        question={queryPreview.question}
-        title={queryPreview.title}
-        description={queryPreview.description}
-        cardContext={queryPreview.cardContext}
-        onClose={() => setQueryPreview((m) => ({ ...m, open: false }))}
-        onSaved={() => {
-          queryClient.invalidateQueries({
-            queryKey: ["project", projectId, "queries"],
-          });
-        }}
-        notify={push}
-      />
-      {dashboardGen.open && (
-        <GenerateDashboardModal
-          open={dashboardGen.open}
-          projectId={projectId}
-          onClose={() => setDashboardGen({ open: false })}
-          onSaved={() => {
-            queryClient.invalidateQueries({
-              queryKey: ["project", projectId, "dashboards"],
-            });
-          }}
-          notify={push}
-        />
-      )}
+
       <CreateActionFromInsightDialog
         open={createActionOpen}
         onClose={() => setCreateActionOpen(false)}
@@ -1123,87 +970,6 @@ function InsightCardItem({
         />
       )}
     </article>
-  );
-}
-
-function statusLabel(status?: string): string {
-  switch (status) {
-    case "saved":
-    case "generated":
-      return "Open";
-    case "measured":
-      return "Measured";
-    case "partially_measured":
-      return "Partial";
-    case "missing_data":
-      return "Missing Data";
-    default:
-      return "Suggested";
-  }
-}
-
-function SuggestionRow({
-  title,
-  subtitle,
-  status,
-  action,
-  onGenerate,
-}: {
-  title: string;
-  subtitle?: string;
-  status?: string;
-  action?: string;
-  onGenerate?: () => void;
-}) {
-  const actionLabel =
-    action === "open"
-      ? "Open"
-      : action === "run"
-        ? "Run"
-        : action === "save"
-          ? "Save"
-          : "Generate";
-  return (
-    <div className="rounded-md border border-line-tertiary px-3 py-2">
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-[13px] font-medium text-ink-primary">{title}</span>
-        <Badge
-          tone={status === "saved" || status === "measured" ? "success" : "brand"}
-          size="sm"
-        >
-          {statusLabel(status)}
-        </Badge>
-      </div>
-      {subtitle && (
-        <div className="mt-0.5 text-small text-ink-tertiary">{subtitle}</div>
-      )}
-      <div className="mt-1.5">
-        {onGenerate ? (
-          <Button variant="secondary" size="sm" onClick={onGenerate}>
-            <IconSparkles size={13} />
-            {actionLabel}
-          </Button>
-        ) : (
-          <Badge tone="outline" size="sm">
-            {actionLabel}
-          </Badge>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function KpiStatusBadge({ status }: { status?: string }) {
-  const tone =
-    status === "measured"
-      ? "success"
-      : status === "missing_data"
-        ? "warning"
-        : "brand";
-  return (
-    <Badge tone={tone} size="sm">
-      {statusLabel(status)}
-    </Badge>
   );
 }
 

@@ -1162,6 +1162,7 @@ async def home_save_dashboard(
 
 class SaveCardToDashboardRequest(BaseModel):
     project_id: int
+    source_project_id: int | None = None
     dashboard_id: int | None = None
     dashboard_name: str | None = None
     title: str
@@ -1187,6 +1188,15 @@ async def save_card_to_dashboard(
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Project not editable"
+        )
+
+    if (
+        req.source_project_id is not None
+        and req.source_project_id != project.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Dashboard project must match the insight's source project",
         )
 
     sql = (req.sql or "").strip().rstrip(";")

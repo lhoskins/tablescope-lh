@@ -526,6 +526,7 @@ export function saveDashboardSuggestion(body: {
 
 export interface SaveCardToDashboardPayload {
   project_id: number;
+  source_project_id?: number | null;
   dashboard_id?: number | null;
   dashboard_name?: string | null;
   title: string;

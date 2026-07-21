@@ -12,7 +12,6 @@ import {
 import { AppShell } from "@/components/tablescope/app-shell";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { ProjectRowActions } from "@/components/tablescope/project/project-row-actions";
-import { ProjectFileDropzone } from "@/components/tablescope/project/project-file-dropzone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
@@ -113,17 +112,6 @@ export default function ProjectsPage() {
             className="h-9 w-full rounded-md border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
           />
         </div>
-
-        <section className="space-y-2">
-          <div>
-            <h3 className="text-h3 text-ink-primary">Add a data source</h3>
-            <p className="text-small text-ink-tertiary">
-              Upload a CSV or Excel file; you will continue in the Data Source
-              Builder to assign it to a project.
-            </p>
-          </div>
-          <ProjectFileDropzone tenantName={tenant.name} />
-        </section>
 
         <ProjectAccordionSection
           type="private"
