@@ -89,6 +89,7 @@ from app.models.project_insight_acknowledgement import (
 from app.models.project_intelligence_snapshot import (
     ProjectIntelligenceSnapshot,
 )
+from app.models.project_action import ProjectAction, ProjectActionSubtask
 from app.models.query_scope import QueryScope
 from app.models.reference_library import (
     ReferenceAdditionRequest,
@@ -186,6 +187,8 @@ __all__ = [
     "ProjectGoalRiskLink",
     "ProjectInsightAcknowledgement",
     "ProjectIntelligenceSnapshot",
+    "ProjectAction",
+    "ProjectActionSubtask",
     "ProjectMember",
     "ProjectMetric",
     "ProjectMetricTarget",

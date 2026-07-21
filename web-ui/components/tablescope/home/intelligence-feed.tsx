@@ -49,6 +49,7 @@ function Section({
   onPin,
   onFeedbackSave,
   onFeedbackRemove,
+  onCreateAction,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -62,6 +63,7 @@ function Section({
   onPin?: (card: InsightCard) => void;
   onFeedbackSave?: (card: InsightCard, payload: Omit<SaveInsightFeedbackArgs, "insightId" | "projectId" | "insightType" | "cardSnapshot" | "explanationSnapshot">) => void;
   onFeedbackRemove?: (card: InsightCard) => void;
+  onCreateAction?: (card: InsightCard) => void;
 }) {
   return (
     <InsightPanel title={title} icon={icon} collapsible defaultOpen={defaultOpen} count={cards.length}>
@@ -85,6 +87,7 @@ function Section({
               onFeedbackRemove={
                 onFeedbackRemove ? () => onFeedbackRemove(card) : undefined
               }
+              onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
             />
           ))}
         </div>
@@ -95,6 +98,7 @@ function Section({
 
 export interface IntelligenceFeedProps {
   onPin?: (card: InsightCard) => void;
+  onCreateAction?: (card: InsightCard) => void;
   /** Accessible projects used to populate the filter and default selection. */
   availableProjects?: FilterableProject[];
 }
@@ -103,6 +107,7 @@ const EMPTY_PROJECTS: FilterableProject[] = [];
 
 export function IntelligenceFeed({
   onPin,
+  onCreateAction,
   availableProjects: propAvailableProjects,
 }: IntelligenceFeedProps = {}) {
   // Normalize the accessible project list to a stable reference so the filter
@@ -528,6 +533,7 @@ export function IntelligenceFeed({
               onPin={onPin}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
+              onCreateAction={onCreateAction}
             />
             <Section
               title="Trends"
@@ -542,6 +548,7 @@ export function IntelligenceFeed({
               onPin={onPin}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
+              onCreateAction={onCreateAction}
             />
             <Section
               title="Opportunities"
@@ -556,6 +563,7 @@ export function IntelligenceFeed({
               onPin={onPin}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
+              onCreateAction={onCreateAction}
             />
 
             {pending.length > 0 && (

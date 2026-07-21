@@ -17,7 +17,7 @@ export interface AppShellProps {
   user: CurrentUser;
   project?: ProjectSummary | null;
   otherProjects?: ProjectSummary[];
-  counts?: Partial<Record<"projects" | "queries" | "documents", number>>;
+  counts?: Partial<Record<"projects" | "queries" | "documents" | "actionCount", number>>;
   /** Top bar content (left/right). Falls back to a bare bar when omitted. */
   topBarLeft?: ReactNode;
   topBarRight?: ReactNode;

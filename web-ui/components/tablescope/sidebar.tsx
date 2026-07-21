@@ -48,7 +48,7 @@ export interface SidebarProps {
   user: CurrentUser;
   project?: ProjectSummary | null;
   otherProjects?: ProjectSummary[];
-  counts?: Partial<Record<"projects" | "queries" | "documents", number>>;
+  counts?: Partial<Record<"projects" | "queries" | "documents" | "actionCount", number>>;
 }
 
 function NavRow({

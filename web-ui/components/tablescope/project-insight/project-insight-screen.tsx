@@ -22,10 +22,13 @@ import {
   IconFileText,
   IconLoader2,
   IconInfoCircle,
+  IconClipboardList,
   IconThumbUp,
   IconThumbDown,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
+import { useCurrentUser } from "@/lib/ui/use-shell-data";
+import { canManageProjectActions } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
@@ -47,6 +50,10 @@ import {
 import {
   InsightFeedbackDialog,
 } from "@/components/tablescope/home/insight-feedback-dialog";
+import {
+  CreateActionFromInsightDialog,
+  type ActionableInsight,
+} from "@/components/tablescope/project-actions/create-action-from-insight-dialog";
 import {
   suggestInsights,
   type InsightCard as InsightCardData,
@@ -131,6 +138,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     open: false,
   });
   const [customQuestion, setCustomQuestion] = useState("");
+  const [createActionOpen, setCreateActionOpen] = useState(false);
+  const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
 
   const { data, isLoading, isError, isFetching, dataUpdatedAt } =
     useQuery<ProjectInsight>({
@@ -202,6 +211,25 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
 
   const investigateCard = (card: ProjectInsightCard, source: string) =>
     askQuestion(card.question, source, cardContextFromCard(card));
+
+  const handleCreateAction = (card: ProjectInsightCard) => {
+    const projectName = data?.project.name ?? "";
+    const insight: ActionableInsight = {
+      insightId: card.id,
+      insightType: card.insightType,
+      title: card.title,
+      summary: card.summary,
+      severity: card.severity,
+      projectId,
+      projectName,
+      recommendedAction: card.recommendedAction || null,
+      sources: { tables: card.sourceTables ?? [], documents: [] },
+      supportingSources: card.supportingSources ?? card.sourceTables ?? [],
+      explanation: card.explanation as Record<string, unknown> | undefined,
+    };
+    setSelectedInsight(insight);
+    setCreateActionOpen(true);
+  };
 
   const submitCustomQuestion = () => {
     const q = customQuestion.trim();
@@ -480,6 +508,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 onReview={reviewCard}
                 onFeedbackSave={handleFeedbackSave}
                 onFeedbackRemove={handleFeedbackRemove}
+                onCreateAction={handleCreateAction}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
               />
@@ -501,6 +530,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 onReview={reviewCard}
                 onFeedbackSave={handleFeedbackSave}
                 onFeedbackRemove={handleFeedbackRemove}
+                onCreateAction={handleCreateAction}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
               />
@@ -520,6 +550,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 onReview={reviewCard}
                 onFeedbackSave={handleFeedbackSave}
                 onFeedbackRemove={handleFeedbackRemove}
+                onCreateAction={handleCreateAction}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
               />
@@ -783,6 +814,12 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
           notify={push}
         />
       )}
+      <CreateActionFromInsightDialog
+        open={createActionOpen}
+        onClose={() => setCreateActionOpen(false)}
+        insight={selectedInsight}
+      />
+
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );
@@ -844,6 +881,7 @@ function InsightCardColumn({
   onReview,
   onFeedbackSave,
   onFeedbackRemove,
+  onCreateAction,
   reviewPending,
   reviewPendingId,
 }: {
@@ -864,6 +902,7 @@ function InsightCardColumn({
     comment: string;
   }) => void;
   onFeedbackRemove?: (card: ProjectInsightCard) => void;
+  onCreateAction?: (card: ProjectInsightCard) => void;
   reviewPending: boolean;
   reviewPendingId?: string;
 }) {
@@ -886,6 +925,7 @@ function InsightCardColumn({
               onReview={() => onReview(card)}
               onFeedbackSave={onFeedbackSave ? (payload) => onFeedbackSave(card, payload) : undefined}
               onFeedbackRemove={onFeedbackRemove ? () => onFeedbackRemove(card) : undefined}
+              onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
               reviewPending={reviewPending && reviewPendingId === card.id}
             />
           ))}
@@ -906,6 +946,7 @@ function InsightCardItem({
   onReview,
   onFeedbackSave,
   onFeedbackRemove,
+  onCreateAction,
   reviewPending,
 }: {
   card: ProjectInsightCard;
@@ -922,11 +963,16 @@ function InsightCardItem({
     comment: string;
   }) => void;
   onFeedbackRemove?: () => void;
+  onCreateAction?: () => void;
   reviewPending: boolean;
 }) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const hasFeedback = feedback != null && feedback.status === "active";
+  const { data: identity } = useCurrentUser();
+  const canCreateAction =
+    onCreateAction &&
+    canManageProjectActions(identity?.user?.rawRole, identity?.user?.isSuperAdmin);
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.informational;
 
   const tables = card.sourceTables ?? card.supportingSources.filter(
@@ -1025,6 +1071,16 @@ function InsightCardItem({
           <IconInfoCircle size={13} />
           Explain
         </button>
+        {canCreateAction && (
+          <button
+            type="button"
+            onClick={onCreateAction}
+            className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+          >
+            <IconClipboardList size={13} />
+            Action
+          </button>
+        )}
         {onFeedbackSave && (
           <button
             type="button"

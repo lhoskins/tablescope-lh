@@ -29,6 +29,7 @@ interface ProjectSummaryResponse {
   document_count: number;
   query_count: number;
   dashboard_count: number;
+  action_count: number;
   member_count: number;
   data_source_count: number;
   ai_status: string;
@@ -99,6 +100,7 @@ export function mapProjectSummary(p: ProjectSummaryResponse): ProjectSummary {
     documentCount: p.document_count,
     queryCount: p.query_count,
     dashboardCount: p.dashboard_count,
+    actionCount: p.action_count,
     aiStatus: toAiStatus(p.ai_status),
     accent: accentFor(id),
   };

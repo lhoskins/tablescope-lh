@@ -30,6 +30,7 @@ from app.models.data_source_ai_profile import (
 from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project, ProjectMember
+from app.models.project_action import ProjectAction
 from app.models.project_asset import ProjectAsset
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
@@ -163,6 +164,16 @@ async def list_project_summaries(
     asset_counts = await _grouped_counts(ProjectAsset)
     member_counts = await _grouped_counts(ProjectMember)
 
+    action_result = await session.execute(
+        select(ProjectAction.project_id, func.count())
+        .where(
+            ProjectAction.project_id.in_(ids),
+            ProjectAction.archived_at.is_(None),
+        )
+        .group_by(ProjectAction.project_id)
+    )
+    action_counts = {pid: count for pid, count in action_result.all()}
+
     indexing_states = ("processing", "indexing", "pending")
     ready_states = ("ready", "completed", "indexed", "complete")
 
@@ -200,6 +211,7 @@ async def list_project_summaries(
                 document_count=doc_count,
                 query_count=q_count,
                 dashboard_count=d_count,
+                action_count=action_counts.get(p.id, 0),
                 member_count=member_counts.get(p.id, 0),
                 data_source_count=0,
                 ai_status=ai_status,

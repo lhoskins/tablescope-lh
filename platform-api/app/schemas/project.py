@@ -49,6 +49,7 @@ class ProjectSummaryRead(BaseModel):
     document_count: int = 0
     query_count: int = 0
     dashboard_count: int = 0
+    action_count: int = 0
     member_count: int = 0
     data_source_count: int = 0
     ai_status: str = "idle"
