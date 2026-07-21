@@ -465,7 +465,7 @@ async def list_actions(
                 status=a.status,
                 priority=a.priority,
                 owner_user_id=a.owner_user_id,
-                owner_name=users.get(a.owner_user_id),
+                owner_name=users.get(a.owner_user_id) if a.owner_user_id is not None else None,
                 due_date=a.due_date,
                 percent_complete=a.percent_complete,
                 source_insight_type=a.source_insight_type,
