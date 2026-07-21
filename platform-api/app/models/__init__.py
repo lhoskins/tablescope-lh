@@ -71,6 +71,7 @@ from app.models.mfa_phone_factor import MfaPhoneFactor
 from app.models.mfa_sms_event import MfaSmsEvent
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
+from app.models.project_action import ProjectAction, ProjectActionSubtask
 from app.models.project_asset import ProjectAsset
 from app.models.project_context import (
     ProjectBusinessContext,
@@ -89,7 +90,6 @@ from app.models.project_insight_acknowledgement import (
 from app.models.project_intelligence_snapshot import (
     ProjectIntelligenceSnapshot,
 )
-from app.models.project_action import ProjectAction, ProjectActionSubtask
 from app.models.query_scope import QueryScope
 from app.models.reference_library import (
     ReferenceAdditionRequest,
