@@ -1,9 +1,11 @@
+import { use } from "react";
 import { ProjectActionDetail } from "@/components/tablescope/project-actions/project-action-detail";
 
 export default function ProjectActionDetailPage({
   params,
 }: {
-  params: { id: string; actionId: string };
+  params: Promise<{ id: string; actionId: string }>;
 }) {
-  return <ProjectActionDetail projectId={params.id} actionId={Number(params.actionId)} />;
+  const { id, actionId } = use(params);
+  return <ProjectActionDetail projectId={id} actionId={Number(actionId)} />;
 }
