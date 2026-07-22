@@ -55,6 +55,9 @@ export interface MethodEnvelope {
   assumptions?: unknown[];
   caveats?: unknown[];
   warnings?: unknown[];
+  executionEngine?: string | null;
+  resultSchemaVersion?: number | null;
+  chartContract?: Record<string, unknown> | null;
 }
 
 /**

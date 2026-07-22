@@ -63,3 +63,26 @@ def test_parameter_hash_changes_with_roles() -> None:
         registry_version=1,
     )
     assert a["audit"]["parameterHash"] != b["audit"]["parameterHash"]
+
+
+def test_envelope_includes_engine_and_chart_contract() -> None:
+    method = {
+        "method_id": "r_descriptive_profile",
+        "display_name": "R Describe",
+        "execution_engine": "r",
+        "result_schema_version": 2,
+        "chart_contract": {"renderer": "echarts", "type": "line"},
+    }
+    envelope = result_envelope.build(
+        intent="describe_numeric",
+        profile={"hash": "h"},
+        method=method,
+        roles={"value": "x"},
+        selection_reasons=[],
+        alternatives=[],
+        exec_result={"status": "ok", "n": 5, "results": {"mean": 3}},
+        registry_version=1,
+    )
+    assert envelope["executionEngine"] == "r"
+    assert envelope["resultSchemaVersion"] == 2
+    assert envelope["chartContract"] == {"renderer": "echarts", "type": "line"}
