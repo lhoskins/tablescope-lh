@@ -32,6 +32,7 @@ class AuthTokenResponse(BaseModel):
     role: str
     is_super_admin: bool = False
     tenant_slug: str | None = None
+    permissions: list[str] = Field(default_factory=list)
 
 
 class CurrentUserResponse(BaseModel):
@@ -49,3 +50,4 @@ class CurrentUserResponse(BaseModel):
     tenant_slug: str | None = None
     avatar_url: str | None = None
     company_logo_url: str | None = None
+    permissions: list[str] = Field(default_factory=list)

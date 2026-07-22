@@ -18,6 +18,7 @@ from app.auth.clerk import verify_external_token
 from app.auth.context import RequestContext
 from app.auth.jwt import AuthError, create_access_token
 from app.auth.membership import require_membership
+from app.auth.rbac import Role, has_role
 from app.config import get_settings
 from app.database import get_db
 from app.models.tenant import Tenant
@@ -33,6 +34,19 @@ from app.services.mfa_phone_service import mfa_aal_for_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _permissions_for_user(role: str, is_super_admin: bool = False) -> list[str]:
+    """Derive fine-grained permissions from the user's role.
+
+    This is a safe initial mapping until a dedicated permission-assignment UI
+    exists. Tenant and root admins inherit the insight feedback reviewer right
+    without needing an explicit ``insight_feedback.review`` permission claim.
+    """
+    permissions: list[str] = []
+    if is_super_admin or has_role(role, Role.ADMIN):
+        permissions.append("insight_feedback.review")
+    return permissions
 
 
 @router.get("/me", response_model=CurrentUserResponse)
@@ -58,6 +72,7 @@ async def get_current_user(
         tenant_slug=tenant.slug if tenant else None,
         avatar_url=user.avatar_url,
         company_logo_url=tenant.logo_url if tenant else None,
+        permissions=_permissions_for_user(user.role, user.is_super_admin),
     )
 
 
@@ -126,11 +141,13 @@ async def exchange_token(
     # Derive the assurance level from the user's verified-phone record: aal2
     # while a recent SMS verification window is open, else aal1. This lets a
     # reload / re-login inside the window skip the SMS challenge.
+    permissions = _permissions_for_user(user.role, user.is_super_admin)
     access_token = create_access_token(
         sub=external_user_id,
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
+        permissions=permissions,
         extra_claims={"aal": await mfa_aal_for_user(session, user.id)},
     )
     tenant = await session.get(Tenant, user.tenant_id)
@@ -142,6 +159,7 @@ async def exchange_token(
         role=user.role,
         is_super_admin=user.is_super_admin,
         tenant_slug=tenant.slug if tenant else None,
+        permissions=permissions,
     )
 
 
@@ -172,11 +190,13 @@ async def direct_login(
         purpose="access",
     )
 
+    permissions = _permissions_for_user(user.role, user.is_super_admin)
     access_token = create_access_token(
         sub=user.external_id or str(user.id),
         tenant_id=user.tenant_id,
         user_id=user.id,
         role=user.role,
+        permissions=permissions,
         extra_claims={"aal": await mfa_aal_for_user(session, user.id)},
     )
     login_tenant = await session.get(Tenant, user.tenant_id)
@@ -188,4 +208,5 @@ async def direct_login(
         role=user.role,
         is_super_admin=user.is_super_admin,
         tenant_slug=login_tenant.slug if login_tenant else None,
+        permissions=permissions,
     )

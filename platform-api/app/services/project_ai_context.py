@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.insight_feedback import InsightFeedback
 from app.models.project import Project
 from app.models.project_action import ProjectAction
 from app.models.project_context import (
@@ -293,6 +294,68 @@ async def _load_actions_package(
     }
 
 
+async def _load_feedback_context(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_id: int,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Load governed insight feedback results for the project AI context.
+
+    Only terminal reviewer dispositions are included, with no private submitter
+    identity or raw comments. The insight snapshot is identified by insight_id so
+    the AI can treat accepted feedback as disputed and upheld feedback as validated.
+    """
+    rows = (
+        await session.execute(
+            select(
+                InsightFeedback.insight_id,
+                InsightFeedback.review_status,
+                InsightFeedback.reviewed_at,
+            )
+            .where(
+                InsightFeedback.tenant_id == tenant_id,
+                InsightFeedback.project_id == project_id,
+                InsightFeedback.status == "active",
+                InsightFeedback.review_status.in_(
+                    ["accepted", "rejected", "pending", "in_review", "needs_more_information"]
+                ),
+            )
+            .order_by(InsightFeedback.updated_at.desc())
+            .limit(limit)
+        )
+    ).all()
+
+    items = []
+    for insight_id, review_status, reviewed_at in rows:
+        label = {
+            "accepted": "disputed",
+            "rejected": "validated",
+            "pending": "under_review",
+            "in_review": "under_review",
+            "needs_more_information": "under_review",
+        }.get(review_status, review_status)
+        items.append(
+            {
+                "insight_id": insight_id,
+                "governance_label": label,
+                "reviewed_at": reviewed_at.isoformat() if reviewed_at else None,
+            }
+        )
+
+    return {
+        "count": len(items),
+        "items": items,
+        "instruction": (
+            "Insight feedback is governed human review. Accepted feedback means the "
+            "insight is disputed and should be regenerated before being relied upon. "
+            "Upheld feedback means the insight was validated by a reviewer. "
+            "Pending or in-review feedback means the insight is under review."
+        ),
+    }
+
+
 async def build_project_ai_context(
     session: AsyncSession,
     *,
@@ -323,11 +386,16 @@ async def build_project_ai_context(
     actions_package = await _load_actions_package(
         session, tenant_id=tenant_id, project_id=project_id, now=now
     )
+    feedback_context = await _load_feedback_context(
+        session, tenant_id=tenant_id, project_id=project_id
+    )
 
     cached = cache.get(tenant_id, project_id, version)
     if cached is not None:
         cached.update(actions_package)
         cached["actions_fresh_at"] = now.isoformat()
+        cached.update(feedback_context)
+        cached["feedback_fresh_at"] = now.isoformat()
         return cached
 
     if settings is None or not settings.ai_context_enabled:
@@ -346,6 +414,8 @@ async def build_project_ai_context(
         }
         result.update(actions_package)
         result["actions_fresh_at"] = now.isoformat()
+        result.update(feedback_context)
+        result["feedback_fresh_at"] = now.isoformat()
         cache.set(tenant_id, project_id, version, result)
         return result
 
@@ -447,13 +517,19 @@ async def build_project_ai_context(
             }
         )
 
-    # 5. Token budget enforcement: drop lower-priority items if oversized.
+    # 5. Governed insight feedback (bounded, no private identity/comments).
+    feedback_package = await _load_feedback_context(
+        session, tenant_id=tenant_id, project_id=project_id
+    )
+
+    # 6. Token budget enforcement: drop lower-priority items if oversized.
     package: dict[str, Any] = {
         "project": project_block,
         "ai_context_enabled": True,
         "goals": goals_package,
         "metrics": metrics_package,
         "risks": risks_package,
+        "feedback": feedback_package,
         "instructions": instructions,
         "interpretation_notes": interpretation_notes,
         "version": version,

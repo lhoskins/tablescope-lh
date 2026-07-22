@@ -37,7 +37,7 @@ import {
   type HomePin,
 } from "@/lib/api/home-pins";
 import type { InsightCard } from "@/lib/api/home-intelligence";
-import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
+import type { GovernanceItem, InsightFeedbackRecord } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import {
   CreateActionFromInsightDialog,
@@ -62,7 +62,9 @@ function PinCard({
   onRefresh,
   onFeedbackSave,
   onFeedbackRemove,
+  onFeedbackRespond,
   onCreateAction,
+  governance,
 }: {
   pin: HomePinItem;
   feedback?: InsightFeedbackRecord | null;
@@ -75,7 +77,9 @@ function PinCard({
     comment: string;
   }) => void;
   onFeedbackRemove?: (pin: HomePinItem) => void;
+  onFeedbackRespond?: (pin: HomePinItem, response: string) => void;
   onCreateAction?: (pin: HomePinItem) => void;
+  governance?: GovernanceItem | null;
 }) {
   const isLive = pin.pin_type === "live_widget";
   const isInsight = pin.pin_type === "insight_card";
@@ -117,7 +121,9 @@ function PinCard({
             savingFeedback={savingFeedback}
             onFeedbackSave={onFeedbackSave}
             onFeedbackRemove={onFeedbackRemove}
+            onFeedbackRespond={onFeedbackRespond}
             onCreateAction={onCreateAction}
+            governance={governance}
           />
         </div>
         {pin.refresh_error && (
@@ -147,7 +153,9 @@ function PinCard({
           savingFeedback={savingFeedback}
           onFeedbackSave={onFeedbackSave}
           onFeedbackRemove={onFeedbackRemove}
+          onFeedbackRespond={onFeedbackRespond}
           onCreateAction={onCreateAction}
+          governance={governance}
         />
       </div>
       {pin.refresh_error && (
@@ -165,7 +173,9 @@ function PinContent({
   savingFeedback,
   onFeedbackSave,
   onFeedbackRemove,
+  onFeedbackRespond,
   onCreateAction,
+  governance,
 }: {
   pin: HomePinItem;
   feedback?: InsightFeedbackRecord | null;
@@ -176,7 +186,9 @@ function PinContent({
     comment: string;
   }) => void;
   onFeedbackRemove?: (pin: HomePinItem) => void;
+  onFeedbackRespond?: (pin: HomePinItem, response: string) => void;
   onCreateAction?: (pin: HomePinItem) => void;
+  governance?: GovernanceItem | null;
 }) {
   if (pin.pin_type === "insight_card") {
     const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
@@ -198,9 +210,13 @@ function PinContent({
         onFeedbackRemove={
           onFeedbackRemove ? () => onFeedbackRemove(pin) : undefined
         }
+        onFeedbackRespond={
+          onFeedbackRespond ? (response) => onFeedbackRespond(pin, response) : undefined
+        }
         onCreateAction={
           onCreateAction ? () => onCreateAction(pin) : undefined
         }
+        governance={governance}
       />
     );
   }
@@ -241,8 +257,10 @@ export function HomePinsGrid() {
   );
   const {
     feedbackById,
+    governanceById,
     saveFeedback,
     removeFeedback,
+    respondToReview,
     saving: savingFeedback,
   } = useInsightFeedback(insightIds);
 
@@ -299,6 +317,13 @@ export function HomePinsGrid() {
     const projectId = pin.project_id ?? Number(card.projectId);
     if (!insightId || !projectId) return;
     void removeFeedback({ insightId, projectId });
+  };
+
+  const handleFeedbackRespond = (pin: HomePinItem, response: string) => {
+    const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
+    const insightId = card.insightId || card.id;
+    if (!insightId) return;
+    void respondToReview({ insightId, response });
   };
 
   const handleCreateAction = (pin: HomePinItem) => {
@@ -504,7 +529,9 @@ export function HomePinsGrid() {
                     onRefresh={() => refreshMutation.mutate()}
                     onFeedbackSave={handleFeedbackSave}
                     onFeedbackRemove={handleFeedbackRemove}
+                    onFeedbackRespond={handleFeedbackRespond}
                     onCreateAction={handleCreateAction}
+                    governance={governanceById[insightId]}
                   />
                 </div>
               );

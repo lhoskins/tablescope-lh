@@ -21,14 +21,14 @@ export interface InsightFeedbackDialogProps {
   onClose: () => void;
   /** The current feedback record for this insight, if any. */
   feedback: InsightFeedbackRecord | null;
+  /** The sentiment to preselect when the dialog opens. */
+  initialSentiment?: InsightSentiment | null;
   onSave: (payload: {
     sentiment: InsightSentiment;
     reason_codes: string[];
     comment: string;
   }) => void | Promise<void>;
   onRemove: () => void | Promise<void>;
-  /** Pre-selected sentiment when opening the dialog for a new feedback action. */
-  initialSentiment?: InsightSentiment;
   /** Whether the save/remove mutation is in flight. */
   saving?: boolean;
 }
@@ -38,31 +38,25 @@ export function InsightFeedbackDialog({
   open,
   onClose,
   feedback,
+  initialSentiment,
   onSave,
   onRemove,
-  initialSentiment,
   saving = false,
 }: InsightFeedbackDialogProps) {
-  const [sentiment, setSentiment] = useState<InsightSentiment>("agree");
+  const [sentiment, setSentiment] = useState<InsightSentiment | null>(null);
   const [reasonCodes, setReasonCodes] = useState<string[]>([]);
   const [comment, setComment] = useState("");
+  const [commentError, setCommentError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setSentiment(
-      initialSentiment ||
-        (feedback?.sentiment as InsightSentiment) ||
-        "agree",
-    );
+    const starting =
+      initialSentiment ?? (feedback?.sentiment as InsightSentiment) ?? null;
+    setSentiment(starting);
     setReasonCodes(feedback?.reason_codes ?? []);
     setComment(feedback?.comment ?? "");
-  }, [
-    open,
-    initialSentiment,
-    feedback?.sentiment,
-    feedback?.reason_codes,
-    feedback?.comment,
-  ]);
+    setCommentError(null);
+  }, [open, initialSentiment, feedback?.sentiment, feedback?.reason_codes, feedback?.comment]);
 
   if (!open) return null;
 
@@ -72,8 +66,31 @@ export function InsightFeedbackDialog({
     );
   };
 
-  const canSave = sentiment === "agree" || sentiment === "disagree";
+  const handleCommentChange = (value: string) => {
+    setComment(value);
+    if (commentError && value.trim().length > 0) {
+      setCommentError(null);
+    }
+  };
+
+  const trimmedComment = comment.trim();
+  const canSave =
+    (sentiment === "agree" || sentiment === "disagree") &&
+    trimmedComment.length > 0;
   const hasExisting = feedback != null && feedback.status === "active";
+
+  const handleSave = () => {
+    if (!trimmedComment) {
+      setCommentError("A comment is required for all feedback.");
+      return;
+    }
+    if (!sentiment) return;
+    void onSave({
+      sentiment,
+      reason_codes: sentiment === "disagree" ? reasonCodes : [],
+      comment: trimmedComment,
+    });
+  };
 
   return (
     <div
@@ -118,34 +135,36 @@ export function InsightFeedbackDialog({
 
         <div className="mt-5">
           <label className="mb-2 block text-small font-medium text-ink-secondary">
-            Do you agree with this insight?
+            Do you agree or disagree with this insight?
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="flex gap-2">
             <button
               type="button"
               onClick={() => setSentiment("agree")}
               aria-pressed={sentiment === "agree"}
-              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-[13px] font-medium transition ${
+              aria-label="Agree with insight"
+              title="Agree with insight"
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition ${
                 sentiment === "agree"
                   ? "border-success bg-success/10 text-success"
                   : "border-line-secondary bg-bg-secondary text-ink-secondary hover:border-line-primary"
               }`}
             >
               <IconThumbUp size={16} />
-              Agree
             </button>
             <button
               type="button"
               onClick={() => setSentiment("disagree")}
               aria-pressed={sentiment === "disagree"}
-              className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-[13px] font-medium transition ${
+              aria-label="Disagree with insight"
+              title="Disagree with insight"
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition ${
                 sentiment === "disagree"
                   ? "border-danger bg-danger/10 text-danger"
                   : "border-line-secondary bg-bg-secondary text-ink-secondary hover:border-line-primary"
               }`}
             >
               <IconThumbDown size={16} />
-              Disagree
             </button>
           </div>
         </div>
@@ -176,16 +195,23 @@ export function InsightFeedbackDialog({
 
         <div className="mt-4">
           <label className="mb-1.5 block text-small font-medium text-ink-secondary">
-            Comment (optional)
+            Comment <span className="text-danger">*</span>
           </label>
           <textarea
             value={comment}
-            onChange={(e) => setComment(e.target.value)}
+            onChange={(e) => handleCommentChange(e.target.value)}
             placeholder="What would make this insight more useful?"
             rows={3}
             maxLength={4000}
-            className="w-full rounded-md border border-line-secondary bg-bg-primary px-3 py-2 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
+            className={`w-full rounded-md border bg-bg-primary px-3 py-2 text-[13px] text-ink-primary focus:outline-none ${
+              commentError
+                ? "border-danger focus:border-danger"
+                : "border-line-secondary focus:border-brand-500"
+            }`}
           />
+          {commentError && (
+            <p className="mt-1 text-[12px] text-danger">{commentError}</p>
+          )}
         </div>
 
         <div className="mt-5 flex items-center justify-between border-t border-line-tertiary pt-4">
@@ -210,13 +236,7 @@ export function InsightFeedbackDialog({
               variant="primary"
               size="sm"
               disabled={!canSave || saving}
-              onClick={() =>
-                void onSave({
-                  sentiment,
-                  reason_codes: sentiment === "disagree" ? reasonCodes : [],
-                  comment,
-                })
-              }
+              onClick={handleSave}
             >
               {saving ? "Saving…" : hasExisting ? "Update" : "Save"}
             </Button>

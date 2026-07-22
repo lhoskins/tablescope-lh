@@ -19,6 +19,7 @@ interface CurrentUserResponse {
   tenant_slug: string | null;
   avatar_url: string | null;
   company_logo_url: string | null;
+  permissions: string[] | null;
 }
 
 interface ProjectSummaryResponse {
@@ -77,6 +78,7 @@ export function useCurrentUser() {
           initials: initials(name),
           id: me.user_id,
           avatarUrl: absoluteUrl(me.avatar_url),
+          permissions: me.permissions ?? [],
         },
         tenant: {
           name: me.tenant_name,

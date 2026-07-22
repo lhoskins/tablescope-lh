@@ -27,7 +27,7 @@ import {
   useInsightFeedback,
   type SaveInsightFeedbackArgs,
 } from "@/lib/hooks/use-insight-feedback";
-import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
+import type { GovernanceItem, InsightFeedbackRecord } from "@/lib/api/insight-feedback";
 import { IntelligenceStrip, type FilterableProject } from "./intelligence-strip";
 import {
   InsightPanel,
@@ -49,6 +49,8 @@ function Section({
   onPin,
   onFeedbackSave,
   onFeedbackRemove,
+  onFeedbackRespond,
+  governanceById,
   onCreateAction,
 }: {
   title: string;
@@ -63,6 +65,8 @@ function Section({
   onPin?: (card: InsightCard) => void;
   onFeedbackSave?: (card: InsightCard, payload: Omit<SaveInsightFeedbackArgs, "insightId" | "projectId" | "insightType" | "cardSnapshot" | "explanationSnapshot">) => void;
   onFeedbackRemove?: (card: InsightCard) => void;
+  onFeedbackRespond?: (card: InsightCard, response: string) => void;
+  governanceById?: Record<string, GovernanceItem>;
   onCreateAction?: (card: InsightCard) => void;
 }) {
   return (
@@ -87,6 +91,10 @@ function Section({
               onFeedbackRemove={
                 onFeedbackRemove ? () => onFeedbackRemove(card) : undefined
               }
+              onFeedbackRespond={
+                onFeedbackRespond ? (response) => onFeedbackRespond(card, response) : undefined
+              }
+              governance={governanceById?.[card.insightId || card.id]}
               onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
             />
           ))}
@@ -393,9 +401,10 @@ export function IntelligenceFeed({
   );
   const {
     feedbackById,
-    isLoading: feedbackLoading,
+    governanceById,
     saveFeedback,
     removeFeedback,
+    respondToReview,
     saving: savingFeedback,
   } = useInsightFeedback(insightIds);
 
@@ -434,6 +443,15 @@ export function IntelligenceFeed({
       });
     },
     [removeFeedback],
+  );
+
+  const handleFeedbackRespond = useCallback(
+    (card: InsightCard, response: string) => {
+      const insightId = card.insightId || card.id;
+      if (!insightId) return;
+      void respondToReview({ insightId, response });
+    },
+    [respondToReview],
   );
 
   const risks = allInsights.filter(
@@ -542,6 +560,8 @@ export function IntelligenceFeed({
               onPin={onPin}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
+              onFeedbackRespond={handleFeedbackRespond}
+              governanceById={governanceById}
               onCreateAction={onCreateAction}
             />
             <Section
@@ -557,6 +577,8 @@ export function IntelligenceFeed({
               onPin={onPin}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
+              onFeedbackRespond={handleFeedbackRespond}
+              governanceById={governanceById}
               onCreateAction={onCreateAction}
             />
             <Section
@@ -572,6 +594,8 @@ export function IntelligenceFeed({
               onPin={onPin}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
+              onFeedbackRespond={handleFeedbackRespond}
+              governanceById={governanceById}
               onCreateAction={onCreateAction}
             />
 

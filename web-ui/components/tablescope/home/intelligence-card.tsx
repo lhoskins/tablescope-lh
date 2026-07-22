@@ -24,9 +24,14 @@ import type {
   InsightCard as InsightCardData,
   InsightChart,
 } from "@/lib/api/home-intelligence";
-import type { InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
+import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { InsightExplanationPanel } from "./insight-explanation-panel";
 import { InsightFeedbackDialog } from "./insight-feedback-dialog";
+import {
+  InsightFeedbackStatusBadge,
+  InsightFeedbackStatusDialog,
+  InsightGovernanceBadge,
+} from "./insight-feedback-status";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
 
 /** Remove every remaining `**` marker (matched pairs handled by renderBold). */
@@ -189,7 +194,12 @@ export interface IntelligenceCardProps {
     comment: string;
   }) => void | Promise<void>;
   onFeedbackRemove?: () => void | Promise<void>;
+  /** Respond to a reviewer request for more information. */
+  onFeedbackRespond?: (response: string) => void | Promise<void>;
   savingFeedback?: boolean;
+  responding?: boolean;
+  /** Governance summary for this insight (visible to all project members). */
+  governance?: GovernanceItem | null;
   /** If provided and the user may create actions, shows a "+ Action" button. */
   onCreateAction?: () => void;
 }
@@ -206,11 +216,15 @@ export function IntelligenceCard({
   feedback,
   onFeedbackSave,
   onFeedbackRemove,
+  onFeedbackRespond,
   savingFeedback = false,
+  responding = false,
+  governance,
   onCreateAction,
 }: IntelligenceCardProps) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [feedbackInitial, setFeedbackInitial] =
     useState<InsightSentiment>("agree");
   const { data: identity } = useCurrentUser();
@@ -250,11 +264,14 @@ export function IntelligenceCard({
           </h3>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <span
-            className={`rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
-          >
-            {sev.label}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <InsightGovernanceBadge status={governance?.governance_status} />
+            <span
+              className={`rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
+            >
+              {sev.label}
+            </span>
+          </div>
           {card.explanation?.governance?.decision === "fallback" && (
             <span className="rounded-full bg-sky-50 px-2 py-0.5 text-small font-medium text-sky-700">
               AI fallback
@@ -386,6 +403,10 @@ export function IntelligenceCard({
                 <IconThumbDown size={14} />
                 Disagree
               </button>
+              <InsightFeedbackStatusBadge
+                feedback={feedback}
+                onClick={() => setStatusDialogOpen(true)}
+              />
             </div>
           )}
 
@@ -461,6 +482,26 @@ export function IntelligenceCard({
             setFeedbackOpen(false);
           }}
           saving={savingFeedback}
+        />
+      )}
+
+      {feedback && (
+        <InsightFeedbackStatusDialog
+          open={statusDialogOpen}
+          onClose={() => setStatusDialogOpen(false)}
+          feedback={feedback}
+          title={card.title}
+          onRespond={onFeedbackRespond ? (response) => void onFeedbackRespond(response) : undefined}
+          onEdit={() => {
+            setStatusDialogOpen(false);
+            setFeedbackOpen(true);
+          }}
+          onWithdraw={async () => {
+            await onFeedbackRemove?.();
+            setStatusDialogOpen(false);
+          }}
+          responding={responding}
+          withdrawing={savingFeedback}
         />
       )}
     </article>

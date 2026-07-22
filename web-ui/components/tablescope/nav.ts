@@ -8,7 +8,6 @@ import {
   IconTopologyStar3,
   IconHistory,
   IconLayoutGrid,
-  IconLayoutDashboard,
   IconDatabase,
   IconDatabasePlus,
   IconCode,
@@ -16,10 +15,10 @@ import {
   IconBook2,
   IconLibrary,
   IconBuildingBank,
-  IconClipboardList,
+  IconShieldCheck,
   type Icon,
 } from "@tabler/icons-react";
-import type { NavKey } from "@/lib/ui/types";
+import type { CurrentUser, NavKey } from "@/lib/ui/types";
 
 export interface NavItem {
   key: NavKey;
@@ -27,7 +26,7 @@ export interface NavItem {
   href: string;
   icon: Icon;
   /** Optional numeric badge (e.g. project count, query count). */
-  countKey?: "projects" | "queries" | "documents" | "actionCount";
+  countKey?: "projects" | "queries" | "documents";
 }
 
 export interface NavGroup {
@@ -35,7 +34,16 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-export function homeNavGroups(): NavGroup[] {
+const REVIEW_PERMISSION = "insight_feedback.review";
+
+function isInsightReviewer(user?: CurrentUser): boolean {
+  if (!user) return false;
+  if (user.permissions?.includes(REVIEW_PERMISSION)) return true;
+  const adminRoles = ["admin", "tenant_admin", "root_admin"];
+  return adminRoles.includes(user.rawRole ?? "");
+}
+
+export function homeNavGroups(user?: CurrentUser): NavGroup[] {
   return [
     {
       items: [
@@ -59,6 +67,16 @@ export function homeNavGroups(): NavGroup[] {
           href: "/ai",
           icon: IconSparkles,
         },
+        ...(isInsightReviewer(user)
+          ? [
+              {
+                key: "insight-feedback-review" as NavKey,
+                label: "Insight Review",
+                href: "/insight-feedback/review",
+                icon: IconShieldCheck,
+              },
+            ]
+          : []),
       ],
     },
     {
@@ -112,23 +130,10 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconSparkles,
         },
         {
-          key: "project-actions",
-          label: "Project Actions",
-          href: `${base}/actions`,
-          icon: IconClipboardList,
-          countKey: "actionCount",
-        },
-        {
           key: "project-data-sources",
           label: "Data Sources",
           href: `${base}/data-sources`,
           icon: IconDatabase,
-        },
-        {
-          key: "project-dashboards",
-          label: "Dashboards",
-          href: `${base}/dashboards`,
-          icon: IconLayoutDashboard,
         },
         {
           key: "project-queries",

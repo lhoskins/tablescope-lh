@@ -8,8 +8,11 @@ import {
 } from "@tanstack/react-query";
 import {
   batchGetInsightFeedback,
+  batchGetInsightGovernance,
   deleteInsightFeedback,
+  respondToInsightFeedbackRequest,
   upsertInsightFeedback,
+  type GovernanceItem,
   type InsightFeedbackRecord,
   type InsightSentiment,
 } from "@/lib/api/insight-feedback";
@@ -31,18 +34,27 @@ export interface RemoveInsightFeedbackArgs {
   projectId: number;
 }
 
+export interface RespondToReviewArgs {
+  insightId: string;
+  response: string;
+}
+
 function feedbackQueryKey(insightIds: string[]) {
   return ["insight-feedback", insightIds];
 }
 
-export function useInsightFeedback(insightIds: string[]) {
+function governanceQueryKey(insightIds: string[], projectId?: number) {
+  return ["insight-governance", projectId ?? "all", insightIds];
+}
+
+export function useInsightFeedback(insightIds: string[], projectId?: number) {
   const queryClient = useQueryClient();
   const ids = useMemo(
     () => Array.from(new Set(insightIds.filter(Boolean))),
     [insightIds],
   );
 
-  const { data: feedbackById = {}, isLoading } = useQuery<
+  const { data: feedbackById = {}, isLoading: isLoadingFeedback } = useQuery<
     Record<string, InsightFeedbackRecord>
   >({
     queryKey: feedbackQueryKey(ids),
@@ -50,6 +62,25 @@ export function useInsightFeedback(insightIds: string[]) {
       if (ids.length === 0) return {};
       const res = await batchGetInsightFeedback({ insight_ids: ids });
       const map: Record<string, InsightFeedbackRecord> = {};
+      for (const item of res.items) {
+        map[item.insight_id] = item;
+      }
+      return map;
+    },
+    enabled: ids.length > 0,
+  });
+
+  const { data: governanceById = {}, isLoading: isLoadingGovernance } = useQuery<
+    Record<string, GovernanceItem>
+  >({
+    queryKey: governanceQueryKey(ids, projectId),
+    queryFn: async () => {
+      if (ids.length === 0) return {};
+      const res = await batchGetInsightGovernance({
+        insight_ids: ids,
+        project_id: projectId,
+      });
+      const map: Record<string, GovernanceItem> = {};
       for (const item of res.items) {
         map[item.insight_id] = item;
       }
@@ -78,6 +109,11 @@ export function useInsightFeedback(insightIds: string[]) {
         feedbackQueryKey(ids),
         (prev) => ({ ...(prev ?? {}), [data.insight_id]: data }),
       );
+      if (projectId != null) {
+        queryClient.invalidateQueries({
+          queryKey: governanceQueryKey([], projectId),
+        });
+      }
     },
   });
 
@@ -96,14 +132,41 @@ export function useInsightFeedback(insightIds: string[]) {
           return next;
         },
       );
+      if (projectId != null) {
+        queryClient.invalidateQueries({
+          queryKey: governanceQueryKey([], projectId),
+        });
+      }
+    },
+  });
+
+  const respondMutation = useMutation({
+    mutationFn: async (args: RespondToReviewArgs) => {
+      return respondToInsightFeedbackRequest(args.insightId, {
+        response: args.response,
+      });
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData<Record<string, InsightFeedbackRecord>>(
+        feedbackQueryKey(ids),
+        (prev) => ({ ...(prev ?? {}), [data.insight_id]: data }),
+      );
+      if (projectId != null) {
+        queryClient.invalidateQueries({
+          queryKey: governanceQueryKey([], projectId),
+        });
+      }
     },
   });
 
   return {
     feedbackById,
-    isLoading,
+    governanceById,
+    isLoading: isLoadingFeedback || isLoadingGovernance,
     saveFeedback: saveMutation.mutateAsync,
     removeFeedback: removeMutation.mutateAsync,
+    respondToReview: respondMutation.mutateAsync,
     saving: saveMutation.isPending || removeMutation.isPending,
+    responding: respondMutation.isPending,
   };
 }

@@ -45,6 +45,11 @@ import {
   InsightFeedbackDialog,
 } from "@/components/tablescope/home/insight-feedback-dialog";
 import {
+  InsightFeedbackStatusBadge,
+  InsightFeedbackStatusDialog,
+  InsightGovernanceBadge,
+} from "@/components/tablescope/home/insight-feedback-status";
+import {
   CreateActionFromInsightDialog,
   type ActionableInsight,
 } from "@/components/tablescope/project-actions/create-action-from-insight-dialog";
@@ -53,7 +58,7 @@ import {
   type InsightCard as InsightCardData,
   type InsightExplanation,
 } from "@/lib/api/home-intelligence";
-import type { InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
+import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import {
@@ -293,12 +298,15 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     () => allInsightCards.map((c) => c.id).filter(Boolean),
     [allInsightCards],
   );
+  const projectIdNum = Number(projectId);
   const {
     feedbackById,
+    governanceById,
     saveFeedback,
     removeFeedback,
+    respondToReview,
     saving: savingFeedback,
-  } = useInsightFeedback(insightIds);
+  } = useInsightFeedback(insightIds, Number.isNaN(projectIdNum) ? undefined : projectIdNum);
 
   const handleFeedbackSave = (
     card: ProjectInsightCard,
@@ -323,9 +331,14 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   };
 
   const handleFeedbackRemove = (card: ProjectInsightCard) => {
-    const projectIdNum = Number(projectId);
-    if (!card.id || Number.isNaN(projectIdNum)) return;
-    void removeFeedback({ insightId: card.id, projectId: projectIdNum });
+    const pid = Number(projectId);
+    if (!card.id || Number.isNaN(pid)) return;
+    void removeFeedback({ insightId: card.id, projectId: pid });
+  };
+
+  const handleFeedbackRespond = (card: ProjectInsightCard, response: string) => {
+    if (!card.id) return;
+    void respondToReview({ insightId: card.id, response });
   };
 
   const insightCount = (insightsQuery.data?.projects ?? []).reduce(
@@ -453,6 +466,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 onReview={reviewCard}
                 onFeedbackSave={handleFeedbackSave}
                 onFeedbackRemove={handleFeedbackRemove}
+                onFeedbackRespond={handleFeedbackRespond}
+                governanceById={governanceById}
                 onCreateAction={handleCreateAction}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
@@ -475,6 +490,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 onReview={reviewCard}
                 onFeedbackSave={handleFeedbackSave}
                 onFeedbackRemove={handleFeedbackRemove}
+                onFeedbackRespond={handleFeedbackRespond}
+                governanceById={governanceById}
                 onCreateAction={handleCreateAction}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
@@ -495,6 +512,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 onReview={reviewCard}
                 onFeedbackSave={handleFeedbackSave}
                 onFeedbackRemove={handleFeedbackRemove}
+                onFeedbackRespond={handleFeedbackRespond}
+                governanceById={governanceById}
                 onCreateAction={handleCreateAction}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
@@ -657,11 +676,13 @@ function InsightCardColumn({
   projectId,
   projectName,
   feedbackById,
+  governanceById,
   savingFeedback,
   onInvestigate,
   onReview,
   onFeedbackSave,
   onFeedbackRemove,
+  onFeedbackRespond,
   onCreateAction,
   reviewPending,
   reviewPendingId,
@@ -674,6 +695,7 @@ function InsightCardColumn({
   projectId: string;
   projectName: string;
   feedbackById: Record<string, InsightFeedbackRecord>;
+  governanceById?: Record<string, GovernanceItem>;
   savingFeedback: boolean;
   onInvestigate: (card: ProjectInsightCard) => void;
   onReview: (card: ProjectInsightCard) => void;
@@ -683,6 +705,7 @@ function InsightCardColumn({
     comment: string;
   }) => void;
   onFeedbackRemove?: (card: ProjectInsightCard) => void;
+  onFeedbackRespond?: (card: ProjectInsightCard, response: string) => void;
   onCreateAction?: (card: ProjectInsightCard) => void;
   reviewPending: boolean;
   reviewPendingId?: string;
@@ -706,6 +729,8 @@ function InsightCardColumn({
               onReview={() => onReview(card)}
               onFeedbackSave={onFeedbackSave ? (payload) => onFeedbackSave(card, payload) : undefined}
               onFeedbackRemove={onFeedbackRemove ? () => onFeedbackRemove(card) : undefined}
+              onFeedbackRespond={onFeedbackRespond ? (response) => onFeedbackRespond(card, response) : undefined}
+              governance={governanceById?.[card.id]}
               onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
               reviewPending={reviewPending && reviewPendingId === card.id}
             />
@@ -727,7 +752,9 @@ function InsightCardItem({
   onReview,
   onFeedbackSave,
   onFeedbackRemove,
+  onFeedbackRespond,
   onCreateAction,
+  governance,
   reviewPending,
 }: {
   card: ProjectInsightCard;
@@ -744,11 +771,14 @@ function InsightCardItem({
     comment: string;
   }) => void;
   onFeedbackRemove?: () => void;
+  onFeedbackRespond?: (response: string) => void | Promise<void>;
   onCreateAction?: () => void;
+  governance?: GovernanceItem | null;
   reviewPending: boolean;
 }) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [feedbackInitial, setFeedbackInitial] = useState<InsightSentiment>("agree");
   const hasFeedback = feedback != null && feedback.status === "active";
   const { data: identity } = useCurrentUser();
@@ -792,14 +822,17 @@ function InsightCardItem({
         <h4 className="min-w-0 text-[13px] font-semibold text-ink-primary">
           {card.title}
         </h4>
-        <span
-          className={cn(
-            "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
-            sev.chip,
-          )}
-        >
-          {sev.label}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <InsightGovernanceBadge status={governance?.governance_status} />
+          <span
+            className={cn(
+              "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+              sev.chip,
+            )}
+          >
+            {sev.label}
+          </span>
+        </div>
       </header>
       <p className="mt-1 text-[13px] leading-snug text-ink-secondary">
         <span className="text-ink-tertiary">Summary: </span>
@@ -915,6 +948,10 @@ function InsightCardItem({
               <IconThumbDown size={13} />
               Disagree
             </button>
+            <InsightFeedbackStatusBadge
+              feedback={feedback}
+              onClick={() => setStatusDialogOpen(true)}
+            />
           </div>
         )}
       </div>
@@ -937,6 +974,26 @@ function InsightCardItem({
             setFeedbackOpen(false);
           }}
           saving={savingFeedback}
+        />
+      )}
+
+      {feedback && (
+        <InsightFeedbackStatusDialog
+          open={statusDialogOpen}
+          onClose={() => setStatusDialogOpen(false)}
+          feedback={feedback}
+          title={card.title}
+          onRespond={onFeedbackRespond ? (response) => void onFeedbackRespond(response) : undefined}
+          onEdit={() => {
+            setStatusDialogOpen(false);
+            setFeedbackOpen(true);
+          }}
+          onWithdraw={async () => {
+            await onFeedbackRemove?.();
+            setStatusDialogOpen(false);
+          }}
+          responding={false}
+          withdrawing={savingFeedback}
         />
       )}
     </article>
