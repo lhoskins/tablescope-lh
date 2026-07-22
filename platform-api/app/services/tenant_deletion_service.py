@@ -97,7 +97,7 @@ async def purge_app_tenant(session: AsyncSession, tenant_id: int) -> dict[str, i
 
     async def _run(name: str, stmt: Delete | Update) -> None:
         res = await session.execute(stmt)
-        counts[name] = res.rowcount or 0
+        counts[name] = res.rowcount or 0  # type: ignore[attr-defined]
 
     # Free the slug for reuse: a deleted tenant's provisioning request would
     # otherwise keep the slug "taken" (its tenant_id is SET NULL on delete, but

@@ -336,7 +336,7 @@ async def finalize_upload(
         rejected_keys = set(req.rejected_tag_keys or [])
         for s in suggestions:
             if s.tag_key in accepted_keys:
-                s.status = "accepted"
+                s.status = "accepted"  # type: ignore[assignment]
                 session.add(AIAssetTag(
                     tenant_id=context.tenant_id,
                     project_id=resolved_project_id,
@@ -349,7 +349,7 @@ async def finalize_upload(
                     created_by=context.user_id,
                 ))
             elif s.tag_key in rejected_keys:
-                s.status = "rejected"
+                s.status = "rejected"  # type: ignore[assignment]
 
     if resolved_project_id and (req.accepted_kpi_keys or req.rejected_kpi_keys):
         from app.models.ai_asset_metadata import (
@@ -369,7 +369,7 @@ async def finalize_upload(
         rejected_kpi_keys = set(req.rejected_kpi_keys or [])
         for ks in kpi_suggestions:
             if ks.kpi_key in accepted_kpi_keys:
-                ks.status = "accepted"
+                ks.status = "accepted"  # type: ignore[assignment]
                 session.add(AIAssetKPI(
                     tenant_id=context.tenant_id,
                     project_id=resolved_project_id,
@@ -385,7 +385,7 @@ async def finalize_upload(
                     created_by=context.user_id,
                 ))
             elif ks.kpi_key in rejected_kpi_keys:
-                ks.status = "rejected"
+                ks.status = "rejected"  # type: ignore[assignment]
 
     # Apply user overrides to AI result
     if req.user_notes:

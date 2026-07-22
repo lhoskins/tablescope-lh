@@ -95,7 +95,7 @@ async def seed_analytical_catalog() -> dict[str, Any]:
         if anything changed (so the caller knows to commit + invalidate)."""
         changed = False
         if ver.status != STATUS_ACTIVE:
-            ver.status = STATUS_ACTIVE
+            ver.status = STATUS_ACTIVE  # type: ignore[assignment]
             changed = True
         if ver.approved_at is None:
             # System approval: no human approver, but stamp the approval time so
@@ -103,7 +103,7 @@ async def seed_analytical_catalog() -> dict[str, Any]:
             ver.approved_at = datetime.now(UTC)
             changed = True
         if not cat.is_active:
-            cat.is_active = True
+            cat.is_active = True  # type: ignore[assignment]
             changed = True
         if cat.active_version_id != ver.id:
             cat.active_version_id = ver.id
@@ -252,7 +252,7 @@ async def seed_analytical_catalog() -> dict[str, Any]:
             )
             stats["matrix"] += 1
 
-        version.method_count = int(stats["methods"])
+        version.method_count = int(stats["methods"])  # type: ignore[assignment]
         # Version itself is active so the registry can read it; only active
         # methods within it are executed. Activate + system-approve so
         # get_active_registry() returns a live registry with no admin step.

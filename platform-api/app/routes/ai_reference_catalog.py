@@ -105,7 +105,7 @@ async def toggle_tenant_catalog(
         )
     )
     if existing:
-        existing.is_enabled = body.is_enabled
+        existing.is_enabled = body.is_enabled  # type: ignore[assignment]
     else:
         session.add(
             TenantReferenceCatalog(
@@ -161,12 +161,12 @@ async def update_tenant_tag(
     tag = await session.get(TenantCustomTag, tag_id)
     if not tag or tag.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="Tag not found")
-    tag.tag_key = body.tag_key
-    tag.display_name = body.display_name
-    tag.description = body.description
-    tag.business_domain = body.business_domain
-    tag.process_area = body.process_area
-    tag.synonyms = body.synonyms
+    tag.tag_key = body.tag_key  # type: ignore[assignment]
+    tag.display_name = body.display_name  # type: ignore[assignment]
+    tag.description = body.description  # type: ignore[assignment]
+    tag.business_domain = body.business_domain  # type: ignore[assignment]
+    tag.process_area = body.process_area  # type: ignore[assignment]
+    tag.synonyms = body.synonyms  # type: ignore[assignment]
     await session.commit()
     return tag.to_dict()
 
@@ -222,15 +222,15 @@ async def update_tenant_kpi(
     kpi = await session.get(TenantCustomKPI, kpi_id)
     if not kpi or kpi.tenant_id != context.tenant_id:
         raise HTTPException(status_code=404, detail="KPI not found")
-    kpi.kpi_key = body.kpi_key
-    kpi.display_name = body.display_name
-    kpi.description = body.description
-    kpi.business_domain = body.business_domain
-    kpi.process_area = body.process_area
-    kpi.formula = body.formula
-    kpi.required_fields = body.required_fields
-    kpi.optional_fields = body.optional_fields
-    kpi.related_tags = body.related_tags
-    kpi.recommended_chart_type = body.recommended_chart_type
+    kpi.kpi_key = body.kpi_key  # type: ignore[assignment]
+    kpi.display_name = body.display_name  # type: ignore[assignment]
+    kpi.description = body.description  # type: ignore[assignment]
+    kpi.business_domain = body.business_domain  # type: ignore[assignment]
+    kpi.process_area = body.process_area  # type: ignore[assignment]
+    kpi.formula = body.formula  # type: ignore[assignment]
+    kpi.required_fields = body.required_fields  # type: ignore[assignment]
+    kpi.optional_fields = body.optional_fields  # type: ignore[assignment]
+    kpi.related_tags = body.related_tags  # type: ignore[assignment]
+    kpi.recommended_chart_type = body.recommended_chart_type  # type: ignore[assignment]
     await session.commit()
     return kpi.to_dict()

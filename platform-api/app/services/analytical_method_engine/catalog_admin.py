@@ -173,8 +173,8 @@ async def activate_method(
     if not implementation_available(method):
         raise ValueError(f"No implementation available for {method_id}")
 
-    method.is_executable = True
-    method.status = STATUS_ACTIVE
+    method.is_executable = True  # type: ignore[assignment]
+    method.status = STATUS_ACTIVE  # type: ignore[assignment]
     session.add(
         MethodCatalogAuditLog(
             tenant_id=None,
@@ -209,8 +209,8 @@ async def deactivate_method(
     if method is None:
         raise ValueError(f"Method {method_id} not found in active catalog")
 
-    method.is_executable = False
-    method.status = STATUS_DRAFT
+    method.is_executable = False  # type: ignore[assignment]
+    method.status = STATUS_DRAFT  # type: ignore[assignment]
     session.add(
         MethodCatalogAuditLog(
             tenant_id=None,
