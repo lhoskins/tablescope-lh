@@ -109,11 +109,9 @@ export function useInsightFeedback(insightIds: string[], projectId?: number) {
         feedbackQueryKey(ids),
         (prev) => ({ ...(prev ?? {}), [data.insight_id]: data }),
       );
-      if (projectId != null) {
-        queryClient.invalidateQueries({
-          queryKey: governanceQueryKey([], projectId),
-        });
-      }
+      queryClient.invalidateQueries({
+        queryKey: ["insight-governance"],
+      });
     },
   });
 
@@ -132,11 +130,9 @@ export function useInsightFeedback(insightIds: string[], projectId?: number) {
           return next;
         },
       );
-      if (projectId != null) {
-        queryClient.invalidateQueries({
-          queryKey: governanceQueryKey([], projectId),
-        });
-      }
+      queryClient.invalidateQueries({
+        queryKey: ["insight-governance"],
+      });
     },
   });
 
@@ -151,11 +147,9 @@ export function useInsightFeedback(insightIds: string[], projectId?: number) {
         feedbackQueryKey(ids),
         (prev) => ({ ...(prev ?? {}), [data.insight_id]: data }),
       );
-      if (projectId != null) {
-        queryClient.invalidateQueries({
-          queryKey: governanceQueryKey([], projectId),
-        });
-      }
+      queryClient.invalidateQueries({
+        queryKey: ["insight-governance"],
+      });
     },
   });
 

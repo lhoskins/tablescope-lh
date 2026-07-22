@@ -73,8 +73,8 @@ def upgrade() -> None:
             ),
             sa.Column("insight_id", sa.String(255), nullable=False, index=True),
             sa.Column("event_type", sa.String(50), nullable=False),
-            sa.Column("from_review_status", sa.String(20), nullable=True),
-            sa.Column("to_review_status", sa.String(20), nullable=True),
+            sa.Column("from_review_status", sa.String(50), nullable=True),
+            sa.Column("to_review_status", sa.String(50), nullable=True),
             sa.Column(
                 "actor_user_id",
                 sa.Integer(),

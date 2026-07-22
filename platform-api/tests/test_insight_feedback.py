@@ -321,14 +321,14 @@ async def test_feedback_api_rejects_invalid_sentiment_and_reasons(client, servic
 
 
 async def test_feedback_api_is_isolated_by_tenant_and_user(client, service_headers):
-    _, _, project_a, headers_a = await _setup(client, service_headers, "fb-iso-a")
-    _, _, project_b, headers_b = await _setup(client, service_headers, "fb-iso-b")
+    _, _, _project_a, headers_a = await _setup(client, service_headers, "fb-iso-a")
+    _, _, _project_b, headers_b = await _setup(client, service_headers, "fb-iso-b")
 
     insight_id = "shared-insight"
     await client.put(
         f"/api/insight-feedback/{insight_id}",
         json={
-            "project_id": project_a["id"],
+            "project_id": _project_a["id"],
             "sentiment": "agree",
             "reason_codes": [],
             "comment": "Agree.",
@@ -423,7 +423,7 @@ async def test_feedback_review_forbidden_for_non_admin(client, service_headers):
 
 
 async def test_feedback_review_is_tenant_isolated(client, service_headers):
-    tenant_a, _, project_a, _ = await _setup(client, service_headers, "fb-review-a")
+    tenant_a, _, _project_a, _ = await _setup(client, service_headers, "fb-review-a")
     tenant_b, user_b, project_b, _ = await _setup(client, service_headers, "fb-review-b")
 
     admin_a = await _create_user(client, service_headers, tenant_a["id"], "admin@a.com", "admin")
@@ -640,7 +640,7 @@ async def test_review_claim_and_disposition_requires_comment(client, service_hea
 
 
 async def test_agree_feedback_is_not_required_and_absent_from_queue(client, service_headers):
-    _, reviewer, reviewer_headers, user, user_headers, project = await _setup_reviewer(
+    _, _reviewer, reviewer_headers, _user, user_headers, project = await _setup_reviewer(
         client, service_headers, "fb-agree"
     )
     insight_id = "insight-agree-1"
@@ -716,7 +716,7 @@ async def test_claim_acknowledges_and_sets_reviewer(client, service_headers):
 
 
 async def test_concurrent_claim_returns_409(client, service_headers):
-    _, reviewer, reviewer_headers, _, user_headers, project = await _setup_reviewer(
+    _, _reviewer, reviewer_headers, _, user_headers, project = await _setup_reviewer(
         client, service_headers, "fb-conc"
     )
     other = await client.post(

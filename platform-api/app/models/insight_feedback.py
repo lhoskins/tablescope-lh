@@ -53,7 +53,7 @@ class InsightFeedback(TimestampMixin, Base):
         String(20), nullable=False, default="active"
     )
     review_status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="pending"
+        String(50), nullable=False, default="pending"
     )
     reviewer_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
@@ -107,8 +107,8 @@ class InsightFeedbackReviewEvent(Base, TimestampMixin):
     )
     insight_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    from_review_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    to_review_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    from_review_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    to_review_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
     actor_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,

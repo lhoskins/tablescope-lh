@@ -38,7 +38,7 @@ def upgrade() -> None:
     if "review_status" not in cols:
         op.add_column(
             "insight_feedback",
-            sa.Column("review_status", sa.String(20), nullable=False, server_default="pending"),
+            sa.Column("review_status", sa.String(50), nullable=False, server_default="pending"),
         )
     if "reviewer_user_id" not in cols:
         op.add_column(
