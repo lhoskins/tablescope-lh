@@ -79,10 +79,10 @@ async def create_query_scope(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> QueryScopeRead:
-    source_query, project = await _get_project_for_query(
+    source_query, _ = await _get_project_for_query(
         session, query_id=payload.query_id, tenant_id=context.tenant_id
     )
-    target_query, _ = await _get_project_for_query(
+    _, _ = await _get_project_for_query(
         session, query_id=payload.target_query_id, tenant_id=context.tenant_id
     )
     if not _FIELD_RE.match(payload.source_field):

@@ -225,7 +225,7 @@ async def test_update_layout(client, service_headers) -> None:
 
 
 async def test_pins_are_isolated_by_user(client, service_headers) -> None:
-    tenant, user1, project, headers1 = await _setup_tenant_user(
+    tenant, _user1, project, headers1 = await _setup_tenant_user(
         client, service_headers, "home-iso"
     )
 

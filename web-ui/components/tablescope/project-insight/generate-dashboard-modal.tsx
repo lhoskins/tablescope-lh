@@ -20,6 +20,7 @@ import {
   saveDashboardSuggestion,
   type DashboardSuggestion,
 } from "@/lib/api/home-intelligence";
+import { getDefaultOptions } from "@/lib/visualizations/chartRegistry";
 
 /**
  * Generate a real, chart-rendered dashboard for the current project — the same
@@ -92,6 +93,7 @@ export function GenerateDashboardModal({
           explanation: w.explanation,
           labelColumn: w.labelColumn,
           valueColumn: w.valueColumn,
+          visualizationOptions: getDefaultOptions(w.chartType),
         })),
       }),
     onSuccess: (res) => {

@@ -22,13 +22,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from app.services.analytical_method_engine.intent import infer_intent
 
 
-class ResponseMode(str, Enum):
+class ResponseMode(StrEnum):
     """How the answer should be produced."""
 
     STRUCTURED_DATA = "structured_data"  # try SQL over an authorized source

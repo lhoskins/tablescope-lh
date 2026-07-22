@@ -3,17 +3,20 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { EChartsWidget } from "./EChartsWidget";
 import type { WidgetConfig } from "./types";
 
-const chartMock = {
-  setOption: vi.fn(),
-  on: vi.fn(),
-  resize: vi.fn(),
-  dispose: vi.fn(),
-};
+const { chartMock, initMock, useMock } = vi.hoisted(() => {
+  const chartMock = {
+    setOption: vi.fn(),
+    on: vi.fn(),
+    resize: vi.fn(),
+    dispose: vi.fn(),
+  };
+  const initMock = vi.fn(() => chartMock);
+  const useMock = vi.fn();
+  return { chartMock, initMock, useMock };
+});
 
-const initMock = vi.fn(() => chartMock);
-
-vi.mock("echarts", () => ({
-  default: { init: initMock },
+vi.mock("echarts/core", () => ({
+  use: useMock,
   init: initMock,
 }));
 
@@ -65,8 +68,9 @@ describe("EChartsWidget", () => {
     expect(root.getAttribute("data-chart-renderer")).toBe("echarts");
   });
 
-  it("initializes echarts for line, area, bar, and pie", async () => {
-    for (const type of ["line", "area", "bar", "pie"] as const) {
+  it("initializes echarts for every supported chart type", async () => {
+    const types: Array<WidgetConfig["type"]> = ["line", "area", "bar", "pie", "combo", "scatter", "radar", "radial_bar", "treemap", "funnel", "sankey"];
+    for (const type of types) {
       vi.clearAllMocks();
       const { unmount } = render(<EChartsWidget widget={makeWidget({ type })} {...defaultProps} />);
       await new Promise((r) => setTimeout(r, 0));

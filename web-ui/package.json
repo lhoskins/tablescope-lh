@@ -42,13 +42,9 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-grid-layout": "^2.2.3",
-    "recharts": "^2.15.0",
     "simple-icons": "^16.24.0",
     "tailwind-merge": "^2.5.4",
     "zustand": "^5.0.14"
-  },
-  "overrides": {
-    "react-is": "^19.0.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.5.0",

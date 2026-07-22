@@ -39,8 +39,8 @@ class UserVDB(TimestampMixin, Base):
     last_health_check: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     health_status: Mapped[str] = mapped_column(String(50), default="unknown", nullable=False)
 
-    tenant: Mapped[Tenant] = relationship(back_populates="user_vdbs")  # type: ignore[name-defined]  # noqa: F821
-    user: Mapped[User] = relationship(back_populates="user_vdb")  # type: ignore[name-defined]  # noqa: F821
+    tenant: Mapped[Tenant] = relationship(back_populates="user_vdbs")  # noqa: F821
+    user: Mapped[User] = relationship(back_populates="user_vdb")  # noqa: F821
 
     def get_connection_string(self) -> str:
         """Return PostgreSQL-style connection string (without credentials).

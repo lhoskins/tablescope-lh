@@ -69,7 +69,7 @@ async def _setup(client, service_headers):
 
 
 async def test_auth_me_returns_identity(client, service_headers) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
     r = await client.get("/api/auth/me", headers=headers)
     assert r.status_code == 200
     body = r.json()
@@ -90,7 +90,7 @@ async def test_auth_me_requires_auth(client) -> None:
 async def test_project_summaries_counts_and_status(
     client, service_headers
 ) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
 
     # No projects yet → empty list.
     r = await client.get("/api/projects/summaries", headers=headers)
@@ -148,7 +148,7 @@ async def test_project_summaries_counts_and_status(
 async def test_route_prompt_targets_existing_project(
     client, service_headers
 ) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
     r = await client.post(
         "/api/projects",
         json={"name": "Logistics", "is_shared": False},
@@ -171,7 +171,7 @@ async def test_route_prompt_targets_existing_project(
 async def test_route_prompt_no_project_seeds_new(
     client, service_headers
 ) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
     r = await client.post(
         "/api/ai/route-prompt",
         json={"prompt": "build me something"},

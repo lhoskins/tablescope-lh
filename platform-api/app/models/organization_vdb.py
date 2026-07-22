@@ -23,7 +23,7 @@ class OrganizationVDB(TimestampMixin, Base):
     vdb_port: Mapped[int] = mapped_column(Integer, default=35442, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    tenant: Mapped[Tenant] = relationship(back_populates="organization_vdbs")  # type: ignore[name-defined]  # noqa: F821
+    tenant: Mapped[Tenant] = relationship(back_populates="organization_vdbs")  # noqa: F821
 
     def __repr__(self) -> str:
         return f"OrganizationVDB(id={self.id}, tenant_id={self.tenant_id}, vdb_name={self.vdb_name!r})"

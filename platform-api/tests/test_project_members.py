@@ -86,7 +86,7 @@ async def _setup(client, service_headers):
 async def test_addable_users_excludes_owner_and_active_members(
     client, service_headers
 ) -> None:
-    tenant, owner, member, owner_headers, project = await _setup(
+    _tenant, owner, member, owner_headers, project = await _setup(
         client, service_headers
     )
     pid = project["id"]
@@ -116,7 +116,7 @@ async def test_addable_users_excludes_owner_and_active_members(
 
 
 async def test_member_role_lifecycle(client, service_headers) -> None:
-    tenant, owner, member, owner_headers, project = await _setup(
+    _tenant, _owner, member, owner_headers, project = await _setup(
         client, service_headers
     )
     pid = project["id"]
@@ -156,7 +156,7 @@ async def test_member_role_lifecycle(client, service_headers) -> None:
 
 
 async def test_add_member_rejects_invalid_role(client, service_headers) -> None:
-    tenant, owner, member, owner_headers, project = await _setup(
+    _tenant, _owner, member, owner_headers, project = await _setup(
         client, service_headers
     )
     r = await client.post(
@@ -170,7 +170,7 @@ async def test_add_member_rejects_invalid_role(client, service_headers) -> None:
 async def test_addable_users_forbidden_for_non_manager(
     client, service_headers
 ) -> None:
-    tenant, owner, member, owner_headers, project = await _setup(
+    tenant, _owner, member, _owner_headers, project = await _setup(
         client, service_headers
     )
     member_headers = _headers(tenant["id"], member["id"], "viewer")
@@ -204,7 +204,7 @@ class _RecordingEmail:
 async def test_add_member_sends_project_membership_email(
     client, service_headers, monkeypatch
 ) -> None:
-    tenant, owner, member, owner_headers, project = await _setup(
+    tenant, _owner, member, owner_headers, project = await _setup(
         client, service_headers
     )
 
@@ -236,7 +236,7 @@ class _FailingEmail:
 async def test_add_member_survives_email_failure(
     client, service_headers, monkeypatch
 ) -> None:
-    tenant, owner, member, owner_headers, project = await _setup(
+    _tenant, _owner, member, owner_headers, project = await _setup(
         client, service_headers
     )
 
