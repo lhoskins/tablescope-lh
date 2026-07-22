@@ -22,7 +22,7 @@ def resolve_roles(intent: str, profile: dict[str, Any]) -> dict[str, Any] | None
     # binary columns are a subset of numeric; treat as candidate group columns too
     group_candidates = [c for c in categorical] + [c for c in binary]
 
-    if intent in ("describe_numeric", "normality"):
+    if intent in ("describe_numeric", "normality", "r_descriptive_profile"):
         if numeric:
             return {"value": numeric[0]}
         return None

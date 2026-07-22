@@ -140,6 +140,7 @@ export function EChartsWidget({ widget, data, xKey, yKey, chartData, seriesNames
   useEffect(() => {
     if (!containerRef.current) return;
     let disposed = false;
+    let resizeHandler: (() => void) | null = null;
 
     const init = async () => {
       const echarts = await import("echarts");
@@ -177,17 +178,17 @@ export function EChartsWidget({ widget, data, xKey, yKey, chartData, seriesNames
       }
 
       const handleResize = () => chart.resize();
+      resizeHandler = handleResize;
       window.addEventListener("resize", handleResize);
-
-      return () => {
-        window.removeEventListener("resize", handleResize);
-        chart.dispose();
-      };
     };
 
-    const cleanupPromise = init();
+    init();
+
     return () => {
       disposed = true;
+      if (resizeHandler) {
+        window.removeEventListener("resize", resizeHandler);
+      }
       if (chartRef.current) {
         chartRef.current.dispose();
         chartRef.current = null;
@@ -197,5 +198,12 @@ export function EChartsWidget({ widget, data, xKey, yKey, chartData, seriesNames
 
   if (data.length === 0) return <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">No data</div>;
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return (
+    <div
+      ref={containerRef}
+      data-testid="echarts-widget"
+      data-chart-renderer="echarts"
+      className="h-full w-full"
+    />
+  );
 }
