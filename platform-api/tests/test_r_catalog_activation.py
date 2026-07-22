@@ -6,10 +6,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.models.analytical_method_catalog import AnalyticalMethod
+from app.models.analytical_method_catalog import (
+    STATUS_ACTIVE,
+    STATUS_DRAFT,
+    AnalyticalMethod,
+    MethodCatalog,
+    MethodCatalogVersion,
+)
 from app.services.analytical_method_engine import method_executor
-from app.services.analytical_method_engine.catalog_admin import implementation_available
+from app.services.analytical_method_engine.catalog_admin import (
+    activate_method,
+    deactivate_method,
+    implementation_available,
+)
 from scripts.convert_analytical_catalog import EXECUTABLE, EXECUTABLE_R, build
+
+pytestmark = pytest.mark.anyio
 
 
 def test_catalog_contains_set_a_and_set_b() -> None:
@@ -93,3 +105,130 @@ def test_set_b_no_python_executor() -> None:
     for key in ("period_change", "detect_change_point", "detect_anomalies",
                 "forecast_time_series", "contribution_to_change"):
         assert key not in method_executor.EXECUTORS, f"{key} should not have a Python executor yet"
+
+
+def test_available_r_methods_falls_back_to_static_when_service_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient R service outage must not hard-disable every R method."""
+    from app.services.analytical_method_engine import catalog_admin
+
+    monkeypatch.setenv("R_ANALYTICS_ENABLED", "true")
+    # Reset the cache so the service query is attempted fresh.
+    catalog_admin._r_methods_cache = None
+    with patch("httpx.Client.get", side_effect=RuntimeError("connection refused")):
+        methods = catalog_admin.available_r_methods()
+    assert "period_change" in methods
+    assert "describe_numeric" in methods
+
+
+def test_available_r_methods_uses_cached_list_on_subsequent_unreachable_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.analytical_method_engine import catalog_admin
+
+    monkeypatch.setenv("R_ANALYTICS_ENABLED", "true")
+    catalog_admin._r_methods_cache = ({"cached_method"}, 0.0)
+    with patch("httpx.Client.get", side_effect=RuntimeError("connection refused")):
+        methods = catalog_admin.available_r_methods()
+    # TTL expired, but the stale cache should still be returned when the service fails.
+    assert "cached_method" in methods
+
+
+def test_implementation_available_set_b_false_when_r_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("R_ANALYTICS_ENABLED", "false")
+    method = AnalyticalMethod(
+        method_id="period_change",
+        execution_engine="r",
+        executor_key="period_change",
+        is_executable=True,
+    )
+    assert implementation_available(method) is False
+
+
+def test_implementation_available_set_a_true_when_r_disabled_due_to_python_twin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("R_ANALYTICS_ENABLED", "false")
+    method = AnalyticalMethod(
+        method_id="describe_numeric",
+        execution_engine="r",
+        executor_key="describe_numeric",
+        is_executable=True,
+    )
+    assert implementation_available(method) is True
+
+
+async def test_activate_and_deactivate_persist_on_active_version(db_session) -> None:
+    """Admin toggles survive in the active catalog version and invalidate the registry cache."""
+    from app.services.analytical_method_engine import method_registry
+
+    catalog = MethodCatalog(catalog_key="tablescope_analytical_methods", name="Test", is_active=True)
+    db_session.add(catalog)
+    await db_session.flush()
+
+    version = MethodCatalogVersion(
+        catalog_id=catalog.id,
+        version="1.0",
+        status=STATUS_ACTIVE,
+    )
+    db_session.add(version)
+    await db_session.flush()
+
+    catalog.active_version_id = version.id
+    method = AnalyticalMethod(
+        catalog_version_id=version.id,
+        method_id="describe_numeric",
+        display_name="Describe numeric",
+        execution_engine="r",
+        executor_key="describe_numeric",
+        status=STATUS_DRAFT,
+        is_executable=False,
+    )
+    db_session.add(method)
+    await db_session.commit()
+
+    method_registry.invalidate_cache()
+    activated = await activate_method(db_session, "describe_numeric", actor_user_id=1)
+    assert activated["status"] == STATUS_ACTIVE
+    assert activated["is_executable"] is True
+
+    await db_session.refresh(method)
+    assert method.status == STATUS_ACTIVE
+    assert method.is_executable is True
+
+    deactivated = await deactivate_method(db_session, "describe_numeric", actor_user_id=1)
+    assert deactivated["status"] == STATUS_DRAFT
+    assert deactivated["is_executable"] is False
+
+
+async def test_activate_rejects_unimplemented_method(db_session) -> None:
+    catalog = MethodCatalog(catalog_key="tablescope_analytical_methods", name="Test 2", is_active=True)
+    db_session.add(catalog)
+    await db_session.flush()
+
+    version = MethodCatalogVersion(
+        catalog_id=catalog.id,
+        version="1.0",
+        status=STATUS_ACTIVE,
+    )
+    db_session.add(version)
+    await db_session.flush()
+
+    catalog.active_version_id = version.id
+    method = AnalyticalMethod(
+        catalog_version_id=version.id,
+        method_id="no_such_method",
+        display_name="No such method",
+        execution_engine="r",
+        executor_key="no_such_r_method",
+        status=STATUS_DRAFT,
+        is_executable=False,
+    )
+    db_session.add(method)
+    await db_session.commit()
+
+    with pytest.raises(ValueError, match="No implementation available"):
+        await activate_method(db_session, "no_such_method", actor_user_id=1)

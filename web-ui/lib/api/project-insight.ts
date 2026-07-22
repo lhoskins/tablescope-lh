@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/api-client";
+import type { MethodEnvelope } from "./ai-actions";
 
 export interface ExecutiveSummary {
   summary: string;
@@ -112,6 +113,8 @@ export interface ProjectInsightCard {
   valueColumn?: string;
   valueColumn2?: string;
   executedAt?: string;
+  /** Governed Analytical Method Engine envelope (not yet produced for Project Insights). */
+  analyticalMethod?: MethodEnvelope;
 }
 
 export interface WhatChangedSinceLastVisit {

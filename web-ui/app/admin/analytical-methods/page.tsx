@@ -86,7 +86,10 @@ function ActivationToggle({ method, onSuccess }: { method: MethodSummary; onSucc
   const busy = activate.isPending || deactivate.isPending;
   if (!method.implementation_available) {
     return (
-      <span className="cursor-help text-xs text-slate-400" title="No implementation available">
+      <span
+        className="cursor-help text-xs text-slate-400"
+        title="No Python or R implementation for this method"
+      >
         No impl
       </span>
     );

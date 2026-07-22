@@ -44,11 +44,13 @@ from app.models.saved_query import SavedQuery
 from app.services.ai_governance import ai_governance_service
 from app.services.analytical_method_engine import (
     EngineMode,
+    data_profiler,
     get_engine_mode,
 )
 from app.services.analytical_method_engine import (
     analyze as analyze_methods,
 )
+from app.services.analytical_method_engine.intent import infer_intent
 from app.services.evidence_severity import gate_severity
 from app.services.insight_explanation import build_explanation, infer_method
 from app.services.presentation_engine import PresentationMode
@@ -2677,10 +2679,44 @@ async def plan_and_execute_widgets(
 # Analysis categories that map cleanly onto a declared engine intent. Risk and
 # opportunity carry no shape information, so the engine's own inference (which
 # reconciles keywords against the actual data profile) decides for those.
-_CATEGORY_INTENT_HINTS = {
-    "trend": "detect_trend",
+_CATEGORY_INTENT_HINTS: dict[str, str | None] = {
+    # Explicit, unambiguous categories from the insight taxonomy route directly.
     "relationship": "relationship_numeric",
+    "group-comparison": "compare_multiple_groups",
+    "period-change": "compare_periods",
+    "forecast": "forecast_time_series",
+    "anomaly": "detect_anomalies",
+    "driver": "contribution_to_change",
+    "descriptive": "describe_numeric",
+    # Generic card categories are resolved per-item from title/rationale + data shape
+    # so a "trend" card titled "Month-over-month change" can route to compare_periods.
+    "trend": None,
+    "risk": None,
+    "opportunity": None,
 }
+
+
+def _resolve_intent_hint(
+    analysis: dict[str, Any], result: dict[str, Any]
+) -> str | None:
+    """Pick the strongest intent hint for an executed analysis.
+
+    Explicit `_CATEGORY_INTENT_HINTS` entries win. For the generic
+    ``trend``/``risk``/``opportunity`` buckets the title/rationale plus the
+    actual result shape are used so Set B time-series methods (forecast,
+    period-change, anomaly, change-point, contribution) can be selected.
+    """
+    category = str(analysis.get("category") or "").lower()
+    explicit = _CATEGORY_INTENT_HINTS.get(category)
+    if explicit is not None:
+        return explicit
+    question = " — ".join(
+        str(x) for x in (analysis.get("title"), analysis.get("rationale")) if x
+    )
+    profile = data_profiler.profile(
+        result.get("columns", []), result.get("rows", [])
+    )
+    return infer_intent(question, profile)
 
 
 async def _attach_method_envelopes(
@@ -2717,7 +2753,7 @@ async def _attach_method_envelopes(
                 columns=result.get("columns", []),
                 rows=result.get("rows", []),
                 question=question or str(a.get("category") or ""),
-                intent=_CATEGORY_INTENT_HINTS.get(str(a.get("category") or "")),
+                intent=_resolve_intent_hint(a, result),
             )
         except Exception as exc:  # pragma: no cover - engine is fail-closed
             logger.warning(

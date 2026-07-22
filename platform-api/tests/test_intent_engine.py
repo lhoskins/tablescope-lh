@@ -8,6 +8,8 @@ scored for accuracy (not just single assertions), the closing of the
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from app.services.analytical_method_engine.intent import infer_intent
@@ -144,3 +146,33 @@ def test_confidence_never_presented_as_probability() -> None:
     # Guard: confidence is a bounded heuristic, documented as non-calibrated.
     for q, _ in _CORPUS:
         assert 0.0 <= classify_intent(q).confidence <= 1.0
+
+
+# ── Set B business time-series phrasing ───────────────────────────────────
+
+def _ts_profile() -> dict[str, Any]:
+    return {
+        "numeric_columns": ["revenue"],
+        "categorical_columns": ["region"],
+        "binary_columns": [],
+        "datetime_columns": ["month"],
+        "has_time_structure": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("Month over month revenue change", "compare_periods"),
+        ("MoM growth", "compare_periods"),
+        ("YoY comparison", "compare_periods"),
+        ("rate of change in orders", "compare_periods"),
+        ("what should we expect next quarter", "forecast_time_series"),
+        ("forecast revenue", "forecast_time_series"),
+        ("unusual spike in defects", "detect_anomalies"),
+        ("when did it change", "detect_change_point"),
+        ("what drove the change", "contribution_to_change"),
+    ],
+)
+def test_infer_intent_setb_phrases(question: str, expected: str) -> None:
+    assert infer_intent(question, _ts_profile()) == expected
