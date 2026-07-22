@@ -27,7 +27,7 @@ import {
   type HomePin,
 } from "@/lib/api/home-pins";
 import type { InsightCard } from "@/lib/api/home-intelligence";
-import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
+import type { GovernanceItem, InsightFeedbackRecord } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 
 type HomePinItem = HomePin;
@@ -48,6 +48,8 @@ function PinCard({
   onRefresh,
   onFeedbackSave,
   onFeedbackRemove,
+  onFeedbackRespond,
+  governance,
 }: {
   pin: HomePinItem;
   feedback?: InsightFeedbackRecord | null;
@@ -60,6 +62,8 @@ function PinCard({
     comment: string;
   }) => void;
   onFeedbackRemove?: (pin: HomePinItem) => void;
+  onFeedbackRespond?: (pin: HomePinItem, response: string) => void;
+  governance?: GovernanceItem | null;
 }) {
   const isLive = pin.pin_type === "live_widget";
   return (
@@ -99,6 +103,8 @@ function PinCard({
           savingFeedback={savingFeedback}
           onFeedbackSave={onFeedbackSave}
           onFeedbackRemove={onFeedbackRemove}
+          onFeedbackRespond={onFeedbackRespond}
+          governance={governance}
         />
       </div>
       {pin.refresh_error && (
@@ -116,6 +122,8 @@ function PinContent({
   savingFeedback,
   onFeedbackSave,
   onFeedbackRemove,
+  onFeedbackRespond,
+  governance,
 }: {
   pin: HomePinItem;
   feedback?: InsightFeedbackRecord | null;
@@ -126,6 +134,8 @@ function PinContent({
     comment: string;
   }) => void;
   onFeedbackRemove?: (pin: HomePinItem) => void;
+  onFeedbackRespond?: (pin: HomePinItem, response: string) => void;
+  governance?: GovernanceItem | null;
 }) {
   if (pin.pin_type === "insight_card") {
     const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
@@ -147,6 +157,10 @@ function PinContent({
         onFeedbackRemove={
           onFeedbackRemove ? () => onFeedbackRemove(pin) : undefined
         }
+        onFeedbackRespond={
+          onFeedbackRespond ? (response) => onFeedbackRespond(pin, response) : undefined
+        }
+        governance={governance}
       />
     );
   }
@@ -187,8 +201,10 @@ export function HomePinsGrid() {
   );
   const {
     feedbackById,
+    governanceById,
     saveFeedback,
     removeFeedback,
+    respondToReview,
     saving: savingFeedback,
   } = useInsightFeedback(insightIds);
 
@@ -241,6 +257,13 @@ export function HomePinsGrid() {
     const projectId = pin.project_id ?? Number(card.projectId);
     if (!insightId || !projectId) return;
     void removeFeedback({ insightId, projectId });
+  };
+
+  const handleFeedbackRespond = (pin: HomePinItem, response: string) => {
+    const card = (pin.frozen_payload ?? pin.config ?? {}) as unknown as InsightCard;
+    const insightId = card.insightId || card.id;
+    if (!insightId) return;
+    void respondToReview({ insightId, response });
   };
 
   const [optimisticLayout, setOptimisticLayout] = useState<LayoutItem[] | null>(null);
@@ -366,6 +389,8 @@ export function HomePinsGrid() {
                 onRefresh={() => refreshMutation.mutate()}
                 onFeedbackSave={handleFeedbackSave}
                 onFeedbackRemove={handleFeedbackRemove}
+                onFeedbackRespond={handleFeedbackRespond}
+                governance={governanceById[insightId]}
               />
             </div>
           );

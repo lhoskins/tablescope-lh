@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -59,8 +59,15 @@ class InsightFeedback(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     reviewer_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    feedback_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
     )
 
     __table_args__ = (
@@ -76,4 +83,45 @@ class InsightFeedback(TimestampMixin, Base):
             f"user_id={self.user_id}, insight_id={self.insight_id!r}, "
             f"sentiment={self.sentiment!r}, status={self.status!r}, "
             f"review_status={self.review_status!r})"
+        )
+
+
+class InsightFeedbackReviewEvent(Base, TimestampMixin):
+    __tablename__ = "insight_feedback_review_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    feedback_id: Mapped[int] = mapped_column(
+        ForeignKey("insight_feedback.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    insight_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    from_review_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_review_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    actor_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feedback_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"InsightFeedbackReviewEvent(id={self.id}, feedback_id={self.feedback_id}, "
+            f"event_type={self.event_type!r}, "
+            f"from={self.from_review_status!r}, to={self.to_review_status!r})"
         )

@@ -24,7 +24,10 @@ export interface InsightFeedbackRecord {
   review_status?: string;
   reviewer_user_id?: number | null;
   reviewer_comment?: string | null;
+  response?: string | null;
   reviewed_at?: string | null;
+  acknowledged_at?: string | null;
+  feedback_revision?: number;
   created_at: string;
   updated_at: string;
 }
@@ -100,6 +103,29 @@ export interface DispositionPayload {
   reviewer_comment?: string;
 }
 
+export interface RequestInfoPayload {
+  reviewer_comment: string;
+}
+
+export interface UserResponsePayload {
+  response: string;
+}
+
+export interface GovernanceRequest {
+  insight_ids: string[];
+  project_id?: number;
+}
+
+export interface GovernanceItem {
+  insight_id: string;
+  governance_status: string;
+  last_status_changed_at: string | null;
+}
+
+export interface GovernanceResponse {
+  items: GovernanceItem[];
+}
+
 export function getInsightFeedbackReviewQueue(
   filters: InsightFeedbackReviewQueueFilters = {},
 ): Promise<InsightFeedbackReviewQueueResponse> {
@@ -137,6 +163,26 @@ export function releaseInsightFeedbackReview(
   );
 }
 
+export function requestInfoInsightFeedbackReview(
+  feedbackId: number,
+  payload: RequestInfoPayload,
+): Promise<InsightFeedbackReviewItem> {
+  return apiClient.post<InsightFeedbackReviewItem>(
+    `/api/insight-feedback/review/${feedbackId}/request-info`,
+    payload,
+  );
+}
+
+export function respondToInsightFeedbackRequest(
+  insightId: string,
+  payload: UserResponsePayload,
+): Promise<InsightFeedbackRecord> {
+  return apiClient.post<InsightFeedbackRecord>(
+    `/api/insight-feedback/${insightId}/review-response`,
+    payload,
+  );
+}
+
 export function dispositionInsightFeedbackReview(
   feedbackId: number,
   payload: DispositionPayload,
@@ -145,4 +191,10 @@ export function dispositionInsightFeedbackReview(
     `/api/insight-feedback/review/${feedbackId}/disposition`,
     payload,
   );
+}
+
+export function batchGetInsightGovernance(
+  payload: GovernanceRequest,
+): Promise<GovernanceResponse> {
+  return apiClient.post<GovernanceResponse>("/api/insight-feedback/governance", payload);
 }
