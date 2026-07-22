@@ -108,7 +108,7 @@ run_method <- function(req) {
 #* @post /execute
 function(req, res) {
   res$setHeader("Content-Type", "application/json")
-  jsonlite::toJSON(run_method(req), auto_unbox = TRUE, null = "null", na = "null")
+  run_method(req)
 }
 
 #* @get /health
