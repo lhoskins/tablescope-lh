@@ -2,10 +2,10 @@ FROM r-base:4.4.0
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        libcurl4-openssl-dev libssl-dev libxml2-dev && \
+        libcurl4-openssl-dev libssl-dev libxml2-dev libsodium-dev curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN R -e "install.packages(c('plumber','jsonlite','dplyr'), repos='https://cloud.r-project.org/')"
+RUN R -e "pkgs <- c('plumber','jsonlite','dplyr'); install.packages(pkgs, repos='https://cloud.r-project.org/'); for (p in pkgs) if (!requireNamespace(p, quietly=TRUE)) stop(paste(p, 'failed to install'))"
 
 WORKDIR /app
 
