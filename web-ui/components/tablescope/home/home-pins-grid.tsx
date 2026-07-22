@@ -270,9 +270,18 @@ export function HomePinsGrid() {
     });
   };
 
-  const { width: containerWidth, containerRef, mounted } = useContainerWidth({
-    measureBeforeMount: true,
-  });
+  const { width: containerWidth, containerRef, mounted, measureWidth } =
+    useContainerWidth({
+      measureBeforeMount: true,
+    });
+
+  // Pins load after mount, so the container ref may not be present on the
+  // initial measurement. Re-measure once pins arrive and the ref is attached.
+  useEffect(() => {
+    if (containerRef.current && pins.length > 0) {
+      measureWidth();
+    }
+  }, [pins.length, measureWidth]);
 
   const [currentBreakpoint, setCurrentBreakpoint] = useState<
     keyof typeof GRID_BREAKPOINTS
