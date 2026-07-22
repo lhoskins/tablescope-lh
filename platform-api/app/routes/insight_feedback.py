@@ -1047,7 +1047,9 @@ async def governance_batch(
             if existing_status == "None" or precedence.index(new_status) < precedence.index(existing_status):
                 governance[insight_id] = (new_status, updated_at)
             elif new_status == existing_status:
-                latest_ts = max(filter(None, [existing_ts, updated_at]), default=None)
+                latest_ts = max(
+                    [ts for ts in (existing_ts, updated_at) if ts is not None], default=None
+                )
                 governance[insight_id] = (new_status, latest_ts)
 
     items: list[InsightFeedbackGovernanceItem] = []
