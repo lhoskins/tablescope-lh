@@ -38,12 +38,14 @@ def build(
     intent: str,
     profile: dict[str, Any],
     method: dict[str, Any] | None,
+    roles: dict[str, Any] | None = None,
     selection_reasons: list[str],
     alternatives: list[str],
     exec_result: dict[str, Any],
     registry_version: int | None,
 ) -> dict[str, Any]:
     method_id = method.get("method_id") if method else None
+    roles = roles or {}
     envelope: dict[str, Any] = {
         "status": exec_result.get("status", "error"),
         "analysisIntent": intent,
@@ -70,7 +72,7 @@ def build(
             "methodRegistryVersion": registry_version,
             "catalogMethodId": method_id,
             "inputDataHash": profile.get("hash"),
-            "parameterHash": _parameter_hash(intent, {}, method_id),
+            "parameterHash": _parameter_hash(intent, roles, method_id),
         },
     }
     return envelope
