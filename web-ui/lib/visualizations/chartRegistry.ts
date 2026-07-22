@@ -72,11 +72,89 @@ const SHARED_DISPLAY_OPTIONS: ChartOptionDefinition[] = [
   { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: true },
   { key: "showLabels", label: "Show data labels", type: "boolean", group: "chart", defaultValue: false },
   { key: "showGrid", label: "Show grid", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
   { key: "tinyMode", label: "Tiny (sparkline) mode", type: "boolean", group: "style", defaultValue: false },
+];
+
+const COLOR_SCHEME_OPTION: ChartOptionDefinition = {
+  key: "colorScheme",
+  label: "Color scheme",
+  type: "select",
+  group: "style",
+  defaultValue: "tablescope",
+  options: [
+    { label: "TableScope", value: "tablescope" },
+    { label: "Ocean", value: "ocean" },
+    { label: "Forest", value: "forest" },
+    { label: "Warm", value: "warm" },
+    { label: "Monochrome", value: "monochrome" },
+  ],
+};
+
+const LEGEND_POSITION_OPTION: ChartOptionDefinition = {
+  key: "legendPosition",
+  label: "Legend position",
+  type: "select",
+  group: "chart",
+  defaultValue: "bottom",
+  options: [
+    { label: "Top", value: "top" },
+    { label: "Bottom", value: "bottom" },
+    { label: "Left", value: "left" },
+    { label: "Right", value: "right" },
+    { label: "None", value: "none" },
+  ],
+};
+
+const X_AXIS_ROTATE_OPTION: ChartOptionDefinition = {
+  key: "xAxisLabelRotate",
+  label: "X-axis label rotation",
+  type: "number",
+  group: "advanced",
+  defaultValue: 0,
+  min: -90,
+  max: 90,
+  step: 15,
+};
+
+const Y_AXIS_FORMAT_OPTION: ChartOptionDefinition = {
+  key: "yAxisFormat",
+  label: "Y-axis format",
+  type: "select",
+  group: "advanced",
+  defaultValue: "number",
+  options: [
+    { label: "Number", value: "number" },
+    { label: "Currency", value: "currency" },
+    { label: "Percent", value: "percent" },
+    { label: "Compact", value: "compact" },
+  ],
+};
+
+const DATA_ZOOM_OPTION: ChartOptionDefinition = {
+  key: "dataZoom",
+  label: "Enable zoom",
+  type: "boolean",
+  group: "advanced",
+  defaultValue: false,
+};
+
+const ANALYTICAL_LAYER_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showRegressionLine", label: "Show regression line", type: "boolean", group: "advanced", defaultValue: false },
+  { key: "showControlLimits", label: "Show control limits (±2σ)", type: "boolean", group: "advanced", defaultValue: false },
+  { key: "showAnomalies", label: "Highlight anomalies", type: "boolean", group: "advanced", defaultValue: false },
+  { key: "showChangePoint", label: "Mark largest change", type: "boolean", group: "advanced", defaultValue: false },
+  { key: "confidenceBand", label: "Confidence/prediction band", type: "boolean", group: "advanced", defaultValue: false },
 ];
 
 const LINE_OPTIONS: ChartOptionDefinition[] = [
   ...SHARED_DISPLAY_OPTIONS,
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
+  Y_AXIS_FORMAT_OPTION,
+  X_AXIS_ROTATE_OPTION,
+  DATA_ZOOM_OPTION,
+  ...ANALYTICAL_LAYER_OPTIONS,
   {
     key: "lineStyle",
     label: "Line style",
@@ -121,6 +199,13 @@ const CURVE_OPTION: ChartOptionDefinition = {
 
 const AREA_OPTIONS: ChartOptionDefinition[] = [
   ...SHARED_DISPLAY_OPTIONS,
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
+  Y_AXIS_FORMAT_OPTION,
+  X_AXIS_ROTATE_OPTION,
+  DATA_ZOOM_OPTION,
+  { key: "showRegressionLine", label: "Show regression line", type: "boolean", group: "advanced", defaultValue: false },
+  { key: "showControlLimits", label: "Show control limits (±2σ)", type: "boolean", group: "advanced", defaultValue: false },
   {
     key: "stackMode",
     label: "Stacking",
@@ -150,6 +235,12 @@ const AREA_OPTIONS: ChartOptionDefinition[] = [
 
 const BAR_OPTIONS: ChartOptionDefinition[] = [
   ...SHARED_DISPLAY_OPTIONS,
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
+  Y_AXIS_FORMAT_OPTION,
+  X_AXIS_ROTATE_OPTION,
+  DATA_ZOOM_OPTION,
+  { key: "showControlLimits", label: "Show control limits (±2σ)", type: "boolean", group: "advanced", defaultValue: false },
   {
     key: "barLayout",
     label: "Orientation",
@@ -191,12 +282,22 @@ const BAR_OPTIONS: ChartOptionDefinition[] = [
 
 const COMPOSED_OPTIONS: ChartOptionDefinition[] = [
   ...SHARED_DISPLAY_OPTIONS,
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
+  Y_AXIS_FORMAT_OPTION,
+  X_AXIS_ROTATE_OPTION,
+  DATA_ZOOM_OPTION,
   { key: "dualAxis", label: "Dual Y axis", type: "boolean", group: "chart", defaultValue: true },
   CURVE_OPTION,
+  { key: "showRegressionLine", label: "Show regression line", type: "boolean", group: "advanced", defaultValue: false },
+  { key: "showControlLimits", label: "Show control limits (±2σ)", type: "boolean", group: "advanced", defaultValue: false },
 ];
 
 const PIE_OPTIONS: ChartOptionDefinition[] = [
   { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
   {
     key: "labelMode",
     label: "Labels",
@@ -279,13 +380,21 @@ const SCATTER_OPTIONS: ChartOptionDefinition[] = [
   { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: true },
   { key: "showGrid", label: "Show grid", type: "boolean", group: "chart", defaultValue: true },
   { key: "showLabels", label: "Show point labels", type: "boolean", group: "chart", defaultValue: false },
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
+  Y_AXIS_FORMAT_OPTION,
+  DATA_ZOOM_OPTION,
   { key: "bubble", label: "Bubble (size by Z)", type: "boolean", group: "chart", defaultValue: false, description: "Sizes each point by the Z column." },
   { key: "showTrendLine", label: "Line of best fit", type: "boolean", group: "advanced", defaultValue: false },
+  { key: "showRegressionLine", label: "Show regression line", type: "boolean", group: "advanced", defaultValue: false },
+  { key: "showControlLimits", label: "Show control limits (±2σ)", type: "boolean", group: "advanced", defaultValue: false },
 ];
 
 const RADAR_OPTIONS: ChartOptionDefinition[] = [
   { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: true },
   { key: "showLabels", label: "Show values", type: "boolean", group: "chart", defaultValue: false },
+  COLOR_SCHEME_OPTION,
   {
     key: "fillOpacity",
     label: "Fill opacity",
@@ -303,6 +412,8 @@ const RADAR_OPTIONS: ChartOptionDefinition[] = [
 const RADIAL_BAR_OPTIONS: ChartOptionDefinition[] = [
   { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: true },
   { key: "showLabels", label: "Show values", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
   {
     key: "innerRadius",
     label: "Inner radius %",
@@ -349,16 +460,20 @@ const RADIAL_BAR_OPTIONS: ChartOptionDefinition[] = [
 const TREEMAP_OPTIONS: ChartOptionDefinition[] = [
   { key: "showLabels", label: "Show labels", type: "boolean", group: "chart", defaultValue: true },
   { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
 ];
 
 const FUNNEL_OPTIONS: ChartOptionDefinition[] = [
   { key: "showLabels", label: "Show labels", type: "boolean", group: "chart", defaultValue: true },
   { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
   { key: "showLegend", label: "Show legend", type: "boolean", group: "chart", defaultValue: false },
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
 ];
 
 const SANKEY_OPTIONS: ChartOptionDefinition[] = [
   { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
   { key: "nodePadding", label: "Node padding", type: "number", group: "style", defaultValue: 20, min: 0, max: 60, step: 2 },
   { key: "nodeWidth", label: "Node width", type: "number", group: "style", defaultValue: 12, min: 4, max: 40, step: 2 },
 ];
@@ -459,7 +574,10 @@ export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
     icon: "\u{1F4CA}\u{1F4C8}",
     description: "Bars plus an overlaid line, often dual-axis.",
     requiredFields: ["x", "y"],
-    variants: [{ value: "bar_line", label: "Bar + Line" }],
+    variants: [
+      { value: "bar_line", label: "Bar + Line", defaultOptions: { dualAxis: true } },
+      { value: "dual_line", label: "Dual Line", defaultOptions: { dualAxis: true } },
+    ],
     options: COMPOSED_OPTIONS,
     bestFor: ["Count plus rate", "Actual plus target"],
     aiRules: ["Use Combo for count plus rate, or actual plus target."],

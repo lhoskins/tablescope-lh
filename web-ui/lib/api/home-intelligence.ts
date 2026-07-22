@@ -519,6 +519,7 @@ export function saveDashboardSuggestion(body: {
     labelColumn?: string;
     valueColumn?: string;
     valueColumn2?: string;
+    visualizationOptions?: Record<string, unknown>;
   }[];
 }): Promise<{ status: string; dashboard_id: number; name: string }> {
   return apiClient.post("/api/ai/home/save-dashboard", body);
@@ -535,6 +536,7 @@ export interface SaveCardToDashboardPayload {
   labelColumn?: string | null;
   valueColumn?: string | null;
   valueColumn2?: string | null;
+  visualizationOptions?: Record<string, unknown>;
 }
 
 export interface SaveCardToDashboardResponse {

@@ -59,24 +59,24 @@ class Tenant(TimestampMixin, Base):
         cascade="all, delete-orphan",
     )
 
-    users: Mapped[list[User]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    users: Mapped[list[User]] = relationship(  # noqa: F821
         back_populates="tenant",
         cascade="all, delete-orphan",
         foreign_keys="User.tenant_id",
     )
-    projects: Mapped[list[Project]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    projects: Mapped[list[Project]] = relationship(  # noqa: F821
         back_populates="tenant",
         cascade="all, delete-orphan",
     )
-    user_vdbs: Mapped[list[UserVDB]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    user_vdbs: Mapped[list[UserVDB]] = relationship(  # noqa: F821
         back_populates="tenant",
         cascade="all, delete-orphan",
     )
-    shared_vdbs: Mapped[list[SharedVDB]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    shared_vdbs: Mapped[list[SharedVDB]] = relationship(  # noqa: F821
         back_populates="tenant",
         cascade="all, delete-orphan",
     )
-    organization_vdbs: Mapped[list[OrganizationVDB]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    organization_vdbs: Mapped[list[OrganizationVDB]] = relationship(  # noqa: F821
         back_populates="tenant",
         cascade="all, delete-orphan",
     )

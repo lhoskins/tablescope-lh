@@ -104,7 +104,7 @@ def _mock_supabase(monkeypatch):
 async def test_ensure_datasource_query_creates_and_dedupes(
     client, db_session, service_headers
 ) -> None:
-    project, user, headers = await _project(client, service_headers)
+    project, user, _headers = await _project(client, service_headers)
     pid = project["id"]
 
     created = await ensure_datasource_query(

@@ -32,8 +32,8 @@ class Project(TimestampMixin, Base):
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     scoping_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
 
-    tenant: Mapped[Tenant] = relationship(back_populates="projects")  # type: ignore[name-defined]  # noqa: F821
-    owner: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    tenant: Mapped[Tenant] = relationship(back_populates="projects")  # noqa: F821
+    owner: Mapped[User | None] = relationship(  # noqa: F821
         back_populates="owned_projects",
         foreign_keys=[owner_id],
     )

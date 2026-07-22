@@ -50,15 +50,15 @@ class User(TimestampMixin, Base):
         _JSON, nullable=False, default=dict, server_default="{}"
     )
 
-    tenant: Mapped[Tenant] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    tenant: Mapped[Tenant] = relationship(  # noqa: F821
         back_populates="users",
         foreign_keys="User.tenant_id",
     )
-    owned_projects: Mapped[list[Project]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    owned_projects: Mapped[list[Project]] = relationship(  # noqa: F821
         back_populates="owner",
         foreign_keys="Project.owner_id",
     )
-    user_vdb: Mapped[UserVDB | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    user_vdb: Mapped[UserVDB | None] = relationship(  # noqa: F821
         back_populates="user",
         uselist=False,
         cascade="all, delete-orphan",

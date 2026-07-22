@@ -13,10 +13,10 @@ charting decisions (charting is already unified via ``InsightChartBlock`` /
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class PresentationMode(str, Enum):
+class PresentationMode(StrEnum):
     """The five (really six) response surfaces, collapsed to a shared vocabulary."""
 
     CONVERSATIONAL = "conversational"  # /ask prose
@@ -26,7 +26,7 @@ class PresentationMode(str, Enum):
     DASHBOARD = "dashboard"  # generated dashboard modal
 
 
-class Section(str, Enum):
+class Section(StrEnum):
     """Every renderable section across all modes (superset)."""
 
     SUMMARY = "summary"

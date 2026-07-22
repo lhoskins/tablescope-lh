@@ -34,7 +34,7 @@ class SharedVDB(TimestampMixin, Base):
     last_health_check: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     health_status: Mapped[str] = mapped_column(String(50), default="unknown", nullable=False)
 
-    tenant: Mapped[Tenant] = relationship(back_populates="shared_vdbs")  # type: ignore[name-defined]  # noqa: F821
+    tenant: Mapped[Tenant] = relationship(back_populates="shared_vdbs")  # noqa: F821
 
     def get_connection_string(self) -> str:
         vdb_name_with_version = f"{self.vdb_id}.1"
