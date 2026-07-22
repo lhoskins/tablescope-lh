@@ -19,11 +19,11 @@ from app.services.ai_governance import ai_governance_service, infer_governance_k
 from app.services.analytical_method_engine import (
     data_profiler,
     method_audit,
-    method_executor,
     method_registry,
     method_selector,
     result_envelope,
 )
+from app.services.analytical_method_engine.executors import ExecutorRegistry
 from app.services.analytical_method_engine.intent import infer_intent
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,7 @@ async def analyze(
         if selection.status != "selected" or selection.method_id is None:
             envelope = result_envelope.build(
                 intent=resolved_intent, profile=profile, method=None,
+                roles=selection.roles,
                 selection_reasons=selection.reasons, alternatives=selection.alternatives,
                 exec_result={"status": "no_method", "reason": "; ".join(selection.reasons)},
                 registry_version=registry_version,
@@ -140,12 +141,13 @@ async def analyze(
 
         method = registry["methods"][chosen_method_id]
         df = data_profiler.to_dataframe(columns, rows)
-        exec_result = method_executor.execute(
-            method["executor_key"], df, selection.roles, profile,
+        exec_result = ExecutorRegistry().execute(
+            method, df, selection.roles, profile,
             registry.get("policies") if registry else {},
         )
         envelope = result_envelope.build(
             intent=resolved_intent, profile=profile, method=method,
+            roles=selection.roles,
             selection_reasons=selection.reasons, alternatives=selection.alternatives,
             exec_result=exec_result, registry_version=registry_version,
         )
