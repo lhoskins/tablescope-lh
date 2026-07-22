@@ -17,6 +17,14 @@ vi.mock("@/components/tablescope/home/intelligence-card", () => ({
   ),
 }));
 
+vi.mock("@/lib/ui/use-shell-data", () => ({
+  useProjectSummaries: vi.fn(() => ({ data: [] })),
+}));
+
+vi.mock("@/components/tablescope/home/save-insight-to-dashboard-modal", () => ({
+  SaveInsightToDashboardModal: vi.fn(() => <div data-testid="save-modal" />),
+}));
+
 import { QuerySuggestionPreviewModal } from "./query-suggestion-preview-modal";
 
 function renderModal() {
@@ -71,5 +79,14 @@ describe("QuerySuggestionPreviewModal", () => {
       await screen.findByText(/The query could not be executed/),
     ).toBeTruthy();
     expect(screen.getByText("Timestamp parse error")).toBeTruthy();
+  });
+
+  it("renders an Add to Dashboard button after the query succeeds", async () => {
+    runDatasourceSql.mockResolvedValue(RESULT);
+    renderModal();
+    await screen.findByTestId("chart");
+    const btn = screen.getByRole("button", { name: /Add to Dashboard/i });
+    expect(btn).toBeTruthy();
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
   });
 });
