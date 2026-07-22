@@ -281,6 +281,8 @@ export function HomePinsGrid() {
     if (containerRef.current && pins.length > 0) {
       measureWidth();
     }
+    // containerRef is a stable ref object and does not trigger re-runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pins.length, measureWidth]);
 
   const [currentBreakpoint, setCurrentBreakpoint] = useState<
