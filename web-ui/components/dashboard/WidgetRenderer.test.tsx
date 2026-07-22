@@ -3,21 +3,24 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { WidgetRenderer } from "./WidgetRenderer";
 import type { WidgetConfig } from "./types";
 
-const chartMock = {
-  setOption: vi.fn(),
-  on: vi.fn(),
-  resize: vi.fn(),
-  dispose: vi.fn(),
-};
+const { chartMock, initMock, useMock } = vi.hoisted(() => {
+  const chartMock = {
+    setOption: vi.fn(),
+    on: vi.fn(),
+    resize: vi.fn(),
+    dispose: vi.fn(),
+  };
+  const initMock = vi.fn(() => chartMock);
+  const useMock = vi.fn();
+  return { chartMock, initMock, useMock };
+});
 
-const initMock = vi.fn(() => chartMock);
-
-vi.mock("echarts", () => ({
-  default: { init: initMock },
+vi.mock("echarts/core", () => ({
+  use: useMock,
   init: initMock,
 }));
 
-function makeWidget(overrides: Partial<WidgetConfig>): WidgetConfig {
+function makeWidget(overrides: Partial<WidgetConfig> = {}): WidgetConfig {
   return {
     id: "w1",
     type: "bar",
@@ -39,30 +42,26 @@ const data = [
   { Category: "B", Value: 10 },
 ];
 
-describe("WidgetRenderer routing", () => {
+describe("WidgetRenderer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "off");
   });
 
   afterEach(() => {
     cleanup();
-    vi.unstubAllEnvs();
   });
 
   it("shows an empty state when there is no data", () => {
-    render(<WidgetRenderer widget={makeWidget({})} data={[]} />);
+    render(<WidgetRenderer widget={makeWidget()} data={[]} />);
     expect(screen.getByText(/no data available/i)).toBeTruthy();
   });
 
-  it("still renders the chart (no table fallback) when a column is unset", () => {
+  it("still renders the chart when a column is unset", () => {
     const widget = makeWidget({ xColumn: "", xKey: undefined });
-    const { container } = render(
-      <WidgetRenderer widget={widget} data={[{ Category: "A", Value: 5 }]} />
-    );
+    const { container } = render(<WidgetRenderer widget={widget} data={[{ Category: "A", Value: 5 }]} />);
     expect(screen.queryByText(/showing table instead/i)).toBeNull();
     expect(screen.queryByText(/no data available/i)).toBeNull();
-    expect(container.querySelector(".recharts-responsive-container")).toBeTruthy();
+    expect(container.querySelector("[data-testid='echarts-widget']")).toBeTruthy();
   });
 
   it("renders a KPI value for kpi widgets", () => {
@@ -71,43 +70,22 @@ describe("WidgetRenderer routing", () => {
     expect(screen.getByText("1,234")).toBeTruthy();
   });
 
-  it("renders ECharts for supported widgets in default mode", async () => {
-    vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "default");
-    render(<WidgetRenderer widget={makeWidget({ type: "line" })} data={data} />);
-    await new Promise((r) => setTimeout(r, 0));
-    expect(screen.getByTestId("echarts-widget")).toBeTruthy();
-    expect(screen.getByTestId("echarts-widget").getAttribute("data-chart-renderer")).toBe("echarts");
-    expect(initMock).toHaveBeenCalled();
+  it("renders every chart type through ECharts", async () => {
+    const types: Array<WidgetConfig["type"]> = ["line", "bar", "area", "pie", "combo", "scatter", "radar", "radial_bar", "treemap", "funnel", "sankey"];
+    for (const type of types) {
+      vi.clearAllMocks();
+      const { unmount } = render(<WidgetRenderer widget={makeWidget({ type })} data={data} />);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.getByTestId("echarts-widget")).toBeTruthy();
+      expect(screen.getByTestId("echarts-widget").getAttribute("data-chart-renderer")).toBe("echarts");
+      expect(initMock).toHaveBeenCalledTimes(1);
+      unmount();
+    }
   });
 
-  it("preserves the Recharts path in off mode", () => {
-    vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "off");
+  it("has no legacy chart markup anywhere", () => {
     const { container } = render(<WidgetRenderer widget={makeWidget({ type: "bar" })} data={data} />);
-    expect(container.querySelector(".recharts-responsive-container")).toBeTruthy();
-  });
-
-  it("renders ECharts in new_widgets mode only when renderer is echarts", async () => {
-    vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "new_widgets");
-    const { container } = render(
-      <WidgetRenderer widget={makeWidget({ type: "bar", visualizationOptions: { renderer: "echarts" } })} data={data} />
-    );
-    await new Promise((r) => setTimeout(r, 0));
-    expect(screen.queryByTestId("echarts-widget")).toBeTruthy();
-    expect(initMock).toHaveBeenCalled();
-    cleanup();
-
-    vi.clearAllMocks();
-    const { container: rechartsContainer } = render(
-      <WidgetRenderer widget={makeWidget({ type: "bar", visualizationOptions: { renderer: "recharts" } })} data={data} />
-    );
-    expect(screen.queryByTestId("echarts-widget")).toBeNull();
-    expect(rechartsContainer.querySelector(".recharts-responsive-container")).toBeTruthy();
-  });
-
-  it("keeps unsupported widgets on the legacy renderer in default mode", () => {
-    vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "default");
-    const { container } = render(<WidgetRenderer widget={makeWidget({ type: "scatter" })} data={data} />);
-    expect(screen.queryByTestId("echarts-widget")).toBeNull();
-    expect(container.querySelector(".recharts-responsive-container")).toBeTruthy();
+    expect(container.querySelectorAll("[data-chart-renderer]").length).toBe(1);
+    expect(screen.getByTestId("echarts-widget").getAttribute("data-chart-renderer")).toBe("echarts");
   });
 });

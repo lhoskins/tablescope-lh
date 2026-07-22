@@ -1,6 +1,6 @@
 /**
- * Pure data-shaping helpers used by chart renderers. Kept free of React and
- * Recharts so they can be unit-tested in isolation.
+ * Pure data-shaping helpers used by ECharts-based chart renderers. Kept free
+ * of React and charting libraries so they can be unit-tested in isolation.
  */
 
 export type Row = Record<string, unknown>;
@@ -56,7 +56,7 @@ export function toPercentStacked(rows: Row[], xKey: string, seriesNames: string[
 }
 
 /**
- * Builds a flat Recharts treemap hierarchy from rows: one leaf per row using
+ * Builds an ECharts treemap data array from rows: one leaf per row using
  * `nameKey` for the label and `valueKey` for the area. Non-positive values are
  * dropped (treemap requires positive sizes).
  */
@@ -181,7 +181,7 @@ export type SankeyGraph = {
 };
 
 /**
- * Builds Recharts Sankey {nodes, links} from flat rows of
+ * Builds ECharts Sankey {nodes, links} from flat rows of
  * (source, target, value). Source and target names share one node index space;
  * identical (source,target) pairs are summed.
  */

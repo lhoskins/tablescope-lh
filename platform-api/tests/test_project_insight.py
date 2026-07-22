@@ -196,7 +196,7 @@ async def test_reference_library_not_used_as_sql_datasource(
 async def test_acknowledge_creates_audit_record(
     client, service_headers, _mock_ai, db_session
 ) -> None:
-    tenant, user, project, headers = await _setup(
+    _tenant, user, project, headers = await _setup(
         client, service_headers, "pi-ack"
     )
     pid = project["id"]
@@ -240,7 +240,7 @@ async def test_acknowledge_creates_audit_record(
 async def test_acknowledge_is_idempotent_and_surfaces_in_workflow(
     client, service_headers, _mock_ai
 ) -> None:
-    _, user, project, headers = await _setup(client, service_headers, "pi-idem")
+    _, _user, project, headers = await _setup(client, service_headers, "pi-idem")
     pid = project["id"]
 
     for _ in range(2):

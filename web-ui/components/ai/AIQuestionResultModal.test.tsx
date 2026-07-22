@@ -15,7 +15,7 @@ vi.mock("@/lib/api/ai-actions", () => ({
   },
 }));
 
-// The chart renderer pulls in recharts; stub it so the modal test stays fast.
+// The chart renderer pulls in ECharts; stub it so the modal test stays fast.
 vi.mock("@/components/tablescope/home/intelligence-card", () => ({
   InsightChartBlock: () => <div data-testid="chart" />,
 }));

@@ -13,10 +13,10 @@ from app.services.ai_intelligence_client import _post, is_enabled
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "is_enabled",
-    "summarize_reference_document",
-    "suggest_references",
     "index_reference_document",
+    "is_enabled",
+    "suggest_references",
+    "summarize_reference_document",
 ]
 
 

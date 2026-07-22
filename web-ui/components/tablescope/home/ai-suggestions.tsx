@@ -30,6 +30,7 @@ import {
   InsightChartBlock,
 } from "@/components/tablescope/home/intelligence-card";
 import { QuerySuggestionPreviewModal } from "@/components/tablescope/home/query-suggestion-preview-modal";
+import { getDefaultOptions } from "@/lib/visualizations/chartRegistry";
 
 type Pill = "queries" | "dashboards" | "insights";
 
@@ -424,6 +425,7 @@ function DashboardSuggestionCard({
           chartType: w.chartType,
           labelColumn: w.labelColumn,
           valueColumn: w.valueColumn,
+          visualizationOptions: getDefaultOptions(w.chartType),
         })),
       });
       setState("saved");

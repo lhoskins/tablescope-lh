@@ -245,7 +245,7 @@ def _user_label(user: User) -> str:
 
 
 class _ProjectMeta:
-    __slots__ = ("name", "owner_id", "is_shared")
+    __slots__ = ("is_shared", "name", "owner_id")
 
     def __init__(self, name: str, owner_id: int | None, is_shared: bool) -> None:
         self.name = name

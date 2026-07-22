@@ -110,7 +110,7 @@ async def accept_tags(
         suggestion = await session.get(AIAssetTagSuggestion, sid)
         if not suggestion or suggestion.tenant_id != context.tenant_id:
             continue
-        suggestion.status = "accepted"  # type: ignore[assignment]
+        suggestion.status = "accepted"
 
         tag = AIAssetTag(
             tenant_id=context.tenant_id,
@@ -166,7 +166,7 @@ async def reject_tags(
         suggestion = await session.get(AIAssetTagSuggestion, sid)
         if not suggestion or suggestion.tenant_id != context.tenant_id:
             continue
-        suggestion.status = "rejected"  # type: ignore[assignment]
+        suggestion.status = "rejected"
         rejected.append(suggestion.tag_key)
     await session.commit()
     return {"rejected": rejected}
@@ -212,7 +212,7 @@ async def accept_kpis(
         suggestion = await session.get(AIAssetKPISuggestion, sid)
         if not suggestion or suggestion.tenant_id != context.tenant_id:
             continue
-        suggestion.status = "accepted"  # type: ignore[assignment]
+        suggestion.status = "accepted"
 
         kpi = AIAssetKPI(
             tenant_id=context.tenant_id,
@@ -251,7 +251,7 @@ async def reject_kpis(
         suggestion = await session.get(AIAssetKPISuggestion, sid)
         if not suggestion or suggestion.tenant_id != context.tenant_id:
             continue
-        suggestion.status = "rejected"  # type: ignore[assignment]
+        suggestion.status = "rejected"
         rejected.append(suggestion.kpi_key)
     await session.commit()
     return {"rejected": rejected}
