@@ -92,6 +92,57 @@ current TableScope event adapter (`normalizeCartesianClick`/`normalizePieClick`
 equivalents). No type may render blank — if data is missing, show the existing
 no-data state.
 
+## Workstream 1b — Insight visualization is data-shape-driven, NOT constrained to WidgetType
+
+Product requirement: **insight cards must not be limited to the dashboard widget
+types/subtypes.** The chart for an insight is chosen from the **data shape
+itself**, using the full ECharts vocabulary.
+
+Current constraint (verified): `platform-api/app/services/visualization_engine.py`
+`select_visualization` deliberately emits only the **13 `WidgetType` families**
+("MUST stay in lockstep with `WidgetType`"), and the frontend `InsightChartView`
+builds a `WidgetConfig` with `type: chart.type as WidgetType`. So even though the
+engine already has good data-shape heuristics (period→line, part-of-whole→donut,
+id-labels→horizontal bar, single-row→kpi, two-numeric→scatter/combo), its output
+is capped to the dashboard vocabulary.
+
+Do:
+
+1. **Decouple insight chart selection from `WidgetType`.** Introduce a governed,
+   data-shape-driven **ECharts chart spec** for insights (a typed, sanitized spec
+   — no raw ECharts option, JS, or HTML), and let `visualization_engine` emit it
+   for the insight path. Keep the existing data-shape heuristics but **expand the
+   output vocabulary to the full ECharts chart family**, chosen by data shape,
+   e.g.:
+   - time series (ordered time index + measure) → line/area, with prediction/
+     confidence bands and anomaly/change-point markers when the method envelope
+     provides them;
+   - one categorical + one measure → bar (auto horizontal when many/long labels);
+     many categories → ranked top-N;
+   - part-of-whole → pie/donut/**treemap/sunburst**;
+   - two measures → scatter/**bubble**;
+   - distribution of one measure → **histogram/box plot**;
+   - matrix / correlation → **heatmap**;
+   - flow / stage → **sankey/funnel**;
+   - single value → kpi.
+   Selection stays **deterministic and LLM-free** (the engine decides from data
+   shape + the analytical method envelope), consistent with the existing
+   visualization-engine design.
+2. **Render the spec directly via ECharts on the insight surfaces** — do not
+   route insight charts back through the `WidgetType`/`WidgetConfig` bottleneck.
+   `InsightChartView`/`InsightChartBlock` render the governed ECharts spec through
+   the ECharts renderer. (Dashboards keep the `WidgetType` authoring vocabulary
+   from Workstream 3; insights are unconstrained.)
+3. **Sanitize + bound** the spec (row/series/point/label/annotation caps; typed
+   fields only; first-party tooltip/label templates by id). Never accept or emit
+   functions, JS strings, raw HTML, or remote URLs.
+4. Any chart family the ECharts renderer does not yet implement must degrade to
+   the nearest supported family (never blank), and be listed as a follow-up.
+
+Net effect: an insight backed by a correlation matrix can render a heatmap, a
+distribution can render a box plot, a flow can render a sankey — none of which are
+in the dashboard widget picker — driven purely by the data shape.
+
 ## Workstream 2 — Make ECharts the sole renderer
 
 - In `WidgetRenderer.tsx`, route **all** chart types to the ECharts path (kpi and
