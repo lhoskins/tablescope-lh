@@ -123,56 +123,79 @@ an implemented method → the method becomes selectable). Then harden:
 4. Keep it `ADMIN`-gated with audit logging (already present); confirm a
    deactivated method is no longer selected (registry cache invalidated).
 
-## Workstream 4 — Make ECharts the default renderer for insight cards
+## Workstream 4 — Make ECharts the default renderer everywhere (dashboards + insight cards), and persist it on Pin/Add-to-Dashboard
 
-Requirement: **insight cards render with ECharts by default**, while existing
-saved dashboards keep following the global renderer mode (preserve-existing — do
-NOT force-convert saved dashboards).
+Requirement (updated per the product decision): **ECharts is the default
+renderer across the app — dashboards AND insight cards — and newly pinned/added
+widgets persist as ECharts.** The old "keep dashboards on recharts" constraint is
+replaced by **backward-compatibility**: existing saved widgets must keep
+rendering correctly, no widget JSON is destructively rewritten, and there is a
+one-switch rollback to recharts.
 
 Verified current behavior on the base branch:
-- Insight cards already render through the dashboard `WidgetRenderer`:
-  `intelligence-card.tsx` `InsightChartView` (→ `<WidgetRenderer widget=… />`,
-  ~line 127) and `home-pins-grid.tsx` (~line 233).
+- Dashboards, insight cards, and Home pins all render through the same
+  `WidgetRenderer`: `intelligence-card.tsx` `InsightChartView` (~line 127),
+  `home-pins-grid.tsx` (~line 233), and the dashboard grid.
 - `WidgetRenderer.tsx:377` uses ECharts only when
   `shouldRenderEcharts(widget.visualizationOptions?.renderer) &&
   ["line","bar","pie","area"].includes(widget.type)`.
 - `shouldRenderEcharts` (`web-ui/lib/echarts.ts`) returns true for global mode
-  `default`, is `new_widgets`-gated by a `renderer==="echarts"` hint, and false
-  for `off`/`shadow`. `NEXT_PUBLIC_ECHARTS_RENDERER_MODE` is **build-time inlined**
+  `default`, `new_widgets`-gated by a `renderer==="echarts"` hint, false for
+  `off`/`shadow`. `NEXT_PUBLIC_ECHARTS_RENDERER_MODE` is **build-time inlined**
   (Dockerfile ARG/ENV + compose `build.args`, already wired, default `default`).
+- The renderer is persisted per widget: `VisualizationOptions.renderer?:
+  "echarts" | "recharts"` (`web-ui/components/dashboard/types.ts:33`), stored in
+  the widget JSON (so it survives save/pin/add).
 
-Two reasons insight cards still show recharts today: (a) the deployed web-ui
-image may not have been **rebuilt** with the intended mode (a restart does not
-re-inline `NEXT_PUBLIC_*`); and (b) **chart-type coverage** — insight cards emit
+Two reasons ECharts still isn't showing: (a) the deployed web-ui image may not
+have been **rebuilt** with mode `default` (a restart does not re-inline
+`NEXT_PUBLIC_*`); and (b) **chart-type coverage** — insight/dashboard widgets emit
 `combo`/`dual_line`, `bubble`(scatter), and `kpi_grid`
-(`home_intelligence.py` ~lines 2042/2056/2132), none of which are in the ECharts
+(`home_intelligence.py` ~lines 2042/2056/2132), none in the ECharts
 `{line,bar,pie,area}` set, so they fall back to recharts regardless of mode.
 
 Do:
 
-1. **Force ECharts on the insight-card surfaces, independent of the global
-   dashboard mode.** Add an explicit opt-in from the insight paths only — e.g. a
-   `forceEcharts` prop on `WidgetRenderer` (or a dedicated
-   `shouldRenderEchartsForInsight()` that returns true unless a hard
-   kill-switch), used by `InsightChartView` and `home-pins-grid` — so insight
-   cards default to ECharts even when the global mode is `new_widgets`/`off`.
-   **Do not change the global default for saved dashboards** — they keep using
-   `shouldRenderEcharts(mode)` as today. Keep a documented way to disable insight
-   ECharts (env or the kill-switch) for emergencies.
-2. **Extend EChartsWidget chart-type coverage to what insight cards actually
-   emit:** `combo`/`dual_line` (multi-series with a secondary axis),
-   `scatter`/`bubble`, and route `kpi`/`kpi_grid` to the existing KPI component
-   (not a canvas chart). Broaden the type gate accordingly for the insight path.
-3. **Graceful fallback:** any chart type still not supported by ECharts must fall
-   back to the recharts renderer **without blanking** the card. Never render an
-   empty box.
-4. Preserve all `WidgetRenderer` behavior ECharts already handles (resize via
-   ResizeObserver, tooltip, theme light/dark, dispose/cleanup, click→filter).
-5. **Deployment note for the PR:** the web-ui image must be **rebuilt**
-   (`docker compose build web-ui`), not just restarted, for any
-   `NEXT_PUBLIC_ECHARTS_RENDERER_MODE` change to take effect — but because
-   insight cards now force ECharts in code, they no longer depend on that env
-   value being `default`.
+1. **Make ECharts the effective default renderer** for all surfaces. Treat an
+   **unset** `visualizationOptions.renderer` as ECharts for supported types
+   (i.e. `shouldRenderEcharts(undefined)` → true for the app's default), so both
+   dashboards and insight cards render ECharts by default. Only an **explicit**
+   `renderer: "recharts"` (or an unsupported chart type) uses recharts. Confirm
+   the deployed build ships mode `default` and document the rebuild requirement.
+2. **Backward-compat (the new safety net):** existing saved widgets must render
+   unchanged in meaning. Widgets that persisted `renderer: "recharts"` keep
+   recharts; widgets with no renderer now render ECharts. **Do not run a
+   destructive migration** over saved widget JSON. ECharts output must reproduce
+   the recharts visual for the shared types (axes, series, polarity, legend,
+   number/percent formatting) — add parity checks.
+3. **Extend EChartsWidget chart-type coverage** to what the app actually emits:
+   `combo`/`dual_line` (multi-series + secondary axis), `scatter`/`bubble`, and
+   route `kpi`/`kpi_grid` to the existing KPI component (not a canvas chart).
+   Broaden the type gate accordingly.
+4. **Graceful fallback:** any chart type still unsupported by ECharts falls back
+   to recharts **without blanking**. Never render an empty box.
+5. **Pin to Home** (`home-pins-grid.tsx` + the pin-create path; API
+   `web-ui/lib/api/home-pins.ts` `createHomePin`, `pin_type: "live_widget"`):
+   stamp `visualizationOptions.renderer = "echarts"` on the widget config saved
+   with the pin, so a pinned widget persists and reloads as ECharts (merge, don't
+   clobber other options).
+6. **Add to Dashboard** (`save-insight-to-dashboard-modal.tsx`, the widget
+   payload around lines 100-102 that sets `title`/`chartType` and posts to
+   `/api/projects/{id}/dashboards`): add
+   `visualizationOptions: { ...existing, renderer: "echarts" }` so widgets added
+   from insights persist as ECharts. Verify the backend dashboard widget
+   persistence round-trips `visualizationOptions.renderer` (it is stored in the
+   widget JSON; confirm the create/update path does not drop unknown keys).
+7. **Rollback / kill-switch:** keep a single documented way to revert to recharts
+   globally (e.g. `NEXT_PUBLIC_ECHARTS_RENDERER_MODE=off`, or a hard
+   `renderer:"recharts"` override), so a rendering regression can be turned off
+   without a code change. Preserve all `WidgetRenderer` behavior ECharts already
+   handles (ResizeObserver resize, tooltip, light/dark theme, dispose/cleanup,
+   click→filter/drilldown).
+8. **Deployment note for the PR:** the web-ui image must be **rebuilt**
+   (`docker compose build web-ui`), not just restarted, for the mode to take
+   effect; new pinned/added widgets carry `renderer:"echarts"` in their JSON so
+   they stay ECharts regardless of future mode changes.
 
 ---
 
@@ -196,6 +219,11 @@ Frontend (`intelligence-card`, `project-insight-screen`, admin page):
   legacy cards show the unavailable state only after Explain.
 - Admin: engine badges + activate/deactivate toggle; disabled-with-tooltip when
   no implementation; toggle updates the row without reload.
+- ECharts default: a dashboard widget and an insight card of a supported type
+  render an ECharts canvas by default; a saved `renderer:"recharts"` widget stays
+  recharts; an unsupported type falls back to recharts without blanking; Pin to
+  Home and Add to Dashboard persist `renderer:"echarts"` (assert the saved
+  payload) and reload as ECharts; resize/tooltip/theme/cleanup behave.
 - Existing feedback/review/governance/pinning/Save-to-Dashboard behavior intact.
 
 Repo-standard: `pytest -q`, `ruff`, `mypy app`; web-ui `typecheck`,
@@ -213,11 +241,13 @@ Repo-standard: `pytest -q`, `ruff`, `mypy app`; web-ui `typecheck`,
 - Admins can activate/deactivate any implemented method from the UI; activations
   are guarded, audited, persist across reboots, and carry forward on version
   bump; the R-availability check degrades gracefully.
-- Insight cards (Business Insight + Home-pinned) render with **ECharts by
-  default** for their chart types (combo/dual_line, scatter/bubble, and
-  line/bar/pie/area), falling back to recharts without blanking for anything not
-  yet supported; **existing saved dashboards are unchanged** (still governed by
-  the global renderer mode).
+- **ECharts is the default renderer everywhere** — dashboards, Business Insight
+  cards, and Home pins — for supported types (line/bar/pie/area, combo/dual_line,
+  scatter/bubble, kpi), with graceful recharts fallback (never blank) for
+  anything not yet covered. **Pin to Home** and **Add to Dashboard** persist
+  `renderer:"echarts"` so widgets stay ECharts on reload. Existing saved widgets
+  render correctly (explicit `renderer:"recharts"` respected; no destructive JSON
+  migration), and a single kill-switch reverts to recharts globally.
 - `R_ANALYTICS_ENABLED=false` remains byte-for-byte today's behavior.
 
 ## PR summary must include
