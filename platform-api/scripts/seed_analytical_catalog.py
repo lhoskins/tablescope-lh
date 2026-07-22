@@ -194,6 +194,11 @@ async def seed_analytical_catalog() -> dict[str, Any]:
                     method_card=m.get("method_card", {}),
                     llm_guardrails=m.get("llm_guardrails", []),
                     executor_key=m.get("executor_key"),
+                    execution_engine=m.get("execution_engine", "python"),
+                    result_schema_version=m.get("result_schema_version", 1),
+                    chart_contract=m.get("chart_contract", {}),
+                    max_rows=m.get("max_rows"),
+                    timeout_seconds=m.get("timeout_seconds"),
                     dependencies=m.get("dependencies", []),
                     is_executable=executable,
                 )

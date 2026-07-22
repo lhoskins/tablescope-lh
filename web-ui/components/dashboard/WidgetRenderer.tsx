@@ -48,6 +48,8 @@ import {
   linearRegression,
 } from "@/lib/visualizations/dataTransforms";
 import { normalizeCartesianClick, normalizePieClick, type CartesianClickState } from "@/lib/dashboard/chartClick";
+import { shouldRenderEcharts } from "@/lib/echarts";
+import { EChartsWidget } from "./EChartsWidget";
 
 /** Renders configured reference lines onto a cartesian chart. */
 function renderReferenceLines(refs: ReferenceLineConfig[] | undefined, yAxisId?: string) {
@@ -372,6 +374,21 @@ export function WidgetRenderer({ widget, data, onElementClick }: Props) {
   };
 
   const renderChart = () => {
+    if (shouldRenderEcharts(widget.visualizationOptions?.renderer) && ["line", "bar", "pie", "area"].includes(widget.type)) {
+      return (
+        <EChartsWidget
+          widget={widget}
+          data={data}
+          xKey={xKey}
+          yKey={yKey}
+          y2Key={y2Key}
+          chartData={chartData}
+          seriesNames={seriesNames}
+          onElementClick={onElementClick}
+        />
+      );
+    }
+
     switch (widget.type) {
       case "kpi":
         return <KpiWidget widget={widget} data={data} />;

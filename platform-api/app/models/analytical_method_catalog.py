@@ -146,9 +146,14 @@ class AnalyticalMethod(Base):
     output_contract = Column(_JSON, nullable=False, server_default="{}")
     method_card = Column(_JSON, nullable=False, server_default="{}")
     llm_guardrails = Column(_JSON, nullable=False, server_default="[]")
-    # Binds an approved+active method to a deterministic Python executor. NULL
+    # Binds an approved+active method to a deterministic executor. NULL
     # means catalogued-but-not-executable (reference only).
     executor_key = Column(String(150), nullable=True)
+    execution_engine = Column(String(50), nullable=False, server_default="python")
+    result_schema_version = Column(Integer, nullable=False, server_default="1")
+    chart_contract = Column(_JSON, nullable=False, server_default="{}")
+    max_rows = Column(Integer, nullable=True)
+    timeout_seconds = Column(Integer, nullable=True)
     dependencies = Column(_JSON, nullable=False, server_default="[]")
     is_executable = Column(Boolean, nullable=False, server_default="false")
 
@@ -177,6 +182,11 @@ class AnalyticalMethod(Base):
             "method_card": self.method_card or {},
             "llm_guardrails": self.llm_guardrails or [],
             "executor_key": self.executor_key,
+            "execution_engine": self.execution_engine,
+            "result_schema_version": self.result_schema_version,
+            "chart_contract": self.chart_contract or {},
+            "max_rows": self.max_rows,
+            "timeout_seconds": self.timeout_seconds,
             "dependencies": self.dependencies or [],
             "is_executable": self.is_executable,
         }

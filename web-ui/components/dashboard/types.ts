@@ -30,6 +30,7 @@ export type ReferenceLineConfig = {
  */
 export type VisualizationOptions = {
   // Shared
+  renderer?: "echarts" | "recharts";
   showLegend?: boolean;
   showLabels?: boolean;
   showGrid?: boolean;
