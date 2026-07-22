@@ -1,7 +1,7 @@
 """Add a sample R-backed analytical method to the active catalog.
 
-Revision ID: 0051
-Revises: 0050
+Revision ID: 0066
+Revises: 0065
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0051"
-down_revision: str | None = "0050"
+revision: str = "0066"
+down_revision: str | None = "0065"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
 

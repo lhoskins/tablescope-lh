@@ -1,7 +1,7 @@
 """Add execution engine and chart contract columns to analytical_methods.
 
-Revision ID: 0050
-Revises: 0049
+Revision ID: 0065
+Revises: 0064
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from alembic import op
 
-revision: str = "0050"
-down_revision: str | None = "0049"
+revision: str = "0065"
+down_revision: str | None = "0064"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
 
