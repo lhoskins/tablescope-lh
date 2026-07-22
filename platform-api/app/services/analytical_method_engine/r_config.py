@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_R_ANALYTICS_ENABLED = "false"
+DEFAULT_R_ANALYTICS_ENABLED = "true"
 DEFAULT_R_ANALYTICS_URL = "http://r-analytics:8000"
 DEFAULT_R_ANALYTICS_TIMEOUT_SECONDS = "30"
 

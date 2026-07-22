@@ -4,7 +4,7 @@ This document records the repeatable validation package for the R-backed Analyti
 
 ## 1. Build-time configuration
 
-`NEXT_PUBLIC_*` values are inlined at `web-ui` build time. To change the renderer mode or enable the R path:
+`NEXT_PUBLIC_*` values are inlined at `web-ui` build time. The deployment defaults are now `default` for ECharts, `true` for R analytics, and `hybrid` for the analytical engine, so the values below are only needed to override or revert:
 
 ```bash
 # On the app host

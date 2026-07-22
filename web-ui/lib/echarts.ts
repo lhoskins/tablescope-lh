@@ -7,10 +7,11 @@
 export type EchartsRendererMode = "off" | "shadow" | "new_widgets" | "default";
 
 const VALID_MODES: EchartsRendererMode[] = ["off", "shadow", "new_widgets", "default"];
+const DEFAULT_MODE: EchartsRendererMode = "default";
 
 export function getEchartsRendererMode(): EchartsRendererMode {
-  const raw = process.env.NEXT_PUBLIC_ECHARTS_RENDERER_MODE?.trim().toLowerCase() ?? "off";
-  return VALID_MODES.includes(raw as EchartsRendererMode) ? (raw as EchartsRendererMode) : "off";
+  const raw = process.env.NEXT_PUBLIC_ECHARTS_RENDERER_MODE?.trim().toLowerCase() ?? DEFAULT_MODE;
+  return VALID_MODES.includes(raw as EchartsRendererMode) ? (raw as EchartsRendererMode) : DEFAULT_MODE;
 }
 
 export function isEchartsEnabled(): boolean {

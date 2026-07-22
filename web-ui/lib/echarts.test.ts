@@ -11,16 +11,18 @@ describe("echarts feature gate", () => {
     vi.unstubAllEnvs();
   });
 
-  it("defaults to off when missing or invalid", () => {
+  it("defaults to default when missing or invalid", () => {
     vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "");
-    expect(getEchartsRendererMode()).toBe("off");
+    expect(getEchartsRendererMode()).toBe("default");
     vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "garbage");
+    expect(getEchartsRendererMode()).toBe("default");
+  });
+
+  it("recognizes off, shadow, new_widgets, and default", () => {
+    vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "off");
     expect(getEchartsRendererMode()).toBe("off");
     vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "  Off  ");
     expect(getEchartsRendererMode()).toBe("off");
-  });
-
-  it("recognizes shadow, new_widgets, and default", () => {
     vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "shadow");
     expect(getEchartsRendererMode()).toBe("shadow");
     vi.stubEnv("NEXT_PUBLIC_ECHARTS_RENDERER_MODE", "new_widgets");
