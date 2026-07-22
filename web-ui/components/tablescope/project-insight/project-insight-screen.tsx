@@ -15,7 +15,6 @@ import {
   IconCheck,
   IconChevronRight,
   IconSearch,
-  IconX,
   IconTable,
   IconFileText,
   IconLoader2,
@@ -124,8 +123,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   }>({ open: false, question: "", source: "" });
   const [createActionOpen, setCreateActionOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
-  const [dismissedAiUnavailable, setDismissedAiUnavailable] = useState(false);
-  const [dismissedGraphDisclosure, setDismissedGraphDisclosure] = useState(false);
   const [loadErrorToasted, setLoadErrorToasted] = useState(false);
   const [refreshErrorToasted, setRefreshErrorToasted] = useState(false);
 
@@ -384,69 +381,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
           />
         ) : !data ? null : (
           <>
-            {data.aiAvailable === false && !dismissedAiUnavailable && (
-              <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-[13px] text-warning">
-                <IconAlertCircle size={15} className="mt-0.5 shrink-0" />
-                <p className="min-w-0 flex-1">
-                  AI insight is temporarily unavailable — showing activity only.
-                  Try Refresh in a moment.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setDismissedAiUnavailable(true)}
-                  className="shrink-0 text-warning hover:text-ink-primary"
-                  aria-label="Dismiss"
-                >
-                  <IconX size={14} />
-                </button>
-              </div>
-            )}
-
-            {data.stale && (
-              <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[13px] text-ink-secondary">
-                <IconLoader2 size={15} className="animate-spin" />
-                Updating project insight to reflect the latest data…
-              </div>
-            )}
-
-            {data.graphMode && data.graphMode !== "full" && !dismissedGraphDisclosure && (
-              <div
-                className={cn(
-                  "flex items-start gap-2 rounded-lg border px-3 py-2 text-[13px]",
-                  data.graphMode === "blocked"
-                    ? "border-danger/30 bg-danger-bg text-danger"
-                    : "border-warning/30 bg-warning-bg text-warning",
-                )}
-              >
-                {data.graphMode === "blocked" ? (
-                  <IconAlertTriangle size={15} className="mt-0.5 shrink-0" />
-                ) : (
-                  <IconAlertCircle size={15} className="mt-0.5 shrink-0" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p>{data.graphDisclosure}</p>
-                  {data.graphBlockingReasons.length > 0 && (
-                    <ul className="mt-1 list-disc pl-4 text-[12px]">
-                      {data.graphBlockingReasons.map((r, i) => (
-                        <li key={i}>{r}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDismissedGraphDisclosure(true)}
-                  className={cn(
-                    "shrink-0 hover:text-ink-primary",
-                    data.graphMode === "blocked" ? "text-danger" : "text-warning",
-                  )}
-                  aria-label="Dismiss"
-                >
-                  <IconX size={14} />
-                </button>
-              </div>
-            )}
-
             {/* 0. Ask + AI suggestions — same experience as Business Insight,
                 scoped to this project. The ask box hands off to the shared
                 conversational-analytics assistant; the pills generate query/

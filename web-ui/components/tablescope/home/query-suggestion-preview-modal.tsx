@@ -8,14 +8,19 @@ import {
   IconChevronRight,
   IconCode,
   IconDeviceFloppy,
+  IconLayoutDashboard,
   IconLoader2,
   IconX,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
+import { useToasts } from "@/components/ui/toast";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
 import { runDatasourceSql } from "@/lib/api/data-source-builder";
 import { saveQuerySuggestion } from "@/lib/api/home-intelligence";
+import { useProjectSummaries } from "@/lib/ui/use-shell-data";
 import type { SuggestedVisualization } from "@/lib/api/ai-actions";
+import type { InsightCard } from "@/lib/api/home-intelligence";
+import { SaveInsightToDashboardModal } from "./save-insight-to-dashboard-modal";
 
 type BackendViz = {
   type: string;
@@ -89,6 +94,9 @@ export function QuerySuggestionPreviewModal({
 }) {
   const [showSql, setShowSql] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveToDashboardOpen, setSaveToDashboardOpen] = useState(false);
+  const { push: pushToast } = useToasts();
+  const { data: projects } = useProjectSummaries();
 
   const run = useMutation<RunResult, Error>({
     mutationFn: () => runDatasourceSql({ sql, project_id: projectId }),
@@ -124,6 +132,38 @@ export function QuerySuggestionPreviewModal({
     : result
       ? inferViz(result.columns, result.rows)
       : { type: "table" as const };
+
+  const project = projects?.find((p) => Number(p.id) === projectId);
+  const previewCard: InsightCard | null = result
+    ? {
+        id: `query-preview-${projectId}`,
+        projectId: String(projectId),
+        projectName: project?.name ?? "",
+        projectColor: project?.accent ?? "",
+        insightType: "query_suggestion",
+        severity: "info",
+        title: title || "Query Preview",
+        summary: description,
+        chart: null,
+        callout: null,
+        sources: { tables: [], documents: [] },
+        executedAt: new Date().toISOString(),
+        sql: result.sql || sql,
+        chartType: viz.type,
+        labelColumn:
+          viz.type === "kpi"
+            ? undefined
+            : viz.xField ?? result.columns[0],
+        valueColumn:
+          viz.yField ?? viz.metricField ?? result.columns[1] ?? result.columns[0],
+      }
+    : null;
+
+  const canAddToDashboard = Boolean(
+    previewCard &&
+      previewCard.sql &&
+      (viz.type === "kpi" || previewCard.valueColumn),
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4">
@@ -209,6 +249,15 @@ export function QuerySuggestionPreviewModal({
           <Button
             variant="secondary"
             size="md"
+            disabled={!canAddToDashboard}
+            onClick={() => setSaveToDashboardOpen(true)}
+          >
+            <IconLayoutDashboard size={15} />
+            Add to Dashboard
+          </Button>
+          <Button
+            variant="secondary"
+            size="md"
             disabled={save.isPending || saved || run.isError}
             onClick={() => save.mutate()}
           >
@@ -218,6 +267,18 @@ export function QuerySuggestionPreviewModal({
           <Button variant="primary" size="md" onClick={onClose}>
             {saved ? "Done" : "Close"}
           </Button>
+
+          {previewCard && (
+            <SaveInsightToDashboardModal
+              card={previewCard}
+              open={saveToDashboardOpen}
+              onClose={() => setSaveToDashboardOpen(false)}
+              onSaved={(_dashboardId, dashboardName) => {
+                pushToast(`Saved to dashboard "${dashboardName}"`, "success");
+                setSaveToDashboardOpen(false);
+              }}
+            />
+          )}
         </div>
       </div>
     </div>
