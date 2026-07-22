@@ -443,7 +443,7 @@ def _one_sample_t_test(df, roles, profile, policies):
                        reason="no comparison target provided for one-sample test")
     if v.size < 3:
         return _result("insufficient_data", n=v.size, reason="fewer than 3 values")
-    t, p = stats.ttest_1samp(v, float(target))
+    _t, p = stats.ttest_1samp(v, float(target))
     d = (np.mean(v) - float(target)) / np.std(v, ddof=1) if np.std(v, ddof=1) > 0 else 0.0
     return _result("ok", results={"effect": _finite(np.mean(v) - float(target)),
                                   "effectName": "mean_difference", "pValue": _finite(p),

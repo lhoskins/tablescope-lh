@@ -15,12 +15,12 @@ tests and local runs never execute the engine unless they opt in explicitly.
 from __future__ import annotations
 
 import os
-from enum import Enum
+from enum import StrEnum
 
 DEFAULT_ENGINE_MODE = "off"
 
 
-class EngineMode(str, Enum):
+class EngineMode(StrEnum):
     OFF = "off"
     READONLY = "readonly"
     HYBRID = "hybrid"
