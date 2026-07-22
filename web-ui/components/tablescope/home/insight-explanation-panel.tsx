@@ -11,7 +11,7 @@ import {
   IconDatabase,
   IconClock,
 } from "@tabler/icons-react";
-import { MethodEnvelopeBlock } from "@/components/ai/method-envelope";
+import { InsightAnalysisDetails } from "./insight-engine-badge";
 import type { InsightCard, InsightExplanation } from "@/lib/api/home-intelligence";
 
 interface InsightExplanationPanelProps {
@@ -376,11 +376,9 @@ export function InsightExplanationPanel({
           <LegacyFallback card={card} />
         )}
 
-        {card.analyticalMethod && (
-          <Section title="Advanced Methods">
-            <MethodEnvelopeBlock envelope={card.analyticalMethod} />
-          </Section>
-        )}
+        <Section title="Analysis details">
+          <InsightAnalysisDetails envelope={card.analyticalMethod} />
+        </Section>
 
         <div className="mt-5 flex items-center justify-between border-t border-line-tertiary pt-4">
           <button

@@ -8,6 +8,8 @@ available (Python executor or R method).
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from typing import Any
 
 import httpx
@@ -62,14 +64,31 @@ _STATIC_R_METHODS: set[str] = {
 }
 
 
+# Cached service method list: (methods_set, timestamp_seconds).  The list is
+# stable, so a short TTL keeps the admin UI responsive while still reacting to
+# a redeployed r-analytics container that exposes new methods.
+_r_methods_cache: tuple[set[str], float] | None = None
+_R_METHODS_CACHE_TTL_SECONDS = 10.0
+_r_methods_lock = threading.Lock()
+
+
 def _r_methods_from_service() -> set[str] | None:
     """Query the R analytics service for its available method names.
 
     Returns None if the service is unreachable so callers can fall back to the
-    static allowlist.
+    static allowlist. A short timeout keeps an unreachable service from hanging
+    the admin activation flow.
     """
+    from app.services.analytical_method_engine.r_config import is_r_analytics_enabled
+
+    if not is_r_analytics_enabled():
+        return None
     try:
-        with httpx.Client(timeout=r_analytics_timeout_seconds()) as client:
+        timeout = min(5.0, float(r_analytics_timeout_seconds()))
+    except (TypeError, ValueError):
+        timeout = 5.0
+    try:
+        with httpx.Client(timeout=timeout) as client:
             resp = client.get(f"{r_analytics_url()}/methods")
             resp.raise_for_status()
             data = resp.json()
@@ -80,18 +99,48 @@ def _r_methods_from_service() -> set[str] | None:
 
 
 def available_r_methods() -> set[str]:
-    """Return the union of the static allowlist and whatever the service reports."""
+    """Return the union of the static allowlist and whatever the service reports.
+
+    If the service is unreachable, the last known good list is reused when
+    available, and the static allowlist is always included so a transient R
+    service outage does not hard-disable every R method toggle.
+    """
+    global _r_methods_cache
+    with _r_methods_lock:
+        if _r_methods_cache is not None:
+            methods, ts = _r_methods_cache
+            if time.monotonic() - ts < _R_METHODS_CACHE_TTL_SECONDS:
+                return methods
+
     service_methods = _r_methods_from_service()
-    if service_methods:
-        return _STATIC_R_METHODS | service_methods
-    return _STATIC_R_METHODS
+    with _r_methods_lock:
+        if service_methods is not None:
+            _r_methods_cache = (_STATIC_R_METHODS | service_methods, time.monotonic())
+            return _r_methods_cache[0]
+        if _r_methods_cache is not None:
+            # Service is down but we have a stale cache; prefer it over dropping
+            # all R methods to "unavailable".
+            return _r_methods_cache[0]
+        return _STATIC_R_METHODS
 
 
 def implementation_available(method: AnalyticalMethod) -> bool:
-    """True if the method has a bound Python executor or an R implementation."""
+    """True if the method can actually be executed right now.
+
+    R-first methods are considered available when either a Python twin exists
+    (so they can run even if R is disabled) or when R is enabled and the
+    service reports the method.  This keeps ``R_ANALYTICS_ENABLED=false``
+    equivalent to the pre-R Python-only behavior.
+    """
+    from app.services.analytical_method_engine.r_config import is_r_analytics_enabled
+
     executor_key = method.executor_key or ""
     if method.execution_engine == "r":
-        return executor_key in available_r_methods()
+        if executor_key in method_executor.EXECUTORS:
+            return True
+        if is_r_analytics_enabled() and executor_key in available_r_methods():
+            return True
+        return False
     return executor_key in method_executor.EXECUTORS
 
 

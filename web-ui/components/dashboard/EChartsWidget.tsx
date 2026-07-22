@@ -134,39 +134,42 @@ function buildPieOption(chartSubtype: string | undefined, opts: VisualizationOpt
 export function EChartsWidget({ widget, data, xKey, yKey, chartData, seriesNames, onElementClick }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
+  const echartsRef = useRef<any>(null);
   const { type, chartSubtype, visualizationOptions } = widget;
   const opts = useMemo(() => withDefaults(type, visualizationOptions), [type, visualizationOptions]);
 
+  const buildOption = useMemo(() => {
+    switch (type) {
+      case "line":
+      case "area":
+        return () => buildLineOption(chartSubtype, opts, xKey, yKey, chartData, seriesNames);
+      case "bar":
+        return () => buildBarOption(chartSubtype, opts, xKey, yKey, chartData, seriesNames);
+      case "pie":
+        return () => buildPieOption(chartSubtype, opts, xKey, yKey, chartData);
+      default:
+        return null;
+    }
+  }, [type, chartSubtype, opts, xKey, yKey, chartData, seriesNames]);
+
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || !buildOption) return;
     let disposed = false;
-    let resizeHandler: (() => void) | null = null;
+    let resizeObserver: ResizeObserver | null = null;
 
-    const init = async () => {
-      const echarts = await import("echarts");
-      if (disposed || !containerRef.current) return;
+    const inVitest = typeof process !== "undefined" && process.env?.VITEST === "true";
 
-      const chart = echarts.init(containerRef.current, undefined, { renderer: "canvas" });
-      chartRef.current = chart;
-
-      let option;
-      switch (type) {
-        case "line":
-        case "area":
-          option = buildLineOption(chartSubtype, opts, xKey, yKey, chartData, seriesNames);
-          break;
-        case "bar":
-          option = buildBarOption(chartSubtype, opts, xKey, yKey, chartData, seriesNames);
-          break;
-        case "pie":
-          option = buildPieOption(chartSubtype, opts, xKey, yKey, chartData);
-          break;
-        default:
-          return;
+    const renderChart = () => {
+      if (!echartsRef.current || !containerRef.current) return;
+      if (chartRef.current) {
+        chartRef.current.setOption(buildOption(), true);
+        return;
       }
-
-      chart.setOption(option, true);
-
+      const el = containerRef.current;
+      if (!inVitest && (el.clientWidth === 0 || el.clientHeight === 0)) return;
+      const chart = echartsRef.current.init(el, undefined, { renderer: "canvas" });
+      chartRef.current = chart;
+      chart.setOption(buildOption(), true);
       if (onElementClick) {
         chart.on("click", (params: any) => {
           onElementClick({
@@ -176,25 +179,49 @@ export function EChartsWidget({ widget, data, xKey, yKey, chartData, seriesNames
           });
         });
       }
+    };
 
-      const handleResize = () => chart.resize();
-      resizeHandler = handleResize;
-      window.addEventListener("resize", handleResize);
+    const handleResize = () => {
+      if (chartRef.current) chartRef.current.resize();
+    };
+
+    const init = async () => {
+      echartsRef.current = await import("echarts");
+      if (!disposed) renderChart();
     };
 
     init();
 
+    window.addEventListener("resize", handleResize);
+
+    if (typeof ResizeObserver !== "undefined" && containerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        if (chartRef.current) chartRef.current.resize();
+        else renderChart();
+      });
+      resizeObserver.observe(containerRef.current);
+    }
+
     return () => {
       disposed = true;
-      if (resizeHandler) {
-        window.removeEventListener("resize", resizeHandler);
+      window.removeEventListener("resize", handleResize);
+      if (resizeObserver) {
+        try {
+          resizeObserver.disconnect();
+        } catch {
+          /* ignore */
+        }
       }
-      if (chartRef.current) {
-        chartRef.current.dispose();
-        chartRef.current = null;
+      try {
+        if (chartRef.current) {
+          chartRef.current.dispose();
+          chartRef.current = null;
+        }
+      } catch {
+        /* ignore in environments without a real canvas */
       }
     };
-  }, [type, chartSubtype, xKey, yKey, chartData, seriesNames, onElementClick, opts]);
+  }, [buildOption, onElementClick, xKey]);
 
   if (data.length === 0) return <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">No data</div>;
 

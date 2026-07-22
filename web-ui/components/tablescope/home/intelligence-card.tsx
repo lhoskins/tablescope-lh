@@ -25,6 +25,7 @@ import type {
   InsightChart,
 } from "@/lib/api/home-intelligence";
 import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
+import { RAnalyticsBadge } from "./insight-engine-badge";
 import { InsightExplanationPanel } from "./insight-explanation-panel";
 import { InsightFeedbackDialog } from "./insight-feedback-dialog";
 import {
@@ -339,6 +340,8 @@ export function IntelligenceCard({
             <IconInfoCircle size={14} />
             Explain
           </button>
+
+          <RAnalyticsBadge envelope={card.analyticalMethod} />
 
           {canCreateAction && (
             <button
