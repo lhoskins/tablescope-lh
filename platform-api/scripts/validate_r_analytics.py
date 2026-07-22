@@ -24,10 +24,9 @@ from app.database import SessionLocal
 from app.services.analytical_method_engine.engine import analyze
 from app.services.analytical_method_engine.r_config import is_r_analytics_enabled
 
-
 COLUMNS = ["value"]
 ROWS = [[10], [20], [30], [40], [50]]
-INTENT = "r_descriptive_profile"
+INTENT = "describe_numeric"
 
 
 def _fail(message: str, extra: dict | None = None) -> dict:
@@ -82,13 +81,13 @@ async def _run_canary() -> dict:
 
     if n != 5:
         return _fail(f"Expected n == 5, got {n!r}.", {"results": results})
-    if not (isinstance(mean, (int, float)) and math.isclose(mean, 30, rel_tol=1e-3)):
+    if not (isinstance(mean, int | float) and math.isclose(mean, 30, rel_tol=1e-3)):
         return _fail(f"Expected mean ~30, got {mean!r}.", {"results": results})
-    if not (isinstance(median, (int, float)) and math.isclose(median, 30, rel_tol=1e-3)):
+    if not (isinstance(median, int | float) and math.isclose(median, 30, rel_tol=1e-3)):
         return _fail(f"Expected median ~30, got {median!r}.", {"results": results})
-    if not (isinstance(min_val, (int, float)) and math.isclose(min_val, 10, rel_tol=1e-3)):
+    if not (isinstance(min_val, int | float) and math.isclose(min_val, 10, rel_tol=1e-3)):
         return _fail(f"Expected min ~10, got {min_val!r}.", {"results": results})
-    if not (isinstance(max_val, (int, float)) and math.isclose(max_val, 50, rel_tol=1e-3)):
+    if not (isinstance(max_val, int | float) and math.isclose(max_val, 50, rel_tol=1e-3)):
         return _fail(f"Expected max ~50, got {max_val!r}.", {"results": results})
 
     if not audit.get("parameterHash"):

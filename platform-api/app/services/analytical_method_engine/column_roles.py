@@ -95,4 +95,19 @@ def resolve_roles(intent: str, profile: dict[str, Any]) -> dict[str, Any] | None
             return {"time": time_col, "value": value}
         return None
 
+    if intent in ("compare_periods", "compare_year_over_year", "compare_to_baseline", "measure_rate_of_change", "detect_change_point", "detect_anomalies", "forecast_time_series"):
+        time_col = datetime[0] if datetime else None
+        value = next((c for c in numeric if c not in binary), None)
+        if value:
+            return {"time": time_col, "value": value}
+        return None
+
+    if intent == "contribution_to_change":
+        value = next((c for c in numeric if c not in binary), None)
+        group = categorical[0] if categorical else None
+        time_col = datetime[0] if datetime else None
+        if value and group:
+            return {"value": value, "group": group, "time": time_col}
+        return None
+
     return None

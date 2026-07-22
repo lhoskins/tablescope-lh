@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  activateAnalyticalMethod,
+  deactivateAnalyticalMethod,
   getAnalyticalMethod,
   getMethodCatalogOverview,
   listAnalyticalMethods,
@@ -38,6 +40,19 @@ function TierBadge({ tier }: { tier: number }) {
   );
 }
 
+function EngineBadge({ engine }: { engine: string | null }) {
+  const normalized = (engine || "python").toLowerCase();
+  const cls =
+    normalized === "r"
+      ? "bg-indigo-50 text-indigo-700"
+      : "bg-emerald-50 text-emerald-700";
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
+      {normalized === "r" ? "R" : "Python"}
+    </span>
+  );
+}
+
 function StatCard({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -46,6 +61,63 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
         {label}
       </div>
     </div>
+  );
+}
+
+function ActivationToggle({ method, onSuccess }: { method: MethodSummary; onSuccess?: () => void }) {
+  const queryClient = useQueryClient();
+  const activate = useMutation({
+    mutationFn: () => activateAnalyticalMethod(method.method_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["analytical-methods"] });
+      queryClient.invalidateQueries({ queryKey: ["analytical-method", method.method_id] });
+      onSuccess?.();
+    },
+  });
+  const deactivate = useMutation({
+    mutationFn: () => deactivateAnalyticalMethod(method.method_id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["analytical-methods"] });
+      queryClient.invalidateQueries({ queryKey: ["analytical-method", method.method_id] });
+      onSuccess?.();
+    },
+  });
+
+  const busy = activate.isPending || deactivate.isPending;
+  if (!method.implementation_available) {
+    return (
+      <span className="cursor-help text-xs text-slate-400" title="No implementation available">
+        No impl
+      </span>
+    );
+  }
+  if (method.is_executable) {
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={(e) => {
+          e.stopPropagation();
+          deactivate.mutate();
+        }}
+        className="rounded-md border border-line-tertiary px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+      >
+        {busy ? "…" : "Deactivate"}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={(e) => {
+        e.stopPropagation();
+        activate.mutate();
+      }}
+      className="rounded-md bg-brand-600 px-2 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+    >
+      {busy ? "…" : "Activate"}
+    </button>
   );
 }
 
@@ -209,7 +281,10 @@ export default function AnalyticalMethodsPage() {
                   Status
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
-                  Executable
+                  Engine
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-slate-500">
+                  Activation
                 </th>
               </tr>
             </thead>
@@ -238,12 +313,11 @@ export default function AnalyticalMethodsPage() {
                   <td className="px-4 py-3">
                     <StatusBadge status={m.status} />
                   </td>
-                  <td className="px-4 py-3 text-sm">
-                    {m.is_executable ? (
-                      <span className="text-emerald-600">Yes</span>
-                    ) : (
-                      <span className="text-slate-400">No</span>
-                    )}
+                  <td className="px-4 py-3">
+                    <EngineBadge engine={m.execution_engine} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <ActivationToggle method={m} />
                   </td>
                 </tr>
               ))}
@@ -333,14 +407,16 @@ function MethodDetailDrawer({
 
         {d && (
           <div className="space-y-4 text-sm">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <TierBadge tier={d.tier} />
               <StatusBadge status={d.status} />
+              <EngineBadge engine={d.execution_engine} />
               {d.is_executable && (
                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
                   Executable
                 </span>
               )}
+              {d && <ActivationToggle method={d} onSuccess={() => detailQuery.refetch()} />}
             </div>
 
             {d.category && (

@@ -156,6 +156,14 @@ SELECTION_MATRIX = [
     ("trend_seasonality", "Regular time series", "stl_decomposition", ["seasonal_regression"]),
     ("normality", "Numeric", "shapiro_wilk_test",
      ["anderson_darling_test", "dagostino_pearson_normality_test"]),
+    ("compare_periods", "Time + numeric with periods", "period_change", []),
+    ("compare_year_over_year", "Time + numeric with years", "period_change", []),
+    ("compare_to_baseline", "Time + numeric with baseline", "period_change", []),
+    ("measure_rate_of_change", "Time + numeric", "period_change", []),
+    ("detect_change_point", "Ordered time with break", "detect_change_point", []),
+    ("detect_anomalies", "Ordered time", "detect_anomalies", []),
+    ("forecast_time_series", "Ordered time", "forecast_time_series", []),
+    ("contribution_to_change", "Numeric + grouping + time", "contribution_to_change", []),
 ]
 
 
@@ -716,6 +724,120 @@ EXECUTABLE = [
     },
 ]
 
+EXECUTABLE_R = [
+    {
+        "method_id": "period_change",
+        "display_name": "Period-over-period change",
+        "category": "Time-Series Analysis and Forecasting",
+        "subcategory": "Business time-series comparison",
+        "executor_key": "period_change",
+        "execution_engine": "r",
+        "dependencies": ["base R"],
+        "supported_intents": ["compare_periods", "compare_year_over_year", "compare_to_baseline", "measure_rate_of_change"],
+        "selection_rules": ["Ordered time index", "Numeric measure", "Two or more distinct periods"],
+        "rejection_rules": ["No time column", "No numeric measure", "Only one period"],
+        "required_checks": ["n count", "period detection", "zero/negative baseline guard"],
+        "fallback_methods": [],
+        "output_contract": {"fields": ["currentPeriod", "comparisonPeriod", "absoluteChange", "relativeChange", "percentagePointChange", "partialPeriod", "zeroBaselineGuard", "negativeBaselineWarning"]},
+        "card": _card(
+            ["Ordered time index", "Numeric measure", "Two or more periods to compare"],
+            ["No time column", "No numeric measure", "Only one period"],
+            ["n count", "period detection", "zero/negative baseline guard"],
+            [],
+            ["current period", "comparison period", "absolute change", "relative change", "percentage-point change", "partial-period flag"],
+        ),
+    },
+    {
+        "method_id": "detect_change_point",
+        "display_name": "Change-point detection",
+        "category": "Time-Series Analysis and Forecasting",
+        "subcategory": "Business time-series comparison",
+        "executor_key": "detect_change_point",
+        "execution_engine": "r",
+        "dependencies": ["changepoint"],
+        "supported_intents": ["detect_change_point"],
+        "selection_rules": ["Ordered time index", "Numeric measure", "Suspected structural break"],
+        "rejection_rules": ["No time column", "No numeric measure", "Too few points"],
+        "required_checks": ["n count", "regular spacing"],
+        "fallback_methods": [],
+        "output_contract": {"fields": ["changePointIndex", "changePointDate", "segmentMeanBefore", "segmentMeanAfter", "confidence"]},
+        "card": _card(
+            ["Ordered time index", "Numeric measure", "Suspected structural break"],
+            ["No time column", "No numeric measure", "Too few ordered points"],
+            ["n count", "regular spacing"],
+            [],
+            ["change-point index/date", "segment means before/after", "confidence"],
+        ),
+    },
+    {
+        "method_id": "detect_anomalies",
+        "display_name": "Anomaly detection",
+        "category": "Time-Series Analysis and Forecasting",
+        "subcategory": "Business time-series comparison",
+        "executor_key": "detect_anomalies",
+        "execution_engine": "r",
+        "dependencies": ["forecast"],
+        "supported_intents": ["detect_anomalies"],
+        "selection_rules": ["Ordered time index", "Numeric measure", "Expected band + outliers"],
+        "rejection_rules": ["No time column", "No numeric measure"],
+        "required_checks": ["n count", "regular spacing"],
+        "fallback_methods": [],
+        "output_contract": {"fields": ["expected", "lower", "upper", "anomalies", "anomalyCount"]},
+        "card": _card(
+            ["Ordered time index", "Numeric measure", "Need expected band and outliers"],
+            ["No time column", "No numeric measure"],
+            ["n count", "regular spacing"],
+            [],
+            ["expected value", "prediction interval", "flagged anomalies"],
+        ),
+    },
+    {
+        "method_id": "forecast_time_series",
+        "display_name": "Time-series forecast",
+        "category": "Time-Series Analysis and Forecasting",
+        "subcategory": "Business time-series comparison",
+        "executor_key": "forecast_time_series",
+        "execution_engine": "r",
+        "dependencies": ["forecast"],
+        "supported_intents": ["forecast_time_series"],
+        "selection_rules": ["Ordered time index", "Numeric measure", "Sufficient history for forecast"],
+        "rejection_rules": ["No time column", "No numeric measure", "Too few periods"],
+        "required_checks": ["n count", "regular spacing"],
+        "fallback_methods": [],
+        "output_contract": {"fields": ["pointForecast", "lower", "upper", "horizon", "method"]},
+        "card": _card(
+            ["Ordered time index", "Numeric measure", "Sufficient history"],
+            ["No time column", "No numeric measure", "Too few periods"],
+            ["n count", "regular spacing"],
+            [],
+            ["point forecast", "prediction interval", "forecast horizon"],
+        ),
+    },
+    {
+        "method_id": "contribution_to_change",
+        "display_name": "Contribution to change",
+        "category": "Time-Series Analysis and Forecasting",
+        "subcategory": "Business time-series comparison",
+        "executor_key": "contribution_to_change",
+        "execution_engine": "r",
+        "dependencies": ["base R"],
+        "supported_intents": ["contribution_to_change"],
+        "selection_rules": ["Numeric measure", "Categorical grouping", "Two periods or ordered time"],
+        "rejection_rules": ["No grouping", "No numeric measure"],
+        "required_checks": ["n count", "group cardinality"],
+        "fallback_methods": [],
+        "output_contract": {"fields": ["group", "contribution", "contributionPercent", "rank"]},
+        "card": _card(
+            ["Numeric measure", "Categorical grouping", "Two periods or ordered time"],
+            ["No grouping", "No numeric measure"],
+            ["n count", "group cardinality"],
+            [],
+            ["per-group contribution", "percentage of total change", "rank"],
+        ),
+    },
+]
+
+
 
 # ---------------------------------------------------------------------------
 # Tier lists (§32). Fuzzy substring matching against method names.
@@ -767,7 +889,7 @@ EXCLUDED_CATEGORIES = {
 def build() -> dict:
     taxonomy = json.loads(SOURCE.read_text())
 
-    exec_by_id = {e["method_id"]: e for e in EXECUTABLE}
+    exec_by_id = {e["method_id"]: e for e in (*EXECUTABLE, *EXECUTABLE_R)}
     # Map common taxonomy names onto executable ids so we don't duplicate them.
     name_to_exec = {
         "descriptive statistics": "describe_numeric",
@@ -798,12 +920,21 @@ def build() -> dict:
         "sens slope": "sens_slope",
         "sen's slope": "sens_slope",
         "stl decomposition": "stl_decomposition",
+        "period over period": "period_change",
+        "period change": "period_change",
+        "change point detection": "detect_change_point",
+        "change point": "detect_change_point",
+        "anomaly detection": "detect_anomalies",
+        "anomalies": "detect_anomalies",
+        "forecast": "forecast_time_series",
+        "time series forecast": "forecast_time_series",
+        "contribution to change": "contribution_to_change",
     }
 
     methods: dict[str, dict] = {}
 
     # 1. Authored executable methods (Tier 1, executable).
-    for e in EXECUTABLE:
+    for e in (*EXECUTABLE, *EXECUTABLE_R):
         methods[e["method_id"]] = {
             "method_id": e["method_id"],
             "display_name": e["display_name"],
@@ -821,6 +952,11 @@ def build() -> dict:
             "method_card": e["card"],
             "llm_guardrails": _GUARDRAILS,
             "executor_key": e["executor_key"],
+            "execution_engine": e.get("execution_engine", "r"),
+            "result_schema_version": 1,
+            "chart_contract": {},
+            "max_rows": 10000,
+            "timeout_seconds": 30,
             "dependencies": e["dependencies"],
             "is_executable": True,
         }
@@ -874,7 +1010,7 @@ def build() -> dict:
             "results; Tablescope selects and executes the method."
         ),
         "source_document": "Tablescope Analytical Method Reference Catalog.rtf",
-        "version": "1.0",
+        "version": "1.1",
         "shared_policies": SHARED_POLICIES,
         "selection_matrix": [
             {

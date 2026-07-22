@@ -21,6 +21,11 @@ _KEYWORDS: list[tuple[str, str]] = [
     (r"\b(predict|drivers of|explain|what affects|impact of|factors)\b", "continuous_prediction"),
     (r"\b(normal|distribution|distributed)\b", "normality"),
     (r"\b(describe|summary|summarize|statistics of|average|mean|median)\b", "describe_numeric"),
+    (r"\b(month over month|mom|quarter over quarter|qoq|year over year|yoy|period over period|vs prior|vs previous|baseline|rate of change)\b", "compare_periods"),
+    (r"\b(change point|when did it change|structural break|break point|shift in)\b", "detect_change_point"),
+    (r"\b(anomal|outlier|unusual|spike|dip)\b", "detect_anomalies"),
+    (r"\b(forecast|project|predict future|what should we expect|forward looking)\b", "forecast_time_series"),
+    (r"\b(contribution to change|what drove the change|why did it change|breakdown of change)\b", "contribution_to_change"),
 ]
 
 

@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.analytical_method_engine import method_executor
 from app.services.analytical_method_engine.executors.base import ExecRequest, Executor
 from app.services.analytical_method_engine.executors.python_executor import PythonExecutor
 from app.services.analytical_method_engine.executors.r_executor import RExecutor
-from app.services.analytical_method_engine.r_config import is_r_analytics_enabled
+from app.services.analytical_method_engine.r_config import (
+    is_r_analytics_enabled,
+    r_analytics_failure_mode,
+)
 
 
 class ExecutorRegistry:
@@ -45,4 +49,22 @@ class ExecutorRegistry:
             max_rows=method.get("max_rows"),
             timeout_seconds=method.get("timeout_seconds"),
         )
-        return self.get(method.get("execution_engine")).execute(request)
+        engine = (method.get("execution_engine") or "python").lower()
+        if engine == "r" and is_r_analytics_enabled():
+            r_result = RExecutor().execute(request)
+            if r_result.get("status") == "ok":
+                r_result["executionEngine"] = "r"
+                return r_result
+            if r_analytics_failure_mode() == "python_fallback" and request.executor_key in method_executor.EXECUTORS:
+                py_result = PythonExecutor().execute(request)
+                py_result["executionEngine"] = "python"
+                py_result["fallbackFrom"] = "r"
+                if py_result.get("status") == "ok":
+                    py_result["quality"] = "reliable (python fallback)"
+                return py_result
+            # No fallback available; return the R error envelope.
+            r_result["executionEngine"] = "r"
+            return r_result
+        result = PythonExecutor().execute(request)
+        result["executionEngine"] = "python"
+        return result

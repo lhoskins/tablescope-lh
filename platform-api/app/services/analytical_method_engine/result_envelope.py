@@ -65,7 +65,9 @@ def build(
         "quality": exec_result.get("quality"),
         "warnings": exec_result.get("warnings", []),
         "reason": exec_result.get("reason"),
-        "executionEngine": method.get("execution_engine") if method else None,
+        "executionEngine": exec_result.get("executionEngine")
+        or (method.get("execution_engine") if method else None),
+        "fallbackFrom": exec_result.get("fallbackFrom"),
         "resultSchemaVersion": method.get("result_schema_version") if method else None,
         "chartContract": method.get("chart_contract") if method else None,
         "methodCard": method.get("method_card") if method else None,

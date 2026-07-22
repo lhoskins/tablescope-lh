@@ -5,7 +5,7 @@ RUN apt-get update && \
         libcurl4-openssl-dev libssl-dev libxml2-dev libsodium-dev curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN R -e "pkgs <- c('plumber','jsonlite','dplyr'); install.packages(pkgs, repos='https://cloud.r-project.org/'); for (p in pkgs) if (!requireNamespace(p, quietly=TRUE)) stop(paste(p, 'failed to install'))"
+RUN R -e "pkgs <- c('plumber','jsonlite','dplyr','forecast','changepoint','Kendall','trend','MASS'); install.packages(pkgs, repos='https://cloud.r-project.org/'); for (p in pkgs) if (!requireNamespace(p, quietly=TRUE)) stop(paste(p, 'failed to install'))"
 
 WORKDIR /app
 
