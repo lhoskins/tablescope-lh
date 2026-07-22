@@ -11,4 +11,4 @@ The LLM only ever *explains* the envelope — it never selects or invents result
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
 from app.services.analytical_method_engine.engine import analyze
 
-__all__ = ["analyze", "EngineMode", "get_engine_mode"]
+__all__ = ["EngineMode", "analyze", "get_engine_mode"]

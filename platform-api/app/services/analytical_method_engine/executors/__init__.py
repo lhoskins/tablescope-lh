@@ -7,9 +7,9 @@ The registry dispatches a selected method to either the local Python executor
 
 from __future__ import annotations
 
-from app.services.analytical_method_engine.executors.base import Executor, ExecRequest
+from app.services.analytical_method_engine.executors.base import ExecRequest, Executor
 from app.services.analytical_method_engine.executors.python_executor import PythonExecutor
 from app.services.analytical_method_engine.executors.r_executor import RExecutor
 from app.services.analytical_method_engine.executors.registry import ExecutorRegistry
 
-__all__ = ["Executor", "ExecRequest", "PythonExecutor", "RExecutor", "ExecutorRegistry"]
+__all__ = ["ExecRequest", "Executor", "ExecutorRegistry", "PythonExecutor", "RExecutor"]

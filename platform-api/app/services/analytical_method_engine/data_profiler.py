@@ -103,7 +103,7 @@ def _numeric_profile(series: pd.Series) -> dict[str, Any]:
 
 
 def profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
-    row_count = int(len(df))
+    row_count = len(df)
     columns: dict[str, Any] = {}
     numeric_cols: list[str] = []
     datetime_cols: list[str] = []

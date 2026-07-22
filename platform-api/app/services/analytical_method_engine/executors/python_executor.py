@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.analytical_method_engine.executors.base import ExecRequest, Executor
 from app.services.analytical_method_engine import method_executor
+from app.services.analytical_method_engine.executors.base import ExecRequest, Executor
 
 
 class PythonExecutor(Executor):

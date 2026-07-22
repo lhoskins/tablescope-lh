@@ -61,7 +61,7 @@ class RExecutor(Executor):
                 )
                 resp.raise_for_status()
                 return resp.json()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("R analytics request failed for %s: %s", request.method_id, exc)
             return {
                 "status": "error",

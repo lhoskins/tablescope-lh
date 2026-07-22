@@ -78,6 +78,9 @@ services:
       ANALYTICAL_METHOD_ENGINE_MODE: ${ANALYTICAL_METHOD_ENGINE_MODE:-off}
       TABLESCOPE_AI_ENABLED: ${TABLESCOPE_AI_ENABLED:-false}
       TABLESCOPE_AI_API_URL: ${TABLESCOPE_AI_API_URL:-}
+      R_ANALYTICS_ENABLED: ${R_ANALYTICS_ENABLED:-false}
+      R_ANALYTICS_URL: ${R_ANALYTICS_URL:-http://r-analytics:8000}
+      R_ANALYTICS_TIMEOUT_SECONDS: ${R_ANALYTICS_TIMEOUT_SECONDS:-30}
       TABLESCOPE_AI_SIGNING_SECRET: ${TABLESCOPE_AI_SIGNING_SECRET:-}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_API_KEY_SID: ${TWILIO_API_KEY_SID:-}
@@ -194,8 +197,29 @@ services:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      NEXT_PUBLIC_ECHARTS_RENDERER_MODE: ${NEXT_PUBLIC_ECHARTS_RENDERER_MODE:-off}
     depends_on:
       - platform-api
+
+  r-analytics:
+    build:
+      context: ./r-analytics
+    image: tablescope-r-analytics:latest
+    restart: unless-stopped
+    # Not published to the host; reachable only from platform-api on the
+    # default Docker network. No nginx upstream.
+    expose:
+      - "8000"
+    environment:
+      R_ANALYTICS_PORT: "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - default
 
   db:
     image: postgres:16-alpine
