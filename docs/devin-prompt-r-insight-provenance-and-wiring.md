@@ -123,6 +123,57 @@ an implemented method → the method becomes selectable). Then harden:
 4. Keep it `ADMIN`-gated with audit logging (already present); confirm a
    deactivated method is no longer selected (registry cache invalidated).
 
+## Workstream 4 — Make ECharts the default renderer for insight cards
+
+Requirement: **insight cards render with ECharts by default**, while existing
+saved dashboards keep following the global renderer mode (preserve-existing — do
+NOT force-convert saved dashboards).
+
+Verified current behavior on the base branch:
+- Insight cards already render through the dashboard `WidgetRenderer`:
+  `intelligence-card.tsx` `InsightChartView` (→ `<WidgetRenderer widget=… />`,
+  ~line 127) and `home-pins-grid.tsx` (~line 233).
+- `WidgetRenderer.tsx:377` uses ECharts only when
+  `shouldRenderEcharts(widget.visualizationOptions?.renderer) &&
+  ["line","bar","pie","area"].includes(widget.type)`.
+- `shouldRenderEcharts` (`web-ui/lib/echarts.ts`) returns true for global mode
+  `default`, is `new_widgets`-gated by a `renderer==="echarts"` hint, and false
+  for `off`/`shadow`. `NEXT_PUBLIC_ECHARTS_RENDERER_MODE` is **build-time inlined**
+  (Dockerfile ARG/ENV + compose `build.args`, already wired, default `default`).
+
+Two reasons insight cards still show recharts today: (a) the deployed web-ui
+image may not have been **rebuilt** with the intended mode (a restart does not
+re-inline `NEXT_PUBLIC_*`); and (b) **chart-type coverage** — insight cards emit
+`combo`/`dual_line`, `bubble`(scatter), and `kpi_grid`
+(`home_intelligence.py` ~lines 2042/2056/2132), none of which are in the ECharts
+`{line,bar,pie,area}` set, so they fall back to recharts regardless of mode.
+
+Do:
+
+1. **Force ECharts on the insight-card surfaces, independent of the global
+   dashboard mode.** Add an explicit opt-in from the insight paths only — e.g. a
+   `forceEcharts` prop on `WidgetRenderer` (or a dedicated
+   `shouldRenderEchartsForInsight()` that returns true unless a hard
+   kill-switch), used by `InsightChartView` and `home-pins-grid` — so insight
+   cards default to ECharts even when the global mode is `new_widgets`/`off`.
+   **Do not change the global default for saved dashboards** — they keep using
+   `shouldRenderEcharts(mode)` as today. Keep a documented way to disable insight
+   ECharts (env or the kill-switch) for emergencies.
+2. **Extend EChartsWidget chart-type coverage to what insight cards actually
+   emit:** `combo`/`dual_line` (multi-series with a secondary axis),
+   `scatter`/`bubble`, and route `kpi`/`kpi_grid` to the existing KPI component
+   (not a canvas chart). Broaden the type gate accordingly for the insight path.
+3. **Graceful fallback:** any chart type still not supported by ECharts must fall
+   back to the recharts renderer **without blanking** the card. Never render an
+   empty box.
+4. Preserve all `WidgetRenderer` behavior ECharts already handles (resize via
+   ResizeObserver, tooltip, theme light/dark, dispose/cleanup, click→filter).
+5. **Deployment note for the PR:** the web-ui image must be **rebuilt**
+   (`docker compose build web-ui`), not just restarted, for any
+   `NEXT_PUBLIC_ECHARTS_RENDERER_MODE` change to take effect — but because
+   insight cards now force ECharts in code, they no longer depend on that env
+   value being `default`.
+
 ---
 
 ## Tests
@@ -162,6 +213,11 @@ Repo-standard: `pytest -q`, `ruff`, `mypy app`; web-ui `typecheck`,
 - Admins can activate/deactivate any implemented method from the UI; activations
   are guarded, audited, persist across reboots, and carry forward on version
   bump; the R-availability check degrades gracefully.
+- Insight cards (Business Insight + Home-pinned) render with **ECharts by
+  default** for their chart types (combo/dual_line, scatter/bubble, and
+  line/bar/pie/area), falling back to recharts without blanking for anything not
+  yet supported; **existing saved dashboards are unchanged** (still governed by
+  the global renderer mode).
 - `R_ANALYTICS_ENABLED=false` remains byte-for-byte today's behavior.
 
 ## PR summary must include
