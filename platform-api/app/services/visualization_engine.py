@@ -25,11 +25,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ChartType(str, Enum):
+class ChartType(StrEnum):
     """The renderable chart vocabulary.
 
     MUST stay in lockstep with ``WidgetType`` in

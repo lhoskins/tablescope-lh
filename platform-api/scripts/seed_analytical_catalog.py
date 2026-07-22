@@ -162,6 +162,22 @@ async def seed_analytical_catalog() -> dict[str, Any]:
             )
             return stats
 
+        # Capture activation overrides from the previous active version so a
+        # catalog version bump does not silently discard admin toggles.
+        previous_by_id: dict[str, dict[str, Any]] = {}
+        if catalog.active_version_id:
+            prev_methods = (
+                await session.scalars(
+                    select(AnalyticalMethod).where(
+                        AnalyticalMethod.catalog_version_id == catalog.active_version_id
+                    )
+                )
+            ).all()
+            previous_by_id = {
+                str(m.method_id): {"is_executable": m.is_executable, "status": m.status}
+                for m in prev_methods
+            }
+
         version = MethodCatalogVersion(
             catalog_id=catalog.id,
             version=version_str,
@@ -174,6 +190,10 @@ async def seed_analytical_catalog() -> dict[str, Any]:
         for m in data.get("methods", []):
             executable = bool(m.get("is_executable"))
             status = STATUS_ACTIVE if executable else STATUS_DRAFT
+            if m["method_id"] in previous_by_id:
+                prev = previous_by_id[m["method_id"]]
+                executable = bool(prev["is_executable"])
+                status = prev["status"]
             session.add(
                 AnalyticalMethod(
                     catalog_version_id=version.id,

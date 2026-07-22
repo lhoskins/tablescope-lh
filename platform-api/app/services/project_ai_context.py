@@ -399,7 +399,7 @@ async def build_project_ai_context(
         return cached
 
     if settings is None or not settings.ai_context_enabled:
-        result = {
+        result: dict[str, Any] = {
             "project": {"id": project.id, "name": project.name},
             "ai_context_enabled": False,
             "goals": [],

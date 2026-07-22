@@ -18,7 +18,29 @@ from app.models.analytical_method_catalog import (
     MethodCatalog,
     MethodCatalogVersion,
 )
+from app.services.analytical_method_engine import method_executor
 from app.services.analytical_method_engine.method_registry import CATALOG_KEY
+
+# Static R method allowlist (Set A + Set B) for the admin implementation badge.
+_STATIC_R_METHODS: set[str] = {
+    "describe_numeric", "normality_test",
+    "pearson_correlation", "spearman_correlation", "kendall_correlation",
+    "one_sample_t_test", "welch_t_test", "students_t_test",
+    "mann_whitney_u", "paired_t_test", "wilcoxon_signed_rank",
+    "one_way_anova", "welch_anova", "kruskal_wallis",
+    "chi_square_independence", "fisher_exact",
+    "linear_regression", "logistic_regression", "poisson_regression", "negative_binomial_regression",
+    "trend_slope", "mann_kendall_trend", "sens_slope", "stl_decomposition",
+    "period_change", "detect_change_point", "detect_anomalies",
+    "forecast_time_series", "contribution_to_change",
+}
+
+
+def _implementation_available(method: AnalyticalMethod) -> bool:
+    executor_key = method.executor_key or ""
+    if method.execution_engine == "r":
+        return executor_key in _STATIC_R_METHODS
+    return executor_key in method_executor.EXECUTORS
 
 
 async def _active_version(session: AsyncSession) -> MethodCatalogVersion | None:
@@ -53,6 +75,9 @@ def _method_summary(m: AnalyticalMethod) -> dict[str, Any]:
         "summary": m.summary,
         "supported_intents": m.supported_intents or [],
         "is_executable": m.is_executable,
+        "execution_engine": m.execution_engine,
+        "executor_key": m.executor_key,
+        "implementation_available": _implementation_available(m),
     }
 
 

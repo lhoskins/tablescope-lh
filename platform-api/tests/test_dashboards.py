@@ -77,7 +77,7 @@ async def _setup_tenant_and_project(client, service_headers):
 
 
 async def test_dashboard_crud_lifecycle(client, service_headers) -> None:
-    tenant, user, project, headers = await _setup_tenant_and_project(
+    _tenant, _user, project, headers = await _setup_tenant_and_project(
         client, service_headers
     )
     pid = project["id"]

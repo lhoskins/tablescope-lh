@@ -277,7 +277,7 @@ async def test_context_audit_records_mutations(client, service_headers):
 
 
 async def test_viewer_cannot_modify_context(client, service_headers):
-    tenant, user, project, _ = await _setup(client, service_headers, slug="ro-tenant")
+    tenant, _user, project, _ = await _setup(client, service_headers, slug="ro-tenant")
     # create a viewer user
     r = await client.post(
         f"/api/tenants/{tenant['id']}/users",

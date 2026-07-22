@@ -29,6 +29,9 @@ const CHART_TYPES: ChartTypeDef[] = [
       { value: "grouped_bar", label: "Grouped" },
       { value: "horizontal_bar", label: "Horizontal" },
       { value: "stacked_horizontal", label: "Stacked Horiz." },
+      { value: "positive_negative", label: "Pos / Neg" },
+      { value: "waterfall", label: "Waterfall" },
+      { value: "population_pyramid", label: "Pyramid" },
     ],
   },
   {
@@ -37,6 +40,10 @@ const CHART_TYPES: ChartTypeDef[] = [
       { value: "", label: "Straight" },
       { value: "smooth_line", label: "Smooth" },
       { value: "step_line", label: "Step" },
+      { value: "dashed_line", label: "Dashed" },
+      { value: "biaxial_line", label: "Biaxial" },
+      { value: "tiny_line", label: "Tiny" },
+      { value: "animated_line", label: "Animated" },
     ],
   },
   {
@@ -51,17 +58,23 @@ const CHART_TYPES: ChartTypeDef[] = [
     subtypes: [
       { value: "", label: "Pie" },
       { value: "donut", label: "Donut" },
+      { value: "two_level", label: "Two-level" },
+      { value: "gauge", label: "Gauge" },
     ],
   },
   {
     type: "combo", label: "Combo", icon: "\u{1F4CA}\u{1F4C8}",
-    subtypes: [{ value: "bar_line", label: "Bar + Line" }],
+    subtypes: [
+      { value: "bar_line", label: "Bar + Line" },
+      { value: "dual_line", label: "Dual Line" },
+    ],
   },
   {
     type: "scatter", label: "Scatter", icon: "\u{1F4A0}",
     subtypes: [
       { value: "", label: "Scatter" },
       { value: "bubble", label: "Bubble" },
+      { value: "best_fit", label: "Best fit" },
     ],
   },
   {
@@ -78,9 +91,9 @@ const CHART_TYPES: ChartTypeDef[] = [
       { value: "multi_ring", label: "Multi-ring" },
     ],
   },
-  { type: "treemap", label: "Treemap", icon: "\u{1F9E9}", subtypes: [] },
-  { type: "funnel", label: "Funnel", icon: "\u{1FA9D}", subtypes: [] },
-  { type: "sankey", label: "Sankey", icon: "\u{1F500}", subtypes: [] },
+  { type: "treemap", label: "Treemap", icon: "\u{1F9E9}", subtypes: [{ value: "", label: "Treemap" }, { value: "nested", label: "Nested" }] },
+  { type: "funnel", label: "Funnel", icon: "\u{1FA9D}", subtypes: [{ value: "", label: "Funnel" }] },
+  { type: "sankey", label: "Sankey", icon: "\u{1F500}", subtypes: [{ value: "", label: "Sankey" }] },
   { type: "kpi", label: "KPI", icon: "\u{1F522}", subtypes: [] },
   { type: "table", label: "Table", icon: "\u{1F4CB}", subtypes: [] },
 ];

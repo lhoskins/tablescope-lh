@@ -30,11 +30,17 @@ export type ReferenceLineConfig = {
  */
 export type VisualizationOptions = {
   // Shared
-  renderer?: "echarts" | "recharts";
   showLegend?: boolean;
   showLabels?: boolean;
   showGrid?: boolean;
   tinyMode?: boolean;
+  colorScheme?: "tablescope" | "ocean" | "forest" | "warm" | "monochrome";
+  legendPosition?: "top" | "bottom" | "left" | "right" | "none";
+  showTooltip?: boolean;
+  // Axis & formatting
+  xAxisLabelRotate?: number;
+  yAxisFormat?: "number" | "currency" | "percent" | "compact";
+  dataZoom?: boolean;
   // Line / Area
   lineStyle?: "solid" | "dashed";
   curveType?: "linear" | "monotone" | "step";
@@ -75,8 +81,13 @@ export type VisualizationOptions = {
   // Radar / Radial bar
   domainMin?: number;
   domainMax?: number;
+  // Analytical layers
+  showRegressionLine?: boolean;
+  showControlLimits?: boolean;
+  showAnomalies?: boolean;
+  showChangePoint?: boolean;
+  confidenceBand?: boolean;
   // Treemap / Funnel
-  showTooltip?: boolean;
   // Sankey
   sourceColumn?: string;
   targetColumn?: string;
@@ -109,6 +120,7 @@ export type ChartSubtype =
   | "gauge"            // semi-circle gauge
   // Combo
   | "bar_line"         // bars + overlay line
+  | "dual_line"        // two line series, often dual-axis
   // Scatter variants
   | "bubble"
   | "best_fit"         // scatter + linear trend line

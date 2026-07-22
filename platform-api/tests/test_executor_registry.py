@@ -329,8 +329,9 @@ def test_r_executor_returns_error_on_invalid_json(monkeypatch: pytest.MonkeyPatc
     assert result["status"] == "error"
 
 
-def test_enabled_but_unavailable_does_not_claim_python_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enabled_but_unavailable_with_error_mode_does_not_claim_python_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("R_ANALYTICS_ENABLED", "true")
+    monkeypatch.setenv("R_ANALYTICS_FAILURE_MODE", "error")
 
     def _fake_post(self, url: str, *, json: dict, **kwargs: object) -> object:
         raise RuntimeError("Connection refused")
@@ -350,3 +351,27 @@ def test_enabled_but_unavailable_does_not_claim_python_execution(monkeypatch: py
     assert result["status"] == "error"
     assert "R analytics unavailable" in result.get("reason", "")
     assert "python" not in result.get("reason", "").lower()
+
+
+def test_enabled_but_unavailable_python_fallback_for_set_a(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("R_ANALYTICS_ENABLED", "true")
+    monkeypatch.setenv("R_ANALYTICS_FAILURE_MODE", "python_fallback")
+
+    def _fake_post(self, url: str, *, json: dict, **kwargs: object) -> object:
+        raise RuntimeError("Connection refused")
+
+    with patch("httpx.Client.post", _fake_post):
+        result = ExecutorRegistry().execute(
+            {
+                "method_id": "describe_numeric",
+                "executor_key": "describe_numeric",
+                "execution_engine": "r",
+            },
+            _df(),
+            {"value": "x"},
+            {},
+        )
+
+    assert result["status"] == "ok"
+    assert result.get("executionEngine") == "python"
+    assert result.get("fallbackFrom") == "r"

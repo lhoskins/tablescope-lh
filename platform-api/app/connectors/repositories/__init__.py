@@ -21,12 +21,12 @@ register_repository_connector("unc", UNCRepositoryConnector())
 __all__ = [
     "ConnectionCheck",
     "ConnectionTestResult",
-    "get_repository_connector",
-    "list_repository_connector_types",
-    "register_repository_connector",
     "RepositoryConnector",
     "RepositoryConnectorError",
     "RepositoryItem",
     "RepositoryPage",
     "UNCRepositoryConnector",
+    "get_repository_connector",
+    "list_repository_connector_types",
+    "register_repository_connector",
 ]

@@ -131,7 +131,7 @@ def _patch_smb_and_redis(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_list_connector_types(client: AsyncClient, service_headers: dict) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
     r = await client.get("/api/repository-connectors/types", headers=headers)
     assert r.status_code == 200
     types = r.json()
@@ -142,7 +142,7 @@ async def test_create_and_list_connections(
     client: AsyncClient,
     service_headers: dict,
 ) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
 
     body = {
         "name": "Finance share",
@@ -166,7 +166,7 @@ async def test_update_with_version_conflict(
     client: AsyncClient,
     service_headers: dict,
 ) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
 
     body = {
         "name": "Finance share",
@@ -187,7 +187,7 @@ async def test_update_with_version_conflict(
 
 
 async def test_test_connection_config(client: AsyncClient, service_headers: dict) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
 
     body = {
         "connector_type": "unc",
@@ -204,7 +204,7 @@ async def test_test_existing_connection(
     client: AsyncClient,
     service_headers: dict,
 ) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
 
     body = {
         "name": "HR share",
@@ -224,7 +224,7 @@ async def test_test_existing_connection(
 
 
 async def test_start_scan(client: AsyncClient, service_headers: dict) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
 
     body = {
         "name": "Ops share",
@@ -256,7 +256,7 @@ async def test_profile_and_items_return_cleanly(
     client: AsyncClient,
     service_headers: dict,
 ) -> None:
-    tenant, user, headers = await _setup(client, service_headers)
+    _tenant, _user, headers = await _setup(client, service_headers)
 
     body = {
         "name": "Empty share",
@@ -288,8 +288,8 @@ async def test_tenant_isolation(
     client: AsyncClient,
     service_headers: dict,
 ) -> None:
-    tenant1, user1, headers1 = await _setup(client, service_headers, slug="t1")
-    tenant2, user2, headers2 = await _setup(client, service_headers, slug="t2")
+    _tenant1, _user1, headers1 = await _setup(client, service_headers, slug="t1")
+    _tenant2, _user2, headers2 = await _setup(client, service_headers, slug="t2")
 
     body = {
         "name": "Shared",

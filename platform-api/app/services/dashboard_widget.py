@@ -94,6 +94,7 @@ def build_widget_config(
     label_column: str | None = None,
     value_column: str | None = None,
     value_column_2: str | None = None,
+    visualization_options: dict[str, Any] | None = None,
     explanation: str = "",
     index: int = 0,
     widget_id: str | None = None,
@@ -135,6 +136,7 @@ def build_widget_config(
         "gridY": (index // 2) * default_h,
         "gridW": default_w,
         "gridH": default_h,
+        "visualizationOptions": visualization_options or {},
     }
     if x_type:
         widget["xColumnType"] = x_type

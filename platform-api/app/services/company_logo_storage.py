@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CompanyLogoValidationError",
-    "validate_company_logo",
-    "store_company_logo",
     "read_company_logo",
+    "store_company_logo",
+    "validate_company_logo",
 ]
 
 

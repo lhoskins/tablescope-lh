@@ -426,7 +426,7 @@ async def test_non_creator_non_admin_cannot_delete(client, service_headers) -> N
 
 
 async def test_viewer_cannot_create_scope_set(client, service_headers) -> None:
-    _tenant, owner_headers, project, _queries = await _setup(
+    _tenant, _owner_headers, project, _queries = await _setup(
         client, service_headers
     )
     pid = project["id"]

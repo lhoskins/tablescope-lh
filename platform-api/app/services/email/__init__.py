@@ -18,10 +18,10 @@ from app.services.email.templates import (
 )
 
 __all__ = [
+    "TEMPLATES",
     "EmailSendResult",
     "MissingTemplateVariableError",
     "RenderedEmail",
-    "TEMPLATES",
     "TemplateNotFoundError",
     "build_content",
     "get_template",

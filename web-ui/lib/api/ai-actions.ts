@@ -56,6 +56,8 @@ export interface MethodEnvelope {
   caveats?: unknown[];
   warnings?: unknown[];
   executionEngine?: string | null;
+  /** When the runtime fell back from one engine to another (e.g. "r" -> "python"). */
+  fallbackFrom?: string | null;
   resultSchemaVersion?: number | null;
   chartContract?: Record<string, unknown> | null;
 }

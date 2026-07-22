@@ -175,7 +175,7 @@ class TenantHealthService:
             return ConnectivityTest(target=target, status="skipped", detail="invalid port")
         try:
             fut = asyncio.open_connection(host, port)
-            reader, writer = await asyncio.wait_for(fut, timeout=self._timeout)
+            _reader, writer = await asyncio.wait_for(fut, timeout=self._timeout)
             writer.close()
             try:
                 await writer.wait_closed()

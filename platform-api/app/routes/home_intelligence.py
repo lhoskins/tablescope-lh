@@ -1057,6 +1057,7 @@ class SaveDashboardWidget(BaseModel):
     labelColumn: str | None = None
     valueColumn: str | None = None
     valueColumn2: str | None = None
+    visualizationOptions: dict[str, Any] | None = None
 
 
 class SaveDashboardRequest(BaseModel):
@@ -1126,6 +1127,7 @@ async def home_save_dashboard(
                 label_column=w.labelColumn,
                 value_column=w.valueColumn,
                 value_column_2=w.valueColumn2,
+                visualization_options=w.visualizationOptions,
                 explanation=w.explanation or "",
                 index=idx,
             )
@@ -1171,6 +1173,7 @@ class SaveCardToDashboardRequest(BaseModel):
     labelColumn: str | None = None
     valueColumn: str | None = None
     valueColumn2: str | None = None
+    visualizationOptions: dict[str, Any] | None = None
 
 
 @router.post("/home/save-card-to-dashboard")
@@ -1270,6 +1273,7 @@ async def save_card_to_dashboard(
             label_column=req.labelColumn,
             value_column=req.valueColumn,
             value_column_2=req.valueColumn2,
+            visualization_options=req.visualizationOptions,
             widget_id=widget_id,
             index=0,
         )
@@ -1306,6 +1310,7 @@ async def save_card_to_dashboard(
             label_column=req.labelColumn,
             value_column=req.valueColumn,
             value_column_2=req.valueColumn2,
+            visualization_options=req.visualizationOptions,
             widget_id=widget_id,
             index=position,
         )

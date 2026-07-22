@@ -39,6 +39,10 @@ import type { AiCardContext } from "@/lib/api/ai-actions";
 import { renderBold } from "@/components/tablescope/home/intelligence-card";
 import { InsightsPanel, HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import {
+  InsightAnalysisDetails,
+  RAnalyticsBadge,
+} from "@/components/tablescope/home/insight-engine-badge";
+import {
   InsightExplanationPanel,
 } from "@/components/tablescope/home/insight-explanation-panel";
 import {
@@ -814,6 +818,7 @@ function InsightCardItem({
     valueColumn: card.valueColumn,
     valueColumn2: card.valueColumn2,
     explanation: card.explanation as InsightExplanation | undefined,
+    analyticalMethod: card.analyticalMethod,
   };
 
   return (
@@ -886,6 +891,9 @@ function InsightCardItem({
           <IconInfoCircle size={13} />
           Explain
         </button>
+
+        <RAnalyticsBadge envelope={card.analyticalMethod} />
+
         {canCreateAction && (
           <button
             type="button"

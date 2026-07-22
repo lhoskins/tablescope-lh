@@ -128,7 +128,7 @@ class SalesforceConnector(SaasConnector):
             )
 
     async def test_connection(self, config: dict) -> dict:
-        token, instance_url = await self._authenticate(config)
+        _token, instance_url = await self._authenticate(config)
         return {"instance_url": instance_url, "authenticated": True}
 
     async def list_objects(self, config: dict) -> list[ObjectInfo]:
