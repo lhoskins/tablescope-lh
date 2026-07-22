@@ -2,7 +2,7 @@
 
 Every endpoint is strictly scoped to the authenticated tenant and user.
 Feedback is returned only for the current user; it is never aggregated or
-exposed to other users, and it is never used to automatically retrain the model.
+shown to other users, and it is never used to automatically retrain the model.
 """
 
 from __future__ import annotations
@@ -18,8 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, has_role, require_role
 from app.database import get_db
-from app.models.insight_feedback import InsightFeedback
+from app.models.insight_feedback import InsightFeedback, InsightFeedbackReviewEvent
 from app.routes.home_pins import _require_project_access
+from app.services.project_ai_context import invalidate_project_ai_context
+from app.services.project_insight_service import mark_project_insight_stale
 
 router = APIRouter(prefix="/insight-feedback", tags=["Insight Feedback"])
 
@@ -45,23 +47,69 @@ _VALID_REASON_CODES = set(REASON_CODE_LABELS)
 _STATUS_ACTIVE = "active"
 _STATUS_WITHDRAWN = "withdrawn"
 
-# Reviewer workflow states. User-submitted feedback always starts as ``pending``.
+# Reviewer workflow states.
+_REVIEW_STATUS_NOT_REQUIRED = "not_required"
 _REVIEW_STATUS_PENDING = "pending"
+_REVIEW_STATUS_IN_REVIEW = "in_review"
+_REVIEW_STATUS_NEEDS_MORE_INFO = "needs_more_information"
 _REVIEW_STATUS_ACCEPTED = "accepted"
 _REVIEW_STATUS_REJECTED = "rejected"
-_REVIEW_STATUS_NEEDS_MORE_INFO = "needs_more_information"
 _VALID_REVIEW_STATUSES = {
+    _REVIEW_STATUS_NOT_REQUIRED,
     _REVIEW_STATUS_PENDING,
+    _REVIEW_STATUS_IN_REVIEW,
+    _REVIEW_STATUS_NEEDS_MORE_INFO,
     _REVIEW_STATUS_ACCEPTED,
     _REVIEW_STATUS_REJECTED,
-    _REVIEW_STATUS_NEEDS_MORE_INFO,
 }
-_FINAL_REVIEW_STATUSES = {_REVIEW_STATUS_ACCEPTED, _REVIEW_STATUS_REJECTED, _REVIEW_STATUS_NEEDS_MORE_INFO}
+_FINAL_REVIEW_STATUSES = {_REVIEW_STATUS_ACCEPTED, _REVIEW_STATUS_REJECTED}
+
+# Review event types for the immutable audit trail.
+_EVENT_AGREE_SAVED = "agree_saved"
+_EVENT_DISAGREE_SUBMITTED = "disagree_submitted"
+_EVENT_EDITED = "feedback_edited"
+_EVENT_WITHDRAWN = "withdrawn"
+_EVENT_ACKNOWLEDGED = "acknowledged"
+_EVENT_RELEASED = "released"
+_EVENT_INFO_REQUESTED = "information_requested"
+_EVENT_USER_RESPONDED = "user_responded"
+_EVENT_FEEDBACK_ACCEPTED = "feedback_accepted"
+_EVENT_INSIGHT_UPHELD = "insight_upheld"
+_EVENT_ADMIN_REOPEN = "admin_reopen"
 
 _PERMISSION_REVIEW = "insight_feedback.review"
 
 
+def _log_review_event(
+    session: AsyncSession,
+    row: InsightFeedback,
+    event_type: str,
+    from_status: str | None,
+    to_status: str | None,
+    actor_user_id: int,
+    comment: str | None = None,
+    response: str | None = None,
+) -> None:
+    session.add(
+        InsightFeedbackReviewEvent(
+            tenant_id=row.tenant_id,
+            project_id=row.project_id,
+            feedback_id=row.id,
+            insight_id=row.insight_id,
+            event_type=event_type,
+            from_review_status=from_status,
+            to_review_status=to_status,
+            actor_user_id=actor_user_id,
+            comment=comment,
+            response=response,
+            feedback_revision=row.feedback_revision,
+        )
+    )
+
+
 class InsightFeedbackResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     id: int
     insight_id: str
     project_id: int | None
@@ -73,7 +121,10 @@ class InsightFeedbackResponse(BaseModel):
     review_status: str
     reviewer_user_id: int | None
     reviewer_comment: str | None
+    response: str | None
     reviewed_at: str | None
+    acknowledged_at: str | None
+    feedback_revision: int
     created_at: str
     updated_at: str
 
@@ -159,7 +210,10 @@ def _to_response(row: InsightFeedback) -> InsightFeedbackResponse:
         review_status=row.review_status,
         reviewer_user_id=row.reviewer_user_id,
         reviewer_comment=row.reviewer_comment,
+        response=row.response,
         reviewed_at=row.reviewed_at.isoformat() if row.reviewed_at else None,
+        acknowledged_at=row.acknowledged_at.isoformat() if row.acknowledged_at else None,
+        feedback_revision=row.feedback_revision,
         created_at=row.created_at.isoformat() if row.created_at else "",
         updated_at=row.updated_at.isoformat() if row.updated_at else "",
     )
@@ -222,14 +276,19 @@ async def upsert_insight_feedback(
             InsightFeedback.insight_id == insight_id,
         )
     )
+    existing = row is not None
     if row is None:
         row = InsightFeedback(
             tenant_id=context.tenant_id,
             user_id=context.user_id,
             project_id=body.project_id,
             insight_id=insight_id,
+            feedback_revision=1,
         )
         session.add(row)
+
+    is_material_edit = existing and row.status == _STATUS_ACTIVE
+    previous_status = row.review_status
 
     row.project_id = body.project_id
     row.sentiment = body.sentiment
@@ -243,11 +302,38 @@ async def upsert_insight_feedback(
     row.explanation_snapshot = body.explanation_snapshot
     row.model_metadata = body.model_metadata
     row.status = _STATUS_ACTIVE
-    # User edits reset the review workflow so the new submission is re-examined.
-    row.review_status = _REVIEW_STATUS_PENDING
-    row.reviewer_user_id = None
-    row.reviewer_comment = None
-    row.reviewed_at = None
+    row.response = None
+
+    if body.sentiment == SENTIMENT_AGREE:
+        row.review_status = _REVIEW_STATUS_NOT_REQUIRED
+        row.reviewer_user_id = None
+        row.reviewer_comment = None
+        row.reviewed_at = None
+        row.acknowledged_at = None
+        event_type = _EVENT_AGREE_SAVED if not is_material_edit else _EVENT_EDITED
+    else:
+        # Disagreement enters the review workflow. A material edit to an
+        # existing disagreement starts a new revision and requeues it.
+        if is_material_edit:
+            row.feedback_revision += 1
+            event_type = _EVENT_EDITED
+        else:
+            event_type = _EVENT_DISAGREE_SUBMITTED
+        row.review_status = _REVIEW_STATUS_PENDING
+        row.reviewer_user_id = None
+        row.reviewer_comment = None
+        row.reviewed_at = None
+        row.acknowledged_at = None
+
+    await session.flush()
+    _log_review_event(
+        session,
+        row,
+        event_type,
+        previous_status if is_material_edit else None,
+        row.review_status,
+        context.user_id,
+    )
 
     await session.commit()
     await session.refresh(row)
@@ -280,18 +366,25 @@ async def delete_insight_feedback(
             detail="Feedback not found",
         )
 
-    # Re-validate project access using the stored project_id when the client
-    # did not supply one; either way the user must still be able to reach it.
     check_project_id = project_id if project_id is not None else row.project_id
     await _require_project_access(session, context, check_project_id)
 
-    # Soft-delete by status; the unique constraint stays valid and the user can
-    # later re-submit feedback. Preserve the review audit trail.
+    previous_status = row.review_status
     row.status = _STATUS_WITHDRAWN
     row.review_status = _REVIEW_STATUS_PENDING
     row.reviewer_user_id = None
     row.reviewer_comment = None
+    row.response = None
     row.reviewed_at = None
+    row.acknowledged_at = None
+    _log_review_event(
+        session,
+        row,
+        _EVENT_WITHDRAWN,
+        previous_status,
+        row.review_status,
+        context.user_id,
+    )
     await session.commit()
 
 
@@ -299,11 +392,7 @@ async def delete_insight_feedback(
 
 
 def _can_review_feedback(context: RequestContext) -> bool:
-    """True when the caller is an explicit reviewer or an admin.
-
-    The permission list is the preferred gate; the role fallback is a safe
-    initial mapping until a dedicated permission-assignment UI exists.
-    """
+    """True when the caller is an explicit reviewer or an admin."""
     return context.has_permission(_PERMISSION_REVIEW) or has_role(
         context.role, Role.ADMIN
     )
@@ -332,6 +421,35 @@ def _require_insight_reviewer(context: RequestContext) -> None:
         )
 
 
+async def _get_review_feedback(
+    session: AsyncSession,
+    context: RequestContext,
+    feedback_id: int,
+) -> InsightFeedback:
+    row = await session.get(InsightFeedback, feedback_id)
+    if row is None or row.tenant_id != context.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Feedback not found",
+        )
+    await _require_project_access_for_review(session, context, row.project_id)
+    return row
+
+
+def _ensure_claimant_or_admin(
+    row: InsightFeedback,
+    context: RequestContext,
+    action: str = "perform this action",
+) -> None:
+    is_claimant = row.reviewer_user_id == context.user_id
+    is_admin = has_role(context.role, Role.ADMIN)
+    if not (is_claimant or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Only the claimant or a tenant admin can {action}",
+        )
+
+
 class InsightFeedbackReviewResponse(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
@@ -347,7 +465,10 @@ class InsightFeedbackReviewResponse(BaseModel):
     review_status: str
     reviewer_user_id: int | None
     reviewer_comment: str | None
+    response: str | None
     reviewed_at: str | None
+    acknowledged_at: str | None
+    feedback_revision: int
     created_at: str
     updated_at: str
     card_snapshot: dict[str, Any] | None = None
@@ -368,7 +489,10 @@ def _to_review_response(row: InsightFeedback) -> InsightFeedbackReviewResponse:
         review_status=row.review_status,
         reviewer_user_id=row.reviewer_user_id,
         reviewer_comment=row.reviewer_comment,
+        response=row.response,
         reviewed_at=row.reviewed_at.isoformat() if row.reviewed_at else None,
+        acknowledged_at=row.acknowledged_at.isoformat() if row.acknowledged_at else None,
+        feedback_revision=row.feedback_revision,
         created_at=row.created_at.isoformat() if row.created_at else "",
         updated_at=row.updated_at.isoformat() if row.updated_at else "",
         card_snapshot=row.card_snapshot,
@@ -379,15 +503,15 @@ def _to_review_response(row: InsightFeedback) -> InsightFeedbackReviewResponse:
 class InsightFeedbackReviewQueueParams:
     def __init__(
         self,
-        review_status: str | None = Query(None),
+        review_status: str | None = Query("pending,in_review,needs_more_information"),
         project_id: int | None = Query(None),
-        sentiment: str | None = Query(None),
+        sentiment: str | None = Query("disagree"),
         limit: int = Query(100, ge=1, le=500),
         offset: int = Query(0, ge=0),
     ) -> None:
-        self.review_status = review_status
+        self.review_status = review_status if review_status else None
         self.project_id = project_id
-        self.sentiment = sentiment
+        self.sentiment = sentiment if sentiment else None
         self.limit = limit
         self.offset = offset
 
@@ -423,6 +547,67 @@ class InsightFeedbackDispositionRequest(BaseModel):
         return v
 
 
+class InsightFeedbackInfoRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    reviewer_comment: str
+
+    @field_validator("reviewer_comment")
+    @classmethod
+    def _validate_reviewer_comment(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("reviewer_comment is required")
+        if len(v) > 4000:
+            raise ValueError("reviewer_comment must not exceed 4000 characters")
+        return v
+
+
+class InsightFeedbackUserResponseRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    response: str
+
+    @field_validator("response")
+    @classmethod
+    def _validate_response(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("response is required and cannot be whitespace")
+        if len(v) > 4000:
+            raise ValueError("response must not exceed 4000 characters")
+        return v
+
+
+class InsightFeedbackGovernanceRequest(BaseModel):
+    insight_ids: list[str] = Field(..., min_length=1, max_length=200)
+    project_id: int | None = None
+
+    @field_validator("insight_ids")
+    @classmethod
+    def _dedupe_and_trim(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for insight_id in v:
+            tid = insight_id.strip()
+            if tid and tid not in seen:
+                seen.add(tid)
+                out.append(tid)
+        if not out:
+            raise ValueError("insight_ids must not be empty")
+        return out
+
+
+class InsightFeedbackGovernanceItem(BaseModel):
+    insight_id: str
+    governance_status: str
+    last_status_changed_at: str | None
+
+
+class InsightFeedbackGovernanceResponse(BaseModel):
+    items: list[InsightFeedbackGovernanceItem]
+
+
 @router.get("/review/queue", response_model=InsightFeedbackReviewQueueResponse)
 async def get_review_queue(
     params: InsightFeedbackReviewQueueParams = Depends(),
@@ -438,9 +623,12 @@ async def get_review_queue(
 
     where = [
         InsightFeedback.tenant_id == context.tenant_id,
+        InsightFeedback.status == _STATUS_ACTIVE,
     ]
     if params.review_status:
-        where.append(InsightFeedback.review_status == params.review_status.lower())
+        statuses = [s.strip().lower() for s in params.review_status.split(",") if s.strip()]
+        if statuses:
+            where.append(InsightFeedback.review_status.in_(statuses))
     if params.project_id is not None:
         await _require_project_access_for_review(session, context, params.project_id)
         where.append(InsightFeedback.project_id == params.project_id)
@@ -475,14 +663,7 @@ async def get_review_feedback(
 ) -> InsightFeedbackReviewResponse:
     """Retrieve a single feedback record for review, including frozen snapshots."""
     _require_insight_reviewer(context)
-
-    row = await session.get(InsightFeedback, feedback_id)
-    if row is None or row.tenant_id != context.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Feedback not found",
-        )
-    await _require_project_access_for_review(session, context, row.project_id)
+    row = await _get_review_feedback(session, context, feedback_id)
     return _to_review_response(row)
 
 
@@ -492,24 +673,28 @@ async def claim_review_feedback(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> InsightFeedbackReviewResponse:
-    """Claim a feedback item for review by the current user."""
+    """Acknowledge a feedback item for review by the current user."""
     _require_insight_reviewer(context)
 
-    row = await session.get(InsightFeedback, feedback_id)
-    if row is None or row.tenant_id != context.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Feedback not found",
-        )
-    await _require_project_access_for_review(session, context, row.project_id)
-
+    row = await _get_review_feedback(session, context, feedback_id)
     if row.review_status != _REVIEW_STATUS_PENDING:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Feedback is already under review or dispositioned",
         )
 
+    previous = row.review_status
+    row.review_status = _REVIEW_STATUS_IN_REVIEW
     row.reviewer_user_id = context.user_id
+    row.acknowledged_at = datetime.now(UTC)
+    _log_review_event(
+        session,
+        row,
+        _EVENT_ACKNOWLEDGED,
+        previous,
+        row.review_status,
+        context.user_id,
+    )
     await session.commit()
     await session.refresh(row)
     return _to_review_response(row)
@@ -524,31 +709,114 @@ async def release_review_feedback(
     """Release a claimed feedback item back to the pending queue."""
     _require_insight_reviewer(context)
 
-    row = await session.get(InsightFeedback, feedback_id)
-    if row is None or row.tenant_id != context.tenant_id:
+    row = await _get_review_feedback(session, context, feedback_id)
+    _ensure_claimant_or_admin(row, context, "release this item")
+
+    previous = row.review_status
+    row.review_status = _REVIEW_STATUS_PENDING
+    row.reviewer_user_id = None
+    row.acknowledged_at = None
+    row.reviewed_at = None
+    row.reviewer_comment = None
+    row.response = None
+    _log_review_event(
+        session,
+        row,
+        _EVENT_RELEASED,
+        previous,
+        row.review_status,
+        context.user_id,
+    )
+    await session.commit()
+    await session.refresh(row)
+    return _to_review_response(row)
+
+
+@router.post(
+    "/review/{feedback_id}/request-info",
+    response_model=InsightFeedbackReviewResponse,
+)
+async def request_more_information(
+    feedback_id: int,
+    body: InsightFeedbackInfoRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> InsightFeedbackReviewResponse:
+    """Request more information from the submitter while reviewing a feedback item."""
+    _require_insight_reviewer(context)
+
+    row = await _get_review_feedback(session, context, feedback_id)
+    _ensure_claimant_or_admin(row, context, "request more information")
+
+    if row.review_status != _REVIEW_STATUS_IN_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Information can only be requested while the feedback is in review",
+        )
+
+    previous = row.review_status
+    row.review_status = _REVIEW_STATUS_NEEDS_MORE_INFO
+    row.reviewer_comment = body.reviewer_comment
+    _log_review_event(
+        session,
+        row,
+        _EVENT_INFO_REQUESTED,
+        previous,
+        row.review_status,
+        context.user_id,
+        comment=body.reviewer_comment,
+    )
+    await session.commit()
+    await session.refresh(row)
+    return _to_review_response(row)
+
+
+@router.post(
+    "/{insight_id}/review-response",
+    response_model=InsightFeedbackResponse,
+)
+async def respond_to_review_request(
+    insight_id: str,
+    body: InsightFeedbackUserResponseRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> InsightFeedbackResponse:
+    """Allow a submitter to respond to a request for more information."""
+    row = await session.scalar(
+        select(InsightFeedback).where(
+            InsightFeedback.tenant_id == context.tenant_id,
+            InsightFeedback.user_id == context.user_id,
+            InsightFeedback.insight_id == insight_id,
+            InsightFeedback.status == _STATUS_ACTIVE,
+        )
+    )
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Feedback not found",
         )
-    await _require_project_access_for_review(session, context, row.project_id)
 
-    is_claimant = row.reviewer_user_id == context.user_id
-    is_admin = has_role(context.role, Role.ADMIN)
-    if not (is_claimant or is_admin):
+    if row.review_status != _REVIEW_STATUS_NEEDS_MORE_INFO:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the claimant or a tenant admin can release this item",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A response can only be submitted when more information is requested",
         )
 
-    row.reviewer_user_id = None
-    # Return to pending only if it was not already dispositioned.
-    if row.review_status == _REVIEW_STATUS_PENDING or row.review_status is None:
-        row.review_status = _REVIEW_STATUS_PENDING
-    row.reviewed_at = None
-    row.reviewer_comment = None
+    previous = row.review_status
+    row.review_status = _REVIEW_STATUS_IN_REVIEW
+    row.response = body.response
+    _log_review_event(
+        session,
+        row,
+        _EVENT_USER_RESPONDED,
+        previous,
+        row.review_status,
+        context.user_id,
+        response=body.response,
+    )
     await session.commit()
     await session.refresh(row)
-    return _to_review_response(row)
+    return _to_response(row)
 
 
 @router.post("/review/{feedback_id}/disposition", response_model=InsightFeedbackReviewResponse)
@@ -560,38 +828,148 @@ async def disposition_review_feedback(
 ) -> InsightFeedbackReviewResponse:
     """Set the final reviewer disposition for a feedback item.
 
-    A reviewer comment is required for final dispositions
-    (``accepted``, ``rejected``, ``needs_more_information``).
+    Final dispositions (``accepted``/``rejected``) require a reviewer comment.
+    ``needs_more_information`` is a non-terminal request-for-info action.
     """
     _require_insight_reviewer(context)
 
-    row = await session.get(InsightFeedback, feedback_id)
-    if row is None or row.tenant_id != context.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Feedback not found",
-        )
-    await _require_project_access_for_review(session, context, row.project_id)
+    row = await _get_review_feedback(session, context, feedback_id)
+    _ensure_claimant_or_admin(row, context, "set a disposition")
 
-    is_claimant = row.reviewer_user_id == context.user_id
-    is_admin = has_role(context.role, Role.ADMIN)
-    if row.reviewer_user_id is not None and not (is_claimant or is_admin):
+    requested_status = body.review_status
+    if requested_status not in _VALID_REVIEW_STATUSES:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the claimant or a tenant admin can disposition this item",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"review_status must be one of: {', '.join(_VALID_REVIEW_STATUSES)}",
         )
 
-    if body.review_status in _FINAL_REVIEW_STATUSES:
+    if requested_status == _REVIEW_STATUS_NEEDS_MORE_INFO:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Use the request-info endpoint to ask for more information",
+        )
+
+    if requested_status in _FINAL_REVIEW_STATUSES:
         if not body.reviewer_comment or not body.reviewer_comment.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="reviewer_comment is required for final dispositions",
             )
 
-    row.review_status = body.review_status
-    row.reviewer_comment = body.reviewer_comment.strip() if body.reviewer_comment else None
+    # Final disposition must come from in_review. If the status is
+    # needs_more_information the caller should first receive a response.
+    if requested_status in _FINAL_REVIEW_STATUSES and row.review_status != _REVIEW_STATUS_IN_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Final disposition is only allowed while the feedback is in review",
+        )
+
+    previous = row.review_status
+    row.review_status = requested_status
     row.reviewer_user_id = context.user_id
     row.reviewed_at = datetime.now(UTC)
+    row.reviewer_comment = (
+        body.reviewer_comment.strip() if body.reviewer_comment else None
+    )
+
+    if row.project_id is not None:
+        await mark_project_insight_stale(
+            session, tenant_id=row.tenant_id, project_id=row.project_id
+        )
+        invalidate_project_ai_context(row.tenant_id, row.project_id)
+
+    event_type = (
+        _EVENT_FEEDBACK_ACCEPTED
+        if requested_status == _REVIEW_STATUS_ACCEPTED
+        else _EVENT_INSIGHT_UPHELD
+    )
+    _log_review_event(
+        session,
+        row,
+        event_type,
+        previous,
+        row.review_status,
+        context.user_id,
+        comment=row.reviewer_comment,
+    )
     await session.commit()
     await session.refresh(row)
     return _to_review_response(row)
+
+
+@router.post("/governance", response_model=InsightFeedbackGovernanceResponse)
+async def governance_batch(
+    body: InsightFeedbackGovernanceRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> InsightFeedbackGovernanceResponse:
+    """Return a safe, privacy-preserving governance summary for a list of insights.
+
+    This endpoint returns only the governance status and the latest status-change
+    timestamp. It never exposes submitter/reviewer identity, comments, or reasons.
+    """
+    if body.project_id is not None:
+        await _require_project_access(session, context, body.project_id)
+
+    where = [
+        InsightFeedback.tenant_id == context.tenant_id,
+        InsightFeedback.insight_id.in_(body.insight_ids),
+        InsightFeedback.status == _STATUS_ACTIVE,
+    ]
+    if body.project_id is not None:
+        where.append(InsightFeedback.project_id == body.project_id)
+
+    rows = (
+        await session.execute(
+            select(
+                InsightFeedback.insight_id,
+                InsightFeedback.review_status,
+                InsightFeedback.updated_at,
+            ).where(*where)
+        )
+    ).all()
+
+    # Precedence: Under Review > Disputed > Validated > None
+    governance: dict[str, tuple[str, datetime | None]] = {}
+    for insight_id, review_status, updated_at in rows:
+        existing = governance.get(insight_id)
+        existing_status = existing[0] if existing else None
+        existing_ts = existing[1] if existing else None
+
+        if review_status in (
+            _REVIEW_STATUS_PENDING,
+            _REVIEW_STATUS_IN_REVIEW,
+            _REVIEW_STATUS_NEEDS_MORE_INFO,
+        ):
+            new_status = "Under Review"
+        elif review_status == _REVIEW_STATUS_ACCEPTED:
+            new_status = "Disputed"
+        elif review_status == _REVIEW_STATUS_REJECTED:
+            new_status = "Validated"
+        else:
+            new_status = "None"
+
+        # Keep the most severe status; update timestamp if changed.
+        if existing_status is None:
+            governance[insight_id] = (new_status, updated_at)
+        else:
+            precedence = ["Under Review", "Disputed", "Validated", "None"]
+            # Lower index = more severe (Under Review beats Disputed beats Validated).
+            if existing_status == "None" or precedence.index(new_status) < precedence.index(existing_status):
+                governance[insight_id] = (new_status, updated_at)
+            elif new_status == existing_status:
+                latest_ts = max(filter(None, [existing_ts, updated_at]), default=None)
+                governance[insight_id] = (new_status, latest_ts)
+
+    items: list[InsightFeedbackGovernanceItem] = []
+    for insight_id in body.insight_ids:
+        status, ts = governance.get(insight_id, ("None", None))
+        items.append(
+            InsightFeedbackGovernanceItem(
+                insight_id=insight_id,
+                governance_status=status,
+                last_status_changed_at=ts.isoformat() if ts else None,
+            )
+        )
+
+    return InsightFeedbackGovernanceResponse(items=items)

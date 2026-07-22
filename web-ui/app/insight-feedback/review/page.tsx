@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconCheck,
+  IconMessage,
   IconRefresh,
-  IconTrash,
   IconThumbDown,
   IconThumbUp,
+  IconTrash,
   IconX,
 } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
@@ -20,6 +21,7 @@ import {
   dispositionInsightFeedbackReview,
   getInsightFeedbackReviewQueue,
   releaseInsightFeedbackReview,
+  requestInfoInsightFeedbackReview,
   type InsightFeedbackReviewItem,
 } from "@/lib/api/insight-feedback";
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
@@ -46,6 +48,10 @@ function isInsightReviewer(user: CurrentUser): boolean {
   return ["admin", "tenant_admin", "root_admin"].includes(user.rawRole ?? "");
 }
 
+function isTenantAdmin(user: CurrentUser): boolean {
+  return ["admin", "tenant_admin", "root_admin"].includes(user.rawRole ?? "");
+}
+
 function sentimentBadge(sentiment: string) {
   if (sentiment === "agree") {
     return (
@@ -67,13 +73,15 @@ function sentimentBadge(sentiment: string) {
 function reviewStatusBadge(status: string) {
   switch (status) {
     case "accepted":
-      return <Badge tone="success">Accepted</Badge>;
+      return <Badge tone="neutral">Feedback Accepted</Badge>;
     case "rejected":
-      return <Badge tone="danger">Rejected</Badge>;
+      return <Badge tone="success">Insight Upheld</Badge>;
     case "needs_more_information":
-      return <Badge tone="warning">Needs more info</Badge>;
+      return <Badge tone="warning">Response Needed</Badge>;
+    case "in_review":
+      return <Badge tone="brand">In Review</Badge>;
     default:
-      return <Badge tone="neutral">Pending</Badge>;
+      return <Badge tone="neutral">Pending Review</Badge>;
   }
 }
 
@@ -82,11 +90,11 @@ export default function InsightFeedbackReviewPage() {
   const queryClient = useQueryClient();
   const { data: identity } = useCurrentUser();
   const [reviewStatus, setReviewStatus] = useState("");
-  const [sentiment, setSentiment] = useState("");
+  const [sentiment, setSentiment] = useState("disagree");
   const [selected, setSelected] = useState<InsightFeedbackReviewItem | null>(null);
-  const [disposition, setDisposition] = useState("accepted");
   const [reviewerComment, setReviewerComment] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   useEffect(() => {
     if (!getUserMeta()) router.replace("/login");
@@ -119,7 +127,7 @@ export default function InsightFeedbackReviewPage() {
       await claimInsightFeedbackReview(id);
       refresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Claim failed");
+      setActionError(err instanceof Error ? err.message : "Acknowledge failed");
     }
   };
 
@@ -133,23 +141,37 @@ export default function InsightFeedbackReviewPage() {
     }
   };
 
-  const handleDisposition = async () => {
-    if (!selected) return;
-    if (!reviewerComment.trim()) {
-      setActionError("A reviewer comment is required for final dispositions.");
+  const openAction = (item: InsightFeedbackReviewItem, action: string) => {
+    setSelected(item);
+    setReviewerComment(item.reviewer_comment ?? "");
+    setActionError(null);
+    setPendingAction(action);
+  };
+
+  const handleSubmitAction = async () => {
+    if (!selected || !pendingAction) return;
+    const comment = reviewerComment.trim();
+    if (!comment) {
+      setActionError("A comment is required.");
       return;
     }
     setActionError(null);
     try {
-      await dispositionInsightFeedbackReview(selected.id, {
-        review_status: disposition,
-        reviewer_comment: reviewerComment.trim(),
-      });
+      if (pendingAction === "request_info") {
+        await requestInfoInsightFeedbackReview(selected.id, { reviewer_comment: comment });
+      } else {
+        const status = pendingAction === "feedback_accepted" ? "accepted" : "rejected";
+        await dispositionInsightFeedbackReview(selected.id, {
+          review_status: status,
+          reviewer_comment: comment,
+        });
+      }
       setSelected(null);
       setReviewerComment("");
+      setPendingAction(null);
       refresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Disposition failed");
+      setActionError(err instanceof Error ? err.message : "Action failed");
     }
   };
 
@@ -193,10 +215,11 @@ export default function InsightFeedbackReviewPage() {
             className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-[13px] text-ink-primary"
           >
             <option value="">All review statuses</option>
-            <option value="pending">Pending</option>
-            <option value="accepted">Accepted</option>
-            <option value="rejected">Rejected</option>
-            <option value="needs_more_information">Needs more information</option>
+            <option value="pending">Pending Review</option>
+            <option value="in_review">In Review</option>
+            <option value="needs_more_information">Response Needed</option>
+            <option value="accepted">Feedback Accepted</option>
+            <option value="rejected">Insight Upheld</option>
           </select>
           <select
             value={sentiment}
@@ -204,8 +227,8 @@ export default function InsightFeedbackReviewPage() {
             className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-[13px] text-ink-primary"
           >
             <option value="">All sentiments</option>
-            <option value="agree">Agree</option>
             <option value="disagree">Disagree</option>
+            <option value="agree">Agree</option>
           </select>
           <span className="text-small text-ink-tertiary">
             {queue?.total ?? 0} item{queue?.total === 1 ? "" : "s"}
@@ -232,76 +255,118 @@ export default function InsightFeedbackReviewPage() {
                 <th className="px-4 py-2.5 font-medium">Project</th>
                 <th className="px-4 py-2.5 font-medium">Sentiment</th>
                 <th className="px-4 py-2.5 font-medium">Status</th>
+                <th className="px-4 py-2.5 font-medium">Reason</th>
                 <th className="px-4 py-2.5 font-medium">Submitted</th>
+                <th className="px-4 py-2.5 font-medium">Assigned</th>
                 <th className="px-4 py-2.5 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-ink-tertiary">
+                  <td colSpan={8} className="px-4 py-10 text-center text-ink-tertiary">
                     Loading…
                   </td>
                 </tr>
               )}
               {!isLoading && (queue?.items.length ?? 0) === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-ink-tertiary">
+                  <td colSpan={8} className="px-4 py-10 text-center text-ink-tertiary">
                     No feedback awaiting review.
                   </td>
                 </tr>
               )}
-              {queue?.items.map((item) => (
-                <tr
-                  key={item.id}
-                  className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-tertiary"
-                  onClick={() => {
-                    setSelected(item);
-                    setReviewerComment(item.reviewer_comment ?? "");
-                    setDisposition(item.review_status || "accepted");
-                    setActionError(null);
-                  }}
-                >
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-ink-primary max-w-xs truncate">
-                      {item.insight_id}
-                    </div>
-                    {item.comment && (
-                      <div className="mt-0.5 max-w-md text-[12px] text-ink-secondary line-clamp-2">
-                        {item.comment}
+              {queue?.items.map((item) => {
+                const isMine = item.reviewer_user_id === user.id;
+                const isAdmin = isTenantAdmin(user);
+                const readOnly =
+                  item.review_status === "accepted" ||
+                  item.review_status === "rejected" ||
+                  (item.review_status === "in_review" && item.reviewer_user_id != null && !isMine && !isAdmin);
+                return (
+                  <tr
+                    key={item.id}
+                    className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-tertiary"
+                    onClick={() => {
+                      setSelected(item);
+                      setReviewerComment(item.reviewer_comment ?? "");
+                      setActionError(null);
+                      setPendingAction(null);
+                    }}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-ink-primary max-w-xs truncate">
+                        {item.insight_id}
                       </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-ink-secondary">{item.project_id ?? "—"}</td>
-                  <td className="px-4 py-3">{sentimentBadge(item.sentiment)}</td>
-                  <td className="px-4 py-3">{reviewStatusBadge(item.review_status || "pending")}</td>
-                  <td className="px-4 py-3 text-ink-secondary">
-                    {new Date(item.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex justify-end gap-2">
-                      {item.review_status === "pending" && item.reviewer_user_id == null && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleClaim(item.id)}
-                        >
-                          Claim
-                        </Button>
+                      {item.comment && (
+                        <div className="mt-0.5 max-w-md text-[12px] text-ink-secondary line-clamp-2">
+                          {item.comment}
+                        </div>
                       )}
-                      {item.reviewer_user_id != null && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRelease(item.id)}
-                        >
-                          Release
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-4 py-3 text-ink-secondary">{item.project_id ?? "—"}</td>
+                    <td className="px-4 py-3">{sentimentBadge(item.sentiment)}</td>
+                    <td className="px-4 py-3">{reviewStatusBadge(item.review_status || "pending")}</td>
+                    <td className="px-4 py-3 text-ink-secondary">
+                      {(item.reason_codes ?? []).slice(0, 2).join(", ") || "—"}
+                    </td>
+                    <td className="px-4 py-3 text-ink-secondary">
+                      {new Date(item.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 text-ink-secondary">
+                      {item.reviewer_user_id ? `User ${item.reviewer_user_id}` : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex justify-end gap-2">
+                        {(item.review_status === "pending" || !item.review_status) && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleClaim(item.id)}
+                          >
+                            Acknowledge
+                          </Button>
+                        )}
+                        {item.review_status === "in_review" && !readOnly && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRelease(item.id)}
+                            >
+                              <IconTrash size={14} /> Release
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => openAction(item, "request_info")}
+                            >
+                              <IconMessage size={14} /> Request info
+                            </Button>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => openAction(item, "feedback_accepted")}
+                            >
+                              <IconCheck size={14} /> Feedback Accepted
+                            </Button>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => openAction(item, "insight_upheld")}
+                            >
+                              <IconCheck size={14} /> Insight Upheld
+                            </Button>
+                          </>
+                        )}
+                        {readOnly && (
+                          <span className="text-[12px] text-ink-tertiary">Read-only</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -310,7 +375,10 @@ export default function InsightFeedbackReviewPage() {
       {selected && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4"
-          onClick={() => setSelected(null)}
+          onClick={() => {
+            setSelected(null);
+            setPendingAction(null);
+          }}
         >
           <div
             className="my-8 w-full max-w-lg rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-lg"
@@ -326,7 +394,10 @@ export default function InsightFeedbackReviewPage() {
               <button
                 type="button"
                 aria-label="Close"
-                onClick={() => setSelected(null)}
+                onClick={() => {
+                  setSelected(null);
+                  setPendingAction(null);
+                }}
                 className="shrink-0 text-ink-tertiary hover:text-ink-primary"
               >
                 <IconX size={18} />
@@ -353,51 +424,78 @@ export default function InsightFeedbackReviewPage() {
                   ))}
                 </div>
               )}
+              {selected.review_status === "needs_more_information" && (
+                <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-small text-warning">
+                  <IconMessage size={14} className="mb-0.5 inline align-text-bottom" />{" "}
+                  Awaiting submitter response. Final disposition is disabled until the user replies.
+                </div>
+              )}
 
-              <div>
-                <label className="mb-1.5 block text-small font-medium text-ink-secondary">
-                  Disposition
-                </label>
-                <select
-                  value={disposition}
-                  onChange={(e) => setDisposition(e.target.value)}
-                  className="w-full rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-[13px] text-ink-primary"
-                >
-                  <option value="accepted">Accepted</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="needs_more_information">Needs more information</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-small font-medium text-ink-secondary">
-                  Reviewer comment <span className="text-danger">*</span>
-                </label>
-                <textarea
-                  value={reviewerComment}
-                  onChange={(e) => setReviewerComment(e.target.value)}
-                  rows={3}
-                  maxLength={4000}
-                  className="w-full rounded-md border border-line-secondary bg-bg-primary px-3 py-2 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
-                />
-              </div>
+              {(selected.review_status === "in_review" || selected.review_status === "needs_more_information") && (
+                <div>
+                  <label className="mb-1.5 block text-small font-medium text-ink-secondary">
+                    Reviewer comment / question <span className="text-danger">*</span>
+                  </label>
+                  <textarea
+                    value={reviewerComment}
+                    onChange={(e) => setReviewerComment(e.target.value)}
+                    rows={3}
+                    maxLength={4000}
+                    className="w-full rounded-md border border-line-secondary bg-bg-primary px-3 py-2 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="mt-5 flex items-center justify-between border-t border-line-tertiary pt-4">
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => handleRelease(selected.id)}
+                onClick={() => {
+                  setSelected(null);
+                  setPendingAction(null);
+                }}
               >
-                <IconTrash size={14} /> Release
+                Close
               </Button>
               <div className="flex gap-2">
-                <Button variant="secondary" size="sm" onClick={() => setSelected(null)}>
-                  Cancel
-                </Button>
-                <Button variant="primary" size="sm" onClick={handleDisposition}>
-                  <IconCheck size={14} /> Save disposition
-                </Button>
+                {selected.review_status === "in_review" && (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => openAction(selected, "request_info")}
+                      disabled={selected.reviewer_user_id != null && selected.reviewer_user_id !== user.id && !isTenantAdmin(user)}
+                    >
+                      <IconMessage size={14} /> Request info
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => openAction(selected, "feedback_accepted")}
+                      disabled={selected.reviewer_user_id != null && selected.reviewer_user_id !== user.id && !isTenantAdmin(user)}
+                    >
+                      <IconCheck size={14} /> Feedback Accepted
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => openAction(selected, "insight_upheld")}
+                      disabled={selected.reviewer_user_id != null && selected.reviewer_user_id !== user.id && !isTenantAdmin(user)}
+                    >
+                      <IconCheck size={14} /> Insight Upheld
+                    </Button>
+                  </>
+                )}
+                {pendingAction && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleSubmitAction}
+                  >
+                    Confirm {pendingAction === "request_info" ? "Request info" : pendingAction === "feedback_accepted" ? "Feedback Accepted" : "Insight Upheld"}
+                  </Button>
+                )}
               </div>
             </div>
           </div>

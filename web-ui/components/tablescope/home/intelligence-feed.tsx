@@ -33,7 +33,7 @@ import {
   useInsightFeedback,
   type SaveInsightFeedbackArgs,
 } from "@/lib/hooks/use-insight-feedback";
-import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
+import type { GovernanceItem, InsightFeedbackRecord } from "@/lib/api/insight-feedback";
 import { IntelligenceStrip } from "./intelligence-strip";
 import {
   InsightPanel,
@@ -54,6 +54,8 @@ function Section({
   onPin,
   onFeedbackSave,
   onFeedbackRemove,
+  onFeedbackRespond,
+  governanceById,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -66,6 +68,8 @@ function Section({
   onPin?: (card: InsightCard) => void;
   onFeedbackSave?: (card: InsightCard, payload: Omit<SaveInsightFeedbackArgs, "insightId" | "projectId" | "insightType" | "cardSnapshot" | "explanationSnapshot">) => void;
   onFeedbackRemove?: (card: InsightCard) => void;
+  onFeedbackRespond?: (card: InsightCard, response: string) => void;
+  governanceById?: Record<string, GovernanceItem>;
 }) {
   return (
     <InsightPanel title={title} icon={icon} collapsible count={cards.length}>
@@ -89,6 +93,10 @@ function Section({
               onFeedbackRemove={
                 onFeedbackRemove ? () => onFeedbackRemove(card) : undefined
               }
+              onFeedbackRespond={
+                onFeedbackRespond ? (response) => onFeedbackRespond(card, response) : undefined
+              }
+              governance={governanceById?.[card.insightId || card.id]}
             />
           ))}
         </div>
@@ -282,9 +290,10 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
   );
   const {
     feedbackById,
-    isLoading: feedbackLoading,
+    governanceById,
     saveFeedback,
     removeFeedback,
+    respondToReview,
     saving: savingFeedback,
   } = useInsightFeedback(insightIds);
 
@@ -323,6 +332,15 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
       });
     },
     [removeFeedback],
+  );
+
+  const handleFeedbackRespond = useCallback(
+    (card: InsightCard, response: string) => {
+      const insightId = card.insightId || card.id;
+      if (!insightId) return;
+      void respondToReview({ insightId, response });
+    },
+    [respondToReview],
   );
 
   const risks = allInsights.filter(
@@ -437,6 +455,8 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
           onPin={onPin}
           onFeedbackSave={handleFeedbackSave}
           onFeedbackRemove={handleFeedbackRemove}
+          onFeedbackRespond={handleFeedbackRespond}
+          governanceById={governanceById}
         />
         <Section
           title="Trends"
@@ -450,6 +470,8 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
           onPin={onPin}
           onFeedbackSave={handleFeedbackSave}
           onFeedbackRemove={handleFeedbackRemove}
+          onFeedbackRespond={handleFeedbackRespond}
+          governanceById={governanceById}
         />
         <Section
           title="Opportunities"
@@ -463,6 +485,8 @@ export function IntelligenceFeed({ onPin }: { onPin?: (card: InsightCard) => voi
           onPin={onPin}
           onFeedbackSave={handleFeedbackSave}
           onFeedbackRemove={handleFeedbackRemove}
+          onFeedbackRespond={handleFeedbackRespond}
+          governanceById={governanceById}
         />
 
         {pending.length > 0 && (
