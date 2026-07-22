@@ -10,6 +10,7 @@ from app.services.teiid_sql import (
     normalize_date_casts,
     normalize_teiid_string_filters,
     normalize_teiid_timestamps,
+    rebuild_group_by_from_select,
 )
 
 
@@ -122,3 +123,49 @@ def test_normalize_string_filter_handles_in_lists() -> None:
     sql = 'SELECT * FROM t WHERE "Result" IN (\'failed\', \'success\')'
     out = normalize_teiid_string_filters(sql, schema)
     assert 'LOWER("Result") IN (LOWER(\'failed\'), LOWER(\'success\'))' in out
+
+
+def test_rebuild_group_by_drops_aggregate_and_double_wrap() -> None:
+    sql = (
+        'SELECT PARSETIMESTAMP("Month", \'yyyy-MM-dd\') AS "month", '
+        'SUM(CAST("RevenueUSD" AS double)) AS total_revenue '
+        'FROM "monthly_review_metrics_CSV" '
+        'GROUP BY PARSETIMESTAMP(PARSETIMESTAMP("Month", \'yyyy-MM-dd\'), \'M/d/yyyy\'), '
+        'SUM(CAST("RevenueUSD" AS double)) '
+        'ORDER BY PARSETIMESTAMP("Month", \'yyyy-MM-dd\')'
+    )
+    out = rebuild_group_by_from_select(sql)
+    assert 'GROUP BY PARSETIMESTAMP("Month", \'yyyy-MM-dd\')' in out
+    assert 'SUM(CAST("RevenueUSD" AS double))' not in out.split("GROUP BY")[1].split("ORDER BY")[0]
+    assert 'PARSETIMESTAMP(PARSETIMESTAMP' not in out
+    assert 'ORDER BY PARSETIMESTAMP("Month", \'yyyy-MM-dd\')' in out
+
+
+def test_rebuild_group_by_multiple_non_aggregate_columns() -> None:
+    sql = 'SELECT "Region", "Month", SUM("Sales") FROM t GROUP BY "Month", "Region"'
+    out = rebuild_group_by_from_select(sql)
+    # Rebuilt GROUP BY follows the SELECT order of non-aggregate expressions.
+    gb = out.split("GROUP BY")[1].strip()
+    assert gb.startswith('"Region", "Month"')
+
+
+def test_rebuild_group_by_no_aggregates_removes_group_by() -> None:
+    sql = 'SELECT "Region", "Month" FROM t GROUP BY "Region", "Month"'
+    out = rebuild_group_by_from_select(sql)
+    assert "GROUP BY" not in out.upper()
+
+
+def test_rebuild_group_by_already_correct_unchanged() -> None:
+    sql = 'SELECT "Month", SUM("Sales") FROM t GROUP BY "Month"'
+    out = rebuild_group_by_from_select(sql)
+    assert out == sql
+
+
+def test_rebuild_group_by_maps_order_by_alias() -> None:
+    sql = (
+        'SELECT "Month" AS sales_month, SUM("Sales") FROM t '
+        'GROUP BY "Month" ORDER BY sales_month'
+    )
+    out = rebuild_group_by_from_select(sql)
+    # Alias in ORDER BY is left as-is because Teiid supports it.
+    assert "ORDER BY sales_month" in out

@@ -67,7 +67,7 @@ export default function SetPasswordPage() {
         user_id: result.user_id,
         tenant_slug: result.tenant_slug,
       });
-      router.replace("/");
+      router.replace(`/${result.tenant_slug || tenantSlug || ""}`);
     } catch (err) {
       setError((err as Error).message);
       setLoading(false);

@@ -15,7 +15,6 @@ import {
   IconCheck,
   IconChevronRight,
   IconSearch,
-  IconX,
   IconTable,
   IconFileText,
   IconLoader2,
@@ -54,7 +53,7 @@ import {
   type InsightCard as InsightCardData,
   type InsightExplanation,
 } from "@/lib/api/home-intelligence";
-import type { InsightFeedbackRecord } from "@/lib/api/insight-feedback";
+import type { InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import {
@@ -124,8 +123,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   }>({ open: false, question: "", source: "" });
   const [createActionOpen, setCreateActionOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
-  const [dismissedAiUnavailable, setDismissedAiUnavailable] = useState(false);
-  const [dismissedGraphDisclosure, setDismissedGraphDisclosure] = useState(false);
   const [loadErrorToasted, setLoadErrorToasted] = useState(false);
   const [refreshErrorToasted, setRefreshErrorToasted] = useState(false);
 
@@ -384,69 +381,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
           />
         ) : !data ? null : (
           <>
-            {data.aiAvailable === false && !dismissedAiUnavailable && (
-              <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-[13px] text-warning">
-                <IconAlertCircle size={15} className="mt-0.5 shrink-0" />
-                <p className="min-w-0 flex-1">
-                  AI insight is temporarily unavailable — showing activity only.
-                  Try Refresh in a moment.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setDismissedAiUnavailable(true)}
-                  className="shrink-0 text-warning hover:text-ink-primary"
-                  aria-label="Dismiss"
-                >
-                  <IconX size={14} />
-                </button>
-              </div>
-            )}
-
-            {data.stale && (
-              <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[13px] text-ink-secondary">
-                <IconLoader2 size={15} className="animate-spin" />
-                Updating project insight to reflect the latest data…
-              </div>
-            )}
-
-            {data.graphMode && data.graphMode !== "full" && !dismissedGraphDisclosure && (
-              <div
-                className={cn(
-                  "flex items-start gap-2 rounded-lg border px-3 py-2 text-[13px]",
-                  data.graphMode === "blocked"
-                    ? "border-danger/30 bg-danger-bg text-danger"
-                    : "border-warning/30 bg-warning-bg text-warning",
-                )}
-              >
-                {data.graphMode === "blocked" ? (
-                  <IconAlertTriangle size={15} className="mt-0.5 shrink-0" />
-                ) : (
-                  <IconAlertCircle size={15} className="mt-0.5 shrink-0" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p>{data.graphDisclosure}</p>
-                  {data.graphBlockingReasons.length > 0 && (
-                    <ul className="mt-1 list-disc pl-4 text-[12px]">
-                      {data.graphBlockingReasons.map((r, i) => (
-                        <li key={i}>{r}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDismissedGraphDisclosure(true)}
-                  className={cn(
-                    "shrink-0 hover:text-ink-primary",
-                    data.graphMode === "blocked" ? "text-danger" : "text-warning",
-                  )}
-                  aria-label="Dismiss"
-                >
-                  <IconX size={14} />
-                </button>
-              </div>
-            )}
-
             {/* 0. Ask + AI suggestions — same experience as Business Insight,
                 scoped to this project. The ask box hands off to the shared
                 conversational-analytics assistant; the pills generate query/
@@ -815,6 +749,7 @@ function InsightCardItem({
 }) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackInitial, setFeedbackInitial] = useState<InsightSentiment>("agree");
   const hasFeedback = feedback != null && feedback.status === "active";
   const { data: identity } = useCurrentUser();
   const canCreateAction =
@@ -929,24 +864,58 @@ function InsightCardItem({
           </button>
         )}
         {onFeedbackSave && (
-          <button
-            type="button"
-            onClick={() => setFeedbackOpen(true)}
-            aria-label={hasFeedback ? "Edit feedback" : "Give feedback"}
-            title={hasFeedback ? "Edit feedback" : "Give feedback"}
-            className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              hasFeedback
-                ? "border-brand-500 bg-brand-50 text-brand-700 hover:bg-brand-100"
-                : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
-            }`}
-          >
-            {feedback?.sentiment === "disagree" ? (
-              <IconThumbDown size={13} />
-            ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setFeedbackInitial("agree");
+                setFeedbackOpen(true);
+              }}
+              aria-label={
+                hasFeedback && feedback?.sentiment === "agree"
+                  ? "Edit agree feedback"
+                  : "Agree"
+              }
+              title={
+                hasFeedback && feedback?.sentiment === "agree"
+                  ? "Edit agree feedback"
+                  : "Agree"
+              }
+              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                hasFeedback && feedback?.sentiment === "agree"
+                  ? "border-success bg-success/10 text-success hover:bg-success/20"
+                  : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
+              }`}
+            >
               <IconThumbUp size={13} />
-            )}
-            {hasFeedback ? "Feedback saved" : "Agree"}
-          </button>
+              Agree
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFeedbackInitial("disagree");
+                setFeedbackOpen(true);
+              }}
+              aria-label={
+                hasFeedback && feedback?.sentiment === "disagree"
+                  ? "Edit disagree feedback"
+                  : "Disagree"
+              }
+              title={
+                hasFeedback && feedback?.sentiment === "disagree"
+                  ? "Edit disagree feedback"
+                  : "Disagree"
+              }
+              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                hasFeedback && feedback?.sentiment === "disagree"
+                  ? "border-danger bg-danger/10 text-danger hover:bg-danger/20"
+                  : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
+              }`}
+            >
+              <IconThumbDown size={13} />
+              Disagree
+            </button>
+          </div>
         )}
       </div>
 
@@ -961,6 +930,7 @@ function InsightCardItem({
           open={feedbackOpen}
           onClose={() => setFeedbackOpen(false)}
           feedback={feedback || null}
+          initialSentiment={feedbackInitial}
           onSave={onFeedbackSave}
           onRemove={async () => {
             await onFeedbackRemove?.();

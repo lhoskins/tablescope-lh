@@ -14,7 +14,7 @@ import {
   IconThumbDown,
   IconThumbUp,
 } from "@tabler/icons-react";
-import { cn } from "@/lib/cn";
+
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { canManageProjectActions } from "@/lib/auth";
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
@@ -335,7 +335,7 @@ export function IntelligenceCard({
           )}
 
           {onFeedbackSave && stableInsightId && (
-            <div className="flex items-center gap-1">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -352,12 +352,11 @@ export function IntelligenceCard({
                     ? "Edit agree feedback"
                     : "Agree"
                 }
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-l-md border px-2.5 py-1 text-small font-medium transition-colors",
+                className={`inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary ${
                   hasFeedback && feedback?.sentiment === "agree"
                     ? "border-success bg-success/10 text-success hover:bg-success/20"
-                    : "border-line-tertiary bg-bg-primary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary",
-                )}
+                    : ""
+                }`}
               >
                 <IconThumbUp size={14} />
                 Agree
@@ -378,12 +377,11 @@ export function IntelligenceCard({
                     ? "Edit disagree feedback"
                     : "Disagree"
                 }
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-r-md border border-l-0 px-2.5 py-1 text-small font-medium transition-colors",
+                className={`inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary ${
                   hasFeedback && feedback?.sentiment === "disagree"
                     ? "border-danger bg-danger/10 text-danger hover:bg-danger/20"
-                    : "border-line-tertiary bg-bg-primary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary",
-                )}
+                    : ""
+                }`}
               >
                 <IconThumbDown size={14} />
                 Disagree

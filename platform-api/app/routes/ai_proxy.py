@@ -63,6 +63,7 @@ from app.services.teiid_sql import (
     normalize_teiid_identifiers,
     normalize_teiid_string_filters,
     normalize_teiid_timestamps,
+    rebuild_group_by_from_select,
 )
 from app.services.visualization_engine import ChartType, select_visualization
 
@@ -924,7 +925,10 @@ async def generate_sql(
             session, context, req.project_id,
         ),
     }
-    return await _forward_to_ai("/ai/query/generate", payload)
+    result = await _forward_to_ai("/ai/query/generate", payload)
+    if isinstance(result, dict) and isinstance(result.get("sql"), str):
+        result["sql"] = rebuild_group_by_from_select(result["sql"])
+    return result
 
 
 @router.post("/project/relationships/generate")
@@ -2441,6 +2445,7 @@ async def _execute_with_repair(
             column_types=column_types,
         )
         current = collapse_bare_following_parens(current)
+        current = rebuild_group_by_from_select(current)
         bounded = _apply_row_limit(current, max_rows)
         try:
             result = await _execute_project_sql(
