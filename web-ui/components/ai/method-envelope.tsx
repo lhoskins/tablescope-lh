@@ -40,6 +40,7 @@ export function MethodEnvelopeBlock({
         {envelope.n != null && <span>n = {envelope.n}</span>}
         {envelope.usableN != null && <span>usable n = {envelope.usableN}</span>}
         {envelope.quality && <span>Quality: {envelope.quality}</span>}
+        {envelope.executionEngine && <span>Engine: {envelope.executionEngine}</span>}
       </div>
       {resultEntries.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-ink-secondary">
