@@ -100,9 +100,9 @@ run_method <- function(req) {
     )
   })
 
-  # Convert any non-JSON-friendly values (NAs, Infs) to null/JSON-safe equivalents
-  json_result <- jsonlite::fromJSON(jsonlite::toJSON(result, null = "null", na = "null", auto_unbox = TRUE))
-  json_result
+  # Return the raw list; plumber will serialize it with auto_unboxing and
+  # NA/NULL conversion handled by the endpoint serializer.
+  result
 }
 
 #* @post /execute
