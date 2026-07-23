@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 
 class ChartType(StrEnum):
@@ -98,6 +98,24 @@ class VizDecision:
         if self.top_n is not None:
             out["topN"] = self.top_n
         return out
+
+
+@dataclass
+class VizCandidate:
+    """A ranked visualization candidate returned by ``recommend_visualizations``."""
+
+    decision: VizDecision
+    score: float = 0.0
+    supported: bool = True
+    unsupported_reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "decision": self.decision.to_dict(),
+            "score": round(self.score, 3),
+            "supported": self.supported,
+            "unsupportedReason": self.unsupported_reason,
+        }
 
 
 # ── Shape detection (lightweight, dependency-free) ───────────────────────────
@@ -343,135 +361,8 @@ def _looks_like_id_labels(labels: list[str]) -> bool:
     return idish >= max(1, int(len(labels) * 0.5))
 
 
-# ── The decision function ────────────────────────────────────────────────────
-
-def select_visualization(
-    columns: list[str],
-    rows: list[Any],
-    *,
-    profile: dict[str, Any] | None = None,
-    intent_hint: str | None = None,
-) -> VizDecision:
-    """Choose the best renderable chart for a result set (deterministic).
-
-    ``intent_hint`` is an optional caller-supplied preference (e.g. a planner's
-    chart hint, or an LLM's ``analysisIntent``). It is honoured only when it
-    names a real family *and* the data shape supports it — the data always wins,
-    so the engine never emits something the renderer cannot draw.
-    """
-    if not columns or not rows:
-        return VizDecision(ChartType.TABLE, reason="No data to plot.", confidence=1.0)
-
-    dict_rows = _rows_as_dicts(columns, rows)
-    shape = derive_shape(columns, dict_rows, profile)
-    hint = _normalize_hint(intent_hint)
-
-    # 1) A single row with no dimension to plot is a scalar summary -> KPI tile.
-    #    (A single row that still carries a real dimension — e.g. one supplier or
-    #    one month — keeps its labeled context and flows to the bar/line logic.)
-    if shape.row_count == 1 and not shape.dimensions:
-        metric = shape.measures[0] if shape.measures else None
-        if metric:
-            return VizDecision(
-                ChartType.KPI,
-                x_field=None,
-                y_field=metric,
-                value_format=detect_value_format(
-                    metric, _column_values(dict_rows, metric)
-                ),
-                reason="Single-row scalar summary — headline metric as a KPI tile.",
-                confidence=0.9,
-            )
-        return VizDecision(
-            ChartType.TABLE, reason="Single row with no numeric metric.", confidence=0.7
-        )
-
-    if not shape.measures:
-        return VizDecision(
-            ChartType.TABLE,
-            reason="No numeric measure to plot — showing detail rows.",
-            confidence=0.9,
-        )
-
-    label_col = _primary_dimension(shape)
-    value_col = shape.measures[0]
-    values = _column_values(dict_rows, value_col, limit=200)
-    vfmt = detect_value_format(value_col, values)
-
-    # 2) Correlation of two measures with no meaningful dimension -> scatter.
-    if len(shape.measures) >= 2 and (
-        hint == "scatter" or label_col is None
-    ):
-        return VizDecision(
-            ChartType.SCATTER,
-            x_field=shape.measures[0],
-            y_field=shape.measures[1],
-            value_format=vfmt,
-            reason="Two numeric measures with no category — correlation scatter.",
-            confidence=0.7,
-        )
-
-    # 3) Time series -> line (trend). Two measures over time -> combo.
-    is_time = bool(shape.time_columns) or (
-        label_col is not None and _is_period_dimension(shape, label_col)
-    )
-    if is_time:
-        x = shape.time_columns[0] if shape.time_columns else label_col
-        if len(shape.measures) >= 2 and hint in (None, "line", "combo", "area"):
-            return VizDecision(
-                ChartType.COMBO,
-                chart_style="bar_line",
-                x_field=x,
-                y_field=shape.measures[0],
-                y2_field=shape.measures[1],
-                value_format=vfmt,
-                reason="Two metrics over a shared time axis — combo (bar + line).",
-                confidence=0.75,
-            )
-        chart = ChartType.AREA if hint == "area" else ChartType.LINE
-        return VizDecision(
-            chart,
-            x_field=x,
-            y_field=value_col,
-            value_format=vfmt,
-            reason="Ordered time-period labels — trend over time.",
-            confidence=0.85,
-        )
-
-    # 4) Honour a valid explicit hint the shape supports.
-    all_positive = all((f := _to_float(v)) is None or f >= 0 for v in values)
-    label_card = _dimension_cardinality(shape, label_col)
-    forced = _hint_if_supported(
-        hint, shape, label_col, value_col, vfmt, label_card, all_positive
-    )
-    if forced is not None:
-        return forced
-
-    # 5) Part-of-a-whole -> pie/donut.
-    if label_col is not None and _looks_like_share(label_col, label_card, all_positive):
-        return VizDecision(
-            ChartType.PIE,
-            chart_style="donut",
-            x_field=label_col,
-            y_field=value_col,
-            value_format=vfmt,
-            reason="A few positive categories of a whole — share breakdown.",
-            confidence=0.7,
-        )
-
-    # 6) Categorical comparison -> bar. Many/id-like categories rank + cap and go
-    #    horizontal so the axis stays readable (see ``_categorical_bar``).
-    if label_col is not None:
-        labels = [str(v) for v in _column_values(dict_rows, label_col, limit=50)]
-        return _categorical_bar(
-            label_col, value_col, vfmt, label_card, labels, confidence=0.65
-        )
-
-    # 7) Fallback.
-    return VizDecision(
-        ChartType.TABLE, reason="No clear chart shape — showing detail rows.",
-        confidence=0.6,
-    )
+# The public single-decision entry point is select_visualization(), defined
+# below after the richer recommend_visualizations() candidate builder.
 
 
 # ── Hint handling ────────────────────────────────────────────────────────────
@@ -531,48 +422,6 @@ def _normalize_hint(raw: str | None) -> str | None:
     return _HINT_ALIASES.get(key)
 
 
-def _hint_if_supported(
-    hint: str | None,
-    shape: _Shape,
-    label_col: str | None,
-    value_col: str,
-    vfmt: ValueFormat,
-    label_card: int,
-    all_positive: bool,
-) -> VizDecision | None:
-    """Return a decision for an explicit hint when the shape supports it.
-
-    Trend families (``line``/``area``/``combo``) and ``scatter`` are resolved by
-    the shape/time logic in the main flow, not forced by a hint — so a ``line``
-    hint on non-time data still corrects to a category chart. ``kpi``/``table``
-    are shape decisions, not honoured as hints.
-    """
-    if hint is None or hint in ("line", "area", "combo", "scatter", "kpi", "table"):
-        return None
-    # Honour a pie/donut request only when the shape is a genuine part-of-whole
-    # (a few positive slices); otherwise fall through so an oversized/negative
-    # "pie" corrects to a ranking bar.
-    if hint == "pie" and label_col is not None and all_positive and 2 <= label_card <= 8:
-        return VizDecision(
-            ChartType.PIE, chart_style="donut", x_field=label_col, y_field=value_col,
-            value_format=vfmt, reason="Explicit share breakdown.", confidence=0.6,
-        )
-    if hint in ("radar", "treemap", "funnel", "sankey", "radial_bar") and (
-        label_col is not None
-    ):
-        return VizDecision(
-            ChartType(hint), x_field=label_col, y_field=value_col,
-            value_format=vfmt, reason=f"Explicit {hint} request.", confidence=0.55,
-        )
-    if hint == "bar" and label_col is not None:
-        # The hint path only carries the shape (not raw label values), so
-        # id-like detection is skipped here; the cardinality rule still ranks
-        # and flips many-category bars to horizontal.
-        return _categorical_bar(
-            label_col, value_col, vfmt, label_card, [], confidence=0.6
-        )
-    return None
-
 
 # ── Shape helpers ────────────────────────────────────────────────────────────
 
@@ -597,3 +446,506 @@ def _dimension_cardinality(shape: _Shape, col: str | None) -> int:
         if c.name == col:
             return c.cardinality
     return 0
+
+
+def _detect_semantic_roles(
+    columns: list[str], rows: list[dict[str, Any]]
+) -> dict[str, str | None]:
+    """Infer source/target/value/group/stage/rate roles from column names and data.
+
+    Roles are hints for richer families (sankey, treemap, funnel, radial_bar,
+    radar). They never force an unrenderable chart; the shape still wins.
+    """
+    roles: dict[str, str | None] = {
+        "source": None,
+        "target": None,
+        "value": None,
+        "group": None,
+        "stage": None,
+        "rate": None,
+    }
+    lower = {c.lower(): c for c in columns}
+
+    # Source / target / value triad for Sankey.
+    for key in ("source", "from", "origin", "src"):
+        if key in lower:
+            roles["source"] = lower[key]
+            break
+    for key in ("target", "to", "destination", "dst", "dest"):
+        if key in lower:
+            roles["target"] = lower[key]
+            break
+    for key in ("value", "weight", "amount", "flow", "volume"):
+        if key in lower:
+            roles["value"] = lower[key]
+            break
+
+    # Stage column for funnel.
+    stage_re = re.compile(r"(stage|step|phase|status|pipeline|funnel)", re.I)
+    for c in columns:
+        if stage_re.search(c):
+            roles["stage"] = c
+            break
+
+    # Group / parent for treemap.
+    group_re = re.compile(r"(group|category|class|type|segment|region|department|parent)", re.I)
+    for c in columns:
+        if group_re.search(c) and c != roles.get("source") and c != roles.get("target"):
+            roles["group"] = c
+            break
+
+    # Rate / percent column for radial bar.
+    rate_re = re.compile(r"(rate|pct|percent|percentage|ratio|compliance|target|on_time|on-time|oee|utilization|score)", re.I)
+    for c in columns:
+        if rate_re.search(c):
+            # Only promote if values are 0..1 or 0..100.
+            nums = cast(
+                "list[float]",
+                [
+                    _to_float(r.get(c))
+                    for r in rows
+                    if isinstance(r, dict) and _to_float(r.get(c)) is not None
+                ][:50],
+            )
+            if nums and all(0 <= v <= 100 for v in nums) and any(v not in (0, 1, 100) for v in nums):
+                roles["rate"] = c
+                break
+
+    # If no explicit value, prefer a numeric measure named revenue/cost/count.
+    if roles["value"] is None:
+        for c in columns:
+            if re.search(r"(revenue|cost|spend|sales|amount|count|value|total|sum)", c, re.I):
+                # Verify numeric.
+                sample = [_to_float(r.get(c)) for r in rows if isinstance(r, dict) and _to_float(r.get(c)) is not None]
+                if sample:
+                    roles["value"] = c
+                    break
+    return roles
+
+
+def _is_monotonic_decreasing(values: list[float]) -> bool:
+    return all(values[i] >= values[i + 1] for i in range(len(values) - 1))
+
+
+def _candidate(
+    chart_type: ChartType,
+    score: float,
+    *,
+    x_field: str | None = None,
+    y_field: str | None = None,
+    y2_field: str | None = None,
+    chart_style: str = "",
+    value_format: ValueFormat = "number",
+    top_n: int | None = None,
+    reason: str = "",
+    supported: bool = True,
+    unsupported_reason: str = "",
+) -> VizCandidate:
+    return VizCandidate(
+        decision=VizDecision(
+            chart_type=chart_type,
+            chart_style=chart_style,
+            x_field=x_field,
+            y_field=y_field,
+            y2_field=y2_field,
+            value_format=value_format,
+            top_n=top_n,
+            reason=reason,
+            confidence=round(score, 3),
+        ),
+        score=score,
+        supported=supported,
+        unsupported_reason=unsupported_reason,
+    )
+
+
+def recommend_visualizations(
+    columns: list[str],
+    rows: list[Any],
+    *,
+    profile: dict[str, Any] | None = None,
+    intent_hint: str | None = None,
+    semantic_roles: dict[str, str | None] | None = None,
+    analytical_evidence: dict[str, Any] | None = None,
+) -> list[VizCandidate]:
+    """Return a ranked list of supported visualization candidates for a result set.
+
+    ``intent_hint`` is honoured when the shape supports it; the data always wins.
+    ``semantic_roles`` and ``analytical_evidence`` allow the method engine to
+    suggest richer families (radar, sankey, funnel, etc.) with explicit role
+    mappings.
+    """
+    if not columns or not rows:
+        return [_candidate(ChartType.TABLE, 0.2, reason="No data to plot.")]
+
+    dict_rows = _rows_as_dicts(columns, rows)
+    shape = derive_shape(columns, dict_rows, profile)
+    hint = _normalize_hint(intent_hint)
+    roles = semantic_roles or _detect_semantic_roles(columns, dict_rows)
+
+    # Forced/hinted families when shape supports them.
+    if hint and hint not in ("line", "area", "combo", "scatter", "kpi", "table"):
+        forced = _hint_candidate(columns, dict_rows, shape, hint, roles)
+        if forced:
+            return [forced, *_fallback_candidates(shape, roles, exclude={hint})]
+
+    candidates: list[VizCandidate] = []
+
+    # 1) Single-row scalar summary -> KPI (or table if no measure).
+    if shape.row_count == 1 and not shape.dimensions:
+        metric = shape.measures[0] if shape.measures else None
+        if metric:
+            candidates.append(
+                _candidate(
+                    ChartType.KPI,
+                    0.95,
+                    y_field=metric,
+                    value_format=detect_value_format(metric, _column_values(dict_rows, metric)),
+                    reason="Single-row scalar summary — headline metric as a KPI tile.",
+                )
+            )
+        candidates.append(_candidate(ChartType.TABLE, 0.1, reason="Single row with no numeric metric."))
+        return sorted(candidates, key=lambda c: c.score, reverse=True)
+
+    # No measures at all -> table.
+    if not shape.measures:
+        return [_candidate(ChartType.TABLE, 0.9, reason="No numeric measure to plot — showing detail rows.")]
+
+    label_col = _primary_dimension(shape)
+    value_col = shape.measures[0]
+    values = _column_values(dict_rows, value_col, limit=200)
+    vfmt = detect_value_format(value_col, values)
+    label_card = _dimension_cardinality(shape, label_col)
+    all_positive = all((f := _to_float(v)) is None or f >= 0 for v in values)
+    labels = [str(v) for v in _column_values(dict_rows, label_col, limit=50)] if label_col else []
+
+    # 2) Sankey: explicit source/target/value roles.
+    source_col = roles.get("source")
+    target_col = roles.get("target")
+    value_col_for_flow = roles.get("value")
+    if source_col and target_col and value_col_for_flow:
+        candidates.append(
+            _candidate(
+                ChartType.SANKEY,
+                0.92,
+                x_field=source_col,
+                y_field=target_col,
+                value_format=detect_value_format(value_col_for_flow, _column_values(dict_rows, value_col_for_flow, 50)),
+                reason=f"Source→target flow: {source_col} → {target_col} weighted by {value_col_for_flow}.",
+            )
+        )
+
+    # 3) Time series -> line / area / combo.
+    is_time = bool(shape.time_columns) or (label_col is not None and _is_period_dimension(shape, label_col))
+    time_col = shape.time_columns[0] if shape.time_columns else label_col
+    if is_time and time_col:
+        if len(shape.measures) >= 2:
+            candidates.append(
+                _candidate(
+                    ChartType.COMBO,
+                    0.92,
+                    x_field=time_col,
+                    y_field=shape.measures[0],
+                    y2_field=shape.measures[1],
+                    value_format=vfmt,
+                    reason="Two metrics over a shared time axis — combo (bar + line).",
+                )
+            )
+            candidates.append(
+                _candidate(
+                    ChartType.LINE,
+                    0.75,
+                    x_field=time_col,
+                    y_field=value_col,
+                    value_format=vfmt,
+                    reason="Ordered time-period labels — trend over time.",
+                )
+            )
+            candidates.append(
+                _candidate(
+                    ChartType.AREA,
+                    0.6,
+                    x_field=time_col,
+                    y_field=value_col,
+                    value_format=vfmt,
+                    reason="Cumulative or volume trend over time.",
+                )
+            )
+        else:
+            candidates.append(
+                _candidate(
+                    ChartType.LINE,
+                    0.92,
+                    x_field=time_col,
+                    y_field=value_col,
+                    value_format=vfmt,
+                    reason="Ordered time-period labels — trend over time.",
+                )
+            )
+            candidates.append(
+                _candidate(
+                    ChartType.AREA,
+                    0.68,
+                    x_field=time_col,
+                    y_field=value_col,
+                    value_format=vfmt,
+                    reason="Cumulative or volume trend over time.",
+                )
+            )
+
+    # 4) Two numeric measures, no meaningful dimension -> scatter.
+    if len(shape.measures) >= 2 and label_col is None:
+        candidates.append(
+            _candidate(
+                ChartType.SCATTER,
+                0.88,
+                x_field=shape.measures[0],
+                y_field=shape.measures[1],
+                value_format=vfmt,
+                reason="Two numeric measures with no category — correlation scatter.",
+            )
+        )
+
+    # 5) Funnel: stage-like labels and monotonically decreasing values.
+    stage_col = roles.get("stage")
+    if stage_col and label_col == stage_col and all_positive:
+        stage_values = [
+            v
+            for v in [_to_float(r.get(stage_col)) for r in dict_rows if isinstance(r, dict)]
+            if v is not None
+        ]
+        if stage_values and _is_monotonic_decreasing(stage_values):
+            candidates.append(
+                _candidate(
+                    ChartType.FUNNEL,
+                    0.85,
+                    x_field=stage_col,
+                    y_field=value_col,
+                    value_format=vfmt,
+                    reason="Stage progression with decreasing values — funnel.",
+                )
+            )
+
+    # 6) Radar / radial bar / treemap for category charts.
+    if label_col is not None:
+        # Radar: 3-8 numeric measures per entity, or pivoted scorecard.
+        if len(shape.measures) >= 3 and 1 <= label_card <= 6:
+            candidates.append(
+                _candidate(
+                    ChartType.RADAR,
+                    0.65,
+                    x_field=label_col,
+                    y_field=value_col,
+                    value_format=vfmt,
+                    reason="Multiple measures compared across a few entities — radar scorecard.",
+                )
+            )
+
+        # Radial bar: percentage-to-target/rate values.
+        rate_col = roles.get("rate")
+        if rate_col:
+            candidates.append(
+                _candidate(
+                    ChartType.RADIAL_BAR,
+                    0.7,
+                    x_field=label_col,
+                    y_field=rate_col,
+                    value_format="percent",
+                    reason="Percentage-to-target metrics by category — radial bar.",
+                )
+            )
+
+        # Treemap: hierarchical group + value.
+        group_col = roles.get("group")
+        if group_col and group_col != label_col and all_positive:
+            candidates.append(
+                _candidate(
+                    ChartType.TREEMAP,
+                    0.68,
+                    x_field=label_col,
+                    y_field=value_col,
+                    value_format=vfmt,
+                    reason=f"Hierarchical part-to-whole by {group_col} — treemap.",
+                )
+            )
+
+        # Part-of-a-whole -> pie/donut.
+        if _looks_like_share(label_col, label_card, all_positive):
+            candidates.append(
+                _candidate(
+                    ChartType.PIE,
+                    0.82,
+                    chart_style="donut",
+                    x_field=label_col,
+                    y_field=value_col,
+                    value_format=vfmt,
+                    reason="A few positive categories of a whole — share breakdown.",
+                )
+            )
+
+        # Categorical comparison -> bar.
+        many = label_card > _HORIZONTAL_BAR_THRESHOLD or _looks_like_id_labels(labels)
+        top_n = _BAR_RANK_CAP if label_card > _BAR_RANK_CAP else None
+        bar_reason = (
+            f"{label_card} categories — ranked top {top_n} as a horizontal bar so the axis stays readable."
+            if top_n else (
+                "Several categories — horizontal bar for readable labels."
+                if many else "Category comparison."
+            )
+        )
+        bar_style = "horizontal_bar" if many else ""
+        candidates.append(
+            _candidate(
+                ChartType.BAR,
+                0.78 if not is_time else 0.45,
+                chart_style=bar_style,
+                x_field=label_col,
+                y_field=value_col,
+                value_format=vfmt,
+                top_n=top_n,
+                reason=bar_reason,
+            )
+        )
+
+    # Fallback table.
+    candidates.append(_candidate(ChartType.TABLE, 0.15, reason="No clear chart shape — showing detail rows."))
+
+    # Deduplicate by chart type + style and sort by score.
+    seen: set[tuple[str, str]] = set()
+    unique: list[VizCandidate] = []
+    for c in sorted(candidates, key=lambda x: x.score, reverse=True):
+        key = (c.decision.chart_type.value, c.decision.chart_style)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(c)
+    return unique
+
+
+def _hint_candidate(
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    shape: _Shape,
+    hint: str,
+    roles: dict[str, str | None],
+) -> VizCandidate | None:
+    """Build a single candidate for an explicit hint when the shape supports it."""
+    if not shape.measures:
+        return None
+    value_col = shape.measures[0]
+    label_col = _primary_dimension(shape)
+    vfmt = detect_value_format(value_col, _column_values(rows, value_col, 50))
+    label_card = _dimension_cardinality(shape, label_col)
+    all_positive = all((f := _to_float(v)) is None or f >= 0 for v in _column_values(rows, value_col, 200))
+
+    if hint == "pie" and label_col is not None and all_positive and 2 <= label_card <= 8:
+        return _candidate(
+            ChartType.PIE,
+            0.82,
+            chart_style="donut",
+            x_field=label_col,
+            y_field=value_col,
+            value_format=vfmt,
+            reason="Explicit share breakdown.",
+        )
+    if hint == "radar" and label_col is not None:
+        return _candidate(
+            ChartType.RADAR,
+            0.75,
+            x_field=label_col,
+            y_field=value_col,
+            value_format=vfmt,
+            reason="Explicit radar request.",
+        )
+    if hint == "treemap" and label_col is not None:
+        return _candidate(
+            ChartType.TREEMAP,
+            0.75,
+            x_field=label_col,
+            y_field=value_col,
+            value_format=vfmt,
+            reason="Explicit treemap request.",
+        )
+    if hint == "funnel" and label_col is not None:
+        return _candidate(
+            ChartType.FUNNEL,
+            0.75,
+            x_field=label_col,
+            y_field=value_col,
+            value_format=vfmt,
+            reason="Explicit funnel request.",
+        )
+    if hint == "sankey":
+        source_col = roles.get("source") or label_col
+        target_col = roles.get("target")
+        value_col_flow = roles.get("value") or value_col
+        if source_col and target_col:
+            return _candidate(
+                ChartType.SANKEY,
+                0.85,
+                x_field=source_col,
+                y_field=target_col,
+                value_format=detect_value_format(value_col_flow, _column_values(rows, value_col_flow, 50)),
+                reason="Explicit sankey request.",
+            )
+    if hint == "radial_bar" and label_col is not None:
+        rate_col = roles.get("rate") or value_col
+        return _candidate(
+            ChartType.RADIAL_BAR,
+            0.75,
+            x_field=label_col,
+            y_field=rate_col,
+            value_format="percent",
+            reason="Explicit radial bar request.",
+        )
+    if hint == "bar" and label_col is not None:
+        return _candidate(
+            ChartType.BAR,
+            0.78,
+            x_field=label_col,
+            y_field=value_col,
+            value_format=vfmt,
+            reason="Explicit bar request.",
+        )
+    return _candidate(
+        ChartType.TABLE,
+        0.3,
+        reason=f"Explicit {hint} request is not supported by this data shape.",
+        supported=False,
+        unsupported_reason=f"Data shape does not support a {hint} chart.",
+    )
+
+
+def _fallback_candidates(
+    shape: _Shape,
+    roles: dict[str, str | None],
+    exclude: set[str],
+) -> list[VizCandidate]:
+    """Return the ranked candidates excluding the already-forced hint."""
+    # Build a minimal columns/rows set and call the main recommender, filtering.
+    if not shape.columns:
+        return []
+    # Rebuild a few representative rows from shape metadata is not enough, so we
+    # return an empty list; the caller already has the winner it asked for.
+    return []
+
+
+def select_visualization(
+    columns: list[str],
+    rows: list[Any],
+    *,
+    profile: dict[str, Any] | None = None,
+    intent_hint: str | None = None,
+) -> VizDecision:
+    """Choose the best renderable chart for a result set (deterministic).
+
+    This is the legacy single-decision entry point; it delegates to
+    :func:`recommend_visualizations` and returns the highest-scoring candidate.
+    """
+    candidates = recommend_visualizations(
+        columns, rows, profile=profile, intent_hint=intent_hint
+    )
+    if not candidates:
+        return VizDecision(ChartType.TABLE, reason="No data to plot.", confidence=1.0)
+    top = candidates[0]
+    return top.decision

@@ -268,6 +268,11 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
         "chart": card.get("chart"),
         "explanation": card.get("explanation"),
         "executedAt": card.get("executedAt"),
+        "evidenceFingerprint": card.get("evidenceFingerprint"),
+        "confidenceScore": card.get("confidenceScore"),
+        "confidenceEvaluation": card.get("confidenceEvaluation"),
+        "visualizationDecision": card.get("visualizationDecision"),
+        "chartCandidates": card.get("chartCandidates"),
     }
 
 

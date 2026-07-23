@@ -52,6 +52,13 @@ from app.services.analytical_method_engine import (
 )
 from app.services.analytical_method_engine.intent import infer_intent
 from app.services.evidence_severity import gate_severity
+from app.services.insight_confidence import evaluate_confidence
+from app.services.insight_evidence_fingerprint import (
+    build_evidence_fingerprint,
+    build_plan_fingerprint,
+    deduplicate_by_evidence,
+    fingerprint_for_card,
+)
 from app.services.insight_explanation import build_explanation, infer_method
 from app.services.presentation_engine import PresentationMode
 from app.services.project_ai_context import build_project_ai_context
@@ -61,7 +68,10 @@ from app.services.teiid_sql import (
     date_masks_from_samples,
     normalize_date_casts,
 )
-from app.services.visualization_engine import select_visualization
+from app.services.visualization_engine import (
+    recommend_visualizations,
+    select_visualization,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -699,33 +709,58 @@ def _card_priority(card: dict[str, Any]) -> float:
     return score
 
 
-def _dedupe_key(card: dict[str, Any]) -> tuple[Any, ...]:
-    itype = str(card.get("insightType", "")).split("_", 1)[0]
-    tables = tuple(sorted(card.get("sources", {}).get("tables", [])))
-    title = _norm(str(card.get("title", "")))[:40]
-    return (card.get("projectId"), itype, tables, title)
+def _dedupe_key(card: dict[str, Any]) -> str | None:
+    """Return the canonical evidence fingerprint key for a card, if available."""
+    fp = fingerprint_for_card(card)
+    return fp.dedupe_key
+
+
+def _pre_execution_dedupe(
+    analyses: list[dict[str, Any]],
+    *,
+    project_id: int,
+    tenant_id: int,
+    tables: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Collapse planned analyses with identical intent + source scope before SQL.
+
+    The plan LLM may rephrase the same analytical question twice; a plan
+    fingerprint catches identical SQL/columns/label/value pairs even when the
+    title or rationale differs.
+    """
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for a in analyses:
+        fp = build_plan_fingerprint(
+            project_id=project_id,
+            tenant_id=tenant_id,
+            analysis=a,
+            tables=tables,
+            method_id=a.get("method"),
+            source_columns=a.get("sourceColumns"),
+        )
+        if fp in seen:
+            continue
+        seen.add(fp)
+        a["planFingerprint"] = fp
+        unique.append(a)
+    return unique
 
 
 def rank_and_dedupe_cards(
     cards: list[dict[str, Any]], *, max_cards: int = 8
 ) -> list[dict[str, Any]]:
     """Return the strongest, de-duplicated cards (best-practices §Insight
-    Selection / §Card Ranking). Duplicates that share project + insight type +
-    source tables + title are collapsed to the highest-scoring one.
+    Selection / §Card Ranking). Duplicates that share canonical evidence
+    (result set, series, or semantic interpretation) are collapsed to the
+    highest-scoring one, regardless of title wording.
 
     Multi-table (relationship-evidence) cards are exempt from the cap: they
     are the rarest, highest-effort findings, so every one that executed and
     passed the quality gates is surfaced. Only single-table cards compete for
     the ``max_cards`` slots.
     """
-    seen: set[tuple[Any, ...]] = set()
-    unique: list[dict[str, Any]] = []
-    for c in sorted(cards, key=_card_priority, reverse=True):
-        key = _dedupe_key(c)
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(c)
+    unique = deduplicate_by_evidence(cards, priority_fn=_card_priority)
 
     def _is_multi(c: dict[str, Any]) -> bool:
         return len(c.get("sources", {}).get("tables", [])) >= 2
@@ -813,6 +848,8 @@ def _card(
     method: str | None = None,
     governance: dict[str, Any] | None = None,
     project_context: dict[str, Any] | None = None,
+    method_envelope: dict[str, Any] | None = None,
+    relationship_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     card: dict[str, Any] = {
         "id": f"{project.id}-{insight_type}-{int(datetime.now().timestamp() * 1000) % 100000}",
@@ -885,6 +922,116 @@ def _card(
         ) or {}
     if explanation:
         card["explanation"] = explanation
+
+    # Evidence-first metadata: canonical fingerprints, structured confidence,
+    # and ranked chart candidates. Computed from the actual result/chart so
+    # identical evidence cannot be duplicated under a different title and
+    # confidence reflects evidence quality rather than row count alone.
+    tenant_id = getattr(project, "tenant_id", 0) or 0
+    analysis_plan = {
+        "sql": sql,
+        "chart_type": chart_type,
+        "label_column": label_column,
+        "value_column": value_column,
+        "value_column_2": value_column_2,
+        "source_documents": documents,
+    }
+    result_columns = [str(c) for c in (result.get("columns") or [])] if result else []
+    result_rows = result.get("rows") or [] if result else []
+
+    try:
+        evidence_fp = build_evidence_fingerprint(
+            project_id=project.id,
+            tenant_id=tenant_id,
+            analysis=analysis_plan,
+            result=result,
+            chart=chart,
+            tables=tables,
+            columns=result_columns,
+            label_column=label_column,
+            value_column=value_column,
+            value_column_2=value_column_2,
+            method_id=(method_envelope or {}).get("method") or method,
+            dimensions=([label_column] if label_column else []) + ([value_column_2] if value_column_2 else []),
+            measures=[value_column] if value_column else [],
+            period_column=label_column if chart_type in ("line", "area", "combo") else None,
+            aggregations=None,
+            grain=None,
+            intent=chart_type,
+        )
+        fp_dict = evidence_fp.to_dict()
+        fp_dict["tenant_id"] = tenant_id
+        card["evidenceFingerprint"] = fp_dict
+    except Exception as exc:
+        logger.debug("evidence fingerprint failed for insight %s: %s", insight_id, exc)
+
+    try:
+        ctx = (metadata or {}).get("sourceContext") or {}
+        validation = (metadata or {}).get("validation") or {}
+        if not validation and result:
+            validation = {
+                "executionStatus": "success",
+                "rowCount": len(result_rows),
+                "columnsReturned": result_columns,
+                "nonNullMetricCount": (
+                    sum(1 for r in result_rows if _to_float(r.get(value_column) if isinstance(r, dict) else None) is not None)
+                    if value_column else 0
+                ),
+                "executedAt": card["executedAt"],
+            }
+        confidence_eval = evaluate_confidence(
+            validation=validation,
+            method_envelope=method_envelope,
+            relationship_meta=relationship_meta,
+            result=result,
+            source_context={
+                "sourceTables": tables,
+                "sourceColumns": ctx.get("sourceColumns") or result_columns,
+                "periodColumn": ctx.get("periodColumn") or label_column,
+                "referenceDocuments": documents,
+            },
+            columns=result_columns,
+            rows=result_rows,
+            label_column=label_column,
+            value_column=value_column,
+            is_document_only=(result is None and bool(documents)),
+            uses_reference=bool(documents) and any(isinstance(d, str) for d in (documents or [])),
+            has_project_evidence=(result is not None) or (bool(documents) and not all(isinstance(d, str) for d in (documents or []))),
+            intent=chart_type,
+        )
+        card["confidenceEvaluation"] = confidence_eval.to_dict()
+        card["confidenceScore"] = confidence_eval.score
+        if card.get("explanation") and isinstance(card["explanation"], dict):
+            card["explanation"]["confidence"] = {
+                "level": confidence_eval.level,
+                "score": confidence_eval.score,
+                "basis": confidence_eval.basis,
+            }
+            card["explanation"]["confidenceFactors"] = [
+                {"label": f.label, "status": f.status, "score": f.score, "weight": f.weight, "evidence": f.evidence}
+                for f in confidence_eval.factors
+            ]
+            card["explanation"]["confidenceCaps"] = confidence_eval.caps
+            card["explanation"]["confidenceGaps"] = confidence_eval.gaps
+            card["explanation"]["whatWouldIncreaseConfidence"] = confidence_eval.what_would_increase_confidence
+    except Exception as exc:
+        logger.debug("confidence evaluation failed for insight %s: %s", insight_id, exc)
+
+    try:
+        if result and result_rows:
+            candidates = recommend_visualizations(
+                result_columns,
+                result_rows,
+                intent_hint=chart_type,
+            )
+            if candidates:
+                card["visualizationDecision"] = candidates[0].decision.to_dict()
+                card["chartCandidates"] = [c.to_dict() for c in candidates[:6]]
+                if card.get("chart"):
+                    card["chart"]["type"] = candidates[0].decision.chart_type.value
+                    card["chart"]["subtype"] = candidates[0].decision.chart_style or ""
+    except Exception as exc:
+        logger.debug("chart candidate generation failed for insight %s: %s", insight_id, exc)
 
     # M4 fast-follow (contract-only): stamp the shared ResponseEnvelope so a
     # Home card also emits the unified contract. The card keeps its bespoke
@@ -2952,6 +3099,13 @@ async def run_ai_intelligence(
     if not analyses:
         return []  # AI reachable but found nothing worth surfacing
 
+    analyses = _pre_execution_dedupe(
+        analyses,
+        project_id=project.id,
+        tenant_id=tenant_id,
+        tables=[t.view_name for t in ctx.tables],
+    )
+
     doc_by_title = {d.title: d for d in ctx.documents}
     # Index relationship hints by the table pair so multi-table cards can carry
     # the join metadata that backs them.
@@ -3365,6 +3519,8 @@ async def run_ai_intelligence(
                 method=effective_method,
                 governance=governance_decision.to_explanation_dict() if governance_decision else None,
                 project_context=project_context,
+                method_envelope=method_envelope,
+                relationship_meta=relationship_meta,
             )
         )
 

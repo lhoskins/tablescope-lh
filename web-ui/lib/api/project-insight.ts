@@ -1,5 +1,6 @@
 import { apiClient } from "@/lib/api-client";
 import type { MethodEnvelope } from "./ai-actions";
+import type { InsightChart } from "./home-intelligence";
 
 export interface ExecutiveSummary {
   summary: string;
@@ -108,6 +109,7 @@ export interface ProjectInsightCard {
   explanation?: Record<string, unknown>;
   /** Query/result context when the card is data-backed. */
   sql?: string;
+  chart?: InsightChart;
   chartType?: string;
   labelColumn?: string;
   valueColumn?: string;
@@ -115,6 +117,17 @@ export interface ProjectInsightCard {
   executedAt?: string;
   /** Governed Analytical Method Engine envelope (not yet produced for Project Insights). */
   analyticalMethod?: MethodEnvelope;
+  evidenceFingerprint?: {
+    fingerprintVersion: number;
+    planFingerprint: string | null;
+    resultFingerprint: string | null;
+    semanticFingerprint: string | null;
+    seriesFingerprint: string | null;
+  };
+  confidenceScore?: number;
+  confidenceEvaluation?: Record<string, unknown>;
+  visualizationDecision?: Record<string, unknown>;
+  chartCandidates?: Record<string, unknown>[];
 }
 
 export interface WhatChangedSinceLastVisit {

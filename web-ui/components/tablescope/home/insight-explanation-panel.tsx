@@ -291,16 +291,52 @@ function ExplanationContent({
       </Section>
 
       <Section title="Confidence">
-        <div className="space-y-1 text-[13px] text-ink-secondary">
+        <div className="space-y-2 text-[13px] text-ink-secondary">
           {explanation.confidence.level && (
-            <div>
+            <div className="flex items-center gap-2">
               <span className="font-medium text-ink-primary">Level:</span>{" "}
               <Badge tone={confidenceTone}>{explanation.confidence.level}</Badge>
+              {typeof explanation.confidence.score === "number" && (
+                <span className="text-ink-tertiary">({explanation.confidence.score.toFixed(2)})</span>
+              )}
             </div>
           )}
           {explanation.confidence.basis && (
             <div>
               <span className="font-medium text-ink-primary">Basis:</span> {explanation.confidence.basis}
+            </div>
+          )}
+          {card.confidenceEvaluation && card.confidenceEvaluation.factors.length > 0 && (
+            <div className="space-y-1">
+              <div className="font-medium text-ink-primary">Evidence factors</div>
+              <ul className="space-y-1">
+                {card.confidenceEvaluation.factors.map((factor, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className={
+                      factor.status === "passed"
+                        ? "text-success"
+                        : factor.status === "failed"
+                          ? "text-danger"
+                          : "text-warning"
+                    }>
+                      {factor.status === "passed" ? "✓" : factor.status === "failed" ? "✗" : "~"}
+                    </span>
+                    <span className="text-ink-secondary">{factor.label} — {factor.evidence}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {card.confidenceEvaluation && card.confidenceEvaluation.caps.length > 0 && (
+            <div>
+              <span className="font-medium text-ink-primary">Confidence caps:</span>{" "}
+              {card.confidenceEvaluation.caps.join(" ")}
+            </div>
+          )}
+          {card.confidenceEvaluation && card.confidenceEvaluation.gaps.length > 0 && (
+            <div className="rounded-md bg-warning/10 p-2 text-warning">
+              <span className="font-medium">To raise confidence:</span>{" "}
+              {card.confidenceEvaluation.gaps.join(" ")}
             </div>
           )}
         </div>

@@ -1,7 +1,8 @@
 "use client";
 
-import { Fragment, type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 import {
+  IconChartBar,
   IconChevronRight,
   IconClipboardList,
   IconFileText,
@@ -23,9 +24,11 @@ import type {
   InsightCallout,
   InsightCard as InsightCardData,
   InsightChart,
+  VizCandidate,
 } from "@/lib/api/home-intelligence";
 import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { RAnalyticsBadge } from "./insight-engine-badge";
+import { ChartSuggestionDialog } from "./chart-suggestion-dialog";
 import { InsightExplanationPanel } from "./insight-explanation-panel";
 import { InsightFeedbackDialog } from "./insight-feedback-dialog";
 import {
@@ -228,6 +231,8 @@ export function IntelligenceCard({
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [feedbackInitial, setFeedbackInitial] =
     useState<InsightSentiment>("agree");
+  const [chartDialogOpen, setChartDialogOpen] = useState(false);
+  const [selectedChart, setSelectedChart] = useState<VizCandidate | null>(null);
   const { data: identity } = useCurrentUser();
   const canCreateAction =
     onCreateAction &&
@@ -241,6 +246,23 @@ export function IntelligenceCard({
   const documents = card.sources?.documents ?? [];
 
   const stableInsightId = card.insightId || card.id;
+
+  const displayCard = useMemo<InsightCardData>(() => {
+    if (!selectedChart || !card.chart) return card;
+    const d = selectedChart.decision;
+    return {
+      ...card,
+      chart: {
+        ...card.chart,
+        type: d.chartType as InsightChart["type"],
+        subtype: d.chartStyle || undefined,
+      },
+      chartType: d.chartType,
+      visualizationDecision: d,
+    };
+  }, [card, selectedChart]);
+
+  const projectIdNumber = Number(card.projectId);
 
   return (
     <article
@@ -281,7 +303,7 @@ export function IntelligenceCard({
           {onPin && !pinned && (
             <button
               type="button"
-              onClick={() => onPin(card)}
+              onClick={() => onPin(displayCard)}
               aria-label="Pin to Home"
               title="Pin to Home"
               className="rounded-md p-1 text-ink-tertiary transition-colors hover:bg-bg-tertiary hover:text-ink-secondary focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -292,7 +314,7 @@ export function IntelligenceCard({
           {onUnpin && pinned && (
             <button
               type="button"
-              onClick={() => onUnpin(card)}
+              onClick={() => onUnpin(displayCard)}
               aria-label="Unpin from Home"
               title="Unpin from Home"
               className="rounded-md p-1 text-danger transition-colors hover:bg-danger/10 focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -308,17 +330,17 @@ export function IntelligenceCard({
         {renderBold(card.summary)}
       </p>
 
-      {card.chart && (
+      {displayCard.chart && (
         <div className="mt-3">
-          {card.chart.title && (
+          {displayCard.chart.title && (
             <div className="mb-1 text-small text-ink-tertiary">
-              {card.chart.title}
+              {displayCard.chart.title}
             </div>
           )}
-          {card.chart.type === "kpi_grid" && card.chart.data.kpis ? (
-            <KpiGridView kpis={card.chart.data.kpis} />
+          {displayCard.chart.type === "kpi_grid" && displayCard.chart.data.kpis ? (
+            <KpiGridView kpis={displayCard.chart.data.kpis} />
           ) : (
-            <InsightChartView chart={card.chart} />
+            <InsightChartView chart={displayCard.chart} />
           )}
         </div>
       )}
@@ -361,6 +383,15 @@ export function IntelligenceCard({
           >
             <IconInfoCircle size={14} />
             Explain
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setChartDialogOpen(true)}
+            className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+          >
+            <IconChartBar size={14} />
+            Chart suggestion
           </button>
 
           <RAnalyticsBadge envelope={card.analyticalMethod} />
@@ -446,7 +477,7 @@ export function IntelligenceCard({
                       ? "Add this insight to a project dashboard"
                       : "This insight does not have query data and cannot be added to a dashboard"
                   }
-                  onClick={() => onSaveToDashboard(card)}
+                  onClick={() => onSaveToDashboard(displayCard)}
                   className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <IconLayoutDashboard size={14} />
@@ -456,7 +487,7 @@ export function IntelligenceCard({
               {onAddToReport && (
                 <button
                   type="button"
-                  onClick={() => onAddToReport(card)}
+                  onClick={() => onAddToReport(displayCard)}
                   className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
                 >
                   <IconPlus size={14} /> Add to report
@@ -468,7 +499,7 @@ export function IntelligenceCard({
       </footer>
 
       <InsightExplanationPanel
-        card={card}
+        card={displayCard}
         open={explainOpen}
         onClose={() => setExplainOpen(false)}
         frozen={frozen}
@@ -509,6 +540,14 @@ export function IntelligenceCard({
           withdrawing={savingFeedback}
         />
       )}
+
+      <ChartSuggestionDialog
+        card={card}
+        projectId={projectIdNumber}
+        open={chartDialogOpen}
+        onClose={() => setChartDialogOpen(false)}
+        onApplied={(candidate) => setSelectedChart(candidate)}
+      />
     </article>
   );
 }
