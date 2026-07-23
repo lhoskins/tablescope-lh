@@ -51,7 +51,9 @@ describe("PhoneMfaForm", () => {
       expect(startPhone).toHaveBeenCalledWith("+16615551212"),
     );
 
-    const codeInput = screen.getByLabelText(/verification code/i);
+    const codeInput = await waitFor(() =>
+      screen.getByLabelText(/verification code/i),
+    );
     fireEvent.change(codeInput, { target: { value: "654321" } });
     fireEvent.click(screen.getByRole("button", { name: /^verify$/i }));
 

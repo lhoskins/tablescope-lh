@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -65,6 +65,7 @@ import {
 import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { formatLastUpdated } from "@/lib/format-datetime";
+import { createHomePin } from "@/lib/api/home-pins";
 import {
   projectInsightApi,
   type ProjectInsight,
@@ -120,10 +121,41 @@ const REVIEWED_KEY = (projectId: string) => [
   "reviewed",
 ];
 
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
 export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
+
+  const pinMutation = useMutation({
+    mutationFn: createHomePin,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["home-pins"] });
+      push("Pinned to Home", "success");
+    },
+    onError: (err: Error) => push(err.message, "error"),
+  });
+
+  const handlePinInsight = useCallback(
+    (card: InsightCardData) => {
+      pinMutation.mutate({
+        pin_type: "insight_card",
+        pin_key: `insight:${card.projectId}:${card.insightType}:${slugify(card.title)}`,
+        title: card.title,
+        project_id: Number(card.projectId),
+        frozen_payload: card as unknown as Record<string, unknown>,
+        layout: { x: 0, y: 0, w: 6, h: 5 },
+      });
+    },
+    [pinMutation],
+  );
+
   const [askModal, setAskModal] = useState<{
     open: boolean;
     question: string;
@@ -541,6 +573,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 <InsightsPanel
                   projects={insightsQuery.data?.projects ?? []}
                   showProjectHeader={false}
+                  onPin={handlePinInsight}
                 />
               )}
             </Panel>

@@ -24,6 +24,7 @@ import {
   type QuerySuggestionsProject,
   type DashboardSuggestionsProject,
   type ProjectResult,
+  type InsightCard,
 } from "@/lib/api/home-intelligence";
 import {
   IntelligenceCard,
@@ -496,9 +497,11 @@ function DashboardSuggestionCard({
 export function InsightsPanel({
   projects,
   showProjectHeader = true,
+  onPin,
 }: {
   projects: ProjectResult[];
   showProjectHeader?: boolean;
+  onPin?: (card: InsightCard) => void;
 }) {
   const withResults = projects.filter((p) => p.insights.length > 0);
   if (withResults.length === 0) {
@@ -515,7 +518,12 @@ export function InsightsPanel({
           )}
           <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
             {p.insights.map((card) => (
-              <IntelligenceCard key={card.id} card={card} hideActions />
+              <IntelligenceCard
+                key={card.id}
+                card={card}
+                hideActions
+                onPin={onPin}
+              />
             ))}
           </div>
         </section>
