@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { startPhone, verifyPhone } from "@/lib/mfa";
-
-const E164 = /^\+[1-9]\d{7,14}$/;
+import { PhoneInput } from "./phone-input";
+import { OtpInput } from "./otp-input";
+import { formatNational, normalizePhone, type CountryCode } from "@/lib/phone";
 
 export type PhoneMfaMode = "setup" | "challenge";
 
@@ -20,11 +21,11 @@ export interface PhoneMfaFormProps {
 type Step = "phone" | "code";
 
 /**
- * Shared phone-SMS MFA form (Twilio Verify). The user enters an E.164 number,
- * the backend sends a code via Twilio Verify, and the entered code is checked.
- * On success the backend returns an aal2 token (stored by `verifyPhone`). In
- * challenge mode the enrolled number must be re-entered (we never store it in
- * the clear); the masked form is shown as a hint.
+ * Shared phone-SMS MFA form (Twilio Verify). The user selects a country and
+ * enters a national phone number; the form normalizes to E.164 before calling
+ * the backend. On success the backend returns an aal2 token (stored by
+ * `verifyPhone`). In challenge mode the enrolled number is re-entered (we never
+ * store it in the clear); the masked form is shown as a hint.
  */
 export function PhoneMfaForm({
   mode,
@@ -32,7 +33,9 @@ export function PhoneMfaForm({
   onVerified,
 }: PhoneMfaFormProps) {
   const [step, setStep] = useState<Step>("phone");
-  const [phone, setPhone] = useState("");
+  const [countryIso, setCountryIso] = useState<string>("US");
+  const [nationalDigits, setNationalDigits] = useState("");
+  const [normalizedPhone, setNormalizedPhone] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +47,11 @@ export function PhoneMfaForm({
     return () => clearTimeout(t);
   }, [cooldown]);
 
+  function computeNormalized(): string | null {
+    const display = formatNational(countryIso as CountryCode, nationalDigits);
+    return normalizePhone(countryIso as CountryCode, display);
+  }
+
   async function sendCode(targetPhone: string) {
     const res = await startPhone(targetPhone);
     setStep("code");
@@ -52,14 +60,16 @@ export function PhoneMfaForm({
 
   async function onSubmitPhone(e: React.FormEvent) {
     e.preventDefault();
-    if (!E164.test(phone)) {
-      setError("Enter a phone number in international format, e.g. +16615551212.");
+    const normalized = computeNormalized();
+    if (!normalized) {
+      setError("Enter a valid phone number for the selected country.");
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await sendCode(phone);
+      setNormalizedPhone(normalized);
+      await sendCode(normalized);
     } catch (err) {
       setError(friendly((err as Error).message));
     } finally {
@@ -68,11 +78,11 @@ export function PhoneMfaForm({
   }
 
   async function onResend() {
-    if (cooldown > 0 || !phone) return;
+    if (cooldown > 0 || !normalizedPhone) return;
     setBusy(true);
     setError(null);
     try {
-      await sendCode(phone);
+      await sendCode(normalizedPhone);
     } catch (err) {
       setError(friendly((err as Error).message));
     } finally {
@@ -82,14 +92,18 @@ export function PhoneMfaForm({
 
   async function onSubmitCode(e: React.FormEvent) {
     e.preventDefault();
-    if (!/^\d{4,8}$/.test(code.trim())) {
-      setError("Enter the numeric code from the text message.");
+    if (!normalizedPhone) {
+      setError("Phone number is missing. Please start over.");
+      return;
+    }
+    if (!/^\d{6}$/.test(code.trim())) {
+      setError("Enter the 6-digit code from the text message.");
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await verifyPhone(phone, code.trim());
+      await verifyPhone(normalizedPhone, code.trim());
       await onVerified();
     } catch (err) {
       setError(friendly((err as Error).message));
@@ -97,30 +111,25 @@ export function PhoneMfaForm({
     }
   }
 
+  const hint =
+    mode === "challenge" && maskedPhone
+      ? `Enter the phone number on file (ending ${maskedPhone}). Standard messaging rates may apply.`
+      : "We'll text a verification code to this number. Standard messaging rates may apply.";
+
   return (
     <div className="space-y-4">
       {step === "phone" ? (
         <form onSubmit={onSubmitPhone} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-ink-secondary">
-              Mobile phone number
-            </label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+16615551212"
-              autoComplete="tel"
-              className="w-full rounded-md border border-line-tertiary px-3 py-2 text-sm"
-            />
-            <p className="mt-1 text-caption text-ink-tertiary">
-              {mode === "challenge" && maskedPhone
-                ? `Enter the phone number on file (ending ${maskedPhone}). `
-                : "We'll text a verification code to this number. "}
-              Standard messaging rates may apply.
-            </p>
-          </div>
-          {error && <p className="text-small text-danger">{error}</p>}
+          <PhoneInput
+            countryIso={countryIso}
+            nationalDigits={nationalDigits}
+            onCountryChange={setCountryIso}
+            onNationalChange={setNationalDigits}
+            label="Mobile phone number"
+            hint={hint}
+            error={error}
+            disabled={busy}
+          />
           <Button type="submit" variant="primary" size="md" disabled={busy}>
             {busy && <IconLoader2 size={14} className="animate-spin" />}
             Send code
@@ -130,22 +139,16 @@ export function PhoneMfaForm({
         <form onSubmit={onSubmitCode} className="space-y-4">
           <p className="text-small text-ink-tertiary">
             Code sent to{" "}
-            <span className="font-medium">{maskedPhone ?? phone}</span>.
+            <span className="font-medium">{maskedPhone ?? normalizedPhone}</span>.
           </p>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-ink-secondary">
-              Verification code
-            </label>
-            <input
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/[^\d]/g, ""))}
-              placeholder="123456"
-              className="w-full rounded-md border border-line-tertiary px-3 py-2 text-sm tracking-widest"
-            />
-          </div>
+          <OtpInput
+            value={code}
+            onChange={setCode}
+            label="Verification code"
+            autoFocus
+            disabled={busy}
+            error={Boolean(error)}
+          />
           {error && <p className="text-small text-danger">{error}</p>}
           <div className="flex items-center gap-3">
             <Button type="submit" variant="primary" size="md" disabled={busy}>
@@ -156,6 +159,7 @@ export function PhoneMfaForm({
               type="button"
               onClick={onResend}
               disabled={cooldown > 0 || busy}
+              aria-live="polite"
               className="text-small text-brand-700 underline disabled:text-ink-tertiary disabled:no-underline"
             >
               {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}

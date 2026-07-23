@@ -43,7 +43,7 @@ export function AppShell({
   children,
 }: AppShellProps) {
   return (
-    <div className="flex h-screen bg-bg-secondary">
+    <div className="flex h-dvh overflow-hidden bg-bg-secondary">
       <MfaGate />
       <Sidebar
         mode={mode}
@@ -63,7 +63,7 @@ export function AppShell({
           right={<CompanyLogo url={tenant.logoUrl} name={tenant.name} />}
         />
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <main className="flex-1 overflow-y-auto">
+          <main className="min-h-0 flex-1 overflow-y-auto">
             <div
               className={
                 centered

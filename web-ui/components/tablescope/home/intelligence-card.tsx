@@ -8,7 +8,7 @@ import {
   IconInfoCircle,
   IconLayoutDashboard,
   IconPin,
-  IconPinnedOff,
+  IconPinnedFilled,
   IconPlus,
   IconTable,
   IconThumbDown,
@@ -278,6 +278,28 @@ export function IntelligenceCard({
               AI fallback
             </span>
           )}
+          {onPin && !pinned && (
+            <button
+              type="button"
+              onClick={() => onPin(card)}
+              aria-label="Pin to Home"
+              title="Pin to Home"
+              className="rounded-md p-1 text-ink-tertiary transition-colors hover:bg-bg-tertiary hover:text-ink-secondary focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <IconPin size={18} />
+            </button>
+          )}
+          {onUnpin && pinned && (
+            <button
+              type="button"
+              onClick={() => onUnpin(card)}
+              aria-label="Unpin from Home"
+              title="Unpin from Home"
+              className="rounded-md p-1 text-danger transition-colors hover:bg-danger/10 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <IconPinnedFilled size={18} />
+            </button>
+          )}
         </div>
       </header>
 
@@ -429,26 +451,6 @@ export function IntelligenceCard({
                 >
                   <IconLayoutDashboard size={14} />
                   Add to dashboard
-                </button>
-              )}
-              {onPin && !pinned && (
-                <button
-                  type="button"
-                  onClick={() => onPin(card)}
-                  className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-                >
-                  <IconPin size={14} />
-                  Pin to Home
-                </button>
-              )}
-              {onUnpin && pinned && (
-                <button
-                  type="button"
-                  onClick={() => onUnpin(card)}
-                  className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-                >
-                  <IconPinnedOff size={14} />
-                  Unpin
                 </button>
               )}
               {onAddToReport && (

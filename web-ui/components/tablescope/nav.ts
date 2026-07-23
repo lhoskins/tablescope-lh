@@ -8,6 +8,7 @@ import {
   IconTopologyStar3,
   IconHistory,
   IconLayoutGrid,
+  IconLayoutDashboard,
   IconDatabase,
   IconDatabasePlus,
   IconCode,
@@ -154,6 +155,12 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           href: `${base}/documents`,
           icon: IconFileText,
           countKey: "documents",
+        },
+        {
+          key: "project-dashboards",
+          label: "Dashboards",
+          href: `${base}/dashboards`,
+          icon: IconLayoutDashboard,
         },
         {
           key: "project-business-context",
