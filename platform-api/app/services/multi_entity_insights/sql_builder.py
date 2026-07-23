@@ -24,11 +24,8 @@ class MultiEntitySQLBuilder:
     def _literal(self, value: str) -> str:
         return "'" + str(value).replace("'", "''") + "'"
 
-    def _alias(self, table: str) -> str:
-        return next(
-            (s.alias or f"{s.table}_agg" for s in self.plan.sources if s.table == table),
-            table[:3].lower(),
-        )
+    def _alias_for_source(self, source: SourceSpec) -> str:
+        return source.alias or f"{source.table}_agg"
 
     def _period_expression(self, alias: str, period_col: str | None) -> str:
         if not period_col:
@@ -75,12 +72,21 @@ class MultiEntitySQLBuilder:
             source_measures,
         )
 
+    def _choose_first_alias(self, cte_aliases: list[str]) -> str:
+        """Pick the CTE alias that exposes the entity name column if possible."""
+        entity_col = self.plan.entity.id_column
+        name_col = self.plan.entity.name_column or entity_col
+        for alias, source in zip(cte_aliases, self.plan.sources, strict=True):
+            if name_col in source.columns:
+                return alias
+        return cte_aliases[0]
+
     def _build_final_select(self, cte_aliases: list[str]) -> str:
         entity_col = self.plan.entity.id_column
         name_col = self.plan.entity.name_column or entity_col
         period_col = self.plan.time.period_column
 
-        first_alias = cte_aliases[0]
+        first_alias = self._choose_first_alias(cte_aliases)
         selects = [
             f"{self._quote(first_alias)}.{self._quote(entity_col)} AS {self._quote(entity_col)}",
         ]
@@ -133,8 +139,11 @@ class MultiEntitySQLBuilder:
         for source in self.plan.sources:
             cte, _ = self._build_cte(source)
             ctes.append(cte)
-        cte_aliases = [s.alias or f"{s.table}_agg" for s in self.plan.sources]
-        final = self._build_final_select(cte_aliases)
+        cte_aliases = [self._alias_for_source(s) for s in self.plan.sources]
+        # Reorder final SELECT so the first referenced CTE exposes the entity name column.
+        first_alias = self._choose_first_alias(cte_aliases)
+        ordered_aliases = [first_alias] + [a for a in cte_aliases if a != first_alias]
+        final = self._build_final_select(ordered_aliases)
         return "WITH\n" + ",\n".join(ctes) + "\n" + final
 
     def query_hash(self) -> str:

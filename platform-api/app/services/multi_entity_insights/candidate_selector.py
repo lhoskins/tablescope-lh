@@ -263,15 +263,23 @@ def _evaluate_combination(
         return None, 0.0, rejections
 
     # Every source must expose the entity id at the declared grain.
-    period_col: str | None = None
+    source_period_cols: list[str | None] = []
     for view_name in combo:
         t = by_view[view_name]
         if entity_id_col not in [c for c, _ty in t.columns]:
             rejections.append(f"Table {view_name} missing entity id {entity_id_col}")
             return None, 0.0, rejections
         pc = _period_column(t, exclude={entity_id_col, entity_name_col or ""})
-        if pc and period_col is None:
-            period_col = pc
+        source_period_cols.append(pc)
+
+    # Only join on a period column if every selected source exposes the same one.
+    period_col: str | None = None
+    if source_period_cols and all(pc == source_period_cols[0] for pc in source_period_cols):
+        period_col = source_period_cols[0]
+
+    for i, view_name in enumerate(combo):
+        t = by_view[view_name]
+        pc = source_period_cols[i]
         # Build source spec and measures.
         excluded = {entity_id_col}
         if entity_name_col:
@@ -293,11 +301,11 @@ def _evaluate_combination(
         ]
         measures.extend(source_measures)
         grain = [entity_id_col]
-        if pc:
+        if pc and pc == period_col:
             grain.append(pc)
         source_objs.append(SourceSpec(
             table=view_name,
-            alias=_alias_for(view_name),
+            alias=_alias_for(view_name, len(source_objs)),
             grain=grain,
             measures=[m.name for m in source_measures],
             columns=[c for c, _ty in t.columns],
@@ -374,12 +382,11 @@ def _evaluate_combination(
     return plan, score, rejections
 
 
-def _alias_for(view_name: str) -> str:
-    """Short SQL alias from view name."""
+def _alias_for(view_name: str, index: int = 0) -> str:
+    """Short unique SQL alias from view name."""
     parts = [p for p in view_name.replace("_", " ").split() if p]
-    if parts:
-        return parts[0][:3].lower()
-    return "t"
+    prefix = parts[0][:3].lower() if parts else "t"
+    return f"{prefix}{index}"
 
 
 def _method_bundle_for_intent(intent: str) -> Any:
