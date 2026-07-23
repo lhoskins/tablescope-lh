@@ -26,6 +26,7 @@ export function storeUserMeta(meta: {
 }): void {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(USER_META_KEY, JSON.stringify(meta));
+    startIdleTimer();
   }
 }
 
@@ -150,9 +151,11 @@ export async function hasSupabaseSession(): Promise<boolean> {
   return Boolean(data.session);
 }
 
-export function signOut() {
+export function signOut(options?: { redirectToRoot?: boolean }) {
   const meta = getUserMeta();
   const slug = meta?.tenant_slug;
+  const redirectToRoot = options?.redirectToRoot ?? false;
+  stopIdleTimer();
   clearToken();
   try {
     void getSupabaseClient().auth.signOut();
@@ -161,7 +164,11 @@ export function signOut() {
   }
   if (typeof window !== "undefined") {
     window.localStorage.removeItem(USER_META_KEY);
-    window.location.href = slug ? `/${slug}/login` : "/login";
+    if (slug) {
+      window.location.href = redirectToRoot ? `/${slug}` : `/${slug}/login`;
+    } else {
+      window.location.href = "/login";
+    }
   }
 }
 
@@ -171,12 +178,13 @@ let idleTimer: ReturnType<typeof setTimeout> | null = null;
 function resetIdleTimer() {
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    signOut();
+    signOut({ redirectToRoot: true });
   }, IDLE_TIMEOUT_MS);
 }
 
 export function startIdleTimer() {
   if (typeof window === "undefined") return;
+  stopIdleTimer();
   const events = ["mousedown", "mousemove", "keydown", "scroll", "touchstart", "click"];
   events.forEach((evt) => window.addEventListener(evt, resetIdleTimer, { passive: true }));
   resetIdleTimer();

@@ -1,0 +1,208 @@
+"use client";
+
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+
+export interface OtpInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  length?: number;
+  label?: string;
+  autoFocus?: boolean;
+  disabled?: boolean;
+  error?: boolean;
+}
+
+export function OtpInput({
+  value,
+  onChange,
+  length = 6,
+  label = "Verification code",
+  autoFocus = false,
+  disabled = false,
+  error = false,
+}: OtpInputProps) {
+  const id = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [caretIndex, setCaretIndex] = useState(0);
+  const [focused, setFocused] = useState(false);
+
+  const digits = value.replace(/\D/g, "").slice(0, length);
+
+  useEffect(() => {
+    if (autoFocus) {
+      inputRef.current?.focus();
+      setCaretIndex(digits.length);
+    }
+  }, [autoFocus, digits.length]);
+
+  useLayoutEffect(() => {
+    inputRef.current?.setSelectionRange(caretIndex, caretIndex);
+  }, [caretIndex, digits]);
+
+  function updateCaretFromInput() {
+    const input = inputRef.current;
+    if (!input) return;
+    let idx = input.selectionStart ?? digits.length;
+    idx = Math.max(0, Math.min(idx, digits.length));
+    setCaretIndex(idx);
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value;
+    const next = raw.replace(/\D/g, "").slice(0, length);
+    const input = e.target;
+    let nextCaret = input.selectionStart ?? next.length;
+    nextCaret = Math.max(0, Math.min(nextCaret, next.length));
+    onChange(next);
+    setCaretIndex(nextCaret);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    const input = e.currentTarget;
+    const start = input.selectionStart ?? digits.length;
+    const end = input.selectionEnd ?? digits.length;
+
+    switch (e.key) {
+      case "ArrowLeft":
+        e.preventDefault();
+        setCaretIndex(Math.max(0, start - 1));
+        return;
+      case "ArrowRight":
+        e.preventDefault();
+        setCaretIndex(Math.min(digits.length, start + 1));
+        return;
+      case "Home":
+        e.preventDefault();
+        setCaretIndex(0);
+        return;
+      case "End":
+        e.preventDefault();
+        setCaretIndex(digits.length);
+        return;
+      case "Backspace":
+      case "Delete": {
+        e.preventDefault();
+        const isBackspace = e.key === "Backspace";
+        let next = digits;
+        let nextCaret = start;
+        if (start !== end) {
+          next = digits.slice(0, start) + digits.slice(end);
+          nextCaret = start;
+        } else if (isBackspace && start > 0) {
+          next = digits.slice(0, start - 1) + digits.slice(start);
+          nextCaret = start - 1;
+        } else if (!isBackspace && start < digits.length) {
+          next = digits.slice(0, start) + digits.slice(start + 1);
+          nextCaret = start;
+        }
+        onChange(next);
+        setCaretIndex(Math.max(0, nextCaret));
+        return;
+      }
+      default:
+        if (/^[0-9]$/.test(e.key)) {
+          e.preventDefault();
+          if (digits.length >= length) return;
+          const next =
+            digits.slice(0, start) + e.key + digits.slice(start);
+          onChange(next.slice(0, length));
+          setCaretIndex(Math.min(length, start + 1));
+        }
+    }
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData("text");
+    const pastedDigits = pasted.replace(/\D/g, "").slice(0, length);
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? digits.length;
+    const next =
+      digits.slice(0, start) + pastedDigits + digits.slice(start);
+    const trimmed = next.slice(0, length);
+    onChange(trimmed);
+    setCaretIndex(Math.min(length, start + pastedDigits.length));
+  }
+
+  function focusCell(index: number) {
+    inputRef.current?.focus();
+    setCaretIndex(Math.min(index, digits.length));
+    setFocused(true);
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor={id}
+        className="block text-sm font-medium text-ink-secondary"
+      >
+        {label}
+      </label>
+      <div
+        className="relative inline-flex gap-2"
+        onClick={() => {
+          if (!disabled) {
+            inputRef.current?.focus();
+            setFocused(true);
+          }
+        }}
+      >
+        <input
+          ref={inputRef}
+          id={id}
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          autoComplete="one-time-code"
+          maxLength={length}
+          value={digits}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onSelect={updateCaretFromInput}
+          onClick={updateCaretFromInput}
+          disabled={disabled}
+          aria-invalid={error}
+          className="sr-only"
+        />
+        {Array.from({ length }).map((_, i) => {
+          const isActive = focused && i === caretIndex;
+          const hasValue = i < digits.length;
+          return (
+            <button
+              key={i}
+              type="button"
+              tabIndex={-1}
+              aria-hidden="true"
+              disabled={disabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                focusCell(i);
+              }}
+              className={[
+                "flex h-12 w-10 items-center justify-center rounded-md border text-center text-lg font-medium transition-all",
+                error
+                  ? "border-danger"
+                  : isActive
+                    ? "border-brand-500 ring-2 ring-brand-500"
+                    : "border-line-tertiary",
+                hasValue ? "text-ink-primary" : "text-ink-tertiary",
+                disabled ? "cursor-not-allowed opacity-50" : "",
+              ].join(" ")}
+            >
+              {hasValue ? digits[i] : isActive ? "▏" : ""}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

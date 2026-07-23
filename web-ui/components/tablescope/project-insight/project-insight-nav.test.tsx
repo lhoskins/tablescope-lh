@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IconSparkles } from "@tabler/icons-react";
+import { IconSparkles, IconLayoutDashboard } from "@tabler/icons-react";
 import { projectNavGroups } from "@/components/tablescope/nav";
 
 describe("Project Insights sidebar entry", () => {
@@ -24,5 +24,19 @@ describe("Project Insights sidebar entry", () => {
     const all = groups.flatMap((g) => g.items);
     expect(all.some((i) => i.label === "AI Assistant")).toBe(false);
     expect(all.some((i) => i.key === "project-ai-assistant")).toBe(false);
+  });
+
+  it("restores the Dashboards nav item after Documents", () => {
+    const all = project?.items ?? [];
+    const docsIndex = all.findIndex((i) => i.key === "project-documents");
+    const dashboards = all.find((i) => i.key === "project-dashboards");
+    expect(dashboards).toBeTruthy();
+    expect(dashboards?.label).toBe("Dashboards");
+    expect(dashboards?.href).toBe("/projects/42/dashboards");
+    expect(dashboards?.icon).toBe(IconLayoutDashboard);
+    expect(docsIndex).toBeGreaterThanOrEqual(0);
+    expect(all.findIndex((i) => i.key === "project-dashboards")).toBe(
+      docsIndex + 1,
+    );
   });
 });
