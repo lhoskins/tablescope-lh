@@ -26,6 +26,7 @@ export function storeUserMeta(meta: {
 }): void {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(USER_META_KEY, JSON.stringify(meta));
+    startIdleTimer();
   }
 }
 
@@ -154,6 +155,7 @@ export function signOut(options?: { redirectToRoot?: boolean }) {
   const meta = getUserMeta();
   const slug = meta?.tenant_slug;
   const redirectToRoot = options?.redirectToRoot ?? false;
+  stopIdleTimer();
   clearToken();
   try {
     void getSupabaseClient().auth.signOut();
@@ -182,6 +184,7 @@ function resetIdleTimer() {
 
 export function startIdleTimer() {
   if (typeof window === "undefined") return;
+  stopIdleTimer();
   const events = ["mousedown", "mousemove", "keydown", "scroll", "touchstart", "click"];
   events.forEach((evt) => window.addEventListener(evt, resetIdleTimer, { passive: true }));
   resetIdleTimer();
