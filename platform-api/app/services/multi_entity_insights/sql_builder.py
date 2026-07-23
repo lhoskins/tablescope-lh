@@ -24,8 +24,11 @@ class MultiEntitySQLBuilder:
     def _literal(self, value: str) -> str:
         return "'" + str(value).replace("'", "''") + "'"
 
-    def _alias_for_source(self, source: SourceSpec) -> str:
-        return source.alias or f"{source.table}_agg"
+    def _table_alias_for_source(self, source: SourceSpec) -> str:
+        return source.alias or f"{source.table[:3].lower()}0"
+
+    def _cte_name_for_source(self, source: SourceSpec) -> str:
+        return f"{self._table_alias_for_source(source)}_agg"
 
     def _period_expression(self, alias: str, period_col: str | None) -> str:
         if not period_col:
@@ -35,16 +38,17 @@ class MultiEntitySQLBuilder:
         return f"{self._quote(alias)}.{self._quote(period_col)}"
 
     def _build_cte(self, source: SourceSpec) -> tuple[str, list[MeasureSpec]]:
-        alias = source.alias or f"{source.table}_agg"
-        grain = [self._quote(alias) + "." + self._quote(g) for g in source.grain]
+        table_alias = self._table_alias_for_source(source)
+        cte_name = self._cte_name_for_source(source)
+        grain = [self._quote(table_alias) + "." + self._quote(g) for g in source.grain]
         entity_col = self.plan.entity.id_column
         name_col = self.plan.entity.name_column or entity_col
-        selects = [f"{self._quote(alias)}.{self._quote(entity_col)} AS {self._quote(entity_col)}"]
+        selects = [f"{self._quote(table_alias)}.{self._quote(entity_col)} AS {self._quote(entity_col)}"]
         if name_col != entity_col and name_col in source.columns:
-            selects.append(f"{self._quote(alias)}.{self._quote(name_col)} AS {self._quote(name_col)}")
+            selects.append(f"{self._quote(table_alias)}.{self._quote(name_col)} AS {self._quote(name_col)}")
         if source.grain and len(source.grain) > 1:
             period_col = source.grain[1]
-            selects.append(f"{self._quote(alias)}.{self._quote(period_col)} AS {self._quote(period_col)}")
+            selects.append(f"{self._quote(table_alias)}.{self._quote(period_col)} AS {self._quote(period_col)}")
 
         source_measures: list[MeasureSpec] = []
         for m in self.plan.measures:
@@ -54,39 +58,39 @@ class MultiEntitySQLBuilder:
                     selects.append(f"{m.derived_expression} AS {self._quote(m.name)}")
                 elif m.numerator_column and m.denominator_column:
                     selects.append(
-                        f"SUM({self._quote(alias)}.{self._quote(m.numerator_column)}) AS {self._quote(m.name + '_num')}, "
-                        f"SUM({self._quote(alias)}.{self._quote(m.denominator_column)}) AS {self._quote(m.name + '_den')}"
+                        f"SUM({self._quote(table_alias)}.{self._quote(m.numerator_column)}) AS {self._quote(m.name + '_num')}, "
+                        f"SUM({self._quote(table_alias)}.{self._quote(m.denominator_column)}) AS {self._quote(m.name + '_den')}"
                     )
                 else:
                     agg = m.aggregation.upper()
-                    col = self._quote(alias) + "." + self._quote(m.column)
+                    col = self._quote(table_alias) + "." + self._quote(m.column)
                     selects.append(f"{agg}(CAST({col} AS double)) AS {self._quote(m.name)}")
 
         group_by = ", ".join(grain)
         return (
-            f"{self._quote(alias)} AS (\n"
+            f"{self._quote(cte_name)} AS (\n"
             f"  SELECT {', '.join(selects)}\n"
-            f"  FROM {self._quote(source.table)} {self._quote(alias)}\n"
+            f"  FROM {self._quote(source.table)} {self._quote(table_alias)}\n"
             f"  GROUP BY {group_by}\n"
             f")",
             source_measures,
         )
 
-    def _choose_first_alias(self, cte_aliases: list[str]) -> str:
-        """Pick the CTE alias that exposes the entity name column if possible."""
+    def _choose_first_source_index(self) -> int:
+        """Pick the index of the source whose CTE exposes the entity name column if possible."""
         entity_col = self.plan.entity.id_column
         name_col = self.plan.entity.name_column or entity_col
-        for alias, source in zip(cte_aliases, self.plan.sources, strict=True):
+        for i, source in enumerate(self.plan.sources):
             if name_col in source.columns:
-                return alias
-        return cte_aliases[0]
+                return i
+        return 0
 
-    def _build_final_select(self, cte_aliases: list[str]) -> str:
+    def _build_final_select(self, cte_names: list[str]) -> str:
         entity_col = self.plan.entity.id_column
         name_col = self.plan.entity.name_column or entity_col
         period_col = self.plan.time.period_column
 
-        first_alias = self._choose_first_alias(cte_aliases)
+        first_alias = cte_names[0]
         selects = [
             f"{self._quote(first_alias)}.{self._quote(entity_col)} AS {self._quote(entity_col)}",
         ]
@@ -107,8 +111,8 @@ class MultiEntitySQLBuilder:
                 selects.append(f"{self._quote(m.name)}")
 
         from_clause = self._quote(first_alias)
-        for i, alias in enumerate(cte_aliases[1:], start=1):
-            prev_alias = cte_aliases[i - 1]
+        for i, alias in enumerate(cte_names[1:], start=1):
+            prev_alias = cte_names[i - 1]
             on_conds = [
                 f"{self._quote(prev_alias)}.{self._quote(entity_col)} = {self._quote(alias)}.{self._quote(entity_col)}"
             ]
@@ -139,11 +143,13 @@ class MultiEntitySQLBuilder:
         for source in self.plan.sources:
             cte, _ = self._build_cte(source)
             ctes.append(cte)
-        cte_aliases = [self._alias_for_source(s) for s in self.plan.sources]
+        cte_names = [self._cte_name_for_source(s) for s in self.plan.sources]
         # Reorder final SELECT so the first referenced CTE exposes the entity name column.
-        first_alias = self._choose_first_alias(cte_aliases)
-        ordered_aliases = [first_alias] + [a for a in cte_aliases if a != first_alias]
-        final = self._build_final_select(ordered_aliases)
+        first_index = self._choose_first_source_index()
+        ordered_cte_names = [cte_names[first_index]] + [
+            c for i, c in enumerate(cte_names) if i != first_index
+        ]
+        final = self._build_final_select(ordered_cte_names)
         return "WITH\n" + ",\n".join(ctes) + "\n" + final
 
     def query_hash(self) -> str:

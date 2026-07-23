@@ -115,10 +115,16 @@ def _entity_name_column(table: Any, entity_type: str) -> str | None:
     return None
 
 
+_NUMERIC_TYPES = {"double", "float", "int", "integer", "numeric", "decimal", "real", "number", "long", "bigint", "smallint"}
+
+
 def _measure_columns(table: Any, exclude: set[str]) -> list[str]:
     return [
-        col for col, _ty in table.columns
-        if col not in exclude and _contains_keyword(col, _MEASURE_KEYWORDS)
+        col for col, ty in table.columns
+        if col not in exclude
+        and _contains_keyword(col, _MEASURE_KEYWORDS)
+        and isinstance(ty, str)
+        and any(num in ty.lower() for num in _NUMERIC_TYPES)
     ]
 
 

@@ -219,12 +219,14 @@ def test_sql_builder_grain_safe_query() -> None:
         sources=[
             SourceSpec(
                 table="invoices",
+                alias="invoices",
                 columns=["supplier_name", "amount", "invoice_date"],
                 grain=["supplier_name"],
                 measures=[MeasureSpec(name="spend", column="amount", aggregation="sum", table="invoices")],
             ),
             SourceSpec(
                 table="quality",
+                alias="quality",
                 columns=["supplier_name", "defect_rate"],
                 grain=["supplier_name"],
                 measures=[MeasureSpec(name="defects", column="defect_rate", aggregation="avg", table="quality")],
