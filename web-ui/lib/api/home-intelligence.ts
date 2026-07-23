@@ -71,6 +71,56 @@ export interface InsightExplanationConfidence {
   basis: string;
 }
 
+export interface InsightConfidenceFactor {
+  code: string;
+  label: string;
+  status: "passed" | "partial" | "failed" | "not_applicable";
+  score: number;
+  weight: number;
+  evidence: string;
+}
+
+export interface InsightConfidenceEvaluation {
+  version: number;
+  score: number;
+  level: "low" | "medium" | "high";
+  basis: string;
+  factors: InsightConfidenceFactor[];
+  caps: string[];
+  gaps: string[];
+  whatWouldIncreaseConfidence: string;
+  evaluatorVersion: string;
+  evaluatedAt: string;
+}
+
+export interface EvidenceFingerprint {
+  fingerprintVersion: number;
+  planFingerprint: string | null;
+  resultFingerprint: string | null;
+  semanticFingerprint: string | null;
+  seriesFingerprint: string | null;
+  tenant_id?: number;
+}
+
+export interface VizDecision {
+  chartType: string;
+  chartStyle: string;
+  xField?: string | null;
+  yField?: string | null;
+  y2Field?: string | null;
+  valueFormat: string;
+  topN?: number | null;
+  reason: string;
+  confidence: number;
+}
+
+export interface VizCandidate {
+  decision: VizDecision;
+  score: number;
+  supported: boolean;
+  unsupportedReason?: string;
+}
+
 export interface InsightExplanationSource {
   projectId: string | number;
   projectName: string;
@@ -129,6 +179,10 @@ export interface InsightExplanation {
   assumptions: string[];
   limitations: string[];
   confidence: InsightExplanationConfidence;
+  confidenceFactors?: InsightConfidenceFactor[];
+  confidenceCaps?: string[];
+  confidenceGaps?: string[];
+  whatWouldIncreaseConfidence?: string;
   generatedAt: string;
   governance?: {
     requestedMethod: string;
@@ -194,6 +248,14 @@ export interface InsightCard {
   valueColumn2?: string;
   /** Structured explainability metadata produced by the insight pipeline. */
   explanation?: InsightExplanation;
+  /** Canonical evidence fingerprints used for duplicate suppression. */
+  evidenceFingerprint?: EvidenceFingerprint;
+  /** Structured evidence-based confidence evaluation. */
+  confidenceEvaluation?: InsightConfidenceEvaluation;
+  /** The selected visualization decision for this card's chart. */
+  visualizationDecision?: VizDecision;
+  /** Ranked compatible chart candidates the user can switch to. */
+  chartCandidates?: VizCandidate[];
 }
 
 export interface ProjectResult {
@@ -552,4 +614,18 @@ export function saveCardToDashboard(
   body: SaveCardToDashboardPayload,
 ): Promise<SaveCardToDashboardResponse> {
   return apiClient.post("/api/ai/home/save-card-to-dashboard", body);
+}
+
+export function applyChartSelection(
+  insightId: string,
+  body: {
+    project_id: number;
+    selection: {
+      chartType?: string;
+      chartSubtype?: string;
+      visualizationDecision?: VizDecision;
+    };
+  },
+): Promise<{ updated: boolean; insight_id: string }> {
+  return apiClient.post(`/api/ai/insights/${insightId}/chart-selection`, body);
 }

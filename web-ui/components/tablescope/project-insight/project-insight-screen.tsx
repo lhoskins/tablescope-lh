@@ -22,6 +22,7 @@ import {
   IconClipboardList,
   IconThumbUp,
   IconThumbDown,
+  IconChartBar,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
@@ -42,6 +43,7 @@ import {
   InsightAnalysisDetails,
   RAnalyticsBadge,
 } from "@/components/tablescope/home/insight-engine-badge";
+import { ChartSuggestionDialog } from "@/components/tablescope/home/chart-suggestion-dialog";
 import {
   InsightExplanationPanel,
 } from "@/components/tablescope/home/insight-explanation-panel";
@@ -816,6 +818,7 @@ function InsightCardItem({
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [chartDialogOpen, setChartDialogOpen] = useState(false);
   const [feedbackInitial, setFeedbackInitial] = useState<InsightSentiment>("agree");
   const hasFeedback = feedback != null && feedback.status === "active";
   const { data: identity } = useCurrentUser();
@@ -841,7 +844,7 @@ function InsightCardItem({
     severity: card.severity as InsightCardData["severity"],
     title: card.title,
     summary: card.summary,
-    chart: null,
+    chart: card.chart ?? null,
     callout: null,
     sources: { tables, documents },
     executedAt: card.executedAt ?? "",
@@ -852,6 +855,11 @@ function InsightCardItem({
     valueColumn2: card.valueColumn2,
     explanation: card.explanation as InsightExplanation | undefined,
     analyticalMethod: card.analyticalMethod,
+    evidenceFingerprint: card.evidenceFingerprint,
+    confidenceScore: card.confidenceScore,
+    confidenceEvaluation: card.confidenceEvaluation as InsightCardData["confidenceEvaluation"],
+    visualizationDecision: card.visualizationDecision as InsightCardData["visualizationDecision"],
+    chartCandidates: card.chartCandidates as InsightCardData["chartCandidates"],
   };
 
   return (
@@ -923,6 +931,15 @@ function InsightCardItem({
         >
           <IconInfoCircle size={13} />
           Explain
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setChartDialogOpen(true)}
+          className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+        >
+          <IconChartBar size={13} />
+          Chart suggestion
         </button>
 
         <RAnalyticsBadge envelope={card.analyticalMethod} />
@@ -1037,6 +1054,13 @@ function InsightCardItem({
           withdrawing={savingFeedback}
         />
       )}
+
+      <ChartSuggestionDialog
+        card={insightCardData}
+        projectId={Number(projectId)}
+        open={chartDialogOpen}
+        onClose={() => setChartDialogOpen(false)}
+      />
     </article>
   );
 }

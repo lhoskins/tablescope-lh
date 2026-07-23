@@ -38,6 +38,7 @@ from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
 from app.routes import home_intelligence as home_intelligence_routes
 from app.routes import home_pins as home_pins_routes
+from app.routes import insight_chart_selection as insight_chart_selection_routes
 from app.routes import insight_feedback as insight_feedback_routes
 from app.routes import knowledge_graph as knowledge_graph_routes
 from app.routes import mfa as mfa_routes
@@ -241,6 +242,7 @@ def create_app() -> FastAPI:
     app.include_router(provisioning_routes.router, prefix=api_prefix)
     app.include_router(home_intelligence_routes.router, prefix=api_prefix)
     app.include_router(home_pins_routes.router, prefix=api_prefix)
+    app.include_router(insight_chart_selection_routes.router, prefix=api_prefix)
     app.include_router(conversational_analytics_routes.router, prefix=api_prefix)
     app.include_router(insight_feedback_routes.router, prefix=api_prefix)
     app.include_router(reference_library_routes.router, prefix=api_prefix)
