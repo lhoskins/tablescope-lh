@@ -93,6 +93,10 @@ services:
       BUSINESS_INSIGHT_SHARED_CACHE_ENABLED: ${BUSINESS_INSIGHT_SHARED_CACHE_ENABLED:-false}
       BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED: ${BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED:-false}
       PROJECT_INSIGHT_EVENT_REBUILD_ENABLED: ${PROJECT_INSIGHT_EVENT_REBUILD_ENABLED:-false}
+      # Multi-source, multi-entity insight planner
+      MULTI_ENTITY_INSIGHTS_ENABLED: ${MULTI_ENTITY_INSIGHTS_ENABLED:-false}
+      MULTI_ENTITY_MAX_SOURCES: ${MULTI_ENTITY_MAX_SOURCES:-3}
+      MULTI_ENTITY_MAX_EXECUTIONS: ${MULTI_ENTITY_MAX_EXECUTIONS:-3}
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       # Read-write access to per-tenant root so the platform API can manage

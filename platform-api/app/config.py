@@ -173,6 +173,14 @@ class Settings(BaseSettings):
     # background rebuild will refresh for one project.
     project_insight_max_rebuild_users: int = 10
 
+    # --- Multi-source, multi-entity insight cards ---
+    # Feature gate for the new multi-table, multi-entity insight planner. When
+    # disabled the existing planner is used unchanged, preserving backward
+    # compatibility.
+    multi_entity_insights_enabled: bool = False
+    multi_entity_max_sources: int = 3
+    multi_entity_max_executions: int = 3
+
     # --- Supabase authentication ---
     # Single environment-configured auth provider (NOT one project per tenant).
     supabase_env: Literal["test", "staging", "production"] = "test"
