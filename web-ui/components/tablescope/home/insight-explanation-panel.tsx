@@ -12,6 +12,7 @@ import {
   IconClock,
 } from "@tabler/icons-react";
 import { InsightAnalysisDetails } from "./insight-engine-badge";
+import { MultiEntityInsightExplain } from "./multi-entity-insight-body";
 import type { InsightCard, InsightExplanation } from "@/lib/api/home-intelligence";
 
 interface InsightExplanationPanelProps {
@@ -370,7 +371,9 @@ export function InsightExplanationPanel({
           </div>
         )}
 
-        {explanation ? (
+        {card.cardType === "multi_entity" ? (
+          <MultiEntityInsightExplain card={card} />
+        ) : explanation ? (
           <ExplanationContent card={card} explanation={explanation} />
         ) : (
           <LegacyFallback card={card} />

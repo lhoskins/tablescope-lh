@@ -206,7 +206,7 @@ def _card_group(insight_type: str) -> str | None:
     """Map a built-in insight type onto risks / trends / opportunities."""
     if insight_type.startswith("risk"):
         return "risks"
-    if insight_type.startswith(("trend", "relationship")):
+    if insight_type.startswith(("trend", "relationship", "multi_entity")):
         return "trends"
     if insight_type.startswith("opportunity"):
         return "opportunities"
@@ -268,12 +268,21 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
         "chart": card.get("chart"),
         "explanation": card.get("explanation"),
         "executedAt": card.get("executedAt"),
+        "analyticalMethod": (card.get("metadata") or {}).get("analyticalMethod"),
+        "multiEntity": (card.get("metadata") or {}).get("cardType") == "multi_entity",
+        "entityType": (card.get("metadata") or {}).get("entityType"),
+        "entities": (card.get("metadata") or {}).get("entities"),
+        "evidenceStatus": (card.get("metadata") or {}).get("evidenceStatus"),
+        "lineage": (card.get("metadata") or {}).get("lineage"),
     }
 
 
 def _is_relationship_card(card: dict[str, Any]) -> bool:
-    """A multi-table relationship analysis with two populated series."""
-    if not str(card.get("insightType", "")).startswith("relationship"):
+    """A multi-table relationship analysis or multi-entity insight card."""
+    itype = str(card.get("insightType", ""))
+    if itype.startswith("multi_entity"):
+        return True
+    if not itype.startswith("relationship"):
         return False
     if card.get("chartType") not in ("dual_line", "scatter"):
         return False

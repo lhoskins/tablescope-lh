@@ -45,6 +45,7 @@ import {
 import {
   InsightExplanationPanel,
 } from "@/components/tablescope/home/insight-explanation-panel";
+import { MultiEntityInsightCollapsed } from "@/components/tablescope/home/multi-entity-insight-body";
 import {
   InsightFeedbackDialog,
 } from "@/components/tablescope/home/insight-feedback-dialog";
@@ -819,6 +820,14 @@ function InsightCardItem({
     valueColumn2: card.valueColumn2,
     explanation: card.explanation as InsightExplanation | undefined,
     analyticalMethod: card.analyticalMethod,
+    cardType: card.multiEntity ? "multi_entity" : undefined,
+    entityType: card.entityType,
+    entities: card.entities,
+    evidenceStatus: card.evidenceStatus,
+    lineage: card.lineage,
+    analysis: card.analyticalMethod
+      ? { primary: card.analyticalMethod, supporting: [] }
+      : undefined,
   };
 
   return (
@@ -839,10 +848,14 @@ function InsightCardItem({
           </span>
         </div>
       </header>
-      <p className="mt-1 text-[13px] leading-snug text-ink-secondary">
-        <span className="text-ink-tertiary">Summary: </span>
-        {renderBold(card.summary)}
-      </p>
+      {card.multiEntity ? (
+        <MultiEntityInsightCollapsed card={insightCardData} />
+      ) : (
+        <p className="mt-1 text-[13px] leading-snug text-ink-secondary">
+          <span className="text-ink-tertiary">Summary: </span>
+          {renderBold(card.summary)}
+        </p>
+      )}
       {card.recommendedAction && (
         <div className="mt-2 flex items-start gap-1.5 rounded-md bg-bg-secondary/60 p-2 text-small text-ink-secondary">
           <IconBulb size={14} className="mt-0.5 shrink-0 text-brand-500" />

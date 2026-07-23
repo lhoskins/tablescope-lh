@@ -194,6 +194,28 @@ export interface InsightCard {
   valueColumn2?: string;
   /** Structured explainability metadata produced by the insight pipeline. */
   explanation?: InsightExplanation;
+  /** Multi-source, multi-entity card extension. */
+  cardType?: "multi_entity" | string;
+  entityType?: string;
+  entities?: Array<{
+    id: string | number;
+    name: string;
+    rank?: number;
+    metrics: Array<{
+      key: string;
+      label: string;
+      value: number | null;
+      formattedValue: string;
+      change?: number | null;
+    }>;
+  }>;
+  evidenceStatus?: "supported" | "partially_supported" | "conflicting" | "insufficient_data";
+  analysis?: {
+    primary?: MethodEnvelope;
+    supporting?: MethodEnvelope[];
+  };
+  lineage?: Record<string, unknown>;
+  warnings?: string[];
 }
 
 export interface ProjectResult {

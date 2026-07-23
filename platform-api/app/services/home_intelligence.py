@@ -53,6 +53,8 @@ from app.services.analytical_method_engine import (
 from app.services.analytical_method_engine.intent import infer_intent
 from app.services.evidence_severity import gate_severity
 from app.services.insight_explanation import build_explanation, infer_method
+from app.services.multi_entity_insights import generate_multi_entity_insights
+from app.services.multi_entity_insights.card_builder import to_card_kwargs
 from app.services.presentation_engine import PresentationMode
 from app.services.project_ai_context import build_project_ai_context
 from app.services.prompt_loader import load_prompt_reference
@@ -3378,6 +3380,26 @@ async def run_ai_intelligence(
             "survived building / quality gates",
             project.id, len(executed),
         )
+
+    # Multi-source, multi-entity insight cards (feature-gated).
+    if session is not None:
+        try:
+            multi_entity_payloads = await generate_multi_entity_insights(
+                project,
+                ctx.tables,
+                relationship_hints,
+                runner,
+                session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                question="Compare the most significant entities across the available sources",
+            )
+            for payload in multi_entity_payloads:
+                kwargs = to_card_kwargs(payload, project)
+                ranked.append(_card(project, **kwargs))
+            ranked = rank_and_dedupe_cards(ranked)
+        except Exception as exc:
+            logger.warning("Multi-entity insight generation skipped for project %s: %s", project.id, exc)
 
     def _n_tables(sql: str) -> int:
         return len(_tables_in_sql(sql, ctx.tables))

@@ -115,6 +115,23 @@ export interface ProjectInsightCard {
   executedAt?: string;
   /** Governed Analytical Method Engine envelope (not yet produced for Project Insights). */
   analyticalMethod?: MethodEnvelope;
+  /** Multi-source, multi-entity card extension. */
+  multiEntity?: boolean;
+  entityType?: string;
+  entities?: Array<{
+    id: string | number;
+    name: string;
+    rank?: number;
+    metrics: Array<{
+      key: string;
+      label: string;
+      value: number | null;
+      formattedValue: string;
+      change?: number | null;
+    }>;
+  }>;
+  evidenceStatus?: "supported" | "partially_supported" | "conflicting" | "insufficient_data";
+  lineage?: Record<string, unknown>;
 }
 
 export interface WhatChangedSinceLastVisit {

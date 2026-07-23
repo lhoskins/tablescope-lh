@@ -27,6 +27,7 @@ import type {
 import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { RAnalyticsBadge } from "./insight-engine-badge";
 import { InsightExplanationPanel } from "./insight-explanation-panel";
+import { MultiEntityInsightCollapsed } from "./multi-entity-insight-body";
 import { InsightFeedbackDialog } from "./insight-feedback-dialog";
 import {
   InsightFeedbackStatusBadge,
@@ -281,12 +282,16 @@ export function IntelligenceCard({
         </div>
       </header>
 
-      <p className="mt-2 text-body text-ink-secondary">
-        <span className="text-ink-tertiary">Summary: </span>
-        {renderBold(card.summary)}
-      </p>
+      {card.cardType === "multi_entity" ? (
+        <MultiEntityInsightCollapsed card={card} />
+      ) : (
+        <p className="mt-2 text-body text-ink-secondary">
+          <span className="text-ink-tertiary">Summary: </span>
+          {renderBold(card.summary)}
+        </p>
+      )}
 
-      {card.chart && (
+      {card.chart && card.cardType !== "multi_entity" && (
         <div className="mt-3">
           {card.chart.title && (
             <div className="mb-1 text-small text-ink-tertiary">
