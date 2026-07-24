@@ -402,7 +402,7 @@ _HINT_ALIASES: dict[str, str] = {
     "stacked_bar": "bar",
     "grouped_bar": "bar",
     "waterfall": "bar",
-    "heatmap": "bar",
+    "heatmap": "heatmap",
     "line": "line",
     "multi_line": "line",
     "smooth_line": "line",
@@ -666,6 +666,7 @@ def recommend_visualizations(
     label_card = _dimension_cardinality(shape, label_col)
     all_positive = all((f := _to_float(v)) is None or f >= 0 for v in values)
     labels = [str(v) for v in _column_values(dict_rows, label_col, limit=50)] if label_col else []
+    label_is_period = label_col is not None and _is_period_dimension(shape, label_col)
 
     # 2) Sankey: explicit source/target/value roles.
     source_col = roles.get("source")
@@ -744,8 +745,24 @@ def recommend_visualizations(
     # Gauge is only appropriate for a single-row scalar summary; it is handled
     # in branch (1). Multi-point time series should never collapse to a gauge.
 
-    # 4) Two numeric measures, no meaningful dimension -> scatter / effect scatter.
-    if len(shape.measures) >= 2 and label_col is None:
+    # 3a) Time-series bar: a period axis is valid as a simple bar chart, but
+    # it is *not* a category ranking and must not use top-N capping.
+    if is_time and label_col is not None:
+        candidates.append(
+            _candidate(
+                ChartType.BAR,
+                0.45,
+                x_field=label_col,
+                y_field=value_col,
+                value_format=vfmt,
+                reason="Time-series values shown as bars for each period.",
+            )
+        )
+
+    # 4) Two numeric measures -> scatter / effect scatter.
+    # A categorical label is fine as a point name, but a period axis should prefer
+    # the time-series families above.
+    if len(shape.measures) >= 2 and not is_time:
         candidates.append(
             _candidate(
                 ChartType.SCATTER,
@@ -767,6 +784,25 @@ def recommend_visualizations(
             )
         )
 
+    # 4b) Heatmap: two categorical dimensions and a numeric measure.
+    if len(shape.dimensions) >= 2 and len(shape.measures) >= 1:
+        non_period_dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+        dims = non_period_dims if len(non_period_dims) >= 2 else shape.dimensions[:2]
+        if len(dims) >= 2:
+            x_dim, y_dim = dims[0], dims[1]
+            measure = shape.measures[0]
+            candidates.append(
+                _candidate(
+                    ChartType.HEATMAP,
+                    0.74,
+                    x_field=x_dim,
+                    y_field=measure,
+                    y2_field=y_dim,
+                    value_format=detect_value_format(measure, _column_values(dict_rows, measure, 50)),
+                    reason=f"Two dimensions ({x_dim}, {y_dim}) and a measure ({measure}) — heatmap.",
+                )
+            )
+
     # 5) Funnel: stage-like labels and monotonically decreasing values.
     stage_col = roles.get("stage")
     if stage_col and label_col == stage_col and all_positive:
@@ -787,8 +823,11 @@ def recommend_visualizations(
                 )
             )
 
-    # 6) Radar / radial bar / treemap for category charts.
-    if label_col is not None:
+    # 6) Radar / radial bar / treemap / funnel / pie / bar for genuine category axes only.
+    # A period/time axis must not masquerade as categories (e.g. 24 months becoming
+    # "24 categories" in a ranked horizontal bar, or a rate metric triggering
+    # radial_bar "by category"). Time-series shapes are handled above.
+    if label_col is not None and not label_is_period:
         # Radar: 3-8 numeric measures per entity, or pivoted scorecard.
         if len(shape.measures) >= 3 and 1 <= label_card <= 6:
             candidates.append(
@@ -861,7 +900,7 @@ def recommend_visualizations(
         candidates.append(
             _candidate(
                 ChartType.BAR,
-                0.78 if not is_time else 0.45,
+                0.78,
                 chart_style=bar_style,
                 x_field=label_col,
                 y_field=value_col,
@@ -947,8 +986,9 @@ def _hint_candidate(
     vfmt = detect_value_format(value_col, _column_values(rows, value_col, 50))
     label_card = _dimension_cardinality(shape, label_col)
     all_positive = all((f := _to_float(v)) is None or f >= 0 for v in _column_values(rows, value_col, 200))
+    label_is_period = label_col is not None and _is_period_dimension(shape, label_col)
 
-    if hint == "pie" and label_col is not None and all_positive and 2 <= label_card <= 8:
+    if hint == "pie" and label_col is not None and not label_is_period and all_positive and 2 <= label_card <= 8:
         return _candidate(
             ChartType.PIE,
             0.82,
@@ -958,7 +998,21 @@ def _hint_candidate(
             value_format=vfmt,
             reason="Explicit share breakdown.",
         )
-    if hint == "radar" and label_col is not None:
+    if hint == "heatmap":
+        if len(shape.dimensions) >= 2 and len(shape.measures) >= 1:
+            non_period = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+            dims = non_period if len(non_period) >= 2 else shape.dimensions[:2]
+            if len(dims) >= 2:
+                return _candidate(
+                    ChartType.HEATMAP,
+                    0.8,
+                    x_field=dims[0],
+                    y_field=shape.measures[0],
+                    y2_field=dims[1],
+                    value_format=detect_value_format(shape.measures[0], _column_values(rows, shape.measures[0], 50)),
+                    reason="Explicit heatmap request for two dimensions and a measure.",
+                )
+    if hint == "radar" and label_col is not None and not label_is_period:
         return _candidate(
             ChartType.RADAR,
             0.75,
@@ -967,7 +1021,7 @@ def _hint_candidate(
             value_format=vfmt,
             reason="Explicit radar request.",
         )
-    if hint == "treemap" and label_col is not None:
+    if hint == "treemap" and label_col is not None and not label_is_period:
         return _candidate(
             ChartType.TREEMAP,
             0.75,
@@ -976,7 +1030,7 @@ def _hint_candidate(
             value_format=vfmt,
             reason="Explicit treemap request.",
         )
-    if hint == "funnel" and label_col is not None:
+    if hint == "funnel" and label_col is not None and not label_is_period:
         return _candidate(
             ChartType.FUNNEL,
             0.75,
@@ -998,7 +1052,7 @@ def _hint_candidate(
                 value_format=detect_value_format(value_col_flow, _column_values(rows, value_col_flow, 50)),
                 reason="Explicit sankey request.",
             )
-    if hint == "radial_bar" and label_col is not None and all_positive:
+    if hint == "radial_bar" and label_col is not None and not label_is_period and all_positive:
         rate_col = roles.get("rate") or value_col
         rate_values = _column_values(rows, rate_col, 200)
         rate_positive = all((f := _to_float(v)) is None or f >= 0 for v in rate_values)

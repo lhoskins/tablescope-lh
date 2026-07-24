@@ -206,6 +206,15 @@ async def _run_for_project(
     if cards is None:
         cards = []
 
+    # Add deterministic shape-template insights for tables that support richer
+    # charts than the LLM's usual label/value aggregates (e.g. two-measure scatter).
+    try:
+        shape_cards = await hi._shape_template_insights(project, ctx, runner)
+        if shape_cards:
+            cards.extend(shape_cards)
+    except Exception as exc:
+        logger.warning("shape-template insights failed for project %s: %s", project.id, exc)
+
     if write_audit and cards:
         duration_ms = int(
             (datetime.now(UTC) - started).total_seconds() * 1000

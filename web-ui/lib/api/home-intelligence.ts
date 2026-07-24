@@ -34,10 +34,14 @@ export interface InsightChart {
     | "pie"
     | "combo"
     | "scatter"
+    | "effect_scatter"
     | "radar"
     | "radial_bar"
     | "treemap"
-    | "funnel";
+    | "funnel"
+    | "sankey"
+    | "heatmap"
+    | "gauge";
   /** Dashboard chart subtype (e.g. "donut", "smooth_line", "waterfall"). */
   subtype?: string;
   title?: string;
@@ -47,15 +51,21 @@ export interface InsightChart {
      * also carry `value2` for the second axis/size.
      */
     series?: { label: string; value: number; value2?: number }[];
+    /**
+     * Generic data rows for multi-dimensional charts (heatmap, radar,
+     * treemap, sankey, funnel). When present, `columns` lists the field names.
+     */
+    rows?: Record<string, unknown>[];
+    columns?: string[];
     threshold?: number;
     kpis?: { value: string; label: string; delta?: string }[];
   };
   /**
-   * Axis roles for two-metric charts. Tells the renderer which field maps to
-   * each axis (e.g. scatter x=value, y=value2; combo x=label, y=value,
-   * y2=value2). Absent for ordinary single-value charts.
+   * Axis/field roles for the renderer. `x` is the primary dimension (or first
+   * measure for scatter), `y` the value, `y2` the second measure, `group` a
+   * second dimension (heatmap Y, treemap child, sankey target, radar metric).
    */
-  roles?: { x?: string; y?: string; y2?: string; z?: string };
+  roles?: { x?: string; y?: string; y2?: string; z?: string; group?: string; value?: string };
   /** Human-readable column names per series field, for axis/legend labels. */
   seriesLabels?: { value?: string; value2?: string };
 }
