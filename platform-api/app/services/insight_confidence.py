@@ -330,7 +330,7 @@ def evaluate_confidence(
     rel_risk = str(relationship_meta.get("rowMultiplicationRisk") or "").lower() if relationship_meta else ""
     join_conf = relationship_meta.get("joinConfidence") if relationship_meta else None
     if relationship_meta:
-        if rel_risk == "low" and isinstance(join_conf, (int, float)) and join_conf >= 0.85:
+        if rel_risk == "low" and isinstance(join_conf, int | float) and join_conf >= 0.85:
             rel_score = 1.0
             rel_status = "passed"
             rel_evidence = "Join has measured containment and low fan-out risk."

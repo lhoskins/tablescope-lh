@@ -484,7 +484,7 @@ def select_duplicate_winner(
         if card.get("chart"):
             score += 10.0
         conf = card.get("confidenceScore") or card.get("confidenceEvaluation", {}).get("score")
-        if isinstance(conf, (int, float)):
+        if isinstance(conf, int | float):
             score += conf
         # Prefer cards with SQL/provenance over bare summaries.
         if card.get("sql"):
