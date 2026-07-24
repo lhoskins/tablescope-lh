@@ -16,6 +16,17 @@ from typing import Any
 CONFIDENCE_VERSION = 1
 
 
+# Score thresholds.
+_HIGH = 0.80
+_MEDIUM = 0.60
+
+# Hard caps applied after the weighted sum.
+_CAP_DOCUMENT_ONLY = 0.50
+_CAP_FEW_ROWS = 0.49
+_CAP_TENTATIVE_METHOD = 0.74
+_CAP_HIGH_JOIN_RISK = 0.50
+
+
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -91,9 +102,9 @@ class ConfidenceEvaluation:
 
 
 def _level_for_score(score: float) -> str:
-    if score >= 0.80:
+    if score >= _HIGH:
         return "high"
-    if score >= 0.60:
+    if score >= _MEDIUM:
         return "medium"
     return "low"
 
@@ -162,15 +173,28 @@ def evaluate_confidence(
     has_project_evidence: bool = True,
     intent: str | None = None,
 ) -> ConfidenceEvaluation:
-    """Return a deterministic, evidence-based confidence evaluation."""
+    """Return a deterministic, evidence-based confidence evaluation.
+
+    The score is the weighted sum of nine evidence factors (weights total 1.0).
+    Hard caps then clamp the score for document-only findings, tentative methods,
+    high join risk, or very small samples.
+    """
     validation = validation or {}
     method_envelope = method_envelope or {}
     source_context = source_context or {}
     result_rows = rows or ((result.get("rows") or []) if result else [])
+    result_columns = [str(c) for c in (columns or (result.get("columns") if result else []) or [])]
     row_count = int(validation.get("rowCount") or len(result_rows) or 0)
-    execution_status = validation.get("executionStatus")
-    method_status = str(method_envelope.get("status") or "").lower()
-    method_quality = str(method_envelope.get("quality") or "").lower()
+    execution_status = str(validation.get("executionStatus") or "").lower()
+
+    # Method envelope normalisation: ``confidence`` is a legacy alias for ``quality``.
+    method_status_raw = method_envelope.get("status") or (
+        "ok" if method_envelope.get("quality") or method_envelope.get("confidence") else None
+    )
+    method_status = str(method_status_raw or "").lower()
+    method_quality = str(
+        method_envelope.get("quality") or method_envelope.get("confidence") or ""
+    ).lower()
     method_id = method_envelope.get("method")
 
     factors: list[ConfidenceFactor] = []
@@ -178,11 +202,11 @@ def evaluate_confidence(
     gaps: list[str] = []
 
     # 1. Execution grounding (0.20)
-    if execution_status == "success" and row_count > 0:
+    if execution_status in ("success", "ok") and row_count > 0:
         exec_score = 1.0
         exec_status = "passed"
         exec_evidence = f"Query executed successfully and returned {row_count} rows."
-    elif execution_status == "success" and row_count == 0:
+    elif execution_status in ("success", "ok") and row_count == 0:
         exec_score = 0.0
         exec_status = "failed"
         exec_evidence = "Query executed but returned no rows."
@@ -208,7 +232,7 @@ def evaluate_confidence(
         suff_score = 0.4
         suff_status = "partial"
         suff_evidence = "Finding is derived from documents; no query rows to evaluate."
-        caps.append("Document-only evidence caps confidence at medium.")
+        caps.append("document_only")
     elif row_count == 0:
         suff_score = 0.0
         suff_status = "failed"
@@ -218,14 +242,15 @@ def evaluate_confidence(
         suff_status = "passed"
         suff_evidence = f"{row_count} rows provide a robust sample."
     elif row_count >= 3:
-        suff_score = 0.6 + (row_count - 3) * (0.4 / 9)
+        # Small-but-usable sample; enough to surface a signal but not strong.
+        suff_score = 0.4
         suff_status = "partial"
         suff_evidence = f"{row_count} rows are available; a larger sample would strengthen confidence."
     else:
         suff_score = 0.2
         suff_status = "partial"
         suff_evidence = f"Only {row_count} rows; the sample is very small."
-        caps.append("Small sample size caps confidence.")
+        caps.append("few_rows")
     factors.append(
         ConfidenceFactor(
             code="data_sufficiency",
@@ -255,7 +280,8 @@ def evaluate_confidence(
             dq_evidence = f"Only {non_null_rate:.0%} of {value_column} values are non-null."
             caps.append("High null rate caps confidence.")
     else:
-        dq_score = 0.5
+        # No metric column was specified; do not penalise the factor.
+        dq_score = 1.0
         dq_status = "not_applicable"
         dq_evidence = "No metric column was specified."
     factors.append(
@@ -270,7 +296,7 @@ def evaluate_confidence(
     )
 
     # 4. Analytical validation (0.15)
-    if method_status == "ok" and method_quality in ("reliable", "significant"):
+    if method_status == "ok" and method_quality in ("reliable", "validated", "significant"):
         av_score = 1.0
         av_status = "passed"
         av_evidence = f"Analytical method '{method_id}' validated the result as {method_quality}."
@@ -278,14 +304,15 @@ def evaluate_confidence(
         av_score = 0.55
         av_status = "partial"
         av_evidence = f"Analytical method '{method_id}' produced a tentative result."
-        caps.append("Tentative method caps confidence at medium.")
+        caps.append("tentative_method")
     elif method_status == "ok":
-        av_score = 0.75
-        av_status = "partial"
+        # Method ran without a clear quality verdict; do not award full credit.
+        av_score = 0.0
+        av_status = "failed"
         av_evidence = f"Analytical method '{method_id}' ran but did not report a quality verdict."
     else:
-        av_score = 0.4
-        av_status = "partial"
+        av_score = 0.0
+        av_status = "failed"
         av_evidence = "No statistical validation was run; confidence relies on query execution alone."
         gaps.append("Run a governed analytical method to validate the finding.")
     factors.append(
@@ -300,8 +327,12 @@ def evaluate_confidence(
     )
 
     # 5. Lineage completeness (0.10)
-    lineage_tables = (source_context.get("sourceTables") or source_context.get("tables") or []) if source_context else []
-    lineage_fields = (source_context.get("sourceColumns") or source_context.get("fields") or []) if source_context else []
+    lineage_tables = (
+        source_context.get("sourceTables") or source_context.get("tables") or []
+    ) if source_context else []
+    lineage_fields = (
+        source_context.get("sourceColumns") or source_context.get("fields") or result_columns or []
+    ) if source_context else result_columns or []
     if lineage_tables and lineage_fields:
         lin_score = 1.0
         lin_status = "passed"
@@ -327,18 +358,36 @@ def evaluate_confidence(
     )
 
     # 6. Relationship safety (0.10)
-    rel_risk = str(relationship_meta.get("rowMultiplicationRisk") or "").lower() if relationship_meta else ""
-    join_conf = relationship_meta.get("joinConfidence") if relationship_meta else None
+    join_risk_score = None
+    rel_risk = ""
+    join_conf: float | int | None = None
     if relationship_meta:
-        if rel_risk == "low" and isinstance(join_conf, int | float) and join_conf >= 0.85:
-            rel_score = 1.0
-            rel_status = "passed"
-            rel_evidence = "Join has measured containment and low fan-out risk."
+        join_risk_score = relationship_meta.get("joinRiskScore")
+        rel_risk = str(relationship_meta.get("rowMultiplicationRisk") or "").lower()
+        join_conf = relationship_meta.get("joinConfidence")
+
+    high_join_risk = (
+        relationship_meta
+        and (
+            (isinstance(join_risk_score, int | float) and join_risk_score >= 0.5)
+            or rel_risk in ("high", "unknown")
+        )
+    )
+    if relationship_meta:
+        if high_join_risk:
+            rel_score = 0.0
+            rel_status = "failed"
+            rel_evidence = "Join carries high fan-out or containment uncertainty."
+            caps.append("high_join_risk")
         elif rel_risk == "medium":
             rel_score = 0.55
             rel_status = "partial"
             rel_evidence = "Join has acceptable containment but medium fan-out risk."
             caps.append("Join fan-out risk caps confidence at medium.")
+        elif rel_risk == "low" and isinstance(join_conf, int | float) and join_conf >= 0.85:
+            rel_score = 1.0
+            rel_status = "passed"
+            rel_evidence = "Join has measured containment and low fan-out risk."
         else:
             rel_score = 0.3
             rel_status = "partial"
@@ -450,25 +499,21 @@ def evaluate_confidence(
         )
     )
 
-    # Weighted score.
-    total_weight = sum(f.weight for f in factors if f.status != "not_applicable")
-    if total_weight <= 0:
-        raw_score = 0.0
-    else:
-        weighted_sum = sum(f.weight * f.score for f in factors if f.status != "not_applicable")
-        raw_score = weighted_sum / total_weight
+    # Weighted score: sum every factor's weighted contribution. Weights total 1.0,
+    # so the score is interpretable as a proportion of maximum possible confidence.
+    raw_score = sum(factor.score * factor.weight for factor in factors)
 
     # Apply hard caps.
     if is_document_only or not has_project_evidence:
-        raw_score = min(raw_score, 0.55)
-        caps.append("Document-only or missing project evidence caps confidence at medium/low.")
+        raw_score = min(raw_score, _CAP_DOCUMENT_ONLY)
+        caps.append("document_only")
     if method_quality == "tentative":
-        raw_score = min(raw_score, 0.74)
+        raw_score = min(raw_score, _CAP_TENTATIVE_METHOD)
+    if high_join_risk:
+        raw_score = min(raw_score, _CAP_HIGH_JOIN_RISK)
     if row_count < 3 and not is_document_only:
-        raw_score = min(raw_score, 0.49)
-        caps.append("Fewer than 3 rows cap confidence to low.")
-    if rel_risk in ("high", "unknown") and relationship_meta:
-        raw_score = min(raw_score, 0.55)
+        raw_score = min(raw_score, _CAP_FEW_ROWS)
+        caps.append("few_rows")
 
     final_score = round(max(0.0, min(1.0, raw_score)), 3)
     level = _level_for_score(final_score)
@@ -485,7 +530,7 @@ def evaluate_confidence(
     what_would = ""
     if gaps:
         what_would = "To raise confidence: " + " ".join(gaps)
-    elif final_score < 0.80:
+    elif final_score < _HIGH:
         what_would = "To raise confidence to high: add a validated analytical method, fill missing periods, and document source lineage."
 
     return ConfidenceEvaluation(

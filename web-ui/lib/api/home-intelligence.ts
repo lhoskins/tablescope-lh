@@ -41,7 +41,17 @@ export interface InsightChart {
     | "funnel"
     | "sankey"
     | "heatmap"
-    | "gauge";
+    | "gauge"
+    | "sunburst"
+    | "tree"
+    | "graph"
+    | "parallel"
+    | "lines"
+    | "candlestick"
+    | "boxplot"
+    | "pictorial_bar"
+    | "theme_river"
+    | "map";
   /** Dashboard chart subtype (e.g. "donut", "smooth_line", "waterfall"). */
   subtype?: string;
   title?: string;
