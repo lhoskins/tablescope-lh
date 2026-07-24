@@ -719,16 +719,16 @@ def recommend_visualizations(
                 )
             )
 
-    # 4a) Gauge: latest value from a time series or single-row scalar.
-    if shape.measures and (shape.row_count == 1 or is_time):
+    # 4a) Gauge: latest value from a time series.
+    if shape.measures and is_time:
         gauge_value_col = shape.measures[0]
         candidates.append(
             _candidate(
                 ChartType.GAUGE,
-                0.55 if is_time else 0.9,
+                0.55,
                 y_field=gauge_value_col,
                 value_format=detect_value_format(gauge_value_col, _column_values(dict_rows, gauge_value_col, 50)),
-                reason=("Latest value shown as a radial gauge." if is_time else "Single scalar value shown as a radial gauge."),
+                reason="Latest value shown as a radial gauge.",
             )
         )
 
