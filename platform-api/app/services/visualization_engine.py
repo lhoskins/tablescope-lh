@@ -759,8 +759,10 @@ def recommend_visualizations(
             )
         )
 
-    # 4) Two numeric measures, no meaningful dimension -> scatter / effect scatter.
-    if len(shape.measures) >= 2 and label_col is None:
+    # 4) Two numeric measures -> scatter / effect scatter.
+    # A categorical label is fine as a point name, but a period axis should prefer
+    # the time-series families above.
+    if len(shape.measures) >= 2 and not is_time:
         candidates.append(
             _candidate(
                 ChartType.SCATTER,

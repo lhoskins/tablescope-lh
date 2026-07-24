@@ -69,6 +69,10 @@ from app.services.teiid_sql import (
     normalize_date_casts,
 )
 from app.services.visualization_engine import (
+    _Shape as Shape,
+)
+from app.services.visualization_engine import (
+    derive_shape,
     rank_visualizations,
     select_visualization,
 )
@@ -2172,14 +2176,29 @@ def _two_value_chart(
     Returns ``None`` when a second numeric column can't be resolved, so the
     caller can fall back to a single-value chart instead of dropping the card.
     """
-    label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
-    if not value_col:
-        return None
-    value2_col = _pick_second_value(
-        columns, rows, (value_col, label_col), value_hint_2
-    )
-    if not value2_col:
-        return None
+    if chart_type in ("scatter", "bubble"):
+        # Scatter uses two numeric measures as X and Y; a label dimension is only
+        # used for point names and must not consume one of the measures.
+        value_col = value_hint if value_hint and value_hint in columns else _pick_columns(columns, rows, "", "")[1]
+        if not value_col:
+            return None
+        value2_col = _pick_second_value(columns, rows, (value_col,), value_hint_2)
+        if not value2_col:
+            return None
+        shape = derive_shape(columns, rows)
+        label_col = next(
+            (c.name for c in shape.columns if c.name not in (value_col, value2_col) and c.kind in ("categorical", "text")),
+            None,
+        )
+    else:
+        label_col, value_col = _pick_columns(columns, rows, label_hint, value_hint)
+        if not value_col:
+            return None
+        value2_col = _pick_second_value(
+            columns, rows, (value_col, label_col), value_hint_2
+        )
+        if not value2_col:
+            return None
     series: list[dict[str, Any]] = []
     for r in rows[:24]:
         v = _to_float(r.get(value_col))
@@ -2309,6 +2328,98 @@ def _build_chart(
         "seriesLabels": {"value": value_col},
         "roles": {"x": label_col or "label", "y": value_col},
     }
+
+
+def _nice_name(col: str) -> str:
+    """Human-friendly column name for insight titles."""
+    return str(col).replace("_", " ").strip().title()
+
+
+def _shape_scatter_label_col(shape: Shape, used: set[str]) -> str | None:
+    """Pick a categorical/text label for scatter points, avoiding period axes."""
+    return next(
+        (
+            c.name
+            for c in shape.columns
+            if c.name not in used and c.kind in ("categorical", "text")
+        ),
+        None,
+    )
+
+
+async def _shape_template_insights(
+    project: Project,
+    ctx: ProjectContext,
+    runner: QueryRunner,
+    *,
+    max_per_table: int = 1,
+    max_total: int = 5,
+    max_rows: int = 200,
+) -> list[dict[str, Any]]:
+    """Generate extra insight cards from raw table shapes when they support richer charts.
+
+    Adds one scatter insight per table that has at least two numeric measures,
+    so the ranker sees a two-metric correlation shape instead of only label/value
+    aggregates. More templates (heatmap, radar, distribution) can follow the same
+    probe -> bounded SQL -> _build_chart -> _card pattern.
+    """
+    if runner is None:
+        return []
+    cards: list[dict[str, Any]] = []
+    for table in ctx.tables:
+        if len(cards) >= max_total:
+            break
+        try:
+            probe = await _safe_query(runner, f'SELECT * FROM "{table.view_name}" LIMIT 50')
+        except Exception:
+            continue
+        if not probe or not probe.get("rows"):
+            continue
+        columns = probe.get("columns", [])
+        rows = probe.get("rows", [])
+        if not columns:
+            continue
+        shape = derive_shape(columns, rows)
+        numeric = shape.measures
+        if len(numeric) < 2:
+            continue
+        # Choose the first two measures; skip obvious ID columns if possible.
+        x_col, y_col = numeric[0], numeric[1]
+        label_col = _shape_scatter_label_col(shape, {x_col, y_col})
+        label_sql = f', "{label_col}"' if label_col else ""
+        sql = f'SELECT "{x_col}", "{y_col}"{label_sql} FROM "{table.view_name}" LIMIT {max_rows}'
+        result = await _safe_query(runner, sql)
+        if not result or not result.get("rows"):
+            continue
+        title = f"{_nice_name(x_col)} vs {_nice_name(y_col)}"
+        summary = (
+            f"Relationship between {_nice_name(x_col)} and {_nice_name(y_col)} "
+            f"across {len(result['rows'])} records."
+        )
+        chart = _build_chart(
+            "scatter",
+            title,
+            result,
+            label_hint=label_col or "",
+            value_hint=x_col,
+            value_hint_2=y_col,
+        )
+        if not chart:
+            continue
+        card = _card(
+            project,
+            "shape_scatter",
+            "informational",
+            title,
+            summary,
+            chart=chart,
+            result=result,
+            tables=[table.view_name],
+            sql=sql,
+        )
+        if card:
+            cards.append(card)
+    return cards
 
 
 def _series_is_constant(rows: list[dict], col: str) -> bool:
