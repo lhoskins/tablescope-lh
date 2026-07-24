@@ -105,11 +105,14 @@ function buildMultiDimWidget(chart: InsightChart, dataRows: Record<string, unkno
   if (type === "heatmap") {
     return { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? "", groupByColumn: roles.y ?? roles.group ?? "" };
   }
-  if (type === "treemap" || type === "sankey") {
+  if (type === "treemap" || type === "sankey" || type === "sunburst" || type === "tree" || type === "graph") {
     return { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? "", groupByColumn: roles.group ?? "" };
   }
   if (type === "funnel" || type === "gauge") {
     return { ...base, xColumn: roles.x ?? (Object.keys(dataRows[0] ?? {})[0] || ""), yColumn: roles.value ?? "" };
+  }
+  if (type === "parallel" || type === "lines" || type === "candlestick" || type === "boxplot" || type === "pictorial_bar" || type === "theme_river" || type === "map") {
+    return { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? roles.y ?? "", groupByColumn: roles.group ?? "" };
   }
   if (type === "combo" && roles.y2) {
     return { ...base, xColumn: roles.x ?? "label", yColumn: roles.y ?? "value", y2Column: roles.y2, y2Aggregation: "sum" };

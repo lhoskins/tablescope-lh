@@ -974,6 +974,8 @@ def _card(
     try:
         ctx = (metadata or {}).get("sourceContext") or {}
         validation = (metadata or {}).get("validation") or {}
+        if validation and not validation.get("executedAt") and card.get("executedAt"):
+            validation["executedAt"] = card["executedAt"]
         if not validation and result:
             validation = {
                 "executionStatus": "success",

@@ -170,25 +170,35 @@ def _canonicalize_value(value: Any) -> Any:
 
 def _canonicalize_rows(
     rows: list[dict[str, Any]],
+    columns: list[str] | None,
     label_column: str | None,
     time_column: str | None,
     period_like: bool,
 ) -> list[dict[str, Any]]:
     """Return a deterministic, value-normalized representation of result rows.
 
+    * Output keys follow the supplied ``columns`` order when available so column
+      reordering changes the fingerprint.
     * Time series are ordered by the period/label column.
     * Unordered category rows are sorted by the label column then value.
     * All numeric values are rounded to avoid float noise.
     """
+    key_order = [str(c) for c in (columns or [])]
+    if not key_order and rows:
+        key_order = sorted({str(k) for r in rows for k in r.keys()})
+
     canonical: list[dict[str, Any]] = []
     for row in rows:
-        out = {str(k): _canonicalize_value(row.get(k)) for k in sorted(row.keys())}
+        out: dict[str, Any] = {}
+        for k in key_order:
+            if k in row:
+                out[k] = _canonicalize_value(row.get(k))
         if not out:
             continue
         canonical.append(out)
 
     sort_key = time_column or label_column
-    if sort_key and sort_key in (rows[0] if rows else {}):
+    if sort_key and sort_key in key_order:
 
         def _sort_val(row: dict[str, Any]) -> Any:
             v = row.get(sort_key)
@@ -203,15 +213,16 @@ def _canonicalize_rows(
 
 
 def build_plan_fingerprint(
+    analysis: dict[str, Any] | None = None,
     *,
     project_id: int,
     tenant_id: int,
-    analysis: dict[str, Any],
     tables: list[str] | None = None,
     method_id: str | None = None,
     source_columns: list[str] | None = None,
 ) -> str:
     """Canonical fingerprint of the analysis plan (intent + source scope)."""
+    analysis = analysis or {}
     sql = _normalize_sql(analysis.get("sql") if analysis else None)
     payload = {
         "v": EVIDENCE_FINGERPRINT_VERSION,
@@ -237,20 +248,32 @@ def build_plan_fingerprint(
 
 
 def build_result_fingerprint(
-    columns: list[str],
-    rows: list[Any],
+    columns: dict[str, Any] | list[str] | None = None,
+    rows: list[Any] | None = None,
     *,
     label_column: str | None = None,
     time_column: str | None = None,
     period_like: bool = False,
 ) -> str | None:
-    """Canonical fingerprint of an executed result set."""
-    if not rows:
+    """Canonical fingerprint of an executed result set.
+
+    Accepts either a ``{"columns": [...], "rows": [...]}`` result dict as the
+    first positional argument or explicit ``columns``/``rows`` lists.
+    """
+    if isinstance(columns, dict):
+        result = columns
+        column_list = [str(c) for c in (result.get("columns") or [])]
+        row_list = result.get("rows") or []
+    else:
+        column_list = [str(c) for c in (columns or [])]
+        row_list = rows or []
+
+    if not row_list:
         return None
-    dict_rows = rows if (rows and isinstance(rows[0], dict)) else [dict(zip(columns, r, strict=False)) for r in rows]
-    canonical = _canonicalize_rows(dict_rows, label_column, time_column, period_like)
+    dict_rows = row_list if (row_list and isinstance(row_list[0], dict)) else [dict(zip(column_list, r, strict=False)) for r in row_list]
+    canonical = _canonicalize_rows(dict_rows, column_list, label_column, time_column, period_like)
     # Cap to first 200 rows, same as the data profiler cache.
-    payload = {"columns": sorted({str(c) for c in columns}), "rows": canonical[:200]}
+    payload = {"columns": column_list, "rows": canonical[:200]}
     return _sha256(_canonical_json(payload))
 
 
@@ -287,23 +310,47 @@ def build_series_fingerprint(chart: dict[str, Any] | None) -> str | None:
 
 def build_semantic_fingerprint(
     *,
-    project_id: int,
-    tenant_id: int,
-    tables: list[str] | None,
-    columns: list[str] | None,
-    dimensions: list[str] | None,
-    measures: list[str] | None,
-    period_column: str | None,
-    filters: list[dict[str, Any]] | None,
-    aggregations: list[str] | None,
-    grain: str | None,
-    intent: str | None,
+    project_id: int = 0,
+    tenant_id: int = 0,
+    tables: list[str] | None = None,
+    columns: list[str] | None = None,
+    dimensions: list[str] | None = None,
+    measures: list[str] | None = None,
+    period_column: str | None = None,
+    filters: list[dict[str, Any]] | None = None,
+    aggregations: list[str] | None = None,
+    grain: str | None = None,
+    intent: str | None = None,
+    # Legacy aliases used by direct callers and older tests.
+    title: str | None = None,
+    summary: str | None = None,
+    row_count: int | None = None,
+    label_column: str | None = None,
+    value_column: str | None = None,
+    insight_type: str | None = None,
 ) -> str:
     """Canonical fingerprint of the semantic interpretation of the evidence.
 
     This captures what the insight *means* (entities, measures, grain,
-    filters) independently of SQL syntax or title wording.
+    filters) independently of SQL syntax or title wording. ``title`` and
+    ``summary`` are intentionally ignored so wording does not affect identity.
     """
+    # Legacy mapping for callers that pass column-oriented descriptors.
+    if columns and not dimensions and not measures:
+        dims = [str(c).lower() for c in columns if c != value_column]
+        if label_column and label_column not in dims:
+            dims.append(str(label_column).lower())
+        dimensions = dims
+        if value_column:
+            measures = [str(value_column).lower()]
+    if insight_type and not intent:
+        intent = insight_type
+    if row_count is not None and not grain:
+        grain = "many" if row_count >= 10 else "few"
+
+    # ``title`` and ``summary`` are deliberately ignored.
+    _ = (title, summary)
+
     payload = {
         "v": EVIDENCE_FINGERPRINT_VERSION,
         "tenant_id": tenant_id,
@@ -408,11 +455,11 @@ def fingerprint_for_card(card: dict[str, Any]) -> EvidenceFingerprint:
     raw = card.get("evidenceFingerprint") or {}
     if raw and isinstance(raw, dict):
         return EvidenceFingerprint(
-            fingerprint_version=raw.get("fingerprint_version", EVIDENCE_FINGERPRINT_VERSION),
-            plan_fingerprint=raw.get("plan_fingerprint"),
-            result_fingerprint=raw.get("result_fingerprint"),
-            semantic_fingerprint=raw.get("semantic_fingerprint"),
-            series_fingerprint=raw.get("series_fingerprint"),
+            fingerprint_version=raw.get("fingerprint_version") or raw.get("fingerprintVersion", EVIDENCE_FINGERPRINT_VERSION),
+            plan_fingerprint=raw.get("plan_fingerprint") or raw.get("planFingerprint"),
+            result_fingerprint=raw.get("result_fingerprint") or raw.get("resultFingerprint"),
+            semantic_fingerprint=raw.get("semantic_fingerprint") or raw.get("semanticFingerprint"),
+            series_fingerprint=raw.get("series_fingerprint") or raw.get("seriesFingerprint"),
         )
     return build_evidence_fingerprint(
         project_id=int(card.get("projectId") or 0),
@@ -472,13 +519,17 @@ def select_duplicate_winner(
     candidates: list[dict[str, Any]],
     priority_fn=None,
 ) -> dict[str, Any]:
-    """Select the representative card from a set of evidence duplicates."""
+    """Select the representative card from a set of evidence duplicates.
+
+    Higher-scoring cards win; when scores tie, the earliest candidate in the
+    input list is kept so deduplication is stable and deterministic.
+    """
     if not candidates:
         raise ValueError("empty duplicate group")
 
-    def _priority(card: dict[str, Any]) -> tuple[float, str]:
+    def _score(card: dict[str, Any]) -> float:
         if priority_fn:
-            return (float(priority_fn(card)), "")
+            return float(priority_fn(card))
         # Prefer: data-backed > document-backed, higher confidence, richer chart.
         score = 0.0
         if card.get("chart"):
@@ -489,10 +540,16 @@ def select_duplicate_winner(
         # Prefer cards with SQL/provenance over bare summaries.
         if card.get("sql"):
             score += 1.0
-        # Deterministic tie-breaker: insightId lexical order.
-        return (score, str(card.get("insightId") or ""))
+        return score
 
-    return max(candidates, key=_priority)
+    best = candidates[0]
+    best_key = (_score(best), 0)
+    for idx, cand in enumerate(candidates[1:], 1):
+        key = (_score(cand), -idx)
+        if key > best_key:
+            best = cand
+            best_key = key
+    return best
 
 
 def deduplicate_by_evidence(

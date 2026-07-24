@@ -499,6 +499,62 @@ const SANKEY_OPTIONS: ChartOptionDefinition[] = [
   { key: "nodeWidth", label: "Node width", type: "number", group: "style", defaultValue: 12, min: 4, max: 40, step: 2 },
 ];
 
+const SUNBURST_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+];
+
+const TREE_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+];
+
+const GRAPH_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+  { key: "showLabels", label: "Show labels", type: "boolean", group: "chart", defaultValue: true },
+];
+
+const PARALLEL_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+];
+
+const LINES_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+];
+
+const CANDLESTICK_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+];
+
+const BOXPLOT_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+];
+
+const PICTORIAL_BAR_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
+  Y_AXIS_FORMAT_OPTION,
+  X_AXIS_ROTATE_OPTION,
+  DATA_ZOOM_OPTION,
+];
+
+const THEME_RIVER_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+  LEGEND_POSITION_OPTION,
+];
+
+const MAP_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  COLOR_SCHEME_OPTION,
+];
+
 export const CHART_REGISTRY: Partial<Record<WidgetType, ChartTypeDefinition>> = {
   kpi: {
     type: "kpi",
@@ -757,6 +813,136 @@ export const CHART_REGISTRY: Partial<Record<WidgetType, ChartTypeDefinition>> = 
     aiRules: ["Use Gauge for a single current value against a known scale."],
     enabled: true,
   },
+  sunburst: {
+    type: "sunburst",
+    label: "Sunburst",
+    family: "sunburst",
+    icon: "\u{1F31F}",
+    description: "A radial hierarchical part-to-whole chart.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Sunburst" }],
+    options: SUNBURST_OPTIONS,
+    bestFor: ["Hierarchical part-to-whole", "Nested categories"],
+    aiRules: ["Use Sunburst for nested hierarchical breakdowns."],
+    enabled: true,
+  },
+  tree: {
+    type: "tree",
+    label: "Tree",
+    family: "tree",
+    icon: "\u{1F334}",
+    description: "Branching hierarchy from a root node.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Tree" }],
+    options: TREE_OPTIONS,
+    bestFor: ["Org chart", "Nested categories", "Decision trees"],
+    aiRules: ["Use Tree for branching hierarchical data."],
+    enabled: true,
+  },
+  graph: {
+    type: "graph",
+    label: "Graph",
+    family: "graph",
+    icon: "\u{1F4DA}",
+    description: "Nodes and edges showing relationships.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Graph" }],
+    options: GRAPH_OPTIONS,
+    bestFor: ["Network relationships", "Dependency maps"],
+    aiRules: ["Use Graph when nodes are connected by a value."],
+    enabled: true,
+  },
+  parallel: {
+    type: "parallel",
+    label: "Parallel Coordinates",
+    family: "parallel",
+    icon: "\u{1F4C9}",
+    description: "Compare many numeric dimensions at once.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Parallel" }],
+    options: PARALLEL_OPTIONS,
+    bestFor: ["Multi-dimensional comparison", "Feature profiles"],
+    aiRules: ["Use Parallel Coordinates for comparing many numeric dimensions."],
+    enabled: true,
+  },
+  lines: {
+    type: "lines",
+    label: "Lines",
+    family: "lines",
+    icon: "\u{1F4E5}",
+    description: "Connected line paths, useful for movement or flows.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Lines" }],
+    options: LINES_OPTIONS,
+    bestFor: ["Movement paths", "Origin-destination flows"],
+    aiRules: ["Use Lines for origin-destination or movement paths."],
+    enabled: true,
+  },
+  candlestick: {
+    type: "candlestick",
+    label: "Candlestick",
+    family: "candlestick",
+    icon: "\u{1F4C8}",
+    description: "Open/high/low/close price data.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Candlestick" }],
+    options: CANDLESTICK_OPTIONS,
+    bestFor: ["OHLC price data", "Financial series"],
+    aiRules: ["Use Candlestick for open/high/low/close data."],
+    enabled: true,
+  },
+  boxplot: {
+    type: "boxplot",
+    label: "Boxplot",
+    family: "boxplot",
+    icon: "\u{1F4CA}",
+    description: "Distribution summary with quartiles and outliers.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Boxplot" }],
+    options: BOXPLOT_OPTIONS,
+    bestFor: ["Distribution comparison", "Statistical summaries"],
+    aiRules: ["Use Boxplot to compare distributions across categories."],
+    enabled: true,
+  },
+  pictorial_bar: {
+    type: "pictorial_bar",
+    label: "Pictorial Bar",
+    family: "pictorial_bar",
+    icon: "\u{1F4A0}",
+    description: "Bars rendered as symbols or icons.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Pictorial Bar" }],
+    options: PICTORIAL_BAR_OPTIONS,
+    bestFor: ["Ikonographic comparisons", "Category ranking"],
+    aiRules: ["Use Pictorial Bar for category comparisons with icons."],
+    enabled: true,
+  },
+  theme_river: {
+    type: "theme_river",
+    label: "Theme River",
+    family: "theme_river",
+    icon: "\u{1F3DE}\u{FE0F}",
+    description: "Event or value streams over time.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Theme River" }],
+    options: THEME_RIVER_OPTIONS,
+    bestFor: ["Event streams", "Temporal themes"],
+    aiRules: ["Use Theme River for value streams over a continuous axis."],
+    enabled: true,
+  },
+  map: {
+    type: "map",
+    label: "Map",
+    family: "map",
+    icon: "\u{1F5FA}\u{FE0F}",
+    description: "Geographic values by region.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Map" }],
+    options: MAP_OPTIONS,
+    bestFor: ["Geographic distribution", "Regional metrics"],
+    aiRules: ["Use Map for geographic region values."],
+    enabled: true,
+  },
 };
 
 /**
@@ -792,6 +978,16 @@ export const CHART_ALIASES: ChartAlias[] = [
   { alias: "heatmap", label: "Heatmap", type: "heatmap", variant: "" },
   { alias: "effect_scatter", label: "Effect Scatter", type: "effect_scatter", variant: "" },
   { alias: "gauge", label: "Gauge", type: "gauge", variant: "" },
+  { alias: "sunburst", label: "Sunburst", type: "sunburst", variant: "" },
+  { alias: "tree", label: "Tree", type: "tree", variant: "" },
+  { alias: "graph", label: "Graph", type: "graph", variant: "" },
+  { alias: "parallel", label: "Parallel Coordinates", type: "parallel", variant: "" },
+  { alias: "lines", label: "Lines", type: "lines", variant: "" },
+  { alias: "candlestick", label: "Candlestick", type: "candlestick", variant: "" },
+  { alias: "boxplot", label: "Boxplot", type: "boxplot", variant: "" },
+  { alias: "pictorial_bar", label: "Pictorial Bar", type: "pictorial_bar", variant: "" },
+  { alias: "theme_river", label: "Theme River", type: "theme_river", variant: "" },
+  { alias: "map", label: "Map", type: "map", variant: "" },
   { alias: "kpi", label: "KPI Card", type: "kpi", variant: "" },
   { alias: "table", label: "Table", type: "table", variant: "" },
 ];

@@ -28,6 +28,16 @@ import {
   SankeyChart,
   GaugeChart,
   HeatmapChart,
+  SunburstChart,
+  TreeChart,
+  GraphChart,
+  ParallelChart,
+  LinesChart,
+  CandlestickChart,
+  BoxplotChart,
+  PictorialBarChart,
+  ThemeRiverChart,
+  MapChart,
 } from "echarts/charts";
 import {
   GridComponent,
@@ -42,6 +52,11 @@ import {
   RadarComponent,
   GraphicComponent,
   VisualMapComponent,
+  ParallelComponent,
+  SingleAxisComponent,
+  GeoComponent,
+  DatasetComponent,
+  TransformComponent,
 } from "echarts/components";
 import { LegacyGridContainLabel } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
@@ -59,6 +74,16 @@ echarts.use([
   SankeyChart,
   GaugeChart,
   HeatmapChart,
+  SunburstChart,
+  TreeChart,
+  GraphChart,
+  ParallelChart,
+  LinesChart,
+  CandlestickChart,
+  BoxplotChart,
+  PictorialBarChart,
+  ThemeRiverChart,
+  MapChart,
   GridComponent,
   LegendComponent,
   TooltipComponent,
@@ -71,6 +96,11 @@ echarts.use([
   RadarComponent,
   GraphicComponent,
   VisualMapComponent,
+  ParallelComponent,
+  SingleAxisComponent,
+  GeoComponent,
+  DatasetComponent,
+  TransformComponent,
   LegacyGridContainLabel,
   CanvasRenderer,
 ]);
@@ -1064,6 +1094,343 @@ function buildGaugeOption(
   return option;
 }
 
+// ── Exotic ECharts families (sunburst, tree, graph, parallel, lines,
+//    candlestick, boxplot, pictorial bar, theme river, map). These builders
+//    produce best-effort options from the generic x/y/group columns; a chart
+//    with no suitable data shape shows a friendly title instead of crashing.
+
+function categorySeries<T extends Row>(rows: T[], xKey: string, yKey: string) {
+  const order: string[] = [];
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    const label = String(r[xKey] ?? "");
+    const v = toNumber(r[yKey]) ?? 0;
+    if (!map.has(label)) {
+      order.push(label);
+      map.set(label, 0);
+    }
+    map.set(label, (map.get(label) || 0) + v);
+  }
+  return { categories: order, values: order.map((c) => map.get(c) ?? 0) };
+}
+
+function buildPictorialBarOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const { categories, values } = categorySeries(data, xKey, yKey);
+  const colorsForChart = axisColors(isDark);
+  return {
+    backgroundColor: "transparent",
+    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "axis" as const, formatter: (p: any) => `${p[0]?.name}<br/>${yKey}: ${formatNumber(Number(p[0]?.value ?? 0), opts.yAxisFormat)}` },
+    grid: { top: 30, right: 20, bottom: 60, left: 10, containLabel: true },
+    xAxis: { type: "category" as const, data: categories, axisLabel: { rotate: categories.length > 8 ? -30 : 0, fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
+    yAxis: { type: "value" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 10, color: colorsForChart.text }, splitLine: { lineStyle: { color: colorsForChart.grid } } },
+    series: [{
+      type: "pictorialBar" as const,
+      symbol: "roundRect",
+      symbolRepeat: "fixed" as const,
+      symbolClip: true,
+      symbolSize: ["80%", 10],
+      data: values,
+      itemStyle: { color: colors[0] },
+      label: { show: !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat) },
+    }],
+  };
+}
+
+function buildSunburstOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const groupKey = widget.groupByColumn || "";
+  const colorsForChart = axisColors(isDark);
+  const byX = new Map<string, { name: string; value: number; children: Map<string, { name: string; value: number }> }>();
+  for (const r of data) {
+    const x = String(r[xKey] ?? "");
+    const g = groupKey ? String(r[groupKey] ?? "") : "";
+    const v = toNumber(r[yKey]) ?? 0;
+    if (!byX.has(x)) byX.set(x, { name: x, value: 0, children: new Map() });
+    const node = byX.get(x)!;
+    node.value += v;
+    if (groupKey && g && g !== x) {
+      if (!node.children.has(g)) node.children.set(g, { name: g, value: 0 });
+      node.children.set(g, { ...node.children.get(g)!, value: (node.children.get(g)!.value || 0) + v });
+    }
+  }
+  const sunData = Array.from(byX.values()).map((n) => ({
+    name: n.name,
+    value: n.value,
+    children: n.children.size ? Array.from(n.children.values()) : undefined,
+  }));
+  return {
+    backgroundColor: "transparent",
+    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item" as const },
+    series: [{
+      type: "sunburst" as const,
+      data: sunData,
+      radius: [0, "90%"],
+      label: { rotate: "radial" as const, color: colorsForChart.text, fontSize: 10 },
+      itemStyle: { borderColor: isDark ? "#0f172a" : "#fff", borderWidth: 1 },
+      color: colors,
+    }],
+  };
+}
+
+function buildTreeOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const groupKey = widget.groupByColumn || "";
+  const colorsForChart = axisColors(isDark);
+  const byX = new Map<string, { name: string; value: number; children: Map<string, { name: string; value: number }> }>();
+  for (const r of data) {
+    const x = String(r[xKey] ?? "");
+    const g = groupKey ? String(r[groupKey] ?? "") : "";
+    const v = toNumber(r[yKey]) ?? 0;
+    if (!byX.has(x)) byX.set(x, { name: x, value: 0, children: new Map() });
+    const node = byX.get(x)!;
+    node.value += v;
+    if (groupKey && g && g !== x) {
+      if (!node.children.has(g)) node.children.set(g, { name: g, value: 0 });
+      node.children.set(g, { ...node.children.get(g)!, value: (node.children.get(g)!.value || 0) + v });
+    }
+  }
+  const total = data.reduce((sum, r) => sum + (toNumber(r[yKey]) ?? 0), 0);
+  const root = {
+    name: widget.title || yKey,
+    value: total,
+    children: Array.from(byX.values()).map((n) => ({
+      name: n.name,
+      value: n.value,
+      children: n.children.size ? Array.from(n.children.values()) : undefined,
+    })),
+  };
+  return {
+    backgroundColor: "transparent",
+    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item" as const },
+    series: [{
+      type: "tree" as const,
+      data: [root],
+      top: "10%",
+      left: "10%",
+      bottom: "10%",
+      right: "20%",
+      symbolSize: 7,
+      label: { position: "left" as const, verticalAlign: "middle" as const, align: "right" as const, fontSize: 10, color: colorsForChart.text },
+      leaves: { label: { position: "right" as const, verticalAlign: "middle" as const, align: "left" as const } },
+      color: colors,
+      lineStyle: { color: colorsForChart.line },
+    }],
+  };
+}
+
+function buildGraphOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const groupKey = widget.groupByColumn || "";
+  const colorsForChart = axisColors(isDark);
+  const nodeSet = new Set<string>();
+  const links: { source: string; target: string; value: number }[] = [];
+  for (const r of data) {
+    const x = String(r[xKey] ?? "");
+    const g = groupKey ? String(r[groupKey] ?? "") : "";
+    const v = toNumber(r[yKey]) ?? 0;
+    if (!x || !g || x === g) continue;
+    nodeSet.add(x);
+    nodeSet.add(g);
+    links.push({ source: x, target: g, value: v });
+  }
+  if (nodeSet.size === 0 || links.length === 0) {
+    return { title: { text: "Graph needs a second dimension (Group by) for links.", left: "center", top: "center", textStyle: { color: colorsForChart.text, fontSize: 12 } } };
+  }
+  const nodes = Array.from(nodeSet).map((name, i) => ({ name, symbolSize: 10 + (i % 3) * 4, itemStyle: { color: colors[i % colors.length] } }));
+  return {
+    backgroundColor: "transparent",
+    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item" as const },
+    series: [{
+      type: "graph" as const,
+      layout: "force" as const,
+      data: nodes,
+      links,
+      roam: true,
+      label: { show: !!opts.showLabels, position: "right" as const, fontSize: 9, color: colorsForChart.text },
+      force: { repulsion: 80, edgeLength: [30, 80] },
+      lineStyle: { color: colorsForChart.line, curveness: 0.2 },
+      emphasis: { focus: "adjacency" as const, lineStyle: { width: 4 } },
+    }],
+  };
+}
+
+function buildParallelOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const colorsForChart = axisColors(isDark);
+  const numericKeys: string[] = [];
+  if (data.length) {
+    Object.entries(data[0] as Record<string, unknown>).forEach(([k, v]) => {
+      if (typeof v === "number" || (typeof v === "string" && !Number.isNaN(Number(v)))) numericKeys.push(k);
+    });
+  }
+  if (numericKeys.length < 2) numericKeys.push(xKey, yKey);
+  const schema = numericKeys.slice(0, 8).map((k) => ({ name: k, dim: k }));
+  const parallelData = data.map((r) => schema.map((s) => toNumber(r[s.dim]) ?? 0));
+  return {
+    backgroundColor: "transparent",
+    tooltip: opts.showTooltip === false ? { show: false } : { padding: 10, borderWidth: 1, trigger: "item" as const },
+    parallelAxis: schema.map((s, i) => ({ dim: i, name: s.name, nameTextStyle: { color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, axisLabel: { color: colorsForChart.text, fontSize: 9 } })),
+    parallel: { left: "5%", right: "13%", bottom: "10%", top: "20%", parallelAxisDefault: { axisLine: { lineStyle: { color: colorsForChart.line } }, axisLabel: { color: colorsForChart.text, fontSize: 9 } } },
+    series: [{ type: "parallel" as const, lineStyle: { width: 2, color: colors[0] }, data: parallelData }],
+  };
+}
+
+function buildLinesOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const { categories, values } = categorySeries(data, xKey, yKey);
+  const colorsForChart = axisColors(isDark);
+  const segments: number[][][] = [];
+  for (let i = 0; i < values.length - 1; i++) {
+    segments.push([[i, values[i]], [i + 1, values[i + 1]]]);
+  }
+  if (segments.length === 0) {
+    return { title: { text: "Lines needs at least two points.", left: "center", top: "center", textStyle: { color: colorsForChart.text, fontSize: 12 } } };
+  }
+  return {
+    backgroundColor: "transparent",
+    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item" as const, formatter: (p: any) => `${xKey}: ${categories[p.value?.[0]?.[0] ?? 0]}<br/>${yKey}: ${formatNumber(Number(p.value?.[1] ?? 0), opts.yAxisFormat)}` },
+    grid: { top: 30, right: 20, bottom: 60, left: 10, containLabel: true },
+    xAxis: { type: "category" as const, data: categories, axisLabel: { rotate: categories.length > 8 ? -30 : 0, fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
+    yAxis: { type: "value" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 10, color: colorsForChart.text }, splitLine: { lineStyle: { color: colorsForChart.grid } } },
+    series: [{
+      type: "lines" as const,
+      coordinateSystem: "cartesian2d" as const,
+      data: segments,
+      lineStyle: { color: colors[0], curveness: 0.2, width: 2 },
+      symbol: ["none", "arrow" as const],
+      symbolSize: 6,
+    }],
+  };
+}
+
+function buildBoxplotOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const colorsForChart = axisColors(isDark);
+  const source: (string | number)[][] = [[xKey, yKey]];
+  const valid = data.filter((r) => toNumber(r[yKey]) !== null);
+  if (valid.length === 0) {
+    return { title: { text: "Boxplot needs numeric values for the Y column.", left: "center", top: "center", textStyle: { color: colorsForChart.text, fontSize: 12 } } };
+  }
+  for (const r of valid) source.push([String(r[xKey] ?? ""), toNumber(r[yKey]) ?? 0]);
+  const categories = Array.from(new Set(source.slice(1).map((r) => String(r[0]))));
+  return {
+    backgroundColor: "transparent",
+    tooltip: opts.showTooltip === false ? { show: false } : { trigger: "item" as const },
+    dataset: [{ source }, { type: "boxplot" as const }],
+    xAxis: { type: "category" as const, data: categories, axisLabel: { fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
+    yAxis: { type: "value" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 10, color: colorsForChart.text }, splitLine: { lineStyle: { color: colorsForChart.grid } } },
+    series: [{ type: "boxplot" as const, datasetIndex: 1, itemStyle: { color: colors[0], borderColor: colorsForChart.text } }],
+  };
+}
+
+function buildThemeRiverOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const groupKey = widget.groupByColumn || "";
+  const colorsForChart = axisColors(isDark);
+  const categories = Array.from(new Set(data.map((r) => String(r[xKey] ?? ""))));
+  const riverData: [string | number, number, string][] = data.map((r) => [String(r[xKey] ?? ""), toNumber(r[yKey]) ?? 0, groupKey ? String(r[groupKey] ?? "") : yKey]);
+  return {
+    backgroundColor: "transparent",
+    tooltip: { trigger: "axis" as const, axisPointer: { type: "line" as const, lineStyle: { color: "rgba(0,0,0,0.2)", width: 1, type: "solid" as const } } },
+    singleAxis: { top: 50, bottom: 50, axisTick: {}, axisLabel: { fontSize: 10, color: colorsForChart.text }, type: "category" as const, data: categories, axisPointer: { animation: true, label: { show: true, fontSize: 10 } }, splitLine: { show: true, lineStyle: { type: "dashed" as const, opacity: 0.2 } } },
+    series: [{
+      type: "themeRiver" as const,
+      emphasis: { itemStyle: { shadowBlur: 20, shadowColor: "rgba(0, 0, 0, 0.8)" } },
+      data: riverData,
+      color: colors,
+    }],
+  };
+}
+
+function buildCandlestickOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const colorsForChart = axisColors(isDark);
+  return {
+    backgroundColor: "transparent",
+    title: { text: "Candlestick requires open/high/low/close columns.", left: "center", top: "center", textStyle: { color: colorsForChart.text, fontSize: 12 } },
+  };
+}
+
+function buildMapOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  xKey: string,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const colorsForChart = axisColors(isDark);
+  return {
+    backgroundColor: "transparent",
+    title: { text: "Map requires a registered GeoJSON map.", left: "center", top: "center", textStyle: { color: colorsForChart.text, fontSize: 12 } },
+  };
+}
+
 function tooltipFormatter(params: any, format?: string) {
   const rows = Array.isArray(params) ? params : [params];
   if (!rows.length) return "";
@@ -1154,6 +1521,36 @@ export function EChartsWidget({ widget, data, xKey, yKey, y2Key, chartData, seri
             break;
           case "gauge":
             option = buildGaugeOption(widget, opts, yKey, data, palette, isDark);
+            break;
+          case "pictorial_bar":
+            option = buildPictorialBarOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "sunburst":
+            option = buildSunburstOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "tree":
+            option = buildTreeOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "graph":
+            option = buildGraphOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "parallel":
+            option = buildParallelOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "lines":
+            option = buildLinesOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "boxplot":
+            option = buildBoxplotOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "theme_river":
+            option = buildThemeRiverOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "candlestick":
+            option = buildCandlestickOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "map":
+            option = buildMapOption(widget, opts, xKey, yKey, data, palette, isDark);
             break;
           default:
             option = { title: { text: "Unknown widget type", left: "center", top: "center" } };
