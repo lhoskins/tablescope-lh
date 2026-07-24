@@ -78,11 +78,26 @@ function InsightChartView({ chart }: { chart: InsightChart }) {
   // Two-metric charts (combo/scatter/bubble) carry a second value; expose both
   // columns so the renderer can map them onto the right axes.
   const hasValue2 = series.some((s) => typeof s.value2 === "number");
-  const rows = series.map((s) =>
-    hasValue2
-      ? { label: s.label, value: s.value, value2: s.value2 ?? 0 }
-      : { label: s.label, value: s.value },
-  );
+  const labels = chart.seriesLabels;
+  const roles = chart.roles;
+  const valueName = labels?.value ?? roles?.y ?? "value";
+  const value2Name = labels?.value2 ?? roles?.y2 ?? "value2";
+  const xName = roles?.x ?? "label";
+
+  // For scatter, the first metric is the X axis and the second is the Y axis.
+  const isScatter = chart.type === "scatter";
+  const xColumnName = isScatter ? valueName : xName;
+  const yColumnName = isScatter ? value2Name : valueName;
+
+  const rows = series.map((s) => {
+    if (isScatter) {
+      return { [valueName]: s.value, [value2Name]: s.value2 ?? 0 };
+    }
+    if (hasValue2) {
+      return { [xName]: s.label, [valueName]: s.value, [value2Name]: s.value2 ?? 0 };
+    }
+    return { [xName]: s.label, [valueName]: s.value };
+  });
 
   const base: WidgetConfig = {
     id: "insight-chart",
@@ -90,9 +105,9 @@ function InsightChartView({ chart }: { chart: InsightChart }) {
     chartSubtype: (chart.subtype || undefined) as WidgetConfig["chartSubtype"],
     title: "",
     dataSource: { kind: "custom_sql" },
-    xColumn: "label",
-    xColumnType: "string",
-    yColumn: "value",
+    xColumn: xColumnName,
+    xColumnType: isScatter ? "number" : "string",
+    yColumn: yColumnName,
     aggregation: "sum",
     sortBy: "x_asc",
     filters: [],
@@ -102,18 +117,8 @@ function InsightChartView({ chart }: { chart: InsightChart }) {
   };
 
   let widget: WidgetConfig = base;
-  if (chart.type === "combo" && hasValue2) {
-    // dual_line -> bars (value) + overlay line (value2) on a shared x axis.
-    widget = { ...base, y2Column: "value2", y2Aggregation: "sum" };
-  } else if (chart.type === "scatter") {
-    // x/y scatter of two metrics; bubble degrades to scatter without a size col.
-    widget = {
-      ...base,
-      xColumn: "value",
-      xColumnType: "number",
-      yColumn: "value2",
-      sortBy: "x_asc",
-    };
+  if ((chart.type === "combo" && hasValue2) || chart.type === "scatter") {
+    widget = { ...base, y2Column: isScatter ? undefined : value2Name, y2Aggregation: "sum" };
   }
 
   // Horizontal bars stack their category labels down the y-axis, so give each

@@ -260,6 +260,35 @@ def test_rank_visualizations_time_series_excludes_gauge() -> None:
     assert ranked[0].decision.chart_type in (ChartType.LINE, ChartType.COMBO, ChartType.AREA)
 
 
+def test_rank_visualizations_time_series_excludes_category_families() -> None:
+    """A 24-month, single-measure, 0-100 rate shape must not be misclassified as categories."""
+    rows = [
+        {"month": f"2026-{m:02d}", "on_time_rate": 0.75 + (m % 10) / 100}
+        for m in range(1, 25)
+    ]
+    ranked = rank_visualizations(["month", "on_time_rate"], rows, limit=6)
+    families = {c.decision.chart_type for c in ranked}
+    assert ChartType.GAUGE not in families
+    assert ChartType.RADIAL_BAR not in families
+    assert ChartType.FUNNEL not in families
+    assert ChartType.TREEMAP not in families
+    assert ChartType.RADAR not in families
+    assert ChartType.PIE not in families
+    # Allowed families are time-series families + table + a simple time bar.
+    allowed = {ChartType.LINE, ChartType.AREA, ChartType.COMBO, ChartType.BAR, ChartType.TABLE}
+    assert families.issubset(allowed)
+    assert ranked[0].decision.chart_type in (ChartType.LINE, ChartType.AREA)
+
+
+def test_explicit_category_hints_ignored_for_time_series() -> None:
+    rows = [{"month": f"2026-{m:02d}", "sales": m * 10} for m in range(1, 8)]
+    for bad_hint in ("radar", "radial_bar", "funnel", "treemap"):
+        ranked = rank_visualizations(
+            ["month", "sales"], rows, intent_hint=bad_hint, limit=6
+        )
+        assert all(c.decision.chart_type.value != bad_hint for c in ranked), bad_hint
+
+
 def test_explicit_gauge_hint_ignored_for_time_series() -> None:
     rows = [{"month": f"2026-{m:02d}", "sales": m * 10} for m in range(1, 8)]
     ranked = rank_visualizations(

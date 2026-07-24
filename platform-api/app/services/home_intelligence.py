@@ -2203,7 +2203,7 @@ def _two_value_chart(
             "subtype": "bar_line",
             "title": title,
             "data": {"series": series},
-            "roles": {"x": "label", "y": "value", "y2": "value2"},
+            "roles": {"x": label_col or "label", "y": value_col, "y2": value2_col},
             "seriesLabels": series_labels,
         }
     # scatter / bubble -> two variables as x/y (bubble degrades to scatter when
@@ -2213,7 +2213,7 @@ def _two_value_chart(
         "subtype": "bubble" if chart_type == "bubble" else "",
         "title": title,
         "data": {"series": series},
-        "roles": {"x": "value", "y": "value2"},
+        "roles": {"x": value_col, "y": value2_col},
         "seriesLabels": series_labels,
     }
 
@@ -2306,6 +2306,8 @@ def _build_chart(
         "subtype": decision.chart_style,
         "title": title,
         "data": {"series": series},
+        "seriesLabels": {"value": value_col},
+        "roles": {"x": label_col or "label", "y": value_col},
     }
 
 
