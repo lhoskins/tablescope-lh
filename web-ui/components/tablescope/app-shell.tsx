@@ -25,6 +25,8 @@ export interface AppShellProps {
   contextPanel?: ReactNode;
   /** When true, main content is centered with a max width (Home only). */
   centered?: boolean;
+  /** When false, the main content area does not scroll (use for full-screen pages). */
+  scrollable?: boolean;
   children: ReactNode;
 }
 
@@ -40,6 +42,7 @@ export function AppShell({
   topBarRight,
   contextPanel,
   centered = false,
+  scrollable = true,
   children,
 }: AppShellProps) {
   return (
@@ -63,7 +66,7 @@ export function AppShell({
           right={<CompanyLogo url={tenant.logoUrl} name={tenant.name} />}
         />
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <main className="min-h-0 flex-1 overflow-y-auto">
+          <main className={`min-h-0 flex-1 ${scrollable ? "overflow-y-auto" : "overflow-hidden"}`}>
             <div
               className={
                 centered

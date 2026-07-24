@@ -807,6 +807,52 @@ def recommend_visualizations(
             )
         )
 
+        # Additional compatible families for positive categorical data (non-time only).
+        if not is_time:
+            if 2 <= label_card <= 8:
+                candidates.append(
+                    _candidate(
+                        ChartType.RADAR,
+                        0.55,
+                        x_field=label_col,
+                        y_field=value_col,
+                        value_format=vfmt,
+                        reason="Multi-metric comparison of a few entities — radar scorecard.",
+                    )
+                )
+            if all_positive and label_card >= 2:
+                candidates.append(
+                    _candidate(
+                        ChartType.FUNNEL,
+                        0.54,
+                        x_field=label_col,
+                        y_field=value_col,
+                        value_format=vfmt,
+                        reason="Stage-like or ranked categories — funnel.",
+                    )
+                )
+                candidates.append(
+                    _candidate(
+                        ChartType.TREEMAP,
+                        0.5,
+                        x_field=label_col,
+                        y_field=value_col,
+                        value_format=vfmt,
+                        reason="Hierarchical part-to-whole by category — treemap.",
+                    )
+                )
+            if all_positive and 2 <= label_card <= 12:
+                candidates.append(
+                    _candidate(
+                        ChartType.RADIAL_BAR,
+                        0.52,
+                        x_field=label_col,
+                        y_field=value_col,
+                        value_format=vfmt,
+                        reason="Relative size of categories around a center — radial bar.",
+                    )
+                )
+
     # Fallback table.
     candidates.append(_candidate(ChartType.TABLE, 0.15, reason="No clear chart shape — showing detail rows."))
 

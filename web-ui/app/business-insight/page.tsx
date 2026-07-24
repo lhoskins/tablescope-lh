@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconHelpCircle } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
@@ -16,7 +16,7 @@ import {
   useProjectSummaries,
 } from "@/lib/ui/use-shell-data";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
-import { createHomePin } from "@/lib/api/home-pins";
+import { createHomePin, getHomePins } from "@/lib/api/home-pins";
 import type { InsightCard } from "@/lib/api/home-intelligence";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
@@ -65,6 +65,24 @@ export default function BusinessInsightPage() {
     if (!getUserMeta()) router.replace("/login");
   }, [router]);
 
+  const { data: homePins = [] } = useQuery({
+    queryKey: ["home-pins"],
+    queryFn: getHomePins,
+  });
+
+  const pinnedByFingerprint = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const pin of homePins) {
+      const payload = (pin.frozen_payload ?? pin.config ?? {}) as { evidenceFingerprint?: { resultFingerprint?: string }; insightId?: string };
+      const key =
+        payload.evidenceFingerprint?.resultFingerprint ??
+        payload.insightId ??
+        pin.pin_key;
+      if (key) map.set(String(key), pin.id);
+    }
+    return map;
+  }, [homePins]);
+
   const pinMutation = useMutation({
     mutationFn: createHomePin,
     onSuccess: () => {
@@ -76,16 +94,28 @@ export default function BusinessInsightPage() {
 
   const handlePinInsight = useCallback(
     (card: InsightCard) => {
+      const key =
+        card.evidenceFingerprint?.resultFingerprint ??
+        card.insightId ??
+        card.id;
+      if (!key) {
+        pushToast("Unable to pin this insight", "error");
+        return;
+      }
+      if (pinnedByFingerprint.has(key)) {
+        pushToast("This insight is already pinned to Home", "info");
+        return;
+      }
       pinMutation.mutate({
         pin_type: "insight_card",
-        pin_key: `insight:${card.projectId}:${card.insightType}:${slugify(card.title)}`,
+        pin_key: `insight:${card.projectId}:${card.insightType}:${key}`,
         title: card.title,
         project_id: Number(card.projectId),
         frozen_payload: card as unknown as Record<string, unknown>,
         layout: { x: 0, y: 0, w: 6, h: 5 },
       });
     },
-    [pinMutation],
+    [pinMutation, pinnedByFingerprint, pushToast],
   );
 
   const [chatTurns, setChatTurns] = useState<ConversationTurn[]>([]);
@@ -165,6 +195,7 @@ export default function BusinessInsightPage() {
       activeNav="business-insight"
       tenant={tenant}
       user={user}
+      scrollable={false}
       counts={{ projects: allProjects?.length }}
       topBarLeft={
         <span className="text-[15px] text-ink-secondary">
@@ -212,6 +243,7 @@ export default function BusinessInsightPage() {
         </div>
         <IntelligenceFeed
           onPin={handlePinInsight}
+          pinnedByFingerprint={pinnedByFingerprint}
           onCreateAction={handleCreateAction}
           availableProjects={allProjects ?? []}
         />

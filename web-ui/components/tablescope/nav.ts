@@ -17,6 +17,7 @@ import {
   IconLibrary,
   IconBuildingBank,
   IconShieldCheck,
+  IconClipboardList,
   type Icon,
 } from "@tabler/icons-react";
 import type { CurrentUser, NavKey } from "@/lib/ui/types";
@@ -161,6 +162,12 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           label: "Dashboards",
           href: `${base}/dashboards`,
           icon: IconLayoutDashboard,
+        },
+        {
+          key: "project-actions",
+          label: "Project Actions",
+          href: `${base}/actions`,
+          icon: IconClipboardList,
         },
         {
           key: "project-business-context",
