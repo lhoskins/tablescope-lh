@@ -71,7 +71,7 @@ export function PhoneInput({
       <label htmlFor={inputId} className="block text-sm font-medium text-ink-secondary">
         {label}
       </label>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <label htmlFor={selectId} className="sr-only">
           Country
         </label>
@@ -80,7 +80,7 @@ export function PhoneInput({
           value={safeIso}
           onChange={handleCountryChange}
           disabled={disabled}
-          className="shrink-0 rounded-md border border-line-tertiary bg-white px-2 py-2 text-sm text-ink-primary focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="shrink-0 truncate rounded-md border border-line-tertiary bg-white px-2 py-2 text-sm text-ink-primary focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 sm:max-w-[45%]"
         >
           {countryOptions.map(({ iso, name, callingCode }) => (
             <option key={iso} value={iso}>
@@ -98,7 +98,7 @@ export function PhoneInput({
           disabled={disabled}
           placeholder={placeholder}
           aria-invalid={Boolean(error)}
-          className="min-w-0 flex-1 rounded-md border border-line-tertiary bg-white px-3 py-2 text-sm text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="min-w-[16rem] flex-1 rounded-md border border-line-tertiary bg-white px-3 py-2 text-sm text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
       </div>
       {hint && <p className="text-caption text-ink-tertiary">{hint}</p>}

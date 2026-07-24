@@ -96,18 +96,7 @@ export function homeNavGroups(user?: CurrentUser): NavGroup[] {
           href: "/database-connectors",
           icon: IconDatabase,
         },
-        {
-          key: "reference-library",
-          label: "Reference Library",
-          href: "/reference-library",
-          icon: IconLibrary,
-        },
-        {
-          key: "company-reference-library",
-          label: "Company Library",
-          href: "/reference-library/company",
-          icon: IconBuildingBank,
-        },
+
       ],
     },
   ];

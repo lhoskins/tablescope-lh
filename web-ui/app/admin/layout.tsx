@@ -21,6 +21,7 @@ const FALLBACK_TENANT: TenantSummary = {
 };
 
 function activeNavFor(pathname: string): NavKey {
+  if (pathname.startsWith("/admin/settings")) return "admin-settings";
   if (pathname.startsWith("/admin/data-planes")) return "admin-data-planes";
   if (pathname.startsWith("/admin/tenants")) return "admin-tenants";
   if (pathname.startsWith("/admin/allowed-domains")) return "admin-allowed-domains";
