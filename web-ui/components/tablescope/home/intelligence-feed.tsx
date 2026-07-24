@@ -36,6 +36,15 @@ import {
 
 type Status = "idle" | "streaming" | "complete" | "error";
 
+function pinFingerprintKey(card: InsightCard): string | undefined {
+  return (
+    card.evidenceFingerprint?.resultFingerprint ??
+    card.insightId ??
+    card.id ??
+    undefined
+  );
+}
+
 function Section({
   title,
   icon,
@@ -47,6 +56,7 @@ function Section({
   savingFeedback,
   onSaveToDashboard,
   onPin,
+  pinnedByFingerprint,
   onFeedbackSave,
   onFeedbackRemove,
   onFeedbackRespond,
@@ -63,6 +73,7 @@ function Section({
   savingFeedback: boolean;
   onSaveToDashboard?: (card: InsightCard) => void;
   onPin?: (card: InsightCard) => void;
+  pinnedByFingerprint?: Map<string, number>;
   onFeedbackSave?: (card: InsightCard, payload: Omit<SaveInsightFeedbackArgs, "insightId" | "projectId" | "insightType" | "cardSnapshot" | "explanationSnapshot">) => void;
   onFeedbackRemove?: (card: InsightCard) => void;
   onFeedbackRespond?: (card: InsightCard, response: string) => void;
@@ -75,29 +86,36 @@ function Section({
         loading ? null : <PanelEmpty text={emptyText} />
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {cards.map((card) => (
-            <IntelligenceCard
-              key={card.insightId || card.id}
-              card={card}
-              feedback={feedbackById[card.insightId || card.id]}
-              savingFeedback={savingFeedback}
-              onSaveToDashboard={onSaveToDashboard}
-              onPin={onPin}
-              onFeedbackSave={
-                onFeedbackSave
-                  ? (payload) => onFeedbackSave(card, payload)
-                  : undefined
-              }
-              onFeedbackRemove={
-                onFeedbackRemove ? () => onFeedbackRemove(card) : undefined
-              }
-              onFeedbackRespond={
-                onFeedbackRespond ? (response) => onFeedbackRespond(card, response) : undefined
-              }
-              governance={governanceById?.[card.insightId || card.id]}
-              onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
-            />
-          ))}
+          {cards.map((card) => {
+            const key = pinFingerprintKey(card) || card.insightId || card.id;
+            const isPinned = Boolean(
+              pinnedByFingerprint && key && pinnedByFingerprint.has(key),
+            );
+            return (
+              <IntelligenceCard
+                key={key}
+                card={card}
+                pinned={isPinned}
+                feedback={feedbackById[card.insightId || card.id]}
+                savingFeedback={savingFeedback}
+                onSaveToDashboard={onSaveToDashboard}
+                onPin={onPin}
+                onFeedbackSave={
+                  onFeedbackSave
+                    ? (payload) => onFeedbackSave(card, payload)
+                    : undefined
+                }
+                onFeedbackRemove={
+                  onFeedbackRemove ? () => onFeedbackRemove(card) : undefined
+                }
+                onFeedbackRespond={
+                  onFeedbackRespond ? (response) => onFeedbackRespond(card, response) : undefined
+                }
+                governance={governanceById?.[card.insightId || card.id]}
+                onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
+              />
+            );
+          })}
         </div>
       )}
     </InsightPanel>
@@ -106,6 +124,7 @@ function Section({
 
 export interface IntelligenceFeedProps {
   onPin?: (card: InsightCard) => void;
+  pinnedByFingerprint?: Map<string, number>;
   onCreateAction?: (card: InsightCard) => void;
   /** Accessible projects used to populate the filter and default selection. */
   availableProjects?: FilterableProject[];
@@ -115,6 +134,7 @@ const EMPTY_PROJECTS: FilterableProject[] = [];
 
 export function IntelligenceFeed({
   onPin,
+  pinnedByFingerprint,
   onCreateAction,
   availableProjects: propAvailableProjects,
 }: IntelligenceFeedProps = {}) {
@@ -558,6 +578,7 @@ export function IntelligenceFeed({
               savingFeedback={savingFeedback}
               onSaveToDashboard={handleSaveToDashboard}
               onPin={onPin}
+              pinnedByFingerprint={pinnedByFingerprint}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
               onFeedbackRespond={handleFeedbackRespond}
@@ -575,6 +596,7 @@ export function IntelligenceFeed({
               savingFeedback={savingFeedback}
               onSaveToDashboard={handleSaveToDashboard}
               onPin={onPin}
+              pinnedByFingerprint={pinnedByFingerprint}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
               onFeedbackRespond={handleFeedbackRespond}
@@ -592,6 +614,7 @@ export function IntelligenceFeed({
               savingFeedback={savingFeedback}
               onSaveToDashboard={handleSaveToDashboard}
               onPin={onPin}
+              pinnedByFingerprint={pinnedByFingerprint}
               onFeedbackSave={handleFeedbackSave}
               onFeedbackRemove={handleFeedbackRemove}
               onFeedbackRespond={handleFeedbackRespond}

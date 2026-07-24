@@ -300,7 +300,18 @@ export function IntelligenceCard({
               AI fallback
             </span>
           )}
-          {onPin && !pinned && (
+          {pinned ? (
+            <button
+              type="button"
+              onClick={onUnpin ? () => onUnpin(displayCard) : undefined}
+              aria-label={onUnpin ? "Unpin from Home" : "Pinned to Home"}
+              title={onUnpin ? "Unpin from Home" : "Pinned to Home"}
+              className="rounded-md p-1 text-danger focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-100"
+              disabled={!onUnpin}
+            >
+              <IconPinnedFilled size={18} />
+            </button>
+          ) : onPin ? (
             <button
               type="button"
               onClick={() => onPin(displayCard)}
@@ -310,18 +321,7 @@ export function IntelligenceCard({
             >
               <IconPin size={18} />
             </button>
-          )}
-          {onUnpin && pinned && (
-            <button
-              type="button"
-              onClick={() => onUnpin(displayCard)}
-              aria-label="Unpin from Home"
-              title="Unpin from Home"
-              className="rounded-md p-1 text-danger transition-colors hover:bg-danger/10 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            >
-              <IconPinnedFilled size={18} />
-            </button>
-          )}
+          ) : null}
         </div>
       </header>
 

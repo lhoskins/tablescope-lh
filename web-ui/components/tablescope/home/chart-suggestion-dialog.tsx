@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { IconX, IconCheck, IconChartBar } from "@tabler/icons-react";
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
 import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
@@ -81,13 +81,26 @@ export function ChartSuggestionDialog({
   onClose,
   onApplied,
 }: ChartSuggestionDialogProps) {
-  const [selected, setSelected] = useState<VizCandidate | null>(null);
-  const [saving, setSaving] = useState(false);
   const { toasts, push, dismiss } = useToasts();
 
-  if (!open) return null;
-
   const candidates = card.chartCandidates?.length ? card.chartCandidates : FALLBACK_CANDIDATES;
+
+  const initialSelected = useMemo(() => {
+    const currentType = card.chart?.type;
+    const currentSubtype = card.chart?.subtype ?? "";
+    return (
+      candidates.find(
+        (c) =>
+          c.decision.chartType === currentType &&
+          (c.decision.chartStyle ?? "") === currentSubtype,
+      ) ?? candidates[0] ?? null
+    );
+  }, [candidates, card.chart?.type, card.chart?.subtype]);
+
+  const [selected, setSelected] = useState<VizCandidate | null>(initialSelected);
+  const [saving, setSaving] = useState(false);
+
+  if (!open) return null;
 
   const chart = card.chart as InsightChart | null | undefined;
   const series = chart?.data?.series ?? [];
@@ -197,7 +210,7 @@ export function ChartSuggestionDialog({
             type="button"
             onClick={handleApply}
             disabled={!selected || saving}
-            className="rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+            className="rounded-md bg-brand-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-brand-300"
           >
             {saving ? "Saving..." : "Apply chart"}
           </button>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IconSparkles, IconLayoutDashboard } from "@tabler/icons-react";
+import { IconSparkles, IconLayoutDashboard, IconClipboardList } from "@tabler/icons-react";
 import { projectNavGroups } from "@/components/tablescope/nav";
 
 describe("Project Insights sidebar entry", () => {
@@ -37,6 +37,20 @@ describe("Project Insights sidebar entry", () => {
     expect(docsIndex).toBeGreaterThanOrEqual(0);
     expect(all.findIndex((i) => i.key === "project-dashboards")).toBe(
       docsIndex + 1,
+    );
+  });
+
+  it("keeps the Project Actions nav item after Dashboards", () => {
+    const all = project?.items ?? [];
+    const dashboardsIndex = all.findIndex((i) => i.key === "project-dashboards");
+    const actions = all.find((i) => i.key === "project-actions");
+    expect(actions).toBeTruthy();
+    expect(actions?.label).toBe("Project Actions");
+    expect(actions?.href).toBe("/projects/42/actions");
+    expect(actions?.icon).toBe(IconClipboardList);
+    expect(dashboardsIndex).toBeGreaterThanOrEqual(0);
+    expect(all.findIndex((i) => i.key === "project-actions")).toBe(
+      dashboardsIndex + 1,
     );
   });
 });

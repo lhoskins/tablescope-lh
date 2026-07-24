@@ -1019,17 +1019,19 @@ def _card(
 
     try:
         if result and result_rows:
-            candidates = recommend_visualizations(
-                result_columns,
-                result_rows,
-                intent_hint=chart_type,
-            )
+            candidates = recommend_visualizations(result_columns, result_rows)
             if candidates:
-                card["visualizationDecision"] = candidates[0].decision.to_dict()
-                card["chartCandidates"] = [c.to_dict() for c in candidates[:6]]
+                current_chart_type = (card.get("chart") or {}).get("type")
+                chosen = candidates[0]
+                for c in candidates:
+                    if c.decision.chart_type.value == current_chart_type:
+                        chosen = c
+                        break
+                card["visualizationDecision"] = chosen.decision.to_dict()
+                card["chartCandidates"] = [c.to_dict() for c in candidates[:8]]
                 if card.get("chart"):
-                    card["chart"]["type"] = candidates[0].decision.chart_type.value
-                    card["chart"]["subtype"] = candidates[0].decision.chart_style or ""
+                    card["chart"]["type"] = chosen.decision.chart_type.value
+                    card["chart"]["subtype"] = chosen.decision.chart_style or ""
     except Exception as exc:
         logger.debug("chart candidate generation failed for insight %s: %s", insight_id, exc)
 
