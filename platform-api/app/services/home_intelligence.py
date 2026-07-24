@@ -2462,15 +2462,16 @@ async def _shape_template_insights(
             continue
 
         shape = derive_shape(columns, rows)
-        dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
-        if not dims:
-            dims = shape.dimensions[:]
+        non_period_dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+        dims = non_period_dims or shape.dimensions[:]
+        has_non_period_dimension = len(non_period_dims) > 0
         measures = shape.measures
 
         generated: list[dict[str, Any]] = []
 
         # 1) Radar: 1 categorical dimension + 3+ numeric measures.
-        if len(dims) >= 1 and len(measures) >= 3 and len(generated) < max_per_table:
+        #    Avoid period-only subjects — line/combo already covers time-by-measures.
+        if has_non_period_dimension and len(dims) >= 1 and len(measures) >= 3 and len(generated) < max_per_table:
             subject_col = dims[0]
             measure_cols = measures[:6]
             agg = ", ".join(f'{_agg_for_measure(m)}({_quote(m)}) AS {_quote(m)}' for m in measure_cols)
@@ -2483,6 +2484,7 @@ async def _shape_template_insights(
                     chart = _build_multi_chart("radar", title, long_rows, ["subject", "metric", "value"], roles)
                     generated.append({
                         "insight_type": "shape_radar",
+                        "group": "analysis",
                         "title": title,
                         "summary": f"Compare {len(measure_cols)} metrics across {len(result['rows'])} {_nice_name(subject_col)} values.",
                         "chart": chart,
@@ -2511,6 +2513,7 @@ async def _shape_template_insights(
                 )
                 generated.append({
                     "insight_type": "shape_heatmap",
+                    "group": "analysis",
                     "title": title,
                     "summary": f"Heatmap of {_nice_name(value_col)} across {_nice_name(x_col)} and {_nice_name(y_col)}.",
                     "chart": chart,
@@ -2539,6 +2542,7 @@ async def _shape_template_insights(
                 )
                 generated.append({
                     "insight_type": "shape_treemap",
+                    "group": "analysis",
                     "title": title,
                     "summary": f"Hierarchical breakdown of {_nice_name(value_col)} by {_nice_name(parent_col)} and {_nice_name(child_col)}.",
                     "chart": chart,
@@ -2572,6 +2576,7 @@ async def _shape_template_insights(
                 )
                 generated.append({
                     "insight_type": "shape_sankey",
+                    "group": "analysis",
                     "title": title,
                     "summary": f"Source-to-target flow weighted by {_nice_name(value_col)}.",
                     "chart": chart,
@@ -2605,6 +2610,7 @@ async def _shape_template_insights(
                 )
                 generated.append({
                     "insight_type": "shape_funnel",
+                    "group": "analysis",
                     "title": title,
                     "summary": f"Stage progression of {_nice_name(value_col)} by {_nice_name(stage_col)}.",
                     "chart": chart,
@@ -2632,6 +2638,7 @@ async def _shape_template_insights(
                 if scatter_chart:
                     generated.append({
                         "insight_type": "shape_scatter",
+                        "group": "analysis",
                         "title": title,
                         "summary": f"Relationship between {_nice_name(x_col)} and {_nice_name(y_col)} across {len(result['rows'])} records.",
                         "chart": scatter_chart,
@@ -2652,6 +2659,7 @@ async def _shape_template_insights(
                 sql=g["sql"],
             )
             if card:
+                card["group"] = g.get("group", "analysis")
                 cards.append(card)
                 if len(cards) >= max_total:
                     break

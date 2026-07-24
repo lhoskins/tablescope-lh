@@ -326,4 +326,55 @@ describe("IntelligenceFeed", () => {
       ).toBeNull(),
     );
   });
+
+  it("renders every card in exactly one bucket, including shape and unknown types", async () => {
+    const shapeCard: InsightCard = {
+      ...RISK,
+      id: "shape-1",
+      insightType: "shape_scatter",
+      severity: "informational",
+      title: "Scatter of uptime vs incidents",
+    };
+    const futureCard: InsightCard = {
+      ...RISK,
+      id: "future-1",
+      insightType: "future_type",
+      severity: "informational",
+      title: "Future insight",
+    };
+    const snapshot = {
+      ...SNAPSHOT,
+      results: [
+        {
+          ...SNAPSHOT.results[0],
+          insights: [RISK, TREND, OPPORTUNITY, shapeCard, futureCard],
+        },
+      ],
+    };
+    renderFeed({ snapshot });
+
+    const buckets = [
+      { name: /Risks/, title: "SLA breach" },
+      { name: /Trends/, title: "Spend trending up" },
+      { name: /Opportunities/, title: "Consolidate suppliers" },
+      { name: /Deeper analysis/, title: "Scatter of uptime vs incidents" },
+    ];
+    for (const { name, title } of buckets) {
+      fireEvent.click(await screen.findByRole("button", { name }));
+      expect(await screen.findByText(title)).toBeTruthy();
+    }
+    // Future should also land in Deeper analysis.
+    expect(screen.getByText("Future insight")).toBeTruthy();
+
+    // Each card must appear exactly once across all buckets.
+    for (const title of [
+      "SLA breach",
+      "Spend trending up",
+      "Consolidate suppliers",
+      "Scatter of uptime vs incidents",
+      "Future insight",
+    ]) {
+      expect(screen.getAllByText(title).length).toBe(1);
+    }
+  });
 });

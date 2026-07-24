@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconAlertTriangle,
   IconBulb,
+  IconChartBar,
   IconRefresh,
   IconTrash,
   IconTrendingUp,
@@ -493,6 +494,10 @@ export function IntelligenceFeed({
       !risks.includes(c) &&
       !trends.includes(c),
   );
+  const analysis = allInsights.filter(
+    (c) =>
+      !risks.includes(c) && !trends.includes(c) && !opportunities.includes(c),
+  );
 
   const visibleProjects = useMemo(
     () => projects.filter((p) => selectedProjectIds.has(p.id)),
@@ -635,6 +640,24 @@ export function IntelligenceFeed({
               cards={opportunities}
               defaultOpen={false}
               emptyText="No opportunities detected from your projects yet."
+              loading={running}
+              feedbackById={feedbackById}
+              savingFeedback={savingFeedback}
+              onSaveToDashboard={handleSaveToDashboard}
+              onPin={onPin}
+              pinnedByFingerprint={pinnedByFingerprint}
+              onFeedbackSave={handleFeedbackSave}
+              onFeedbackRemove={handleFeedbackRemove}
+              onFeedbackRespond={handleFeedbackRespond}
+              governanceById={governanceById}
+              onCreateAction={onCreateAction}
+            />
+            <Section
+              title="Deeper analysis"
+              icon={<IconChartBar size={16} className="text-brand-500" />}
+              cards={analysis}
+              defaultOpen={false}
+              emptyText="No additional analysis available."
               loading={running}
               feedbackById={feedbackById}
               savingFeedback={savingFeedback}

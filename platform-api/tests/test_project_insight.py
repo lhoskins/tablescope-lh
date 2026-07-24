@@ -443,7 +443,8 @@ def test_card_group_maps_insight_type() -> None:
     assert pis._card_group("risk_sla") == "risks"
     assert pis._card_group("trend_spend") == "trends"
     assert pis._card_group("opportunity_supplier") == "opportunities"
-    assert pis._card_group("something_else") is None
+    assert pis._card_group("shape_scatter") == "analysis"
+    assert pis._card_group("something_else") == "analysis"
 
 
 async def test_grouped_intelligence_cards_groups_and_maps(monkeypatch) -> None:
