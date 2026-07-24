@@ -1,5 +1,10 @@
 # Devin prompt: data-shape chart ranking — many best-fit ECharts charts + top-6 suggestions
 
+> **SUPERSEDED.** Implement `docs/devin-plan-echarts-chart-intelligence.md`
+> instead — it is the authoritative, consolidated plan (adds the full ECharts
+> capability registry / planner access to all installed families, plus additive
+> and land-it guardrails). This file is kept only for history.
+
 Repository: `lhoskins/tablescope-lh`
 Base: the integrated R/ECharts branch (`devin/r-echarts-integration` or its merged
 successor). Feature branch: `devin/chart-selection-data-shape-ranking`.
