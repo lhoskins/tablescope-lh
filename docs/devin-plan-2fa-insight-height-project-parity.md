@@ -18,6 +18,14 @@ has `role_requires_mfa(role)` / `mfa_required_for_request(role, aal)` — today 
 `tenant_admin`/`root_admin` must complete SMS MFA; Members are optional. There is
 **no tenant flag** on the `Tenant` model. Add a tenant-level enforcement toggle.
 
+**Enforcement semantics (exact):**
+- **OFF (default):** unchanged from today — **admin/privileged accounts still
+  require 2FA** (the existing role-based policy stays in force); Members remain
+  optional. Turning the toggle off must never weaken admin 2FA.
+- **ON:** the **entire organization** must log in with 2FA — every member of the
+  tenant, regardless of role, requires an MFA-satisfied session. Admins remain
+  required (superset of the OFF behavior).
+
 Do:
 
 - **Model + migration:** add `enforce_2fa` (boolean, default `false`,
