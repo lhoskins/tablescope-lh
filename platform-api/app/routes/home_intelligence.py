@@ -22,13 +22,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import SessionLocal, get_db
 from app.models.audit_event import AuditEvent
+from app.models.business_insight_result import BusinessInsightResult
 from app.models.dashboard import Dashboard
 from app.models.file_source_meta import FileSourceMeta
 from app.models.intelligence_snapshot import IntelligenceSnapshot
@@ -543,6 +544,55 @@ async def get_intelligence_snapshot(
             **snap.payload,
             "stale": bool(stale_projects),
             "staleProjects": stale_projects,
+        }
+    }
+
+
+@router.post("/home-intelligence/clear-cache")
+async def clear_home_intelligence_cache(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> dict[str, Any]:
+    """Clear Business Insight caches for the caller's tenant.
+
+    Deletes the tenant's shared Business Insight result cache, the stream
+    snapshot, and per-user project snapshots used by the Business Insight feed.
+    The next feed refresh regenerates cards with the latest ranking.
+    """
+    r1 = await session.execute(
+        delete(BusinessInsightResult).where(
+            BusinessInsightResult.tenant_id == context.tenant_id
+        )
+    )
+    r2 = await session.execute(
+        delete(IntelligenceSnapshot).where(
+            IntelligenceSnapshot.tenant_id == context.tenant_id
+        )
+    )
+    r3 = await session.execute(
+        delete(ProjectIntelligenceSnapshot).where(
+            ProjectIntelligenceSnapshot.tenant_id == context.tenant_id,
+            ProjectIntelligenceSnapshot.suite == "insights",
+        )
+    )
+    business_count = int(getattr(r1, "rowcount", 0) or 0)
+    snapshot_count = int(getattr(r2, "rowcount", 0) or 0)
+    insight_snapshot_count = int(getattr(r3, "rowcount", 0) or 0)
+    session.add(
+        AuditEvent(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            event_type="tenant_settings",
+            scope="business_insight_cache_clear",
+            title="Cleared business insight cache",
+        )
+    )
+    await session.commit()
+    return {
+        "deleted": {
+            "business_insight_results": business_count,
+            "intelligence_snapshots": snapshot_count,
+            "project_insight_snapshots": insight_snapshot_count,
         }
     }
 

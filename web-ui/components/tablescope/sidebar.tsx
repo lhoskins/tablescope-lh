@@ -9,10 +9,7 @@ import {
   IconChevronDown,
   IconPlus,
   IconUsers,
-  IconBuildingBank,
   IconDatabaseShare,
-  IconMathFunction,
-  IconBrain,
   IconThumbUp,
   IconUserCircle,
   IconLogout,
@@ -164,7 +161,7 @@ export function Sidebar({
   const isPlatformAdmin =
     Boolean(user.isSuperAdmin) || user.rawRole === "root_admin";
 
-  const adminItems: NavItem[] = canManageUsers
+  const adminManagementItems: NavItem[] = canManageUsers
     ? [
         {
           key: "admin-settings",
@@ -178,35 +175,22 @@ export function Sidebar({
           href: "/admin/users",
           icon: IconUsers,
         },
+      ]
+    : [];
+
+  const adminToolItems: NavItem[] = canManageUsers
+    ? [
         {
-          key: "admin-tenants",
-          label: isPlatformAdmin ? "Tenants" : "My Tenant",
-          href: "/admin/tenants",
-          icon: IconBuildingBank,
+          key: "admin-insight-feedback",
+          label: "Insight Review",
+          href: "/admin/insight-feedback",
+          icon: IconThumbUp,
         },
         {
           key: "admin-data-source-assignments",
           label: "Data Source Assignments",
           href: "/admin/data-source-assignments",
           icon: IconDatabaseShare,
-        },
-        {
-          key: "admin-analytical-methods",
-          label: "Analytical Methods",
-          href: "/admin/analytical-methods",
-          icon: IconMathFunction,
-        },
-        {
-          key: "admin-ai-governance",
-          label: "AI Governance",
-          href: "/admin/ai-governance",
-          icon: IconBrain,
-        },
-        {
-          key: "admin-insight-feedback",
-          label: "Insight Review",
-          href: "/admin/insight-feedback",
-          icon: IconThumbUp,
         },
       ]
     : [];
@@ -316,9 +300,17 @@ export function Sidebar({
           />
         ))}
 
-        {mode === "home" && adminItems.length > 0 && (
+        {mode === "home" && adminManagementItems.length > 0 && (
           <NavGroupBlock
-            group={{ heading: "Administration", items: adminItems }}
+            group={{ heading: "Administration", items: adminManagementItems }}
+            activeNav={activeNav}
+            collapsed={collapsed}
+          />
+        )}
+
+        {mode === "home" && adminToolItems.length > 0 && (
+          <NavGroupBlock
+            group={{ heading: "Tools", items: adminToolItems }}
             activeNav={activeNav}
             collapsed={collapsed}
           />

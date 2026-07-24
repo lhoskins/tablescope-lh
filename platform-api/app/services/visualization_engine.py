@@ -154,6 +154,10 @@ _SHARE_LABEL_KEYS = (
     "group", "tier", "rating", "priority", "department", "mode", "method",
     "reason", "country", "state", "industry",
 )
+_METRIC_LABEL_KEYS = (
+    "metric", "measure", "name", "label", "kpi", "indicator", "stat",
+    "title", "description", "field",
+)
 _ID_LABEL_RE = re.compile(
     r"(?i)(sup|sku|id|code|part|item|vendor|customer|prod)[-_ ]?\w*\d"
 )
@@ -372,6 +376,13 @@ def _looks_like_id_labels(labels: list[str]) -> bool:
         if _ID_LABEL_RE.search(lbl) or len(lbl) >= 12 or any(c.isdigit() for c in lbl)
     )
     return idish >= max(1, int(len(labels) * 0.5))
+
+
+def _looks_like_metric_label(label_col: str | None) -> bool:
+    if not label_col:
+        return False
+    lower = label_col.lower()
+    return any(k in lower for k in _METRIC_LABEL_KEYS)
 
 
 # The public single-decision entry point is select_visualization(), defined
@@ -609,9 +620,17 @@ def recommend_visualizations(
     candidates: list[VizCandidate] = []
 
     # 1) Single-row scalar summary -> KPI (or table if no measure).
-    if shape.row_count == 1 and not shape.dimensions:
-        metric = shape.measures[0] if shape.measures else None
-        if metric:
+    # A single result row with one numeric measure and no real categorical
+    # dimension (or only a metric-name label dimension) is a headline metric.
+    # Time columns are excluded because a lone time point is still a series
+    # intent and should prefer line/area/combo.
+    if shape.row_count == 1 and shape.measures and not shape.time_columns:
+        non_time_label_cols = [c for c in shape.dimensions if c not in shape.time_columns]
+        scalar_label = (
+            len(non_time_label_cols) == 1 and _looks_like_metric_label(non_time_label_cols[0])
+        )
+        if not non_time_label_cols or scalar_label:
+            metric = shape.measures[0]
             candidates.append(
                 _candidate(
                     ChartType.KPI,
@@ -630,8 +649,11 @@ def recommend_visualizations(
                     reason="Single scalar value shown as a radial gauge.",
                 )
             )
-        candidates.append(_candidate(ChartType.TABLE, 0.1, reason="Single row with no numeric metric."))
-        return sorted(candidates, key=lambda c: c.score, reverse=True)
+            candidates.append(_candidate(ChartType.TABLE, 0.1, reason="Single row — table fallback."))
+            return sorted(candidates, key=lambda c: c.score, reverse=True)
+
+    if shape.row_count == 1 and not shape.measures:
+        return [_candidate(ChartType.TABLE, 0.1, reason="Single row with no numeric metric.")]
 
     # No measures at all -> table.
     if not shape.measures:
@@ -719,18 +741,8 @@ def recommend_visualizations(
                 )
             )
 
-    # 4a) Gauge: latest value from a time series.
-    if shape.measures and is_time:
-        gauge_value_col = shape.measures[0]
-        candidates.append(
-            _candidate(
-                ChartType.GAUGE,
-                0.55,
-                y_field=gauge_value_col,
-                value_format=detect_value_format(gauge_value_col, _column_values(dict_rows, gauge_value_col, 50)),
-                reason="Latest value shown as a radial gauge.",
-            )
-        )
+    # Gauge is only appropriate for a single-row scalar summary; it is handled
+    # in branch (1). Multi-point time series should never collapse to a gauge.
 
     # 4) Two numeric measures, no meaningful dimension -> scatter / effect scatter.
     if len(shape.measures) >= 2 and label_col is None:
@@ -790,19 +802,22 @@ def recommend_visualizations(
                 )
             )
 
-        # Radial bar: percentage-to-target/rate values.
+        # Radial bar: percentage-to-target/rate values (must be non-negative).
         rate_col = roles.get("rate")
         if rate_col:
-            candidates.append(
-                _candidate(
-                    ChartType.RADIAL_BAR,
-                    0.7,
-                    x_field=label_col,
-                    y_field=rate_col,
-                    value_format="percent",
-                    reason="Percentage-to-target metrics by category — radial bar.",
+            rate_values = _column_values(dict_rows, rate_col, 200)
+            rate_positive = all((f := _to_float(v)) is None or f >= 0 for v in rate_values)
+            if rate_positive:
+                candidates.append(
+                    _candidate(
+                        ChartType.RADIAL_BAR,
+                        0.7,
+                        x_field=label_col,
+                        y_field=rate_col,
+                        value_format="percent",
+                        reason="Percentage-to-target metrics by category — radial bar.",
+                    )
                 )
-            )
 
         # Treemap: hierarchical group + value.
         group_col = roles.get("group")
@@ -983,16 +998,19 @@ def _hint_candidate(
                 value_format=detect_value_format(value_col_flow, _column_values(rows, value_col_flow, 50)),
                 reason="Explicit sankey request.",
             )
-    if hint == "radial_bar" and label_col is not None:
+    if hint == "radial_bar" and label_col is not None and all_positive:
         rate_col = roles.get("rate") or value_col
-        return _candidate(
-            ChartType.RADIAL_BAR,
-            0.75,
-            x_field=label_col,
-            y_field=rate_col,
-            value_format="percent",
-            reason="Explicit radial bar request.",
-        )
+        rate_values = _column_values(rows, rate_col, 200)
+        rate_positive = all((f := _to_float(v)) is None or f >= 0 for v in rate_values)
+        if rate_positive:
+            return _candidate(
+                ChartType.RADIAL_BAR,
+                0.75,
+                x_field=label_col,
+                y_field=rate_col,
+                value_format="percent",
+                reason="Explicit radial bar request.",
+            )
     if hint == "bar" and label_col is not None:
         return _candidate(
             ChartType.BAR,
@@ -1002,7 +1020,7 @@ def _hint_candidate(
             value_format=vfmt,
             reason="Explicit bar request.",
         )
-    if hint == "gauge" and shape.measures:
+    if hint == "gauge" and shape.row_count == 1 and shape.measures:
         return _candidate(
             ChartType.GAUGE,
             0.78,

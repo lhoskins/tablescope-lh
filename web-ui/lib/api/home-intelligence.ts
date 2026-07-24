@@ -384,6 +384,16 @@ export function getIntelligenceSnapshot(): Promise<{
   return apiClient.get("/api/ai/home-intelligence/snapshot");
 }
 
+export function clearBusinessInsightCache(): Promise<{
+  deleted: {
+    business_insight_results: number;
+    intelligence_snapshots: number;
+    project_insight_snapshots: number;
+  };
+}> {
+  return apiClient.post("/api/ai/home-intelligence/clear-cache", {});
+}
+
 // ── Single-project re-run (report viewer) ────────────────────────────────────
 
 export function runIntelligenceSuite(

@@ -5,9 +5,11 @@ import {
   IconAlertTriangle,
   IconBulb,
   IconRefresh,
+  IconTrash,
   IconTrendingUp,
 } from "@tabler/icons-react";
 import {
+  clearBusinessInsightCache,
   getIntelligenceSnapshot,
   getPreferences,
   streamHomeIntelligence,
@@ -516,6 +518,28 @@ export function IntelligenceFeed({
     startStream(settings?.cross_project ?? true, granularity, hasCards);
   };
 
+  const [clearingCache, setClearingCache] = useState(false);
+  const handleClearCache = useCallback(async () => {
+    if (clearingCache) return;
+    if (!window.confirm("Clear all cached Business Insight cards?")) return;
+    setClearingCache(true);
+    controllerRef.current?.abort();
+    try {
+      await clearBusinessInsightCache();
+      setProjects([]);
+      setResults({});
+      setCompleted(new Set());
+      setSynthesis(null);
+      setLastUpdated(null);
+      setStatus("idle");
+      pushToast("Business Insight cache cleared", "success");
+    } catch (err) {
+      pushToast(`Failed to clear cache: ${String(err)}`, "error");
+    } finally {
+      setClearingCache(false);
+    }
+  }, [clearingCache, pushToast]);
+
   const handleSaveToDashboard = useCallback((card: InsightCard) => {
     setSaveCard(card);
   }, []);
@@ -541,6 +565,8 @@ export function IntelligenceFeed({
         running={running}
         lastUpdatedLabel={formatLastUpdated(lastUpdated)}
         onRefresh={handleRefresh}
+        onClearCache={handleClearCache}
+        isClearingCache={clearingCache}
         granularity={granularity}
         onGranularityChange={handleGranularity}
         synthesisHeadline={synthesis?.headline ?? null}

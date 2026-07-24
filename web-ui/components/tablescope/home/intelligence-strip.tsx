@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { IconFilter, IconRefresh, IconSparkles } from "@tabler/icons-react";
+import { IconFilter, IconRefresh, IconSparkles, IconTrash } from "@tabler/icons-react";
 
 export interface FilterableProject {
   id: string;
@@ -25,6 +25,8 @@ export interface IntelligenceStripProps {
   running: boolean;
   lastUpdatedLabel: string | null;
   onRefresh: () => void;
+  onClearCache?: () => void;
+  isClearingCache?: boolean;
   granularity: number;
   onGranularityChange: (value: number) => void;
   /** Cross-project synthesis headline, shown inside the blue banner. */
@@ -144,6 +146,8 @@ export function IntelligenceStrip({
   running,
   lastUpdatedLabel,
   onRefresh,
+  onClearCache,
+  isClearingCache,
   granularity,
   onGranularityChange,
   synthesisHeadline,
@@ -205,6 +209,18 @@ export function IntelligenceStrip({
 
         <div className="flex shrink-0 items-center gap-3 text-small text-brand-fg/80">
           {lastUpdatedLabel && <span>{lastUpdatedLabel}</span>}
+          {onClearCache && (
+            <button
+              type="button"
+              onClick={onClearCache}
+              disabled={isClearingCache}
+              title="Clear cached Business Insight cards"
+              aria-label="Clear Business Insight cache"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors hover:bg-white/15 disabled:opacity-50"
+            >
+              <IconTrash size={15} />
+            </button>
+          )}
           <button
             type="button"
             onClick={onRefresh}
