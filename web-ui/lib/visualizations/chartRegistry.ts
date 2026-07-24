@@ -20,11 +20,24 @@ export type ChartFamily =
   | "composed"
   | "pie"
   | "scatter"
+  | "effect_scatter"
   | "radar"
   | "radial_bar"
   | "treemap"
+  | "sunburst"
+  | "tree"
   | "funnel"
-  | "sankey";
+  | "sankey"
+  | "graph"
+  | "parallel"
+  | "lines"
+  | "heatmap"
+  | "candlestick"
+  | "boxplot"
+  | "pictorial_bar"
+  | "theme_river"
+  | "gauge"
+  | "map";
 
 export type ChartOptionType = "boolean" | "number" | "select";
 
@@ -66,6 +79,8 @@ export interface ChartTypeDefinition {
   options: ChartOptionDefinition[];
   bestFor: string[];
   aiRules: string[];
+  /** Whether the planner/selector may choose this family. */
+  enabled?: boolean;
 }
 
 const SHARED_DISPLAY_OPTIONS: ChartOptionDefinition[] = [
@@ -478,7 +493,7 @@ const SANKEY_OPTIONS: ChartOptionDefinition[] = [
   { key: "nodeWidth", label: "Node width", type: "number", group: "style", defaultValue: 12, min: 4, max: 40, step: 2 },
 ];
 
-export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
+export const CHART_REGISTRY: Partial<Record<WidgetType, ChartTypeDefinition>> = {
   kpi: {
     type: "kpi",
     label: "KPI",
@@ -687,6 +702,42 @@ export const CHART_REGISTRY: Record<WidgetType, ChartTypeDefinition> = {
     bestFor: ["Source \u2192 service \u2192 group flows", "Provider \u2192 BU spend"],
     aiRules: ["Use Sankey for source-to-target flows."],
   },
+  effect_scatter: {
+    type: "effect_scatter",
+    label: "Effect Scatter",
+    family: "effect_scatter",
+    icon: "\u{2728}",
+    description: "Scatter with animated emphasis on each point.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Effect Scatter" }],
+    options: SCATTER_OPTIONS,
+    bestFor: ["Anomalies", "Highlights", "Time-point events"],
+    aiRules: ["Use Effect Scatter to emphasize individual points."],
+    enabled: true,
+  },
+  gauge: {
+    type: "gauge",
+    label: "Gauge",
+    family: "gauge",
+    icon: "\u{1F6E0}\u{FE0F}",
+    description: "A single value shown as a radial gauge.",
+    requiredFields: ["y"],
+    variants: [
+      { value: "", label: "Gauge" },
+      { value: "semi", label: "Semi-circle" },
+    ],
+    options: [
+      { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+      { key: "domainMin", label: "Min value", type: "number", group: "advanced", defaultValue: 0, step: 1 },
+      { key: "domainMax", label: "Max value", type: "number", group: "advanced", defaultValue: 100, step: 1 },
+      { key: "innerRadius", label: "Inner radius %", type: "number", group: "style", defaultValue: 55, min: 0, max: 90, step: 5 },
+      { key: "outerRadius", label: "Outer radius %", type: "number", group: "style", defaultValue: 80, min: 40, max: 100, step: 5 },
+      COLOR_SCHEME_OPTION,
+    ],
+    bestFor: ["Current value vs target", "SLA", "Utilization"],
+    aiRules: ["Use Gauge for a single current value against a known scale."],
+    enabled: true,
+  },
 };
 
 /**
@@ -719,6 +770,8 @@ export const CHART_ALIASES: ChartAlias[] = [
   { alias: "treemap", label: "Treemap", type: "treemap", variant: "" },
   { alias: "funnel", label: "Funnel", type: "funnel", variant: "" },
   { alias: "sankey", label: "Sankey", type: "sankey", variant: "" },
+  { alias: "effect_scatter", label: "Effect Scatter", type: "effect_scatter", variant: "" },
+  { alias: "gauge", label: "Gauge", type: "gauge", variant: "" },
   { alias: "kpi", label: "KPI Card", type: "kpi", variant: "" },
   { alias: "table", label: "Table", type: "table", variant: "" },
 ];

@@ -19,6 +19,7 @@ from app.services.visualization_engine import (
     ChartType,
     detect_value_format,
     normalize_chart_hint,
+    rank_visualizations,
     select_visualization,
 )
 
@@ -158,8 +159,8 @@ def test_value_format_detection(name, values, expected) -> None:
 def test_legacy_hints_normalize_to_real_families() -> None:
     # Types the LLM prompt used to name that nothing could render.
     assert normalize_chart_hint("waterfall") == "bar"
-    assert normalize_chart_hint("gauge") == "radial_bar"
-    assert normalize_chart_hint("bullet") == "radial_bar"
+    assert normalize_chart_hint("gauge") == "gauge"
+    assert normalize_chart_hint("bullet") == "gauge"
     assert normalize_chart_hint("sparkline_table") == "line"
     assert normalize_chart_hint("narrative_insight") == "table"
     assert normalize_chart_hint("donut") == "pie"
@@ -211,3 +212,33 @@ def test_home_call_site_agrees_with_engine() -> None:
         ["segment", "revenue"], result["rows"], intent_hint="auto"
     )
     assert chart["type"] == engine.chart_type.value == "pie"
+
+
+# ── rank_visualizations: top-6 diverse suggestions ───────────────────────────────
+
+def test_rank_visualizations_returns_six_diverse_candidates() -> None:
+    rows = [
+        {"month": f"2026-{m:02d}", "sales": m * 10, "target": 50}
+        for m in range(1, 8)
+    ]
+    ranked = rank_visualizations(["month", "sales", "target"], rows, limit=6)
+    assert len(ranked) <= 6
+    families = [c.decision.chart_type.value for c in ranked]
+    assert len(families) == len(set(families)), "Top-6 must contain distinct families"
+    assert families[0] == "combo", "Two measures over time -> combo first"
+    assert all(c.score > 0 for c in ranked)
+    assert all(c.decision.reason for c in ranked)
+
+
+def test_rank_visualizations_includes_gauge_and_effect_scatter() -> None:
+    rows = [{"x": float(i), "y": float(2 * i + 1)} for i in range(20)]
+    ranked = rank_visualizations(["x", "y"], rows, limit=6)
+    families = [c.decision.chart_type.value for c in ranked]
+    assert "scatter" in families
+    assert "effect_scatter" in families
+
+
+def test_rank_visualizations_gauge_for_single_row() -> None:
+    ranked = rank_visualizations(["revenue"], [{"revenue": 1200}], limit=6)
+    assert ranked[0].decision.chart_type is ChartType.KPI
+    assert any(c.decision.chart_type is ChartType.GAUGE for c in ranked)
