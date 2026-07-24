@@ -10,17 +10,15 @@ import {
   IconPlus,
   IconUsers,
   IconBuildingBank,
-  IconShieldLock,
   IconDatabaseShare,
-  IconPhoto,
   IconMathFunction,
   IconBrain,
-  IconFolders,
   IconThumbUp,
   IconUserCircle,
   IconLogout,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
+  IconSettings,
 } from "@tabler/icons-react";
 import { signOut } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -169,6 +167,12 @@ export function Sidebar({
   const adminItems: NavItem[] = canManageUsers
     ? [
         {
+          key: "admin-settings",
+          label: "Settings",
+          href: "/admin/settings",
+          icon: IconSettings,
+        },
+        {
           key: "admin-users",
           label: "Users",
           href: "/admin/users",
@@ -181,22 +185,10 @@ export function Sidebar({
           icon: IconBuildingBank,
         },
         {
-          key: "admin-allowed-domains",
-          label: "Allowed Domains",
-          href: "/admin/allowed-domains",
-          icon: IconShieldLock,
-        },
-        {
           key: "admin-data-source-assignments",
           label: "Data Source Assignments",
           href: "/admin/data-source-assignments",
           icon: IconDatabaseShare,
-        },
-        {
-          key: "admin-branding",
-          label: "Branding",
-          href: "/admin/branding",
-          icon: IconPhoto,
         },
         {
           key: "admin-analytical-methods",
@@ -209,12 +201,6 @@ export function Sidebar({
           label: "AI Governance",
           href: "/admin/ai-governance",
           icon: IconBrain,
-        },
-        {
-          key: "admin-repositories",
-          label: "Repositories",
-          href: "/admin/repositories",
-          icon: IconFolders,
         },
         {
           key: "admin-insight-feedback",
