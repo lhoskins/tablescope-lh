@@ -279,6 +279,32 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
     }
 
 
+def _series_to_result(card: dict[str, Any]) -> dict[str, Any] | None:
+    """Reconstruct a result set from a chart's rendered series for the method engine."""
+    chart = card.get("chart") or {}
+    series = chart.get("data", {}).get("series") if isinstance(chart.get("data"), dict) else None
+    if not series and isinstance(chart.get("series"), list):
+        series = chart["series"]
+    if not isinstance(series, list) or not series:
+        return None
+    label_col = card.get("labelColumn") or "label"
+    value_col = card.get("valueColumn") or "value"
+    # If series items already look like rows, use their keys; otherwise build rows
+    # from (label, value) pairs.
+    if isinstance(series[0], dict):
+        keys = set(series[0].keys())
+        if label_col in keys and value_col in keys:
+            return {"columns": list(keys), "rows": series}
+        return {
+            "columns": [label_col, value_col],
+            "rows": [{label_col: s.get("label"), value_col: s.get("value")} for s in series],
+        }
+    return {
+        "columns": [label_col, value_col],
+        "rows": [{label_col: s[0], value_col: s[1]} for s in series],
+    }
+
+
 def _is_relationship_card(card: dict[str, Any]) -> bool:
     """A multi-table relationship analysis with two populated series."""
     if not str(card.get("insightType", "")).startswith("relationship"):
@@ -312,6 +338,11 @@ async def _attach_method_envelope_to_card(
                 card.get("insightId"), exc,
             )
             result = None
+    if not result and card.get("chart"):
+        # Deterministic prompt functions do not keep the raw SQL/result, but the
+        # rendered chart series is enough for the method engine to profile and
+        # select a method.
+        result = _series_to_result(card)
     if not result or not result.get("rows"):
         return
     columns = result.get("columns", [])
