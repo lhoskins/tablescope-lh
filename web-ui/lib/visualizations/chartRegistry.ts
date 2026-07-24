@@ -402,6 +402,12 @@ const SCATTER_OPTIONS: ChartOptionDefinition[] = [
   DATA_ZOOM_OPTION,
   { key: "bubble", label: "Bubble (size by Z)", type: "boolean", group: "chart", defaultValue: false, description: "Sizes each point by the Z column." },
   { key: "showTrendLine", label: "Line of best fit", type: "boolean", group: "advanced", defaultValue: false },
+];
+
+const HEATMAP_OPTIONS: ChartOptionDefinition[] = [
+  { key: "showTooltip", label: "Show tooltip", type: "boolean", group: "chart", defaultValue: true },
+  { key: "showLabels", label: "Show cell values", type: "boolean", group: "chart", defaultValue: false },
+  COLOR_SCHEME_OPTION,
   { key: "showRegressionLine", label: "Show regression line", type: "boolean", group: "advanced", defaultValue: false },
   { key: "showControlLimits", label: "Show control limits (±2σ)", type: "boolean", group: "advanced", defaultValue: false },
 ];
@@ -702,6 +708,19 @@ export const CHART_REGISTRY: Partial<Record<WidgetType, ChartTypeDefinition>> = 
     bestFor: ["Source \u2192 service \u2192 group flows", "Provider \u2192 BU spend"],
     aiRules: ["Use Sankey for source-to-target flows."],
   },
+  heatmap: {
+    type: "heatmap",
+    label: "Heatmap",
+    family: "heatmap",
+    icon: "\u{1F525}",
+    description: "Density of a value across two categorical dimensions.",
+    requiredFields: ["x", "y"],
+    variants: [{ value: "", label: "Heatmap" }],
+    options: HEATMAP_OPTIONS,
+    bestFor: ["Two-dimension breakdown", "Correlation matrix", "Volume by region and period"],
+    aiRules: ["Use Heatmap when a value varies across two categorical dimensions."],
+    enabled: true,
+  },
   effect_scatter: {
     type: "effect_scatter",
     label: "Effect Scatter",
@@ -770,6 +789,7 @@ export const CHART_ALIASES: ChartAlias[] = [
   { alias: "treemap", label: "Treemap", type: "treemap", variant: "" },
   { alias: "funnel", label: "Funnel", type: "funnel", variant: "" },
   { alias: "sankey", label: "Sankey", type: "sankey", variant: "" },
+  { alias: "heatmap", label: "Heatmap", type: "heatmap", variant: "" },
   { alias: "effect_scatter", label: "Effect Scatter", type: "effect_scatter", variant: "" },
   { alias: "gauge", label: "Gauge", type: "gauge", variant: "" },
   { alias: "kpi", label: "KPI Card", type: "kpi", variant: "" },

@@ -402,7 +402,7 @@ _HINT_ALIASES: dict[str, str] = {
     "stacked_bar": "bar",
     "grouped_bar": "bar",
     "waterfall": "bar",
-    "heatmap": "bar",
+    "heatmap": "heatmap",
     "line": "line",
     "multi_line": "line",
     "smooth_line": "line",
@@ -784,6 +784,25 @@ def recommend_visualizations(
             )
         )
 
+    # 4b) Heatmap: two categorical dimensions and a numeric measure.
+    if len(shape.dimensions) >= 2 and len(shape.measures) >= 1:
+        non_period_dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+        dims = non_period_dims if len(non_period_dims) >= 2 else shape.dimensions[:2]
+        if len(dims) >= 2:
+            x_dim, y_dim = dims[0], dims[1]
+            measure = shape.measures[0]
+            candidates.append(
+                _candidate(
+                    ChartType.HEATMAP,
+                    0.74,
+                    x_field=x_dim,
+                    y_field=measure,
+                    y2_field=y_dim,
+                    value_format=detect_value_format(measure, _column_values(dict_rows, measure, 50)),
+                    reason=f"Two dimensions ({x_dim}, {y_dim}) and a measure ({measure}) — heatmap.",
+                )
+            )
+
     # 5) Funnel: stage-like labels and monotonically decreasing values.
     stage_col = roles.get("stage")
     if stage_col and label_col == stage_col and all_positive:
@@ -979,6 +998,20 @@ def _hint_candidate(
             value_format=vfmt,
             reason="Explicit share breakdown.",
         )
+    if hint == "heatmap":
+        if len(shape.dimensions) >= 2 and len(shape.measures) >= 1:
+            non_period = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+            dims = non_period if len(non_period) >= 2 else shape.dimensions[:2]
+            if len(dims) >= 2:
+                return _candidate(
+                    ChartType.HEATMAP,
+                    0.8,
+                    x_field=dims[0],
+                    y_field=shape.measures[0],
+                    y2_field=dims[1],
+                    value_format=detect_value_format(shape.measures[0], _column_values(rows, shape.measures[0], 50)),
+                    reason="Explicit heatmap request for two dimensions and a measure.",
+                )
     if hint == "radar" and label_col is not None and not label_is_period:
         return _candidate(
             ChartType.RADAR,

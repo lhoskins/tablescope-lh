@@ -71,9 +71,67 @@ function calloutLabel(type: InsightCallout["type"]): string {
  * The backend emits a `{label, value}` series plus a dashboard chart
  * `type`/`subtype`; we adapt that into a minimal `WidgetConfig` + rows.
  */
+function buildMultiDimWidget(chart: InsightChart, dataRows: Record<string, unknown>[]): WidgetConfig {
+  const roles = chart.roles ?? {};
+  const type = chart.type as WidgetType;
+  const base: WidgetConfig = {
+    id: "insight-chart",
+    type,
+    chartSubtype: (chart.subtype || undefined) as WidgetConfig["chartSubtype"],
+    title: "",
+    dataSource: { kind: "custom_sql" },
+    xColumn: roles.x ?? "",
+    yColumn: roles.value ?? roles.y ?? "",
+    aggregation: "sum",
+    sortBy: "x_asc",
+    filters: [],
+    visualizationOptions: { showLegend: type === "radar", showGrid: false },
+    colSpan: 1,
+    position: 0,
+  };
+
+  if (type === "scatter" || type === "effect_scatter") {
+    return {
+      ...base,
+      xColumn: roles.x ?? "x",
+      yColumn: roles.y ?? "y",
+      groupByColumn: roles.group,
+      xColumnType: "number",
+    };
+  }
+  if (type === "radar") {
+    return { ...base, xColumn: roles.x ?? "subject", yColumn: roles.value ?? "value", groupByColumn: roles.group ?? "metric" };
+  }
+  if (type === "heatmap") {
+    return { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? "", groupByColumn: roles.y ?? roles.group ?? "" };
+  }
+  if (type === "treemap" || type === "sankey") {
+    return { ...base, xColumn: roles.x ?? "", yColumn: roles.value ?? "", groupByColumn: roles.group ?? "" };
+  }
+  if (type === "funnel" || type === "gauge") {
+    return { ...base, xColumn: roles.x ?? (Object.keys(dataRows[0] ?? {})[0] || ""), yColumn: roles.value ?? "" };
+  }
+  if (type === "combo" && roles.y2) {
+    return { ...base, xColumn: roles.x ?? "label", yColumn: roles.y ?? "value", y2Column: roles.y2, y2Aggregation: "sum" };
+  }
+  return { ...base, xColumn: roles.x ?? "label", yColumn: roles.value ?? roles.y ?? "value" };
+}
+
 function InsightChartView({ chart }: { chart: InsightChart }) {
-  const series = chart.data.series ?? [];
-  if (series.length === 0) return null;
+  const dataRows = chart.data.rows;
+  const series = chart.data.series;
+
+  if (dataRows && dataRows.length > 0) {
+    const widget = buildMultiDimWidget(chart, dataRows);
+    const height = chart.type === "funnel" || chart.type === "sankey" ? 260 : chart.type === "heatmap" ? 240 : 220;
+    return (
+      <div className="w-full" style={{ height }}>
+        <WidgetRenderer widget={widget} data={dataRows} />
+      </div>
+    );
+  }
+
+  if (!series || series.length === 0) return null;
 
   // Two-metric charts (combo/scatter/bubble) carry a second value; expose both
   // columns so the renderer can map them onto the right axes.
