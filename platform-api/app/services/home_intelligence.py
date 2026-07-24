@@ -2399,6 +2399,13 @@ def _build_multi_chart(
     if y2_field:
         decision["y2Field"] = y2_field
 
+    candidate = {
+        "decision": decision,
+        "score": 1.0,
+        "supported": True,
+        "unsupportedReason": "",
+    }
+
     return {
         "type": chart_type,
         "subtype": "",
@@ -2406,7 +2413,7 @@ def _build_multi_chart(
         "data": {"rows": rows, "columns": columns},
         "roles": roles,
         "visualizationDecision": decision,
-        "chartCandidates": [decision],
+        "chartCandidates": [candidate],
     }
 
 
