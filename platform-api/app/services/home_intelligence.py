@@ -1023,13 +1023,19 @@ def _card(
             if candidates:
                 current_chart_type = (card.get("chart") or {}).get("type")
                 chosen = candidates[0]
+                # Preserve legacy multi-KPI card type while still offering candidates.
+                preserve_type = current_chart_type == "kpi_grid"
                 for c in candidates:
-                    if c.decision.chart_type.value == current_chart_type:
+                    match_value = c.decision.chart_type.value
+                    if preserve_type and match_value == "kpi":
+                        chosen = c
+                        break
+                    if match_value == current_chart_type:
                         chosen = c
                         break
                 card["visualizationDecision"] = chosen.decision.to_dict()
                 card["chartCandidates"] = [c.to_dict() for c in candidates[:6]]
-                if card.get("chart"):
+                if card.get("chart") and not preserve_type:
                     card["chart"]["type"] = chosen.decision.chart_type.value
                     card["chart"]["subtype"] = chosen.decision.chart_style or ""
     except Exception as exc:

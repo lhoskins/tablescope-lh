@@ -242,3 +242,28 @@ def test_rank_visualizations_gauge_for_single_row() -> None:
     ranked = rank_visualizations(["revenue"], [{"revenue": 1200}], limit=6)
     assert ranked[0].decision.chart_type is ChartType.KPI
     assert any(c.decision.chart_type is ChartType.GAUGE for c in ranked)
+
+
+def test_rank_visualizations_single_row_with_label_is_kpi() -> None:
+    ranked = rank_visualizations(
+        ["metric", "value"], [{"metric": "Total Revenue", "value": 1200}], limit=6
+    )
+    assert ranked[0].decision.chart_type is ChartType.KPI
+    assert any(c.decision.chart_type is ChartType.GAUGE for c in ranked)
+
+
+def test_rank_visualizations_time_series_excludes_gauge() -> None:
+    rows = [{"month": f"2026-{m:02d}", "sales": m * 10} for m in range(1, 8)]
+    ranked = rank_visualizations(["month", "sales"], rows, limit=6)
+    families = {c.decision.chart_type for c in ranked}
+    assert ChartType.GAUGE not in families
+    assert ranked[0].decision.chart_type in (ChartType.LINE, ChartType.COMBO, ChartType.AREA)
+
+
+def test_explicit_gauge_hint_ignored_for_time_series() -> None:
+    rows = [{"month": f"2026-{m:02d}", "sales": m * 10} for m in range(1, 8)]
+    ranked = rank_visualizations(
+        ["month", "sales"], rows, intent_hint="gauge", limit=6
+    )
+    assert ranked[0].decision.chart_type is not ChartType.GAUGE
+    assert all(c.decision.chart_type is not ChartType.GAUGE for c in ranked)

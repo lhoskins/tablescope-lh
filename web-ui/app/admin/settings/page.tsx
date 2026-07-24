@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import {
   IconBook,
   IconBuildingBank,
+  IconMathFunction,
+  IconBrain,
   IconPhoto,
   IconShieldLock,
   IconFolders,
@@ -72,6 +74,27 @@ export default function AdminSettingsPage() {
       description: "Connect and manage enterprise repositories and UNC paths.",
       href: "/admin/repositories",
       icon: IconFolders,
+    },
+    {
+      key: "my-tenant",
+      label: "My Tenant",
+      description: "Manage tenant details and tenant-wide 2FA enforcement.",
+      href: tenantId ? `/admin/tenants/${tenantId}` : "/admin/tenants",
+      icon: IconBuildingBank,
+    },
+    {
+      key: "analytical-methods",
+      label: "Analytical Methods",
+      description: "Activate and review analytical method catalog entries.",
+      href: "/admin/analytical-methods",
+      icon: IconMathFunction,
+    },
+    {
+      key: "ai-governance",
+      label: "AI Governance",
+      description: "Review AI governance policies and audit history.",
+      href: "/admin/ai-governance",
+      icon: IconBrain,
     },
     {
       key: "two-factor",

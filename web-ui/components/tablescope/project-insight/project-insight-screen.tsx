@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconSparkles,
   IconRefresh,
+  IconTrash,
   IconAlertTriangle,
   IconAlertCircle,
   IconArrowUpRight,
@@ -242,6 +243,20 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     },
   });
 
+  const clearCache = useMutation({
+    mutationFn: () => projectInsightApi.clearCache(projectId),
+    onSuccess: () => {
+      queryClient.setQueryData(INSIGHT_KEY(projectId), undefined);
+      push("Project Insight cache cleared", "success");
+    },
+    onError: (err: Error) => push(err.message, "error"),
+  });
+
+  const handleClearCache = () => {
+    if (!window.confirm("Clear cached Project Insight cards?")) return;
+    clearCache.mutate();
+  };
+
   // Insights & opportunities — the same content as the Home page's
   // "Suggest Insights" pill, scoped to this project, rendered inline.
   const insightsQuery = useQuery({
@@ -462,8 +477,16 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
           </span>
           <Button
             variant="secondary"
+            onClick={handleClearCache}
+            disabled={clearCache.isPending || analyzing}
+          >
+            <IconTrash size={14} />
+            Clear cache
+          </Button>
+          <Button
+            variant="secondary"
             onClick={handleRefresh}
-            disabled={analyzing}
+            disabled={analyzing || clearCache.isPending}
           >
             <IconRefresh
               size={14}

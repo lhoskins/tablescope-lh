@@ -339,12 +339,22 @@ async def list_tenants(
 async def get_tenant_details(
     tenant_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(_require_root_or_super),
+    context: RequestContext = Depends(_require_user_management),
 ) -> dict:
-    """Get tenant details including users with VDB info and shared VDBs."""
+    """Get tenant details including users with VDB info and shared VDBs.
+
+    Tenant admins may view their own tenant; root/super admins may view any tenant.
+    """
     tenant = await session.get(Tenant, tenant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    if (
+        not context.is_service
+        and context.tenant_id != tenant_id
+        and context.role not in (Role.ROOT_ADMIN,)
+        and not await _is_super_admin(session, context)
+    ):
+        raise HTTPException(status_code=403, detail="Cannot view another tenant")
 
     # Get all users for this tenant
     users_result = await session.scalars(

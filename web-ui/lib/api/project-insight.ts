@@ -218,6 +218,11 @@ export const projectInsightApi = {
     apiClient.get<ProjectInsight>(
       `/api/projects/${projectId}/insight?refresh=true`,
     ),
+  clearCache: (projectId: string) =>
+    apiClient.post<{ deleted: { project_intelligence_snapshots: number; business_insight_results: number } }>(
+      `/api/projects/${projectId}/insight/clear-cache`,
+      {},
+    ),
   acknowledge: (
     projectId: string,
     insightId: string,
