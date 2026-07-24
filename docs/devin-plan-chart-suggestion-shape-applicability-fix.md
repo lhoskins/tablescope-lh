@@ -85,6 +85,39 @@ charts: truncate/delete `business_insight_results` and the project-insight
 snapshots (existing `scripts/delete_insight_caches.py` path), then let them
 regenerate.
 
+### 5. "Clear cache" button on the Business Insight and Project Insight pages
+
+Add a user-facing **Clear cache** button on each insight page so a user can empty
+the cached cards on demand; **all cards disappear** after clearing (empty state),
+and cards rebuild on the next generate/refresh.
+
+The clear logic already exists but only as an **unscoped script**
+(`scripts/delete_insight_caches.py` `delete_insight_caches()` deletes all
+`BusinessInsightResult` + `ProjectIntelligenceSnapshot` rows). The button needs
+**scoped** endpoints:
+
+- **Backend — Business Insight:** an endpoint that deletes
+  `BusinessInsightResult` rows for **`context.tenant_id` only** (not all tenants).
+- **Backend — Project Insight:** an endpoint that deletes
+  `ProjectIntelligenceSnapshot` rows for the **specific `project_id`** (enforce
+  project access), reusing the existing sequence-reset safety from the script.
+- Gate both appropriately (ADMIN / project-manage role), audit the action, and
+  keep tenant/project isolation strict — a clear must never touch another
+  tenant's or project's cache.
+- **Frontend:** add a **Clear cache** button to
+  `web-ui/app/business-insight/page.tsx` (tenant scope) and the Project Insight
+  page/screen `web-ui/components/tablescope/project-insight/project-insight-screen.tsx`
+  (current project scope). On click: a confirm dialog, call the endpoint, then
+  **invalidate the insights query** so the card list immediately empties to the
+  existing empty state. Do not auto-regenerate — clearing just empties; the
+  normal generate/refresh rebuilds with the corrected ranking.
+- Place it near the existing page header actions; disable while the request is in
+  flight; show a brief success confirmation.
+
+Tests: clearing empties only the caller's tenant (business) / project (project)
+cache and leaves others intact; the page shows zero cards after clear; a
+subsequent refresh regenerates; non-authorized roles are forbidden.
+
 ## Expectation-setting (honest)
 
 "More variety" is bounded by the data shape — a simple monthly single-metric trend
