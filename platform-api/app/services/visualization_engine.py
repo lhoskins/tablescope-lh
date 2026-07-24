@@ -1019,13 +1019,9 @@ def _hint_candidate(
             value_format=vfmt,
             reason="Explicit effect-scatter request — emphasize individual points.",
         )
-    return _candidate(
-        ChartType.TABLE,
-        0.3,
-        reason=f"Explicit {hint} request is not supported by this data shape.",
-        supported=False,
-        unsupported_reason=f"Data shape does not support a {hint} chart.",
-    )
+    # The explicit hint cannot be honoured by this data shape; fall through to
+    # the shape-driven ranking so the data always wins.
+    return None
 
 
 def _fallback_candidates(
