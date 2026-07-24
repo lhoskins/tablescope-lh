@@ -203,15 +203,19 @@ _INVESTIGATION_QUESTIONS = {
 }
 
 
-def _card_group(insight_type: str) -> str | None:
-    """Map a built-in insight type onto risks / trends / opportunities."""
+def _card_group(insight_type: str) -> str:
+    """Map a built-in insight type onto risks / trends / opportunities / analysis.
+
+    Anything that does not fit the three executive buckets lands in analysis
+    (e.g. shape-template cards) so no generated card is silently dropped.
+    """
     if insight_type.startswith("risk"):
         return "risks"
     if insight_type.startswith(("trend", "relationship")):
         return "trends"
     if insight_type.startswith("opportunity"):
         return "opportunities"
-    return None
+    return "analysis"
 
 
 def _normalize_severity(severity: str, group: str) -> str:
@@ -222,6 +226,8 @@ def _normalize_severity(severity: str, group: str) -> str:
     if group == "trends":
         if sev in ("urgent", "critical"):
             return "warning"
+        return sev if sev in _TREND_SEVERITIES else "informational"
+    if group == "analysis":
         return sev if sev in _TREND_SEVERITIES else "informational"
     return sev if sev in _OPPORTUNITY_SEVERITIES else "opportunity"
 
@@ -423,6 +429,7 @@ async def _grouped_intelligence_cards(
         "risks": [],
         "trends": [],
         "opportunities": [],
+        "analysis": [],
     }
     cards: list[dict[str, Any]] = []
     try:
@@ -482,8 +489,6 @@ async def _grouped_intelligence_cards(
         if not isinstance(card, dict):
             continue
         group = _card_group(str(card.get("insightType", "")))
-        if group is None:
-            continue
         grouped[group].append(_to_insight_card(card, group))
     return grouped
 
@@ -674,6 +679,7 @@ async def build_project_insight(
             risks=grouped_cards["risks"],
             trends=grouped_cards["trends"],
             opportunities=grouped_cards["opportunities"],
+            analysis=grouped_cards["analysis"],
             whatChangedSinceLastVisit=what_changed,
             aiAvailable=False,
             aiContextEnabled=project_context.get("ai_context_enabled") if project_context else False,
@@ -740,6 +746,7 @@ async def build_project_insight(
         risks=grouped_cards["risks"],
         trends=grouped_cards["trends"],
         opportunities=grouped_cards["opportunities"],
+        analysis=grouped_cards["analysis"],
         whatChangedSinceLastVisit=what_changed,
         insightValidationWorkflow=workflow,
         aiAvailable=True,

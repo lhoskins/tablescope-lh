@@ -396,6 +396,16 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       ),
     [allAiCards, riskCards, trendCards],
   );
+  const analysisCards = useMemo(
+    () =>
+      allAiCards.filter(
+        (c) =>
+          !riskCards.includes(c) &&
+          !trendCards.includes(c) &&
+          !opportunityCards.includes(c),
+      ),
+    [allAiCards, riskCards, trendCards, opportunityCards],
+  );
   const allTrendCards = trendCards;
 
   const allInsightCards = allAiCards;
@@ -559,8 +569,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               </div>
             </section>
 
-            {/* Risks / Trends / Opportunities cards */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            {/* Risks / Trends / Opportunities / Analysis cards */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
               <InsightCardColumn
                 title="Risks"
                 icon={
@@ -627,6 +637,31 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 savingFeedback={savingFeedback}
                 onInvestigate={(c) =>
                   investigateCard(c, "project_insight_opportunity")
+                }
+                onReview={reviewCard}
+                onFeedbackSave={handleFeedbackSave}
+                onFeedbackRemove={handleFeedbackRemove}
+                onFeedbackRespond={handleFeedbackRespond}
+                governanceById={governanceById}
+                onCreateAction={handleCreateAction}
+                onPin={handlePinInsight}
+                onSaveToDashboard={setSaveToDashboardCard}
+                pinnedByFingerprint={pinnedByFingerprint}
+                reviewPending={acknowledge.isPending}
+                reviewPendingId={acknowledge.variables?.id}
+              />
+              <InsightCardColumn
+                title="Deeper analysis"
+                icon={<IconChartBar size={16} className="text-brand-500" />}
+                cards={analysisCards}
+                emptyText="No deeper analysis available for this project yet."
+                reviewedIds={reviewedIds}
+                projectId={projectId}
+                projectName={data?.project.name ?? ""}
+                feedbackById={feedbackById}
+                savingFeedback={savingFeedback}
+                onInvestigate={(c) =>
+                  investigateCard(c, "project_insight_analysis")
                 }
                 onReview={reviewCard}
                 onFeedbackSave={handleFeedbackSave}

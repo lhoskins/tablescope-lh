@@ -169,6 +169,7 @@ export interface ProjectInsight {
   risks: ProjectInsightCard[];
   trends: ProjectInsightCard[];
   opportunities: ProjectInsightCard[];
+  analysis: ProjectInsightCard[];
   whatChangedSinceLastVisit: WhatChangedSinceLastVisit;
   insightValidationWorkflow: InsightWorkflowItem[];
   aiAvailable: boolean;
