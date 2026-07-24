@@ -39,6 +39,7 @@ from app.auth.mfa_policy import (
 from app.config import get_settings
 from app.database import get_db
 from app.models.mfa_sms_event import MFA_SMS_FACTOR_REMOVED
+from app.models.tenant import Tenant
 from app.models.user import User
 from app.services.mfa_phone_service import (
     deactivate_factor,
@@ -66,6 +67,7 @@ CODE = re.compile(r"^\d{4,10}$")
 class MfaStatusResponse(BaseModel):
     role: str
     roleRequiresMfa: bool
+    tenantRequiresMfa: bool
     aal: str | None
     mfaSatisfied: bool
     hasVerifiedFactor: bool
@@ -110,18 +112,27 @@ async def mfa_status(
     """Report the caller's MFA requirement + whether the session satisfies it."""
     user = await session.get(User, context.user_id)
     role = (user.role if user else context.role) or "viewer"
+    tenant = await session.get(Tenant, context.tenant_id)
+    settings = get_settings()
     # roleRequiresMfa reflects *effective* enforcement: only true when the master
     # switch is on, so the frontend gate doesn't redirect before MFA is live.
-    requires = get_settings().mfa_enforcement_enabled and role_requires_mfa(role)
+    role_requires = settings.mfa_enforcement_enabled and role_requires_mfa(role)
+    # tenantRequiresMfa is true when the tenant has mandated 2FA for every member
+    # (including non-admin roles). It is also gated by the platform MFA switch.
+    tenant_requires = (
+        settings.mfa_enforcement_enabled
+        and bool(tenant.enforce_2fa if tenant else False)
+    )
     satisfied = session_has_mfa(context.aal)
     factor = await get_active_factor(session, context.user_id)
     has_factor = factor is not None
     required_action: str | None = None
-    if requires and not satisfied:
+    if (role_requires or tenant_requires) and not satisfied:
         required_action = "challenge" if has_factor else "setup"
     return MfaStatusResponse(
         role=role,
-        roleRequiresMfa=requires,
+        roleRequiresMfa=role_requires,
+        tenantRequiresMfa=tenant_requires,
         aal=context.aal,
         mfaSatisfied=satisfied,
         hasVerifiedFactor=has_factor,

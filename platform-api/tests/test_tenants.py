@@ -168,3 +168,49 @@ async def test_delete_tenant_bound_to_data_plane_rejected(
     )
     assert rejected.status_code == 409
     assert "data plane" in rejected.json()["detail"].lower()
+
+
+# --- Tenant-wide 2FA enforcement toggle -------------------------------------
+
+
+def _admin_token(tenant_id: int, user_id: int) -> str:
+    from app.auth.jwt import create_access_token
+
+    return create_access_token(
+        sub="admin-test",
+        tenant_id=tenant_id,
+        user_id=user_id,
+        role="admin",
+    )
+
+
+async def test_tenant_2fa_enforcement_toggle(client, service_headers) -> None:
+    created = await client.post(
+        "/api/tenants",
+        json={
+            "slug": "2fa-toggle",
+            "name": "2FA Toggle",
+            "root_user_email": "admin@2fa-toggle.com",
+            "root_user_password": "pw-123456",
+        },
+        headers=service_headers,
+    )
+    assert created.status_code == 201, created.text
+    tenant = created.json()
+    assert tenant["enforce_2fa"] is False
+
+    headers = {"Authorization": f"Bearer {_admin_token(tenant['id'], 1)}"}
+    r = await client.put(
+        f"/api/tenants/{tenant['id']}/2fa-enforcement",
+        json={"enabled": True},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["enabled"] is True
+
+    r = await client.get(
+        f"/api/tenants/{tenant['id']}/2fa-enforcement",
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["enabled"] is True

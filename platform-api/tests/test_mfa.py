@@ -212,6 +212,34 @@ async def test_mfa_status_member_optional(client_strict, db_session) -> None:
     assert r.json()["roleRequiresMfa"] is False
 
 
+async def test_tenant_enforce_2fa_blocks_member_aal1(client_strict, db_session) -> None:
+    tenant, user = await _seed(db_session, role="member", ext="ext-t2fa")
+    tenant.enforce_2fa = True
+    await db_session.commit()
+    r = await client_strict.get(
+        "/api/projects",
+        headers=_headers(tenant.id, user.id, role="member", aal="aal1", sub="ext-t2fa"),
+    )
+    assert r.status_code == 403
+    assert r.json()["error"] == "MFA_REQUIRED"
+
+
+async def test_tenant_enforce_2fa_status_informs_members_to_setup(client_strict, db_session) -> None:
+    tenant, user = await _seed(db_session, role="member", ext="ext-t2fa-st")
+    tenant.enforce_2fa = True
+    await db_session.commit()
+    r = await client_strict.get(
+        "/api/mfa/status",
+        headers=_headers(tenant.id, user.id, role="member", aal="aal1", sub="ext-t2fa-st"),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["roleRequiresMfa"] is False
+    assert body["tenantRequiresMfa"] is True
+    assert body["mfaSatisfied"] is False
+    assert body["requiredAction"] == "setup"
+
+
 # --- Twilio Verify service contract -----------------------------------------
 
 

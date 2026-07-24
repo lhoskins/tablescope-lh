@@ -40,6 +40,7 @@ from app.schemas.project_insight import (
 from app.services import ai_intelligence_client as ai
 from app.services import home_intelligence as hi
 from app.services.ai_governance import ai_governance_service, infer_governance_key
+from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.executive_insight_dependencies import ExecutiveInsightDependencyService
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
@@ -273,6 +274,8 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
         "confidenceEvaluation": card.get("confidenceEvaluation"),
         "visualizationDecision": card.get("visualizationDecision"),
         "chartCandidates": card.get("chartCandidates"),
+        "analyticalMethod": card.get("analyticalMethod"),
+        "insightMethod": card.get("insightMethod"),
     }
 
 
@@ -283,6 +286,60 @@ def _is_relationship_card(card: dict[str, Any]) -> bool:
     if card.get("chartType") not in ("dual_line", "scatter"):
         return False
     return bool(card.get("valueColumn2"))
+
+
+async def _attach_method_envelope_to_card(
+    session: AsyncSession,
+    tenant_id: int,
+    card: dict[str, Any],
+) -> None:
+    """Run the Analytical Method Engine over one project-insight card.
+
+    Reuses the same governed ``analyze`` path used by Business Insights so that
+    project cards carry a real execution-engine envelope. Fail-closed per card
+    so engine issues never drop the insight.
+    """
+    result = card.get("result")
+    if not result or not result.get("rows"):
+        return
+    columns = result.get("columns", [])
+    rows = result.get("rows", [])
+    if not columns or not rows:
+        return
+    question = " — ".join(
+        str(x)
+        for x in (card.get("title"), card.get("summary"))
+        if x
+    )
+    try:
+        envelope = await analyze_methods(
+            session,
+            tenant_id=tenant_id,
+            columns=columns,
+            rows=rows,
+            question=question or str(card.get("insightType", "")),
+        )
+    except Exception as exc:  # pragma: no cover - engine is fail-closed
+        logger.warning(
+            "method engine skipped for project insight card %s: %s",
+            card.get("insightId"), exc,
+        )
+        return
+    if envelope and envelope.get("method") is not None:
+        card["analyticalMethod"] = envelope
+
+
+async def _attach_method_envelopes_to_cards(
+    session: AsyncSession | None,
+    tenant_id: int | None,
+    cards: list[dict[str, Any]],
+) -> None:
+    """Attach governed method envelopes to any project cards missing them."""
+    if session is None or tenant_id is None:
+        return
+    for card in cards:
+        if isinstance(card, dict) and not card.get("analyticalMethod"):
+            await _attach_method_envelope_to_card(session, tenant_id, card)
 
 
 async def _grouped_intelligence_cards(
@@ -359,6 +416,8 @@ async def _grouped_intelligence_cards(
                     project.id,
                     exc,
                 )
+
+    await _attach_method_envelopes_to_cards(session, tenant_id, cards)
 
     for card in cards:
         if not isinstance(card, dict):

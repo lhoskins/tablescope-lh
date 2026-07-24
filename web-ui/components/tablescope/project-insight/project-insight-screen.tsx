@@ -23,6 +23,9 @@ import {
   IconThumbUp,
   IconThumbDown,
   IconChartBar,
+  IconPin,
+  IconPinnedFilled,
+  IconLayoutDashboard,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
@@ -37,13 +40,19 @@ import {
 } from "@/components/tablescope/insight-panel";
 import { AIQuestionResultModal } from "@/components/ai/AIQuestionResultModal";
 import type { AiCardContext } from "@/lib/api/ai-actions";
-import { renderBold } from "@/components/tablescope/home/intelligence-card";
+import {
+  renderBold,
+  InsightChartBlock,
+} from "@/components/tablescope/home/intelligence-card";
 import { InsightsPanel, HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import {
   InsightAnalysisDetails,
   RAnalyticsBadge,
 } from "@/components/tablescope/home/insight-engine-badge";
 import { ChartSuggestionDialog } from "@/components/tablescope/home/chart-suggestion-dialog";
+import {
+  SaveInsightToDashboardModal,
+} from "@/components/tablescope/home/save-insight-to-dashboard-modal";
 import {
   InsightExplanationPanel,
 } from "@/components/tablescope/home/insight-explanation-panel";
@@ -62,7 +71,9 @@ import {
 import {
   suggestInsights,
   type InsightCard as InsightCardData,
+  type InsightChart,
   type InsightExplanation,
+  type VizCandidate,
 } from "@/lib/api/home-intelligence";
 import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
@@ -107,11 +118,18 @@ function toProjectInsightCard(card: InsightCardData): ProjectInsightCard {
     sourceTables: card.sources?.tables,
     explanation: card.explanation as unknown as Record<string, unknown>,
     sql: card.sql,
+    chart: card.chart ?? undefined,
     chartType: card.chartType,
     labelColumn: card.labelColumn,
     valueColumn: card.valueColumn,
     valueColumn2: card.valueColumn2,
     executedAt: card.executedAt,
+    analyticalMethod: card.analyticalMethod,
+    evidenceFingerprint: card.evidenceFingerprint,
+    confidenceScore: card.confidenceScore,
+    confidenceEvaluation: card.confidenceEvaluation as unknown as Record<string, unknown>,
+    visualizationDecision: card.visualizationDecision as unknown as Record<string, unknown>,
+    chartCandidates: card.chartCandidates as unknown as Record<string, unknown>[],
   };
 }
 
@@ -199,6 +217,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   }>({ open: false, question: "", source: "" });
   const [createActionOpen, setCreateActionOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
+  const [saveToDashboardCard, setSaveToDashboardCard] = useState<InsightCardData | null>(null);
   const [loadErrorToasted, setLoadErrorToasted] = useState(false);
   const [refreshErrorToasted, setRefreshErrorToasted] = useState(false);
 
@@ -540,6 +559,9 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 onFeedbackRespond={handleFeedbackRespond}
                 governanceById={governanceById}
                 onCreateAction={handleCreateAction}
+                onPin={handlePinInsight}
+                onSaveToDashboard={setSaveToDashboardCard}
+                pinnedByFingerprint={pinnedByFingerprint}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
               />
@@ -564,6 +586,9 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 onFeedbackRespond={handleFeedbackRespond}
                 governanceById={governanceById}
                 onCreateAction={handleCreateAction}
+                onPin={handlePinInsight}
+                onSaveToDashboard={setSaveToDashboardCard}
+                pinnedByFingerprint={pinnedByFingerprint}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
               />
@@ -586,6 +611,9 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 onFeedbackRespond={handleFeedbackRespond}
                 governanceById={governanceById}
                 onCreateAction={handleCreateAction}
+                onPin={handlePinInsight}
+                onSaveToDashboard={setSaveToDashboardCard}
+                pinnedByFingerprint={pinnedByFingerprint}
                 reviewPending={acknowledge.isPending}
                 reviewPendingId={acknowledge.variables?.id}
               />
@@ -693,6 +721,15 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
         insight={selectedInsight}
       />
 
+      {saveToDashboardCard && (
+        <SaveInsightToDashboardModal
+          card={saveToDashboardCard}
+          open={Boolean(saveToDashboardCard)}
+          onClose={() => setSaveToDashboardCard(null)}
+          onSaved={() => push("Saved to dashboard", "success")}
+        />
+      )}
+
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
   );
@@ -757,6 +794,9 @@ function InsightCardColumn({
   onFeedbackRemove,
   onFeedbackRespond,
   onCreateAction,
+  onPin,
+  onSaveToDashboard,
+  pinnedByFingerprint,
   reviewPending,
   reviewPendingId,
 }: {
@@ -780,6 +820,9 @@ function InsightCardColumn({
   onFeedbackRemove?: (card: ProjectInsightCard) => void;
   onFeedbackRespond?: (card: ProjectInsightCard, response: string) => void;
   onCreateAction?: (card: ProjectInsightCard) => void;
+  onPin?: (card: InsightCardData) => void;
+  onSaveToDashboard?: (card: InsightCardData) => void;
+  pinnedByFingerprint?: Map<string, number>;
   reviewPending: boolean;
   reviewPendingId?: string;
 }) {
@@ -789,25 +832,37 @@ function InsightCardColumn({
         <PanelEmpty text={emptyText} />
       ) : (
         <div className="space-y-3">
-          {cards.map((card) => (
-            <InsightCardItem
-              key={card.id}
-              card={card}
-              projectId={projectId}
-              projectName={projectName}
-              reviewed={reviewedIds.has(card.id)}
-              feedback={feedbackById[card.id]}
-              savingFeedback={savingFeedback}
-              onInvestigate={() => onInvestigate(card)}
-              onReview={() => onReview(card)}
-              onFeedbackSave={onFeedbackSave ? (payload) => onFeedbackSave(card, payload) : undefined}
-              onFeedbackRemove={onFeedbackRemove ? () => onFeedbackRemove(card) : undefined}
-              onFeedbackRespond={onFeedbackRespond ? (response) => onFeedbackRespond(card, response) : undefined}
-              governance={governanceById?.[card.id]}
-              onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
-              reviewPending={reviewPending && reviewPendingId === card.id}
-            />
-          ))}
+          {cards.map((card) => {
+            const pinKey =
+              card.evidenceFingerprint?.resultFingerprint ??
+              card.insightId ??
+              card.id;
+            const pinned = pinKey
+              ? Boolean(pinnedByFingerprint?.has(String(pinKey)))
+              : false;
+            return (
+              <InsightCardItem
+                key={card.id}
+                card={card}
+                projectId={projectId}
+                projectName={projectName}
+                reviewed={reviewedIds.has(card.id)}
+                pinned={pinned}
+                feedback={feedbackById[card.id]}
+                savingFeedback={savingFeedback}
+                onInvestigate={() => onInvestigate(card)}
+                onReview={() => onReview(card)}
+                onFeedbackSave={onFeedbackSave ? (payload) => onFeedbackSave(card, payload) : undefined}
+                onFeedbackRemove={onFeedbackRemove ? () => onFeedbackRemove(card) : undefined}
+                onFeedbackRespond={onFeedbackRespond ? (response) => onFeedbackRespond(card, response) : undefined}
+                governance={governanceById?.[card.id]}
+                onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
+                onPin={onPin}
+                onSaveToDashboard={onSaveToDashboard}
+                reviewPending={reviewPending && reviewPendingId === card.id}
+              />
+            );
+          })}
         </div>
       )}
     </Panel>
@@ -819,6 +874,7 @@ function InsightCardItem({
   projectId,
   projectName,
   reviewed,
+  pinned,
   feedback,
   savingFeedback,
   onInvestigate,
@@ -827,6 +883,8 @@ function InsightCardItem({
   onFeedbackRemove,
   onFeedbackRespond,
   onCreateAction,
+  onPin,
+  onSaveToDashboard,
   governance,
   reviewPending,
 }: {
@@ -834,6 +892,7 @@ function InsightCardItem({
   projectId: string;
   projectName: string;
   reviewed: boolean;
+  pinned?: boolean;
   feedback?: InsightFeedbackRecord | null;
   savingFeedback?: boolean;
   onInvestigate: () => void;
@@ -846,6 +905,8 @@ function InsightCardItem({
   onFeedbackRemove?: () => void;
   onFeedbackRespond?: (response: string) => void | Promise<void>;
   onCreateAction?: () => void;
+  onPin?: (card: InsightCardData) => void;
+  onSaveToDashboard?: (card: InsightCardData) => void;
   governance?: GovernanceItem | null;
   reviewPending: boolean;
 }) {
@@ -854,6 +915,7 @@ function InsightCardItem({
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [chartDialogOpen, setChartDialogOpen] = useState(false);
   const [feedbackInitial, setFeedbackInitial] = useState<InsightSentiment>("agree");
+  const [selectedChart, setSelectedChart] = useState<VizCandidate | null>(null);
   const hasFeedback = feedback != null && feedback.status === "active";
   const { data: identity } = useCurrentUser();
   const canCreateAction =
@@ -861,40 +923,61 @@ function InsightCardItem({
     canManageProjectActions(identity?.user?.rawRole, identity?.user?.isSuperAdmin);
   const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.informational;
 
-  const tables = card.sourceTables ?? card.supportingSources.filter(
-    (s) => !/\.(pdf|docx?|txt|csv)$/i.test(s),
-  );
-  const documents = card.supportingSources.filter((s) =>
-    /\.(pdf|docx?|txt|csv)$/i.test(s),
-  );
+  const insightCardData = useMemo<InsightCardData>(() => {
+    const tables = card.sourceTables ?? card.supportingSources.filter(
+      (s) => !/\.(pdf|docx?|txt|csv)$/i.test(s),
+    );
+    const documents = card.supportingSources.filter((s) =>
+      /\.(pdf|docx?|txt|csv)$/i.test(s),
+    );
+    return {
+      id: card.id,
+      insightId: card.id,
+      projectId,
+      projectName,
+      projectColor: "",
+      insightType: card.insightType,
+      severity: card.severity as InsightCardData["severity"],
+      title: card.title,
+      summary: card.summary,
+      chart: card.chart ?? null,
+      callout: null,
+      sources: { tables, documents },
+      executedAt: card.executedAt ?? "",
+      sql: card.sql,
+      chartType: card.chartType,
+      labelColumn: card.labelColumn,
+      valueColumn: card.valueColumn,
+      valueColumn2: card.valueColumn2,
+      explanation: card.explanation as InsightExplanation | undefined,
+      analyticalMethod: card.analyticalMethod,
+      evidenceFingerprint: card.evidenceFingerprint,
+      confidenceScore: card.confidenceScore,
+      confidenceEvaluation: card.confidenceEvaluation as unknown as InsightCardData["confidenceEvaluation"],
+      visualizationDecision: card.visualizationDecision as unknown as InsightCardData["visualizationDecision"],
+      chartCandidates: card.chartCandidates as unknown as InsightCardData["chartCandidates"],
+    };
+  }, [card, projectId, projectName]);
 
-  const insightCardData: InsightCardData = {
-    id: card.id,
-    insightId: card.id,
-    projectId,
-    projectName,
-    projectColor: "",
-    insightType: card.insightType,
-    severity: card.severity as InsightCardData["severity"],
-    title: card.title,
-    summary: card.summary,
-    chart: card.chart ?? null,
-    callout: null,
-    sources: { tables, documents },
-    executedAt: card.executedAt ?? "",
-    sql: card.sql,
-    chartType: card.chartType,
-    labelColumn: card.labelColumn,
-    valueColumn: card.valueColumn,
-    valueColumn2: card.valueColumn2,
-    explanation: card.explanation as InsightExplanation | undefined,
-    analyticalMethod: card.analyticalMethod,
-    evidenceFingerprint: card.evidenceFingerprint,
-    confidenceScore: card.confidenceScore,
-    confidenceEvaluation: card.confidenceEvaluation as InsightCardData["confidenceEvaluation"],
-    visualizationDecision: card.visualizationDecision as InsightCardData["visualizationDecision"],
-    chartCandidates: card.chartCandidates as InsightCardData["chartCandidates"],
-  };
+  const displayCard = useMemo<InsightCardData>(() => {
+    const chart = insightCardData.chart;
+    if (!selectedChart || !chart) return insightCardData;
+    const d = selectedChart.decision;
+    return {
+      ...insightCardData,
+      chart: {
+        ...chart,
+        type: d.chartType as InsightChart["type"],
+        subtype: d.chartStyle || undefined,
+      },
+      chartType: d.chartType,
+      visualizationDecision: d,
+    };
+  }, [insightCardData, selectedChart]);
+
+  const canSaveToDashboard = Boolean(
+    displayCard.sql?.trim() && displayCard.valueColumn?.trim(),
+  );
 
   return (
     <article className="rounded-md border border-line-tertiary bg-bg-primary p-3">
@@ -903,6 +986,27 @@ function InsightCardItem({
           {card.title}
         </h4>
         <div className="flex shrink-0 items-center gap-1.5">
+          {pinned ? (
+            <button
+              type="button"
+              aria-label="Pinned to Home"
+              title="Pinned to Home"
+              className="rounded-md p-1 text-danger focus:outline-none focus:ring-2 focus:ring-brand-500"
+              disabled
+            >
+              <IconPinnedFilled size={18} />
+            </button>
+          ) : onPin ? (
+            <button
+              type="button"
+              onClick={() => onPin(displayCard)}
+              aria-label="Pin to Home"
+              title="Pin to Home"
+              className="rounded-md p-1 text-ink-tertiary transition-colors hover:bg-bg-tertiary hover:text-ink-secondary focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <IconPin size={18} />
+            </button>
+          ) : null}
           <InsightGovernanceBadge status={governance?.governance_status} />
           <span
             className={cn(
@@ -922,6 +1026,16 @@ function InsightCardItem({
         <div className="mt-2 flex items-start gap-1.5 rounded-md bg-bg-secondary/60 p-2 text-small text-ink-secondary">
           <IconBulb size={14} className="mt-0.5 shrink-0 text-brand-500" />
           <span>{renderBold(card.recommendedAction)}</span>
+        </div>
+      )}
+      {displayCard.chart && (
+        <div className="mt-3">
+          {displayCard.chart.title && (
+            <div className="mb-1 text-[12px] text-ink-tertiary">
+              {displayCard.chart.title}
+            </div>
+          )}
+          <InsightChartBlock chart={displayCard.chart} />
         </div>
       )}
       {card.supportingSources.length > 0 && (
@@ -988,6 +1102,22 @@ function InsightCardItem({
             Action
           </button>
         )}
+        {onSaveToDashboard && (
+          <button
+            type="button"
+            disabled={!canSaveToDashboard}
+            title={
+              canSaveToDashboard
+                ? "Add this insight to a project dashboard"
+                : "This insight does not have query data and cannot be added to a dashboard"
+            }
+            onClick={() => onSaveToDashboard(displayCard)}
+            className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <IconLayoutDashboard size={13} />
+            Add to dashboard
+          </button>
+        )}
         {onFeedbackSave && (
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -1049,13 +1179,13 @@ function InsightCardItem({
       </div>
 
       <InsightExplanationPanel
-        card={insightCardData}
+        card={displayCard}
         open={explainOpen}
         onClose={() => setExplainOpen(false)}
       />
       {onFeedbackSave && (
         <InsightFeedbackDialog
-          card={insightCardData}
+          card={displayCard}
           open={feedbackOpen}
           onClose={() => setFeedbackOpen(false)}
           feedback={feedback || null}
@@ -1090,10 +1220,11 @@ function InsightCardItem({
       )}
 
       <ChartSuggestionDialog
-        card={insightCardData}
+        card={displayCard}
         projectId={Number(projectId)}
         open={chartDialogOpen}
         onClose={() => setChartDialogOpen(false)}
+        onApplied={setSelectedChart}
       />
     </article>
   );

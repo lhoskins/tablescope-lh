@@ -27,6 +27,7 @@ from app.auth.rbac import Role, require_role
 from app.auth.tenant_roles import to_tenant_role, validate_tenant_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.audit_event import AuditEvent
 from app.models.project import Project
 from app.models.shared_vdb import SharedVDB
 from app.models.tenant import Tenant, TenantAllowedDomain
@@ -39,6 +40,8 @@ from app.schemas.tenant import (
     AllowedDomainsResponse,
     AllowedDomainsSettingsUpdate,
     CompanyLogoRead,
+    Enforce2faSettingsResponse,
+    Enforce2faSettingsUpdate,
     TenantCreate,
     TenantDeleteResponse,
     TenantRead,
@@ -560,6 +563,63 @@ async def update_allowed_domains_settings(
     await session.commit()
     await session.refresh(tenant)
     return await _allowed_domains_response(session, tenant)
+
+
+@router.get(
+    "/{tenant_id}/2fa-enforcement",
+    response_model=Enforce2faSettingsResponse,
+)
+async def get_enforce_2fa(
+    tenant_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> Enforce2faSettingsResponse:
+    """Return the tenant-wide 2FA enforcement flag."""
+    if not context.is_service and context.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Cannot access another tenant")
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return Enforce2faSettingsResponse(enabled=tenant.enforce_2fa)
+
+
+@router.put(
+    "/{tenant_id}/2fa-enforcement",
+    response_model=Enforce2faSettingsResponse,
+)
+async def set_enforce_2fa(
+    tenant_id: int,
+    payload: Enforce2faSettingsUpdate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> Enforce2faSettingsResponse:
+    """Toggle tenant-wide 2FA enforcement on or off.
+
+    When enabled, every member of the tenant must complete SMS MFA regardless
+    of role. The change is audited; existing aal1 sessions are challenged on
+    their next request through the membership middleware.
+    """
+    if not context.is_service and context.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Cannot modify another tenant")
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    tenant.enforce_2fa = payload.enabled
+    session.add(
+        AuditEvent(
+            tenant_id=tenant_id,
+            user_id=context.user_id,
+            event_type="tenant_settings",
+            scope="enforce_2fa",
+            title=f"enforce_2fa set to {payload.enabled}",
+            prompt_type="enforce_2fa_toggle",
+            tables_queried=[],
+            documents_read=[],
+        )
+    )
+    await session.commit()
+    await session.refresh(tenant)
+    return Enforce2faSettingsResponse(enabled=tenant.enforce_2fa)
 
 
 @router.post(

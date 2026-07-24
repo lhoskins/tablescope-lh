@@ -52,7 +52,8 @@ export function MfaSecuritySection() {
     }
   }
 
-  const required = status?.roleRequiresMfa ?? false;
+  const required =
+    (status?.roleRequiresMfa || status?.tenantRequiresMfa) ?? false;
   const hasFactor = status?.hasVerifiedFactor ?? false;
 
   return (
@@ -84,8 +85,8 @@ export function MfaSecuritySection() {
         <>
           {required && !hasFactor && (
             <p className="rounded-md bg-warning/10 px-3 py-2 text-small text-warning">
-              Your role requires SMS verification for access. Add a phone number
-              to continue.
+              SMS verification is required for access. Add a phone number to
+              continue.
             </p>
           )}
 

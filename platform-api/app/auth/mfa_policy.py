@@ -44,6 +44,21 @@ def session_has_mfa(aal: str | None) -> bool:
     return aal == AAL2
 
 
-def mfa_required_for_request(role: str | None, aal: str | None) -> bool:
-    """True when this caller's role demands MFA but the session lacks aal2."""
-    return role_requires_mfa(role) and not session_has_mfa(aal)
+def mfa_required_for_request(
+    role: str | None,
+    aal: str | None,
+    *,
+    tenant_enforce_2fa: bool = False,
+) -> bool:
+    """True when this caller must complete MFA but the session lacks aal2.
+
+    Admin/privileged roles are always required to complete MFA. When the caller's
+    tenant has ``enforce_2fa`` enabled, every member (regardless of role) is
+    required to complete MFA. A session that already has ``aal2`` satisfies all
+    paths.
+    """
+    if session_has_mfa(aal):
+        return False
+    if tenant_enforce_2fa:
+        return True
+    return role_requires_mfa(role)
