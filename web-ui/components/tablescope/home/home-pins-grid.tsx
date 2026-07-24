@@ -96,14 +96,16 @@ function PinCard({
           <IconRefresh size={14} />
         </button>
       )}
-      <button
-        type="button"
-        onClick={() => onUnpin(pin)}
-        title="Unpin"
-        className="rounded p-1 text-ink-tertiary hover:bg-bg-tertiary hover:text-danger"
-      >
-        <IconPinnedOff size={14} />
-      </button>
+      {!isInsight && (
+        <button
+          type="button"
+          onClick={() => onUnpin(pin)}
+          title="Unpin"
+          className="rounded p-1 text-ink-tertiary hover:bg-bg-tertiary hover:text-danger"
+        >
+          <IconPinnedOff size={14} />
+        </button>
+      )}
     </div>
   );
 
@@ -119,6 +121,7 @@ function PinCard({
             pin={pin}
             feedback={feedback}
             savingFeedback={savingFeedback}
+            onUnpin={onUnpin}
             onFeedbackSave={onFeedbackSave}
             onFeedbackRemove={onFeedbackRemove}
             onFeedbackRespond={onFeedbackRespond}
@@ -151,6 +154,7 @@ function PinCard({
           pin={pin}
           feedback={feedback}
           savingFeedback={savingFeedback}
+          onUnpin={onUnpin}
           onFeedbackSave={onFeedbackSave}
           onFeedbackRemove={onFeedbackRemove}
           onFeedbackRespond={onFeedbackRespond}
@@ -171,6 +175,7 @@ function PinContent({
   pin,
   feedback,
   savingFeedback,
+  onUnpin,
   onFeedbackSave,
   onFeedbackRemove,
   onFeedbackRespond,
@@ -180,6 +185,7 @@ function PinContent({
   pin: HomePinItem;
   feedback?: InsightFeedbackRecord | null;
   savingFeedback?: boolean;
+  onUnpin?: (pin: HomePinItem) => void;
   onFeedbackSave?: (pin: HomePinItem, payload: {
     sentiment: "agree" | "disagree";
     reason_codes: string[];
@@ -200,8 +206,9 @@ function PinContent({
     return (
       <IntelligenceCard
         card={card}
-        hideActions
+        pinned
         frozen
+        onUnpin={onUnpin ? () => onUnpin(pin) : undefined}
         feedback={feedback}
         savingFeedback={savingFeedback}
         onFeedbackSave={
