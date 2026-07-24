@@ -28,10 +28,12 @@ async def delete_insight_caches() -> dict[str, int]:
                     ProjectIntelligenceSnapshot.suite == "project_insight"
                 )
             )
-            # Reset project-insight suggestion sequence to avoid skipping ids.
+            # Reset the sequence to the next free id so later snapshots do not
+            # collide with existing rows after the cache is cleared.
             await session.execute(
                 text(
-                    "ALTER SEQUENCE IF EXISTS project_intelligence_snapshots_id_seq RESTART WITH 1"
+                    "SELECT setval(pg_get_serial_sequence('project_intelligence_snapshots', 'id'), "
+                    "COALESCE((SELECT MAX(id) FROM project_intelligence_snapshots), 0) + 1, false)"
                 )
             )
             business_count = r1.rowcount

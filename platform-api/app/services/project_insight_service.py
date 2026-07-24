@@ -292,14 +292,26 @@ async def _attach_method_envelope_to_card(
     session: AsyncSession,
     tenant_id: int,
     card: dict[str, Any],
+    runner: Any | None = None,
 ) -> None:
     """Run the Analytical Method Engine over one project-insight card.
 
     Reuses the same governed ``analyze`` path used by Business Insights so that
-    project cards carry a real execution-engine envelope. Fail-closed per card
-    so engine issues never drop the insight.
+    project cards carry a real execution-engine envelope. When the raw query
+    ``result`` is not already on the card (deterministic prompt functions do not
+    keep it), the card's ``sql`` is re-executed through the project VDB runner.
+    Fail-closed per card so engine issues never drop the insight.
     """
     result = card.get("result")
+    if not result and runner and card.get("sql"):
+        try:
+            result = await runner(card["sql"])
+        except Exception as exc:
+            logger.debug(
+                "project insight could not re-execute sql for method engine %s: %s",
+                card.get("insightId"), exc,
+            )
+            result = None
     if not result or not result.get("rows"):
         return
     columns = result.get("columns", [])
@@ -333,13 +345,14 @@ async def _attach_method_envelopes_to_cards(
     session: AsyncSession | None,
     tenant_id: int | None,
     cards: list[dict[str, Any]],
+    runner: Any | None = None,
 ) -> None:
     """Attach governed method envelopes to any project cards missing them."""
     if session is None or tenant_id is None:
         return
     for card in cards:
         if isinstance(card, dict) and not card.get("analyticalMethod"):
-            await _attach_method_envelope_to_card(session, tenant_id, card)
+            await _attach_method_envelope_to_card(session, tenant_id, card, runner)
 
 
 async def _grouped_intelligence_cards(
@@ -417,7 +430,7 @@ async def _grouped_intelligence_cards(
                     exc,
                 )
 
-    await _attach_method_envelopes_to_cards(session, tenant_id, cards)
+    await _attach_method_envelopes_to_cards(session, tenant_id, cards, runner)
 
     for card in cards:
         if not isinstance(card, dict):
