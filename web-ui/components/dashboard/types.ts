@@ -7,11 +7,24 @@ export type WidgetType =
   | "table"
   | "combo"
   | "scatter"
+  | "effect_scatter"
   | "radar"
   | "radial_bar"
   | "treemap"
+  | "sunburst"
+  | "tree"
   | "funnel"
-  | "sankey";
+  | "sankey"
+  | "graph"
+  | "parallel"
+  | "lines"
+  | "heatmap"
+  | "candlestick"
+  | "boxplot"
+  | "pictorial_bar"
+  | "theme_river"
+  | "gauge"
+  | "map";
 
 /**
  * Reference line drawn on a cartesian chart (line/area/bar/combo).
@@ -129,7 +142,9 @@ export type ChartSubtype =
   // Radial bar variants
   | "multi_ring"
   // Treemap variants
-  | "nested";
+  | "nested"
+  // Gauge variants
+  | "semi";
 
 export type WidgetDataSource = {
   kind: "query" | "datasource" | "custom_sql";

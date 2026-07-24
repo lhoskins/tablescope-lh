@@ -69,7 +69,7 @@ from app.services.teiid_sql import (
     normalize_date_casts,
 )
 from app.services.visualization_engine import (
-    recommend_visualizations,
+    rank_visualizations,
     select_visualization,
 )
 
@@ -1019,7 +1019,7 @@ def _card(
 
     try:
         if result and result_rows:
-            candidates = recommend_visualizations(result_columns, result_rows)
+            candidates = rank_visualizations(result_columns, result_rows, limit=6)
             if candidates:
                 current_chart_type = (card.get("chart") or {}).get("type")
                 chosen = candidates[0]
@@ -1028,7 +1028,7 @@ def _card(
                         chosen = c
                         break
                 card["visualizationDecision"] = chosen.decision.to_dict()
-                card["chartCandidates"] = [c.to_dict() for c in candidates[:8]]
+                card["chartCandidates"] = [c.to_dict() for c in candidates[:6]]
                 if card.get("chart"):
                     card["chart"]["type"] = chosen.decision.chart_type.value
                     card["chart"]["subtype"] = chosen.decision.chart_style or ""

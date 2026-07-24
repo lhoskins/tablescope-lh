@@ -21,6 +21,7 @@ import {
   BarChart,
   PieChart,
   ScatterChart,
+  EffectScatterChart,
   RadarChart,
   TreemapChart,
   FunnelChart,
@@ -49,6 +50,7 @@ echarts.use([
   BarChart,
   PieChart,
   ScatterChart,
+  EffectScatterChart,
   RadarChart,
   TreemapChart,
   FunnelChart,
@@ -579,14 +581,16 @@ function buildScatterOption(
     return z !== undefined ? [x, y, z] as number[] : [x, y] as number[];
   }).filter((d): d is number[] => d !== null);
 
+  const isEffectScatter = widget.type === "effect_scatter";
   const series: any[] = [{
     name: yKey,
-    type: "scatter" as const,
+    type: isEffectScatter ? ("effectScatter" as const) : ("scatter" as const),
     data: seriesData,
-    symbolSize: isBubble ? (p: any) => Math.max(6, Math.min(40, (p.data?.[2] ?? 5) / 2)) : 10,
+    symbolSize: isBubble ? (p: any) => Math.max(6, Math.min(40, (p.data?.[2] ?? 5) / 2)) : isEffectScatter ? 18 : 10,
     itemStyle: { color: colors[0] },
     label: { show: !!opts.showLabels, fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value?.[1] ?? 0), opts.yAxisFormat) },
     animation: animate,
+    ...(isEffectScatter ? { rippleEffect: { brushType: "stroke" } } : {}),
   }];
 
   const option: any = {
@@ -918,6 +922,58 @@ function buildComboOption(
   return option;
 }
 
+function buildGaugeOption(
+  widget: WidgetConfig,
+  opts: VisualizationOptions,
+  yKey: string,
+  data: Row[],
+  colors: string[],
+  isDark: boolean
+) {
+  const tiny = !!opts.tinyMode;
+  const sub = widget.chartSubtype ?? "";
+  const colorsForChart = axisColors(isDark);
+  const animate = !!opts.animate;
+  const values = data.map((r) => toNumber(r[yKey])).filter((v): v is number => v !== null);
+  const value = values.length ? values[values.length - 1] : 0;
+  const min = (opts.domainMin as number) ?? 0;
+  const max = (opts.domainMax as number) ?? Math.max(100, Math.ceil(value * 1.2));
+  const startAngle = sub === "semi" ? 180 : 90;
+  const endAngle = sub === "semi" ? 0 : -270;
+  const innerRadius = (opts.innerRadius as number) ?? 55;
+  const outerRadius = (opts.outerRadius as number) ?? 80;
+
+  const option: any = {
+    aria: { enabled: true, description: `${widget.title || "Gauge"} chart` },
+    color: colors,
+    tooltip: opts.showTooltip === false || tiny ? { show: false } : { formatter: `{b}: {c}` },
+    series: [{
+      type: "gauge" as const,
+      startAngle,
+      endAngle,
+      min,
+      max,
+      radius: `${outerRadius}%`,
+      progress: { show: true, width: outerRadius - innerRadius },
+      axisLine: { lineStyle: { width: outerRadius - innerRadius, color: [[1, colorsForChart.grid]] } },
+      axisTick: { show: !tiny, splitNumber: 5 },
+      splitLine: { show: !tiny, length: 8, lineStyle: { width: 2, color: colorsForChart.line } },
+      axisLabel: { show: !tiny, distance: 12, color: colorsForChart.text, fontSize: 10, formatter: (v: number) => formatNumber(v, opts.yAxisFormat) },
+      anchor: { show: true, showAbove: true, size: 12, itemStyle: { borderColor: colors[0] } },
+      title: { show: !tiny, offsetCenter: [0, "30%"], fontSize: 12, color: colorsForChart.text },
+      detail: {
+        valueAnimation: animate,
+        fontSize: tiny ? 14 : 24,
+        color: colorsForChart.text,
+        formatter: (v: number) => formatNumber(v, opts.yAxisFormat),
+        offsetCenter: [0, "-15%"],
+      },
+      data: [{ value, name: widget.title || yKey }],
+    }],
+  };
+  return option;
+}
+
 function tooltipFormatter(params: any, format?: string) {
   const rows = Array.isArray(params) ? params : [params];
   if (!rows.length) return "";
@@ -985,6 +1041,7 @@ export function EChartsWidget({ widget, data, xKey, yKey, y2Key, chartData, seri
             option = buildComboOption(widget, opts, xKey, yKey, y2Key, chartData, seriesNames, palette, isDark);
             break;
           case "scatter":
+          case "effect_scatter":
             option = buildScatterOption(widget, opts, xKey, yKey, data, palette, isDark);
             break;
           case "radar":
@@ -1001,6 +1058,9 @@ export function EChartsWidget({ widget, data, xKey, yKey, y2Key, chartData, seri
             break;
           case "sankey":
             option = buildSankeyOption(widget, opts, xKey, yKey, data, palette, isDark);
+            break;
+          case "gauge":
+            option = buildGaugeOption(widget, opts, yKey, data, palette, isDark);
             break;
           default:
             option = { title: { text: "Unknown widget type", left: "center", top: "center" } };

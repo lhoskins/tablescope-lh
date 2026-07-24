@@ -47,11 +47,24 @@ class ChartType(StrEnum):
     COMBO = "combo"
     PIE = "pie"
     SCATTER = "scatter"
+    EFFECT_SCATTER = "effect_scatter"
     RADAR = "radar"
     RADIAL_BAR = "radial_bar"
     TREEMAP = "treemap"
+    SUNBURST = "sunburst"
+    TREE = "tree"
     FUNNEL = "funnel"
     SANKEY = "sankey"
+    GRAPH = "graph"
+    PARALLEL = "parallel"
+    LINES = "lines"
+    HEATMAP = "heatmap"
+    CANDLESTICK = "candlestick"
+    BOXPLOT = "boxplot"
+    PICTORIAL_BAR = "pictorial_bar"
+    THEME_RIVER = "theme_river"
+    GAUGE = "gauge"
+    MAP = "map"
 
 
 #: All renderable chart-type values (for validation / contract tests).
@@ -394,8 +407,8 @@ _HINT_ALIASES: dict[str, str] = {
     "bubble": "scatter",
     "radar": "radar",
     "radial_bar": "radial_bar",
-    "gauge": "radial_bar",
-    "bullet": "radial_bar",
+    "gauge": "gauge",
+    "bullet": "gauge",
     "treemap": "treemap",
     "funnel": "funnel",
     "sankey": "sankey",
@@ -567,6 +580,8 @@ def recommend_visualizations(
     intent_hint: str | None = None,
     semantic_roles: dict[str, str | None] | None = None,
     analytical_evidence: dict[str, Any] | None = None,
+    method_envelope: dict[str, Any] | None = None,
+    limit: int = 8,
 ) -> list[VizCandidate]:
     """Return a ranked list of supported visualization candidates for a result set.
 
@@ -574,6 +589,8 @@ def recommend_visualizations(
     ``semantic_roles`` and ``analytical_evidence`` allow the method engine to
     suggest richer families (radar, sankey, funnel, etc.) with explicit role
     mappings.
+    ``method_envelope`` may carry analytical results (e.g. distribution groups,
+    OHLC roles) that unlock richer families.
     """
     if not columns or not rows:
         return [_candidate(ChartType.TABLE, 0.2, reason="No data to plot.")]
@@ -602,6 +619,15 @@ def recommend_visualizations(
                     y_field=metric,
                     value_format=detect_value_format(metric, _column_values(dict_rows, metric)),
                     reason="Single-row scalar summary — headline metric as a KPI tile.",
+                )
+            )
+            candidates.append(
+                _candidate(
+                    ChartType.GAUGE,
+                    0.85,
+                    y_field=metric,
+                    value_format=detect_value_format(metric, _column_values(dict_rows, metric)),
+                    reason="Single scalar value shown as a radial gauge.",
                 )
             )
         candidates.append(_candidate(ChartType.TABLE, 0.1, reason="Single row with no numeric metric."))
@@ -693,7 +719,20 @@ def recommend_visualizations(
                 )
             )
 
-    # 4) Two numeric measures, no meaningful dimension -> scatter.
+    # 4a) Gauge: latest value from a time series or single-row scalar.
+    if shape.measures and (shape.row_count == 1 or is_time):
+        gauge_value_col = shape.measures[0]
+        candidates.append(
+            _candidate(
+                ChartType.GAUGE,
+                0.55 if is_time else 0.9,
+                y_field=gauge_value_col,
+                value_format=detect_value_format(gauge_value_col, _column_values(dict_rows, gauge_value_col, 50)),
+                reason=("Latest value shown as a radial gauge." if is_time else "Single scalar value shown as a radial gauge."),
+            )
+        )
+
+    # 4) Two numeric measures, no meaningful dimension -> scatter / effect scatter.
     if len(shape.measures) >= 2 and label_col is None:
         candidates.append(
             _candidate(
@@ -703,6 +742,16 @@ def recommend_visualizations(
                 y_field=shape.measures[1],
                 value_format=vfmt,
                 reason="Two numeric measures with no category — correlation scatter.",
+            )
+        )
+        candidates.append(
+            _candidate(
+                ChartType.EFFECT_SCATTER,
+                0.6,
+                x_field=shape.measures[0],
+                y_field=shape.measures[1],
+                value_format=vfmt,
+                reason="Emphasize individual observations with ripple effects.",
             )
         )
 
@@ -856,7 +905,7 @@ def recommend_visualizations(
     # Fallback table.
     candidates.append(_candidate(ChartType.TABLE, 0.15, reason="No clear chart shape — showing detail rows."))
 
-    # Deduplicate by chart type + style and sort by score.
+    # Deduplicate by chart type + style, then enforce family diversity and cap.
     seen: set[tuple[str, str]] = set()
     unique: list[VizCandidate] = []
     for c in sorted(candidates, key=lambda x: x.score, reverse=True):
@@ -865,7 +914,7 @@ def recommend_visualizations(
             continue
         seen.add(key)
         unique.append(c)
-    return unique
+    return _diverse_top_n(unique, limit)
 
 
 def _hint_candidate(
@@ -953,6 +1002,23 @@ def _hint_candidate(
             value_format=vfmt,
             reason="Explicit bar request.",
         )
+    if hint == "gauge" and shape.measures:
+        return _candidate(
+            ChartType.GAUGE,
+            0.78,
+            y_field=value_col,
+            value_format=vfmt,
+            reason="Explicit gauge request — single headline value.",
+        )
+    if hint == "effect_scatter" and len(shape.measures) >= 2:
+        return _candidate(
+            ChartType.EFFECT_SCATTER,
+            0.75,
+            x_field=shape.measures[0],
+            y_field=shape.measures[1],
+            value_format=vfmt,
+            reason="Explicit effect-scatter request — emphasize individual points.",
+        )
     return _candidate(
         ChartType.TABLE,
         0.3,
@@ -976,6 +1042,57 @@ def _fallback_candidates(
     return []
 
 
+def _diverse_top_n(candidates: list[VizCandidate], limit: int) -> list[VizCandidate]:
+    """Return the top ``limit`` candidates while maximising family diversity.
+
+    Each ``ChartType`` is treated as a family. The highest-scoring candidate from
+    each family is kept first; remaining slots are filled with the next-best
+    candidates. This prevents a single family (e.g. bar) from filling all six
+    suggestion slots.
+    """
+    sorted_by_score = sorted(candidates, key=lambda c: c.score, reverse=True)
+    seen_families: set[str] = set()
+    first_pass: list[VizCandidate] = []
+    second_pass: list[VizCandidate] = []
+    for c in sorted_by_score:
+        family = c.decision.chart_type.value
+        if family in seen_families:
+            second_pass.append(c)
+        else:
+            seen_families.add(family)
+            first_pass.append(c)
+    diverse = first_pass + second_pass
+    return diverse[:limit]
+
+
+def rank_visualizations(
+    columns: list[str],
+    rows: list[Any],
+    *,
+    profile: dict[str, Any] | None = None,
+    intent_hint: str | None = None,
+    semantic_roles: dict[str, str | None] | None = None,
+    analytical_evidence: dict[str, Any] | None = None,
+    method_envelope: dict[str, Any] | None = None,
+    limit: int = 6,
+) -> list[VizCandidate]:
+    """Rank the top ``limit`` diverse, data-shape-driven chart families.
+
+    ``intent_hint`` and ``method_envelope`` only bias scores; the data shape
+    decides which families are eligible.
+    """
+    return recommend_visualizations(
+        columns,
+        rows,
+        profile=profile,
+        intent_hint=intent_hint,
+        semantic_roles=semantic_roles,
+        analytical_evidence=analytical_evidence,
+        method_envelope=method_envelope,
+        limit=limit,
+    )
+
+
 def select_visualization(
     columns: list[str],
     rows: list[Any],
@@ -986,11 +1103,9 @@ def select_visualization(
     """Choose the best renderable chart for a result set (deterministic).
 
     This is the legacy single-decision entry point; it delegates to
-    :func:`recommend_visualizations` and returns the highest-scoring candidate.
+    :func:`rank_visualizations` and returns the highest-scoring candidate.
     """
-    candidates = recommend_visualizations(
-        columns, rows, profile=profile, intent_hint=intent_hint
-    )
+    candidates = rank_visualizations(columns, rows, profile=profile, intent_hint=intent_hint, limit=6)
     if not candidates:
         return VizDecision(ChartType.TABLE, reason="No data to plot.", confidence=1.0)
     top = candidates[0]
