@@ -67,7 +67,7 @@ import {
 import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { formatLastUpdated } from "@/lib/format-datetime";
-import { createHomePin } from "@/lib/api/home-pins";
+import { createHomePin, getHomePins } from "@/lib/api/home-pins";
 import {
   projectInsightApi,
   type ProjectInsight,
@@ -135,6 +135,27 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
 
+  const { data: homePins = [] } = useQuery({
+    queryKey: ["home-pins"],
+    queryFn: getHomePins,
+  });
+
+  const pinnedByFingerprint = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const pin of homePins) {
+      const payload = (pin.frozen_payload ?? pin.config ?? {}) as {
+        evidenceFingerprint?: { resultFingerprint?: string };
+        insightId?: string;
+      };
+      const key =
+        payload.evidenceFingerprint?.resultFingerprint ??
+        payload.insightId ??
+        pin.pin_key;
+      if (key) map.set(String(key), pin.id);
+    }
+    return map;
+  }, [homePins]);
+
   const pinMutation = useMutation({
     mutationFn: createHomePin,
     onSuccess: () => {
@@ -146,16 +167,28 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
 
   const handlePinInsight = useCallback(
     (card: InsightCardData) => {
+      const key =
+        card.evidenceFingerprint?.resultFingerprint ??
+        card.insightId ??
+        card.id;
+      if (!key) {
+        push("Unable to pin this insight", "error");
+        return;
+      }
+      if (pinnedByFingerprint.has(key)) {
+        push("This insight is already pinned to Home", "info");
+        return;
+      }
       pinMutation.mutate({
         pin_type: "insight_card",
-        pin_key: `insight:${card.projectId}:${card.insightType}:${slugify(card.title)}`,
+        pin_key: `insight:${card.projectId}:${card.insightType}:${key}`,
         title: card.title,
         project_id: Number(card.projectId),
         frozen_payload: card as unknown as Record<string, unknown>,
         layout: { x: 0, y: 0, w: 6, h: 5 },
       });
     },
-    [pinMutation],
+    [pinMutation, pinnedByFingerprint, push],
   );
 
   const [askModal, setAskModal] = useState<{
@@ -576,6 +609,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                   projects={insightsQuery.data?.projects ?? []}
                   showProjectHeader={false}
                   onPin={handlePinInsight}
+                  pinnedByFingerprint={pinnedByFingerprint}
                 />
               )}
             </Panel>

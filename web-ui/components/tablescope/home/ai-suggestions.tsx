@@ -492,16 +492,27 @@ function DashboardSuggestionCard({
   );
 }
 
+function pinFingerprintKey(card: InsightCard): string | undefined {
+  return (
+    card.evidenceFingerprint?.resultFingerprint ??
+    card.insightId ??
+    card.id ??
+    undefined
+  );
+}
+
 // ── Insights ─────────────────────────────────────────────────────────
 
 export function InsightsPanel({
   projects,
   showProjectHeader = true,
   onPin,
+  pinnedByFingerprint,
 }: {
   projects: ProjectResult[];
   showProjectHeader?: boolean;
   onPin?: (card: InsightCard) => void;
+  pinnedByFingerprint?: Map<string, number>;
 }) {
   const withResults = projects.filter((p) => p.insights.length > 0);
   if (withResults.length === 0) {
@@ -517,14 +528,21 @@ export function InsightsPanel({
             <ProjectHeader name={p.projectName} color={p.projectColor} />
           )}
           <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
-            {p.insights.map((card) => (
-              <IntelligenceCard
-                key={card.id}
-                card={card}
-                hideActions
-                onPin={onPin}
-              />
-            ))}
+            {p.insights.map((card) => {
+              const key = pinFingerprintKey(card) || card.insightId || card.id;
+              const isPinned = Boolean(
+                pinnedByFingerprint && key && pinnedByFingerprint.has(key),
+              );
+              return (
+                <IntelligenceCard
+                  key={card.id}
+                  card={card}
+                  pinned={isPinned}
+                  hideActions
+                  onPin={onPin}
+                />
+              );
+            })}
           </div>
         </section>
       ))}
