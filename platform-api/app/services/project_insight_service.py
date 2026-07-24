@@ -279,6 +279,19 @@ def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
     }
 
 
+def _infer_method_intent(card: dict[str, Any]) -> str | None:
+    """Map a project-insight card's chart type/taxonomy to an analytical intent."""
+    chart_type = str(card.get("chartType") or "").lower()
+    insight_type = str(card.get("insightType") or "").lower()
+    if chart_type in ("line", "area", "combo") or "trend" in insight_type:
+        return "detect_trend"
+    if chart_type in ("dual_line", "scatter") or card.get("valueColumn2"):
+        return "relationship_numeric"
+    # Default to a descriptive profile; the method engine will fall back to
+    # Python if the data is too sparse for the R implementation.
+    return "describe_numeric"
+
+
 def _series_to_result(card: dict[str, Any]) -> dict[str, Any] | None:
     """Reconstruct a result set from a chart's rendered series for the method engine."""
     chart = card.get("chart") or {}
@@ -354,6 +367,7 @@ async def _attach_method_envelope_to_card(
         for x in (card.get("title"), card.get("summary"))
         if x
     )
+    intent = _infer_method_intent(card)
     try:
         envelope = await analyze_methods(
             session,
@@ -361,6 +375,7 @@ async def _attach_method_envelope_to_card(
             columns=columns,
             rows=rows,
             question=question or str(card.get("insightType", "")),
+            intent=intent,
         )
     except Exception as exc:  # pragma: no cover - engine is fail-closed
         logger.warning(
