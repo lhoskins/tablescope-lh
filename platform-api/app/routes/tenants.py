@@ -45,6 +45,8 @@ from app.schemas.tenant import (
     TenantCreate,
     TenantDeleteResponse,
     TenantRead,
+    TenantReprocessResponse,
+    TenantSettingsRead,
     UserCreate,
     UserRead,
     UserUpdate,
@@ -339,7 +341,7 @@ async def list_tenants(
 async def get_tenant_details(
     tenant_id: int,
     session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(_require_user_management),
+    context: RequestContext = Depends(_require_root_or_super),
 ) -> dict:
     """Get tenant details including users with VDB info and shared VDBs.
 
@@ -432,6 +434,29 @@ async def get_my_tenant(
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
     return TenantRead.model_validate(tenant)
+
+
+def _tenant_login_url(tenant: Tenant) -> str:
+    base = get_settings().app_base_url.rstrip("/")
+    return f"{base}/{tenant.slug}/login"
+
+
+@router.get("/current/settings", response_model=TenantSettingsRead)
+async def get_current_tenant_settings(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> TenantSettingsRead:
+    """Return a safe, tenant-facing view of the current tenant.
+
+    Excludes users, VDB assignments, VDB health, locations, credentials, and
+    other platform metadata.
+    """
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    data = TenantRead.model_validate(tenant).model_dump(mode="json")
+    data["allowed_domains_enabled"] = tenant.allowed_domains_enabled
+    return TenantSettingsRead(**data, login_url=_tenant_login_url(tenant))
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +600,61 @@ async def update_allowed_domains_settings(
     return await _allowed_domains_response(session, tenant)
 
 
+async def _set_enforce_2fa(
+    session: AsyncSession,
+    context: RequestContext,
+    tenant_id: int,
+    payload: Enforce2faSettingsUpdate,
+) -> Enforce2faSettingsResponse:
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    old_value = tenant.enforce_2fa
+    tenant.enforce_2fa = payload.enabled
+    session.add(
+        AuditEvent(
+            tenant_id=tenant_id,
+            user_id=context.user_id,
+            event_type="tenant_settings",
+            scope="enforce_2fa",
+            title=f"enforce_2fa changed from {old_value} to {payload.enabled}",
+            prompt_type="enforce_2fa_toggle",
+            tables_queried=[],
+            documents_read=[],
+        )
+    )
+    await session.commit()
+    await session.refresh(tenant)
+    return Enforce2faSettingsResponse(enabled=tenant.enforce_2fa)
+
+
+@router.get(
+    "/current/2fa-enforcement",
+    response_model=Enforce2faSettingsResponse,
+)
+async def get_current_enforce_2fa(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> Enforce2faSettingsResponse:
+    tenant = await session.get(Tenant, context.tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return Enforce2faSettingsResponse(enabled=tenant.enforce_2fa)
+
+
+@router.put(
+    "/current/2fa-enforcement",
+    response_model=Enforce2faSettingsResponse,
+)
+async def set_current_enforce_2fa(
+    payload: Enforce2faSettingsUpdate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> Enforce2faSettingsResponse:
+    """Toggle tenant-wide 2FA enforcement for the calling tenant."""
+    return await _set_enforce_2fa(session, context, context.tenant_id, payload)
+
+
 @router.get(
     "/{tenant_id}/2fa-enforcement",
     response_model=Enforce2faSettingsResponse,
@@ -605,31 +685,12 @@ async def set_enforce_2fa(
 ) -> Enforce2faSettingsResponse:
     """Toggle tenant-wide 2FA enforcement on or off.
 
-    When enabled, every member of the tenant must complete SMS MFA regardless
-    of role. The change is audited; existing aal1 sessions are challenged on
-    their next request through the membership middleware.
+    Tenant admins may toggle their own tenant; root/super admins may toggle any
+    tenant.
     """
     if not context.is_service and context.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Cannot modify another tenant")
-    tenant = await session.get(Tenant, tenant_id)
-    if tenant is None:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    tenant.enforce_2fa = payload.enabled
-    session.add(
-        AuditEvent(
-            tenant_id=tenant_id,
-            user_id=context.user_id,
-            event_type="tenant_settings",
-            scope="enforce_2fa",
-            title=f"enforce_2fa set to {payload.enabled}",
-            prompt_type="enforce_2fa_toggle",
-            tables_queried=[],
-            documents_read=[],
-        )
-    )
-    await session.commit()
-    await session.refresh(tenant)
-    return Enforce2faSettingsResponse(enabled=tenant.enforce_2fa)
+    return await _set_enforce_2fa(session, context, tenant_id, payload)
 
 
 @router.post(
@@ -927,34 +988,16 @@ async def delete_user_permanently(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{tenant_id}/reprocess-documents")
-async def reprocess_tenant_documents(
+async def _reprocess_tenant_documents(
+    session: AsyncSession,
+    context: RequestContext,
     tenant_id: int,
     force: bool = False,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(_require_user_management),
-) -> dict:
-    """Reprocess every document in every project for a tenant.
-
-    Enqueues one project-wide reprocess cascade per project.  Each cascade
-    profiles changed documents (or all documents when ``force=true``) and
-    rebuilds the project's knowledge graph last.  Duplicate enqueues for a
-    project coalesce onto its in-flight job.
-    """
+) -> TenantReprocessResponse:
+    """Enqueue a project-wide reprocess cascade for every project in a tenant."""
     tenant = await session.get(Tenant, tenant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
-
-    if (
-        not context.is_service
-        and context.tenant_id != tenant_id
-        and context.role != Role.ROOT_ADMIN
-        and not await _is_super_admin(session, context)
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="Cannot reprocess documents for another tenant",
-        )
 
     project_ids = (
         await session.scalars(select(Project.id).where(Project.tenant_id == tenant_id))
@@ -976,12 +1019,47 @@ async def reprocess_tenant_documents(
         else:
             skipped += 1
 
-    return {
-        "tenant_id": tenant_id,
-        "status": "queued",
-        "total_projects": len(project_ids),
-        "projects_queued": len(job_ids),
-        "projects_skipped": skipped,
-        "job_ids": job_ids,
-        "force": force,
-    }
+    return TenantReprocessResponse(
+        tenant_id=tenant_id,
+        status="queued",
+        total_projects=len(project_ids),
+        projects_queued=len(job_ids),
+        projects_skipped=skipped,
+        job_ids=job_ids,
+        force=force,
+    )
+
+
+@router.post("/current/reprocess-documents", response_model=TenantReprocessResponse)
+async def reprocess_current_tenant_documents(
+    force: bool = False,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> TenantReprocessResponse:
+    """Reprocess every document in every project for the calling tenant."""
+    return await _reprocess_tenant_documents(session, context, context.tenant_id, force)
+
+
+@router.post("/{tenant_id}/reprocess-documents", response_model=TenantReprocessResponse)
+async def reprocess_tenant_documents(
+    tenant_id: int,
+    force: bool = False,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(_require_user_management),
+) -> TenantReprocessResponse:
+    """Reprocess every document in every project for a tenant.
+
+    Tenant admins may reprocess their own tenant; root/super admins may
+    reprocess any tenant.
+    """
+    if (
+        not context.is_service
+        and context.tenant_id != tenant_id
+        and context.role != Role.ROOT_ADMIN
+        and not await _is_super_admin(session, context)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot reprocess documents for another tenant",
+        )
+    return await _reprocess_tenant_documents(session, context, tenant_id, force)
