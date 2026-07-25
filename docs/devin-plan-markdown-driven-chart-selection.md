@@ -1,182 +1,173 @@
-# Devin plan: markdown-driven chart selection (remove all hard-coded chart lists) + Business-Insight scrollbar fix
+# Devin plan: markdown-driven chart selection — DELIVERED CODE, transfer + integrate only
 
 Repository: `lhoskins/tablescope-lh`
-Base: `devin/r-echarts-e2e-validation` (contains PR #89/#90/#92). Feature branch:
-`devin/markdown-driven-chart-selection`.
 
-## Why variety is still capped (verified — the remaining hard-coded chain)
+## ⚠️ Delivery model — read before touching anything
 
-All 31 families are registered (PR #90) and visible buckets exist (PR #92), yet
-risks/trends/opportunities show only line/bar/KPI and Deeper analysis shows only
-scatter/heatmap/comparison. The chart vocabulary is hard-coded at every decision
-point:
+The core implementation is **already written, tested, and pushed** on branch
+**`claude/markdown-chart-selection`** (based on `devin/r-echarts-e2e-validation`).
 
-1. **The planner prompt embeds a fixed enum** —
-   `ai-server/tablescope-ai-api/app/routers/ai.py:2491` hard-codes
-   `"chart_type": "kpi_grid|line|area|dual_line|scatter|bubble|bar|...|none"`
-   into the LLM prompt string.
-2. **Unknown types silently become bar** — `ai.py:2567-2569`:
-   `if chart_type not in _ALLOWED_PLAN_CHART_TYPES: chart_type = "bar"`. Any
-   richer chart the LLM proposes is collapsed to bar. This is the single biggest
-   variety killer for risk/trend/opportunity cards.
-3. **Shape templates are six hard-coded blocks** —
-   `home_intelligence._shape_template_insights` implements exactly
-   radar/heatmap/treemap/sankey/funnel/scatter as inline Python. That is why
-   Deeper analysis shows only those.
-4. **Per-type branches in card building** — `home_intelligence` special-cases
-   types inline (`chart_type in ("line","area","combo")` at 963, scatter/bubble
-   at 2191, `_TWO_VALUE_TYPES` at 2300, etc.).
-5. **`visualization_engine` family rules are inline Python branches** — each
-   family's eligibility is a code block, not data.
+**STRICT RULES:**
 
-Conclusion: the user is right — chart selection must stop being code-enumerated.
+1. **Do NOT rewrite, refactor, reformat, rename, or "improve" the delivered
+   files** listed in the manifest below. Merge them as-is. If a merge conflict
+   arises with newer base commits, resolve by preserving the delivered files'
+   content and adapting the *surrounding* code, not the delivered code.
+2. Your job is: **merge the branch, add the remaining integration described in
+   Part B (with the exact before/after code given), run all tests, deploy, and
+   verify.** Nothing else.
+3. If you believe a delivered file has a bug, report it in the PR description —
+   do not change it without listing the exact change and reason.
 
-## Target architecture (the ask + my recommendation)
+## Part A — Delivered code (branch `claude/markdown-chart-selection`)
 
-**Single source of truth: a chart-selection best-practices markdown**, following
-the existing `prompt_loader` + `*_best_practices.md` pattern already used in both
-services (`ai-server/.../app/prompts/*_best_practices.md`,
-`platform-api/app/prompts/*_best_practices.md`).
+All of it verified: platform catalog tests **13/13** pass; **full ai-server
+suite 68/68** passes (proving the `ai.py` edits are safe); web-ui `tsc`
+typecheck clean and lockstep test **4/4** passes.
 
-Create `chart_selection_best_practices.md` (one canonical copy; mirror or share
-between services the same way existing best-practice files are mirrored) with
-**one section per chart family** (all 31), each carrying a machine-readable
-front-matter block plus prose guidance:
+| File | What it is |
+|---|---|
+| `platform-api/app/prompts/chart_selection_best_practices.md` | **The single source of truth.** 31 chart families, each with a fenced ```rules block (min/max dims + measures, `needs`/`excludes` traits, role mapping, subtypes, base score) plus prose guidance. `map` is gated off via `score: 0.00`. Editing this file is how chart selection is tuned from now on. |
+| `ai-server/tablescope-ai-api/app/prompts/chart_selection_best_practices.md` | Mirror for the AI server (same content; keep the two in sync when editing). |
+| `platform-api/app/services/chart_catalog.py` | Dependency-free parser → `ChartFamilyRule` / `ShapeSummary`; `load_chart_catalog()`, `eligible_families(shape)`, `allowed_plan_chart_types()`, `planner_guidance()`. This is what the visualization engine consumes in Part B. |
+| `platform-api/tests/test_chart_catalog.py` | 13 tests incl. shape-eligibility cases (a time series must not offer gauge/radial_bar/pie/bar; single scalar → kpi first; matrix → heatmap; raw → boxplot/histogram; flow → sankey; OHLC → candlestick; gated map never eligible). |
+| `ai-server/.../app/services/chart_catalog.py` | Slim planner-side parser: `allowed_plan_chart_types()` (54 values = 31 families + subtypes + legacy aliases `kpi_grid/dual_line/bullet/sparkline_table/none`), `plan_chart_type_enum()`, `planner_chart_digest()` (compact 1-line-per-family guide, deliberately small for bounded num_ctx). Fails open to the historical core set if the markdown is missing. |
+| `ai-server/.../app/routers/ai.py` (3 surgical edits) | The hard-coded 21-value `_ALLOWED_PLAN_CHART_TYPES` frozenset → `chart_catalog.allowed_plan_chart_types()`; the hard-coded `"chart_type": "kpi_grid|line|…|none"` prompt enum → `plan_chart_type_enum()`; the per-family digest injected into the plan prompt. Unknown proposals now only snap to "bar" when genuinely outside the whole catalog (garbage), with an info log. |
+| `ai-server/.../tests/test_chart_catalog.py` | 4 tests (vocabulary from markdown, sorted enum, digest size, fail-open). |
+| `web-ui/lib/visualizations/chartCatalogLockstep.test.ts` | **The drift guard:** every markdown family must be renderable (registry key, alias, or subtype parent via its `SUBTYPE_RESOLUTION` map: waterfall→bar, bubble→scatter, histogram→bar, calendar_heatmap→heatmap, bump→line), and every registry family must be documented in the markdown. |
 
-```markdown
-## heatmap
-```yaml
-family: heatmap
-requires: {dims: 2, measures: 1}
-excludes: [period_only_dimension]
-roles: {x: dimension, y: dimension, value: measure}
-subtypes: [calendar]
+Net effect already achieved by Part A: the planner can propose **any of the 31
+families** (boxplot, sankey, candlestick, sunburst, theme_river, …) and they
+survive planning instead of being snapped to "bar".
+
+## Part B — Integration work for Devin (exact before/after)
+
+### B1. `visualization_engine.py` consumes the catalog (platform-api)
+
+Goal: family eligibility comes from `chart_catalog` rules, not inline branches.
+Bounded change — do it as a **filter + extension layer** around
+`recommend_visualizations`, not a rewrite:
+
+**(1) Build a `ShapeSummary` from the existing `_Shape`** (add near
+`derive_shape`):
+
+```python
+from app.services.chart_catalog import ShapeSummary, eligible_families
+
+def _catalog_shape(shape: _Shape, dict_rows: list[dict[str, Any]], roles: dict[str, Any]) -> ShapeSummary:
+    dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+    traits: set[str] = set()
+    if shape.time_columns:
+        traits.add("time")
+    if shape.dimensions and not dims:
+        traits.add("period_only_dimension")
+    if shape.row_count == 1 and not shape.dimensions:
+        traits.add("single_row")
+    if roles.get("rate"):
+        traits.add("rate")
+    if roles.get("source") and roles.get("target"):
+        traits.add("flow")
+    if roles.get("parent") or (len(dims) >= 2 and _looks_hierarchical(dict_rows, dims)):
+        traits.add("hierarchy")
+    if _has_ohlc_roles(roles):
+        traits.add("ohlc")
+    if shape.row_count > max(20, 2 * max((_cardinality(shape, d) for d in dims), default=1)):
+        traits.add("raw")  # plausibly unaggregated rows
+    if any(_has_negative(dict_rows, m) for m in shape.measures):
+        traits.add("negative_values")
+    return ShapeSummary(dims=len(dims), measures=len(shape.measures), traits=frozenset(traits))
 ```
-Use when comparing a measure across two categorical dimensions (e.g. region ×
-product). Prefer over grouped bars when both cardinalities exceed ~5. Never use
-for a single time series...
+
+(`_looks_hierarchical`, `_has_ohlc_roles`, `_cardinality`, `_has_negative` are
+small helpers — implement against the existing `_Shape`/roles structures. If a
+trait can't be detected cheaply, omit it: rules that `needs` it simply won't
+fire, which is safe.)
+
+**(2) At the end of `recommend_visualizations`, filter by catalog eligibility**
+(this becomes the final authority over every inline branch):
+
+```python
+# BEFORE (end of recommend_visualizations):
+    return _diverse_top_n(candidates, limit)
+
+# AFTER:
+    catalog_ok = {r.family for r in eligible_families(_catalog_shape(shape, dict_rows, roles))}
+    candidates = [
+        c for c in candidates
+        if c.decision.chart_type.value in catalog_ok
+        or c.decision.chart_type.value == "table"  # universal fallback stays
+    ]
+    return _diverse_top_n(candidates, limit)
 ```
 
-Consumption (this is the important design decision — **advice, please keep it**):
+This makes the markdown the hard gate: an inline branch can still propose a
+family, but only catalog-eligible families survive. (The inline branches become
+score/role providers; dissolving them into pure catalog scoring is a later
+cleanup — do NOT attempt that larger rewrite in this PR.)
 
-- **The LLM planner reads the prose + family list** (via `prompt_loader`) instead
-  of an inline enum — it may propose ANY family in the file, with role mappings.
-- **The deterministic ranker (`visualization_engine`) reads the front-matter
-  rules** (parsed once at startup) instead of inline Python branches — it
-  validates/ranks the LLM's proposal and all alternatives against the actual data
-  shape. **Keep this validation layer.** The markdown removes the hard-coded
-  vocabulary; the shape check must remain, otherwise the LLM will put gauges on
-  time series again (we have already seen the ranker's value here). LLM proposes
-  from the markdown; the data shape disposes.
-- **Snap-to-bar is abolished.** When a proposed type fails validation, fall back
-  to the ranker's top shape-fit decision — never a hard-coded `"bar"`.
+**(3) Add catalog-only candidates the inline code never proposes** (so new
+markdown families surface without code): after the filter, for any
+`eligible_families(...)` entry with `rule.score >= 0.5` not already among the
+candidates, append `_candidate(ChartType(rule.family), rule.score,
+reason=rule.guidance.split(".")[0])` **only if** `rule.family` is a valid
+`ChartType` member. Extend the `ChartType` enum with any markdown family it
+lacks (`sunburst`, `tree`, `graph`, `parallel`, `lines`, `candlestick`,
+`boxplot`, `pictorial_bar`, `theme_river`, `map`, `histogram`,
+`calendar_heatmap`, `waterfall`, `bump`, `bubble`, `effect_scatter` — check
+current members first; several were added by PR #90's lockstep work).
 
-## Work items
+Tests: extend `test_visualization_engine.py` — a time-series shape yields no
+gauge/radial_bar/pie candidates (now catalog-enforced); a flow shape yields
+sankey; a fixture family added to a monkeypatched markdown becomes eligible with
+no Python change (`monkeypatch` `load_prompt_reference`).
 
-### 1. Author `chart_selection_best_practices.md`
+### B2. `home_intelligence._shape_template_insights` reads the catalog
 
-- All 31 registered families, each with front-matter (requires/excludes/roles/
-  subtypes) + concise best-practice prose (when to use, when not to, drawn from
-  the ECharts gallery vocabulary: stacked/gradient area, bump/ranking line,
-  confidence band, mixed line+bar, polar bar, boxplot variants, calendar heatmap,
-  candlestick, sunburst, tree, graph, parallel, themeRiver, pictorialBar, …).
-- Loaded via the existing `prompt_loader` in BOTH services; add a lockstep test:
-  every family in the markdown is registered in the renderer
-  (`EChartsWidget`/`chartRegistry`), and every registered family appears in the
-  markdown. No drift in either direction.
+Replace the hard-coded six-family template list with iteration over
+`eligible_families(...)` for each probed table, keeping the existing per-family
+SQL builders as a dispatch map (`_TEMPLATE_BUILDERS: dict[str, Callable]`) —
+new families appear in "Deeper analysis" when (a) the markdown declares them
+eligible and (b) a builder exists; the every-card-renders invariant from PR #92
+keeps unknown ones visible. Do not remove any currently working template
+builder.
 
-### 2. ai-server planner: prompt from the markdown, no enum, no snap-to-bar
+### B3. Business-Insight page: remove the outer scrollbar
 
-- Build the plan prompt's chart guidance + allowed-type list from the loaded
-  markdown (`ai.py` ~2392-2491) — delete the inline enum string.
-- Replace `_ALLOWED_PLAN_CHART_TYPES` gating (~2567-2569) with
-  markdown-derived membership; on unknown/failed type, defer to the platform
-  ranker (emit no forced type) instead of `"bar"`.
+Exactly one scroll owner — the app-shell `<main className="flex-1
+overflow-y-auto">` (`app-shell.tsx:66`). Find what makes the document/body
+scrollable on `web-ui/app/business-insight/page.tsx` (content escaping the
+`h-screen` flex column at `app-shell.tsx:46`) and remove it. Re-verify: all
+panels expanded → one scrollbar → last card fully reachable; Home unaffected.
 
-### 3. platform-api: data-driven families, generic card building
+### B4. Land + deploy + verify (the step that keeps getting missed)
 
-- `visualization_engine`: parse the front-matter into the family/eligibility
-  table at startup; replace the inline per-family branches with a generic loop
-  over that table (shape predicates from `requires`/`excludes`, scores from fit).
-  Same deterministic behavior, zero per-family code.
-- `home_intelligence`: replace `_shape_template_insights`'s six inline blocks
-  with a generic generator driven by the same table — for each family whose
-  `requires` matches a table's probed shape, emit the templated SQL/card (role
-  mapping from the front-matter `roles`). New families then appear in Deeper
-  analysis by editing the markdown only.
-- Collapse the per-type special cases (`_TWO_VALUE_TYPES`, the
-  line/area/combo period check, scatter/bubble branch) into role-driven generic
-  code keyed off the front-matter roles.
-- Frontend `buildMultiDimWidget`/`chartRegistry` should already be generic per
-  PR #90; verify no remaining per-family switch that would drop a family the
-  markdown allows.
-
-### 4. Editing the markdown must be the ONLY step to tune selection
-
-Acceptance for the refactor: adding/removing/re-scoping a chart family or
-changing its guidance requires **editing `chart_selection_best_practices.md`
-only** — no Python/TS chart-name changes anywhere (renderer builder must already
-exist; the lockstep test enforces that pairing).
-
-### 5. Business-Insight page: remove the outer scrollbar
-
-The page currently shows a second (outer/window) scrollbar in addition to the
-app-shell's `main` scroller. Exactly **one** scroll container may own vertical
-scrolling — the app-shell `<main className="flex-1 overflow-y-auto">`
-(`app-shell.tsx:66`). Find what makes the document/body taller than the viewport
-on `web-ui/app/business-insight/page.tsx` (the `h-screen` shell is at
-`app-shell.tsx:46`; look for content escaping the flex column, margins collapsing
-outside, or a fixed-height element exceeding the shell) and eliminate the outer
-scrollbar. Re-verify the earlier requirement: with all panels expanded, the single
-scrollbar reaches the last card; no clipped content; Home and other shell pages
-unaffected.
-
-### 6. Regenerate + verify variety
-
-- Clear insight caches (Clear-cache button/endpoint or script) and regenerate.
-- Expected live outcome: risk/trend/opportunity cards can carry any
-  shape-eligible family the planner proposes (stacked/area/combo/bands where the
-  data fits), and Deeper analysis grows beyond scatter/heatmap/comparison as
-  families match probed shapes (boxplot for distributions, sunburst/tree for
-  hierarchies, candlestick for OHLC, etc.).
-- **Honest bound (state it in the PR):** variety remains limited by actual data
-  shapes — monthly label/value sources will still legitimately produce
-  line/bar/KPI; the win is that nothing in code caps the vocabulary anymore.
-
-## Tests
-
-- Lockstep: markdown families ⇄ renderer registry (both directions).
-- Planner: prompt contains the markdown-derived family guidance; a plan proposing
-  `boxplot` with valid roles survives (no snap-to-bar); an invalid proposal falls
-  back to the ranker's shape-fit choice, not `"bar"`.
-- Ranker: behavior driven from front-matter — a family added to the markdown with
-  matching shape rules becomes eligible with **no Python change** (test with a
-  fixture family); time-series exclusions still enforced (`excludes:
-  period_only_dimension`).
-- Shape templates: generic generator emits a card for every family whose
-  `requires` matches a fixture table; the six previous families still work.
-- Scrollbar: business-insight page has exactly one vertical scroll container;
-  last card reachable with panels expanded.
-- Full suites green (platform-api pytest/ruff/mypy; web-ui typecheck/test/build).
+1. Merge `claude/markdown-chart-selection` into your integration branch, add
+   B1-B3, PR into `devin/r-echarts-e2e-validation` (or the current deployed
+   lineage), merge.
+2. Full suites: platform-api `pytest`/`ruff`/`mypy`; ai-server `pytest`
+   (all 68+ must stay green); web-ui `typecheck`/`test --run`/`build`
+   (lockstep test included).
+3. Deploy: **rebuild** web-ui + ai-server + platform-api images; restart.
+4. **Clear insight caches** (Clear-cache buttons or script) so cards regenerate
+   through the new vocabulary.
+5. Verify live: the plan prompt contains the digest + wide enum (log check); a
+   distribution-shaped result offers boxplot/histogram; a time series offers no
+   gauge/radial_bar; new families render via ECharts.
 
 ## Definition of done
 
-- Zero hard-coded chart-type lists/enums/branches remain in ai-server planner,
-  `visualization_engine`, `home_intelligence` card/template building (grep proof:
-  chart family names appear only in the markdown, the renderer builders, and the
-  registry).
-- The LLM/planner receives its chart guidance from
-  `chart_selection_best_practices.md`; deterministic shape validation retained;
-  snap-to-bar removed.
-- Deeper analysis and the three main buckets show additional families wherever
-  data shape supports them (live screenshots after cache clear).
-- One scrollbar on the Business-Insight page.
-- Merged into the deployed lineage + rebuilt/redeployed (not stranded).
+- `claude/markdown-chart-selection` merged **unmodified** (any deviation listed
+  explicitly in the PR).
+- B1-B3 implemented per the given diffs; the catalog is the hard eligibility
+  gate; chart-family names in platform-api/ai-server appear only in the
+  markdown, the `chart_catalog` modules, renderer builders/registry, template
+  builders, and tests — no enums or per-family `if` gates elsewhere.
+- All suites green; deployed; caches cleared; live verification screenshots
+  (suggestion modal for a time series and for a distribution; a new-family card
+  rendering).
 
 ## Report
 
-The markdown file (all 31 sections); grep proof no chart-name enums/branches
-remain outside markdown/renderer/registry; the planner-prompt diff (enum removed,
-markdown injected); the generic ranker/template loops; scrollbar root cause +
-fix; cache-clear + live screenshots of new families in each bucket; the honest
-data-shape bound restated with the per-source audit numbers if available.
+Confirmation the delivered files are byte-identical to the branch (or the exact
+deviations + reasons); the B1/B2 diffs as landed; the scrollbar root cause; test
+totals per suite; deploy + cache-clear confirmation; live screenshots.
