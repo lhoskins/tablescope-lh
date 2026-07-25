@@ -1040,7 +1040,7 @@ def _card(
                 card["visualizationDecision"] = card["chart"]["visualizationDecision"]
                 card["chartCandidates"] = card["chart"].get("chartCandidates", [])
             else:
-                candidates = rank_visualizations(result_columns, result_rows, limit=6)
+                candidates = rank_visualizations(result_columns, result_rows, limit=50)
                 if candidates:
                     chosen = candidates[0]
                     # Preserve legacy multi-KPI card type and shape-template rows
@@ -1084,7 +1084,7 @@ def _card(
                             chosen = current_candidate
 
                     card["visualizationDecision"] = chosen.decision.to_dict()
-                    card["chartCandidates"] = [c.to_dict() for c in candidates[:6]]
+                    card["chartCandidates"] = [c.to_dict() for c in candidates[:50]]
                     if card.get("chart") and not preserve_type:
                         card["chart"]["type"] = chosen.decision.chart_type.value
                         card["chart"]["subtype"] = chosen.decision.chart_style or ""
@@ -2416,29 +2416,48 @@ def _build_multi_chart(
 
     The frontend ``InsightChartView`` maps ``roles`` to ``WidgetConfig`` columns
     and renders the rows through the same ``WidgetRenderer`` used by dashboards.
-    A minimal visualization decision is stamped so the chart-suggestion modal
-    preselects the intended family.
+    All shape-compatible chart families are ranked so the chart-suggestion modal
+    can offer every viable alternative, not just the template's first choice.
     """
-    x_field = roles.get("x")
-    y_field = roles.get("value") or roles.get("y")
-    y2_field = roles.get("y2") or roles.get("group")
-    decision: dict[str, Any] = {
-        "chartType": chart_type,
-        "chartStyle": "",
-        "xField": x_field,
-        "yField": y_field,
-        "valueFormat": "number",
-        "reason": f"Shape template generated a {chart_type} chart from the source table.",
-    }
-    if y2_field:
-        decision["y2Field"] = y2_field
+    ranked = rank_visualizations(columns, rows, limit=50)
 
-    candidate = {
-        "decision": decision,
-        "score": 1.0,
-        "supported": True,
-        "unsupportedReason": "",
-    }
+    # Promote the template's intended family to the top so the preselected card
+    # matches the shape that produced it, but still expose every eligible family.
+    candidates = [c.to_dict() for c in ranked]
+    template_index = next(
+        (
+            i
+            for i, c in enumerate(candidates)
+            if c.get("decision", {}).get("chartType") == chart_type
+        ),
+        None,
+    )
+    if template_index is not None and template_index > 0:
+        intended = candidates.pop(template_index)
+        candidates.insert(0, intended)
+    elif not candidates:
+        # Fallback: at least one candidate for the intended family.
+        x_field = roles.get("x")
+        y_field = roles.get("value") or roles.get("y")
+        y2_field = roles.get("y2") or roles.get("group")
+        candidates = [
+            {
+                "decision": {
+                    "chartType": chart_type,
+                    "chartStyle": "",
+                    "xField": x_field,
+                    "yField": y_field,
+                    "valueFormat": "number",
+                    "reason": f"Shape template generated a {chart_type} chart from the source table.",
+                    "y2Field": y2_field,
+                },
+                "score": 1.0,
+                "supported": True,
+                "unsupportedReason": "",
+            }
+        ]
+
+    decision = candidates[0]["decision"]
 
     return {
         "type": chart_type,
@@ -2447,7 +2466,7 @@ def _build_multi_chart(
         "data": {"rows": rows, "columns": columns},
         "roles": roles,
         "visualizationDecision": decision,
-        "chartCandidates": [candidate],
+        "chartCandidates": candidates,
     }
 
 

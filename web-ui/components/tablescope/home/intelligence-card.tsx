@@ -121,13 +121,25 @@ function buildMultiDimWidget(chart: InsightChart, dataRows: Record<string, unkno
   return { ...base, xColumn: roles.x ?? "label", yColumn: roles.value ?? roles.y ?? "value" };
 }
 
-function InsightChartView({ chart }: { chart: InsightChart }) {
+export function InsightChartView({
+  chart,
+  height: heightProp,
+}: {
+  chart: InsightChart;
+  height?: number;
+}) {
   const dataRows = chart.data.rows;
   const series = chart.data.series;
 
   if (dataRows && dataRows.length > 0) {
     const widget = buildMultiDimWidget(chart, dataRows);
-    const height = chart.type === "funnel" || chart.type === "sankey" ? 260 : chart.type === "heatmap" ? 240 : 220;
+    const height =
+      heightProp ??
+      (chart.type === "funnel" || chart.type === "sankey"
+        ? 260
+        : chart.type === "heatmap"
+          ? 240
+          : 220);
     return (
       <div className="w-full" style={{ height }}>
         <WidgetRenderer widget={widget} data={dataRows} />
@@ -189,9 +201,11 @@ function InsightChartView({ chart }: { chart: InsightChart }) {
     chart.type === "bar" &&
     (chart.subtype === "horizontal_bar" ||
       chart.subtype === "stacked_horizontal");
-  const height = isHorizontalBar
-    ? Math.min(520, Math.max(180, rows.length * 28 + 48))
-    : 180;
+  const height =
+    heightProp ??
+    (isHorizontalBar
+      ? Math.min(520, Math.max(180, rows.length * 28 + 48))
+      : 180);
 
   return (
     <div className="w-full" style={{ height }}>
