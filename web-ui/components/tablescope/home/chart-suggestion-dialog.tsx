@@ -2,8 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { IconX, IconCheck, IconChartBar } from "@tabler/icons-react";
-import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
-import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
+import { InsightChartView } from "@/components/tablescope/home/intelligence-card";
 import type { InsightCard, InsightChart, VizCandidate } from "@/lib/api/home-intelligence";
 import { applyChartSelection } from "@/lib/api/home-intelligence";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
@@ -34,33 +33,18 @@ const FALLBACK_CANDIDATES: VizCandidate[] = [
   },
 ];
 
-function buildPreviewWidget(
+function buildCandidateChart(
+  baseChart: InsightChart | null | undefined,
   candidate: VizCandidate,
-  hasValue2: boolean,
-): WidgetConfig {
+): InsightChart {
   const d = candidate.decision;
-  const chartType = d.chartType as WidgetType;
-  const base: WidgetConfig = {
-    id: `preview-${chartType}`,
-    type: chartType,
-    chartSubtype: (d.chartStyle || undefined) as WidgetConfig["chartSubtype"],
-    title: "",
-    dataSource: { kind: "custom_sql" },
-    xColumn: d.xField || "label",
-    xColumnType: chartType === "scatter" ? "number" : "string",
-    yColumn: d.yField || "value",
-    aggregation: "sum",
-    sortBy: "x_asc",
-    filters: [],
-    visualizationOptions: { showLegend: false, showGrid: false },
-    colSpan: 1,
-    position: 0,
-  };
-
-  if (hasValue2 && (chartType === "combo" || chartType === "scatter")) {
-    return { ...base, y2Column: d.y2Field || "value2", y2Aggregation: "sum" };
-  }
-  return base;
+  return {
+    ...baseChart,
+    type: d.chartType as InsightChart["type"],
+    subtype: d.chartStyle || undefined,
+    // Keep the original data + roles so InsightChartView can map columns.
+    // The candidate type is the only thing we override.
+  } as InsightChart;
 }
 
 export function ChartSuggestionDialog({
@@ -90,15 +74,6 @@ export function ChartSuggestionDialog({
   const [saving, setSaving] = useState(false);
 
   if (!open) return null;
-
-  const chart = card.chart as InsightChart | null | undefined;
-  const series = chart?.data?.series ?? [];
-  const hasValue2 = series.some((s) => typeof s.value2 === "number");
-  const rows = series.map((s) =>
-    hasValue2
-      ? { label: s.label, value: s.value, value2: s.value2 ?? 0 }
-      : { label: s.label, value: s.value },
-  );
 
   const handleApply = async () => {
     if (!selected) return;
@@ -130,7 +105,7 @@ export function ChartSuggestionDialog({
       aria-modal="true"
     >
       <div
-        className="my-8 w-full max-w-4xl rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-lg"
+        className="my-8 w-full max-w-5xl rounded-xl border border-line-tertiary bg-bg-primary p-5 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between gap-3">
@@ -153,10 +128,11 @@ export function ChartSuggestionDialog({
           </button>
         </div>
 
-        <div className="grid max-h-[70vh] grid-cols-1 gap-4 overflow-y-auto md:grid-cols-2">
+        <div className="grid max-h-[70vh] grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
           {candidates.map((candidate, idx) => {
-            const widget = buildPreviewWidget(candidate, hasValue2);
-            const isSelected = selected?.decision.chartType === candidate.decision.chartType &&
+            const candidateChart = buildCandidateChart(card.chart, candidate);
+            const isSelected =
+              selected?.decision.chartType === candidate.decision.chartType &&
               selected?.decision.chartStyle === candidate.decision.chartStyle;
             return (
               <button
@@ -172,12 +148,14 @@ export function ChartSuggestionDialog({
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[13px] font-medium text-ink-primary">
                     {candidate.decision.chartType}
-                    {candidate.decision.chartStyle ? ` — ${candidate.decision.chartStyle}` : ""}
+                    {candidate.decision.chartStyle
+                      ? ` — ${candidate.decision.chartStyle}`
+                      : ""}
                   </span>
                   {isSelected && <IconCheck size={16} className="text-brand-500" />}
                 </div>
-                <div className="h-[160px] rounded-md bg-bg-secondary/40">
-                  <WidgetRenderer widget={widget} data={rows} />
+                <div className="h-[160px] rounded-md bg-bg-secondary/40 overflow-hidden">
+                  <InsightChartView chart={candidateChart} height={160} />
                 </div>
                 <p className="mt-2 text-[11px] text-ink-tertiary">
                   {candidate.decision.reason}
