@@ -1138,7 +1138,7 @@ def recommend_visualizations(
             # this dataset's shape makes it a poor fit.
             rule, confidence = entry
             fit_ratio = confidence / rule.score if rule.score > 0 else 0.0
-            c.score = round(c.score * fit_ratio, 4)
+            c.score = round(min(c.score * fit_ratio, 1.0), 4)
             c.decision.confidence = c.score
         filtered.append(c)
 
