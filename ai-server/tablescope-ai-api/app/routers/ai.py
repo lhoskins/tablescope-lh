@@ -72,6 +72,7 @@ from app.models.schemas import (
     SuggestDashboardsMultiResponse,
 )
 from app.services import context_builder, llm_client, vector_store
+from app.services import chart_catalog
 from app.services.context_builder import ContextBuildError
 from app.services.kg_context import format_knowledge_graph_context
 from app.services.prompt_loader import load_prompt_reference
@@ -2081,30 +2082,11 @@ _TEIID_SQL_RULES = (
 # Chart families the planner may request. These map onto the dashboard's chart
 # catalog downstream (platform-api ``_build_chart``); the result shape can still
 # override the pick (e.g. a single-row aggregate always renders as KPI tiles).
-_ALLOWED_PLAN_CHART_TYPES = frozenset(
-    {
-        "kpi_grid",
-        "line",
-        "area",
-        "dual_line",
-        "scatter",
-        "bubble",
-        "bar",
-        "horizontal_bar",
-        "stacked_bar",
-        "waterfall",
-        "donut",
-        "pie",
-        "treemap",
-        "funnel",
-        "radar",
-        "heatmap",
-        "gauge",
-        "bullet",
-        "sparkline_table",
-        "none",
-    }
-)
+# Chart vocabulary is markdown-driven (chart_selection_best_practices.md via
+# app.services.chart_catalog) — do not hard-code chart-type enums here. The
+# platform's visualization engine shape-validates and re-ranks every proposal.
+def _allowed_plan_chart_types() -> frozenset[str]:
+    return chart_catalog.allowed_plan_chart_types()
 
 
 @router.post("/intelligence/plan", response_model=IntelligencePlanResponse)
@@ -2482,13 +2464,14 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
         "cross-table analyses this way; if the data "
         "genuinely can't support that many non-empty analyses, return fewer rather "
         "than padding with weak or empty ones.\n\n"
+        f"{chart_catalog.planner_chart_digest()}\n\n"
         "Return ONLY a JSON object: {\"analyses\": [ {\n"
         "  \"id\": \"a1\",\n"
         "  \"category\": \"risk|trend|opportunity|relationship\",\n"
         "  \"title\": \"short headline\",\n"
         "  \"rationale\": \"why this matters for the business (1 sentence)\",\n"
         "  \"sql\": \"SELECT ... (empty for document findings)\",\n"
-        "  \"chart_type\": \"kpi_grid|line|area|dual_line|scatter|bubble|bar|horizontal_bar|stacked_bar|waterfall|donut|pie|treemap|funnel|radar|heatmap|gauge|bullet|sparkline_table|none\",\n"
+        f"  \"chart_type\": \"{chart_catalog.plan_chart_type_enum()}\",\n"
         "  \"label_column\": \"alias used for the category/x axis\",\n"
         "  \"value_column\": \"alias used for the numeric value (primary metric, or size for bubble)\",\n"
         "  \"value_column_2\": \"alias for a second metric — used by dual_line, scatter, bubble, heatmap (color value), gauge/bullet (target). Omit/empty otherwise.\",\n"
@@ -2565,7 +2548,15 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
             if category not in ("risk", "trend", "opportunity", "relationship"):
                 category = "trend"
             chart_type = str(a.get("chart_type", "bar")).lower()
-            if chart_type not in _ALLOWED_PLAN_CHART_TYPES:
+            if chart_type not in _allowed_plan_chart_types():
+                # Unknown proposal: keep planning but let the platform's
+                # shape-driven ranker choose the family (it re-ranks every
+                # card); "bar" only as the absolute last resort so legacy
+                # consumers that require a type keep working.
+                logger.info(
+                    "Plan chart_type %r not in catalog; deferring to shape ranker",
+                    chart_type,
+                )
                 chart_type = "bar"
 
             label_col, value_col, value2_col = _infer_chart_columns(sql)
