@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { IntelligenceFeed } from "./intelligence-feed";
 import type { FilterableProject } from "./intelligence-strip";
@@ -206,7 +206,9 @@ describe("IntelligenceFeed", () => {
     renderFeed();
     fireEvent.click(screen.getByRole("button", { name: /Trends/ }));
     await screen.findByText("Spend concentrated");
-    fireEvent.click(screen.getByRole("button", { name: /Explain/i }));
+    const card = screen.getByText("Spend concentrated").closest("article") as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: /More Actions/i }));
+    fireEvent.click(within(card).getByRole("button", { name: "Explain" }));
     expect(await screen.findByText("Analytical method: Pareto analysis")).toBeTruthy();
     expect(screen.getByText("Quality: reliable")).toBeTruthy();
   });
