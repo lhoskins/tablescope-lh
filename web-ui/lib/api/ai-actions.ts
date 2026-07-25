@@ -1,6 +1,40 @@
 import { apiClient } from "@/lib/api-client";
 
-export type VizType = "table" | "bar" | "line" | "pie" | "kpi";
+/**
+ * Chart families a conversational answer can request.
+ *
+ * This mirrors the backend `ChartType` vocabulary (and therefore the ECharts
+ * renderer registry) rather than a hand-picked subset: the shared ask pipeline
+ * now ranks every family for chat, so narrowing here would silently turn a
+ * scatter or heatmap answer back into a bar.
+ */
+export type VizType =
+  | "table"
+  | "kpi"
+  | "line"
+  | "area"
+  | "bar"
+  | "combo"
+  | "pie"
+  | "scatter"
+  | "effect_scatter"
+  | "radar"
+  | "radial_bar"
+  | "treemap"
+  | "sunburst"
+  | "tree"
+  | "funnel"
+  | "sankey"
+  | "graph"
+  | "parallel"
+  | "lines"
+  | "heatmap"
+  | "candlestick"
+  | "boxplot"
+  | "pictorial_bar"
+  | "theme_river"
+  | "gauge"
+  | "map";
 
 export interface SuggestedVisualization {
   type: VizType;
@@ -11,6 +45,12 @@ export interface SuggestedVisualization {
   chartStyle?: string;
   /** Rank by the measure and keep only the top N categories when set. */
   topN?: number;
+  /** Second measure for dual-axis families (combo, dual line). */
+  y2Field?: string;
+  /** Axis/label formatting class chosen by the engine. */
+  valueFormat?: string;
+  /** Ranked alternatives for the in-chat chart picker. */
+  candidates?: unknown[];
 }
 
 export type AiActionStatus =

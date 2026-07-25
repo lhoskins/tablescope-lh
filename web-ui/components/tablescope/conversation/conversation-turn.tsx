@@ -29,7 +29,13 @@ function buildEnvelope(turn: ConversationTurn): ResponseEnvelope | null {
         type: turn.chart_config.type as SuggestedVisualization["type"],
         xField: turn.chart_config.labelColumn,
         yField: turn.chart_config.valueColumns?.[0],
+        // Dual-axis families (combo, actual-vs-target, co-movement) carry a
+        // second measure; dropping it rendered them as a single series.
+        y2Field: turn.chart_config.valueColumns?.[1],
         chartStyle: turn.chart_config.subtype,
+        metricField: turn.chart_config.metricField,
+        topN: turn.chart_config.topN,
+        valueFormat: turn.chart_config.valueFormat,
       }
     : undefined;
 

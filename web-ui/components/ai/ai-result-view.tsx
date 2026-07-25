@@ -54,7 +54,11 @@ export function buildChart(
     .filter((s) => s.label !== "");
   if (!series.length) return null;
 
-  const type = viz.type === "pie" ? "pie" : viz.type === "line" ? "line" : "bar";
+  // Keep the family the engine chose. Collapsing everything to pie/line/bar
+  // here silently undid the shared ask pipeline's chart-fit ranking — a scatter
+  // or heatmap answer came back as a bar. The renderer (EChartsWidget, via
+  // WidgetRenderer) draws every family in the vocabulary, so pass it through.
+  const type = viz.type as InsightChart["type"];
 
   // Bars with many categories are ranked by the measure and capped to the top N
   // (the engine's decision) so the chart shows the leaders instead of an
