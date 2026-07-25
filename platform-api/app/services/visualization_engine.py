@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, cast
 
+from app.services.chart_catalog import ShapeSummary, eligible_families
+
 
 class ChartType(StrEnum):
     """The renderable chart vocabulary.
@@ -470,6 +472,78 @@ def _dimension_cardinality(shape: _Shape, col: str | None) -> int:
         if c.name == col:
             return c.cardinality
     return 0
+
+
+def _cardinality(shape: _Shape, col: str) -> int:
+    """Return the stored cardinality for a known column."""
+    for c in shape.columns:
+        if c.name == col:
+            return c.cardinality
+    return 0
+
+
+def _has_negative(rows: list[dict[str, Any]], col: str) -> bool:
+    for r in rows:
+        v = _to_float(r.get(col))
+        if v is not None and v < 0:
+            return True
+    return False
+
+
+def _has_ohlc_roles(roles: dict[str, Any]) -> bool:
+    return all(roles.get(k) for k in ("open", "high", "low", "close"))
+
+
+def _looks_hierarchical(rows: list[dict[str, Any]], dims: list[str]) -> bool:
+    """True when the first two dimensions look like a parent/child hierarchy."""
+    if len(dims) < 2:
+        return False
+    parent_col, child_col = dims[0], dims[1]
+    parent_for_child: dict[str, str] = {}
+    parent_counts: dict[str, int] = {}
+    for r in rows:
+        parent = str(r.get(parent_col, ""))
+        child = str(r.get(child_col, ""))
+        if not parent or not child:
+            continue
+        if child in parent_for_child and parent_for_child[child] != parent:
+            return False
+        parent_for_child[child] = parent
+        parent_counts[parent] = parent_counts.get(parent, 0) + 1
+    # Need multiple parents and at least one parent with multiple children.
+    return len(parent_counts) >= 2 and any(c > 1 for c in parent_counts.values())
+
+
+def _catalog_shape(
+    shape: _Shape,
+    dict_rows: list[dict[str, Any]],
+    roles: dict[str, Any],
+) -> ShapeSummary:
+    """Map the engine's detailed shape to the markdown catalog's summary."""
+    dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+    traits: set[str] = set()
+    if shape.time_columns:
+        traits.add("time")
+    if shape.dimensions and not dims:
+        traits.add("period_only_dimension")
+    if shape.row_count == 1 and not shape.dimensions:
+        traits.add("single_row")
+    if roles.get("rate"):
+        traits.add("rate")
+    if roles.get("source") and roles.get("target"):
+        traits.add("flow")
+    if roles.get("group") or roles.get("parent") or (
+        len(dims) >= 2 and _looks_hierarchical(dict_rows, dims)
+    ):
+        traits.add("hierarchy")
+    if _has_ohlc_roles(roles):
+        traits.add("ohlc")
+    max_dim_card = max((_cardinality(shape, d) for d in dims), default=1)
+    if shape.row_count >= max(15, 2 * max_dim_card) and "period_only_dimension" not in traits:
+        traits.add("raw")
+    if any(_has_negative(dict_rows, m) for m in shape.measures):
+        traits.add("negative_values")
+    return ShapeSummary(dims=len(dims), measures=len(shape.measures), traits=frozenset(traits))
 
 
 def _detect_semantic_roles(
@@ -968,7 +1042,40 @@ def recommend_visualizations(
             continue
         seen.add(key)
         unique.append(c)
-    return _diverse_top_n(unique, limit)
+
+    # The markdown catalog is the hard eligibility gate: an inline branch can
+    # propose a family, but only catalog-eligible families survive. This fixes
+    # period/category leaks (e.g. 24 months being treated as 24 categories) and
+    # keeps gated families (map) from surfacing.
+    catalog_shape = _catalog_shape(shape, dict_rows, roles)
+    catalog_rules = {r.family: r for r in eligible_families(catalog_shape)}
+    catalog_ok = set(catalog_rules) | {"table"}
+    filtered: list[VizCandidate] = [
+        c
+        for c in unique
+        if c.decision.chart_type.value in catalog_ok
+    ]
+
+    # Promote catalog-eligible families the inline branches never proposed, so
+    # editing the markdown is enough to surface a new chart family. Only
+    # append families that are valid members of the ChartType enum.
+    existing_families = {c.decision.chart_type.value for c in filtered}
+    for family, rule in catalog_rules.items():
+        if rule.score < 0.5 or family in existing_families:
+            continue
+        chart_type_attr = family.upper().replace("-", "_")
+        chart_type = getattr(ChartType, chart_type_attr, None)
+        if chart_type is None:
+            continue
+        filtered.append(
+            _candidate(
+                chart_type,
+                rule.score,
+                reason=rule.guidance.split(".")[0] if rule.guidance else f"{family} from catalog",
+            )
+        )
+
+    return _diverse_top_n(filtered, limit)
 
 
 def _hint_candidate(

@@ -48,7 +48,7 @@ class ChartFamilyRule:
     score: float = 0.5
     guidance: str = ""
 
-    def eligible(self, shape: "ShapeSummary") -> bool:
+    def eligible(self, shape: ShapeSummary) -> bool:
         """True when ``shape`` satisfies this family's requirements."""
         if shape.dims < self.min_dims:
             return False
