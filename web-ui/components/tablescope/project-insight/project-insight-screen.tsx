@@ -65,6 +65,7 @@ import {
   InsightFeedbackStatusDialog,
   InsightGovernanceBadge,
 } from "@/components/tablescope/home/insight-feedback-status";
+import { InsightCardActionsDisclosure } from "@/components/tablescope/insights/insight-card-actions-disclosure";
 import {
   CreateActionFromInsightDialog,
   type ActionableInsight,
@@ -1037,6 +1038,150 @@ function InsightCardItem({
     displayCard.sql?.trim() && displayCard.valueColumn?.trim(),
   );
 
+  const hasSources = card.supportingSources.length > 0;
+  const sourceContent = hasSources ? (
+    <>
+      {card.supportingSources.slice(0, 3).map((s) => (
+        <span key={s} className="inline-flex items-center gap-1 text-[11px] text-ink-tertiary">
+          {/\.(pdf|docx?|txt|csv)$/i.test(s) ? (
+            <IconFileText size={12} />
+          ) : (
+            <IconTable size={12} />
+          )}
+          {s}
+        </span>
+      ))}
+    </>
+  ) : null;
+
+  const actionContent = (
+    <>
+      <Button variant="secondary" size="sm" onClick={onInvestigate}>
+        <IconSearch size={13} />
+        Investigate
+      </Button>
+      {reviewed ? (
+        <Badge tone="success" size="sm">
+          <IconCheck size={12} />
+          Reviewed
+        </Badge>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onReview}
+          disabled={reviewPending}
+        >
+          {reviewPending ? "Saving…" : "Mark reviewed"}
+        </Button>
+      )}
+      <button
+        type="button"
+        onClick={() => setExplainOpen(true)}
+        className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+      >
+        <IconInfoCircle size={13} />
+        Explain
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setChartDialogOpen(true)}
+        className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+      >
+        <IconChartBar size={13} />
+        Chart suggestion
+      </button>
+
+      <RAnalyticsBadge envelope={card.analyticalMethod} />
+
+      {canCreateAction && (
+        <button
+          type="button"
+          onClick={onCreateAction}
+          className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+        >
+          <IconClipboardList size={13} />
+          Action
+        </button>
+      )}
+      {onSaveToDashboard && (
+        <button
+          type="button"
+          disabled={!canSaveToDashboard}
+          title={
+            canSaveToDashboard
+              ? "Add this insight to a project dashboard"
+              : "This insight does not have query data and cannot be added to a dashboard"
+          }
+          onClick={() => onSaveToDashboard(displayCard)}
+          className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <IconLayoutDashboard size={13} />
+          Add to dashboard
+        </button>
+      )}
+      {onFeedbackSave && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setFeedbackInitial("agree");
+              setFeedbackOpen(true);
+            }}
+            aria-label={
+              hasFeedback && feedback?.sentiment === "agree"
+                ? "Edit agree feedback"
+                : "Agree"
+            }
+            title={
+              hasFeedback && feedback?.sentiment === "agree"
+                ? "Edit agree feedback"
+                : "Agree"
+            }
+            className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              hasFeedback && feedback?.sentiment === "agree"
+                ? "border-success bg-success/10 text-success hover:bg-success/20"
+                : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
+            }`}
+          >
+            <IconThumbUp size={13} />
+            Agree
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFeedbackInitial("disagree");
+              setFeedbackOpen(true);
+            }}
+            aria-label={
+              hasFeedback && feedback?.sentiment === "disagree"
+                ? "Edit disagree feedback"
+                : "Disagree"
+            }
+            title={
+              hasFeedback && feedback?.sentiment === "disagree"
+                ? "Edit disagree feedback"
+                : "Disagree"
+            }
+            className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              hasFeedback && feedback?.sentiment === "disagree"
+                ? "border-danger bg-danger/10 text-danger hover:bg-danger/20"
+                : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
+            }`}
+          >
+            <IconThumbDown size={13} />
+            Disagree
+          </button>
+          <InsightFeedbackStatusBadge
+            feedback={feedback}
+            onClick={() => setStatusDialogOpen(true)}
+          />
+        </div>
+      )}
+    </>
+  );
+
   return (
     <article className="rounded-md border border-line-tertiary bg-bg-primary p-3">
       <header className="flex items-start justify-between gap-2">
@@ -1096,145 +1241,11 @@ function InsightCardItem({
           <InsightChartBlock chart={displayCard.chart} />
         </div>
       )}
-      {card.supportingSources.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ink-tertiary">
-          {card.supportingSources.slice(0, 3).map((s) => (
-            <span key={s} className="inline-flex items-center gap-1">
-              {/\.(pdf|docx?|txt|csv)$/i.test(s) ? (
-                <IconFileText size={12} />
-              ) : (
-                <IconTable size={12} />
-              )}
-              {s}
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-line-tertiary pt-2.5">
-        <Button variant="secondary" size="sm" onClick={onInvestigate}>
-          <IconSearch size={13} />
-          Investigate
-        </Button>
-        {reviewed ? (
-          <Badge tone="success" size="sm">
-            <IconCheck size={12} />
-            Reviewed
-          </Badge>
-        ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onReview}
-            disabled={reviewPending}
-          >
-            {reviewPending ? "Saving…" : "Mark reviewed"}
-          </Button>
-        )}
-        <button
-          type="button"
-          onClick={() => setExplainOpen(true)}
-          className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-        >
-          <IconInfoCircle size={13} />
-          Explain
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setChartDialogOpen(true)}
-          className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-        >
-          <IconChartBar size={13} />
-          Chart suggestion
-        </button>
-
-        <RAnalyticsBadge envelope={card.analyticalMethod} />
-
-        {canCreateAction && (
-          <button
-            type="button"
-            onClick={onCreateAction}
-            className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-          >
-            <IconClipboardList size={13} />
-            Action
-          </button>
-        )}
-        {onSaveToDashboard && (
-          <button
-            type="button"
-            disabled={!canSaveToDashboard}
-            title={
-              canSaveToDashboard
-                ? "Add this insight to a project dashboard"
-                : "This insight does not have query data and cannot be added to a dashboard"
-            }
-            onClick={() => onSaveToDashboard(displayCard)}
-            className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <IconLayoutDashboard size={13} />
-            Add to dashboard
-          </button>
-        )}
-        {onFeedbackSave && (
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setFeedbackInitial("agree");
-                setFeedbackOpen(true);
-              }}
-              aria-label={
-                hasFeedback && feedback?.sentiment === "agree"
-                  ? "Edit agree feedback"
-                  : "Agree"
-              }
-              title={
-                hasFeedback && feedback?.sentiment === "agree"
-                  ? "Edit agree feedback"
-                  : "Agree"
-              }
-              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                hasFeedback && feedback?.sentiment === "agree"
-                  ? "border-success bg-success/10 text-success hover:bg-success/20"
-                  : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
-              }`}
-            >
-              <IconThumbUp size={13} />
-              Agree
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setFeedbackInitial("disagree");
-                setFeedbackOpen(true);
-              }}
-              aria-label={
-                hasFeedback && feedback?.sentiment === "disagree"
-                  ? "Edit disagree feedback"
-                  : "Disagree"
-              }
-              title={
-                hasFeedback && feedback?.sentiment === "disagree"
-                  ? "Edit disagree feedback"
-                  : "Disagree"
-              }
-              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                hasFeedback && feedback?.sentiment === "disagree"
-                  ? "border-danger bg-danger/10 text-danger hover:bg-danger/20"
-                  : "border-line-tertiary text-ink-secondary hover:border-line-secondary hover:bg-bg-tertiary"
-              }`}
-            >
-              <IconThumbDown size={13} />
-              Disagree
-            </button>
-            <InsightFeedbackStatusBadge
-              feedback={feedback}
-              onClick={() => setStatusDialogOpen(true)}
-            />
-          </div>
-        )}
-      </div>
+      <InsightCardActionsDisclosure
+        insightId={card.id}
+        sources={sourceContent}
+        actions={actionContent}
+      />
 
       <InsightExplanationPanel
         card={displayCard}
