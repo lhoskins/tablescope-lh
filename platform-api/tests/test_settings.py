@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from app.auth.jwt import create_access_token
-from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.tenant import TenantSettingsRead
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
