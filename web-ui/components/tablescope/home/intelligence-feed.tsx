@@ -65,6 +65,7 @@ function Section({
   onFeedbackRespond,
   governanceById,
   onCreateAction,
+  actionsDisclosure = "collapsible",
 }: {
   title: string;
   icon: React.ReactNode;
@@ -82,6 +83,7 @@ function Section({
   onFeedbackRespond?: (card: InsightCard, response: string) => void;
   governanceById?: Record<string, GovernanceItem>;
   onCreateAction?: (card: InsightCard) => void;
+  actionsDisclosure?: "always-visible" | "collapsible";
 }) {
   return (
     <InsightPanel title={title} icon={icon} collapsible defaultOpen={defaultOpen} count={cards.length}>
@@ -116,6 +118,7 @@ function Section({
                 }
                 governance={governanceById?.[card.insightId || card.id]}
                 onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
+                actionsDisclosure={actionsDisclosure}
               />
             );
           })}

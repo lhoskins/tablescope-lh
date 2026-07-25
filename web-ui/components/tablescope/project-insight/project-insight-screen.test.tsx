@@ -452,10 +452,12 @@ describe("ProjectInsightScreen", () => {
     });
     renderScreen();
     expect((await screen.findAllByText("Spend tracking over budget")).length).toBeGreaterThan(0);
-    const investigate = screen.getAllByRole("button", {
-      name: /investigate/i,
-    });
-    fireEvent.click(investigate[0]);
+    const heading = screen.getByRole("heading", { name: "Spend tracking over budget" });
+    const card = heading.closest("article") as HTMLElement;
+    const moreActions = within(card).getByRole("button", { name: /More Actions/i });
+    fireEvent.click(moreActions);
+    const investigate = within(card).getByRole("button", { name: /investigate/i });
+    fireEvent.click(investigate);
     const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
     expect(dialog.textContent).toContain(
       "How has total spend changed across recent periods?",
