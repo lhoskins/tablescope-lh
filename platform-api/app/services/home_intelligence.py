@@ -76,7 +76,7 @@ from app.services.visualization_engine import (
     _catalog_facts,
     _catalog_shape,
     _detect_semantic_roles,
-    _is_period_dimension,
+    business_dimensions,
     derive_shape,
     rank_visualizations,
     select_visualization,
@@ -2794,8 +2794,13 @@ async def _shape_template_insights(
             if confidence >= _SHAPE_TEMPLATE_MIN_FIT
         ]
 
-        non_period_dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
-        dims = non_period_dims or shape.dimensions[:]
+        # Only business-meaningful dimensions may drive a Deeper-analysis card.
+        # Falling back to identifier columns produced charts keyed on order ids
+        # and SKUs — technically renderable, analytically worthless. A table
+        # with nothing but keys and periods simply yields no shape card.
+        dims = business_dimensions(shape, rows)
+        if not dims and not shape.measures:
+            continue
         measures = shape.measures
 
         generated: list[dict[str, Any]] = []

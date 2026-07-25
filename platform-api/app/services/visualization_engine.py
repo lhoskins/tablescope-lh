@@ -524,7 +524,11 @@ def _catalog_shape(
     roles: dict[str, Any],
 ) -> ShapeSummary:
     """Map the engine's detailed shape to the markdown catalog's summary."""
-    dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+    # Identifier columns (order_id, sku, near-unique keys) are excluded: a chart
+    # grouped by a record key aggregates nothing and tells a business user
+    # nothing. They must not inflate the dimension count that decides which
+    # families are eligible.
+    dims = business_dimensions(shape, dict_rows)
     traits: set[str] = set()
     if shape.time_columns:
         traits.add("time")
@@ -585,6 +589,80 @@ def _catalog_chart_type(family: str) -> tuple[Any, str] | None:
     return (chart_type, parent[1]) if chart_type is not None else None
 
 
+#: A column name that identifies a record rather than describing a business
+#: category (``order_id``, ``sku``, ``part_number``, ``uuid``). Charting one
+#: produces a bar per record — technically valid, analytically worthless.
+#: A near-unique column needs at least this many rows before uniqueness means
+#: anything, and this share of distinct values to look key-like.
+_IDENTIFIER_MIN_ROWS = 20
+_IDENTIFIER_UNIQUENESS = 0.85
+
+_ID_COLUMN_NAME_RE = re.compile(
+    r"(?i)(^|[_\s-])(id|ids|uuid|guid|key|pk|fk|no|num|number|code|sku|ref|"
+    r"reference|serial|barcode|batch|lot|ticket|invoice|order|record)([_\s-]|$)"
+)
+
+
+def is_identifier_column(
+    shape: _Shape, col: str, dict_rows: list[dict[str, Any]]
+) -> bool:
+    """True when ``col`` identifies rows rather than grouping them.
+
+    Two independent signals, either of which disqualifies a column from being a
+    chart dimension:
+
+    * **Name** — the column reads like a key (``order_id``, ``sku``, ``ref_no``).
+    * **Uniqueness** — its distinct-value ratio approaches one row per value, so
+      grouping by it cannot aggregate anything.
+
+    Period columns are never identifiers: a date axis is a legitimate dimension
+    even when every value is distinct.
+    """
+    if _is_period_dimension(shape, col):
+        return False
+    if _ID_COLUMN_NAME_RE.search(col):
+        return True
+
+    # Uniqueness alone is NOT evidence of a key: an aggregated result has one
+    # row per category by construction (8 suppliers in 8 rows is a bar chart,
+    # not a key). A near-unique column is only an identifier when it sits
+    # alongside a genuine low-cardinality dimension — the signature of raw,
+    # row-level data carrying a key plus a real category.
+    total = len([r for r in dict_rows if r.get(col) is not None])
+    if total < _IDENTIFIER_MIN_ROWS:
+        return False
+    try:
+        distinct = len({str(r.get(col)) for r in dict_rows if r.get(col) is not None})
+    except TypeError:
+        return False
+    if distinct / total < _IDENTIFIER_UNIQUENESS:
+        return False
+    for other in shape.dimensions:
+        if other == col or _is_period_dimension(shape, other):
+            continue
+        try:
+            other_distinct = len(
+                {str(r.get(other)) for r in dict_rows if r.get(other) is not None}
+            )
+        except TypeError:
+            continue
+        if other_distinct and other_distinct * 4 <= distinct:
+            return True
+    return False
+
+
+def business_dimensions(
+    shape: _Shape, dict_rows: list[dict[str, Any]]
+) -> list[str]:
+    """Non-period dimensions that describe the business, not row identity."""
+    return [
+        c
+        for c in shape.dimensions
+        if not _is_period_dimension(shape, c)
+        and not is_identifier_column(shape, c, dict_rows)
+    ]
+
+
 def _catalog_facts(shape: _Shape, dict_rows: list[dict[str, Any]]) -> ShapeFacts:
     """Per-dataset facts (row count, dimension cardinalities) for fit scoring.
 
@@ -596,7 +674,7 @@ def _catalog_facts(shape: _Shape, dict_rows: list[dict[str, Any]]) -> ShapeFacts
     Ordered with the primary dimension first so a family's ``ideal_dim_card`` /
     ``ideal_dim2_card`` hints line up with the axes it would actually use.
     """
-    dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+    dims = business_dimensions(shape, dict_rows)
     primary = _primary_dimension(shape)
     if primary in dims:
         dims = [primary] + [d for d in dims if d != primary]
