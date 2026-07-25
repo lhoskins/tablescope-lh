@@ -66,7 +66,9 @@ export function AppShell({
           right={<CompanyLogo url={tenant.logoUrl} name={tenant.name} />}
         />
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <main className={`min-h-0 flex-1 ${scrollable ? "overflow-y-auto" : "overflow-hidden"}`}>
+          <main
+            className={`relative min-h-0 flex-1 ${scrollable ? "overflow-y-auto" : "overflow-hidden"}`}
+          >
             <div
               className={
                 centered
