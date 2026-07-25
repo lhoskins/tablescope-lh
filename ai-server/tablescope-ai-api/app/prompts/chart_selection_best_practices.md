@@ -65,6 +65,8 @@ needs: time
 roles: x=time, y=measure
 subtypes: smooth_line, step_line, dashed_line, tiny_line, bump
 score: 0.90
+min_rows: 3
+ideal_rows: 3-1000
 ```
 
 The default for a measure over an ordered time axis. Use `bump` for rank
@@ -81,6 +83,8 @@ needs: time
 roles: x=time, y=measure
 subtypes: stacked_area, gradient_area
 score: 0.80
+min_rows: 3
+ideal_rows: 3-1000
 ```
 
 Cumulative or volume feel over time. `stacked_area` when several series share a
@@ -96,6 +100,8 @@ needs: time
 roles: x=time, y=measure, y2=measure2
 subtypes: bar_line, dual_line
 score: 0.85
+min_rows: 3
+ideal_rows: 3-1000
 ```
 
 Two measures on a shared time axis, especially with different units/scales
@@ -110,6 +116,8 @@ min_measures: 1
 roles: x=dimension, y=measure
 subtypes: column, stacked_bar, grouped_bar, horizontal_bar, stacked_horizontal, positive_negative, population_pyramid
 score: 0.85
+min_rows: 2
+ideal_dim_card: 2-30
 ```
 
 Category comparison. Auto-horizontal when labels are long or categories exceed
@@ -126,6 +134,8 @@ min_measures: 1
 roles: x=dimension, y=measure
 excludes: period_only_dimension
 score: 0.60
+min_rows: 3
+ideal_dim_card: 3-15
 ```
 
 Running cumulative contribution from a start value to an end value (bridge
@@ -141,6 +151,8 @@ min_measures: 1
 excludes: period_only_dimension
 roles: x=dimension, y=measure
 score: 0.30
+min_rows: 2
+ideal_dim_card: 2-10
 ```
 
 Decorative bar variant for small, presentation-oriented category counts. Never
@@ -156,6 +168,8 @@ excludes: period_only_dimension, negative_values
 roles: category=dimension, value=measure
 subtypes: donut, two_level, rose
 score: 0.70
+min_rows: 2
+ideal_dim_card: 2-7
 ```
 
 Part-of-whole for a *small* number (≤7) of non-negative categories summing to a
@@ -171,6 +185,9 @@ needs: hierarchy
 excludes: period_only_dimension
 roles: parent=dimension, child=dimension2, value=measure
 score: 0.65
+min_rows: 3
+ideal_dim_card: 2-20
+ideal_dim2_card: 2-20
 ```
 
 Nested part-of-whole across a two-plus-level hierarchy (region → plant →
@@ -185,6 +202,8 @@ min_measures: 1
 excludes: period_only_dimension, negative_values
 roles: category=dimension, value=measure
 score: 0.65
+min_rows: 3
+ideal_dim_card: 3-60
 ```
 
 Proportional area for many categories or a hierarchy; the readable alternative
@@ -199,6 +218,8 @@ min_measures: 0
 needs: hierarchy
 roles: parent=parent, child=child
 score: 0.45
+min_rows: 3
+ideal_dim_card: 2-60
 ```
 
 Structural hierarchy without a size measure (org chart, BOM structure). Use
@@ -215,6 +236,8 @@ needs: stage
 excludes: period_only_dimension
 roles: stage=stage, value=measure
 score: 0.60
+min_rows: 3
+ideal_dim_card: 3-10
 ```
 
 Strictly ordered stages with monotonically decreasing counts (pipeline,
@@ -229,6 +252,9 @@ min_measures: 1
 needs: flow
 roles: source=source, target=target, value=measure
 score: 0.65
+min_rows: 2
+ideal_dim_card: 2-30
+ideal_dim2_card: 2-30
 ```
 
 Flow volume between two sets of nodes (material flow, order routing,
@@ -243,6 +269,8 @@ min_measures: 0
 needs: flow
 roles: source=source, target=target
 score: 0.40
+min_rows: 3
+ideal_dim_card: 2-60
 ```
 
 Network relationships without flow magnitude (dependencies, associations). Use
@@ -270,6 +298,8 @@ min_measures: 2
 needs: raw
 roles: x=measure, y=measure2
 score: 0.80
+min_rows: 8
+ideal_rows: 8-5000
 ```
 
 Relationship between two measures across records. The workhorse for
@@ -284,6 +314,8 @@ min_measures: 2
 needs: raw
 roles: x=measure, y=measure2
 score: 0.30
+min_rows: 8
+ideal_rows: 8-5000
 ```
 
 Scatter with ripple emphasis for highlighted points (anomalies, outliers).
@@ -298,6 +330,8 @@ min_measures: 3
 needs: raw
 roles: x=measure, y=measure2, size=size
 score: 0.70
+min_rows: 8
+ideal_rows: 8-3000
 ```
 
 Scatter with a third measure encoded as size. Cap point counts; sizes must be
@@ -312,6 +346,8 @@ min_measures: 4
 needs: time, ohlc
 roles: x=time, open=open, high=high, low=low, close=close
 score: 0.85
+min_rows: 5
+ideal_rows: 5-2000
 ```
 
 Open/high/low/close per period (finance, min/avg/max process windows). Requires
@@ -326,6 +362,8 @@ min_measures: 1
 needs: raw
 roles: category=dimension, value=measure
 score: 0.75
+min_rows: 20
+ideal_dim_card: 1-12
 ```
 
 Distribution of a measure (median/IQR/whiskers/outliers), optionally grouped by
@@ -341,6 +379,8 @@ min_measures: 1
 needs: raw
 roles: value=measure
 score: 0.75
+min_rows: 20
+ideal_rows: 20-200000
 ```
 
 Frequency distribution of one measure via governed binning. Requires raw rows;
@@ -355,6 +395,9 @@ min_measures: 1
 roles: x=dimension, y=dimension2, value=measure
 subtypes: calendar
 score: 0.80
+min_rows: 6
+ideal_dim_card: 3-30
+ideal_dim2_card: 3-30
 ```
 
 A measure across two categorical dimensions (region × product), or a
@@ -369,6 +412,8 @@ min_measures: 1
 needs: time, raw
 roles: x=time, value=measure
 score: 0.55
+min_rows: 28
+ideal_rows: 28-2000
 ```
 
 Daily values across weeks/months (activity, defects per day). Requires a daily
@@ -384,6 +429,8 @@ max_measures: 8
 excludes: period_only_dimension
 roles: category=dimension, value=measure
 score: 0.65
+min_rows: 1
+ideal_dim_card: 1-6
 ```
 
 3-8 measures compared across a few (≤6) entities — a scorecard shape. Never
@@ -398,6 +445,8 @@ min_measures: 4
 needs: raw
 roles: value=measure
 score: 0.50
+min_rows: 10
+ideal_rows: 10-2000
 ```
 
 Many measures per record across many records (multivariate profiles). The
@@ -413,6 +462,8 @@ needs: rate
 excludes: period_only_dimension, negative_values
 roles: category=dimension, value=measure
 score: 0.55
+min_rows: 1
+ideal_dim_card: 2-12
 ```
 
 Progress-to-target rates by category on a radial axis. Only for bounded 0-100%
@@ -442,6 +493,8 @@ min_measures: 1
 needs: time
 roles: x=time, category=dimension, value=measure
 score: 0.50
+min_rows: 12
+ideal_dim_card: 2-10
 ```
 
 Composition of several categories flowing over time (stacked-stream). Needs a
@@ -456,6 +509,8 @@ min_measures: 1
 needs: time
 roles: x=time, category=dimension, value=measure
 score: 0.55
+min_rows: 6
+ideal_dim_card: 2-10
 ```
 
 Rank positions of categories over time (league tables). Values must be

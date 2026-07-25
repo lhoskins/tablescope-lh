@@ -47,6 +47,12 @@ class ChartFamilyRule:
     subtypes: tuple[str, ...] = ()
     score: float = 0.5
     guidance: str = ""
+    # Optional fit hints (from the markdown) used by fit_score(); a family with
+    # no hints keeps its base score whenever eligible.
+    min_rows: int = 0
+    ideal_rows: tuple[int, int] | None = None
+    ideal_dim_card: tuple[int, int] | None = None
+    ideal_dim2_card: tuple[int, int] | None = None
 
     def eligible(self, shape: ShapeSummary) -> bool:
         """True when ``shape`` satisfies this family's requirements."""
@@ -97,6 +103,17 @@ def _parse_csv(value: str) -> tuple[str, ...]:
     return tuple(t.strip() for t in value.split(",") if t.strip())
 
 
+def _parse_range(value: str) -> tuple[int, int] | None:
+    """Parse ``lo-hi`` (e.g. ``3-30``) into an inclusive int range."""
+    if "-" not in value:
+        return None
+    lo_s, _, hi_s = value.partition("-")
+    lo, hi = _parse_int(lo_s), _parse_int(hi_s)
+    if lo is None or hi is None or lo > hi:
+        return None
+    return (lo, hi)
+
+
 def _parse_roles(value: str) -> dict[str, str]:
     roles: dict[str, str] = {}
     for pair in _parse_csv(value):
@@ -141,6 +158,10 @@ def _parse_rules_block(family_heading: str, text: str, guidance: str) -> ChartFa
         # 0.0 is a meaningful "gated off" score — only None falls back.
         score=score if score is not None else 0.5,
         guidance=guidance.strip(),
+        min_rows=_parse_int(fields.get("min_rows", "")) or 0,
+        ideal_rows=_parse_range(fields.get("ideal_rows", "")),
+        ideal_dim_card=_parse_range(fields.get("ideal_dim_card", "")),
+        ideal_dim2_card=_parse_range(fields.get("ideal_dim2_card", "")),
     )
 
 
@@ -194,7 +215,9 @@ def allowed_plan_chart_types() -> frozenset[str]:
 def eligible_families(shape: ShapeSummary) -> list[ChartFamilyRule]:
     """Families whose rules the shape satisfies, best base-score first.
 
-    Zero-scored families (gated, e.g. ``map``) are excluded.
+    Zero-scored families (gated, e.g. ``map``) are excluded. Prefer
+    :func:`fit_ranked` when per-dataset facts (row count, cardinalities) are
+    available — base score alone over-selects broadly-eligible families.
     """
     rules = [
         r
@@ -202,6 +225,79 @@ def eligible_families(shape: ShapeSummary) -> list[ChartFamilyRule]:
         if r.score > 0 and r.eligible(shape)
     ]
     return sorted(rules, key=lambda r: r.score, reverse=True)
+
+
+@dataclass(frozen=True)
+class ShapeFacts:
+    """Per-dataset facts that turn base eligibility into a fit confidence.
+
+    ``dim_cardinalities`` is ordered: primary dimension first. Missing facts
+    (zero/empty) skip the corresponding fit checks rather than penalizing.
+    """
+
+    row_count: int = 0
+    dim_cardinalities: tuple[int, ...] = ()
+
+
+def _range_multiplier(value: int, ideal: tuple[int, int] | None) -> float:
+    """Graded fit penalty for a value against a family's ideal range.
+
+    1.0 inside the range; outside it the penalty scales with how far out the
+    value is (a 400-category "heatmap" axis is far worse than a 35-category
+    one), floored at 0.15 so a poor fit is demoted rather than erased.
+    Unknown values (<= 0) or families without the hint are not penalized.
+    """
+    if ideal is None or value <= 0:
+        return 1.0
+    lo, hi = ideal
+    if lo <= value <= hi:
+        return 1.0
+    ratio = (hi / value) if value > hi else (value / lo)
+    return max(0.15, min(1.0, ratio))
+
+
+def fit_score(rule: ChartFamilyRule, shape: ShapeSummary, facts: ShapeFacts) -> float:
+    """Confidence that ``rule``'s family fits THIS dataset (0 = do not use).
+
+    Deterministic: base score from the markdown, multiplied down when the
+    dataset's row count / dimension cardinalities fall outside the family's
+    declared ideal ranges. All tuning lives in the markdown fit hints.
+    """
+    if rule.score <= 0 or not rule.eligible(shape):
+        return 0.0
+    if rule.min_rows and 0 < facts.row_count < rule.min_rows:
+        return 0.0
+    confidence = rule.score
+    # Specificity: a family that consumes the data's full structure explains it
+    # better than one that discards a dimension/measure (a 2-dimension matrix is
+    # a heatmap, not a bar chart that drops a dimension).
+    if shape.dims and rule.min_dims >= shape.dims:
+        confidence += 0.15
+    if shape.measures >= 2 and rule.min_measures >= shape.measures:
+        confidence += 0.05
+    confidence *= _range_multiplier(facts.row_count, rule.ideal_rows)
+    dim1 = facts.dim_cardinalities[0] if len(facts.dim_cardinalities) >= 1 else 0
+    dim2 = facts.dim_cardinalities[1] if len(facts.dim_cardinalities) >= 2 else 0
+    confidence *= _range_multiplier(dim1, rule.ideal_dim_card)
+    confidence *= _range_multiplier(dim2, rule.ideal_dim2_card)
+    return round(min(confidence, 1.0), 4)
+
+
+def fit_ranked(
+    shape: ShapeSummary, facts: ShapeFacts
+) -> list[tuple[ChartFamilyRule, float]]:
+    """Every family with a positive fit confidence for this dataset, best first.
+
+    The intended selection contract: ``fit_ranked(...)[0]`` is the chart to
+    display; the following entries feed the chart-suggestion list.
+    """
+    scored = [
+        (rule, fit_score(rule, shape, facts))
+        for rule in load_chart_catalog().values()
+    ]
+    ranked = [(r, s) for r, s in scored if s > 0]
+    ranked.sort(key=lambda rs: rs[1], reverse=True)
+    return ranked
 
 
 def planner_guidance() -> str:
