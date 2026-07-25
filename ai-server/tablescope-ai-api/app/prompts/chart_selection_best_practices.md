@@ -211,7 +211,7 @@ family: funnel
 min_dims: 1
 max_dims: 1
 min_measures: 1
-needs: flow
+needs: stage
 excludes: period_only_dimension
 roles: stage=stage, value=measure
 score: 0.60

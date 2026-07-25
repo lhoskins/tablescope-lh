@@ -71,7 +71,7 @@ class ShapeSummary:
 
     ``traits`` carries the special markers the rules grammar understands:
     ``time``, ``raw``, ``flow``, ``hierarchy``, ``ohlc``, ``single_row``,
-    ``rate``, ``geo``, ``period_only_dimension``, ``negative_values``.
+    ``rate``, ``geo``, ``period_only_dimension``, ``negative_values``, ``stage``.
     """
 
     dims: int

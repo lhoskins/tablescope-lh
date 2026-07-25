@@ -538,6 +538,13 @@ def _catalog_shape(
         traits.add("hierarchy")
     if _has_ohlc_roles(roles):
         traits.add("ohlc")
+
+    # Stage/ordered trait for funnel: a single non-period dimension that is
+    # explicitly tagged as a stage, with at least one measure to size stages.
+    stage_col = roles.get("stage")
+    if stage_col and stage_col in dims and shape.measures:
+        traits.add("stage")
+
     max_dim_card = max((_cardinality(shape, d) for d in dims), default=1)
     if shape.row_count >= max(15, 2 * max_dim_card) and "period_only_dimension" not in traits:
         traits.add("raw")
