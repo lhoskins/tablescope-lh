@@ -51,7 +51,7 @@ from app.services.analytical_method_engine import (
     analyze as analyze_methods,
 )
 from app.services.analytical_method_engine.intent import infer_intent
-from app.services.chart_catalog import eligible_families
+from app.services.chart_catalog import fit_ranked
 from app.services.evidence_severity import gate_severity
 from app.services.insight_confidence import evaluate_confidence
 from app.services.insight_evidence_fingerprint import (
@@ -73,6 +73,7 @@ from app.services.visualization_engine import (
     ChartType,
     VizCandidate,
     VizDecision,
+    _catalog_facts,
     _catalog_shape,
     _detect_semantic_roles,
     _is_period_dimension,
@@ -2728,6 +2729,11 @@ async def _build_scatter_template(
     }
 
 
+#: A shape template only runs when the family is a genuinely good fit for the
+#: probed table; below this the card would be a technically-eligible but
+#: misleading chart (e.g. a heatmap over an id-like dimension).
+_SHAPE_TEMPLATE_MIN_FIT = 0.5
+
 _TEMPLATE_BUILDERS: dict[str, Any] = {
     "radar": _build_radar_template,
     "heatmap": _build_heatmap_template,
@@ -2777,7 +2783,16 @@ async def _shape_template_insights(
         shape = derive_shape(columns, rows)
         semantic_roles = _detect_semantic_roles(columns, rows) if columns else {}
         catalog_summary = _catalog_shape(shape, rows, semantic_roles)
-        eligible = eligible_families(catalog_summary)
+        # Rank by per-dataset fit confidence, not the family's base score: a
+        # table with two dimensions is *eligible* for a heatmap, but a heatmap
+        # is only a good fit when both cardinalities are moderate. Base-score
+        # ordering made nearly every Deeper-analysis card a heatmap.
+        catalog_facts = _catalog_facts(shape, rows)
+        eligible = [
+            rule
+            for rule, confidence in fit_ranked(catalog_summary, catalog_facts)
+            if confidence >= _SHAPE_TEMPLATE_MIN_FIT
+        ]
 
         non_period_dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
         dims = non_period_dims or shape.dimensions[:]

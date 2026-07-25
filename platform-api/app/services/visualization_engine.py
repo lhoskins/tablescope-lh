@@ -28,7 +28,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, cast
 
-from app.services.chart_catalog import ShapeSummary, eligible_families
+from app.services.chart_catalog import (
+    ShapeFacts,
+    ShapeSummary,
+    fit_ranked,
+)
 
 
 class ChartType(StrEnum):
@@ -553,6 +557,59 @@ def _catalog_shape(
     return ShapeSummary(dims=len(dims), measures=len(shape.measures), traits=frozenset(traits))
 
 
+#: Below this fit confidence no chart explains the data, so the detail table
+#: is promoted instead of showing the least-bad chart.
+_WEAK_FIT_THRESHOLD = 0.25
+
+#: Catalog families that render through a parent ``ChartType`` plus a style
+#: variant rather than having their own enum member. Mirrors the frontend
+#: lockstep map in ``web-ui/lib/visualizations/chartCatalogLockstep.test.ts``.
+_CATALOG_SUBTYPE_PARENTS: dict[str, tuple[str, str]] = {
+    "histogram": ("BAR", "histogram"),
+    "waterfall": ("BAR", "waterfall"),
+    "bubble": ("SCATTER", "bubble"),
+    "bump": ("LINE", "bump"),
+    "calendar_heatmap": ("HEATMAP", "calendar"),
+}
+
+
+def _catalog_chart_type(family: str) -> tuple[Any, str] | None:
+    """Resolve a catalog family to a (ChartType, chart_style) pair, or None."""
+    direct = getattr(ChartType, family.upper().replace("-", "_"), None)
+    if direct is not None:
+        return direct, ""
+    parent = _CATALOG_SUBTYPE_PARENTS.get(family)
+    if parent is None:
+        return None
+    chart_type = getattr(ChartType, parent[0], None)
+    return (chart_type, parent[1]) if chart_type is not None else None
+
+
+def _catalog_facts(shape: _Shape, dict_rows: list[dict[str, Any]]) -> ShapeFacts:
+    """Per-dataset facts (row count, dimension cardinalities) for fit scoring.
+
+    Cardinalities are counted over the full result rows rather than reusing
+    ``_ColumnShape.cardinality``, which saturates at the shape sampler's limit —
+    an id-like column with 300 distinct values would otherwise look like 50 and
+    escape the "too many categories" penalty.
+
+    Ordered with the primary dimension first so a family's ``ideal_dim_card`` /
+    ``ideal_dim2_card`` hints line up with the axes it would actually use.
+    """
+    dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
+    primary = _primary_dimension(shape)
+    if primary in dims:
+        dims = [primary] + [d for d in dims if d != primary]
+
+    cardinalities: list[int] = []
+    for d in dims:
+        try:
+            cardinalities.append(len({str(r.get(d)) for r in dict_rows if r.get(d) is not None}))
+        except TypeError:  # unhashable cell value — fall back to the sampled count
+            cardinalities.append(_cardinality(shape, d))
+    return ShapeFacts(row_count=shape.row_count, dim_cardinalities=tuple(cardinalities))
+
+
 def _detect_semantic_roles(
     columns: list[str], rows: list[dict[str, Any]]
 ) -> dict[str, str | None]:
@@ -1055,32 +1112,75 @@ def recommend_visualizations(
     # period/category leaks (e.g. 24 months being treated as 24 categories) and
     # keeps gated families (map) from surfacing.
     catalog_shape = _catalog_shape(shape, dict_rows, roles)
-    catalog_rules = {r.family: r for r in eligible_families(catalog_shape)}
+    catalog_facts = _catalog_facts(shape, dict_rows)
+    # Per-dataset fit confidence (not just base eligibility) decides the order:
+    # a family that is *eligible* for two dimensions may still be a poor fit when
+    # a dimension is id-like (400 categories make an unreadable heatmap).
+    fit_by_family = {
+        rule.family: (rule, confidence)
+        for rule, confidence in fit_ranked(catalog_shape, catalog_facts)
+    }
+    catalog_rules = {family: rule for family, (rule, _) in fit_by_family.items()}
     catalog_ok = set(catalog_rules) | {"table"}
-    filtered: list[VizCandidate] = [
-        c
-        for c in unique
-        if c.decision.chart_type.value in catalog_ok
-    ]
+    filtered: list[VizCandidate] = []
+    for c in unique:
+        family = c.decision.chart_type.value
+        if family not in catalog_ok:
+            continue
+        entry = fit_by_family.get(family)
+        if entry is not None:
+            # Blend: the inline branch contributes *semantics* the catalog
+            # cannot see from shape alone (part-of-whole, id-like labels, rate
+            # columns); the catalog contributes *per-dataset fit* the inline
+            # branch ignores (row count, cardinalities, specificity). Applying
+            # the catalog's fit ratio to the inline score keeps both: a
+            # semantically-right family stays on top, and any family sinks when
+            # this dataset's shape makes it a poor fit.
+            rule, confidence = entry
+            fit_ratio = confidence / rule.score if rule.score > 0 else 0.0
+            c.score = round(c.score * fit_ratio, 4)
+            c.decision.confidence = c.score
+        filtered.append(c)
 
     # Promote catalog-eligible families the inline branches never proposed, so
-    # editing the markdown is enough to surface a new chart family. Only
-    # append families that are valid members of the ChartType enum.
-    existing_families = {c.decision.chart_type.value for c in filtered}
+    # editing the markdown is enough to surface a new chart family. Families
+    # that render as a parent type's variant (histogram, waterfall, bubble,
+    # bump, calendar heatmap) are promoted through that parent.
+    # Dedupe by family: if an inline branch already produced this ChartType it
+    # picked a considered style (e.g. horizontal_bar for id-like labels), so the
+    # catalog must not add a bare duplicate that outranks it.
+    existing_types = {c.decision.chart_type.value for c in filtered}
     for family, rule in catalog_rules.items():
-        if rule.score < 0.5 or family in existing_families:
+        confidence = fit_by_family[family][1]
+        if confidence < 0.5:
             continue
-        chart_type_attr = family.upper().replace("-", "_")
-        chart_type = getattr(ChartType, chart_type_attr, None)
-        if chart_type is None:
+        resolved = _catalog_chart_type(family)
+        if resolved is None:
             continue
+        chart_type, chart_style = resolved
+        if chart_type.value in existing_types:
+            continue
+        existing_types.add(chart_type.value)
         filtered.append(
             _candidate(
                 chart_type,
-                rule.score,
+                confidence,
+                chart_style=chart_style,
                 reason=rule.guidance.split(".")[0] if rule.guidance else f"{family} from catalog",
             )
         )
+
+    # When nothing fits the shape well, the detail table is the honest answer
+    # rather than the least-bad chart.
+    best_chart = max(
+        (c.score for c in filtered if c.decision.chart_type != ChartType.TABLE),
+        default=0.0,
+    )
+    if best_chart < _WEAK_FIT_THRESHOLD:
+        for c in filtered:
+            if c.decision.chart_type == ChartType.TABLE:
+                c.score = max(c.score, best_chart + 0.05)
+                c.decision.confidence = c.score
 
     return _diverse_top_n(filtered, limit)
 

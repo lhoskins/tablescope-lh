@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from app.services.chart_catalog import (
+    ShapeFacts,
     ShapeSummary,
+    fit_ranked,
+    fit_score,
     allowed_plan_chart_types,
     chart_families,
     eligible_families,
@@ -113,3 +116,52 @@ def test_planner_guidance_is_full_markdown():
 
 def test_families_listing_matches_catalog():
     assert set(chart_families()) == set(load_chart_catalog())
+
+
+# ── Per-dataset fit confidence ───────────────────────────────────────────────
+
+
+def test_fit_demotes_heatmap_when_a_dimension_is_id_like():
+    """Two dimensions make a heatmap *eligible*, but an id-like axis is a poor fit."""
+    shape = ShapeSummary(dims=2, measures=1, traits=frozenset())
+    good = fit_score(load_chart_catalog()["heatmap"], shape,
+                     ShapeFacts(row_count=96, dim_cardinalities=(8, 12)))
+    bad = fit_score(load_chart_catalog()["heatmap"], shape,
+                    ShapeFacts(row_count=500, dim_cardinalities=(400, 12)))
+    assert good > 0.8
+    assert bad < 0.2
+    assert bad < good
+
+
+def test_fit_excludes_family_below_its_min_rows():
+    """A boxplot needs a real distribution, not three rows."""
+    shape = ShapeSummary(dims=0, measures=1, traits=frozenset({"raw"}))
+    rule = load_chart_catalog()["boxplot"]
+    assert fit_score(rule, shape, ShapeFacts(row_count=3)) == 0.0
+    assert fit_score(rule, shape, ShapeFacts(row_count=200)) > 0.5
+
+
+def test_fit_ranked_orders_true_matrix_heatmap_first():
+    ranked = fit_ranked(
+        ShapeSummary(dims=2, measures=1, traits=frozenset()),
+        ShapeFacts(row_count=96, dim_cardinalities=(8, 12)),
+    )
+    assert ranked[0][0].family == "heatmap"
+
+
+def test_fit_ranked_scores_are_bounded_and_sorted():
+    ranked = fit_ranked(
+        ShapeSummary(dims=2, measures=1, traits=frozenset({"flow"})),
+        ShapeFacts(row_count=40, dim_cardinalities=(6, 8)),
+    )
+    scores = [s for _, s in ranked]
+    assert scores == sorted(scores, reverse=True)
+    assert all(0.0 < s <= 1.0 for s in scores)
+
+
+def test_specificity_prefers_family_using_all_dimensions():
+    """A 2-dimension dataset is better explained by a family that uses both."""
+    shape = ShapeSummary(dims=2, measures=1, traits=frozenset())
+    facts = ShapeFacts(row_count=96, dim_cardinalities=(8, 12))
+    cat = load_chart_catalog()
+    assert fit_score(cat["heatmap"], shape, facts) > fit_score(cat["bar"], shape, facts)
