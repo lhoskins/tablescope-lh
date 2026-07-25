@@ -296,3 +296,60 @@ def test_explicit_gauge_hint_ignored_for_time_series() -> None:
     )
     assert ranked[0].decision.chart_type is not ChartType.GAUGE
     assert all(c.decision.chart_type is not ChartType.GAUGE for c in ranked)
+
+
+def test_identifier_columns_are_not_chart_dimensions() -> None:
+    """A key column must never become a chart axis — grouping by it aggregates nothing."""
+    from app.services.visualization_engine import (
+        business_dimensions,
+        derive_shape,
+        is_identifier_column,
+    )
+
+    rows = [
+        {"order_id": f"O{i}", "status": ["open", "closed", "held", "void"][i % 4], "amount": i % 37 + 1}
+        for i in range(300)
+    ]
+    shape = derive_shape(["order_id", "status", "amount"], rows)
+    assert is_identifier_column(shape, "order_id", rows) is True
+    assert is_identifier_column(shape, "status", rows) is False
+    assert business_dimensions(shape, rows) == ["status"]
+
+
+def test_near_unique_column_is_an_identifier_only_beside_a_real_category() -> None:
+    """Uniqueness alone is not a key: an aggregate has one row per category.
+
+    ``supplier`` unique across 40 aggregated rows is a legitimate bar chart;
+    a near-unique column sitting next to a low-cardinality dimension is a key.
+    """
+    from app.services.visualization_engine import derive_shape, is_identifier_column
+
+    aggregated = [{"supplier": f"S{i}", "defects": i} for i in range(40)]
+    shape = derive_shape(["supplier", "defects"], aggregated)
+    assert is_identifier_column(shape, "supplier", aggregated) is False
+
+    raw = [
+        {"record": f"free-text-{i}", "status": ["a", "b"][i % 2], "n": i}
+        for i in range(50)
+    ]
+    shape2 = derive_shape(["record", "status", "n"], raw)
+    assert is_identifier_column(shape2, "record", raw) is True
+
+
+def test_period_column_is_never_treated_as_an_identifier() -> None:
+    """Every date in a daily series is distinct, but a date axis is legitimate."""
+    from app.services.visualization_engine import derive_shape, is_identifier_column
+
+    rows = [{"day": f"2026-01-{d:02d}", "units": d} for d in range(1, 29)]
+    shape = derive_shape(["day", "units"], rows)
+    assert is_identifier_column(shape, "day", rows) is False
+
+
+def test_id_dimension_does_not_unlock_two_dimension_families() -> None:
+    """order_id + status must rank as a one-dimension shape, so no heatmap."""
+    rows = [
+        {"order_id": f"O{i}", "status": ["a", "b", "c", "d"][i % 4], "amount": i % 37 + 1}
+        for i in range(300)
+    ]
+    families = [c.decision.chart_type.value for c in rank_visualizations(["order_id", "status", "amount"], rows, limit=8)]
+    assert "heatmap" not in families

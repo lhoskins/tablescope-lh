@@ -206,10 +206,27 @@ async def _run_for_project(
     if cards is None:
         cards = []
 
-    # Add deterministic shape-template insights for tables that support richer
-    # charts than the LLM's usual label/value aggregates (e.g. two-measure scatter).
+    # Deeper analysis, in order of depth:
+    # 1) Governed analytical methods (forecast, anomaly, change point,
+    #    contribution, correlation, group comparison) executed through the
+    #    Analytical Method Engine and gated on materiality — the cards that
+    #    genuinely earn the "deeper" label.
+    # 2) Shape templates as a fallback for tables where no method applies, so a
+    #    project without method-eligible data still gets richer charts.
+    deep_cards: list[dict[str, Any]] = []
     try:
-        shape_cards = await hi._shape_template_insights(project, ctx, runner)
+        deep_cards = await hi._method_driven_insights(
+            project, ctx, runner, session, tenant_id=context.tenant_id
+        )
+        if deep_cards:
+            cards.extend(deep_cards)
+    except Exception as exc:
+        logger.warning("method-driven insights failed for project %s: %s", project.id, exc)
+
+    try:
+        shape_cards = await hi._shape_template_insights(
+            project, ctx, runner, max_total=max(0, 4 - len(deep_cards))
+        )
         if shape_cards:
             cards.extend(shape_cards)
     except Exception as exc:
