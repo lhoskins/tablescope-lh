@@ -207,3 +207,99 @@ def test_card_summary_leads_with_the_finding_then_provenance():
     assert summary.startswith("3 observation(s) outside the expected range.")
     assert "40 observations" in summary
     assert "(R)" in summary
+
+
+# ── Executive-grade analyses ─────────────────────────────────────────────────
+
+
+def test_year_over_year_requires_two_calendar_years():
+    """24 monthly rows inside ONE year cannot support a YoY read."""
+    one_year = {s.intent for s in _plan(period_count=24, distinct_years=1, max_per_table=12)}
+    assert "compare_year_over_year" not in one_year
+    two_years = {s.intent for s in _plan(period_count=24, distinct_years=2, max_per_table=12)}
+    assert "compare_year_over_year" in two_years
+
+
+def test_year_over_year_outranks_month_over_month():
+    specs = _plan(period_count=36, distinct_years=3, max_per_table=12)
+    by_intent = {s.intent: s.priority for s in specs}
+    assert by_intent["compare_year_over_year"] > by_intent["compare_periods"]
+
+
+def test_growth_rate_and_trend_are_planned():
+    intents = {s.intent for s in _plan(period_count=12, distinct_years=1, max_per_table=12)}
+    assert "measure_rate_of_change" in intents
+    assert "detect_trend" in intents
+
+
+def test_actual_vs_target_is_planned_only_with_a_baseline_column():
+    without = {s.intent for s in _plan(max_per_table=12)}
+    assert "compare_to_baseline" not in without
+    specs = _plan(target_column="budget_revenue", max_per_table=12)
+    baseline = next(s for s in specs if s.intent == "compare_to_baseline")
+    assert baseline.roles["measure2"] == "budget_revenue"
+    assert baseline.presentation == "combo"
+
+
+def test_two_metrics_on_a_shared_timeline_is_a_combo_not_a_scatter():
+    """The co-movement read and the raw-scatter read are distinct analyses."""
+    specs = _plan(measures=["revenue", "gross_margin"], row_count=200,
+                  period_count=24, distinct_years=2, max_per_table=12)
+    timeline = [s for s in specs if s.intent == "relationship_numeric" and s.presentation == "combo"]
+    scatter = [s for s in specs if s.intent == "relationship_numeric" and s.presentation is None]
+    assert len(timeline) == 1
+    assert len(scatter) == 1
+    assert timeline[0].roles.get("period") == "month"
+    assert timeline[0].priority > scatter[0].priority
+
+
+def test_driver_analysis_needs_three_measures():
+    two = {s.intent for s in _plan(measures=["a", "b"], row_count=200, max_per_table=12)}
+    assert "continuous_prediction" not in two
+    three = {s.intent for s in _plan(measures=["a", "b", "c"], row_count=200, max_per_table=12)}
+    assert "continuous_prediction" in three
+
+
+def test_driver_model_with_no_explanatory_power_is_suppressed():
+    weak = _env({"r_squared": 0.04, "p_value": 0.01})
+    assert assess_materiality("continuous_prediction", weak).material is False
+    strong = _env({"r_squared": 0.61, "p_value": 0.001})
+    hit = assess_materiality("continuous_prediction", strong)
+    assert hit.material is True
+    assert "0.61" in hit.highlight
+
+
+def test_baseline_comparison_uses_the_period_change_gate():
+    assert assess_materiality("compare_to_baseline", _env({"relative_change": 0.01})).material is False
+    assert assess_materiality("compare_to_baseline", _env({"relative_change": 0.22})).material is True
+
+
+def test_spec_presentation_honours_the_override():
+    from app.services.deep_analysis import spec_presentation
+
+    combo = DeepAnalysisSpec(intent="relationship_numeric", title="t", question="q",
+                             roles={}, presentation="combo")
+    plain = DeepAnalysisSpec(intent="relationship_numeric", title="t", question="q", roles={})
+    assert spec_presentation(combo)["chart"] == "combo"
+    assert spec_presentation(plain)["chart"] == "scatter"
+    # Layers survive the override.
+    assert spec_presentation(combo)["layers"] == ["regression_line"]
+
+
+def test_executive_suite_is_planned_for_a_rich_kpi_table():
+    """A monthly KPI table with history, a second metric and a segment should
+    offer the comparisons an executive actually asks for."""
+    specs = _plan(measures=["revenue", "gross_margin", "units"], dimensions=["region"],
+                  row_count=500, period_count=36, distinct_years=3,
+                  target_column="budget_revenue", max_per_table=12)
+    intents = {s.intent for s in specs}
+    assert {
+        "compare_year_over_year",
+        "compare_periods",
+        "compare_to_baseline",
+        "measure_rate_of_change",
+        "contribution_to_change",
+        "detect_trend",
+        "forecast_time_series",
+        "continuous_prediction",
+    } <= intents

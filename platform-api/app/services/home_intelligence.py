@@ -20,7 +20,7 @@ import asyncio
 import logging
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -2745,6 +2745,40 @@ _TEMPLATE_BUILDERS: dict[str, Any] = {
 }
 
 
+#: ``_`` is a word character, so ``\b`` never fires inside ``budget_revenue`` —
+#: match on explicit separators instead.
+_TARGET_COL_RE = re.compile(
+    r"(?i)(^|[_\s-])(target|targets|budget|budgeted|plan|planned|goal|quota"
+    r"|baseline|benchmark|standard|expected)([_\s-]|$)"
+)
+_YEAR_RE = re.compile(r"(19|20)\d{2}")
+
+
+def _distinct_years(rows: list[dict[str, Any]], period_col: str) -> int:
+    """Distinct calendar years present in a period column.
+
+    Year-over-year needs two actual years: 24 monthly rows inside a single year
+    cannot support a YoY read, and comparing them would be a lie.
+    """
+    years: set[str] = set()
+    for r in rows:
+        value = r.get(period_col)
+        if value is None:
+            continue
+        match = _YEAR_RE.search(str(value))
+        if match:
+            years.add(match.group(0))
+    return len(years)
+
+
+def _target_measure(measures: list[str]) -> str | None:
+    """The measure that reads like a plan/target/budget baseline, if any."""
+    for m in measures:
+        if _TARGET_COL_RE.search(str(m)):
+            return m
+    return None
+
+
 async def _method_driven_insights(
     project: Project,
     ctx: ProjectContext,
@@ -2752,8 +2786,8 @@ async def _method_driven_insights(
     session: AsyncSession | None,
     *,
     tenant_id: int | None,
-    max_per_table: int = 2,
-    max_total: int = 6,
+    max_per_table: int = 4,
+    max_total: int = 10,
     max_rows: int = 5000,
 ) -> list[dict[str, Any]]:
     """Deeper analysis driven by governed analytical methods, not table shapes.
@@ -2797,19 +2831,32 @@ async def _method_driven_insights(
                 {str(r.get(period_col)) for r in rows if r.get(period_col) is not None}
             )
 
+        distinct_years = _distinct_years(rows, period_col) if period_col else 0
+        target_col = _target_measure(shape.measures)
+        # A target/budget column is a baseline to compare against, not a KPI to
+        # analyse in its own right.
+        measures = [m for m in shape.measures if m != target_col]
+
         specs = deep_analysis.plan_deep_analyses(
             table_title=table.view_name,
             period_column=period_col,
-            measures=shape.measures,
+            measures=measures,
             dimensions=dims,
             row_count=shape.row_count,
             period_count=period_count,
+            distinct_years=distinct_years,
+            target_column=target_col,
             max_per_table=max_per_table,
         )
 
         for spec in specs:
             if len(cards) >= max_total:
                 break
+            if spec.intent == "continuous_prediction":
+                spec = replace(
+                    spec,
+                    roles={**spec.roles, "explanatory": ",".join(measures[1:5])},
+                )
             sql = _deep_analysis_sql(table.view_name, spec, max_rows)
             if not sql:
                 continue
@@ -2846,7 +2893,7 @@ async def _method_driven_insights(
                 )
                 continue
 
-            presentation = deep_analysis.evidence_presentation(spec.intent)
+            presentation = deep_analysis.spec_presentation(spec)
             chart = _build_chart(
                 presentation["chart"],
                 spec.title,
@@ -2909,11 +2956,29 @@ def _deep_analysis_sql(view_name: str, spec: deep_analysis.DeepAnalysisSpec, max
             f'SELECT {_quote(group_by)}, {_quote(measure)} FROM {table} '
             f'WHERE {_quote(measure)} IS NOT NULL LIMIT {max_rows}'
         )
+    # Two measures across a shared timeline (co-movement, actual-vs-target):
+    # aggregate both per period so the method compares the series, not raw rows.
+    if period and measure2:
+        agg2 = _agg_for_measure(measure2)
+        return (
+            f'SELECT {_quote(period)}, {agg}({_quote(measure)}) AS {_quote(measure)}, '
+            f'{agg2}({_quote(measure2)}) AS {_quote(measure2)} FROM {table} '
+            f'GROUP BY {_quote(period)} ORDER BY {_quote(period)} LIMIT {max_rows}'
+        )
     if spec.intent in ("relationship_numeric", "relationship_monotonic") and measure2:
         return (
             f'SELECT {_quote(measure)}, {_quote(measure2)} FROM {table} '
             f'WHERE {_quote(measure)} IS NOT NULL AND {_quote(measure2)} IS NOT NULL '
             f'LIMIT {max_rows}'
+        )
+    # Driver analysis: raw rows across every measure so the regression can
+    # attribute variation.
+    if spec.intent == "continuous_prediction":
+        others = spec.roles.get("explanatory") or ""
+        cols = ", ".join(_quote(c) for c in [measure, *others.split(",")] if c)
+        return (
+            f'SELECT {cols} FROM {table} '
+            f'WHERE {_quote(measure)} IS NOT NULL LIMIT {max_rows}'
         )
     if period:
         return (

@@ -41,6 +41,11 @@ MIN_ROWS_GROUP_COMPARISON = 20
 MIN_GROUPS = 3
 MAX_GROUPS = 12
 
+#: Distinct calendar years needed before a year-over-year comparison is honest.
+MIN_YEARS_FOR_YOY = 2
+#: Measures needed before a driver/decomposition regression is worth running.
+MIN_MEASURES_FOR_DRIVERS = 3
+
 #: A period-over-period move smaller than this is noise, not an insight.
 MATERIAL_RELATIVE_CHANGE = 0.05
 #: Correlations weaker than this are not worth a card even when significant —
@@ -66,6 +71,11 @@ class DeepAnalysisSpec:
     #: Presentation family for the method's evidence (see EVIDENCE_PRESENTATION).
     priority: float = 0.5
     group_by: str | None = None
+    #: Overrides the intent's default presentation. Two analyses can share an
+    #: intent but need different charts — a correlation on raw rows is a
+    #: scatter, the same correlation across a shared timeline is a dual-axis
+    #: combo showing both metrics moving together.
+    presentation: str | None = None
 
 
 @dataclass
@@ -127,6 +137,8 @@ def plan_deep_analyses(
     dimensions: list[str],
     row_count: int,
     period_count: int,
+    distinct_years: int = 0,
+    target_column: str | None = None,
     max_per_table: int = 3,
 ) -> list[DeepAnalysisSpec]:
     """Decide which governed analyses a table's shape can genuinely support.
@@ -152,6 +164,90 @@ def plan_deep_analyses(
                 question=f"How did {metric} change versus the prior period?",
                 roles={"period": period_column, "measure": measure},
                 priority=0.95,
+            )
+        )
+    # Year over year — the comparison every executive asks for first. Needs two
+    # distinct calendar years, not merely 24 rows: 24 months inside one year
+    # cannot support a YoY read.
+    if period_column and distinct_years >= MIN_YEARS_FOR_YOY:
+        specs.append(
+            DeepAnalysisSpec(
+                intent="compare_year_over_year",
+                title=f"{metric}: year over year",
+                question=f"How does {metric} compare with the same period last year?",
+                roles={"period": period_column, "measure": measure},
+                priority=0.97,
+                presentation="combo",
+            )
+        )
+    # Growth rate / momentum.
+    if period_column and period_count >= MIN_PERIODS_TREND:
+        specs.append(
+            DeepAnalysisSpec(
+                intent="measure_rate_of_change",
+                title=f"{metric}: rate of change",
+                question=f"How fast is {metric} growing or declining?",
+                roles={"period": period_column, "measure": measure},
+                priority=0.86,
+            )
+        )
+    # Actual vs plan/target/budget — only when the table carries a baseline.
+    if period_column and target_column:
+        specs.append(
+            DeepAnalysisSpec(
+                intent="compare_to_baseline",
+                title=f"{metric} vs {_humanize(target_column)}",
+                question=f"Is {metric} tracking against {_humanize(target_column)}?",
+                roles={
+                    "period": period_column,
+                    "measure": measure,
+                    "measure2": target_column,
+                },
+                priority=0.93,
+                presentation="combo",
+            )
+        )
+    # Two KPIs moving along a shared timeline — the co-movement read (revenue
+    # against margin, volume against scrap). Same correlation intent as the raw
+    # scatter, but aggregated per period and drawn as a dual-axis combo.
+    if period_column and len(measures) >= 2 and period_count >= MIN_PERIODS_TREND:
+        other = measures[1]
+        specs.append(
+            DeepAnalysisSpec(
+                intent="relationship_numeric",
+                title=f"{metric} and {_humanize(other)} over time",
+                question=(
+                    f"Do {metric} and {_humanize(other)} move together over time?"
+                ),
+                roles={
+                    "period": period_column,
+                    "measure": measure,
+                    "measure2": other,
+                },
+                priority=0.91,
+                presentation="combo",
+            )
+        )
+    # Is the movement real, or noise?
+    if period_column and period_count >= MIN_PERIODS_TREND:
+        specs.append(
+            DeepAnalysisSpec(
+                intent="detect_trend",
+                title=f"{metric}: underlying trend",
+                question=f"Is the movement in {metric} a real trend or noise?",
+                roles={"period": period_column, "measure": measure},
+                priority=0.83,
+            )
+        )
+    # Which factors explain the KPI (executive driver analysis).
+    if len(measures) >= MIN_MEASURES_FOR_DRIVERS and row_count >= MIN_ROWS_RELATIONSHIP:
+        specs.append(
+            DeepAnalysisSpec(
+                intent="continuous_prediction",
+                title=f"What explains {metric}",
+                question=f"Which measures explain movement in {metric}?",
+                roles={"measure": measure},
+                priority=0.78,
             )
         )
     if period_column and period_count >= MIN_PERIODS_ANOMALY:
@@ -414,8 +510,29 @@ def _material_seasonality(results: dict[str, Any], _env: dict[str, Any]) -> Mate
     )
 
 
+def _material_drivers(results: dict[str, Any], _env: dict[str, Any]) -> Materiality:
+    """A driver regression only earns a card when it explains something."""
+    r2 = _first_num(results, "r_squared", "r2", "adj_r_squared", "adjusted_r_squared")
+    p = _first_num(results, "p_value", "pvalue", "model_p_value")
+    if p is not None and p > MATERIAL_P_VALUE:
+        return Materiality(False, f"Model is not statistically significant (p={p:.3f}).")
+    if r2 is not None and r2 < 0.2:
+        return Materiality(
+            False, f"Measures explain too little of the variation (R²={r2:.2f})."
+        )
+    return Materiality(
+        True,
+        f"Measures explain R²={r2:.2f} of the variation." if r2 is not None
+        else "A significant explanatory model was found.",
+        highlight=f"R²={r2:.2f}" if r2 is not None else "",
+        facts={"r_squared": r2, "p_value": p},
+    )
+
+
 _MATERIALITY_RULES = {
     "compare_periods": _material_period_change,
+    "compare_to_baseline": _material_period_change,
+    "continuous_prediction": _material_drivers,
     "compare_year_over_year": _material_period_change,
     "measure_rate_of_change": _material_period_change,
     "detect_anomalies": _material_anomalies,
@@ -438,6 +555,8 @@ _MATERIALITY_RULES = {
 #: ``chart_selection_best_practices.md``.
 EVIDENCE_PRESENTATION: dict[str, dict[str, Any]] = {
     "compare_periods": {"chart": "combo", "layers": ["reference_line"]},
+    "compare_to_baseline": {"chart": "combo", "layers": ["reference_line"]},
+    "continuous_prediction": {"chart": "bar", "layers": []},
     "compare_year_over_year": {"chart": "combo", "layers": ["reference_line"]},
     "measure_rate_of_change": {"chart": "line", "layers": ["reference_line"]},
     "detect_trend": {"chart": "line", "layers": ["regression_line"]},
@@ -451,6 +570,14 @@ EVIDENCE_PRESENTATION: dict[str, dict[str, Any]] = {
     "compare_multiple_groups": {"chart": "boxplot", "layers": []},
     "compare_two_groups": {"chart": "boxplot", "layers": []},
 }
+
+
+def spec_presentation(spec: DeepAnalysisSpec) -> dict[str, Any]:
+    """Presentation for a planned analysis, honouring an explicit override."""
+    base = evidence_presentation(spec.intent)
+    if spec.presentation:
+        return {"chart": spec.presentation, "layers": base.get("layers", [])}
+    return base
 
 
 def evidence_presentation(intent: str) -> dict[str, Any]:
