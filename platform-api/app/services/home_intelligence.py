@@ -22,7 +22,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +51,7 @@ from app.services.analytical_method_engine import (
     analyze as analyze_methods,
 )
 from app.services.analytical_method_engine.intent import infer_intent
+from app.services.chart_catalog import eligible_families
 from app.services.evidence_severity import gate_severity
 from app.services.insight_confidence import evaluate_confidence
 from app.services.insight_evidence_fingerprint import (
@@ -69,6 +70,10 @@ from app.services.teiid_sql import (
     normalize_date_casts,
 )
 from app.services.visualization_engine import (
+    ChartType,
+    VizCandidate,
+    VizDecision,
+    _catalog_shape,
     _detect_semantic_roles,
     _is_period_dimension,
     derive_shape,
@@ -1049,6 +1054,35 @@ def _card(
                         if match_value == current_chart_type:
                             chosen = c
                             break
+
+                    # If the caller already built a concrete chart (e.g. risk SLA
+                    # bar) but the catalog does not propose that family for this
+                    # shape, inject it as the top candidate so the rendered card
+                    # does not silently switch to a different chart type.
+                    if (
+                        current_chart_type
+                        and not preserve_type
+                        and chosen.decision.chart_type.value != current_chart_type
+                    ):
+                        try:
+                            current_enum = ChartType(current_chart_type)
+                        except ValueError:
+                            current_enum = None
+                        if current_enum is not None:
+                            current_candidate = VizCandidate(
+                                decision=VizDecision(
+                                    chart_type=current_enum,
+                                    chart_style=(card.get("chart") or {}).get("subtype") or "",
+                                    x_field=label_column,
+                                    y_field=value_column,
+                                    y2_field=value_column_2,
+                                    reason="Current inline chart preserved.",
+                                ),
+                                score=1.0,
+                            )
+                            candidates.insert(0, current_candidate)
+                            chosen = current_candidate
+
                     card["visualizationDecision"] = chosen.decision.to_dict()
                     card["chartCandidates"] = [c.to_dict() for c in candidates[:6]]
                     if card.get("chart") and not preserve_type:
@@ -2432,6 +2466,259 @@ def _build_radar_rows(rows: list[dict[str, Any]], subject_col: str, measure_cols
     return long_rows, {"x": "subject", "y": "value", "group": "metric"}
 
 
+async def _build_radar_template(
+    table: Any,
+    shape: Shape,
+    dims: list[str],
+    measures: list[str],
+    roles: dict[str, Any],
+    runner: QueryRunner,
+    max_rows: int,
+) -> dict[str, Any] | None:
+    if len(dims) < 1 or len(measures) < 3:
+        return None
+    subject_col = dims[0]
+    measure_cols = measures[:6]
+    agg = ", ".join(f'{_agg_for_measure(m)}({_quote(m)}) AS {_quote(m)}' for m in measure_cols)
+    sql = f'SELECT {_quote(subject_col)}, {agg} FROM {_quote(table.view_name)} GROUP BY {_quote(subject_col)} LIMIT {max_rows}'
+    result = await _safe_query(runner, sql)
+    if not result or not result.get("rows"):
+        return None
+    long_rows, radar_roles = _build_radar_rows(result["rows"], subject_col, measure_cols)
+    if not long_rows:
+        return None
+    title = f"{_nice_name(subject_col)} Scorecard"
+    chart = _build_multi_chart("radar", title, long_rows, ["subject", "metric", "value"], radar_roles)
+    return {
+        "insight_type": "shape_radar",
+        "group": "analysis",
+        "title": title,
+        "summary": f"Compare {len(measure_cols)} metrics across {len(result['rows'])} {_nice_name(subject_col)} values.",
+        "chart": chart,
+        "result": result,
+        "sql": sql,
+    }
+
+
+async def _build_heatmap_template(
+    table: Any,
+    shape: Shape,
+    dims: list[str],
+    measures: list[str],
+    roles: dict[str, Any],
+    runner: QueryRunner,
+    max_rows: int,
+) -> dict[str, Any] | None:
+    if len(dims) < 2 or len(measures) < 1:
+        return None
+    x_col, y_col = dims[0], dims[1]
+    value_col = measures[0]
+    agg = _agg_for_measure(value_col)
+    sql = (
+        f'SELECT {_quote(x_col)}, {_quote(y_col)}, {agg}({_quote(value_col)}) AS {_quote("value")} '
+        f'FROM {_quote(table.view_name)} GROUP BY {_quote(x_col)}, {_quote(y_col)} LIMIT {max_rows}'
+    )
+    result = await _safe_query(runner, sql)
+    if not result or not result.get("rows"):
+        return None
+    title = f"{_nice_name(value_col)} by {_nice_name(x_col)} and {_nice_name(y_col)}"
+    chart = _build_multi_chart(
+        "heatmap",
+        title,
+        result["rows"],
+        result.get("columns", [x_col, y_col, "value"]),
+        {"x": x_col, "y": y_col, "value": "value"},
+    )
+    return {
+        "insight_type": "shape_heatmap",
+        "group": "analysis",
+        "title": title,
+        "summary": f"Heatmap of {_nice_name(value_col)} across {_nice_name(x_col)} and {_nice_name(y_col)}.",
+        "chart": chart,
+        "result": result,
+        "sql": sql,
+    }
+
+
+async def _build_treemap_template(
+    table: Any,
+    shape: Shape,
+    dims: list[str],
+    measures: list[str],
+    roles: dict[str, Any],
+    runner: QueryRunner,
+    max_rows: int,
+) -> dict[str, Any] | None:
+    if len(dims) < 2 or len(measures) < 1:
+        return None
+    parent_col, child_col = dims[0], dims[1]
+    value_col = measures[0]
+    agg = _agg_for_measure(value_col)
+    sql = (
+        f'SELECT {_quote(parent_col)}, {_quote(child_col)}, {agg}({_quote(value_col)}) AS {_quote("value")} '
+        f'FROM {_quote(table.view_name)} GROUP BY {_quote(parent_col)}, {_quote(child_col)} LIMIT {max_rows}'
+    )
+    result = await _safe_query(runner, sql)
+    if not result or not result.get("rows"):
+        return None
+    title = f"{_nice_name(value_col)} by {_nice_name(parent_col)} / {_nice_name(child_col)}"
+    chart = _build_multi_chart(
+        "treemap",
+        title,
+        result["rows"],
+        result.get("columns", [parent_col, child_col, "value"]),
+        {"x": parent_col, "group": child_col, "value": "value"},
+    )
+    return {
+        "insight_type": "shape_treemap",
+        "group": "analysis",
+        "title": title,
+        "summary": f"Hierarchical breakdown of {_nice_name(value_col)} by {_nice_name(parent_col)} and {_nice_name(child_col)}.",
+        "chart": chart,
+        "result": result,
+        "sql": sql,
+    }
+
+
+async def _build_sankey_template(
+    table: Any,
+    shape: Shape,
+    dims: list[str],
+    measures: list[str],
+    roles: dict[str, Any],
+    runner: QueryRunner,
+    max_rows: int,
+) -> dict[str, Any] | None:
+    if len(measures) < 1:
+        return None
+    if roles.get("source") and roles.get("target"):
+        source_col = roles["source"]
+        target_col = roles["target"]
+    elif len(dims) >= 2:
+        source_col = dims[0]
+        target_col = dims[1]
+    else:
+        return None
+    value_col = roles.get("value") or measures[0]
+    agg = _agg_for_measure(value_col)
+    sql = (
+        f'SELECT {_quote(source_col)}, {_quote(target_col)}, {agg}({_quote(value_col)}) AS {_quote("value")} '
+        f'FROM {_quote(table.view_name)} GROUP BY {_quote(source_col)}, {_quote(target_col)} LIMIT {max_rows}'
+    )
+    result = await _safe_query(runner, sql)
+    if not result or not result.get("rows"):
+        return None
+    title = f"Flow from {_nice_name(source_col)} to {_nice_name(target_col)}"
+    chart = _build_multi_chart(
+        "sankey",
+        title,
+        result["rows"],
+        result.get("columns", [source_col, target_col, "value"]),
+        {"x": source_col, "group": target_col, "value": "value"},
+    )
+    return {
+        "insight_type": "shape_sankey",
+        "group": "analysis",
+        "title": title,
+        "summary": f"Source-to-target flow weighted by {_nice_name(value_col)}.",
+        "chart": chart,
+        "result": result,
+        "sql": sql,
+    }
+
+
+async def _build_funnel_template(
+    table: Any,
+    shape: Shape,
+    dims: list[str],
+    measures: list[str],
+    roles: dict[str, Any],
+    runner: QueryRunner,
+    max_rows: int,
+) -> dict[str, Any] | None:
+    if len(dims) < 1 or len(measures) < 1:
+        return None
+    stage_col = roles.get("stage")
+    if not stage_col:
+        return None
+    value_col = measures[0]
+    agg = _agg_for_measure(value_col)
+    sql = (
+        f'SELECT {_quote(stage_col)}, {agg}({_quote(value_col)}) AS {_quote("value")} '
+        f'FROM {_quote(table.view_name)} GROUP BY {_quote(stage_col)} ORDER BY {_quote("value")} DESC LIMIT {max_rows}'
+    )
+    result = await _safe_query(runner, sql)
+    if not result or not result.get("rows"):
+        return None
+    title = f"{_nice_name(stage_col)} {_nice_name(value_col)} Funnel"
+    chart = _build_multi_chart(
+        "funnel",
+        title,
+        result["rows"],
+        result.get("columns", [stage_col, "value"]),
+        {"x": stage_col, "value": "value"},
+    )
+    return {
+        "insight_type": "shape_funnel",
+        "group": "analysis",
+        "title": title,
+        "summary": f"Stage progression of {_nice_name(value_col)} by {_nice_name(stage_col)}.",
+        "chart": chart,
+        "result": result,
+        "sql": sql,
+    }
+
+
+async def _build_scatter_template(
+    table: Any,
+    shape: Shape,
+    dims: list[str],
+    measures: list[str],
+    roles: dict[str, Any],
+    runner: QueryRunner,
+    max_rows: int,
+) -> dict[str, Any] | None:
+    if len(measures) < 2:
+        return None
+    x_col, y_col = measures[0], measures[1]
+    label_col = _shape_scatter_label_col(shape, {x_col, y_col})
+    label_select = f", {_quote(label_col)}" if label_col else ""
+    sql = f'SELECT {_quote(x_col)}, {_quote(y_col)}{label_select} FROM {_quote(table.view_name)} LIMIT {max_rows}'
+    result = await _safe_query(runner, sql)
+    if not result or not result.get("rows"):
+        return None
+    title = f"{_nice_name(x_col)} vs {_nice_name(y_col)}"
+    scatter_chart = _build_chart(
+        "scatter",
+        title,
+        result,
+        label_hint=label_col or "",
+        value_hint=x_col,
+        value_hint_2=y_col,
+    )
+    if not scatter_chart:
+        return None
+    return {
+        "insight_type": "shape_scatter",
+        "group": "analysis",
+        "title": title,
+        "summary": f"Relationship between {_nice_name(x_col)} and {_nice_name(y_col)} across {len(result['rows'])} records.",
+        "chart": scatter_chart,
+        "result": result,
+        "sql": sql,
+    }
+
+
+_TEMPLATE_BUILDERS: dict[str, Any] = {
+    "radar": _build_radar_template,
+    "heatmap": _build_heatmap_template,
+    "treemap": _build_treemap_template,
+    "sankey": _build_sankey_template,
+    "funnel": _build_funnel_template,
+    "scatter": _build_scatter_template,
+}
+
+
 async def _shape_template_insights(
     project: Project,
     ctx: ProjectContext,
@@ -2443,10 +2730,10 @@ async def _shape_template_insights(
 ) -> list[dict[str, Any]]:
     """Generate extra insight cards from raw table shapes that support richer charts.
 
-    Probes each real table, classifies its columns, then runs a bounded,
-    deterministic SQL template for the richest matching shape:
-    heatmap (2 dims + measure), radar (1 dim + 3+ measures), treemap,
-    sankey, funnel, or scatter (2 measures).
+    Probes each real table, classifies its columns, then iterates over the
+    markdown-driven chart catalog to run the highest-scoring SQL template whose
+    builder exists. New families appear automatically when (a) the catalog
+    declares them eligible and (b) a builder is added here.
     """
     if runner is None:
         return []
@@ -2469,189 +2756,24 @@ async def _shape_template_insights(
             continue
 
         shape = derive_shape(columns, rows)
+        semantic_roles = _detect_semantic_roles(columns, rows) if columns else {}
+        catalog_summary = _catalog_shape(shape, rows, semantic_roles)
+        eligible = eligible_families(catalog_summary)
+
         non_period_dims = [c for c in shape.dimensions if not _is_period_dimension(shape, c)]
         dims = non_period_dims or shape.dimensions[:]
-        has_non_period_dimension = len(non_period_dims) > 0
         measures = shape.measures
 
         generated: list[dict[str, Any]] = []
-
-        # 1) Radar: 1 categorical dimension + 3+ numeric measures.
-        #    Avoid period-only subjects — line/combo already covers time-by-measures.
-        if has_non_period_dimension and len(dims) >= 1 and len(measures) >= 3 and len(generated) < max_per_table:
-            subject_col = dims[0]
-            measure_cols = measures[:6]
-            agg = ", ".join(f'{_agg_for_measure(m)}({_quote(m)}) AS {_quote(m)}' for m in measure_cols)
-            sql = f'SELECT {_quote(subject_col)}, {agg} FROM {_quote(table.view_name)} GROUP BY {_quote(subject_col)} LIMIT {max_rows}'
-            result = await _safe_query(runner, sql)
-            if result and result.get("rows"):
-                long_rows, roles = _build_radar_rows(result["rows"], subject_col, measure_cols)
-                if long_rows:
-                    title = f"{_nice_name(subject_col)} Scorecard"
-                    chart = _build_multi_chart("radar", title, long_rows, ["subject", "metric", "value"], roles)
-                    generated.append({
-                        "insight_type": "shape_radar",
-                        "group": "analysis",
-                        "title": title,
-                        "summary": f"Compare {len(measure_cols)} metrics across {len(result['rows'])} {_nice_name(subject_col)} values.",
-                        "chart": chart,
-                        "result": result,
-                        "sql": sql,
-                    })
-
-        # 2) Heatmap: 2 categorical dimensions + 1 numeric measure.
-        if len(dims) >= 2 and len(measures) >= 1 and len(generated) < max_per_table:
-            x_col, y_col = dims[0], dims[1]
-            value_col = measures[0]
-            agg = _agg_for_measure(value_col)
-            sql = (
-                f'SELECT {_quote(x_col)}, {_quote(y_col)}, {agg}({_quote(value_col)}) AS {_quote("value")} '
-                f'FROM {_quote(table.view_name)} GROUP BY {_quote(x_col)}, {_quote(y_col)} LIMIT {max_rows}'
-            )
-            result = await _safe_query(runner, sql)
-            if result and result.get("rows"):
-                title = f"{_nice_name(value_col)} by {_nice_name(x_col)} and {_nice_name(y_col)}"
-                chart = _build_multi_chart(
-                    "heatmap",
-                    title,
-                    result["rows"],
-                    result.get("columns", [x_col, y_col, "value"]),
-                    {"x": x_col, "y": y_col, "value": "value"},
-                )
-                generated.append({
-                    "insight_type": "shape_heatmap",
-                    "group": "analysis",
-                    "title": title,
-                    "summary": f"Heatmap of {_nice_name(value_col)} across {_nice_name(x_col)} and {_nice_name(y_col)}.",
-                    "chart": chart,
-                    "result": result,
-                    "sql": sql,
-                })
-
-        # 3) Treemap: 2 categorical dimensions + 1 numeric measure.
-        if len(dims) >= 2 and len(measures) >= 1 and len(generated) < max_per_table:
-            parent_col, child_col = dims[0], dims[1]
-            value_col = measures[0]
-            agg = _agg_for_measure(value_col)
-            sql = (
-                f'SELECT {_quote(parent_col)}, {_quote(child_col)}, {agg}({_quote(value_col)}) AS {_quote("value")} '
-                f'FROM {_quote(table.view_name)} GROUP BY {_quote(parent_col)}, {_quote(child_col)} LIMIT {max_rows}'
-            )
-            result = await _safe_query(runner, sql)
-            if result and result.get("rows"):
-                title = f"{_nice_name(value_col)} by {_nice_name(parent_col)} / {_nice_name(child_col)}"
-                chart = _build_multi_chart(
-                    "treemap",
-                    title,
-                    result["rows"],
-                    result.get("columns", [parent_col, child_col, "value"]),
-                    {"x": parent_col, "group": child_col, "value": "value"},
-                )
-                generated.append({
-                    "insight_type": "shape_treemap",
-                    "group": "analysis",
-                    "title": title,
-                    "summary": f"Hierarchical breakdown of {_nice_name(value_col)} by {_nice_name(parent_col)} and {_nice_name(child_col)}.",
-                    "chart": chart,
-                    "result": result,
-                    "sql": sql,
-                })
-
-        # 4) Sankey: explicit source/target-style columns or any two dimensions.
-        semantic_roles = _detect_semantic_roles(columns, rows) if columns else {}
-        if (
-            (semantic_roles.get("source") and semantic_roles.get("target"))
-            or len(dims) >= 2
-        ) and len(measures) >= 1 and len(generated) < max_per_table:
-            source_col = semantic_roles.get("source") or dims[0]
-            target_col = semantic_roles.get("target") or dims[1]
-            value_col = semantic_roles.get("value") or measures[0]
-            agg = _agg_for_measure(value_col)
-            sql = (
-                f'SELECT {_quote(source_col)}, {_quote(target_col)}, {agg}({_quote(value_col)}) AS {_quote("value")} '
-                f'FROM {_quote(table.view_name)} GROUP BY {_quote(source_col)}, {_quote(target_col)} LIMIT {max_rows}'
-            )
-            result = await _safe_query(runner, sql)
-            if result and result.get("rows"):
-                title = f"Flow from {_nice_name(source_col)} to {_nice_name(target_col)}"
-                chart = _build_multi_chart(
-                    "sankey",
-                    title,
-                    result["rows"],
-                    result.get("columns", [source_col, target_col, "value"]),
-                    {"x": source_col, "group": target_col, "value": "value"},
-                )
-                generated.append({
-                    "insight_type": "shape_sankey",
-                    "group": "analysis",
-                    "title": title,
-                    "summary": f"Source-to-target flow weighted by {_nice_name(value_col)}.",
-                    "chart": chart,
-                    "result": result,
-                    "sql": sql,
-                })
-
-        # 5) Funnel: one dimension that looks like a stage + one measure.
-        if (
-            len(dims) >= 1
-            and len(measures) >= 1
-            and semantic_roles.get("stage")
-            and len(generated) < max_per_table
-        ):
-            stage_col = cast(str, semantic_roles["stage"])
-            value_col = measures[0]
-            agg = _agg_for_measure(value_col)
-            sql = (
-                f'SELECT {_quote(stage_col)}, {agg}({_quote(value_col)}) AS {_quote("value")} '
-                f'FROM {_quote(table.view_name)} GROUP BY {_quote(stage_col)} ORDER BY {_quote("value")} DESC LIMIT {max_rows}'
-            )
-            result = await _safe_query(runner, sql)
-            if result and result.get("rows"):
-                title = f"{_nice_name(stage_col)} {_nice_name(value_col)} Funnel"
-                chart = _build_multi_chart(
-                    "funnel",
-                    title,
-                    result["rows"],
-                    result.get("columns", [stage_col, "value"]),
-                    {"x": stage_col, "value": "value"},
-                )
-                generated.append({
-                    "insight_type": "shape_funnel",
-                    "group": "analysis",
-                    "title": title,
-                    "summary": f"Stage progression of {_nice_name(value_col)} by {_nice_name(stage_col)}.",
-                    "chart": chart,
-                    "result": result,
-                    "sql": sql,
-                })
-
-        # 6) Scatter: two numeric measures.
-        if len(measures) >= 2 and len(generated) < max_per_table:
-            x_col, y_col = measures[0], measures[1]
-            label_col = _shape_scatter_label_col(shape, {x_col, y_col})
-            label_select = f", {_quote(label_col)}" if label_col else ""
-            sql = f'SELECT {_quote(x_col)}, {_quote(y_col)}{label_select} FROM {_quote(table.view_name)} LIMIT {max_rows}'
-            result = await _safe_query(runner, sql)
-            if result and result.get("rows"):
-                title = f"{_nice_name(x_col)} vs {_nice_name(y_col)}"
-                scatter_chart = _build_chart(
-                    "scatter",
-                    title,
-                    result,
-                    label_hint=label_col or "",
-                    value_hint=x_col,
-                    value_hint_2=y_col,
-                )
-                if scatter_chart:
-                    generated.append({
-                        "insight_type": "shape_scatter",
-                        "group": "analysis",
-                        "title": title,
-                        "summary": f"Relationship between {_nice_name(x_col)} and {_nice_name(y_col)} across {len(result['rows'])} records.",
-                        "chart": scatter_chart,
-                        "result": result,
-                        "sql": sql,
-                    })
+        for rule in eligible:
+            if len(generated) >= max_per_table:
+                break
+            builder = _TEMPLATE_BUILDERS.get(rule.family)
+            if not builder:
+                continue
+            g = await builder(table, shape, dims, measures, semantic_roles, runner, max_rows)
+            if g:
+                generated.append(g)
 
         for g in generated[:max_per_table]:
             card = _card(

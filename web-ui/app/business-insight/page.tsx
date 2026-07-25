@@ -217,7 +217,7 @@ export default function BusinessInsightPage() {
       }
     >
       <div className="space-y-6 pb-24">
-        <div className="mx-auto w-full max-w-content space-y-6 pb-24">
+        <div className="mx-auto w-full max-w-content space-y-6">
           <HomeAiSuggestions onAsk={handleAsk} />
           {(chatTurns.length > 0 || chatBusy || chatError) && (
             <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
