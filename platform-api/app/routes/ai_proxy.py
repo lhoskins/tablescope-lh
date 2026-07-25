@@ -39,6 +39,7 @@ from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
 from app.services import ai_intelligence_client as ai
+from app.services import ask_pipeline
 from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.analytical_method_engine import data_profiler
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
@@ -2238,23 +2239,6 @@ async def ai_generate_and_save_query(
 # rendered output never exceeds this surface's capability. Charts this surface
 # cannot shape meaningfully (scatter) degrade to a table rather than a
 # misleading bar.
-_ASK_AND_RUN_SURFACE: dict[ChartType, str] = {
-    ChartType.KPI: "kpi",
-    ChartType.TABLE: "table",
-    ChartType.LINE: "line",
-    ChartType.AREA: "line",
-    ChartType.BAR: "bar",
-    ChartType.PIE: "pie",
-    ChartType.COMBO: "line",
-    ChartType.SCATTER: "table",
-    ChartType.RADAR: "bar",
-    ChartType.TREEMAP: "bar",
-    ChartType.FUNNEL: "bar",
-    ChartType.SANKEY: "bar",
-    ChartType.RADIAL_BAR: "bar",
-}
-
-
 def _suggest_visualization(
     columns: list[str], rows: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -2268,25 +2252,25 @@ def _suggest_visualization(
     if not columns or not rows:
         return {"type": "table"}
 
-    decision = select_visualization(columns, rows)
-    surface_type = _ASK_AND_RUN_SURFACE.get(decision.chart_type, "table")
-
-    if surface_type == "table":
-        return {"type": "table"}
-    if surface_type == "kpi":
-        return {"type": "kpi", "metricField": decision.y_field or columns[0]}
-    fallback_y = columns[1] if len(columns) > 1 else columns[0]
-    viz: dict[str, Any] = {
-        "type": surface_type,
-        "xField": decision.x_field or columns[0],
-        "yField": decision.y_field or fallback_y,
-    }
-    # Carry the engine's readability decision so the surface renders a horizontal,
-    # top-N-ranked bar for many categories instead of an unreadable vertical wall.
-    if decision.chart_style:
-        viz["chartStyle"] = decision.chart_style
-    if decision.top_n is not None:
-        viz["topN"] = decision.top_n
+    # Delegate to the shared ask pipeline so every conversational surface uses
+    # the same chart-fit ranking the insight cards use. The old
+    # ``_ASK_AND_RUN_SURFACE`` narrowing collapsed 26 families onto five and
+    # turned scatter/heatmap/boxplot answers into tables; the renderer draws all
+    # of them, so the narrowing only lost information.
+    presentation = ask_pipeline.resolve_presentation(columns, rows)
+    viz = dict(presentation.chart)
+    # Keep the legacy field names this surface's clients already read.
+    if "labelColumn" in viz:
+        viz["xField"] = viz["labelColumn"]
+    value_columns = viz.get("valueColumns") or []
+    if value_columns:
+        viz["yField"] = value_columns[0]
+        if len(value_columns) > 1:
+            viz["y2Field"] = value_columns[1]
+    if viz.get("subtype"):
+        viz["chartStyle"] = viz["subtype"]
+    if presentation.candidates:
+        viz["candidates"] = presentation.candidates
     return viz
 
 
@@ -2718,6 +2702,9 @@ async def _ask_and_run_core(
         session, context, question, columns, rows, response,
         intent_hint=decision.analysis_intent if decision else None,
     )
+    await _attach_ask_analytics(
+        response, session, tenant_id=context.tenant_id, question=question
+    )
     _attach_presentation(response)
     return response
 
@@ -3067,8 +3054,49 @@ async def ai_generate_query_preview(
     # M4 fast-follow: an executed preview is a structured result — stamp the
     # shared ResponseEnvelope so the modal renders via the same ResponsePresenter
     # as ask-and-run. Additive/fail-closed (same helper as ask-and-run).
+    await _attach_ask_analytics(
+        response, session, tenant_id=context.tenant_id, question=req.question
+    )
     _attach_presentation(response)
     return response
+
+
+async def _attach_ask_analytics(
+    response: dict[str, Any],
+    session: AsyncSession,
+    *,
+    tenant_id: int | None,
+    question: str,
+) -> None:
+    """Run the governed Analytical Method Engine over a chat answer.
+
+    Chat answers previously carried no analytical provenance while insight cards
+    did, so the same data got a statistical read on a card and none in
+    conversation. Running the engine here gives chat R-first execution (the
+    catalog's methods are ``execution_engine: r``, with Python fallback) plus the
+    method envelope the R Analytics badge and Explain panel already render.
+
+    Fail-closed: any problem leaves the answer exactly as it was.
+    """
+    try:
+        if get_engine_mode() == EngineMode.OFF:
+            return
+        columns = response.get("columns") or []
+        rows = response.get("rows") or []
+        if not columns or not rows:
+            return
+        envelope = await analyze_methods(
+            session,
+            tenant_id=tenant_id,
+            columns=columns,
+            rows=rows,
+            question=question,
+        )
+        if envelope and envelope.get("method") is not None:
+            response["analyticalMethod"] = envelope
+            response["method_envelope"] = envelope
+    except Exception as exc:  # pragma: no cover - analytics must never break chat
+        logger.warning("ask analytics skipped: %s", exc)
 
 
 @router.post("/actions/generate-and-save-dashboard")

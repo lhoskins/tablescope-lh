@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/api-client";
+import type { VizType } from "@/lib/api/ai-actions";
 
 export type TurnStatus = "pending" | "success" | "error";
 
@@ -11,7 +12,9 @@ export interface TurnResult {
 }
 
 export interface ChartConfig {
-  type: "table" | "bar" | "line" | "pie" | "scatter";
+  /** Full renderer vocabulary — see `VizType`. Narrowing this silently undid
+   *  the shared ask pipeline's chart-fit ranking for saved conversation turns. */
+  type: VizType;
   title?: string;
   labelColumn?: string;
   valueColumns?: string[];
@@ -20,6 +23,9 @@ export interface ChartConfig {
   dataLabels?: boolean;
   sort?: { column: string; direction: "asc" | "desc" };
   legend?: { visible: boolean };
+  metricField?: string;
+  topN?: number;
+  valueFormat?: string;
 }
 
 export interface ConversationTurn {
