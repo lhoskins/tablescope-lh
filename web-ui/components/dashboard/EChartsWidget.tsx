@@ -1618,17 +1618,19 @@ export function EChartsWidget({ widget, data, xKey, yKey, y2Key, chartData, seri
         className="h-full w-full"
         aria-label={`${widget.title || type} chart`}
       />
-      <table className="sr-only">
-        <caption>{widget.title || `${type} chart`}</caption>
-        <thead>
-          <tr>{data.length > 0 ? Object.keys(data[0]).map((k) => <th key={k}>{k}</th>) : null}</tr>
-        </thead>
-        <tbody>
-          {data.slice(0, 50).map((row, i) => (
-            <tr key={i}>{Object.keys(data[0] ?? {}).map((k) => <td key={k}>{String(row[k] ?? "")}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="sr-only">
+        <table>
+          <caption>{widget.title || `${type} chart`}</caption>
+          <thead>
+            <tr>{data.length > 0 ? Object.keys(data[0]).map((k) => <th key={k}>{k}</th>) : null}</tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 50).map((row, i) => (
+              <tr key={i}>{Object.keys(data[0] ?? {}).map((k) => <td key={k}>{String(row[k] ?? "")}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
