@@ -5,11 +5,11 @@ from __future__ import annotations
 from app.services.chart_catalog import (
     ShapeFacts,
     ShapeSummary,
-    fit_ranked,
-    fit_score,
     allowed_plan_chart_types,
     chart_families,
     eligible_families,
+    fit_ranked,
+    fit_score,
     load_chart_catalog,
     planner_guidance,
 )
