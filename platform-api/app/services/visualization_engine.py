@@ -145,8 +145,8 @@ class VizCandidate:
 
 _PERIOD_LABEL_RE = re.compile(
     r"(?i)^\s*("
-    r"\d{4}"  # 2026
-    r"|\d{4}[-/]\d{1,2}([-/]\d{1,2})?"  # 2026-01, 2026/01/15
+    r"(?:19|20|21)\d{2}"  # 1900-2199 years
+    r"|(?:19|20|21)\d{2}[-/]\d{1,2}([-/]\d{1,2})?"  # 2026-01, 2026/01/15
     r"|q[1-4][\s-]?\d{2,4}"  # Q1 2026
     r"|(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[\s-]?\d{0,4}"
     r"|(week|wk|day)\s?\d+"
