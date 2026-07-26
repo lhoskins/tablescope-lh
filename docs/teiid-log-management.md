@@ -81,21 +81,26 @@ volumes:
 
 ### 2.3 Logrotate sidecar for compression and daily retention
 
-A lightweight `alpine:3.20` sidecar runs `logrotate` hourly against the shared volume:
+A dedicated `tablescope-teiid-logrotate` image runs `logrotate` hourly against the shared volume:
 
 ```yaml
 teid-logrotate:
-  image: alpine:3.20
+  build:
+    context: ./wildfly/logrotate
+  image: tablescope-teiid-logrotate:latest
   restart: unless-stopped
-  command: >
-    sh -c "apk add --no-cache logrotate &&
-    while true; do
-      /usr/sbin/logrotate -s /tmp/logrotate.status /etc/logrotate.d/tablescope-teiid;
-      sleep 3600;
-    done"
   volumes:
     - teiid_logs:/logs
-    - ./wildfly/logrotate/tablescope-teiid:/etc/logrotate.d/tablescope-teiid:ro
+```
+
+`wildfly/logrotate/Dockerfile`:
+
+```dockerfile
+FROM alpine:3.20
+RUN apk add --no-cache logrotate
+COPY tablescope-teiid /etc/logrotate.d/tablescope-teiid
+RUN chmod 644 /etc/logrotate.d/tablescope-teiid
+CMD ["sh", "-c", "while true; do /usr/sbin/logrotate -s /tmp/logrotate.status /etc/logrotate.d/tablescope-teiid; sleep 3600; done"]
 ```
 
 `wildfly/logrotate/tablescope-teiid`:
