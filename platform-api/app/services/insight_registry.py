@@ -336,6 +336,66 @@ def is_query_request(question: str) -> bool:
     return bool(_QUERY_REQUEST_RE.search(question or ""))
 
 
+def _result_from_chart(card: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort result grid from a card's rendered chart.
+
+    Method-driven cards do not persist the raw ``result`` block, but the chart
+    already contains the same points (label/value/value2) plus role names. This
+    lets a stored-SQL answer still carry a small table the chat surface can
+    render, without requiring the full result frame to be duplicated in the
+    cache payload.
+    """
+    chart = card.get("chart") or {}
+    data = chart.get("data") or {}
+    if not isinstance(data, dict):
+        return {}
+
+    rows = data.get("rows")
+    if rows and isinstance(rows, list):
+        cols = data.get("columns") or (list(rows[0].keys()) if rows else [])
+        return {"columns": cols, "rows": rows}
+
+    series = data.get("series")
+    if not series or not isinstance(series, list):
+        return {}
+
+    roles = chart.get("roles") or {}
+    series_labels = chart.get("seriesLabels") or {}
+    x_col = (
+        roles.get("x")
+        or chart.get("xColumn")
+        or chart.get("labelColumn")
+        or series_labels.get("label")
+        or "label"
+    )
+    y_col = (
+        roles.get("y")
+        or chart.get("yColumn")
+        or chart.get("valueColumn")
+        or series_labels.get("value")
+        or "value"
+    )
+    y2_col = (
+        roles.get("y2")
+        or chart.get("y2Column")
+        or chart.get("metricField")
+        or series_labels.get("value2")
+    )
+
+    cols = [x_col, y_col]
+    if y2_col:
+        cols.append(y2_col)
+    out_rows: list[dict[str, Any]] = []
+    for point in series:
+        if not isinstance(point, dict):
+            continue
+        row: dict[str, Any] = {x_col: point.get("label"), y_col: point.get("value")}
+        if y2_col:
+            row[y2_col] = point.get("value2")
+        out_rows.append(row)
+    return {"columns": cols, "rows": out_rows} if out_rows else {}
+
+
 def stored_query_answer(ref: InsightRef) -> dict[str, Any] | None:
     """A deterministic answer containing the card's real SQL, or None.
 
@@ -346,6 +406,8 @@ def stored_query_answer(ref: InsightRef) -> dict[str, Any] | None:
     if not sql:
         return None
     result = ref.card.get("result") or {}
+    if not result or not result.get("rows"):
+        result = _result_from_chart(ref.card) or result
     return {
         "title": f'Query for "{ref.title}"',
         "sql": sql,

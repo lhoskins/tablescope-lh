@@ -718,7 +718,10 @@ async def _ask_data_first(
     except Exception as exc:  # pragma: no cover - defensive
         logger.info("Chat data-first attempt failed, falling back to prose: %s", exc)
         return None
-    if run.get("status") != "success" or not run.get("rows"):
+    # Retrieval answers (stored SQL) are valid even when the cache did not keep
+    # the full result frame; the SQL itself is what the user asked for.
+    is_retrieval = bool(run.get("retrievedFromInsight"))
+    if run.get("status") != "success" or (not run.get("rows") and not is_retrieval):
         return None
     return {
         "answer": _chat_answer_text(question, run),
