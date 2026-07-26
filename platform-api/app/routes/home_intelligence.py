@@ -213,6 +213,18 @@ async def _run_for_project(
     #    genuinely earn the "deeper" label.
     # 2) Shape templates as a fallback for tables where no method applies, so a
     #    project without method-eligible data still gets richer charts.
+    # 1) Dissect the findings the user already cares about. Diagnostics attach
+    #    to their originating Risk/Trend/Opportunity card (they do not add new
+    #    cards), so the section reads as a drill-down with proposed actions
+    #    rather than a second, unrelated feed.
+    try:
+        await hi._card_diagnostic_insights(
+            project, ctx, runner, session, tenant_id=context.tenant_id, cards=cards
+        )
+    except Exception as exc:
+        logger.warning("card diagnostics failed for project %s: %s", project.id, exc)
+
+    # 2) Standalone governed analyses for tables no card covers.
     deep_cards: list[dict[str, Any]] = []
     try:
         deep_cards = await hi._method_driven_insights(

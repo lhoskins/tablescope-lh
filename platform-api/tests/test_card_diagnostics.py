@@ -261,3 +261,85 @@ def test_opportunity_followups_ask_about_size():
 def test_followups_include_document_cross_reference():
     qs = suggested_followups(TREND_CARD, max_items=9)
     assert any("documents" in q.lower() for q in qs)
+
+
+# ── Findings extraction (envelope -> the facts an action needs) ──────────────
+
+
+def test_contribution_results_yield_the_dominant_segment():
+    from app.services.card_diagnostics import extract_findings
+
+    facts = extract_findings(
+        "contribution_to_change",
+        {"results": {"contributions": [
+            {"group": "Plant A", "contribution": 0.2},
+            {"group": "Plant B", "contribution": 0.62},
+        ]}},
+    )
+    assert facts["top_segment"] == "Plant B"
+    assert facts["top_segment_share"] == 0.62
+
+
+def test_negative_contribution_still_counts_as_dominant():
+    """A large negative contributor drives the movement just as much."""
+    from app.services.card_diagnostics import extract_findings
+
+    facts = extract_findings(
+        "compare_multiple_groups",
+        {"results": {"groups": [{"name": "East", "value": 0.1}, {"name": "West", "value": -0.9}]}},
+    )
+    assert facts["top_segment"] == "West"
+
+
+def test_change_point_yields_count_and_period():
+    from app.services.card_diagnostics import extract_findings
+
+    facts = extract_findings(
+        "detect_change_point", {"results": {"change_points": [{"period": "2026-03"}]}}
+    )
+    assert facts == {"change_point_count": 1, "change_point_period": "2026-03"}
+
+
+def test_regression_yields_the_strongest_driver():
+    from app.services.card_diagnostics import extract_findings
+
+    facts = extract_findings(
+        "continuous_prediction",
+        {"results": {"coefficients": [
+            {"term": "downtime", "estimate": 0.1},
+            {"term": "scrap_rate", "estimate": -0.8},
+        ]}},
+    )
+    assert facts["top_driver"] == "scrap_rate"
+
+
+def test_forecast_direction_is_derived_from_slope():
+    from app.services.card_diagnostics import extract_findings
+
+    assert extract_findings("forecast_time_series", {"results": {"slope": 2.5}})[
+        "forecast_direction"
+    ] == "worsening"
+    assert extract_findings("forecast_time_series", {"results": {"slope": -1.0}})[
+        "forecast_direction"
+    ] == "improving"
+
+
+def test_malformed_or_unknown_envelopes_contribute_nothing():
+    from app.services.card_diagnostics import extract_findings
+
+    assert extract_findings("detect_anomalies", {"results": "not-a-dict"}) == {}
+    assert extract_findings("detect_anomalies", None) == {}
+    assert extract_findings("some_future_intent", {"results": {"x": 1}}) == {}
+
+
+def test_extracted_findings_feed_a_targeted_action():
+    """The end-to-end contract: envelope -> facts -> grounded proposal."""
+    from app.services.card_diagnostics import extract_findings
+
+    facts = extract_findings(
+        "contribution_to_change",
+        {"results": {"contributions": [{"group": "Plant B", "contribution": 0.62}]}},
+    )
+    actions = propose_actions(RISK_CARD, facts)
+    assert "Plant B" in actions[0].headline
+    assert actions[0].confidence == "high"
