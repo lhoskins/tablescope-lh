@@ -39,7 +39,7 @@ from app.models.project import Project, ProjectMember
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
 from app.services import ai_intelligence_client as ai
-from app.services import ask_pipeline
+from app.services import ask_pipeline, insight_registry
 from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.analytical_method_engine import data_profiler
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
@@ -832,6 +832,64 @@ async def route_prompt(
             route=f"/projects/{target_id}/ai", prefilled=prompt
         )
     return RoutePromptResponse(route="/projects/new", prefilled=prompt)
+
+
+async def _retrieve_stored_insight_query(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int | None,
+    question: str,
+) -> dict[str, Any] | None:
+    """Answer "show me the query for <insight>" from the stored card.
+
+    Returns ``None`` unless the question is a query request AND resolves to a
+    single card with stored SQL — every other question falls through to normal
+    generation. Fail-open: any error returns ``None``.
+    """
+    try:
+        if not insight_registry.is_query_request(question):
+            return None
+        cards = await insight_registry.load_tenant_insight_cards(
+            session, tenant_id=context.tenant_id, project_id=project_id
+        )
+        if not cards:
+            return None
+        match = insight_registry.resolve_insight_reference(question, cards)
+        if not match.resolved or match.match is None:
+            return None
+        answer = insight_registry.stored_query_answer(match.match)
+        if answer is None:
+            return None
+        _attach_presentation(answer)
+        return answer
+    except Exception:
+        logger.exception("stored-insight query retrieval failed")
+        return None
+
+
+async def _insight_card_context(
+    session: AsyncSession,
+    context: RequestContext,
+    project_id: int | None,
+    question: str,
+) -> str:
+    """Grounding for a question that names an insight card.
+
+    Without this the ask paths saw knowledge-graph context only — documents,
+    KPIs and tables — so "show me the query for <card title>" had nothing to
+    retrieve and the model invented a plausible-looking SQL query instead. Cards
+    already store their real SQL; this makes that retrievable.
+
+    Best-effort: any failure returns "" and the answer proceeds as before.
+    """
+    try:
+        cards = await insight_registry.load_tenant_insight_cards(
+            session, tenant_id=context.tenant_id, project_id=project_id
+        )
+        return insight_registry.build_insight_context(question, cards)
+    except Exception:
+        logger.exception("Failed to build insight-card context")
+        return ""
 
 
 async def _kg_context(
@@ -2607,6 +2665,15 @@ async def _ask_and_run_core(
     ground answers on real executed data. Never raises on a generation/execution
     failure — returns a structured ``status`` with SQL + error instead.
     """
+    # A question that asks to SEE an insight's query is a RETRIEVAL, not a
+    # generation. Generating SQL here is exactly how an invented query got
+    # presented as the card's query; the card stores the real one.
+    retrieved = await _retrieve_stored_insight_query(
+        session, context, project_id, question
+    )
+    if retrieved is not None:
+        return retrieved
+
     resolver = await _resolve_action_sources(
         session, context,
         project_id=project_id,
@@ -2705,6 +2772,12 @@ async def _ask_and_run_core(
     await _attach_ask_analytics(
         response, session, tenant_id=context.tenant_id, question=question
     )
+    # Ground the answer in the insight card the question names, when it names
+    # one, so follow-ups ("why did that happen?", "break it down") continue that
+    # card's story with its real method and sources instead of starting over.
+    insight_ctx = await _insight_card_context(session, context, project_id, question)
+    if insight_ctx:
+        response["insightContext"] = insight_ctx
     _attach_presentation(response)
     return response
 
