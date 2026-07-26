@@ -721,11 +721,12 @@ async def _ask_data_first(
     # Retrieval answers (stored SQL) are valid even when the cache did not keep
     # the full result frame; the SQL itself is what the user asked for.
     is_retrieval = bool(run.get("retrievedFromInsight"))
-    if run.get("status") != "success" or (not run.get("rows") and not is_retrieval):
+    is_text = run.get("answerType") == "text"
+    if run.get("status") != "success" or (not run.get("rows") and not is_retrieval and not is_text):
         return None
     return {
-        "answer": _chat_answer_text(question, run),
-        "model_used": "tablescope-data",
+        "answer": run.get("answer") if is_text else _chat_answer_text(question, run),
+        "model_used": run.get("model_used", "tablescope-data"),
         "request_id": "",
         "context_summary": {},
         "audit_id": None,
@@ -858,6 +859,21 @@ async def _retrieve_stored_insight_query(
         if not cards:
             return None
         match = insight_registry.resolve_insight_reference(question, cards)
+        if match.ambiguous:
+            clarifying: dict[str, Any] = {
+                "answer": insight_registry.format_ambiguous(match.ambiguous),
+                "model_used": "tablescope-direct",
+                "request_id": "",
+                "context_summary": {},
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "status": "success",
+                "answerType": "text",
+                "retrievedFromInsight": None,
+            }
+            _attach_presentation(clarifying)
+            return clarifying
         if not match.resolved or match.match is None:
             return None
         answer = insight_registry.stored_query_answer(match.match)
