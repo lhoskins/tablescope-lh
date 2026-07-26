@@ -10,9 +10,9 @@ services:
     image: tablescope-teiid:latest
     restart: unless-stopped
     ports:
-      - "8095:8080"
-      - "35442:35432"
-      - "9990:9990"
+      - "127.0.0.1:8095:8080"
+      - "127.0.0.1:35442:35432"
+      - "127.0.0.1:9990:9990"
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
     healthcheck:
@@ -256,7 +256,7 @@ services:
       DEFAULT_POOL_SIZE: "20"
       AUTH_TYPE: scram-sha-256
     ports:
-      - "35443:5432"
+      - "127.0.0.1:35443:5432"
     depends_on:
       - teiid
 
