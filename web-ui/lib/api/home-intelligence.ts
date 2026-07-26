@@ -214,6 +214,44 @@ export interface InsightExplanation {
   };
 }
 
+/** One step of a card's Deeper-analysis dissection. */
+export interface InsightDiagnostic {
+  /** localise | when | quantify | explain | project | corroborate */
+  stage: string;
+  title: string;
+  question: string;
+  /** Why this step was run — shown so the ladder reads as reasoning. */
+  rationale: string;
+  /** What it found, in business language. */
+  finding: string;
+  /** Headline figure, when the method exposes one. */
+  highlight?: string;
+  /** Set when the step ran because a trigger fired (e.g. a period comparison). */
+  triggeredBy?: string | null;
+  analyticalMethod?: MethodEnvelope;
+  sql?: string;
+  result?: { columns?: string[]; rows?: Record<string, unknown>[] };
+}
+
+/** A proposed next step grounded in the diagnostics. */
+export interface ProposedAction {
+  headline: string;
+  rationale: string;
+  /** mitigate | capture | investigate | monitor */
+  kind: string;
+  /** high | medium | low — low means the evidence did not isolate a cause. */
+  confidence: string;
+}
+
+/** Another source worth checking the finding against. */
+export interface CrossReference {
+  /** table | document */
+  kind: string;
+  name: string;
+  question: string;
+  rationale: string;
+}
+
 export interface InsightCard {
   id: string;
   /** Stable, server-generated identifier for this insight instance. */
@@ -256,6 +294,19 @@ export interface InsightCard {
   };
   /** Governed Analytical Method Engine envelope (hybrid mode only). */
   analyticalMethod?: MethodEnvelope;
+  /**
+   * Deeper-analysis dissection of THIS finding: each step states the question
+   * it answers and why it was run, so the drill-down reads as a line of
+   * reasoning rather than a pile of charts. Present only when the card was
+   * dissected; a card without it must not advertise a full analysis.
+   */
+  diagnostics?: InsightDiagnostic[];
+  /** Grounded next steps derived from what the diagnostics measured. */
+  proposedActions?: ProposedAction[];
+  /** Card-scoped questions for the ask box. */
+  suggestedQuestions?: string[];
+  /** Other tables and documents worth checking this finding against. */
+  crossReferences?: CrossReference[];
   /**
    * Raw SQL and chart roles for data-backed cards. These are optional and
    * only present when the insight was generated from a successfully executed
