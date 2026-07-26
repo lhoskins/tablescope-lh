@@ -1,23 +1,23 @@
-# Devin: merge + deploy instructions — insight & conversation pipeline
+# Devin: merge + deploy — insight, conversation & retrieval pipeline
 
 Repository: `lhoskins/tablescope-lh`
 **Branch to merge:** `claude/deep-analysis-business-value`
-**Base:** `devin/r-echarts-e2e-validation` (the deployed lineage; already contains
-the merged chart-fit work from PR #96)
+**Base:** `devin/r-echarts-e2e-validation` (deployed lineage; already has the
+chart-fit work from PR #96)
 
-7 commits · 16 files · +2202 / −48 · **all tests green** (see §5)
+**9 commits · 19 files · +3073 / −48 · all tests green** (§5)
 
 ---
 
-## 1. Merge rules (read first)
+## 1. Merge rules — read first
 
 1. **Do not rewrite, refactor, rename or reformat the delivered files.** Merge
-   as-is. Resolve any conflict by preserving the delivered code and adapting the
+   as-is; resolve conflicts by preserving the delivered code and adapting the
    surrounding code.
-2. Suspected bug in delivered code → **report it in the PR description** with the
-   exact change and reason. Do not silently change it.
-3. Two platform tests could not run in the authoring container (its
-   numpy/pandas is broken, so anything importing `app.main` was skipped):
+2. Suspected bug → **report it in the PR description** with the exact change and
+   reason. Do not silently change it.
+3. Two platform tests could not run in the authoring container (its numpy/pandas
+   is broken, so anything importing `app.main` was skipped):
    `test_ask_and_run_call_site_agrees_with_engine` and
    `test_home_call_site_agrees_with_engine`. **They must pass in CI.**
 
@@ -29,122 +29,121 @@ git merge origin/claude/deep-analysis-business-value
 
 ---
 
-## 2. What each commit does
+## 2. Commits
 
-| Commit | What it changes |
+| Commit | What it does |
 |---|---|
-| `f1dcd38` | Identifier columns are never chart dimensions |
+| `f1dcd38` | Identifier columns (`order_id`, SKU) are never chart dimensions |
 | `fa9f7d7` | Method-driven Deeper analysis + materiality gate |
 | `d604727` | Executive analyses: YoY, MoM, growth, actual-vs-target, co-movement, drivers |
-| `9ddf5ef` | Deeper-analysis handoff doc |
 | `dc0fed0` | Unified ask pipeline: shared chart-fit + R analytics + insight follow-ups |
-| `8643495` | Ask-pipeline handoff doc |
-| `ec9a497` | Chat renders the full ECharts vocabulary (three frontend narrowings removed) |
+| `ec9a497` | Chat renders the full ECharts vocabulary (3 frontend narrowings removed) |
+| `eb0a0b9` | **Insight cards become retrievable — assistant stops inventing their SQL** |
+| `9ddf5ef`, `8643495`, `0626398` | Handoff docs |
 
 ---
 
-## 3. The code path (end to end)
+## 3. The four problems fixed
 
-### 3a. Chart selection — one ranker, every surface
+**A. Deeper analysis was not analysis.** `_shape_template_insights` probed tables
+(`SELECT * LIMIT 50`) for any drawable column combination — zero calls to the
+method engine, and it happily charted `order_id`. Now `_method_driven_insights`
+plans governed *intents*, executes them R-first through the Analytical Method
+Engine, and **suppresses any result that finds nothing** (materiality gate).
+
+**B. Chat lost chart variety — twice.** The backend collapsed 26 families to five
+(`_ASK_AND_RUN_SURFACE`, scatter→table), and the frontend collapsed again in
+three places (`buildChart`'s pie/line/bar ternary, `VizType`, `ChartConfig`). All
+four narrowings removed; chat now uses the same ranker as the cards.
+
+**C. Chat had no analytics.** Neither ask path called the method engine, so a
+chat answer had no R execution or provenance while a card on the same rows did.
+`_attach_ask_analytics()` now runs it on both paths.
+
+**D. The assistant invented insight SQL.** The ask paths received
+knowledge-graph context only (documents/KPIs/tables) and **no path could look a
+card up** — so "show me the query for *Material Costs vs Revenue Trend*"
+produced a fabricated query. Cards store their real SQL; it is now retrievable.
+
+---
+
+## 4. Code path
+
+### 4a. Chart selection — one ranker for every surface
 
 ```
-chart_selection_best_practices.md        ← single source of truth (31 families)
-        │  parsed by
-        ▼
-services/chart_catalog.py                 fit_score() / fit_ranked()
-        │  consumed by
-        ▼
-services/visualization_engine.py          rank_visualizations()
-        │                                 ├─ business_dimensions()  ← NEW: drops
-        │                                 │   identifier columns (order_id, sku)
-        │                                 └─ _catalog_facts()       ← row counts +
-        │                                     true cardinalities
-        ├──────────────► home_intelligence  (insight cards, deeper analysis)
-        └──────────────► ask_pipeline       (all three conversational surfaces)
+chart_selection_best_practices.md          31 families, single source of truth
+   └─ chart_catalog.fit_ranked()           per-dataset fit confidence
+      └─ visualization_engine.rank_visualizations()
+         ├─ business_dimensions()          ← drops identifier columns
+         ├─ home_intelligence              → insight cards / deeper analysis
+         └─ ask_pipeline                   → all three conversational surfaces
 ```
 
-### 3b. Deeper analysis — governed methods, not shape probing
+### 4b. Deeper analysis — governed methods, not shape probing
 
 ```
 routes/home_intelligence.py::_run_for_project
-        │
-        ├─ hi._method_driven_insights(...)            ← NEW, runs FIRST
-        │      ├─ probe table (LIMIT 200)
-        │      ├─ deep_analysis.plan_deep_analyses()  ← which INTENTS the data supports
-        │      ├─ _deep_analysis_sql()                ← per-intent projection
-        │      ├─ analyze_methods()                   ← governed engine, R-first
-        │      ├─ deep_analysis.assess_materiality()  ← no finding ⇒ NO CARD
-        │      └─ card["analyticalMethod"] = envelope ← R badge + Explain panel
-        │
-        └─ hi._shape_template_insights(...)           ← fallback only
+  ├─ hi._method_driven_insights()                    ← runs FIRST
+  │    probe → deep_analysis.plan_deep_analyses()     which INTENTS the data supports
+  │          → _deep_analysis_sql()                   per-intent projection
+  │          → analyze_methods()                      governed engine, R-first
+  │          → deep_analysis.assess_materiality()     no finding ⇒ NO CARD
+  │          → card["analyticalMethod"]               R badge + Explain panel
+  └─ hi._shape_template_insights()                   ← fallback only
 ```
 
-### 3c. Conversation — same ranker, same renderer, plus R
+### 4c. Conversation — retrieval first, then generation
 
 ```
-AI Assistant / Business-Insight ask / Project-Insight ask
-        │
-        ▼
-routes/ai_proxy.py::_ask_and_run_core            (every ask surface flows here)
-        ├─ _suggest_visualization()  ──►  ask_pipeline.resolve_presentation()
-        │                                  └─ rank_visualizations()  ← same ranker
-        └─ _attach_ask_analytics()   ──►  analyze_methods()          ← R-first
-                                           └─ response["analyticalMethod"]
-        ▼  frontend
-conversation-turn.tsx → ResultChart → InsightChartBlock → WidgetRenderer → EChartsWidget
+AI Assistant · Business-Insight ask · Project-Insight ask
+   └─ routes/ai_proxy.py::_ask_and_run_core          (all three flow here)
+      ├─ _retrieve_stored_insight_query()            ← NEW, BEFORE generation
+      │     is_query_request() && card resolves ⇒ return the STORED SQL
+      ├─ _suggest_visualization() → ask_pipeline.resolve_presentation()
+      │                              └─ rank_visualizations()   same ranker
+      ├─ _attach_ask_analytics()  → analyze_methods()           R-first
+      └─ _insight_card_context()  → response["insightContext"]  follow-up grounding
+   frontend:
+   conversation-turn → ResultChart → InsightChartBlock → WidgetRenderer → EChartsWidget
 ```
 
-**Renderer note (important):** no renderer was added or retired. `recharts` is
-already gone (zero imports, absent from `package.json`), and `WidgetRenderer` is
-now a thin **adapter** that delegates to `EChartsWidget` — it holds no chart
-library. Keep it: it is the single `WidgetConfig → ECharts` mapping that
-dashboards, cards, home pins and chat all share. `EChartsWidget` is the renderer;
-`WidgetRenderer` is the adapter.
+**Renderer note:** no renderer was added or retired. `recharts` is already gone
+(zero imports, absent from `package.json`); `WidgetRenderer` is now a thin
+**adapter** delegating to `EChartsWidget` with no chart library inside. **Keep
+it** — it is the single `WidgetConfig → ECharts` mapping shared by dashboards,
+cards, home pins and chat. `EChartsWidget` is the renderer; `WidgetRenderer` is
+the adapter.
 
 ---
 
-## 4. Files changed
+## 5. Files & verification
 
 **New**
-- `platform-api/app/services/deep_analysis.py` — intent planning, materiality
-  gate, evidence presentation (pure, no DB/LLM/pandas)
-- `platform-api/app/services/ask_pipeline.py` — shared conversational
-  presentation + insight follow-up grounding
-- `platform-api/tests/test_deep_analysis.py` (34), `test_ask_pipeline.py` (14)
-- `web-ui/components/ai/ai-result-view.chartfamily.test.tsx` (4)
+| File | Purpose | Tests |
+|---|---|---|
+| `app/services/deep_analysis.py` | intent planning, materiality gate, evidence presentation | 34 |
+| `app/services/ask_pipeline.py` | shared conversational presentation + follow-up grounding | 14 |
+| `app/services/insight_registry.py` | card retrieval by partial title, stored-SQL answers | 21 |
+| `web-ui/.../ai-result-view.chartfamily.test.tsx` | locks the chart-family collapse shut | 4 |
 
-**Modified**
-- `platform-api/app/services/visualization_engine.py` — `is_identifier_column()`,
-  `business_dimensions()`, wired into `_catalog_shape` / `_catalog_facts`
-- `platform-api/app/services/home_intelligence.py` — `_method_driven_insights()`,
-  `_deep_analysis_sql()`, `_distinct_years()`, `_target_measure()`
-- `platform-api/app/routes/home_intelligence.py` — methods run before shape
-  templates
-- `platform-api/app/routes/ai_proxy.py` — `_suggest_visualization` delegates to
-  the pipeline; dead `_ASK_AND_RUN_SURFACE` map removed; `_attach_ask_analytics()`
-- `web-ui/lib/api/ai-actions.ts` — `VizType` widened to the full vocabulary
-- `web-ui/lib/api/conversational-analytics.ts` — `ChartConfig.type` widened
-- `web-ui/components/ai/ai-result-view.tsx` — the pie/line/bar collapse removed
-- `web-ui/components/tablescope/conversation/conversation-turn.tsx` — passes
-  `y2Field` / `metricField` / `topN` / `valueFormat`
-
----
-
-## 5. Verification
-
-Authoring container (platform tests run directly; two excluded per §1):
+**Modified:** `visualization_engine.py` (identifier detection),
+`home_intelligence.py` (+ `routes/`), `routes/ai_proxy.py`,
+`web-ui/lib/api/ai-actions.ts`, `web-ui/lib/api/conversational-analytics.ts`,
+`web-ui/components/ai/ai-result-view.tsx`,
+`web-ui/components/tablescope/conversation/conversation-turn.tsx`.
 
 | Suite | Result |
 |---|---|
 | `test_deep_analysis.py` | 34 / 34 |
+| `test_insight_registry.py` | 21 / 21 |
 | `test_ask_pipeline.py` | 14 / 14 |
 | `test_chart_catalog.py` | 18 / 18 |
 | `test_visualization_engine.py` | 27 / 27 |
 | web-ui `vitest` | 242 / 242 (39 files) |
-| web-ui `tsc` | clean |
-| `ruff` (platform-api) | clean |
+| `tsc` · `ruff` | clean |
 
-Run in CI:
+CI:
 
 ```bash
 cd platform-api && pytest -q && ruff check app tests && mypy app
@@ -157,11 +156,11 @@ cd ../../web-ui && npm run typecheck && npm test -- --run && npm run build
 ## 6. Deploy
 
 ```bash
-docker compose build web-ui platform-api      # rebuild: frontend + backend both changed
+docker compose build web-ui platform-api        # both changed
 docker compose up -d web-ui platform-api platform-api-worker r-analytics
 ```
 
-Environment (platform-api **and** platform-api-worker — the worker generates
+Environment on **platform-api *and* platform-api-worker** (the worker generates
 insights):
 
 ```
@@ -170,59 +169,75 @@ R_ANALYTICS_ENABLED=true
 R_ANALYTICS_FAILURE_MODE=python_fallback
 ```
 
-Then **clear insight caches** so cards regenerate through the new path (the
-Clear-cache buttons, or `scripts/delete_insight_caches.py`).
+Then **clear insight caches** so cards regenerate through the new path
+(Clear-cache buttons, or `scripts/delete_insight_caches.py`).
+
+> Card retrieval reads the Business-Insight cache. Clearing it empties the
+> registry until cards regenerate — regenerate before testing §7 retrieval.
 
 ---
 
-## 7. Verify on the live app
+## 7. Verify live
 
 **Deeper analysis**
 - Cards are YoY / MoM / actual-vs-target / co-movement / contribution / anomaly /
   forecast — not shape-probe charts.
-- **No card is keyed on an identifier column** (`order_id`, SKU).
+- **No card is keyed on an identifier column.**
 - Cards show the **R Analytics badge**; Explain shows method, engine, n, caveats.
-- Statistically empty results produce **no card** — that is correct, not a
-  regression.
+- A method that found nothing produces **no card** — correct, not a regression.
 
-**Conversation (test all three surfaces: AI Assistant, Business-Insight ask,
-Project-Insight ask)**
-- A two-measure question renders a **scatter** (previously forced to a table).
-- A two-dimension question renders a **heatmap**.
-- bar / line / pie still render correctly (same ECharts path).
-- A data-table answer still renders as a table — nothing regressed.
-- The chat bubble shows the **R Analytics badge** with method + n.
+**Conversation — test all three surfaces**
+- Two-measure question → **scatter** (was forced to a table).
+- Two-dimension question → **heatmap**.
+- bar / line / pie still render (same ECharts path); a table answer still tables.
+- Chat bubble shows the **R Analytics badge** with method + n.
+
+**Insight retrieval — the reported failure**
+- `Please display query for Business Insight Title: Material Costs vs Revenue Trend`
+  → returns the card's **stored** SQL verbatim, not a generated one.
+- A **partial** title works: `show me the query for material costs`.
+- An ambiguous fragment (e.g. `revenue` when two revenue cards exist) → the
+  assistant **asks which**, rather than answering about one.
+- A card with no stored SQL → says so; it must not invent one.
+- `why did that happen?` still goes through normal generation (unchanged).
 
 ---
 
-## 8. Two follow-ups deliberately left to you
+## 8. Follow-ups deliberately left to you
 
-1. **"Ask about this card" wiring.** `_ask_and_run_core` already accepts a
-   `card_context` parameter, and `ask_pipeline.build_insight_followup(question,
-   card)` → `followup_prompt(...)` produces the grounded question. Send the card
-   payload from the insight card's ask entry point and pass the grounded prompt
-   in. No new endpoint required.
-2. **Surface `analyticalMethod` in the chat bubble's Explain area** so the R
-   badge appears in conversation — the component already renders this shape for
-   cards.
+1. **"Ask about this card" wiring.** `_ask_and_run_core` already accepts
+   `card_context`, and `ask_pipeline.build_insight_followup(question, card)` →
+   `followup_prompt(...)` builds the grounded question. Send the card payload
+   from the card's ask entry point. No new endpoint needed.
+2. **Surface `analyticalMethod` / `insightContext` in the chat bubble's Explain
+   area** so the R badge and card grounding are visible in conversation — the
+   component already renders this shape for cards.
 
-## 9. Known check after deploy
+---
 
-The materiality gates read result keys defensively (`anomalies`,
+## 9. Known checks after deploy
+
+**Materiality result keys.** The gates read keys defensively (`anomalies`,
 `change_points`, `p_value`, `correlation`, `r_squared`, `relative_change` /
-`percent_change`, …). The R implementations' actual output key names were not
-visible from the authoring container. **If a gate reads keys the R methods do not
-emit, that intent falls through to "material"** — safe (you see cards, you do not
-lose them), but unfiltered.
+`percent_change`, …). The R implementations' actual key names were not visible
+from the authoring container. If a gate reads keys the R methods do not emit,
+that intent falls through to **material** — safe (you see cards, you do not lose
+them), but unfiltered. Open one anomaly card and one driver/correlation card,
+read the Explain panel's keys, and add any real names to the lookup lists in
+`_MATERIALITY_RULES` (`deep_analysis.py`). One line per key.
 
-Open one anomaly card and one driver/correlation card, read the Explain panel's
-result keys, and if they differ, add the real names to the lookup lists in
-`_MATERIALITY_RULES` (`deep_analysis.py`). One line per key — report it in the
-PR rather than restructuring the gate.
+**Retrieval scope.** `load_tenant_insight_cards()` reads cards for the caller's
+tenant (optionally filtered by project). Confirm on a multi-project tenant that
+a question resolves to the intended card, and report if project scoping should
+be tightened.
+
+---
 
 ## 10. Report back
 
 Byte-identical confirmation (or exact deviations + reasons); CI totals per suite;
 deploy + cache-clear confirmation; screenshots of a YoY card, an actual-vs-target
 card, a co-movement (dual-axis) card, an anomaly card with its R badge, a scatter
-chat answer and a heatmap chat answer; plus any materiality key names you added.
+chat answer, a heatmap chat answer, and **the stored-SQL retrieval answering the
+"Material Costs vs Revenue Trend" question**; plus any materiality key names you
+added.
