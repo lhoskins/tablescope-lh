@@ -262,17 +262,12 @@ services:
       - teiid
 
   teiid-logrotate:
-    image: alpine:3.20
+    build:
+      context: ./wildfly/logrotate
+    image: tablescope-teiid-logrotate:latest
     restart: unless-stopped
-    command: >
-      sh -c "apk add --no-cache logrotate &&
-      while true; do
-        /usr/sbin/logrotate -s /tmp/logrotate.status /etc/logrotate.d/tablescope-teiid;
-        sleep 3600;
-      done"
     volumes:
       - teiid_logs:/logs
-      - ./wildfly/logrotate/tablescope-teiid:/etc/logrotate.d/tablescope-teiid:ro
 
 volumes:
   postgres_data:
