@@ -20,6 +20,7 @@ orchestration (running SQL, calling the engine) stays in ``home_intelligence``.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -104,13 +105,18 @@ def _num(value: Any) -> float | None:
     return None
 
 
+def _norm_key(key: Any) -> str:
+    """Flatten a result key for matching: lower-case and drop punctuation."""
+    return re.sub(r"[^a-z0-9]", "", str(key).lower())
+
+
 def _first_num(results: dict[str, Any], *keys: str) -> float | None:
     """First numeric value found under any of ``keys`` (case-insensitive)."""
     if not isinstance(results, dict):
         return None
-    lowered = {str(k).lower(): v for k, v in results.items()}
+    norm = {_norm_key(k): v for k, v in results.items()}
     for key in keys:
-        if (v := _num(lowered.get(key.lower()))) is not None:
+        if (v := _num(norm.get(_norm_key(key)))) is not None:
             return v
     return None
 
@@ -118,9 +124,9 @@ def _first_num(results: dict[str, Any], *keys: str) -> float | None:
 def _first_list(results: dict[str, Any], *keys: str) -> list[Any]:
     if not isinstance(results, dict):
         return []
-    lowered = {str(k).lower(): v for k, v in results.items()}
+    norm = {_norm_key(k): v for k, v in results.items()}
     for key in keys:
-        v = lowered.get(key.lower())
+        v = norm.get(_norm_key(key))
         if isinstance(v, list):
             return v
     return []
@@ -443,7 +449,7 @@ def _material_trend(results: dict[str, Any], _env: dict[str, Any]) -> Materialit
 
 
 def _material_relationship(results: dict[str, Any], _env: dict[str, Any]) -> Materiality:
-    r = _first_num(results, "correlation", "estimate", "r", "rho", "tau")
+    r = _first_num(results, "effect", "correlation", "estimate", "r", "rho", "tau")
     p = _first_num(results, "p_value", "pvalue", "p")
     if r is None:
         return Materiality(False, "No association estimate was produced.")
