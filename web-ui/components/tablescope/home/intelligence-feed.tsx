@@ -586,6 +586,7 @@ export function IntelligenceFeed({
       />
 
       {synthesis && selectedProjectIds.size > 0 &&
+        synthesis.projectIds &&
         synthesis.projectIds.length === selectedProjectIds.size &&
         synthesis.projectIds.every((id) => selectedProjectIds.has(id)) && (
         <div className="rounded-md border border-line-tertiary bg-bg-primary p-3 text-[13px] text-ink-secondary">
