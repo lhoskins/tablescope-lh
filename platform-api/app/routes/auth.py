@@ -210,3 +210,43 @@ async def direct_login(
         tenant_slug=login_tenant.slug if login_tenant else None,
         permissions=permissions,
     )
+
+
+@router.post("/refresh", response_model=AuthTokenResponse)
+async def refresh_token(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_membership),
+) -> AuthTokenResponse:
+    """Return a new access token for an already-authenticated session.
+
+    This lets the web client extend a session while the user is active,
+    without waiting for the JWT to expire and trigger a full re-login.
+    """
+    settings = get_settings()
+    user = await session.get(User, context.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session no longer valid",
+        )
+
+    permissions = _permissions_for_user(user.role, user.is_super_admin)
+    access_token = create_access_token(
+        sub=context.claims.sub,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        role=user.role,
+        permissions=permissions,
+        extra_claims={"aal": context.claims.aal},
+    )
+    tenant = await session.get(Tenant, user.tenant_id)
+    return AuthTokenResponse(
+        access_token=access_token,
+        expires_in=settings.jwt_access_token_ttl_minutes * 60,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        role=user.role,
+        is_super_admin=user.is_super_admin,
+        tenant_slug=tenant.slug if tenant else None,
+        permissions=permissions,
+    )

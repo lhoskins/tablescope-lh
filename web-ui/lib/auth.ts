@@ -1,4 +1,9 @@
-import { apiClient, clearToken, storeToken } from "./api-client";
+import {
+  apiClient,
+  clearToken,
+  extractTenantSlugFromPath,
+  storeToken,
+} from "./api-client";
 import { getSupabaseClient } from "./supabase";
 
 export { storeToken, clearToken };
@@ -15,7 +20,9 @@ export type ExchangeResponse = {
 };
 
 const USER_META_KEY = "tablescope.user_meta";
+const TOKEN_KEY = "tablescope.token";
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh if expiring within 5 min
 
 export function storeUserMeta(meta: {
   role: string;
@@ -153,7 +160,11 @@ export async function hasSupabaseSession(): Promise<boolean> {
 
 export function signOut(options?: { redirectToRoot?: boolean }) {
   const meta = getUserMeta();
-  const slug = meta?.tenant_slug;
+  const slug =
+    meta?.tenant_slug ??
+    (typeof window !== "undefined"
+      ? extractTenantSlugFromPath(window.location.pathname)
+      : null);
   const redirectToRoot = options?.redirectToRoot ?? false;
   stopIdleTimer();
   clearToken();
@@ -172,14 +183,64 @@ export function signOut(options?: { redirectToRoot?: boolean }) {
   }
 }
 
-// ── Idle timeout ─────────────────────────────────────────────────────
+// ── Idle timeout / session refresh ───────────────────────────────────
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
+let tokenRefreshPromise: Promise<void> | null = null;
+
+function getTokenExpiry(token: string): number | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(
+      base64.length + ((4 - (base64.length % 4)) % 4),
+      "=",
+    );
+    const payload = JSON.parse(atob(padded)) as { exp?: number };
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshAccessToken(): Promise<void> {
+  try {
+    const result = await apiClient.post<ExchangeResponse>("/api/auth/refresh", {});
+    if (result.access_token) {
+      storeToken(result.access_token);
+      storeUserMeta({
+        role: result.role,
+        is_super_admin: result.is_super_admin,
+        tenant_id: result.tenant_id,
+        user_id: result.user_id,
+        tenant_slug: result.tenant_slug,
+      });
+    }
+  } catch {
+    // The API client will redirect to login on 401.
+  }
+}
+
+function maybeRefreshToken() {
+  if (typeof window === "undefined" || tokenRefreshPromise) return;
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  if (!token) return;
+  const expiry = getTokenExpiry(token);
+  if (!expiry) return;
+  const now = Date.now();
+  if (expiry > now && expiry - now < TOKEN_REFRESH_BUFFER_MS) {
+    tokenRefreshPromise = refreshAccessToken().finally(() => {
+      tokenRefreshPromise = null;
+    });
+  }
+}
 
 function resetIdleTimer() {
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
     signOut({ redirectToRoot: true });
   }, IDLE_TIMEOUT_MS);
+  maybeRefreshToken();
 }
 
 export function startIdleTimer() {

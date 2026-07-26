@@ -37,10 +37,20 @@ export class ApiError extends Error {
   }
 }
 
-const TOKEN_KEY = "tablescope.token";
+export const TOKEN_KEY = "tablescope.token";
 // Mirrors USER_META_KEY in lib/auth.ts; duplicated here to avoid an import
 // cycle (auth.ts imports from this module).
 const USER_META_KEY = "tablescope.user_meta";
+
+const RESERVED_PATH_SEGMENTS = new Set([
+  "login",
+  "set-password",
+  "forgot-password",
+  "mfa",
+  "api",
+  "admin",
+  "_next",
+]);
 
 // Error codes that mean the session/token is no longer valid (as opposed to a
 // legitimate authorization failure like project membership or MFA_REQUIRED).
@@ -54,6 +64,15 @@ let redirectingToLogin = false;
 
 function onAuthPage(pathname: string): boolean {
   return /(^|\/)(login|set-password|forgot-password)(\/|$)/.test(pathname);
+}
+
+export function extractTenantSlugFromPath(pathname?: string | null): string | null {
+  if (!pathname) return null;
+  const match = pathname.match(/^\/([^/]+)(?:\/|$)/);
+  if (!match) return null;
+  const slug = match[1];
+  if (RESERVED_PATH_SEGMENTS.has(slug)) return null;
+  return slug;
 }
 
 /**
@@ -70,6 +89,7 @@ function redirectToLogin(): void {
   } catch {
     /* ignore */
   }
+  slug = slug ?? extractTenantSlugFromPath(window.location.pathname);
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_META_KEY);
   const { pathname, search } = window.location;

@@ -4,6 +4,7 @@ import { signOut } from "./auth";
 
 vi.mock("./api-client", () => ({
   clearToken: vi.fn(),
+  extractTenantSlugFromPath: vi.fn(() => null),
   apiClient: {},
 }));
 

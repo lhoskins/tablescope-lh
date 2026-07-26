@@ -108,11 +108,22 @@ export function OtpInput({
       default:
         if (/^[0-9]$/.test(e.key)) {
           e.preventDefault();
-          if (digits.length >= length) return;
-          const next =
-            digits.slice(0, start) + e.key + digits.slice(start);
+          const hasSelection = start !== end;
+          let next: string;
+          let nextCaret: number;
+          if (hasSelection) {
+            next = digits.slice(0, start) + e.key + digits.slice(end);
+            nextCaret = start + 1;
+          } else if (digits.length >= length) {
+            // Overwrite the digit at the caret when the code is full.
+            next = digits.slice(0, start) + e.key + digits.slice(start + 1);
+            nextCaret = Math.min(length, start + 1);
+          } else {
+            next = digits.slice(0, start) + e.key + digits.slice(start);
+            nextCaret = Math.min(length, start + 1);
+          }
           onChange(next.slice(0, length));
-          setCaretIndex(Math.min(length, start + 1));
+          setCaretIndex(nextCaret);
         }
     }
   }
@@ -123,8 +134,8 @@ export function OtpInput({
     const pastedDigits = pasted.replace(/\D/g, "").slice(0, length);
     const input = inputRef.current;
     const start = input?.selectionStart ?? digits.length;
-    const next =
-      digits.slice(0, start) + pastedDigits + digits.slice(start);
+    const end = input?.selectionEnd ?? digits.length;
+    const next = digits.slice(0, start) + pastedDigits + digits.slice(end);
     const trimmed = next.slice(0, length);
     onChange(trimmed);
     setCaretIndex(Math.min(length, start + pastedDigits.length));
