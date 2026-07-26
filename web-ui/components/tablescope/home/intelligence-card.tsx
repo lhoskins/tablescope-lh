@@ -18,6 +18,7 @@ import {
 
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { canManageProjectActions } from "@/lib/auth";
+import { InsightAnalysisStrip } from "./insight-analysis-strip";
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
 import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
 import type {
@@ -585,6 +586,11 @@ export function IntelligenceCard({
           </span>
         </div>
       )}
+
+      {/* Lead finding + top action; the full dissection lives on its own route.
+          Suppressed with the other actions — a shared report is read by people
+          who cannot open an authenticated drill-down. */}
+      {!hideActions && <InsightAnalysisStrip card={card} />}
 
       {actionsDisclosure === "collapsible" ? (
         <InsightCardActionsDisclosure

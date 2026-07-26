@@ -41,7 +41,7 @@ from app.models.reference_library import (
     ReferenceDocument,
 )
 from app.models.saved_query import SavedQuery
-from app.services import deep_analysis
+from app.services import card_diagnostics, deep_analysis
 from app.services.ai_governance import ai_governance_service
 from app.services.analytical_method_engine import (
     EngineMode,
@@ -2777,6 +2777,216 @@ def _target_measure(measures: list[str]) -> str | None:
         if _TARGET_COL_RE.search(str(m)):
             return m
     return None
+
+
+async def _card_diagnostic_insights(
+    project: Project,
+    ctx: ProjectContext,
+    runner: QueryRunner,
+    session: AsyncSession | None,
+    *,
+    tenant_id: int | None,
+    cards: list[dict[str, Any]],
+    max_cards: int = 4,
+    max_steps: int = 3,
+    max_rows: int = 5000,
+) -> list[dict[str, Any]]:
+    """Dissect existing Risk/Trend/Opportunity cards and propose actions.
+
+    This is the purpose of Deeper analysis: take a finding the user already
+    cares about and work it — where is it concentrated, when did it shift, what
+    explains it, where is it heading — then propose what to do. Scanning tables
+    for whatever was computable produced interchangeable period comparisons
+    instead of answers.
+
+    Diagnostics attach to the ORIGINATING card (so the section reads as a
+    drill-down of that finding) and each card gets grounded action proposals
+    plus follow-up questions for its ask box.
+
+    Fail-closed per card: a diagnostic problem never drops the original card.
+    """
+    if runner is None or session is None or not cards:
+        return []
+    if get_engine_mode() == EngineMode.OFF:
+        return []
+
+    produced: list[dict[str, Any]] = []
+    examined = 0
+    for card in cards:
+        if examined >= max_cards:
+            break
+        if card_diagnostics.card_family(card) is None:
+            continue
+
+        table = _card_primary_table(card, ctx)
+        if table is None:
+            continue
+        try:
+            probe = await _safe_query(
+                runner, f'SELECT * FROM {_quote(table.view_name)} LIMIT 200'
+            )
+        except Exception:
+            continue
+        if not probe or not probe.get("rows") or not probe.get("columns"):
+            continue
+
+        columns, rows = probe["columns"], probe["rows"]
+        shape = derive_shape(columns, rows)
+        period_col = shape.time_columns[0] if shape.time_columns else None
+        dims = business_dimensions(shape, rows)
+        period_count = (
+            len({str(r.get(period_col)) for r in rows if r.get(period_col) is not None})
+            if period_col
+            else 0
+        )
+        examined += 1
+
+        specs = card_diagnostics.plan_card_diagnostics(
+            card,
+            metric=_card_metric(card, shape),
+            dimensions=dims,
+            period_column=period_col,
+            period_count=period_count,
+            row_count=shape.row_count,
+            related_measures=shape.measures,
+            max_steps=max_steps,
+        )
+
+        findings: dict[str, Any] = {}
+        diagnostics: list[dict[str, Any]] = []
+        for spec in specs:
+            envelope, result, sql = await _run_diagnostic(
+                session, runner, table, spec, shape, tenant_id, max_rows
+            )
+            if envelope is None:
+                continue
+            materiality = deep_analysis.assess_materiality(spec.intent, envelope)
+            if not materiality.material:
+                continue
+            findings.update(card_diagnostics.extract_findings(spec.intent, envelope))
+            diagnostics.append(
+                {
+                    "stage": spec.stage,
+                    "title": spec.title,
+                    "question": spec.question,
+                    "rationale": spec.rationale,
+                    "finding": materiality.reason,
+                    "highlight": materiality.highlight,
+                    "triggeredBy": spec.triggered_by,
+                    "analyticalMethod": envelope,
+                    "sql": sql,
+                    "result": result,
+                }
+            )
+
+        if not diagnostics:
+            continue
+
+        # A period comparison is re-checked against what the diagnostics
+        # actually found, so a detected shift can justify one the card's text
+        # alone did not.
+        card["diagnostics"] = diagnostics
+        card["proposedActions"] = [
+            a.to_dict() for a in card_diagnostics.propose_actions(card, findings)
+        ]
+        card["suggestedQuestions"] = card_diagnostics.suggested_followups(
+            card, dimensions=dims
+        )
+        card["crossReferences"] = [
+            {"kind": r.kind, "name": r.name, "question": r.question, "rationale": r.rationale}
+            for r in card_diagnostics.plan_cross_references(
+                card,
+                tables=[tbl.view_name for tbl in ctx.tables],
+                documents=_context_documents(ctx),
+            )
+        ]
+        produced.append(card)
+
+    return produced
+
+
+def _card_primary_table(card: dict[str, Any], ctx: ProjectContext) -> Any | None:
+    """The table a card was built from, matched against the project's tables."""
+    sources = card.get("sources") or {}
+    names = [str(t) for t in (sources.get("tables") or [])] if isinstance(sources, dict) else []
+    for name in names:
+        for table in ctx.tables:
+            if table.view_name == name:
+                return table
+    return ctx.tables[0] if ctx.tables else None
+
+
+def _card_metric(card: dict[str, Any], shape: Shape) -> str | None:
+    """The measure a card is about, preferring what the card itself names."""
+    for key in ("metric", "valueColumn"):
+        value = card.get(key)
+        if value and str(value) in shape.measures:
+            return str(value)
+    return shape.measures[0] if shape.measures else None
+
+
+def _context_documents(ctx: ProjectContext) -> list[dict[str, Any]]:
+    """Project documents exposed for cross-referencing, best-effort."""
+    docs = getattr(ctx, "documents", None) or []
+    out: list[dict[str, Any]] = []
+    for doc in docs[:20]:
+        if isinstance(doc, dict):
+            out.append(doc)
+        else:
+            title = getattr(doc, "title", None) or getattr(doc, "name", None)
+            if title:
+                out.append({"title": str(title), "summary": str(getattr(doc, "summary", "") or "")})
+    return out
+
+
+async def _run_diagnostic(
+    session: AsyncSession,
+    runner: QueryRunner,
+    table: Any,
+    spec: Any,
+    shape: Shape,
+    tenant_id: int | None,
+    max_rows: int,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str]:
+    """Execute one diagnostic step through the governed method engine."""
+    measure = _card_metric({}, shape)
+    if not measure:
+        return None, None, ""
+    period = shape.time_columns[0] if shape.time_columns else None
+    pseudo = deep_analysis.DeepAnalysisSpec(
+        intent=spec.intent,
+        title=spec.title,
+        question=spec.question,
+        roles={
+            k: v
+            for k, v in (
+                ("period", period),
+                ("measure", measure),
+                ("measure2", shape.measures[1] if len(shape.measures) > 1 else None),
+            )
+            if v
+        },
+        group_by=spec.group_by,
+    )
+    sql = _deep_analysis_sql(table.view_name, pseudo, max_rows)
+    if not sql:
+        return None, None, ""
+    try:
+        result = await _safe_query(runner, sql)
+        if not result or not result.get("rows"):
+            return None, None, sql
+        envelope = await analyze_methods(
+            session,
+            tenant_id=tenant_id,
+            columns=result.get("columns", []),
+            rows=result.get("rows", []),
+            question=spec.question,
+            intent=spec.intent,
+        )
+        return envelope, result, sql
+    except Exception as exc:  # pragma: no cover - diagnostics are fail-closed
+        logger.warning("diagnostic %s failed on %s: %s", spec.intent, table.view_name, exc)
+        return None, None, sql
 
 
 async def _method_driven_insights(

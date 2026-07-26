@@ -5,7 +5,7 @@ Repository: `lhoskins/tablescope-lh`
 **Base:** `devin/r-echarts-e2e-validation` (deployed lineage; already has the
 chart-fit work from PR #96)
 
-**9 commits · 19 files · +3073 / −48 · all tests green** (§5)
+**13 commits · 26 files · +4855 / −48 · all tests green** (§5)
 
 ---
 
@@ -39,11 +39,14 @@ git merge origin/claude/deep-analysis-business-value
 | `dc0fed0` | Unified ask pipeline: shared chart-fit + R analytics + insight follow-ups |
 | `ec9a497` | Chat renders the full ECharts vocabulary (3 frontend narrowings removed) |
 | `eb0a0b9` | **Insight cards become retrievable — assistant stops inventing their SQL** |
-| `9ddf5ef`, `8643495`, `0626398` | Handoff docs |
+| `e569cf8` | **Purpose-driven Deeper analysis: dissect the card, propose actions, demote MoM/YoY** |
+| `bc0a958` | Wire card diagnostics into the insight run |
+| `655640f` | Card strip + shareable `/business-insight/analysis/<id>` route |
+| `9ddf5ef`, `8643495`, `0626398`, `d0482f2` | Handoff docs |
 
 ---
 
-## 3. The four problems fixed
+## 3. The five problems fixed
 
 **A. Deeper analysis was not analysis.** `_shape_template_insights` probed tables
 (`SELECT * LIMIT 50`) for any drawable column combination — zero calls to the
@@ -65,6 +68,16 @@ knowledge-graph context only (documents/KPIs/tables) and **no path could look a
 card up** — so "show me the query for *Material Costs vs Revenue Trend*"
 produced a fabricated query. Cards store their real SQL; it is now retrievable.
 
+**E. Deeper analysis answered a question nobody asked.** It ran month-over-month
+and year-over-year on whatever had a date, because almost any dated measure
+supports them — so every card got the same two comparisons and none of them said
+what to *do*. Now each Risk / Trend / Opportunity card is **dissected**: where the
+problem concentrates, when it shifted, how large it is, what explains it, where it
+is heading — each step recording *why it was run*. Those findings ground
+**proposed actions**. MoM/YoY is demoted to triggered evidence: it runs only when
+the card shows change or threshold language, or a change-point / anomaly /
+breach was actually detected (`should_compare_periods`).
+
 ---
 
 ## 4. Code path
@@ -84,7 +97,19 @@ chart_selection_best_practices.md          31 families, single source of truth
 
 ```
 routes/home_intelligence.py::_run_for_project
-  ├─ hi._method_driven_insights()                    ← runs FIRST
+  ├─ hi._card_diagnostic_insights()                  ← runs FIRST: dissect the cards
+  │    card_diagnostics.card_family()                 risk / trend / opportunity
+  │          → plan_card_diagnostics()                the ladder: localise → when →
+  │                                                   quantify → explain → project
+  │          → should_compare_periods()               MoM/YoY only on a trigger
+  │          → analyze_methods()                      governed engine, R-first
+  │          → extract_findings()                     envelope ⇒ the facts
+  │          → propose_actions()                      facts ⇒ grounded next steps
+  │          → plan_cross_references()                other tables/docs to check
+  │          → suggested_followups()                  card-scoped questions
+  │    card["diagnostics" | "proposedActions"
+  │         | "crossReferences" | "suggestedQuestions"]
+  ├─ hi._method_driven_insights()                    ← standalone method cards
   │    probe → deep_analysis.plan_deep_analyses()     which INTENTS the data supports
   │          → _deep_analysis_sql()                   per-intent projection
   │          → analyze_methods()                      governed engine, R-first
@@ -108,6 +133,34 @@ AI Assistant · Business-Insight ask · Project-Insight ask
    conversation-turn → ResultChart → InsightChartBlock → WidgetRenderer → EChartsWidget
 ```
 
+### 4d. Where the dissection surfaces — card strip + shareable route
+
+```
+intelligence-card.tsx
+  └─ {!hideActions && <InsightAnalysisStrip card={card} />}
+        renders NOTHING when card.diagnostics is empty
+        shows: lead finding · top proposed action · "N diagnostic steps"
+        → /business-insight/analysis/<insightId>
+
+app/business-insight/analysis/[insightId]/page.tsx
+  ├─ getIntelligenceSnapshot()   tenant-wide  — Business Insight cards
+  └─ suggestInsights()           per-project  — Project Insight cards (fallback)
+     sections: Proposed actions · How we got here (the ladder, with each step's
+               rationale + chart + R method) · Check this against · Ask about this
+```
+
+Two constraints the shared card component imposes — **keep both**:
+
+- **The strip is gated on `!hideActions`.** The same card renders on the public
+  `/reports/<token>` page, where the reader has no session and the drill-down
+  link would go nowhere.
+- **The route resolves against both insight stores.** Business Insight cards live
+  in `IntelligenceSnapshot` (tenant-wide); Project Insight cards live in
+  `ProjectIntelligenceSnapshot` (per project, `suite="insights"`). The id in the
+  URL does not say which produced the card, so the page tries the tenant snapshot
+  and falls back to the project insights endpoint. Drop the fallback and every
+  Project-Insight link dead-ends on "Analysis not available".
+
 **Renderer note:** no renderer was added or retired. `recharts` is already gone
 (zero imports, absent from `package.json`); `WidgetRenderer` is now a thin
 **adapter** delegating to `EChartsWidget` with no chart library inside. **Keep
@@ -125,23 +178,29 @@ the adapter.
 | `app/services/deep_analysis.py` | intent planning, materiality gate, evidence presentation | 34 |
 | `app/services/ask_pipeline.py` | shared conversational presentation + follow-up grounding | 14 |
 | `app/services/insight_registry.py` | card retrieval by partial title, stored-SQL answers | 21 |
+| `app/services/card_diagnostics.py` | the diagnostic ladder, MoM/YoY triggers, action proposals, cross-refs | 34 |
+| `web-ui/.../home/insight-analysis-strip.tsx` | compact strip on the card | 6 |
+| `web-ui/app/business-insight/analysis/[insightId]/page.tsx` | the shareable full analysis | — |
 | `web-ui/.../ai-result-view.chartfamily.test.tsx` | locks the chart-family collapse shut | 4 |
 
 **Modified:** `visualization_engine.py` (identifier detection),
 `home_intelligence.py` (+ `routes/`), `routes/ai_proxy.py`,
 `web-ui/lib/api/ai-actions.ts`, `web-ui/lib/api/conversational-analytics.ts`,
 `web-ui/components/ai/ai-result-view.tsx`,
-`web-ui/components/tablescope/conversation/conversation-turn.tsx`.
+`web-ui/components/tablescope/conversation/conversation-turn.tsx`,
+`web-ui/lib/api/home-intelligence.ts` (diagnostic/action/cross-ref types),
+`web-ui/components/tablescope/home/intelligence-card.tsx` (strip mount).
 
 | Suite | Result |
 |---|---|
 | `test_deep_analysis.py` | 34 / 34 |
+| `test_card_diagnostics.py` | 34 / 34 |
 | `test_insight_registry.py` | 21 / 21 |
 | `test_ask_pipeline.py` | 14 / 14 |
 | `test_chart_catalog.py` | 18 / 18 |
 | `test_visualization_engine.py` | 27 / 27 |
-| web-ui `vitest` | 242 / 242 (39 files) |
-| `tsc` · `ruff` | clean |
+| web-ui `vitest` | 248 / 248 (40 files) |
+| `tsc` · `ruff` · `next lint` | clean |
 
 CI:
 
@@ -186,6 +245,22 @@ Then **clear insight caches** so cards regenerate through the new path
 - Cards show the **R Analytics badge**; Explain shows method, engine, n, caveats.
 - A method that found nothing produces **no card** — correct, not a regression.
 
+**Card dissection — the reported complaint**
+- A Risk / Trend / Opportunity card carries a **Deeper-analysis strip**: one lead
+  finding, one proposed action, `Full analysis →`.
+- An **informational** card carries **no strip** — it was not dissected, and must
+  not advertise an analysis.
+- `Full analysis →` opens `/business-insight/analysis/<id>` and every step states
+  **why it was run**, not just what it found.
+- **Test the link from a Project Insight card too** — that is the path that needs
+  the per-project fallback (§4d).
+- The URL is shareable: paste it in another browser session (same tenant) and the
+  analysis loads.
+- **MoM/YoY no longer appears on every card.** A card with no change/threshold
+  language and no detected change-point should show *no* period comparison; a
+  trend card should show one, labelled with what triggered it.
+- Open a shared **`/reports/<token>`** page and confirm **no strip** appears.
+
 **Conversation — test all three surfaces**
 - Two-measure question → **scatter** (was forced to a table).
 - Two-dimension question → **heatmap**.
@@ -209,6 +284,10 @@ Then **clear insight caches** so cards regenerate through the new path
    `card_context`, and `ask_pipeline.build_insight_followup(question, card)` →
    `followup_prompt(...)` builds the grounded question. Send the card payload
    from the card's ask entry point. No new endpoint needed.
+1b. **The analysis page's "Ask about this insight" chips** link to
+   `/ai?q=<question>` — they pre-fill the assistant but do **not** yet pass the
+   card as `card_context`, so the answer is not card-grounded. Wire them through
+   the same `build_insight_followup` path as (1).
 2. **Surface `analyticalMethod` / `insightContext` in the chat bubble's Explain
    area** so the R badge and card grounding are visible in conversation — the
    component already renders this shape for cards.
@@ -226,6 +305,13 @@ them), but unfiltered. Open one anomaly card and one driver/correlation card,
 read the Explain panel's keys, and add any real names to the lookup lists in
 `_MATERIALITY_RULES` (`deep_analysis.py`). One line per key.
 
+**Diagnostic depth vs. run time.** Each dissected card now runs up to `max_steps`
+governed methods on top of the card's own query, so an insight refresh does more
+work than before. If a refresh times out, lower the cap where
+`_card_diagnostic_insights()` calls `plan_card_diagnostics(...)` rather than
+disabling the feature — the ladder is priority-ordered, so a smaller cap keeps
+the most actionable steps (localise, then when) and drops the speculative tail.
+
 **Retrieval scope.** `load_tenant_insight_cards()` reads cards for the caller's
 tenant (optionally filtered by project). Confirm on a multi-project tenant that
 a question resolves to the intended card, and report if project scoping should
@@ -238,6 +324,7 @@ be tightened.
 Byte-identical confirmation (or exact deviations + reasons); CI totals per suite;
 deploy + cache-clear confirmation; screenshots of a YoY card, an actual-vs-target
 card, a co-movement (dual-axis) card, an anomaly card with its R badge, a scatter
-chat answer, a heatmap chat answer, and **the stored-SQL retrieval answering the
-"Material Costs vs Revenue Trend" question**; plus any materiality key names you
-added.
+chat answer, a heatmap chat answer, **a Risk card's Deeper-analysis strip and its
+full-analysis route**, **the same route reached from a Project Insight card**,
+and **the stored-SQL retrieval answering the "Material Costs vs Revenue Trend"
+question**; plus any materiality key names you added.
