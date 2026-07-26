@@ -732,6 +732,11 @@ async def _ask_data_first(
         "audit_id": None,
         "presentation": run.get("presentation"),
         "envelope": run.get("envelope"),
+        "answerType": run.get("answerType"),
+        "retrievedFromInsight": run.get("retrievedFromInsight"),
+        "sql": run.get("sql") if is_retrieval else None,
+        "columns": run.get("columns"),
+        "rows": run.get("rows"),
     }
 
 

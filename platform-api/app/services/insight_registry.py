@@ -408,14 +408,18 @@ def stored_query_answer(ref: InsightRef) -> dict[str, Any] | None:
     result = ref.card.get("result") or {}
     if not result or not result.get("rows"):
         result = _result_from_chart(ref.card) or result
+    answer = (
+        f'This is the stored query that generated the insight "{ref.title}":\n\n'
+        f"```sql\n{sql}\n```"
+    )
     return {
         "title": f'Query for "{ref.title}"',
         "sql": sql,
         "columns": result.get("columns", []) if isinstance(result, dict) else [],
         "rows": result.get("rows", []) if isinstance(result, dict) else [],
-        "explanation": (
-            f'This is the stored query that generated the insight "{ref.title}".'
-        ),
+        "explanation": answer,
+        "answer": answer,
+        "answerType": "text",
         "status": "success",
         "error": None,
         "retrievedFromInsight": ref.title,
