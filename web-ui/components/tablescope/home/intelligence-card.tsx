@@ -20,7 +20,11 @@ import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { canManageProjectActions } from "@/lib/auth";
 import { InsightAnalysisStrip } from "./insight-analysis-strip";
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
-import type { WidgetConfig, WidgetType } from "@/components/dashboard/types";
+import type {
+  VisualizationOptions,
+  WidgetConfig,
+  WidgetType,
+} from "@/components/dashboard/types";
 import type {
   InsightCallout,
   InsightCard as InsightCardData,
@@ -125,15 +129,25 @@ function buildMultiDimWidget(chart: InsightChart, dataRows: Record<string, unkno
 export function InsightChartView({
   chart,
   height: heightProp,
+  options,
 }: {
   chart: InsightChart;
   height?: number;
+  /**
+   * Extra renderer options merged over the defaults — used to carry annotations
+   * an analysis produced (e.g. the exact points a method flagged) through to
+   * the chart.
+   */
+  options?: Partial<VisualizationOptions>;
 }) {
   const dataRows = chart.data.rows;
   const series = chart.data.series;
 
   if (dataRows && dataRows.length > 0) {
     const widget = buildMultiDimWidget(chart, dataRows);
+    if (options) {
+      widget.visualizationOptions = { ...widget.visualizationOptions, ...options };
+    }
     const height =
       heightProp ??
       (chart.type === "funnel" || chart.type === "sankey"
@@ -186,7 +200,7 @@ export function InsightChartView({
     aggregation: "sum",
     sortBy: "x_asc",
     filters: [],
-    visualizationOptions: { showLegend: false, showGrid: false },
+    visualizationOptions: { showLegend: false, showGrid: false, ...options },
     colSpan: 1,
     position: 0,
   };
@@ -246,7 +260,13 @@ function KpiGridView({
  * Render an {@link InsightChart} (kpi grid or any dashboard chart) standalone.
  * Shared by the Intelligence feed and the Home dashboard-suggestion previews.
  */
-export function InsightChartBlock({ chart }: { chart: InsightChart }) {
+export function InsightChartBlock({
+  chart,
+  options,
+}: {
+  chart: InsightChart;
+  options?: Partial<VisualizationOptions>;
+}) {
   return (
     <>
       {chart.title && (
@@ -255,7 +275,7 @@ export function InsightChartBlock({ chart }: { chart: InsightChart }) {
       {chart.type === "kpi_grid" && chart.data.kpis ? (
         <KpiGridView kpis={chart.data.kpis} />
       ) : (
-        <InsightChartView chart={chart} />
+        <InsightChartView chart={chart} options={options} />
       )}
     </>
   );

@@ -231,6 +231,31 @@ export interface InsightDiagnostic {
   analyticalMethod?: MethodEnvelope;
   sql?: string;
   result?: { columns?: string[]; rows?: Record<string, unknown>[] };
+  /** Governed intent this step ran (e.g. `detect_anomalies`). */
+  intent?: string;
+  /**
+   * Chart family and analytical layers for this step's evidence, chosen from
+   * the intent. Without it the caller has to guess, and guessing "bar" reorders
+   * a timeline by magnitude.
+   */
+  presentation?: { chart?: string; layers?: string[] };
+  /**
+   * Point-level annotations **from the method itself**. `anomalyIndices` are
+   * 0-based positions in the period-ordered series; re-deriving them in the
+   * renderer would mark different points than the method flagged.
+   */
+  markers?: {
+    anomalyIndices?: number[];
+    changePointIndex?: number;
+    band?: { expected: number[]; lower: number[]; upper: number[] };
+  };
+  /** Which column carries the x axis, the measure, and any second measure. */
+  roles?: { x?: string; y?: string; y2?: string };
+  /**
+   * Set when this step was produced by checking an independent source. The
+   * named table has already been tested, so it is no longer an open lead.
+   */
+  crossReference?: string;
 }
 
 /** A proposed next step grounded in the diagnostics. */

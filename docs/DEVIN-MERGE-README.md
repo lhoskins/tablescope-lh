@@ -5,7 +5,7 @@ Repository: `lhoskins/tablescope-lh`
 **Base:** `devin/r-echarts-e2e-validation` (deployed lineage; already has the
 chart-fit work from PR #96)
 
-**13 commits · 26 files · +4855 / −48 · all tests green** (§5)
+**17 commits · 33 files · +6568 / −56 · all tests green** (§5)
 
 ---
 
@@ -42,11 +42,13 @@ git merge origin/claude/deep-analysis-business-value
 | `e569cf8` | **Purpose-driven Deeper analysis: dissect the card, propose actions, demote MoM/YoY** |
 | `bc0a958` | Wire card diagnostics into the insight run |
 | `655640f` | Card strip + shareable `/business-insight/analysis/<id>` route |
-| `9ddf5ef`, `8643495`, `0626398`, `d0482f2` | Handoff docs |
+| `1c9131a` | **Analysis page evidence: real chart family, R's own anomaly markers, all rows, open ask box** |
+| `5749e49` | **Drill-down answers instead of asking: 4→24 card coverage, ranked segments, executed cross-references** |
+| `9ddf5ef`, `8643495`, `0626398`, `d0482f2`, `32c962a`, `d43446c` | Handoff docs |
 
 ---
 
-## 3. The five problems fixed
+## 3. The six problems fixed
 
 **A. Deeper analysis was not analysis.** `_shape_template_insights` probed tables
 (`SELECT * LIMIT 50`) for any drawable column combination — zero calls to the
@@ -77,6 +79,24 @@ is heading — each step recording *why it was run*. Those findings ground
 **proposed actions**. MoM/YoY is demoted to triggered evidence: it runs only when
 the card shows change or threshold language, or a change-point / anomaly /
 breach was actually detected (`should_compare_periods`).
+
+**F. The drill-down asked questions instead of answering them.** Three separate
+causes, all reported from one screenshot:
+
+1. **Coverage.** `_card_diagnostic_insights` capped at `max_cards=4` and the call
+   site never overrode it, so **at most four cards per run were ever dissected** —
+   only 2 of 29 risk cards had a *Full analysis* link.
+2. **The group-comparison chart was meaningless.** `compare_multiple_groups`
+   projects **raw rows on purpose** (Welch's ANOVA needs the within-group spread),
+   and the chart drew those same rows — plotting the first 25 of 948 *individual
+   records*, so one work centre repeated down the axis with every bar the same
+   height. It was never showing work centres at all.
+3. **Cross-references were listed, not run.** "Does `mfg_labor_rates` show the
+   same pattern?" is a question the system can answer itself.
+
+Fixed respectively by a tunable card budget, `summarise_group_evidence()` (fold
+to one ranked entry per group *for the chart only*), and `_run_cross_reference()`
+(join the two sources on their shared period and run the governed correlation).
 
 ---
 
@@ -149,6 +169,84 @@ app/business-insight/analysis/[insightId]/page.tsx
                rationale + chart + R method) · Check this against · Ask about this
 ```
 
+### 4e. Evidence on the analysis page — chart, markers, rows, ask box
+
+```
+_card_diagnostic_insights()  attaches per step:
+   presentation   deep_analysis.evidence_presentation(intent)   line/bar/scatter + layers
+   markers        card_diagnostics.extract_markers(intent, env) R's OWN flagged indices
+   roles          {x, y, y2} from the projection that ran
+   result         the full evidence rows
+
+lib/insights/diagnostic-chart.ts::buildDiagnosticChart()
+   → honours `presentation`, keeps EVERY row in projection order, plots `roles`
+   → options.markedIndices / markedChangePointIndex
+
+EChartsWidget  explicit markedIndices WIN over the 2-sigma re-derivation
+analysis page  "See all N observations" → EvidenceTable, flagged rows highlighted
+               InsightAskBox → aiActionsApi.askAndRun(card_context with base_sql)
+                  └─ _ask_and_run_core → ask_pipeline.build_insight_followup()
+                                       → followup_prompt()  ← now includes the SQL
+```
+
+**Three things here are load-bearing — do not "simplify" them:**
+
+- **`buildDiagnosticChart` is deliberately not `buildChart`.** The conversational
+  builder ranks bars by magnitude and caps at 25 points. Correct for chat; applied
+  to a 31-period series it reorders the timeline by value and drops six
+  observations. That was the reported "scrambled dates" bug. Evidence keeps row
+  order and every row.
+- **`sortBy` on `WidgetConfig` is inert** — no renderer reads it. Row order is the
+  only order. Do not "fix" ordering by setting `sortBy`.
+- **Explicit `markedIndices` must keep winning over `showAnomalies`.** R's
+  `detect_anomalies` fits an ETS model, so a flagged point can sit *inside* 2σ of
+  the mean. Letting the heuristic run would mark a different point than the
+  sentence above the chart names.
+
+### 4f. Answering the drill-down — coverage, ranked segments, executed leads
+
+```
+_card_diagnostic_insights(max_cards=None, max_steps=5, max_cross_refs=3)
+  ├─ _diagnostic_card_budget()        env INSIGHT_DIAGNOSTIC_CARD_BUDGET, default 24
+  │                                   (was a hard-coded 4 — the coverage bug)
+  ├─ per dissected card:
+  │    plan_card_diagnostics() → _run_diagnostic() → analyze_methods()
+  │    IF intent in GROUP_EVIDENCE_INTENTS and spec.group_by:
+  │        summarise_group_evidence(RAW rows, group, measure)
+  │           → one ranked entry per group, `marked` = clear leader or None
+  │        describe_group_leader(...)  → finding NAMES the segment
+  │        findings["top_segment"]     → propose_actions() gets a target
+  │        presentation := bar, markers := {anomalyIndices:[marked]}
+  └─ per other table in ctx.tables (bounded by max_cross_refs):
+       _run_cross_reference()
+         _cross_reference_sql()   aggregate BOTH tables on their own period,
+                                  JOIN on period, ORDER BY period
+         < 8 overlapping periods ⇒ skip (not evidence)
+         analyze_methods(intent="relationship_numeric")
+         assess_materiality()     immaterial ⇒ NO step
+         _relationship_direction() "moves together" / "one rises as the other falls"
+         ⇒ diagnostic{stage: corroborate, crossReference: <table>}
+```
+
+**Three things here are load-bearing — do not "simplify" them:**
+
+- **The group-comparison SQL must keep returning RAW rows.** It looks like an
+  obvious candidate for a `GROUP BY`, and that would break the analysis: Welch's
+  ANOVA tests whether group *distributions* differ and needs the within-group
+  spread. The aggregation belongs in `summarise_group_evidence()`, which shapes
+  the **chart only** — the method still receives raw rows. Aggregating in SQL
+  would leave one row per group and the test would have nothing to compare.
+- **`marked` is `None` on a flat ranking, by design.** A leader is claimed only
+  when it clears the runner-up by ≥10%. Always marking index 0 would point at
+  noise and the finding would name a segment that is not actually the problem.
+- **Immaterial cross-references must produce nothing.** An uncorrelated table is
+  not evidence; emitting a "no relationship" step per table pair would bury the
+  real findings.
+
+**Wording constraint:** a cross-reference establishes *co-movement*, not
+causation. The UI says "candidate cause or lever" deliberately. Do not
+strengthen this to "causes" / "driven by" anywhere in the copy.
+
 Two constraints the shared card component imposes — **keep both**:
 
 - **The strip is gated on `!hideActions`.** The same card renders on the public
@@ -178,8 +276,10 @@ the adapter.
 | `app/services/deep_analysis.py` | intent planning, materiality gate, evidence presentation | 34 |
 | `app/services/ask_pipeline.py` | shared conversational presentation + follow-up grounding | 14 |
 | `app/services/insight_registry.py` | card retrieval by partial title, stored-SQL answers | 21 |
-| `app/services/card_diagnostics.py` | the diagnostic ladder, MoM/YoY triggers, action proposals, cross-refs | 34 |
+| `app/services/card_diagnostics.py` | ladder, MoM/YoY triggers, actions, markers, group evidence | 48 |
 | `web-ui/.../home/insight-analysis-strip.tsx` | compact strip on the card | 6 |
+| `web-ui/lib/insights/diagnostic-chart.ts` | evidence chart: intent's family, full series, method markers | 16 |
+| `web-ui/.../home/insight-ask-box.tsx` | free-text ask grounded in the card's query | 5 |
 | `web-ui/app/business-insight/analysis/[insightId]/page.tsx` | the shareable full analysis | — |
 | `web-ui/.../ai-result-view.chartfamily.test.tsx` | locks the chart-family collapse shut | 4 |
 
@@ -194,12 +294,12 @@ the adapter.
 | Suite | Result |
 |---|---|
 | `test_deep_analysis.py` | 34 / 34 |
-| `test_card_diagnostics.py` | 34 / 34 |
+| `test_card_diagnostics.py` | 48 / 48 |
 | `test_insight_registry.py` | 21 / 21 |
-| `test_ask_pipeline.py` | 14 / 14 |
+| `test_ask_pipeline.py` | 17 / 17 |
 | `test_chart_catalog.py` | 18 / 18 |
 | `test_visualization_engine.py` | 27 / 27 |
-| web-ui `vitest` | 248 / 248 (40 files) |
+| web-ui `vitest` | 274 / 274 (42 files) |
 | `tsc` · `ruff` · `next lint` | clean |
 
 CI:
@@ -226,6 +326,12 @@ insights):
 ANALYTICAL_METHOD_ENGINE_MODE=hybrid
 R_ANALYTICS_ENABLED=true
 R_ANALYTICS_FAILURE_MODE=python_fallback
+
+# Cards dissected per run (default 24). Each one executes several governed
+# methods plus up to 3 cross-reference correlations, so this is the knob that
+# trades drill-down coverage against insight-refresh time. Lower it if a
+# refresh times out; do NOT disable the feature to fix a timeout.
+INSIGHT_DIAGNOSTIC_CARD_BUDGET=24
 ```
 
 Then **clear insight caches** so cards regenerate through the new path
@@ -261,6 +367,40 @@ Then **clear insight caches** so cards regenerate through the new path
   trend card should show one, labelled with what triggered it.
 - Open a shared **`/reports/<token>`** page and confirm **no strip** appears.
 
+**Analysis-page evidence — the reported follow-ups**
+- An anomaly step renders as a **line in date order**, not a bar sorted by
+  magnitude, and shows **all** observations (a 31-period series must show 31
+  points, not 25).
+- The flagged observation(s) carry a **red marker at the point the method
+  named** — cross-check the marked period against the Explain panel's
+  `anomalies` indices; they must agree.
+- **"See all N observations"** expands the evidence table and the flagged rows
+  are highlighted.
+- The **ask box accepts free text**. Ask something the suggestions do not cover
+  (e.g. "break this down by supplier and join the contract list") and confirm
+  the generated SQL **builds on the card's query** rather than starting over.
+- Suggested questions and cross-reference prompts **submit into the same box**
+  (they no longer navigate away to `/ai?q=`).
+- Title and summary show **bold text, not literal `**`**.
+
+**Coverage, segments and cross-references — the reported regressions**
+- **Most Risk/Trend/Opportunity cards now carry a *Full analysis* link**, not 2
+  of 29. If coverage is still thin, check the worker log for
+  `card diagnostics failed` before assuming the budget.
+- A **"Where X is concentrated"** step shows **one bar per group, ranked**, with
+  **no repeated category labels**. Repeated labels means the raw-row path is back
+  — see §4f.
+- Its finding **names the segment** ("WC-007 leads at 42 per record, 320% above
+  WC-001"), not just `p=0.000`, and the proposed action **targets that segment**
+  instead of "Investigate before acting".
+- On a genuinely even distribution, **no bar is marked** and the finding does not
+  name a leader. That is correct.
+- A **corroboration step** appears for at least one related table, badged
+  `cross-checked · <table>`, stating **direction** (moves together / opposite).
+- Tables that were cross-checked **do not also appear** under "Not yet checked".
+- **Timing:** compare insight-refresh duration before/after. Report it — this
+  change does materially more work per run.
+
 **Conversation — test all three surfaces**
 - Two-measure question → **scatter** (was forced to a table).
 - Two-dimension question → **heatmap**.
@@ -280,17 +420,20 @@ Then **clear insight caches** so cards regenerate through the new path
 
 ## 8. Follow-ups deliberately left to you
 
-1. **"Ask about this card" wiring.** `_ask_and_run_core` already accepts
-   `card_context`, and `ask_pipeline.build_insight_followup(question, card)` →
-   `followup_prompt(...)` builds the grounded question. Send the card payload
-   from the card's ask entry point. No new endpoint needed.
-1b. **The analysis page's "Ask about this insight" chips** link to
-   `/ai?q=<question>` — they pre-fill the assistant but do **not** yet pass the
-   card as `card_context`, so the answer is not card-grounded. Wire them through
-   the same `build_insight_followup` path as (1).
-2. **Surface `analyticalMethod` / `insightContext` in the chat bubble's Explain
+> Items 1 and 1b from the previous revision of this doc are **done** — the
+> card-grounded ask path is wired (`1c9131a`). Do not re-implement them.
+
+1. **Surface `analyticalMethod` / `insightContext` in the chat bubble's Explain
    area** so the R badge and card grounding are visible in conversation — the
    component already renders this shape for cards.
+2. **Knowledge-graph entities for insight cards.** Card retrieval is currently a
+   title match over the cached cards (`insight_registry`). Promoting cards to KG
+   entities would let the assistant reason over them relationally rather than by
+   name. Design work, not a patch.
+3. **The suggested-question chips are shortcuts, not the interface.** They sit
+   below the free-text box now. The user's stated preference is that the system
+   answers rather than asks; if the chips still read as the system asking, delete
+   them — the ladder already carries the answered questions.
 
 ---
 
@@ -305,12 +448,25 @@ them), but unfiltered. Open one anomaly card and one driver/correlation card,
 read the Explain panel's keys, and add any real names to the lookup lists in
 `_MATERIALITY_RULES` (`deep_analysis.py`). One line per key.
 
-**Diagnostic depth vs. run time.** Each dissected card now runs up to `max_steps`
-governed methods on top of the card's own query, so an insight refresh does more
-work than before. If a refresh times out, lower the cap where
-`_card_diagnostic_insights()` calls `plan_card_diagnostics(...)` rather than
-disabling the feature — the ladder is priority-ordered, so a smaller cap keeps
-the most actionable steps (localise, then when) and drops the speculative tail.
+**Diagnostic depth vs. run time — the main operational risk of this merge.**
+A run now dissects up to 24 cards (was 4), each executing up to 5 governed
+methods plus up to 3 cross-reference correlations. That is roughly an order of
+magnitude more analytical work per refresh. **Measure it and report the number.**
+If refreshes time out, lower `INSIGHT_DIAGNOSTIC_CARD_BUDGET` first (the ladder
+is priority-ordered, so a smaller `max_steps` keeps localise/when and drops the
+speculative tail). Do not disable the feature to fix a timeout.
+
+**Cross-reference period grain.** `_cross_reference_sql()` joins two tables on
+their own period columns. Weekly-against-monthly sources will match on few or no
+periods and correctly produce **nothing** rather than a bad correlation. If two
+sources you *expect* to relate stay silent, mismatched grain is the first thing
+to check — not a bug in the correlation. Report any pair where this bites; the
+fix is a date-truncation in the projection, which needs to know your warehouse
+dialect.
+
+**Co-movement is not causation.** A corroboration step means two series moved
+together over the overlapping periods. The copy says "candidate cause or lever"
+on purpose. Do not strengthen it.
 
 **Retrieval scope.** `load_tenant_insight_cards()` reads cards for the caller's
 tenant (optionally filtered by project). Confirm on a multi-project tenant that
@@ -328,3 +484,11 @@ chat answer, a heatmap chat answer, **a Risk card's Deeper-analysis strip and it
 full-analysis route**, **the same route reached from a Project Insight card**,
 and **the stored-SQL retrieval answering the "Material Costs vs Revenue Trend"
 question**; plus any materiality key names you added.
+
+Also report, specifically:
+- **how many cards now carry a *Full analysis* link** (was 2 of 29);
+- a **screenshot of a ranked group chart** with the leading bar marked and the
+  segment named in the finding;
+- a **screenshot of a corroboration step** with its direction statement;
+- **insight-refresh duration before and after** (§9), and the value of
+  `INSIGHT_DIAGNOSTIC_CARD_BUDGET` you settled on.

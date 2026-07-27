@@ -210,7 +210,24 @@ def build_insight_followup(
 
 
 def followup_prompt(followup: InsightFollowUp) -> str:
-    """The question as the LLM should receive it, with card grounding prepended."""
-    if not followup.context:
+    """The question as the LLM should receive it, with card grounding prepended.
+
+    The card's own query is included when it has one: a follow-up should start
+    from the rows the finding was computed on — filtering them further, joining
+    another source to them, or aggregating them differently — rather than
+    generating an unrelated query that answers about a different population.
+    """
+    if not followup.context and not followup.base_sql:
         return followup.question
-    return f"{followup.context}\n\nQuestion: {followup.question}"
+    parts = []
+    if followup.context:
+        parts.append(followup.context)
+    if followup.base_sql:
+        parts.append(
+            "This is the query the insight was computed from. Build on it — "
+            "extend, filter, join or re-aggregate it — rather than starting "
+            "over, so the answer describes the same population:\n"
+            f"```sql\n{followup.base_sql}\n```"
+        )
+    parts.append(f"Question: {followup.question}")
+    return "\n\n".join(parts)

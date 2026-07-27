@@ -343,3 +343,167 @@ def test_extracted_findings_feed_a_targeted_action():
     actions = propose_actions(RISK_CARD, facts)
     assert "Plant B" in actions[0].headline
     assert actions[0].confidence == "high"
+
+
+# ── Chart markers come from the method, not a re-derivation ──────────────────
+
+
+def test_r_anomaly_indices_are_converted_to_zero_based_positions():
+    """R's `which()` is 1-based; the chart indexes from 0."""
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_anomalies", {"results": {"anomalies": [1, 7, 31]}}
+    )
+    assert markers["anomalyIndices"] == [0, 6, 30]
+
+
+def test_anomaly_indices_accept_the_dict_form_too():
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_anomalies", {"results": {"anomalies": [{"index": 4}, {"position": 9}]}}
+    )
+    assert markers["anomalyIndices"] == [3, 8]
+
+
+def test_the_expected_band_travels_with_the_anomalies():
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_anomalies",
+        {"results": {
+            "anomalies": [2],
+            "expected": [10.0, 11.0, 12.0],
+            "lower": [8.0, 9.0, 10.0],
+            "upper": [12.0, 13.0, 14.0],
+        }},
+    )
+    assert markers["band"]["expected"] == [10.0, 11.0, 12.0]
+    assert markers["band"]["lower"] == [8.0, 9.0, 10.0]
+
+
+def test_a_ragged_band_is_dropped_rather_than_misaligned():
+    """Unequal band arrays would draw the envelope against the wrong points."""
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_anomalies",
+        {"results": {"anomalies": [1], "expected": [1.0, 2.0], "lower": [0.0], "upper": [3.0, 4.0]}},
+    )
+    assert "band" not in markers
+    assert markers["anomalyIndices"] == [0]
+
+
+def test_a_change_point_index_is_marked():
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_change_point", {"results": {"change_points": [{"index": 12, "period": "2026-03"}]}}
+    )
+    assert markers["changePointIndex"] == 11
+
+
+def test_nothing_to_mark_yields_no_markers():
+    from app.services.card_diagnostics import extract_markers
+
+    assert extract_markers("detect_anomalies", {"results": {}}) == {}
+    assert extract_markers("detect_anomalies", {"results": "not-a-dict"}) == {}
+    assert extract_markers("detect_anomalies", None) == {}
+    assert extract_markers("forecast_time_series", {"results": {"slope": 1.0}}) == {}
+
+
+# ── Group comparisons chart groups, not raw records ──────────────────────────
+
+
+def _raw(*pairs):
+    return [{"WorkCenterId": g, "UnitsScrapped": v} for g, v in pairs]
+
+
+def test_raw_rows_are_folded_to_one_entry_per_group():
+    """The method needs raw rows; charting them repeated one group down the axis."""
+    from app.services.card_diagnostics import summarise_group_evidence
+
+    rows = _raw(("WC-012", 10), ("WC-012", 20), ("WC-003", 5), ("WC-003", 5))
+    summary, columns, _ = summarise_group_evidence(rows, "WorkCenterId", "UnitsScrapped")
+    assert len(summary) == 2
+    assert columns == ["WorkCenterId", "UnitsScrapped", "observations"]
+    by_group = {r["WorkCenterId"]: r for r in summary}
+    assert by_group["WC-012"]["UnitsScrapped"] == 15.0
+    assert by_group["WC-012"]["observations"] == 2
+
+
+def test_groups_are_ranked_so_the_leading_bar_is_the_answer():
+    from app.services.card_diagnostics import summarise_group_evidence
+
+    rows = _raw(("A", 1), ("B", 50), ("C", 10))
+    summary, _, marked = summarise_group_evidence(rows, "WorkCenterId", "UnitsScrapped")
+    assert [r["WorkCenterId"] for r in summary] == ["B", "C", "A"]
+    assert marked == 0
+
+
+def test_an_even_ranking_marks_nothing():
+    """Marking the top of a flat ranking would point at noise."""
+    from app.services.card_diagnostics import summarise_group_evidence
+
+    rows = _raw(("A", 100), ("B", 99), ("C", 98))
+    _, _, marked = summarise_group_evidence(rows, "WorkCenterId", "UnitsScrapped")
+    assert marked is None
+
+
+def test_a_single_group_is_not_a_comparison():
+    from app.services.card_diagnostics import summarise_group_evidence
+
+    summary, _, marked = summarise_group_evidence(
+        _raw(("A", 1), ("A", 2)), "WorkCenterId", "UnitsScrapped"
+    )
+    assert summary == [] and marked is None
+
+
+def test_non_numeric_and_null_groups_are_skipped():
+    from app.services.card_diagnostics import summarise_group_evidence
+
+    rows = [
+        {"WorkCenterId": "A", "UnitsScrapped": 10},
+        {"WorkCenterId": "A", "UnitsScrapped": "n/a"},
+        {"WorkCenterId": None, "UnitsScrapped": 5},
+        {"WorkCenterId": "B", "UnitsScrapped": 2},
+    ]
+    summary, _, _ = summarise_group_evidence(rows, "WorkCenterId", "UnitsScrapped")
+    by_group = {r["WorkCenterId"]: r for r in summary}
+    assert by_group["A"]["observations"] == 1
+    assert None not in by_group
+
+
+def test_group_count_is_bounded():
+    from app.services.card_diagnostics import summarise_group_evidence
+
+    rows = _raw(*((f"WC-{i:03d}", i) for i in range(50)))
+    summary, _, _ = summarise_group_evidence(
+        rows, "WorkCenterId", "UnitsScrapped", max_groups=5
+    )
+    assert len(summary) == 5
+
+
+# ── Naming the segment, not just the p-value ────────────────────────────────
+
+
+def test_the_leading_group_is_named_with_its_margin():
+    from app.services.card_diagnostics import describe_group_leader, summarise_group_evidence
+
+    rows = _raw(("WC-007", 40), ("WC-007", 44), ("WC-001", 10), ("WC-002", 9))
+    summary, _, marked = summarise_group_evidence(rows, "WorkCenterId", "UnitsScrapped")
+    sentence = describe_group_leader(
+        summary, "WorkCenterId", "UnitsScrapped", marked=marked
+    )
+    assert "WC-007" in sentence
+    assert "%" in sentence            # how far clear of the next group
+    assert "2 observations" in sentence
+    assert sentence.endswith(".")
+
+
+def test_no_leader_yields_no_claim():
+    from app.services.card_diagnostics import describe_group_leader
+
+    assert describe_group_leader([{"g": "A", "v": 1}], "g", "v", marked=None) == ""
+    assert describe_group_leader([], "g", "v", marked=0) == ""

@@ -1,19 +1,24 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   IconArrowLeft,
+  IconChevronDown,
   IconFileText,
   IconLoader2,
   IconTable,
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
-import { InsightChartBlock } from "@/components/tablescope/home/intelligence-card";
-import { buildChart } from "@/components/ai/ai-result-view";
+import {
+  InsightChartBlock,
+  renderBold,
+} from "@/components/tablescope/home/intelligence-card";
+import { buildDiagnosticChart } from "@/lib/insights/diagnostic-chart";
+import { InsightAskBox } from "@/components/tablescope/home/insight-ask-box";
 import {
   getIntelligenceSnapshot,
   suggestInsights,
@@ -76,13 +81,28 @@ function findCard(
   return null;
 }
 
+/**
+ * What the red marker means for this kind of step. A group comparison marks the
+ * segment carrying the problem; a time-series step marks flagged observations.
+ * One caption for both would be wrong in one of the two cases.
+ */
+function markerCaption(intent: string | undefined, count: number): string {
+  if (intent === "compare_multiple_groups" || intent === "compare_two_groups") {
+    return "The marked bar is the segment carrying the problem.";
+  }
+  if (intent === "detect_change_point") return "The marked point is where the level shifted.";
+  return count === 1
+    ? "The marked point is the flagged observation."
+    : `The ${count} marked points are the flagged observations.`;
+}
+
 function DiagnosticStep({ step }: { step: InsightDiagnostic }) {
-  const chart = useMemo(() => {
-    const columns = step.result?.columns ?? [];
-    const rows = (step.result?.rows ?? []) as Record<string, unknown>[];
-    if (!columns.length || !rows.length) return null;
-    return buildChart(columns, rows, { type: "bar" });
-  }, [step.result]);
+  const [showEvidence, setShowEvidence] = useState(false);
+  // Presentation comes from the intent, not from this component. Hardcoding a
+  // bar here ranked a 31-period series by magnitude and cut it to 25 points.
+  const built = useMemo(() => buildDiagnosticChart(step), [step]);
+  const rows = (step.result?.rows ?? []) as Record<string, unknown>[];
+  const columns = step.result?.columns ?? [];
 
   return (
     <li className="rounded-xl border border-line-tertiary bg-bg-primary p-4">
@@ -95,7 +115,11 @@ function DiagnosticStep({ step }: { step: InsightDiagnostic }) {
             {step.highlight}
           </span>
         ) : null}
-        {step.triggeredBy ? (
+        {step.crossReference ? (
+          <span className="rounded-full bg-bg-secondary px-2 py-0.5 text-[11px] text-ink-tertiary">
+            cross-checked · {step.crossReference}
+          </span>
+        ) : step.triggeredBy ? (
           <span className="text-[11px] text-ink-tertiary">
             triggered: {step.triggeredBy}
           </span>
@@ -108,25 +132,128 @@ function DiagnosticStep({ step }: { step: InsightDiagnostic }) {
       {/* Why this step was run — what turns a pile of charts into reasoning. */}
       <p className="mt-1 text-[12px] italic text-ink-tertiary">{step.rationale}</p>
 
-      {chart ? (
+      {built ? (
         <div className="mt-3">
-          <InsightChartBlock chart={chart} />
+          <InsightChartBlock chart={built.chart} options={built.options} />
+          {built.anomalyRows.length > 0 ? (
+            <p className="mt-1 text-[12px] text-ink-tertiary">
+              <span className="mr-1 inline-block h-2 w-2 rounded-full bg-danger align-middle" />
+              {markerCaption(step.intent, built.anomalyRows.length)}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
-      {step.analyticalMethod?.method ? (
-        <p className="mt-3 text-[12px] text-ink-tertiary">
-          Method: {step.analyticalMethod.method}
-          {String(step.analyticalMethod.executionEngine ?? "").toLowerCase() === "r"
-            ? " (R)"
-            : ""}
-          {step.analyticalMethod.usableN
-            ? ` · ${step.analyticalMethod.usableN} observations`
-            : ""}
-        </p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        {step.analyticalMethod?.method ? (
+          <p className="text-[12px] text-ink-tertiary">
+            Method: {step.analyticalMethod.method}
+            {String(step.analyticalMethod.executionEngine ?? "").toLowerCase() === "r"
+              ? " (R)"
+              : ""}
+            {step.analyticalMethod.usableN
+              ? ` · ${step.analyticalMethod.usableN} observations`
+              : ""}
+          </p>
+        ) : null}
+        {rows.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setShowEvidence((v) => !v)}
+            aria-expanded={showEvidence}
+            className="inline-flex items-center gap-1 text-[12px] font-medium text-brand-600 hover:underline"
+          >
+            {showEvidence ? "Hide" : `See all ${rows.length}`} observations
+            <IconChevronDown
+              size={13}
+              className={showEvidence ? "rotate-180 transition-transform" : "transition-transform"}
+              aria-hidden
+            />
+          </button>
+        ) : null}
+      </div>
+
+      {showEvidence && rows.length > 0 ? (
+        <EvidenceTable
+          columns={columns}
+          rows={rows}
+          flagged={built?.anomalyRows ?? []}
+        />
       ) : null}
     </li>
   );
+}
+
+/**
+ * The observations a step was computed from.
+ *
+ * Rows the method flagged are marked here too — the chart shows *that* there is
+ * an outlier, this shows *which* record it is, which is what someone has to
+ * chase down to act on the finding.
+ */
+function EvidenceTable({
+  columns,
+  rows,
+  flagged,
+}: {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  flagged: number[];
+}) {
+  const flaggedSet = useMemo(() => new Set(flagged), [flagged]);
+  return (
+    <div className="mt-2 max-h-80 overflow-auto rounded-lg border border-line-tertiary">
+      <table className="w-full border-collapse text-[12px]">
+        <thead className="sticky top-0 bg-bg-secondary">
+          <tr>
+            <th className="border-b border-line-tertiary px-2 py-1.5 text-left font-medium text-ink-tertiary">
+              #
+            </th>
+            {columns.map((c) => (
+              <th
+                key={c}
+                className="border-b border-line-tertiary px-2 py-1.5 text-left font-medium text-ink-secondary"
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => {
+            const isFlagged = flaggedSet.has(i);
+            return (
+              <tr
+                key={i}
+                className={isFlagged ? "bg-danger/10" : undefined}
+                title={isFlagged ? "Outside the expected range" : undefined}
+              >
+                <td className="px-2 py-1 text-ink-tertiary">
+                  {isFlagged ? "!" : i + 1}
+                </td>
+                {columns.map((c) => (
+                  <td
+                    key={c}
+                    className={`px-2 py-1 ${
+                      isFlagged ? "font-medium text-ink-primary" : "text-ink-secondary"
+                    }`}
+                  >
+                    {formatCell(row[c])}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatCell(value: unknown): string {
+  if (value == null) return "—";
+  if (typeof value === "number") return value.toLocaleString();
+  return String(value);
 }
 
 export default function InsightAnalysisPage() {
@@ -164,7 +291,14 @@ export default function InsightAnalysisPage() {
 
   const diagnostics = card?.diagnostics ?? [];
   const actions = card?.proposedActions ?? [];
-  const crossRefs = card?.crossReferences ?? [];
+  const checked = new Set(
+    diagnostics.map((d) => d.crossReference).filter(Boolean) as string[],
+  );
+  // A source that was actually tested is answered in the ladder above; listing
+  // it again as an open question would re-ask a question already answered.
+  const crossRefs = (card?.crossReferences ?? []).filter(
+    (r) => !checked.has(r.name),
+  );
   const questions = card?.suggestedQuestions ?? [];
 
   return (
@@ -197,9 +331,13 @@ export default function InsightAnalysisPage() {
         ) : (
           <>
             <header>
-              <h1 className="text-[20px] font-semibold text-ink-primary">{card.title}</h1>
+              <h1 className="text-[20px] font-semibold text-ink-primary">
+                {renderBold(card.title)}
+              </h1>
               {card.summary ? (
-                <p className="mt-1 text-[14px] text-ink-secondary">{card.summary}</p>
+                <p className="mt-1 text-[14px] text-ink-secondary">
+                  {renderBold(card.summary)}
+                </p>
               ) : null}
             </header>
 
@@ -246,10 +384,14 @@ export default function InsightAnalysisPage() {
             <section aria-labelledby="how-we-got-here">
               <h2
                 id="how-we-got-here"
-                className="mb-2 text-[15px] font-semibold text-ink-primary"
+                className="mb-1 text-[15px] font-semibold text-ink-primary"
               >
-                How we got here
+                What we asked, and what the data answered
               </h2>
+              <p className="mb-2 text-[13px] text-ink-tertiary">
+                Each question below was run against the data — the answer is the
+                finding, not a prompt to investigate yourself.
+              </p>
               {diagnostics.length === 0 ? (
                 <p className="text-[13px] text-ink-tertiary">
                   This insight has not been dissected yet.
@@ -269,8 +411,12 @@ export default function InsightAnalysisPage() {
                   id="cross-references"
                   className="mb-2 text-[15px] font-semibold text-ink-primary"
                 >
-                  Check this against
+                  Not yet checked
                 </h2>
+                <p className="mb-2 text-[13px] text-ink-tertiary">
+                  Leads the analysis could not test automatically. Ask about any
+                  of them below.
+                </p>
                 <ul className="space-y-2">
                   {crossRefs.map((ref, i) => (
                     <li
@@ -292,25 +438,15 @@ export default function InsightAnalysisPage() {
               </section>
             ) : null}
 
-            {questions.length > 0 ? (
-              <section aria-labelledby="ask-next">
-                <h2 id="ask-next" className="mb-2 text-[15px] font-semibold text-ink-primary">
-                  Ask about this insight
-                </h2>
-                <ul className="flex flex-wrap gap-2">
-                  {questions.map((q) => (
-                    <li key={q}>
-                      <Link
-                        href={`/ai?q=${encodeURIComponent(q)}`}
-                        className="inline-flex rounded-full border border-line-tertiary px-3 py-1.5 text-[13px] text-ink-secondary transition-colors hover:bg-bg-secondary hover:text-ink-primary"
-                      >
-                        {q}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
+            {/* Cross-reference prompts are questions too, so they go into the
+                same box rather than being a dead list. */}
+            <InsightAskBox
+              card={card}
+              suggestions={[
+                ...questions,
+                ...crossRefs.map((r) => r.question).filter(Boolean),
+              ]}
+            />
           </>
         )}
       </div>
