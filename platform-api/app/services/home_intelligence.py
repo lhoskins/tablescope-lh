@@ -2867,7 +2867,7 @@ async def _verify_card_claims(
             envelope = await analyze_methods(
                 session,
                 tenant_id=tenant_id,
-                columns=result.get("columns", []),
+                columns=(result or {}).get("columns", []),
                 rows=rows,
                 question=f"Is {measure} trending over time?",
                 intent="detect_trend",
