@@ -73,6 +73,16 @@ export interface AiCardContext {
   source_columns?: string[];
   metric?: string;
   period_column?: string;
+  /** The card's own text, so a follow-up is answered about this finding. */
+  title?: string;
+  summary?: string;
+  /**
+   * The query the finding was computed from. Sent so a follow-up extends the
+   * rows behind the card instead of the generator writing an unrelated query.
+   */
+  base_sql?: string;
+  /** Provenance when the question is about one diagnostic step. */
+  analytical_method?: MethodEnvelope;
 }
 
 /** A source the resolver offers when a request is ambiguous. */

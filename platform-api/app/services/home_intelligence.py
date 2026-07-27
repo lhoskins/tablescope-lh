@@ -2855,7 +2855,7 @@ async def _card_diagnostic_insights(
         findings: dict[str, Any] = {}
         diagnostics: list[dict[str, Any]] = []
         for spec in specs:
-            envelope, result, sql = await _run_diagnostic(
+            envelope, result, sql, roles = await _run_diagnostic(
                 session, runner, table, spec, shape, tenant_id, max_rows
             )
             if envelope is None:
@@ -2864,9 +2864,14 @@ async def _card_diagnostic_insights(
             if not materiality.material:
                 continue
             findings.update(card_diagnostics.extract_findings(spec.intent, envelope))
+            # The chart family comes from the intent, not from the caller: an
+            # anomaly step is a period-ordered line with its flagged points
+            # marked, and rendering it as a ranked bar reorders the timeline.
+            presentation = deep_analysis.evidence_presentation(spec.intent)
             diagnostics.append(
                 {
                     "stage": spec.stage,
+                    "intent": spec.intent,
                     "title": spec.title,
                     "question": spec.question,
                     "rationale": spec.rationale,
@@ -2876,6 +2881,9 @@ async def _card_diagnostic_insights(
                     "analyticalMethod": envelope,
                     "sql": sql,
                     "result": result,
+                    "presentation": presentation,
+                    "markers": card_diagnostics.extract_markers(spec.intent, envelope),
+                    "roles": roles,
                 }
             )
 
@@ -2947,11 +2955,17 @@ async def _run_diagnostic(
     shape: Shape,
     tenant_id: int | None,
     max_rows: int,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str]:
-    """Execute one diagnostic step through the governed method engine."""
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str, dict[str, str]]:
+    """Execute one diagnostic step through the governed method engine.
+
+    Returns the envelope, the evidence rows, the SQL, and the column *roles* —
+    the chart must know which column is the period and which the measure rather
+    than guessing by position, or a step whose projection puts the measure first
+    is plotted against the wrong axis.
+    """
     measure = _card_metric({}, shape)
     if not measure:
-        return None, None, ""
+        return None, None, "", {}
     period = shape.time_columns[0] if shape.time_columns else None
     pseudo = deep_analysis.DeepAnalysisSpec(
         intent=spec.intent,
@@ -2968,13 +2982,24 @@ async def _run_diagnostic(
         },
         group_by=spec.group_by,
     )
+    # What the projection actually plots: the group comparison is measured
+    # across segments, everything else across the timeline.
+    roles = {
+        k: v
+        for k, v in (
+            ("x", spec.group_by if spec.group_by else period),
+            ("y", measure),
+            ("y2", pseudo.roles.get("measure2")),
+        )
+        if v
+    }
     sql = _deep_analysis_sql(table.view_name, pseudo, max_rows)
     if not sql:
-        return None, None, ""
+        return None, None, "", roles
     try:
         result = await _safe_query(runner, sql)
         if not result or not result.get("rows"):
-            return None, None, sql
+            return None, None, sql, roles
         envelope = await analyze_methods(
             session,
             tenant_id=tenant_id,
@@ -2983,10 +3008,10 @@ async def _run_diagnostic(
             question=spec.question,
             intent=spec.intent,
         )
-        return envelope, result, sql
+        return envelope, result, sql, roles
     except Exception as exc:  # pragma: no cover - diagnostics are fail-closed
         logger.warning("diagnostic %s failed on %s: %s", spec.intent, table.view_name, exc)
-        return None, None, sql
+        return None, None, sql, roles
 
 
 async def _method_driven_insights(

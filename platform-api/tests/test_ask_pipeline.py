@@ -173,3 +173,28 @@ def test_python_executed_card_is_not_described_as_r():
     prompt = followup_prompt(build_insight_followup("q", card))
     assert "pearson_correlation" in prompt
     assert "executed in R" not in prompt
+
+
+def test_the_cards_query_is_handed_to_the_generator():
+    """A follow-up should extend the query behind the finding, not invent one."""
+    card = {
+        "title": "Material costs vs revenue",
+        "sql": "SELECT month, SUM(material_cost) FROM ledger GROUP BY month",
+    }
+    prompt = followup_prompt(build_insight_followup("what is driving this?", card))
+    assert "SELECT month, SUM(material_cost) FROM ledger GROUP BY month" in prompt
+    assert "```sql" in prompt
+    assert "Build on it" in prompt
+    # The user's question still lands last so it is what actually gets answered.
+    assert prompt.endswith("Question: what is driving this?")
+
+
+def test_a_card_with_no_query_adds_no_sql_block():
+    card = {"title": "Scrap rate by plant", "summary": "Plant B is highest."}
+    prompt = followup_prompt(build_insight_followup("why?", card))
+    assert "```sql" not in prompt
+
+
+def test_a_bare_question_is_never_wrapped():
+    fu = build_insight_followup("why?", {})
+    assert followup_prompt(fu) == "why?"

@@ -267,7 +267,23 @@ function addAnalyticalLayers(
   const values = data.map((r) => toNumber(r[yKey])).filter((v): v is number => v !== null);
   if (values.length === 0) return;
 
-  if (opts.showControlLimits || opts.showAnomalies || opts.showChangePoint) {
+  const explicitPoints = (opts.markedIndices ?? []).filter(
+    (i) => Number.isInteger(i) && i >= 0 && i < data.length,
+  );
+  const explicitChangePoint =
+    typeof opts.markedChangePointIndex === "number" &&
+    opts.markedChangePointIndex >= 0 &&
+    opts.markedChangePointIndex < data.length
+      ? opts.markedChangePointIndex
+      : null;
+
+  if (
+    opts.showControlLimits ||
+    opts.showAnomalies ||
+    opts.showChangePoint ||
+    explicitPoints.length > 0 ||
+    explicitChangePoint !== null
+  ) {
     if (!option.series[0].markLine) option.series[0].markLine = { symbol: "none", data: [] };
     if (!option.series[0].markPoint) option.series[0].markPoint = { data: [] };
   }
@@ -283,7 +299,21 @@ function addAnalyticalLayers(
     );
   }
 
-  if (opts.showAnomalies) {
+  // Points an analysis actually flagged. These take precedence over the 2-sigma
+  // re-derivation below: a method that fits a model (ETS, STL) can flag a point
+  // that sits inside 2 sigma of the mean, and marking a different point than the
+  // one the finding names would contradict the text beside the chart.
+  if (explicitPoints.length > 0) {
+    explicitPoints.forEach((i) => {
+      const v = toNumber(data[i]?.[yKey]);
+      if (v === null) return;
+      option.series[0].markPoint.data.push({
+        coord: [i, v],
+        value: formatNumber(v, opts.yAxisFormat),
+        itemStyle: { color: "#ef4444" },
+      });
+    });
+  } else if (opts.showAnomalies) {
     const mean = values.reduce((a, b) => a + b, 0) / values.length;
     const std = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length);
     const threshold = 2 * std;
@@ -299,7 +329,16 @@ function addAnalyticalLayers(
     });
   }
 
-  if (opts.showChangePoint) {
+  if (explicitChangePoint !== null) {
+    const v = toNumber(data[explicitChangePoint]?.[yKey]);
+    if (v !== null) {
+      option.series[0].markPoint.data.push({
+        coord: [explicitChangePoint, v],
+        value: "Change",
+        itemStyle: { color: "#8b5cf6" },
+      });
+    }
+  } else if (opts.showChangePoint) {
     let maxDiff = 0;
     let maxIdx = 0;
     for (let i = 1; i < values.length; i++) {

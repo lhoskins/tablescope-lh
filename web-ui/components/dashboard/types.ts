@@ -100,6 +100,15 @@ export type VisualizationOptions = {
   showAnomalies?: boolean;
   showChangePoint?: boolean;
   confidenceBand?: boolean;
+  /**
+   * Explicit 0-based point positions to mark, supplied by whatever analysed the
+   * data. When present these win over `showAnomalies`, which re-derives outliers
+   * with a 2-sigma rule and would otherwise mark different points than the
+   * method reported.
+   */
+  markedIndices?: number[];
+  /** Explicit change-point position; wins over `showChangePoint`'s largest-jump guess. */
+  markedChangePointIndex?: number;
   // Treemap / Funnel
   // Sankey
   sourceColumn?: string;

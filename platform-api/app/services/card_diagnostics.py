@@ -648,3 +648,72 @@ def _first_label(items: list[Any]) -> str | None:
         elif isinstance(item, str | int):
             return str(item)
     return None
+
+
+def extract_markers(intent: str, envelope: dict[str, Any] | None) -> dict[str, Any]:
+    """Point-level annotations the chart should draw, taken from the method.
+
+    The renderer can re-derive "anomalies" itself with a 2-sigma rule, but that
+    would mark *different* points than the method flagged — R's ``detect_anomalies``
+    uses an ETS fit, so a point inside 2 sigma of the mean can still sit outside
+    its own expected band. Marking a point the method did not flag is worse than
+    marking nothing, so the indices travel with the result.
+
+    Indices are normalised to **0-based** positions in the period-ordered series
+    (R reports 1-based). Returns ``{}`` when the method exposes nothing to mark,
+    so the chart simply renders unannotated.
+    """
+    results = (envelope or {}).get("results")
+    if not isinstance(results, dict):
+        return {}
+    lowered = {str(k).lower(): v for k, v in results.items()}
+
+    def _floats(*keys: str) -> list[float]:
+        for key in keys:
+            value = lowered.get(key)
+            if isinstance(value, list) and value:
+                out: list[float] = []
+                for item in value:
+                    if isinstance(item, int | float) and not isinstance(item, bool):
+                        out.append(float(item))
+                    else:
+                        return []
+                return out
+        return []
+
+    markers: dict[str, Any] = {}
+
+    if intent == "detect_anomalies":
+        raw = lowered.get("anomalies")
+        indices: list[int] = []
+        if isinstance(raw, list):
+            for item in raw:
+                # R emits bare 1-based positions; a dict form may carry an index.
+                if isinstance(item, int | float) and not isinstance(item, bool):
+                    indices.append(int(item) - 1)
+                elif isinstance(item, dict):
+                    for key in ("index", "position", "i"):
+                        value = item.get(key)
+                        if isinstance(value, int | float) and not isinstance(value, bool):
+                            indices.append(int(value) - 1)
+                            break
+        indices = sorted({i for i in indices if i >= 0})
+        if indices:
+            markers["anomalyIndices"] = indices
+        band = {
+            key: _floats(key)
+            for key in ("expected", "lower", "upper")
+        }
+        if all(band.values()) and len({len(v) for v in band.values()}) == 1:
+            markers["band"] = band
+
+    elif intent == "detect_change_point":
+        points = lowered.get("change_points") or lowered.get("changepoints")
+        if isinstance(points, list):
+            for item in points:
+                value = item.get("index") if isinstance(item, dict) else item
+                if isinstance(value, int | float) and not isinstance(value, bool):
+                    markers["changePointIndex"] = int(value) - 1
+                    break
+
+    return markers

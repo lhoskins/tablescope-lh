@@ -150,6 +150,17 @@ class AICardContext(BaseModel):
     source_columns: list[str] = Field(default_factory=list)
     metric: str | None = None
     period_column: str | None = None
+    #: The card's own text, so a follow-up is answered about *this* finding.
+    title: str | None = None
+    summary: str | None = None
+    #: The query the finding was computed from. A question asked from a card
+    #: ("what is driving this?") should extend the query that produced it —
+    #: without this the generator writes a fresh query and can answer about
+    #: subtly different rows than the card the user is looking at.
+    base_sql: str | None = None
+    #: Provenance of the analysis being asked about, when the question comes
+    #: from a specific diagnostic step rather than the card as a whole.
+    analytical_method: dict[str, Any] | None = None
 
     def to_resolver_context(self) -> dict[str, Any]:
         return {
@@ -158,6 +169,18 @@ class AICardContext(BaseModel):
             "sourceColumns": self.source_columns,
             "metric": self.metric,
             "periodColumn": self.period_column,
+        }
+
+    def to_card(self) -> dict[str, Any]:
+        """Shape :mod:`ask_pipeline` expects for grounding a follow-up."""
+        return {
+            "title": self.title,
+            "summary": self.summary,
+            "sql": self.base_sql,
+            "insightType": self.insight_type,
+            "metric": self.metric,
+            "analyticalMethod": self.analytical_method or {},
+            "sources": {"tables": list(self.source_tables)},
         }
 
 
@@ -2683,9 +2706,18 @@ async def _ask_and_run_core(
         card_context=card_context,
     )
 
+    # A question asked *from* a card carries that card with it. Grounding the
+    # prompt in the finding — its text, its method and the query it was computed
+    # from — is what makes "what is driving this?" dig into that insight instead
+    # of being answered against the project at large.
+    generation_question = question
+    if card_context is not None and hasattr(card_context, "to_card"):
+        followup = ask_pipeline.build_insight_followup(question, card_context.to_card())
+        generation_question = ask_pipeline.followup_prompt(followup)
+
     try:
         ai_result = await _generate_sql_for_question(
-            session, context, project_id, question,
+            session, context, project_id, generation_question,
             preferred_sources=resolver.preferred_sources,
             relevant_columns=resolver.relevant_columns,
         )

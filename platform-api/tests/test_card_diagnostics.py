@@ -343,3 +343,71 @@ def test_extracted_findings_feed_a_targeted_action():
     actions = propose_actions(RISK_CARD, facts)
     assert "Plant B" in actions[0].headline
     assert actions[0].confidence == "high"
+
+
+# ── Chart markers come from the method, not a re-derivation ──────────────────
+
+
+def test_r_anomaly_indices_are_converted_to_zero_based_positions():
+    """R's `which()` is 1-based; the chart indexes from 0."""
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_anomalies", {"results": {"anomalies": [1, 7, 31]}}
+    )
+    assert markers["anomalyIndices"] == [0, 6, 30]
+
+
+def test_anomaly_indices_accept_the_dict_form_too():
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_anomalies", {"results": {"anomalies": [{"index": 4}, {"position": 9}]}}
+    )
+    assert markers["anomalyIndices"] == [3, 8]
+
+
+def test_the_expected_band_travels_with_the_anomalies():
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_anomalies",
+        {"results": {
+            "anomalies": [2],
+            "expected": [10.0, 11.0, 12.0],
+            "lower": [8.0, 9.0, 10.0],
+            "upper": [12.0, 13.0, 14.0],
+        }},
+    )
+    assert markers["band"]["expected"] == [10.0, 11.0, 12.0]
+    assert markers["band"]["lower"] == [8.0, 9.0, 10.0]
+
+
+def test_a_ragged_band_is_dropped_rather_than_misaligned():
+    """Unequal band arrays would draw the envelope against the wrong points."""
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_anomalies",
+        {"results": {"anomalies": [1], "expected": [1.0, 2.0], "lower": [0.0], "upper": [3.0, 4.0]}},
+    )
+    assert "band" not in markers
+    assert markers["anomalyIndices"] == [0]
+
+
+def test_a_change_point_index_is_marked():
+    from app.services.card_diagnostics import extract_markers
+
+    markers = extract_markers(
+        "detect_change_point", {"results": {"change_points": [{"index": 12, "period": "2026-03"}]}}
+    )
+    assert markers["changePointIndex"] == 11
+
+
+def test_nothing_to_mark_yields_no_markers():
+    from app.services.card_diagnostics import extract_markers
+
+    assert extract_markers("detect_anomalies", {"results": {}}) == {}
+    assert extract_markers("detect_anomalies", {"results": "not-a-dict"}) == {}
+    assert extract_markers("detect_anomalies", None) == {}
+    assert extract_markers("forecast_time_series", {"results": {"slope": 1.0}}) == {}
