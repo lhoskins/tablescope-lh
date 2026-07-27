@@ -2863,6 +2863,8 @@ async def _run_cross_reference(
             )
         except Exception:
             continue
+        if not envelope:
+            continue
         materiality = deep_analysis.assess_materiality("relationship_numeric", envelope)
         if not materiality.material:
             continue
@@ -3040,9 +3042,9 @@ async def _card_diagnostic_insights(
             # individual records, repeating one work centre down the axis. Fold
             # to one ranked entry per group so the leading bar names the segment.
             if spec.intent in card_diagnostics.GROUP_EVIDENCE_INTENTS and spec.group_by:
-                measure = (roles or {}).get("y")
+                measure = str((roles or {}).get("y") or "")
                 grouped, columns, marked = card_diagnostics.summarise_group_evidence(
-                    result.get("rows") or [], spec.group_by, str(measure or "")
+                    (result or {}).get("rows") or [], spec.group_by, measure
                 )
                 if grouped:
                     evidence = {"columns": columns, "rows": grouped}
@@ -3055,9 +3057,9 @@ async def _card_diagnostic_insights(
                     # test rejected its null hypothesis; it does not say where
                     # to go. Name the segment.
                     lead = card_diagnostics.describe_group_leader(
-                        grouped, spec.group_by, str(measure or ""), marked=marked
+                        grouped, spec.group_by, measure, marked=marked
                     )
-                    if lead:
+                    if lead and marked is not None:
                         finding = f"{lead} {materiality.reason}"
                         findings["top_segment"] = grouped[marked][spec.group_by]
 

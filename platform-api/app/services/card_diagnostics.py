@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -759,7 +759,7 @@ def summarise_group_evidence(
     if len(totals) < 2:
         return [], [], None
 
-    summary = [
+    summary: list[dict[str, Any]] = [
         {
             group_key: group,
             value_key: round(sum(values) / len(values), 4),
@@ -767,15 +767,15 @@ def summarise_group_evidence(
         }
         for group, values in totals.items()
     ]
-    summary.sort(key=lambda r: abs(float(r[value_key])), reverse=True)
+    summary.sort(key=lambda r: abs(float(cast(Any, r[value_key]))), reverse=True)
     summary = summary[:max_groups]
 
     # Only claim a leader when one actually leads. Marking the top bar of an
     # essentially flat ranking would point at noise.
     marked: int | None = None
     if len(summary) >= 2:
-        top = abs(float(summary[0][value_key]))
-        runner_up = abs(float(summary[1][value_key]))
+        top = abs(float(cast(Any, summary[0][value_key])))
+        runner_up = abs(float(cast(Any, summary[1][value_key])))
         if top > 0 and (top - runner_up) / top >= 0.10:
             marked = 0
 
