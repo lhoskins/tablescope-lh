@@ -103,7 +103,6 @@ services:
       BUSINESS_INSIGHT_SHARED_CACHE_ENABLED: ${BUSINESS_INSIGHT_SHARED_CACHE_ENABLED:-false}
       BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED: ${BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED:-false}
       PROJECT_INSIGHT_EVENT_REBUILD_ENABLED: ${PROJECT_INSIGHT_EVENT_REBUILD_ENABLED:-false}
-      INSIGHT_DIAGNOSTIC_CARD_BUDGET: ${INSIGHT_DIAGNOSTIC_CARD_BUDGET:-24}
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       # Read-write access to per-tenant root so the platform API can manage
