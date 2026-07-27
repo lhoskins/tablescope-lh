@@ -81,6 +81,21 @@ function findCard(
   return null;
 }
 
+/**
+ * What the red marker means for this kind of step. A group comparison marks the
+ * segment carrying the problem; a time-series step marks flagged observations.
+ * One caption for both would be wrong in one of the two cases.
+ */
+function markerCaption(intent: string | undefined, count: number): string {
+  if (intent === "compare_multiple_groups" || intent === "compare_two_groups") {
+    return "The marked bar is the segment carrying the problem.";
+  }
+  if (intent === "detect_change_point") return "The marked point is where the level shifted.";
+  return count === 1
+    ? "The marked point is the flagged observation."
+    : `The ${count} marked points are the flagged observations.`;
+}
+
 function DiagnosticStep({ step }: { step: InsightDiagnostic }) {
   const [showEvidence, setShowEvidence] = useState(false);
   // Presentation comes from the intent, not from this component. Hardcoding a
@@ -100,7 +115,11 @@ function DiagnosticStep({ step }: { step: InsightDiagnostic }) {
             {step.highlight}
           </span>
         ) : null}
-        {step.triggeredBy ? (
+        {step.crossReference ? (
+          <span className="rounded-full bg-bg-secondary px-2 py-0.5 text-[11px] text-ink-tertiary">
+            cross-checked · {step.crossReference}
+          </span>
+        ) : step.triggeredBy ? (
           <span className="text-[11px] text-ink-tertiary">
             triggered: {step.triggeredBy}
           </span>
@@ -119,9 +138,7 @@ function DiagnosticStep({ step }: { step: InsightDiagnostic }) {
           {built.anomalyRows.length > 0 ? (
             <p className="mt-1 text-[12px] text-ink-tertiary">
               <span className="mr-1 inline-block h-2 w-2 rounded-full bg-danger align-middle" />
-              {built.anomalyRows.length === 1
-                ? "The marked point is the flagged observation."
-                : `The ${built.anomalyRows.length} marked points are the flagged observations.`}
+              {markerCaption(step.intent, built.anomalyRows.length)}
             </p>
           ) : null}
         </div>
@@ -274,7 +291,14 @@ export default function InsightAnalysisPage() {
 
   const diagnostics = card?.diagnostics ?? [];
   const actions = card?.proposedActions ?? [];
-  const crossRefs = card?.crossReferences ?? [];
+  const checked = new Set(
+    diagnostics.map((d) => d.crossReference).filter(Boolean) as string[],
+  );
+  // A source that was actually tested is answered in the ladder above; listing
+  // it again as an open question would re-ask a question already answered.
+  const crossRefs = (card?.crossReferences ?? []).filter(
+    (r) => !checked.has(r.name),
+  );
   const questions = card?.suggestedQuestions ?? [];
 
   return (
@@ -360,10 +384,14 @@ export default function InsightAnalysisPage() {
             <section aria-labelledby="how-we-got-here">
               <h2
                 id="how-we-got-here"
-                className="mb-2 text-[15px] font-semibold text-ink-primary"
+                className="mb-1 text-[15px] font-semibold text-ink-primary"
               >
-                How we got here
+                What we asked, and what the data answered
               </h2>
+              <p className="mb-2 text-[13px] text-ink-tertiary">
+                Each question below was run against the data — the answer is the
+                finding, not a prompt to investigate yourself.
+              </p>
               {diagnostics.length === 0 ? (
                 <p className="text-[13px] text-ink-tertiary">
                   This insight has not been dissected yet.
@@ -383,8 +411,12 @@ export default function InsightAnalysisPage() {
                   id="cross-references"
                   className="mb-2 text-[15px] font-semibold text-ink-primary"
                 >
-                  Check this against
+                  Not yet checked
                 </h2>
+                <p className="mb-2 text-[13px] text-ink-tertiary">
+                  Leads the analysis could not test automatically. Ask about any
+                  of them below.
+                </p>
                 <ul className="space-y-2">
                   {crossRefs.map((ref, i) => (
                     <li

@@ -134,4 +134,77 @@ describe("buildDiagnosticChart", () => {
     expect(buildDiagnosticChart(step({ result: { columns: [], rows: [] } }))).toBeNull();
     expect(buildDiagnosticChart(step({ result: undefined }))).toBeNull();
   });
+
+  it("charts a group comparison as ranked bars with the worst segment marked", () => {
+    // The backend folds raw records into one entry per group before sending
+    // these; charting the raw rows repeated one work centre down the axis.
+    const built = buildDiagnosticChart(
+      step({
+        intent: "compare_multiple_groups",
+        presentation: { chart: "bar" },
+        roles: { x: "WorkCenterId", y: "UnitsScrapped" },
+        markers: { anomalyIndices: [0] },
+        result: {
+          columns: ["WorkCenterId", "UnitsScrapped", "observations"],
+          rows: [
+            { WorkCenterId: "WC-007", UnitsScrapped: 42, observations: 60 },
+            { WorkCenterId: "WC-001", UnitsScrapped: 10, observations: 55 },
+            { WorkCenterId: "WC-002", UnitsScrapped: 9, observations: 51 },
+          ],
+        },
+      }),
+    )!;
+    expect(built.chart.type).toBe("bar");
+    expect(built.chart.data.series!.map((s) => s.label)).toEqual([
+      "WC-007",
+      "WC-001",
+      "WC-002",
+    ]);
+    // Ranking must survive: the leading bar is the answer to "where".
+    expect(built.chart.data.series![0].value).toBe(42);
+    expect(built.options.markedIndices).toEqual([0]);
+    expect(built.anomalyRows).toEqual([0]);
+  });
+
+  it("marks nothing when the backend found no clear leader", () => {
+    const built = buildDiagnosticChart(
+      step({
+        intent: "compare_multiple_groups",
+        presentation: { chart: "bar" },
+        roles: { x: "WorkCenterId", y: "UnitsScrapped" },
+        markers: {},
+        result: {
+          columns: ["WorkCenterId", "UnitsScrapped"],
+          rows: [
+            { WorkCenterId: "A", UnitsScrapped: 100 },
+            { WorkCenterId: "B", UnitsScrapped: 99 },
+          ],
+        },
+      }),
+    )!;
+    expect(built.options.markedIndices).toBeUndefined();
+    expect(built.anomalyRows).toEqual([]);
+  });
+
+  it("charts a cross-reference as a scatter with its regression line", () => {
+    const built = buildDiagnosticChart(
+      step({
+        intent: "relationship_numeric",
+        presentation: { chart: "scatter", layers: ["regression_line"] },
+        roles: { x: "UnitsScrapped", y: "OvertimeHours__ref" },
+        crossReference: "mfg_labor_actuals_weekly_CSV",
+        result: {
+          columns: ["WeekStart", "UnitsScrapped", "OvertimeHours__ref"],
+          rows: [
+            { WeekStart: "2025-01-06", UnitsScrapped: 111, OvertimeHours__ref: 40 },
+            { WeekStart: "2025-01-13", UnitsScrapped: 90, OvertimeHours__ref: 31 },
+          ],
+        },
+      }),
+    )!;
+    expect(built.chart.type).toBe("scatter");
+    expect(built.options.showRegressionLine).toBe(true);
+    expect(built.chart.data.series![0]).toEqual({ label: "111", value: 40 });
+  });
 });
+

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import uuid
 from dataclasses import dataclass, field, replace
@@ -2779,6 +2780,165 @@ def _target_measure(measures: list[str]) -> str | None:
     return None
 
 
+#: How many cards a single run will dissect. Each dissected card executes up to
+#: ``max_steps`` governed methods on top of its own query, so this is the knob
+#: that trades insight coverage against run time. The old hard-coded 4 meant
+#: most cards in a busy project never got a drill-down at all.
+_DIAGNOSTIC_CARD_BUDGET_DEFAULT = 24
+
+
+def _diagnostic_card_budget() -> int:
+    """Cards to dissect per run, overridable when a tenant's runs get slow."""
+    raw = os.getenv("INSIGHT_DIAGNOSTIC_CARD_BUDGET")
+    try:
+        value = int(raw) if raw else _DIAGNOSTIC_CARD_BUDGET_DEFAULT
+    except ValueError:
+        return _DIAGNOSTIC_CARD_BUDGET_DEFAULT
+    return max(1, value)
+
+
+async def _run_cross_reference(
+    session: AsyncSession,
+    runner: QueryRunner,
+    *,
+    card_table: Any,
+    card_measure: str,
+    card_period: str,
+    other_table: Any,
+    tenant_id: int | None,
+    max_rows: int,
+    max_measures: int = 2,
+) -> list[dict[str, Any]]:
+    """Test whether another data source moves with this finding.
+
+    "Does mfg_labor_rates show the same pattern?" is a question the system can
+    answer itself, and leaving it for the reader to click was the weakest part
+    of the drill-down. Both tables are aggregated onto their own period column,
+    joined on the period, and the pair is handed to the governed correlation
+    method. A material result is a **candidate causation factor** — positive or
+    negative — which is the thing worth chasing when deciding what to do.
+
+    Immaterial pairings produce nothing: an uncorrelated table is not evidence.
+    """
+    try:
+        probe = await _safe_query(
+            runner, f'SELECT * FROM {_quote(other_table.view_name)} LIMIT 200'
+        )
+    except Exception:
+        return []
+    if not probe or not probe.get("rows") or not probe.get("columns"):
+        return []
+
+    shape = derive_shape(probe["columns"], probe["rows"])
+    if not shape.time_columns or not shape.measures:
+        return []
+    other_period = shape.time_columns[0]
+
+    found: list[dict[str, Any]] = []
+    for other_measure in shape.measures[:max_measures]:
+        sql = _cross_reference_sql(
+            card_table.view_name, card_measure, card_period,
+            other_table.view_name, other_measure, other_period, max_rows,
+        )
+        try:
+            result = await _safe_query(runner, sql)
+        except Exception:
+            continue
+        # Correlating a handful of overlapping periods is not evidence.
+        if not result or len(result.get("rows") or []) < 8:
+            continue
+
+        left, right = f"{card_measure}", f"{other_measure}__ref"
+        try:
+            envelope = await analyze_methods(
+                session,
+                tenant_id=tenant_id,
+                columns=result.get("columns", []),
+                rows=result.get("rows", []),
+                question=(
+                    f"Does {other_measure} in {other_table.view_name} move with "
+                    f"{card_measure}?"
+                ),
+                intent="relationship_numeric",
+            )
+        except Exception:
+            continue
+        materiality = deep_analysis.assess_materiality("relationship_numeric", envelope)
+        if not materiality.material:
+            continue
+
+        direction = _relationship_direction(envelope)
+        found.append(
+            {
+                "stage": card_diagnostics.STAGE_CORROBORATE,
+                "intent": "relationship_numeric",
+                "title": f"{_humanize_column(other_measure)} in {other_table.view_name}",
+                "question": (
+                    f"Does {_humanize_column(other_measure)} in "
+                    f"{other_table.view_name} move with {_humanize_column(card_measure)}?"
+                ),
+                "rationale": (
+                    "A measure in an independent source that tracks this one is a "
+                    "candidate cause or lever; one that does not rules that source out."
+                ),
+                "finding": f"{direction} {materiality.reason}".strip(),
+                "highlight": materiality.highlight,
+                "triggeredBy": f"cross-reference against {other_table.view_name}",
+                "analyticalMethod": envelope,
+                "sql": sql,
+                "result": result,
+                "presentation": {"chart": "scatter", "layers": ["regression_line"]},
+                "markers": {},
+                "roles": {"x": left, "y": right},
+                "crossReference": other_table.view_name,
+            }
+        )
+    return found
+
+
+def _relationship_direction(envelope: dict[str, Any]) -> str:
+    """Whether the other source moves with this finding or against it."""
+    results = (envelope or {}).get("results")
+    if not isinstance(results, dict):
+        return ""
+    for key in ("correlation", "estimate", "rho", "r"):
+        value = results.get(key)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            if value > 0:
+                return "Moves in the same direction \u2014 rises together."
+            if value < 0:
+                return "Moves in the opposite direction \u2014 one rises as the other falls."
+    return ""
+
+
+def _humanize_column(name: str) -> str:
+    """`unit_cost` / `UnitCost` -> `Unit Cost`, for question text."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(name).replace("_", " "))
+    return " ".join(w.capitalize() for w in spaced.split())
+
+
+def _cross_reference_sql(
+    left_table: str, left_measure: str, left_period: str,
+    right_table: str, right_measure: str, right_period: str,
+    max_rows: int,
+) -> str:
+    """Two measures from two tables aligned on their shared timeline."""
+    left_agg = _agg_for_measure(left_measure)
+    right_agg = _agg_for_measure(right_measure)
+    return (
+        f'SELECT a.{_quote(left_period)}, a.{_quote(left_measure)}, '
+        f'b.{_quote(right_measure + "__ref")} FROM '
+        f'(SELECT {_quote(left_period)}, {left_agg}({_quote(left_measure)}) '
+        f'AS {_quote(left_measure)} FROM {_quote(left_table)} '
+        f'GROUP BY {_quote(left_period)}) a JOIN '
+        f'(SELECT {_quote(right_period)} AS {_quote(left_period)}, '
+        f'{right_agg}({_quote(right_measure)}) AS {_quote(right_measure + "__ref")} '
+        f'FROM {_quote(right_table)} GROUP BY {_quote(right_period)}) b '
+        f'ON a.{_quote(left_period)} = b.{_quote(left_period)} '
+        f'ORDER BY a.{_quote(left_period)} LIMIT {max_rows}'
+    )
+
+
 async def _card_diagnostic_insights(
     project: Project,
     ctx: ProjectContext,
@@ -2787,8 +2947,9 @@ async def _card_diagnostic_insights(
     *,
     tenant_id: int | None,
     cards: list[dict[str, Any]],
-    max_cards: int = 4,
-    max_steps: int = 3,
+    max_cards: int | None = None,
+    max_steps: int = 5,
+    max_cross_refs: int = 3,
     max_rows: int = 5000,
 ) -> list[dict[str, Any]]:
     """Dissect existing Risk/Trend/Opportunity cards and propose actions.
@@ -2809,6 +2970,8 @@ async def _card_diagnostic_insights(
         return []
     if get_engine_mode() == EngineMode.OFF:
         return []
+    if max_cards is None:
+        max_cards = _diagnostic_card_budget()
 
     produced: list[dict[str, Any]] = []
     examined = 0
@@ -2868,6 +3031,36 @@ async def _card_diagnostic_insights(
             # anomaly step is a period-ordered line with its flagged points
             # marked, and rendering it as a ranked bar reorders the timeline.
             presentation = deep_analysis.evidence_presentation(spec.intent)
+            markers = card_diagnostics.extract_markers(spec.intent, envelope)
+            evidence, evidence_roles = result, roles
+            finding = materiality.reason
+
+            # A group comparison hands the method raw rows (Welch's ANOVA needs
+            # the within-group spread) but must not chart them: that plotted
+            # individual records, repeating one work centre down the axis. Fold
+            # to one ranked entry per group so the leading bar names the segment.
+            if spec.intent in card_diagnostics.GROUP_EVIDENCE_INTENTS and spec.group_by:
+                measure = (roles or {}).get("y")
+                grouped, columns, marked = card_diagnostics.summarise_group_evidence(
+                    result.get("rows") or [], spec.group_by, str(measure or "")
+                )
+                if grouped:
+                    evidence = {"columns": columns, "rows": grouped}
+                    evidence_roles = {"x": spec.group_by, "y": measure}
+                    presentation = {"chart": "bar", "layers": []}
+                    markers = (
+                        {"anomalyIndices": [marked]} if marked is not None else {}
+                    )
+                    # "Groups differ significantly (p=0.000)" reports that a
+                    # test rejected its null hypothesis; it does not say where
+                    # to go. Name the segment.
+                    lead = card_diagnostics.describe_group_leader(
+                        grouped, spec.group_by, str(measure or ""), marked=marked
+                    )
+                    if lead:
+                        finding = f"{lead} {materiality.reason}"
+                        findings["top_segment"] = grouped[marked][spec.group_by]
+
             diagnostics.append(
                 {
                     "stage": spec.stage,
@@ -2875,20 +3068,49 @@ async def _card_diagnostic_insights(
                     "title": spec.title,
                     "question": spec.question,
                     "rationale": spec.rationale,
-                    "finding": materiality.reason,
+                    "finding": finding,
                     "highlight": materiality.highlight,
                     "triggeredBy": spec.triggered_by,
                     "analyticalMethod": envelope,
                     "sql": sql,
-                    "result": result,
+                    "result": evidence,
                     "presentation": presentation,
-                    "markers": card_diagnostics.extract_markers(spec.intent, envelope),
-                    "roles": roles,
+                    "markers": markers,
+                    "roles": evidence_roles,
                 }
             )
 
         if not diagnostics:
             continue
+
+        # Answer the cross-reference questions instead of listing them. A
+        # measure in an independent source that tracks this finding is a
+        # candidate cause or lever — the thing a reader actually needs when
+        # deciding what to do about it.
+        card_measure = _card_metric(card, shape)
+        if period_col and card_measure:
+            for other in ctx.tables:
+                if len(diagnostics) >= max_steps + max_cross_refs:
+                    break
+                if other.view_name == table.view_name:
+                    continue
+                try:
+                    diagnostics.extend(
+                        await _run_cross_reference(
+                            session, runner,
+                            card_table=table,
+                            card_measure=card_measure,
+                            card_period=period_col,
+                            other_table=other,
+                            tenant_id=tenant_id,
+                            max_rows=max_rows,
+                        )
+                    )
+                except Exception as exc:  # cross-referencing is best-effort
+                    logger.warning(
+                        "cross-reference %s x %s failed: %s",
+                        table.view_name, other.view_name, exc,
+                    )
 
         # A period comparison is re-checked against what the diagnostics
         # actually found, so a detected shift can justify one the card's text

@@ -251,6 +251,11 @@ export interface InsightDiagnostic {
   };
   /** Which column carries the x axis, the measure, and any second measure. */
   roles?: { x?: string; y?: string; y2?: string };
+  /**
+   * Set when this step was produced by checking an independent source. The
+   * named table has already been tested, so it is no longer an open lead.
+   */
+  crossReference?: string;
 }
 
 /** A proposed next step grounded in the diagnostics. */
