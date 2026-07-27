@@ -752,7 +752,14 @@ def summarise_group_evidence(
         value = row.get(value_key)
         if group is None:
             continue
-        if isinstance(value, bool) or not isinstance(value, int | float):
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, str):
+            try:
+                value = float(value)
+            except ValueError:
+                continue
+        if not isinstance(value, int | float):
             continue
         totals.setdefault(str(group), []).append(float(value))
 
