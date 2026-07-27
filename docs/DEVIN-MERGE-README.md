@@ -5,7 +5,7 @@ Repository: `lhoskins/tablescope-lh`
 **Base:** `devin/r-echarts-e2e-validation` (deployed lineage; already has the
 chart-fit work from PR #96)
 
-**17 commits · 33 files · +6568 / −56 · all tests green** (§5)
+**18 commits · 44 files · +7032 / −69 · all tests green** (§5)
 
 ---
 
@@ -44,11 +44,12 @@ git merge origin/claude/deep-analysis-business-value
 | `655640f` | Card strip + shareable `/business-insight/analysis/<id>` route |
 | `1c9131a` | **Analysis page evidence: real chart family, R's own anomaly markers, all rows, open ask box** |
 | `5749e49` | **Drill-down answers instead of asking: 4→24 card coverage, ranked segments, executed cross-references** |
-| `9ddf5ef`, `8643495`, `0626398`, `d0482f2`, `32c962a`, `d43446c` | Handoff docs |
+| `3a5f54c` | **Three reported defects: mid-session logout, uncorrectable 2FA code, lost place on back** |
+| `9ddf5ef`, `8643495`, `0626398`, `d0482f2`, `32c962a`, `d43446c`, `b5db428` | Handoff docs |
 
 ---
 
-## 3. The six problems fixed
+## 3. The seven problems fixed
 
 **A. Deeper analysis was not analysis.** `_shape_template_insights` probed tables
 (`SELECT * LIMIT 50`) for any drawable column combination — zero calls to the
@@ -97,6 +98,25 @@ causes, all reported from one screenshot:
 Fixed respectively by a tunable card budget, `summarise_group_evidence()` (fold
 to one ranked entry per group *for the chart only*), and `_run_cross_reference()`
 (join the two sources on their shared period and run the governed correlation).
+
+**G. Three defects reported from the deployed build.** Independent of the
+insight work, and the first is the most serious thing in this branch:
+
+1. **Sessions had no refresh path at all.** The JWT was minted for 60 minutes at
+   login and **never renewed — no refresh endpoint existed anywhere**. The first
+   request past the hour returned 401 and `api-client` cleared the token and
+   redirected to login. Anyone working longer than an hour was logged out
+   mid-task. Fixed with sliding renewal (§4g).
+2. **A mistyped 2FA code could not be corrected.** `OtpInput`'s autoFocus effect
+   was keyed on `digits.length`, so *every* deletion re-ran the mount effect,
+   which calls `focus()` and resets the caret to the end. Deleting a wrong middle
+   digit jumped to the end and the replacement landed there. The effect now runs
+   once on mount.
+3. **Back from Full analysis lost the reader's place.** The link went to
+   `/business-insight`, remounting the feed with panels collapsed —
+   `InsightPanel` holds open state locally, so browser history cannot restore it.
+   The link now carries the insight id in the hash; the holding panel opens and
+   the card scrolls into view.
 
 ---
 
@@ -247,6 +267,40 @@ _card_diagnostic_insights(max_cards=None, max_steps=5, max_cross_refs=3)
 causation. The UI says "candidate cause or lever" deliberately. Do not
 strengthen this to "causes" / "driven by" anywhere in the copy.
 
+### 4g. Sliding session renewal — the auth change
+
+```
+AuthMiddleware.dispatch()
+  decode_access_token(token)          unchanged: invalid ⇒ 401 SESSION_EXPIRED
+  response = await call_next(request)
+  renew_access_token(token)           None unless PAST HALFWAY through its life
+    ├─ re-mints from the RAW claims   → `aal` (2FA level) survives
+    ├─ `ses` = original session start → preserved across renewals
+    └─ now - ses >= jwt_session_absolute_ttl_minutes ⇒ None (hard stop)
+  response.headers["X-Session-Token"] = renewed
+      ↑ must stay in CORS expose_headers (app/main.py) or the browser hides it
+
+web-ui/lib/api-client.ts   request() · uploadFile() · streamRequest()
+  response.headers.get("X-Session-Token") ⇒ storeToken(...)
+```
+
+**Four things here are load-bearing:**
+
+- **Renewal must re-mint from the raw claims, not from a fixed field list.**
+  `aal` records that the user cleared 2FA. Rebuilding the token from named
+  fields would drop it and silently downgrade a verified session.
+- **`ses` must be carried forward.** If each renewal reset it, the absolute cap
+  would never fire and sessions would slide forever.
+- **Tokens minted before this feature have no `ses`** and fall back to their
+  `iat`, so existing sessions are capped rather than becoming immortal.
+- **`X-Session-Token` must stay in `expose_headers`.** Drop it and the browser
+  silently hides the header — every session then expires at the TTL exactly as
+  before, with no error to point at the cause.
+
+Renewal is deliberately *not* a refresh endpoint: it follows activity on the
+requests already being made, so there is no extra round trip and no refresh
+token to store. An **idle** session still expires on schedule.
+
 Two constraints the shared card component imposes — **keep both**:
 
 - **The strip is gated on `!hideActions`.** The same card renders on the public
@@ -295,11 +349,12 @@ the adapter.
 |---|---|
 | `test_deep_analysis.py` | 34 / 34 |
 | `test_card_diagnostics.py` | 48 / 48 |
+| `test_jwt.py` (incl. 9 renewal / security-boundary tests) | full |
 | `test_insight_registry.py` | 21 / 21 |
 | `test_ask_pipeline.py` | 17 / 17 |
 | `test_chart_catalog.py` | 18 / 18 |
 | `test_visualization_engine.py` | 27 / 27 |
-| web-ui `vitest` | 274 / 274 (42 files) |
+| web-ui `vitest` | 281 / 281 (43 files) |
 | `tsc` · `ruff` · `next lint` | clean |
 
 CI:
@@ -332,6 +387,13 @@ R_ANALYTICS_FAILURE_MODE=python_fallback
 # trades drill-down coverage against insight-refresh time. Lower it if a
 # refresh times out; do NOT disable the feature to fix a timeout.
 INSIGHT_DIAGNOSTIC_CARD_BUDGET=24
+```
+
+Session lifetime (optional — defaults are sane):
+
+```
+JWT_ACCESS_TOKEN_TTL_MINUTES=60        # unchanged; now slides while active
+JWT_SESSION_ABSOLUTE_TTL_MINUTES=720   # ceiling activity cannot exceed (12h)
 ```
 
 Then **clear insight caches** so cards regenerate through the new path
@@ -382,6 +444,23 @@ Then **clear insight caches** so cards regenerate through the new path
 - Suggested questions and cross-reference prompts **submit into the same box**
   (they no longer navigate away to `/ai?q=`).
 - Title and summary show **bold text, not literal `**`**.
+
+**The three reported defects (§3G)**
+- **Session:** sign in, then keep using the app past the token TTL. You must
+  **not** be logged out. Confirm in devtools that responses carry
+  `X-Session-Token` once past halfway, and that `tablescope.token` in
+  localStorage changes. If the header is absent from the browser (but present
+  server-side), `expose_headers` is missing — see §4g.
+- **Session, 2FA:** do the same on a **2FA-verified** session and confirm you are
+  not re-prompted for MFA after a renewal — that would mean `aal` was dropped.
+- **Session, idle:** leave a tab idle past the TTL and confirm the next request
+  *does* land on login. Renewal follows activity; idle sessions must still end.
+- **2FA entry:** type a 6-digit code, click a **middle** cell, delete that digit
+  and retype it. The corrected digit must land **where it was deleted**, not at
+  the end.
+- **Back navigation:** open a card's *Full analysis*, then *Back to this
+  insight*. The panel holding that card must be **open** and the card scrolled
+  into view (with a brief ring) — not the top of a collapsed feed.
 
 **Coverage, segments and cross-references — the reported regressions**
 - **Most Risk/Trend/Opportunity cards now carry a *Full analysis* link**, not 2
@@ -468,6 +547,14 @@ dialect.
 together over the overlapping periods. The copy says "candidate cause or lever"
 on purpose. Do not strengthen it.
 
+**Session renewal is the highest-risk change in this merge to get wrong.** It
+touches authentication. The 9 tests in `test_jwt.py` cover the boundaries
+(absolute cap enforced, legacy tokens capped, tampered and expired tokens never
+renewed, `aal` and identity preserved) — **run them and report the totals**. If
+anything about the sliding-session model is unacceptable for your security
+posture, say so in the PR rather than weakening it silently; the alternative
+(a real refresh-token flow) is a larger design change, not a tweak.
+
 **Retrieval scope.** `load_tenant_insight_cards()` reads cards for the caller's
 tenant (optionally filtered by project). Confirm on a multi-project tenant that
 a question resolves to the intended card, and report if project scoping should
@@ -491,4 +578,8 @@ Also report, specifically:
   segment named in the finding;
 - a **screenshot of a corroboration step** with its direction statement;
 - **insight-refresh duration before and after** (§9), and the value of
-  `INSIGHT_DIAGNOSTIC_CARD_BUDGET` you settled on.
+  `INSIGHT_DIAGNOSTIC_CARD_BUDGET` you settled on;
+- **confirmation that a session survives past the token TTL while active**, that
+  a 2FA-verified session is not re-prompted after renewal, and that an **idle**
+  session still expires;
+- `test_jwt.py` totals.

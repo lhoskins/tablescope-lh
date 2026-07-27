@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 from app.auth.mfa_errors import MfaRequiredError, mfa_required_handler
-from app.auth.middleware import AuthMiddleware
+from app.auth.middleware import SESSION_TOKEN_HEADER, AuthMiddleware
 from app.config import get_settings
 from app.logging_config import configure_logging
 from app.observability import mount_metrics, setup_sentry
@@ -165,6 +165,9 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Without this the browser drops the renewed-session header and every
+        # session dies at the TTL regardless of activity.
+        expose_headers=[SESSION_TOKEN_HEADER],
     )
     app.add_middleware(AuthMiddleware)
 

@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "change-me-please"
     jwt_algorithm: str = "HS256"
     jwt_access_token_ttl_minutes: int = 60
+    #: Ceiling on how long *activity* may keep extending one session before real
+    #: re-authentication. Sliding renewal (see `renew_access_token`) stops here.
+    jwt_session_absolute_ttl_minutes: int = 720
     jwt_issuer: str = "tablescope-platform-api"
     jwt_audience: str = "tablescope-clients"
 

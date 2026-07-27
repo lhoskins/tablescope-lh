@@ -100,6 +100,13 @@ function redirectToLogin(): void {
   window.location.href = `${base}?next=${next}`;
 }
 
+/**
+ * Response header carrying a renewed session token. Mirrors
+ * `SESSION_TOKEN_HEADER` in the platform-api auth middleware, and must stay in
+ * that service's CORS `expose_headers` or the browser will hide it.
+ */
+const SESSION_TOKEN_HEADER = "X-Session-Token";
+
 /** Whether an HTTP status + error code represents an expired/invalid session. */
 function isAuthExpiry(status: number, code: string | null): boolean {
   if (status === 401) return true;
@@ -143,6 +150,14 @@ async function request<T>(
     headers,
     cache: "no-store",
   });
+
+  // The API slides the session forward while the user is active. Adopting the
+  // renewed token here is what stops a long task — reading an analysis, waiting
+  // on an insight refresh — from ending in a surprise logout at the TTL.
+  // Read before the `ok` check so a renewal riding on an error response is
+  // still picked up.
+  const renewed = response.headers.get(SESSION_TOKEN_HEADER);
+  if (renewed) storeToken(renewed);
 
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
@@ -204,6 +219,8 @@ async function uploadFile<T>(
     body: form,
     headers,
   });
+  const renewedUpload = response.headers.get(SESSION_TOKEN_HEADER);
+  if (renewedUpload) storeToken(renewedUpload);
   if (!response.ok) {
     let detail = `Upload failed: ${response.status}`;
     let code: string | null = null;
@@ -238,11 +255,16 @@ async function streamRequest(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  return fetch(`${getApiUrl()}${path}`, {
+  const response = await fetch(`${getApiUrl()}${path}`, {
     ...init,
     headers,
     cache: "no-store",
   });
+  // SSE runs are the longest-lived requests in the app — an insight refresh can
+  // straddle the TTL — so adopt a renewal here too.
+  const renewed = response.headers.get(SESSION_TOKEN_HEADER);
+  if (renewed) storeToken(renewed);
+  return response;
 }
 
 export const apiClient = {

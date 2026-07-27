@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { IconMinus, IconPlus } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 
@@ -11,6 +11,7 @@ export function InsightPanel({
   headerRight,
   collapsible = false,
   defaultOpen = true,
+  forceOpen = false,
   count,
 }: {
   title: string;
@@ -19,9 +20,19 @@ export function InsightPanel({
   headerRight?: ReactNode;
   collapsible?: boolean;
   defaultOpen?: boolean;
+  /**
+   * Open the panel from outside, after mount. `defaultOpen` only seeds the
+   * initial state, so it cannot reveal a panel once the hash it depends on is
+   * read (the hash is unavailable during SSR). The user can still collapse it.
+   */
+  forceOpen?: boolean;
   count?: number;
 }) {
   const [open, setOpen] = useState(!collapsible || defaultOpen);
+
+  useEffect(() => {
+    if (forceOpen) setOpen(true);
+  }, [forceOpen]);
   const badge = collapsible && count != null && count > 0 && (
     <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
       {count}
