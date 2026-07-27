@@ -5,7 +5,7 @@ Repository: `lhoskins/tablescope-lh`
 **Base:** `devin/r-echarts-e2e-validation` (deployed lineage; already has the
 chart-fit work from PR #96)
 
-**13 commits · 26 files · +4855 / −48 · all tests green** (§5)
+**14 commits · 38 files · +5952 / −109 · all tests green** (§5)
 
 ---
 
@@ -42,6 +42,7 @@ git merge origin/claude/deep-analysis-business-value
 | `e569cf8` | **Purpose-driven Deeper analysis: dissect the card, propose actions, demote MoM/YoY** |
 | `bc0a958` | Wire card diagnostics into the insight run |
 | `655640f` | Card strip + shareable `/business-insight/analysis/<id>` route |
+| `1c9131a` | **Analysis page evidence: real chart family, R's own anomaly markers, all rows, open ask box** |
 | `9ddf5ef`, `8643495`, `0626398`, `d0482f2` | Handoff docs |
 
 ---
@@ -149,6 +150,40 @@ app/business-insight/analysis/[insightId]/page.tsx
                rationale + chart + R method) · Check this against · Ask about this
 ```
 
+### 4e. Evidence on the analysis page — chart, markers, rows, ask box
+
+```
+_card_diagnostic_insights()  attaches per step:
+   presentation   deep_analysis.evidence_presentation(intent)   line/bar/scatter + layers
+   markers        card_diagnostics.extract_markers(intent, env) R's OWN flagged indices
+   roles          {x, y, y2} from the projection that ran
+   result         the full evidence rows
+
+lib/insights/diagnostic-chart.ts::buildDiagnosticChart()
+   → honours `presentation`, keeps EVERY row in projection order, plots `roles`
+   → options.markedIndices / markedChangePointIndex
+
+EChartsWidget  explicit markedIndices WIN over the 2-sigma re-derivation
+analysis page  "See all N observations" → EvidenceTable, flagged rows highlighted
+               InsightAskBox → aiActionsApi.askAndRun(card_context with base_sql)
+                  └─ _ask_and_run_core → ask_pipeline.build_insight_followup()
+                                       → followup_prompt()  ← now includes the SQL
+```
+
+**Three things here are load-bearing — do not "simplify" them:**
+
+- **`buildDiagnosticChart` is deliberately not `buildChart`.** The conversational
+  builder ranks bars by magnitude and caps at 25 points. Correct for chat; applied
+  to a 31-period series it reorders the timeline by value and drops six
+  observations. That was the reported "scrambled dates" bug. Evidence keeps row
+  order and every row.
+- **`sortBy` on `WidgetConfig` is inert** — no renderer reads it. Row order is the
+  only order. Do not "fix" ordering by setting `sortBy`.
+- **Explicit `markedIndices` must keep winning over `showAnomalies`.** R's
+  `detect_anomalies` fits an ETS model, so a flagged point can sit *inside* 2σ of
+  the mean. Letting the heuristic run would mark a different point than the
+  sentence above the chart names.
+
 Two constraints the shared card component imposes — **keep both**:
 
 - **The strip is gated on `!hideActions`.** The same card renders on the public
@@ -180,6 +215,8 @@ the adapter.
 | `app/services/insight_registry.py` | card retrieval by partial title, stored-SQL answers | 21 |
 | `app/services/card_diagnostics.py` | the diagnostic ladder, MoM/YoY triggers, action proposals, cross-refs | 34 |
 | `web-ui/.../home/insight-analysis-strip.tsx` | compact strip on the card | 6 |
+| `web-ui/lib/insights/diagnostic-chart.ts` | evidence chart: intent's family, full series, method markers | 13 |
+| `web-ui/.../home/insight-ask-box.tsx` | free-text ask grounded in the card's query | 5 |
 | `web-ui/app/business-insight/analysis/[insightId]/page.tsx` | the shareable full analysis | — |
 | `web-ui/.../ai-result-view.chartfamily.test.tsx` | locks the chart-family collapse shut | 4 |
 
@@ -194,12 +231,12 @@ the adapter.
 | Suite | Result |
 |---|---|
 | `test_deep_analysis.py` | 34 / 34 |
-| `test_card_diagnostics.py` | 34 / 34 |
+| `test_card_diagnostics.py` | 40 / 40 |
 | `test_insight_registry.py` | 21 / 21 |
-| `test_ask_pipeline.py` | 14 / 14 |
+| `test_ask_pipeline.py` | 17 / 17 |
 | `test_chart_catalog.py` | 18 / 18 |
 | `test_visualization_engine.py` | 27 / 27 |
-| web-ui `vitest` | 248 / 248 (40 files) |
+| web-ui `vitest` | 271 / 271 (42 files) |
 | `tsc` · `ruff` · `next lint` | clean |
 
 CI:
@@ -260,6 +297,22 @@ Then **clear insight caches** so cards regenerate through the new path
   language and no detected change-point should show *no* period comparison; a
   trend card should show one, labelled with what triggered it.
 - Open a shared **`/reports/<token>`** page and confirm **no strip** appears.
+
+**Analysis-page evidence — the reported follow-ups**
+- An anomaly step renders as a **line in date order**, not a bar sorted by
+  magnitude, and shows **all** observations (a 31-period series must show 31
+  points, not 25).
+- The flagged observation(s) carry a **red marker at the point the method
+  named** — cross-check the marked period against the Explain panel's
+  `anomalies` indices; they must agree.
+- **"See all N observations"** expands the evidence table and the flagged rows
+  are highlighted.
+- The **ask box accepts free text**. Ask something the suggestions do not cover
+  (e.g. "break this down by supplier and join the contract list") and confirm
+  the generated SQL **builds on the card's query** rather than starting over.
+- Suggested questions and cross-reference prompts **submit into the same box**
+  (they no longer navigate away to `/ai?q=`).
+- Title and summary show **bold text, not literal `**`**.
 
 **Conversation — test all three surfaces**
 - Two-measure question → **scatter** (was forced to a table).
