@@ -256,6 +256,14 @@ export interface InsightDiagnostic {
    * named table has already been tested, so it is no longer an open lead.
    */
   crossReference?: string;
+  /**
+   * For a claim-verification step: whether the data bore out the assertion the
+   * card's own summary made. `contradicted` means the narrative is wrong.
+   */
+  claimVerdict?: "supported" | "contradicted" | "inconclusive" | "untestable";
+  /** The measure that was tested to reach that verdict. */
+  claimMeasure?: string;
+  claimTable?: string;
 }
 
 /** A proposed next step grounded in the diagnostics. */

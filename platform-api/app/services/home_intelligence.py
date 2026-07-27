@@ -42,7 +42,7 @@ from app.models.reference_library import (
     ReferenceDocument,
 )
 from app.models.saved_query import SavedQuery
-from app.services import card_diagnostics, deep_analysis
+from app.services import card_diagnostics, claim_verification, deep_analysis
 from app.services.ai_governance import ai_governance_service
 from app.services.analytical_method_engine import (
     EngineMode,
@@ -2797,6 +2797,159 @@ def _diagnostic_card_budget() -> int:
     return max(1, value)
 
 
+async def _verify_card_claims(
+    session: AsyncSession,
+    runner: QueryRunner,
+    *,
+    card: dict[str, Any],
+    ctx: ProjectContext,
+    tenant_id: int | None,
+    max_rows: int,
+    max_claims: int = 2,
+) -> list[dict[str, Any]]:
+    """Put the card's own narrative to the test.
+
+    A card writes "gross margin declined, indicating rising material costs" and
+    nothing ever checks the clause after "indicating" — it is a hypothesis
+    printed in the same voice as the measurement. Here the claim is extracted,
+    the measure it names is located anywhere in the project (usually a different
+    table from the card's own), and its trend is run through the governed engine
+    over that measure's full history.
+
+    The result leads the drill-down because a contradicted claim invalidates the
+    card's story, and that is the single most useful thing the analysis can say.
+    """
+    claims = claim_verification.extract_claims(card, max_claims=max_claims)
+    if not claims:
+        return []
+
+    # Every measure in the project is a candidate: the claim almost always names
+    # something outside the table the card was built from.
+    candidates: list[tuple[str, str]] = [
+        (table.view_name, column)
+        for table in ctx.tables
+        for column in table.column_names
+    ]
+
+    steps: list[dict[str, Any]] = []
+    for claim in claims:
+        match = claim_verification.match_measure(claim, candidates)
+        if match is None:
+            steps.append(
+                _claim_step(claim_verification.check_claim(
+                    claim, measure=None, table=None, envelope=None
+                ), sql="", result=None)
+            )
+            continue
+
+        table_name, measure = match
+        table = next((t for t in ctx.tables if t.view_name == table_name), None)
+        if table is None:
+            continue
+        period = await _first_time_column(runner, table)
+        if not period:
+            continue
+
+        sql = (
+            f'SELECT {_quote(period)}, {_agg_for_measure(measure)}({_quote(measure)}) '
+            f'AS {_quote(measure)} FROM {_quote(table_name)} '
+            f'GROUP BY {_quote(period)} ORDER BY {_quote(period)} LIMIT {max_rows}'
+        )
+        try:
+            result = await _safe_query(runner, sql)
+        except Exception:
+            continue
+        rows = (result or {}).get("rows") or []
+        if len(rows) < 4:
+            continue
+
+        try:
+            envelope = await analyze_methods(
+                session,
+                tenant_id=tenant_id,
+                columns=result.get("columns", []),
+                rows=rows,
+                question=f"Is {measure} trending over time?",
+                intent="detect_trend",
+            )
+        except Exception:
+            continue
+
+        check = claim_verification.check_claim(
+            claim,
+            measure=measure,
+            table=table_name,
+            envelope=envelope,
+            change_percent=claim_verification.percent_change(rows, measure),
+            period_label=_period_label(rows, period),
+        )
+        steps.append(_claim_step(check, sql=sql, result=result, envelope=envelope))
+
+    return steps
+
+
+def _claim_step(
+    check: Any,
+    *,
+    sql: str,
+    result: dict[str, Any] | None,
+    envelope: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A claim check rendered as a diagnostic step."""
+    return {
+        "stage": card_diagnostics.STAGE_VERIFY,
+        "intent": "detect_trend",
+        "title": f"Claim: \u201c{check.claim.text}\u201d",
+        "question": f"Does the data support \u201c{check.claim.text}\u201d?",
+        "rationale": (
+            "The card asserts this as a cause. Until it is measured it is a "
+            "hypothesis stated in the same voice as the finding."
+        ),
+        "finding": check.finding,
+        "highlight": check.verdict,
+        "triggeredBy": "stated in the card's summary",
+        "analyticalMethod": envelope or {},
+        "sql": sql,
+        "result": result,
+        "presentation": {"chart": "line", "layers": ["regression_line"]}
+        if result
+        else {"chart": "table", "layers": []},
+        "markers": {},
+        "roles": {"x": _first_column(result), "y": check.measure} if result else {},
+        "claimVerdict": check.verdict,
+        "claimMeasure": check.measure,
+        "claimTable": check.table,
+    }
+
+
+def _first_column(result: dict[str, Any] | None) -> str | None:
+    """First projected column, or None — an empty projection must not raise."""
+    columns = (result or {}).get("columns") or []
+    return str(columns[0]) if columns else None
+
+
+async def _first_time_column(runner: QueryRunner, table: Any) -> str | None:
+    """The table's period column, probed the same way the diagnostics do."""
+    try:
+        probe = await _safe_query(
+            runner, f'SELECT * FROM {_quote(table.view_name)} LIMIT 200'
+        )
+    except Exception:
+        return None
+    if not probe or not probe.get("rows") or not probe.get("columns"):
+        return None
+    shape = derive_shape(probe["columns"], probe["rows"])
+    return shape.time_columns[0] if shape.time_columns else None
+
+
+def _period_label(rows: list[dict[str, Any]], period: str) -> str:
+    """`2024-01 to 2026-01`, so a magnitude is anchored to a window."""
+    values = [str(r.get(period)) for r in rows if r.get(period) is not None]
+    if not values:
+        return "the same period"
+    return f"{values[0]} to {values[-1]}"
+
+
 async def _run_cross_reference(
     session: AsyncSession,
     runner: QueryRunner,
@@ -3017,6 +3170,19 @@ async def _card_diagnostic_insights(
 
         findings: dict[str, Any] = {}
         diagnostics: list[dict[str, Any]] = []
+
+        # Check the card's own assertions first. "indicating rising material
+        # costs" is a hypothesis printed beside the measurement; if it is wrong,
+        # everything below it is reasoning about a story that does not hold.
+        try:
+            diagnostics.extend(
+                await _verify_card_claims(
+                    session, runner, card=card, ctx=ctx,
+                    tenant_id=tenant_id, max_rows=max_rows,
+                )
+            )
+        except Exception as exc:  # claim checking is best-effort
+            logger.warning("claim verification failed for %s: %s", card.get("title"), exc)
         for spec in specs:
             envelope, result, sql, roles = await _run_diagnostic(
                 session, runner, table, spec, shape, tenant_id, max_rows
