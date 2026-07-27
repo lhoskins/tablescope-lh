@@ -34,12 +34,18 @@ export function OtpInput({
 
   const digits = value.replace(/\D/g, "").slice(0, length);
 
+  // Mount only. Keying this on `digits.length` meant every deletion re-ran it
+  // and slammed the caret back to the end: correcting a mistyped middle digit
+  // deleted it, jumped to the end, and re-inserted the fix in the wrong place —
+  // so a wrong code could not be corrected, only cleared and retyped.
+  const autoFocused = useRef(false);
   useEffect(() => {
-    if (autoFocus) {
-      inputRef.current?.focus();
-      setCaretIndex(digits.length);
-    }
-  }, [autoFocus, digits.length]);
+    if (!autoFocus || autoFocused.current) return;
+    autoFocused.current = true;
+    inputRef.current?.focus();
+    setCaretIndex(digits.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFocus]);
 
   useLayoutEffect(() => {
     inputRef.current?.setSelectionRange(caretIndex, caretIndex);

@@ -19,6 +19,7 @@ import {
 } from "@/components/tablescope/home/intelligence-card";
 import { buildDiagnosticChart } from "@/lib/insights/diagnostic-chart";
 import { InsightAskBox } from "@/components/tablescope/home/insight-ask-box";
+import { insightReturnHref } from "@/lib/insights/return-target";
 import {
   getIntelligenceSnapshot,
   suggestInsights,
@@ -304,12 +305,14 @@ export default function InsightAnalysisPage() {
   return (
     <AppShell mode="home" activeNav="business-insight" tenant={tenant} user={user}>
       <div className="mx-auto w-full max-w-content space-y-5 py-6">
+        {/* Back to the CARD, not the top of a freshly-collapsed feed: the
+            reader was mid-investigation and expects to carry on there. */}
         <Link
-          href="/business-insight"
+          href={insightReturnHref("/business-insight", insightId)}
           className="inline-flex items-center gap-1 text-[13px] text-ink-secondary hover:text-ink-primary"
         >
           <IconArrowLeft size={15} aria-hidden />
-          Back to Business Insight
+          Back to this insight
         </Link>
 
         {isLoading ? (

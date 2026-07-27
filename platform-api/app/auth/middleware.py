@@ -22,10 +22,19 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.auth.context import RequestContext
-from app.auth.jwt import AuthError, TokenClaims, decode_access_token
+from app.auth.jwt import (
+    AuthError,
+    TokenClaims,
+    decode_access_token,
+    renew_access_token,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+#: Response header carrying a renewed session token. Must stay in the CORS
+#: `expose_headers` list or the browser will hide it and sessions will expire.
+SESSION_TOKEN_HEADER = "X-Session-Token"
 
 _ANONYMOUS_PATH_PREFIXES = (
     "/health",
@@ -111,5 +120,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     status_code=401,
                 )
             request.state.context = RequestContext(claims=claims, is_service=False)
+
+            # Sliding session: an active user should never be logged out
+            # mid-task just because the clock ran out. Handed back on the
+            # response so no extra round trip is needed; the client swaps it in.
+            response = await call_next(request)
+            try:
+                renewed = renew_access_token(token)
+            except Exception:  # never let renewal break a good response
+                logger.exception("Token renewal failed")
+                renewed = None
+            if renewed:
+                response.headers[SESSION_TOKEN_HEADER] = renewed
+            return response
 
         return await call_next(request)

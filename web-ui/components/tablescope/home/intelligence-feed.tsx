@@ -36,6 +36,11 @@ import {
   InsightPanel,
   PanelEmpty,
 } from "@/components/tablescope/insight-panel";
+import {
+  insightAnchorId,
+  useReturnTarget,
+  useScrollToReturnTarget,
+} from "@/lib/insights/return-target";
 
 type Status = "idle" | "streaming" | "complete" | "error";
 
@@ -85,8 +90,22 @@ function Section({
   onCreateAction?: (card: InsightCard) => void;
   actionsDisclosure?: "always-visible" | "collapsible";
 }) {
+  // A reader returning from a card's full analysis must find that card, so the
+  // panel holding it opens regardless of its usual default.
+  const returnTarget = useReturnTarget();
+  const holdsReturnTarget =
+    returnTarget != null &&
+    cards.some((c) => (c.insightId || c.id) === returnTarget);
+
   return (
-    <InsightPanel title={title} icon={icon} collapsible defaultOpen={defaultOpen} count={cards.length}>
+    <InsightPanel
+      title={title}
+      icon={icon}
+      collapsible
+      defaultOpen={defaultOpen || holdsReturnTarget}
+      forceOpen={holdsReturnTarget}
+      count={cards.length}
+    >
       {cards.length === 0 ? (
         loading ? null : <PanelEmpty text={emptyText} />
       ) : (
@@ -96,9 +115,14 @@ function Section({
             const isPinned = Boolean(
               pinnedByFingerprint && key && pinnedByFingerprint.has(key),
             );
+            const anchor = card.insightId || card.id;
             return (
-              <IntelligenceCard
+              <div
                 key={key}
+                id={anchor ? insightAnchorId(anchor) : undefined}
+                className="scroll-mt-24 rounded-lg transition-shadow data-[returned=true]:ring-2 data-[returned=true]:ring-brand-500"
+              >
+              <IntelligenceCard
                 card={card}
                 pinned={isPinned}
                 feedback={feedbackById[card.insightId || card.id]}
@@ -120,6 +144,7 @@ function Section({
                 onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
                 actionsDisclosure={actionsDisclosure}
               />
+              </div>
             );
           })}
         </div>
@@ -512,6 +537,10 @@ export function IntelligenceFeed({
 
   const granularity = settings?.granularity ?? 3;
   const hasCards = allInsights.length > 0;
+
+  // Bring the card a reader came back to into view, once the feed has rendered
+  // it. The browser's own hash scrolling fires before the cards exist.
+  useScrollToReturnTarget(useReturnTarget(), hasCards);
 
   const handleGranularity = (value: number) => {
     setSettings((prev) => (prev ? { ...prev, granularity: value } : prev));
