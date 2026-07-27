@@ -5,7 +5,7 @@ Repository: `lhoskins/tablescope-lh`
 **Base:** `devin/r-echarts-e2e-validation` (deployed lineage; already has the
 chart-fit work from PR #96)
 
-**19 commits · 46 files · +7870 / −72 · all tests green** (§5)
+**20 commits · 49 files · +7990 / −78 · all tests green** (§5)
 
 ---
 
@@ -46,6 +46,7 @@ git merge origin/claude/deep-analysis-business-value
 | `5749e49` | **Drill-down answers instead of asking: 4→24 card coverage, ranked segments, executed cross-references** |
 | `3a5f54c` | **Three reported defects: mid-session logout, uncorrectable 2FA code, lost place on back** |
 | `dcbbbc9` | **Claim verification: the card's own narrative is put to a statistical test** |
+| `<deploy>` | Deployment runbook; cache-clear script fixed to clear all three stores |
 | `9ddf5ef`, `8643495`, `0626398`, `d0482f2`, `32c962a`, `d43446c`, `b5db428` | Handoff docs |
 
 ---
@@ -419,38 +420,118 @@ cd ../../web-ui && npm run typecheck && npm test -- --run && npm run build
 
 ## 6. Deploy
 
-```bash
-docker compose build web-ui platform-api        # both changed
-docker compose up -d web-ui platform-api platform-api-worker r-analytics
-```
+**No database migration is required** — this branch changes no schema. Only
+`platform-api` and `web-ui` changed; `r-analytics`, `teiid`, `nginx` and the
+datastores are untouched and must not be rebuilt.
 
-Environment on **platform-api *and* platform-api-worker** (the worker generates
-insights):
+### 6.1 Configuration
+
+Both new settings are already wired into `docker-compose.yml` with working
+defaults, and `platform-api-worker` inherits them through the
+`&platform_api_env` anchor — **the worker generates insights, so it needs them
+too**. Deploy works with no `.env` change at all; set these only to override:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `INSIGHT_DIAGNOSTIC_CARD_BUDGET` | `24` | Cards dissected per run. Trades drill-down coverage against refresh time. |
+| `JWT_SESSION_ABSOLUTE_TTL_MINUTES` | `720` | Ceiling on how long activity may extend one session. |
+
+Confirm these are already correct for the R path (unchanged by this branch):
 
 ```
 ANALYTICAL_METHOD_ENGINE_MODE=hybrid
 R_ANALYTICS_ENABLED=true
 R_ANALYTICS_FAILURE_MODE=python_fallback
-
-# Cards dissected per run (default 24). Each one executes several governed
-# methods plus up to 3 cross-reference correlations, so this is the knob that
-# trades drill-down coverage against insight-refresh time. Lower it if a
-# refresh times out; do NOT disable the feature to fix a timeout.
-INSIGHT_DIAGNOSTIC_CARD_BUDGET=24
 ```
 
-Session lifetime (optional — defaults are sane):
+> **If you add any further variable**, it must be listed in the `environment:`
+> block of `docker-compose.yml` as well as `.env` — compose only forwards what
+> it explicitly names. A variable set only in `.env` is silently ignored, which
+> looks exactly like the feature not working.
 
+### 6.2 Build and start
+
+```bash
+# Both changed images. r-analytics is NOT rebuilt.
+docker compose build platform-api web-ui
+
+# platform-api-worker runs the same image as platform-api, so it must be
+# recreated too or it keeps serving the OLD insight code.
+docker compose up -d platform-api platform-api-worker web-ui
+
+docker compose ps          # all healthy before continuing
+docker compose logs --tail=50 platform-api platform-api-worker
 ```
-JWT_ACCESS_TOKEN_TTL_MINUTES=60        # unchanged; now slides while active
-JWT_SESSION_ABSOLUTE_TTL_MINUTES=720   # ceiling activity cannot exceed (12h)
+
+### 6.3 Smoke-check before clearing anything
+
+Cheap checks that catch the two silent failure modes:
+
+```bash
+# 1. The renewed-session header must be visible to the browser. If
+#    Access-Control-Expose-Headers is missing, sessions expire at the TTL
+#    exactly as before, with no error anywhere to point at the cause.
+curl -si -X OPTIONS https://<host>/api/ai/home-intelligence/snapshot \
+  -H "Origin: https://<host>" -H "Access-Control-Request-Method: GET" \
+  | grep -i "access-control-expose-headers"
+#    expect: access-control-expose-headers: X-Session-Token
+
+# 2. The worker picked up the new settings.
+docker compose exec platform-api-worker env \
+  | grep -E "INSIGHT_DIAGNOSTIC_CARD_BUDGET|ANALYTICAL_METHOD_ENGINE_MODE"
 ```
 
-Then **clear insight caches** so cards regenerate through the new path
-(Clear-cache buttons, or `scripts/delete_insight_caches.py`).
+### 6.4 Clear insight caches, then regenerate
 
-> Card retrieval reads the Business-Insight cache. Clearing it empties the
-> registry until cards regenerate — regenerate before testing §7 retrieval.
+Cards are cached per user. Existing cards were produced by the old code and
+carry **no** diagnostics, claim checks or cross-references, so nothing new
+appears until they regenerate.
+
+```bash
+docker compose exec platform-api python scripts/delete_insight_caches.py
+# expect all three counts, e.g.
+# {'business_insight_results': N, 'intelligence_snapshots': N, 'project_intelligence_snapshots': N}
+```
+
+or use the **Clear cache** buttons on Business Insight / Project Insight.
+
+> **This script was fixed in this branch and the fix matters.** It previously
+> cleared only `BusinessInsightResult` and the `project_insight` suite — it never
+> touched `IntelligenceSnapshot` (the tenant-wide snapshot the Business Insight
+> feed *and* the full-analysis route actually read) nor the `insights` suite.
+> Running the old version would leave both surfaces serving pre-deploy cards,
+> which looks **exactly** like the new features not working. If you see no
+> diagnostics after clearing, confirm you are running this branch's script and
+> that all three counts came back non-zero.
+
+Then **refresh Business Insight and wait for the run to finish.**
+
+> **Order matters.** Card retrieval (§7) reads the Business-Insight cache, so
+> between clearing and regenerating, "show me the query for …" has nothing to
+> resolve against. Regenerate before testing retrieval.
+
+> **Expect this run to take materially longer than before** — up to 24 cards are
+> dissected instead of 4, each running several governed methods plus
+> cross-reference correlations. **Time it and report the number** (§9). If it
+> times out, lower `INSIGHT_DIAGNOSTIC_CARD_BUDGET` and re-run; do not disable
+> the feature.
+
+### 6.5 Rollback
+
+No migration means rollback is just redeploying the previous images:
+
+```bash
+git checkout <previous-sha> && docker compose build platform-api web-ui
+docker compose up -d platform-api platform-api-worker web-ui
+docker compose exec platform-api python scripts/delete_insight_caches.py
+```
+
+Clear caches on the way back down too: cards generated by this branch carry
+fields the old frontend ignores, but the stale cache would otherwise mask
+whether the rollback took effect.
+
+Sessions survive a rollback — a token issued with a `ses` claim still validates
+against the old code, which simply ignores the extra claim.
 
 ---
 
