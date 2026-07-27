@@ -5,7 +5,7 @@ Repository: `lhoskins/tablescope-lh`
 **Base:** `devin/r-echarts-e2e-validation` (deployed lineage; already has the
 chart-fit work from PR #96)
 
-**18 commits · 44 files · +7032 / −69 · all tests green** (§5)
+**19 commits · 46 files · +7870 / −72 · all tests green** (§5)
 
 ---
 
@@ -45,11 +45,12 @@ git merge origin/claude/deep-analysis-business-value
 | `1c9131a` | **Analysis page evidence: real chart family, R's own anomaly markers, all rows, open ask box** |
 | `5749e49` | **Drill-down answers instead of asking: 4→24 card coverage, ranked segments, executed cross-references** |
 | `3a5f54c` | **Three reported defects: mid-session logout, uncorrectable 2FA code, lost place on back** |
+| `dcbbbc9` | **Claim verification: the card's own narrative is put to a statistical test** |
 | `9ddf5ef`, `8643495`, `0626398`, `d0482f2`, `32c962a`, `d43446c`, `b5db428` | Handoff docs |
 
 ---
 
-## 3. The seven problems fixed
+## 3. The eight problems fixed
 
 **A. Deeper analysis was not analysis.** `_shape_template_insights` probed tables
 (`SELECT * LIMIT 50`) for any drawable column combination — zero calls to the
@@ -117,6 +118,18 @@ insight work, and the first is the most serious thing in this branch:
    `InsightPanel` holds open state locally, so browser history cannot restore it.
    The link now carries the insight id in the hash; the holding panel opens and
    the card scrolls into view.
+
+**H. The card asserted causes it never tested.** A card reads "gross margin has
+been declining …, **indicating rising material costs** and potential
+profitability issues." The decline was measured; the clause after "indicating"
+names a *different* measure in a *different* table and **nothing ever checked
+it** — a hypothesis printed in the same voice as the finding, and the part most
+likely to be acted on. `claim_verification` now extracts those clauses, locates
+the measure each names anywhere in the project, and runs the governed trend
+method over its history. Four verdicts: **confirmed** (with the magnitude, so
+"rising" becomes "rose 18.4% over 2024-01 to 2026-01"), **not supported** (the
+card's narrative is wrong — the most valuable outcome), **inconclusive** (moved,
+but not significantly), **not testable** (no measure matches — said plainly).
 
 ---
 
@@ -301,6 +314,42 @@ Renewal is deliberately *not* a refresh endpoint: it follows activity on the
 requests already being made, so there is no extra round trip and no refresh
 token to store. An **idle** session still expires on schedule.
 
+### 4h. Claim verification — testing the narrative
+
+```
+_card_diagnostic_insights()
+  └─ _verify_card_claims()                       ← runs BEFORE the ladder
+       claim_verification.extract_claims(card)    summary/title/callout prose
+         _CLAIM_PATTERNS   indicating · suggesting · driven by · due to ·
+                           because of · reflecting · attributable to ·
+                           resulting from
+         _split_conjuncts()  "rising X and potential Y" ⇒ TWO claims
+       match_measure(claim, every (table, column) in the project)
+         └─ None ⇒ verdict "untestable" (stated, not dropped)
+       SELECT period, AGG(measure) … GROUP BY period ORDER BY period
+       analyze_methods(intent="detect_trend")     governed engine, R-first
+       check_claim(...) + percent_change(rows)    ⇒ verdict + magnitude
+  ⇒ diagnostic{stage: "verify", claimVerdict, claimMeasure, claimTable}
+```
+
+**Four things here are load-bearing:**
+
+- **Coordinated clauses must stay split.** "rising material costs and potential
+  profitability issues" is two assertions about two measures; checked as one, the
+  blurred terms match *neither* column and the real claim goes untested.
+- **A shared verb distributes, but never onto a hedged conjunct.** "rising X and
+  Y" asserts both rise; giving "potential Y issues" a direction invents a claim
+  the card never made — and could then report it *contradicted*.
+- **Unit suffixes are excluded when matching** (`_UNIT_TOKENS`). `MaterialCostUSD`
+  is the same measure as `MaterialCost`; counting `usd` against the match drops a
+  correct column below threshold.
+- **Matching stays conservative** (`min_score`). A confident verdict about the
+  wrong column is worse than reporting that the claim could not be checked.
+
+**Wording constraint:** a confirmed claim means the named measure moved the way
+the card said, over the same window. It is co-movement, not proof of cause. Do
+not restate a `supported` verdict as "caused by".
+
 Two constraints the shared card component imposes — **keep both**:
 
 - **The strip is gated on `!hideActions`.** The same card renders on the public
@@ -349,6 +398,7 @@ the adapter.
 |---|---|
 | `test_deep_analysis.py` | 34 / 34 |
 | `test_card_diagnostics.py` | 48 / 48 |
+| `test_claim_verification.py` | 24 / 24 |
 | `test_jwt.py` (incl. 9 renewal / security-boundary tests) | full |
 | `test_insight_registry.py` | 21 / 21 |
 | `test_ask_pipeline.py` | 17 / 17 |
@@ -444,6 +494,19 @@ Then **clear insight caches** so cards regenerate through the new path
 - Suggested questions and cross-reference prompts **submit into the same box**
   (they no longer navigate away to `/ai?q=`).
 - Title and summary show **bold text, not literal `**`**.
+
+**Claim verification (§3H)**
+- Open the *Rising Material Costs* card's full analysis. The **first** step is
+  **Checking the card's claim**, quoting the claim and carrying a verdict chip.
+- A confirmed claim **states the magnitude and window** ("rose 18.4% over
+  2024-01 to 2026-01"), not just "rising".
+- Confirm the tested measure (shown as `tested: <column> in <table>`) is the one
+  the claim actually names. **Report any mismatch** — a wrong column produces a
+  confident verdict about the wrong thing.
+- A claim naming something the project has no measure for reads **Not testable**,
+  not silence.
+- If a claim comes back **Not supported**, that is a genuine finding: the card's
+  narrative is wrong. Screenshot it.
 
 **The three reported defects (§3G)**
 - **Session:** sign in, then keep using the app past the token TTL. You must
