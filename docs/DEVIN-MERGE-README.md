@@ -46,7 +46,7 @@ git merge origin/claude/deep-analysis-business-value
 | `5749e49` | **Drill-down answers instead of asking: 4→24 card coverage, ranked segments, executed cross-references** |
 | `3a5f54c` | **Three reported defects: mid-session logout, uncorrectable 2FA code, lost place on back** |
 | `dcbbbc9` | **Claim verification: the card's own narrative is put to a statistical test** |
-| `<deploy>` | Deployment runbook; cache-clear script fixed to clear all three stores |
+| `1112fdf` | Deployment runbook; cache-clear script fixed to clear all three stores |
 | `9ddf5ef`, `8643495`, `0626398`, `d0482f2`, `32c962a`, `d43446c`, `b5db428` | Handoff docs |
 
 ---
