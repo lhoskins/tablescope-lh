@@ -77,6 +77,14 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       PROMETHEUS_ENABLED: "true"
       ANALYTICAL_METHOD_ENGINE_MODE: ${ANALYTICAL_METHOD_ENGINE_MODE:-hybrid}
+      # Cards dissected per insight run. Each one executes several governed
+      # methods plus cross-reference correlations, so this trades drill-down
+      # coverage against run time. Lower it if a refresh times out.
+      INSIGHT_DIAGNOSTIC_CARD_BUDGET: ${INSIGHT_DIAGNOSTIC_CARD_BUDGET:-24}
+      # Ceiling on how long activity may keep extending one session before real
+      # re-authentication. Sessions slide while active; idle ones still expire
+      # at JWT_ACCESS_TOKEN_TTL_MINUTES.
+      JWT_SESSION_ABSOLUTE_TTL_MINUTES: ${JWT_SESSION_ABSOLUTE_TTL_MINUTES:-720}
       TABLESCOPE_AI_ENABLED: ${TABLESCOPE_AI_ENABLED:-false}
       TABLESCOPE_AI_API_URL: ${TABLESCOPE_AI_API_URL:-}
       R_ANALYTICS_ENABLED: ${R_ANALYTICS_ENABLED:-true}

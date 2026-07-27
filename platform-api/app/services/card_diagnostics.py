@@ -38,6 +38,9 @@ from typing import Any, cast
 logger = logging.getLogger(__name__)
 
 #: Diagnostic stages, in the order an analyst would work a finding.
+#: Testing what the card's own narrative asserts. Leads the ladder: a
+#: contradicted claim invalidates the story the rest of the steps sit inside.
+STAGE_VERIFY = "verify"
 STAGE_LOCALISE = "localise"
 STAGE_WHEN = "when"
 STAGE_QUANTIFY = "quantify"

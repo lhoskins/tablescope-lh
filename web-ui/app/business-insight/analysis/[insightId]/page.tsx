@@ -55,12 +55,33 @@ const FALLBACK_TENANT: TenantSummary = {
  */
 
 const STAGE_LABELS: Record<string, string> = {
+  verify: "Checking the card's claim",
   localise: "Where it is concentrated",
   when: "When it changed",
   quantify: "How large it is",
   explain: "What explains it",
   project: "Where it is heading",
   corroborate: "Corroboration",
+};
+
+/**
+ * How a claim verdict reads at a glance.
+ *
+ * `contradicted` is the one that matters most: the card asserted a cause the
+ * data does not bear out, and someone would otherwise have acted on it.
+ */
+const VERDICT_TONES: Record<string, string> = {
+  supported: "bg-success/10 text-success",
+  contradicted: "bg-danger/10 text-danger",
+  inconclusive: "bg-warning/10 text-warning",
+  untestable: "bg-bg-secondary text-ink-tertiary",
+};
+
+const VERDICT_LABELS: Record<string, string> = {
+  supported: "Confirmed",
+  contradicted: "Not supported",
+  inconclusive: "Inconclusive",
+  untestable: "Not testable",
 };
 
 const ACTION_TONES: Record<string, string> = {
@@ -111,12 +132,25 @@ function DiagnosticStep({ step }: { step: InsightDiagnostic }) {
         <span className="rounded-full bg-bg-secondary px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-ink-tertiary">
           {STAGE_LABELS[step.stage] ?? step.stage}
         </span>
-        {step.highlight ? (
+        {step.claimVerdict ? (
+          <span
+            className={`rounded-full px-2 py-0.5 text-[12px] font-medium ${
+              VERDICT_TONES[step.claimVerdict] ?? VERDICT_TONES.untestable
+            }`}
+          >
+            {VERDICT_LABELS[step.claimVerdict] ?? step.claimVerdict}
+          </span>
+        ) : step.highlight ? (
           <span className="rounded-full bg-brand-600/10 px-2 py-0.5 text-[12px] font-medium text-brand-600">
             {step.highlight}
           </span>
         ) : null}
-        {step.crossReference ? (
+        {step.claimMeasure ? (
+          <span className="text-[11px] text-ink-tertiary">
+            tested: {step.claimMeasure}
+            {step.claimTable ? ` in ${step.claimTable}` : ""}
+          </span>
+        ) : step.crossReference ? (
           <span className="rounded-full bg-bg-secondary px-2 py-0.5 text-[11px] text-ink-tertiary">
             cross-checked · {step.crossReference}
           </span>
