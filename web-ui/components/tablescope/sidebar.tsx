@@ -9,8 +9,6 @@ import {
   IconChevronDown,
   IconPlus,
   IconUsers,
-  IconDatabaseShare,
-  IconThumbUp,
   IconUserCircle,
   IconLogout,
   IconLayoutSidebarLeftCollapse,
@@ -178,23 +176,6 @@ export function Sidebar({
       ]
     : [];
 
-  const adminToolItems: NavItem[] = canManageUsers
-    ? [
-        {
-          key: "admin-insight-feedback",
-          label: "Insight Review",
-          href: "/admin/insight-feedback",
-          icon: IconThumbUp,
-        },
-        {
-          key: "admin-data-source-assignments",
-          label: "Data Source Assignments",
-          href: "/admin/data-source-assignments",
-          icon: IconDatabaseShare,
-        },
-      ]
-    : [];
-
   return (
     <aside
       className={cn(
@@ -303,14 +284,6 @@ export function Sidebar({
         {mode === "home" && adminManagementItems.length > 0 && (
           <NavGroupBlock
             group={{ heading: "Administration", items: adminManagementItems }}
-            activeNav={activeNav}
-            collapsed={collapsed}
-          />
-        )}
-
-        {mode === "home" && adminToolItems.length > 0 && (
-          <NavGroupBlock
-            group={{ heading: "Tools", items: adminToolItems }}
             activeNav={activeNav}
             collapsed={collapsed}
           />

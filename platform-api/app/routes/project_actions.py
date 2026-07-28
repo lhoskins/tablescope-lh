@@ -21,12 +21,20 @@ from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models.audit_event import AuditEvent
 from app.models.project import Project, ProjectMember
-from app.models.project_action import ProjectAction, ProjectActionSubtask
+from app.models.project_action import ProjectAction, ProjectActionComment, ProjectActionSubtask
 from app.models.user import User
 from app.schemas.project_action import (
+    ProjectActionBoardSummary,
+    ProjectActionBulkResponse,
+    ProjectActionBulkResultItem,
+    ProjectActionBulkUpdate,
+    ProjectActionCommentCreate,
+    ProjectActionCommentOut,
+    ProjectActionCommentUpdate,
     ProjectActionCountForInsightRequest,
     ProjectActionCountForInsightResponse,
     ProjectActionCreate,
+    ProjectActionGroupSummary,
     ProjectActionListItem,
     ProjectActionListResponse,
     ProjectActionOut,
@@ -54,6 +62,38 @@ _PRIORITY_ORDER: dict[str, int] = {
     "high": 1,
     "medium": 2,
     "low": 3,
+}
+
+_BOARD_GROUP_ORDER: dict[str, int] = {
+    "blocked": 0,
+    "in_progress": 1,
+    "not_started": 2,
+    "completed": 3,
+    "cancelled": 4,
+}
+
+_GROUP_LABELS: dict[str, str] = {
+    "blocked": "Blocked",
+    "in_progress": "In progress",
+    "not_started": "Not started",
+    "completed": "Completed",
+    "cancelled": "Cancelled",
+}
+
+_DUE_STATE_ORDER: dict[str, int] = {
+    "overdue": 0,
+    "due_today": 1,
+    "due_this_week": 2,
+    "upcoming": 3,
+    "no_due": 4,
+}
+
+_DUE_STATE_LABELS: dict[str, str] = {
+    "overdue": "Overdue",
+    "due_today": "Due today",
+    "due_this_week": "Due this week",
+    "upcoming": "Upcoming",
+    "no_due": "No due date",
 }
 
 
@@ -333,6 +373,50 @@ async def _after_mutation(
         logger.exception("mark_project_insight_stale failed for project %s", project_id)
 
 
+def _due_state(due_date: datetime | None, now: datetime) -> str:
+    if due_date is None:
+        return "no_due"
+    if due_date < now:
+        return "overdue"
+    if due_date.date() == now.date():
+        return "due_today"
+    delta = (due_date - now).days
+    if delta <= 7:
+        return "due_this_week"
+    return "upcoming"
+
+
+def _risk_impact_from_snapshot(snapshot: dict[str, Any] | None) -> str | None:
+    if not snapshot:
+        return None
+    severity = snapshot.get("severity")
+    if severity:
+        return str(severity)
+    return None
+
+
+def _group_key(action: ProjectAction, group_by: str, now: datetime) -> str:
+    if group_by == "priority":
+        return action.priority
+    if group_by == "owner":
+        return str(action.owner_user_id or "unassigned")
+    if group_by == "due_state":
+        return _due_state(action.due_date, now)
+    if group_by == "source_type":
+        return action.source_type or "none"
+    return action.status
+
+
+def _group_sort_key(group_by: str, key: str) -> int | str:
+    if group_by == "status":
+        return _BOARD_GROUP_ORDER.get(key, 99)
+    if group_by == "due_state":
+        return _DUE_STATE_ORDER.get(key, 99)
+    if group_by == "priority":
+        return _PRIORITY_ORDER.get(key, 99)
+    return key
+
+
 def _subtask_payload(subtask: ProjectActionSubtask) -> dict[str, Any]:
     return {
         "id": subtask.id,
@@ -471,10 +555,13 @@ async def list_actions(
                 source_insight_type=a.source_insight_type,
                 source_insight_title=a.source_insight_title,
                 source_insight_snapshot=a.source_insight_snapshot,
+                risk_impact=_risk_impact_from_snapshot(a.source_insight_snapshot),
                 active_subtasks=active,
                 total_subtasks=total,
+                created_at=a.created_at,
                 updated_at=a.updated_at,
                 archived_at=a.archived_at,
+                lock_version=a.lock_version,
             )
         )
     return ProjectActionListResponse(items=items, total=total)
@@ -630,6 +717,304 @@ async def count_for_insight(
     )
 
 
+@router.get("/{project_id}/actions/board", response_model=ProjectActionListResponse)
+async def board_actions(
+    project_id: int,
+    status: str | None = None,
+    priority: str | None = None,
+    owner_user_id: int | None = None,
+    overdue: bool | None = None,
+    due_from: datetime | None = None,
+    due_to: datetime | None = None,
+    source_type: str | None = None,
+    source_insight_type: str | None = None,
+    source_insight_fingerprint: str | None = None,
+    risk_impact: str | None = None,
+    has_incomplete_required_subtasks: bool | None = None,
+    q: str | None = None,
+    include_archived: bool = False,
+    sort_by: str = Query("updated", pattern="^(updated|created|due_date|priority|progress|title)$"),
+    sort_direction: str = Query("desc", pattern="^(asc|desc)$"),
+    group_by: str = Query("status", pattern="^(status|priority|owner|due_state|source_type|none)$"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> ProjectActionListResponse:
+    """Monday-style board: filtered, grouped, sorted actions with summary."""
+    await _require_project_access(project_id, session, context)
+
+    if status:
+        _validate_status_value(status)
+    if priority:
+        _validate_priority_value(priority)
+
+    base = select(ProjectAction).where(
+        ProjectAction.tenant_id == context.tenant_id,
+        ProjectAction.project_id == project_id,
+    )
+    if not include_archived:
+        base = base.where(ProjectAction.archived_at.is_(None))
+    if status:
+        base = base.where(ProjectAction.status == status)
+    if priority:
+        base = base.where(ProjectAction.priority == priority)
+    if owner_user_id is not None:
+        base = base.where(ProjectAction.owner_user_id == owner_user_id)
+    if overdue is not None:
+        now = datetime.now(UTC)
+        if overdue:
+            base = base.where(
+                ProjectAction.due_date.isnot(None),
+                ProjectAction.due_date < now,
+                ProjectAction.status.notin_(["completed", "cancelled"]),
+                ProjectAction.archived_at.is_(None),
+            )
+        else:
+            base = base.where(
+                (ProjectAction.due_date.is_(None)) | (ProjectAction.due_date >= now)
+            )
+    if due_from is not None:
+        base = base.where(ProjectAction.due_date >= due_from)
+    if due_to is not None:
+        base = base.where(ProjectAction.due_date <= due_to)
+    if source_type:
+        base = base.where(ProjectAction.source_type == source_type)
+    if source_insight_type:
+        base = base.where(ProjectAction.source_insight_type == source_insight_type)
+    if source_insight_fingerprint:
+        base = base.where(
+            ProjectAction.source_insight_fingerprint == source_insight_fingerprint
+        )
+    if q:
+        pattern = f"%{q}%"
+        base = base.where(
+            (ProjectAction.title.ilike(pattern))
+            | (ProjectAction.description.ilike(pattern))
+            | (ProjectAction.source_insight_title.ilike(pattern))
+        )
+
+    rows = (await session.execute(base)).scalars().all()
+
+    all_action_ids = [a.id for a in rows]
+    subtask_stats: dict[int, tuple[int, int, int, int]] = {}
+    if all_action_ids:
+        counts = await session.execute(
+            select(
+                ProjectActionSubtask.action_id,
+                func.count(),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (ProjectActionSubtask.archived_at.is_(None), 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                (ProjectActionSubtask.archived_at.is_(None))
+                                & (ProjectActionSubtask.is_required.is_(True))
+                                & (ProjectActionSubtask.status != "cancelled"),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                (ProjectActionSubtask.archived_at.is_(None))
+                                & (ProjectActionSubtask.is_required.is_(True))
+                                & (ProjectActionSubtask.status == "completed"),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+            )
+            .where(ProjectActionSubtask.action_id.in_(all_action_ids))
+            .group_by(ProjectActionSubtask.action_id)
+        )
+        for (
+            aid,
+            total_st,
+            active_st,
+            required_st,
+            completed_required_st,
+        ) in counts:
+            subtask_stats[aid] = (
+                int(active_st),
+                int(total_st),
+                int(required_st),
+                int(completed_required_st),
+            )
+
+    comment_counts: dict[int, int] = {}
+    if all_action_ids:
+        counts = await session.execute(
+            select(
+                ProjectActionComment.action_id,
+                func.count(),
+            )
+            .where(
+                ProjectActionComment.action_id.in_(all_action_ids),
+                ProjectActionComment.archived_at.is_(None),
+            )
+            .group_by(ProjectActionComment.action_id)
+        )
+        for aid, cnt in counts:
+            comment_counts[aid] = int(cnt)
+
+    filtered = []
+    for a in rows:
+        if risk_impact is not None:
+            impact = _risk_impact_from_snapshot(a.source_insight_snapshot)
+            if (impact or "").lower() != risk_impact.lower():
+                continue
+        if has_incomplete_required_subtasks is not None:
+            _, _, required, completed = subtask_stats.get(a.id, (0, 0, 0, 0))
+            incomplete = required - completed
+            if has_incomplete_required_subtasks and incomplete == 0:
+                continue
+            if not has_incomplete_required_subtasks and incomplete > 0:
+                continue
+        filtered.append(a)
+
+    total = len(filtered)
+    now = datetime.now(UTC)
+
+    summary = ProjectActionBoardSummary()
+    for a in filtered:
+        if a.archived_at is None and a.status not in ("completed", "cancelled"):
+            summary.active += 1
+            if a.due_date is not None and a.due_date < now:
+                summary.overdue += 1
+            summary.avg_progress += a.percent_complete
+        if a.status == "completed" and a.archived_at is None:
+            if (a.source_insight_type or "").lower() == "risk" or (
+                (a.source_insight_snapshot or {}).get("insight_type") == "risk"
+            ):
+                summary.risk_mitigations_completed += 1
+    active_for_avg = [
+        a for a in filtered if a.archived_at is None and a.status not in ("completed", "cancelled")
+    ]
+    if active_for_avg:
+        summary.avg_progress = round(
+            sum(a.percent_complete for a in active_for_avg) / len(active_for_avg)
+        )
+    else:
+        summary.avg_progress = 0
+
+    group_map: dict[str, dict[str, Any]] = {}
+    for a in filtered:
+        key = _group_key(a, group_by, now)
+        if key not in group_map:
+            group_map[key] = {"count": 0, "overdue": 0, "progress_sum": 0, "progress_n": 0}
+        g = group_map[key]
+        g["count"] += 1
+        if a.due_date is not None and a.due_date < now and a.status not in ("completed", "cancelled"):
+            g["overdue"] += 1
+        if a.archived_at is None and a.status not in ("completed", "cancelled"):
+            g["progress_sum"] += a.percent_complete
+            g["progress_n"] += 1
+    groups = []
+    for key in sorted(group_map.keys(), key=lambda k: _group_sort_key(group_by, k)):
+        g = group_map[key]
+        avg = round(g["progress_sum"] / g["progress_n"]) if g["progress_n"] else 0
+        label = _GROUP_LABELS.get(key) or _DUE_STATE_LABELS.get(key) or key.capitalize()
+        groups.append(
+            ProjectActionGroupSummary(
+                group=key,
+                label=label,
+                count=g["count"],
+                overdue_count=g["overdue"],
+                avg_progress=avg,
+            )
+        )
+    summary.groups = groups
+
+    def _sort_key(a: ProjectAction) -> tuple:
+        group_rank = _group_sort_key(group_by, _group_key(a, group_by, now))
+        val: Any
+        if sort_by == "due_date":
+            val = a.due_date or datetime.max.replace(tzinfo=UTC)
+        elif sort_by == "priority":
+            val = _PRIORITY_ORDER.get(a.priority, 99)
+        elif sort_by == "progress":
+            val = a.percent_complete
+        elif sort_by == "title":
+            val = (a.title or "").lower()
+        elif sort_by == "created":
+            val = a.created_at
+        else:
+            val = a.updated_at
+        if sort_direction == "desc":
+            if isinstance(val, datetime):
+                val = -val.timestamp()
+            elif isinstance(val, str):
+                pass
+            else:
+                val = -val
+        return (group_rank, val, a.id)
+
+    sorted_rows = sorted(filtered, key=_sort_key)
+    page = sorted_rows[offset : offset + limit]
+
+    owner_ids = {a.owner_user_id for a in page if a.owner_user_id}
+    users = {}
+    if owner_ids:
+        users = {
+            u.id: (u.display_name or u.email or "")
+            for u in (await session.scalars(select(User).where(User.id.in_(owner_ids)))).all()
+        }
+
+    items = []
+    for a in page:
+        active, total, required, completed_required = subtask_stats.get(a.id, (0, 0, 0, 0))
+        items.append(
+            ProjectActionListItem(
+                id=a.id,
+                title=a.title,
+                description=a.description,
+                status=a.status,
+                priority=a.priority,
+                owner_user_id=a.owner_user_id,
+                owner_name=users.get(a.owner_user_id) if a.owner_user_id is not None else None,
+                due_date=a.due_date,
+                percent_complete=a.percent_complete,
+                source_type=a.source_type,
+                source_insight_id=a.source_insight_id,
+                source_insight_fingerprint=a.source_insight_fingerprint,
+                source_insight_type=a.source_insight_type,
+                source_insight_title=a.source_insight_title,
+                source_insight_snapshot=a.source_insight_snapshot,
+                risk_impact=_risk_impact_from_snapshot(a.source_insight_snapshot),
+                active_subtasks=active,
+                total_subtasks=total,
+                required_subtasks=required,
+                completed_required_subtasks=completed_required,
+                comment_count=comment_counts.get(a.id, 0),
+                created_at=a.created_at,
+                started_at=a.started_at,
+                completed_at=a.completed_at,
+                updated_at=a.updated_at,
+                archived_at=a.archived_at,
+                lock_version=a.lock_version,
+            )
+        )
+
+    return ProjectActionListResponse(items=items, total=total, summary=summary)
+
+
 @router.get("/{project_id}/actions/{action_id}", response_model=ProjectActionOut)
 async def get_action(
     project_id: int,
@@ -653,7 +1038,17 @@ async def update_action(
 ) -> ProjectActionOut:
     """Update action metadata, status, or due date; server recomputes percent."""
     await _require_project_access(project_id, session, context)
-    action = await _get_action(session, context, project_id, action_id)
+    action = await _get_action(session, context, project_id, action_id, active_only=False)
+
+    if body.expected_version is not None and action.lock_version != body.expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "This action changed while you were editing. Review the latest values and try again.",
+                "expected_version": body.expected_version,
+                "current_version": action.lock_version,
+            },
+        )
 
     if action.archived_at is not None and body.archived_at is None:
         action.archived_at = None
@@ -675,6 +1070,7 @@ async def update_action(
         _apply_status_transition(action, body.status)
 
     action.updated_by_user_id = context.user_id
+    action.lock_version = action.lock_version + 1
 
     old_subtasks = [s.id for s in action.subtasks]
     await _audit(
@@ -688,6 +1084,7 @@ async def update_action(
             "status": action.status,
             "percent_complete": action.percent_complete,
             "subtasks": old_subtasks,
+            "lock_version": action.lock_version,
         },
     )
     await session.commit()
@@ -701,14 +1098,25 @@ async def update_action(
 async def archive_action(
     project_id: int,
     action_id: int,
+    expected_version: int | None = Query(None),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict[str, Any]:
     """Soft-archive an action and its subtasks."""
     await _require_project_access(project_id, session, context)
     action = await _get_action(session, context, project_id, action_id)
+    if expected_version is not None and action.lock_version != expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "This action changed while you were editing. Review the latest values and try again.",
+                "expected_version": expected_version,
+                "current_version": action.lock_version,
+            },
+        )
     now = datetime.now(UTC)
     action.archived_at = now
+    action.lock_version = action.lock_version + 1
     action.updated_by_user_id = context.user_id
     for sub in action.subtasks:
         sub.archived_at = now
@@ -725,7 +1133,7 @@ async def archive_action(
     )
     await session.commit()
     await _after_mutation(session, context, project_id)
-    return {"status": "archived", "id": action.id}
+    return {"status": "archived", "id": action.id, "lock_version": action.lock_version}
 
 
 @router.post(
@@ -755,6 +1163,7 @@ async def create_subtask(
     if max_position is None:
         max_position = -1
 
+    now = datetime.now(UTC)
     sub = ProjectActionSubtask(
         tenant_id=context.tenant_id,
         project_id=project_id,
@@ -767,6 +1176,8 @@ async def create_subtask(
         due_date=body.due_date,
         position=max_position + 1,
         is_required=body.is_required,
+        effort_points=body.effort_points,
+        completed_at=now if body.status == "completed" else None,
         created_by_user_id=context.user_id,
         updated_by_user_id=context.user_id,
     )
@@ -817,6 +1228,17 @@ async def update_subtask(
             detail="Subtask not found",
         )
 
+    if body.expected_version is not None and sub.lock_version != body.expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "This subtask changed while you were editing. Review the latest values and try again.",
+                "expected_version": body.expected_version,
+                "current_version": sub.lock_version,
+            },
+        )
+
+    now = datetime.now(UTC)
     if sub.archived_at is not None and body.archived_at is None:
         sub.archived_at = None
 
@@ -827,9 +1249,15 @@ async def update_subtask(
     if body.status is not None:
         _validate_status_value(body.status)
         sub.status = body.status
-        sp = _status_percent(sub.status)
-        if sp >= 0:
-            sub.percent_complete = sp
+        if sub.status == "completed":
+            sub.percent_complete = 100
+            sub.completed_at = now
+        else:
+            sp = _status_percent(sub.status)
+            if sp >= 0:
+                sub.percent_complete = sp
+            if sub.completed_at is not None:
+                sub.completed_at = None
     if body.percent_complete is not None:
         if sub.status == "completed":
             sub.percent_complete = 100
@@ -846,8 +1274,11 @@ async def update_subtask(
         sub.position = body.position
     if body.is_required is not None:
         sub.is_required = body.is_required
+    if body.effort_points is not None:
+        sub.effort_points = body.effort_points
 
     sub.updated_by_user_id = context.user_id
+    sub.lock_version = sub.lock_version + 1
     await session.flush()
     _recalculate_action_progress(action)
     action.updated_by_user_id = context.user_id
@@ -873,6 +1304,7 @@ async def archive_subtask(
     project_id: int,
     action_id: int,
     subtask_id: int,
+    expected_version: int | None = Query(None),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict[str, Any]:
@@ -885,8 +1317,18 @@ async def archive_subtask(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subtask not found",
         )
+    if expected_version is not None and sub.lock_version != expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "This subtask changed while you were editing. Review the latest values and try again.",
+                "expected_version": expected_version,
+                "current_version": sub.lock_version,
+            },
+        )
     now = datetime.now(UTC)
     sub.archived_at = now
+    sub.lock_version = sub.lock_version + 1
     sub.updated_by_user_id = context.user_id
     await session.flush()
     _recalculate_action_progress(action)
@@ -904,4 +1346,315 @@ async def archive_subtask(
     )
     await session.commit()
     await _after_mutation(session, context, project_id)
-    return {"status": "archived", "id": sub.id}
+    return {"status": "archived", "id": sub.id, "lock_version": sub.lock_version}
+
+
+@router.post("/{project_id}/actions/{action_id}/restore", response_model=ProjectActionOut)
+async def restore_action(
+    project_id: int,
+    action_id: int,
+    expected_version: int | None = Query(None),
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> ProjectActionOut:
+    """Restore an archived action and its subtasks."""
+    await _require_project_access(project_id, session, context)
+    action = await _get_action(session, context, project_id, action_id, active_only=False)
+    if action.archived_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Action is not archived",
+        )
+    if expected_version is not None and action.lock_version != expected_version:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "This action changed while you were editing. Review the latest values and try again.",
+                "expected_version": expected_version,
+                "current_version": action.lock_version,
+            },
+        )
+    action.archived_at = None
+    action.lock_version = action.lock_version + 1
+    action.updated_by_user_id = context.user_id
+    for sub in action.subtasks:
+        sub.archived_at = None
+        sub.updated_by_user_id = context.user_id
+
+    await _audit(
+        session,
+        context=context,
+        event_type="project_action_restored",
+        project_id=project_id,
+        action_id=action.id,
+        title=action.title,
+        payload={"subtasks_restored": [s.id for s in action.subtasks]},
+    )
+    await session.commit()
+    await session.refresh(action, ["subtasks"])
+    await _after_mutation(session, context, project_id)
+    return ProjectActionOut.model_validate(action)
+
+
+@router.patch("/{project_id}/actions/bulk", response_model=ProjectActionBulkResponse)
+async def bulk_update_actions(
+    project_id: int,
+    body: ProjectActionBulkUpdate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> ProjectActionBulkResponse:
+    """Apply one field change to multiple actions in the same project."""
+    await _require_project_access(project_id, session, context)
+
+    actions = (
+        await session.scalars(
+            select(ProjectAction).where(
+                ProjectAction.tenant_id == context.tenant_id,
+                ProjectAction.project_id == project_id,
+                ProjectAction.id.in_(body.action_ids),
+            )
+        )
+    ).all()
+    by_id = {a.id: a for a in actions}
+
+    results = []
+    for aid in body.action_ids:
+        action = by_id.get(aid)
+        if action is None:
+            results.append(
+                ProjectActionBulkResultItem(
+                    action_id=aid,
+                    success=False,
+                    error="Action not found",
+                )
+            )
+            continue
+        expected = body.expected_versions.get(aid)
+        if expected is not None and action.lock_version != expected:
+            results.append(
+                ProjectActionBulkResultItem(
+                    action_id=aid,
+                    success=False,
+                    error="Conflict: action changed while editing",
+                )
+            )
+            continue
+        if action.archived_at is not None:
+            results.append(
+                ProjectActionBulkResultItem(
+                    action_id=aid,
+                    success=False,
+                    error="Action is archived",
+                )
+            )
+            continue
+
+        try:
+            if body.status is not None:
+                _validate_status_value(body.status)
+                _apply_status_transition(action, body.status)
+            if body.priority is not None:
+                _validate_priority_value(body.priority)
+                action.priority = body.priority
+            if body.owner_user_id is not None:
+                await _validate_owner(project_id, body.owner_user_id, session)
+                action.owner_user_id = body.owner_user_id
+            if body.due_date is not None:
+                action.due_date = body.due_date
+        except HTTPException as e:
+            results.append(
+                ProjectActionBulkResultItem(
+                    action_id=aid,
+                    success=False,
+                    error=str(e.detail),
+                )
+            )
+            continue
+
+        action.updated_by_user_id = context.user_id
+        action.lock_version = action.lock_version + 1
+        await _audit(
+            session,
+            context=context,
+            event_type="project_action_bulk_updated",
+            project_id=project_id,
+            action_id=action.id,
+            title=action.title,
+            payload={"status": action.status, "priority": action.priority},
+        )
+        results.append(
+            ProjectActionBulkResultItem(
+                action_id=aid,
+                success=True,
+                lock_version=action.lock_version,
+            )
+        )
+
+    await session.commit()
+    for res in results:
+        if res.success:
+            action = by_id.get(res.action_id)
+            if action:
+                await session.refresh(action, ["subtasks"])
+    await _after_mutation(session, context, project_id)
+    return ProjectActionBulkResponse(results=results)
+
+
+@router.get("/{project_id}/actions/{action_id}/comments", response_model=list[ProjectActionCommentOut])
+async def list_comments(
+    project_id: int,
+    action_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> list[ProjectActionCommentOut]:
+    """List active comments for an action."""
+    await _require_project_access(project_id, session, context)
+    action = await _get_action(session, context, project_id, action_id, active_only=False)
+    comments = (
+        await session.scalars(
+            select(ProjectActionComment)
+            .where(
+                ProjectActionComment.tenant_id == context.tenant_id,
+                ProjectActionComment.project_id == project_id,
+                ProjectActionComment.action_id == action.id,
+                ProjectActionComment.archived_at.is_(None),
+            )
+            .order_by(ProjectActionComment.created_at.desc())
+        )
+    ).all()
+    user_ids = {c.author_user_id for c in comments if c.author_user_id}
+    users = {}
+    if user_ids:
+        users = {
+            u.id: (u.display_name or u.email or "")
+            for u in (await session.scalars(select(User).where(User.id.in_(user_ids)))).all()
+        }
+    return [
+        ProjectActionCommentOut(
+            id=c.id,
+            tenant_id=c.tenant_id,
+            project_id=c.project_id,
+            action_id=c.action_id,
+            author_user_id=c.author_user_id,
+            author_name=users.get(c.author_user_id) if c.author_user_id is not None else None,
+            body=c.body,
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+            archived_at=c.archived_at,
+        )
+        for c in comments
+    ]
+
+
+@router.post(
+    "/{project_id}/actions/{action_id}/comments",
+    response_model=ProjectActionCommentOut,
+    status_code=201,
+)
+async def create_comment(
+    project_id: int,
+    action_id: int,
+    body: ProjectActionCommentCreate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> ProjectActionCommentOut:
+    """Add a comment to an action."""
+    await _require_project_access(project_id, session, context)
+    action = await _get_action(session, context, project_id, action_id, active_only=False)
+    comment = ProjectActionComment(
+        tenant_id=context.tenant_id,
+        project_id=project_id,
+        action_id=action.id,
+        author_user_id=context.user_id,
+        body=body.body.strip(),
+    )
+    session.add(comment)
+    await _audit(
+        session,
+        context=context,
+        event_type="project_action_comment_created",
+        project_id=project_id,
+        action_id=action.id,
+        title=action.title,
+        payload={"comment_id": comment.id},
+    )
+    await session.commit()
+    await session.refresh(comment)
+    return ProjectActionCommentOut.model_validate(comment)
+
+
+@router.patch("/{project_id}/actions/{action_id}/comments/{comment_id}", response_model=ProjectActionCommentOut)
+async def update_comment(
+    project_id: int,
+    action_id: int,
+    comment_id: int,
+    body: ProjectActionCommentUpdate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> ProjectActionCommentOut:
+    """Update or soft-delete a comment."""
+    await _require_project_access(project_id, session, context)
+    comment = await session.scalar(
+        select(ProjectActionComment).where(
+            ProjectActionComment.tenant_id == context.tenant_id,
+            ProjectActionComment.project_id == project_id,
+            ProjectActionComment.action_id == action_id,
+            ProjectActionComment.id == comment_id,
+        )
+    )
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    is_admin = context.role in {"admin", "tenant_admin", "root_admin", "super_admin"}
+    if comment.author_user_id != context.user_id and not is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to edit this comment")
+    comment.body = body.body.strip()
+    await _audit(
+        session,
+        context=context,
+        event_type="project_action_comment_updated",
+        project_id=project_id,
+        action_id=action_id,
+        title=comment.body[:100],
+        payload={"comment_id": comment.id},
+    )
+    await session.commit()
+    await session.refresh(comment)
+    return ProjectActionCommentOut.model_validate(comment)
+
+
+@router.delete("/{project_id}/actions/{action_id}/comments/{comment_id}")
+async def archive_comment(
+    project_id: int,
+    action_id: int,
+    comment_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Soft-delete a comment."""
+    await _require_project_access(project_id, session, context)
+    comment = await session.scalar(
+        select(ProjectActionComment).where(
+            ProjectActionComment.tenant_id == context.tenant_id,
+            ProjectActionComment.project_id == project_id,
+            ProjectActionComment.action_id == action_id,
+            ProjectActionComment.id == comment_id,
+        )
+    )
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    is_admin = context.role in {"admin", "tenant_admin", "root_admin", "super_admin"}
+    if comment.author_user_id != context.user_id and not is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this comment")
+    comment.archived_at = datetime.now(UTC)
+    await _audit(
+        session,
+        context=context,
+        event_type="project_action_comment_archived",
+        project_id=project_id,
+        action_id=action_id,
+        title=comment.body[:100],
+        payload={"comment_id": comment.id},
+    )
+    await session.commit()
+    await session.refresh(comment)
+    return {"status": "archived", "id": comment.id}
