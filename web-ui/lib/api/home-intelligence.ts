@@ -809,6 +809,17 @@ export interface PercentChangeSummaryCell {
   warnings: string[];
 }
 
+export interface PercentChangeSummaryStatistics {
+  latest: number | null;
+  min: number | null;
+  max: number | null;
+  median: number | null;
+  average: number | null;
+  standard_deviation: number | null;
+  cumulative_change: number | null;
+  valid_count: number;
+}
+
 export interface PercentChangeSummaryRow {
   insight_id: string;
   title: string;
@@ -820,6 +831,7 @@ export interface PercentChangeSummaryRow {
   supported_intervals: string[];
   data_through: string | null;
   cells: Record<string, PercentChangeSummaryCell>;
+  statistics: PercentChangeSummaryStatistics;
 }
 
 export interface PercentChangeSummaryPageInfo {

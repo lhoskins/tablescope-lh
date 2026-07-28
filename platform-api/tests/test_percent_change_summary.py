@@ -249,3 +249,179 @@ def test_summary_interval_support_counts_reflect_in_scope():
     )
     assert response.interval_support_counts["month"] == 1
     assert response.interval_support_counts["day"] == 0
+
+
+def test_summary_statistics_calculated_from_valid_periods():
+    snapshot = {
+        "results": [
+            {
+                "projectId": 1,
+                "projectName": "P1",
+                "insights": [
+                    _card("c1", "Revenue", 1, series=_monthly_series()),
+                ],
+            }
+        ]
+    }
+    request = pcs.PercentChangeSummaryRequest(
+        project_ids=[1],
+        interval="month",
+        range="1y",
+    )
+    response = pcs.build_percent_change_summary(
+        [_project(1, "P1")], snapshot, request
+    )
+    row = response.rows[0]
+    stats = row.statistics
+    assert stats.valid_count == 11
+    # 2025-11 vs 2025-10: (130 - 90) / 90 = +44.4%
+    assert stats.max == pytest.approx(0.444444, rel=1e-3)
+    # 2025-10 vs 2025-09: (90 - 120) / 120 = -25.0%
+    assert stats.min == pytest.approx(-0.25, rel=1e-3)
+    assert stats.latest == row.cells["2026-06"].percent_change_ratio
+    assert stats.average == pytest.approx(
+        sum(
+            cell.percent_change_ratio
+            for cell in row.cells.values()
+            if cell.percent_change_ratio is not None
+        ) / stats.valid_count,
+        rel=1e-9,
+    )
+    # Cumulative: earliest baseline 100, latest current 180 -> 80.0%
+    assert stats.cumulative_change == pytest.approx(0.80, rel=1e-3)
+    assert stats.standard_deviation is not None
+    assert stats.standard_deviation > 0
+
+
+def test_summary_cumulative_is_first_to_last_not_sum_of_periods():
+    snapshot = {
+        "results": [
+            {
+                "projectId": 1,
+                "projectName": "P1",
+                "insights": [
+                    _card("c1", "Revenue", 1, series=_monthly_series()),
+                ],
+            }
+        ]
+    }
+    request = pcs.PercentChangeSummaryRequest(
+        project_ids=[1],
+        interval="month",
+        range="1y",
+    )
+    response = pcs.build_percent_change_summary(
+        [_project(1, "P1")], snapshot, request
+    )
+    row = response.rows[0]
+    stats = row.statistics
+    period_sum = sum(
+        cell.percent_change_ratio
+        for cell in row.cells.values()
+        if cell.percent_change_ratio is not None
+    )
+    assert stats.cumulative_change is not None
+    assert stats.cumulative_change != pytest.approx(period_sum, rel=1e-9)
+
+
+def test_summary_cumulative_unavailable_for_discontinuous_series():
+    series = _monthly_series()
+    # Remove 2025-11 to create a gap.
+    series = [p for p in series if p["label"] != "2025-11"]
+    snapshot = {
+        "results": [
+            {
+                "projectId": 1,
+                "projectName": "P1",
+                "insights": [
+                    _card("c1", "Revenue", 1, series=series),
+                ],
+            }
+        ]
+    }
+    request = pcs.PercentChangeSummaryRequest(
+        project_ids=[1],
+        interval="month",
+        range="1y",
+    )
+    response = pcs.build_percent_change_summary(
+        [_project(1, "P1")], snapshot, request
+    )
+    row = response.rows[0]
+    assert row.statistics.cumulative_change is None
+    assert row.statistics.valid_count == 9
+
+
+def test_summary_std_dev_unavailable_when_less_than_two_observations():
+    series = [
+        {"label": "2025-07", "value": 100},
+        {"label": "2025-08", "value": 110},
+    ]
+    snapshot = {
+        "results": [
+            {
+                "projectId": 1,
+                "projectName": "P1",
+                "insights": [
+                    _card("c1", "Revenue", 1, series=series),
+                ],
+            }
+        ]
+    }
+    request = pcs.PercentChangeSummaryRequest(
+        project_ids=[1],
+        interval="month",
+        range="1y",
+    )
+    response = pcs.build_percent_change_summary(
+        [_project(1, "P1")], snapshot, request
+    )
+    row = response.rows[0]
+    assert row.statistics.valid_count == 1
+    assert row.statistics.standard_deviation is None
+
+
+def test_summary_statistic_sorting_orders_by_latest_value():
+    high_series = [
+        {"label": "2025-07", "value": 100},
+        {"label": "2025-08", "value": 120},
+        {"label": "2025-09", "value": 144},
+    ]
+    low_series = [
+        {"label": "2025-07", "value": 100},
+        {"label": "2025-08", "value": 80},
+        {"label": "2025-09", "value": 64},
+    ]
+    snapshot = {
+        "results": [
+            {
+                "projectId": 1,
+                "projectName": "P1",
+                "insights": [
+                    _card("c1", "Low", 1, series=low_series),
+                    _card("c2", "High", 1, series=high_series),
+                ],
+            }
+        ]
+    }
+    request = pcs.PercentChangeSummaryRequest(
+        project_ids=[1],
+        interval="month",
+        range="1y",
+        sort=pcs.SummarySort(field="statistics:latest", direction="desc"),
+    )
+    response = pcs.build_percent_change_summary(
+        [_project(1, "P1")], snapshot, request
+    )
+    assert [r.title for r in response.rows] == ["High", "Low"]
+
+    request_asc = pcs.PercentChangeSummaryRequest(
+        project_ids=[1],
+        interval="month",
+        range="1y",
+        sort=pcs.SummarySort(field="statistics:latest", direction="asc"),
+    )
+    response_asc = pcs.build_percent_change_summary(
+        [_project(1, "P1")], snapshot, request_asc
+    )
+    assert [r.title for r in response_asc.rows] == ["Low", "High"]

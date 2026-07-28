@@ -24,14 +24,14 @@ logger = logging.getLogger(__name__)
 _ZERO_TOLERANCE = Decimal("1E-9")
 
 
-class TimeSeriesInterval(str, Enum):  # noqa: UP042
+class TimeSeriesInterval(str, Enum):
     DAY = "day"
     WEEK = "week"
     MONTH = "month"
     YEAR = "year"
 
 
-class TimeSeriesRange(str, Enum):  # noqa: UP042
+class TimeSeriesRange(str, Enum):
     DAYS_7 = "7d"
     DAYS_30 = "30d"
     DAYS_90 = "90d"

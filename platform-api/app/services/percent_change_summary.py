@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -72,6 +73,17 @@ class SummaryCell(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class SummaryStatistics(BaseModel):
+    latest: float | None = None
+    min: float | None = None
+    max: float | None = None
+    median: float | None = None
+    average: float | None = None
+    standard_deviation: float | None = None
+    cumulative_change: float | None = None
+    valid_count: int = 0
+
+
 class SummaryRow(BaseModel):
     insight_id: str
     title: str
@@ -83,6 +95,7 @@ class SummaryRow(BaseModel):
     supported_intervals: list[str] = Field(default_factory=list)
     data_through: str | None = None
     cells: dict[str, SummaryCell] = Field(default_factory=dict)
+    statistics: SummaryStatistics = Field(default_factory=SummaryStatistics)
 
 
 class PercentChangeSummaryPage(BaseModel):
@@ -349,12 +362,98 @@ def _evaluate_card(
     )
 
 
-def _latest_absolute_change(row: SummaryRow, periods: list[SummaryPeriod]) -> float:
+def _latest_absolute_change(
+    row: SummaryRow,
+    periods: list[SummaryPeriod],
+) -> float | None:
     for period in reversed(periods):
         cell = row.cells.get(period.key)
         if cell and cell.percent_change_ratio is not None:
             return abs(cell.percent_change_ratio)
-    return -1.0
+    return None
+
+
+def _calculate_period_statistics(
+    row: SummaryRow,
+    periods: list[SummaryPeriod],
+) -> SummaryStatistics:
+    """Compute summary statistics from valid aligned period-over-period changes."""
+    ratios: list[float] = []
+    first_index: int | None = None
+    last_index: int | None = None
+    earliest_baseline: float | None = None
+    latest_current: float | None = None
+
+    for i, period in enumerate(periods):
+        cell = row.cells.get(period.key)
+        if cell is None or cell.percent_change_ratio is None:
+            continue
+        ratio = cell.percent_change_ratio
+        if not math.isfinite(ratio):
+            continue
+        ratios.append(ratio)
+        if first_index is None:
+            first_index = i
+            earliest_baseline = cell.previous_value
+        last_index = i
+        latest_current = cell.current_value
+
+    n = len(ratios)
+    stats = SummaryStatistics(valid_count=n)
+    if n == 0:
+        return stats
+
+    stats.latest = ratios[-1]
+    sorted_ratios = sorted(ratios)
+    stats.min = sorted_ratios[0]
+    stats.max = sorted_ratios[-1]
+    if n % 2 == 1:
+        stats.median = sorted_ratios[n // 2]
+    else:
+        stats.median = (sorted_ratios[n // 2 - 1] + sorted_ratios[n // 2]) / 2
+    stats.average = sum(ratios) / n
+
+    # Welford's algorithm for population variance.
+    if n >= 2:
+        mean = 0.0
+        m2 = 0.0
+        for i, x in enumerate(ratios, 1):
+            delta = x - mean
+            mean += delta / i
+            delta2 = x - mean
+            m2 += delta * delta2
+        variance = m2 / n
+        stats.standard_deviation = math.sqrt(max(0.0, variance))
+
+    # Cumulative first-to-last change, only when the series is continuous and
+    # the earliest baseline is non-zero.
+    if (
+        first_index is not None
+        and last_index is not None
+        and earliest_baseline is not None
+        and latest_current is not None
+        and math.isfinite(earliest_baseline)
+        and math.isfinite(latest_current)
+    ):
+        discontinuous = False
+        for i in range(first_index, last_index + 1):
+            cell = row.cells.get(periods[i].key)
+            if (
+                cell is None
+                or cell.percent_change_ratio is None
+                or not math.isfinite(cell.percent_change_ratio)
+            ):
+                discontinuous = True
+                break
+        if (
+            not discontinuous
+            and abs(Decimal(str(earliest_baseline))) > _ZERO_TOLERANCE
+        ):
+            stats.cumulative_change = (
+                latest_current - earliest_baseline
+            ) / earliest_baseline
+
+    return stats
 
 
 def _sort_rows(
@@ -366,23 +465,38 @@ def _sort_rows(
     direction = sort.direction
     desc = direction == "desc"
 
+    if field == "title":
+        return sorted(rows, key=lambda r: r.title.lower(), reverse=desc)
+
     def _key(row: SummaryRow):
-        if field == "title":
-            return row.title.lower()
+        value: int | float | None
         if field == "priority_score":
-            return row.priority_score if row.priority_score is not None else -1.0
-        if field == "latest_absolute_change":
-            return _latest_absolute_change(row, periods)
-        if field.startswith("period:"):
+            value = row.priority_score
+        elif field == "latest_absolute_change":
+            value = _latest_absolute_change(row, periods)
+        elif field.startswith("period:"):
             key = field.split(":", 1)[1]
             cell = row.cells.get(key)
-            ratio = cell.percent_change_ratio if cell else None
-            if ratio is None:
-                return float("-inf") if desc else float("inf")
-            return ratio
-        return _latest_absolute_change(row, periods)
+            value = cell.percent_change_ratio if cell else None
+        elif field.startswith("statistics:"):
+            stat_field = field.split(":", 1)[1]
+            stats = row.statistics
+            if stats is None:
+                value = None
+            else:
+                raw = getattr(stats, stat_field, None)
+                value = raw if isinstance(raw, int | float) and not isinstance(raw, bool) else None
+        else:
+            value = _latest_absolute_change(row, periods)
 
-    return sorted(rows, key=_key, reverse=desc)
+        if value is None:
+            return (float("inf"), row.title.lower())
+        numeric = float(value)
+        if desc:
+            return (-numeric, row.title.lower())
+        return (numeric, row.title.lower())
+
+    return sorted(rows, key=_key)
 
 
 def build_percent_change_summary(
@@ -493,8 +607,21 @@ def build_percent_change_summary(
     total_eligible = len(all_rows)
     total_excluded = total_in_scope - total_eligible
 
+    # Compute period statistics once on the complete authorized result set so
+    # that statistic sorting and pagination are consistent.
+    all_rows = [
+        row.model_copy(
+            update={"statistics": _calculate_period_statistics(row, periods)}
+        )
+        for row in all_rows
+    ]
+
     sort = request.sort or SummarySort()
-    if sort.field not in {"title", "priority_score", "latest_absolute_change"} and not sort.field.startswith("period:"):
+    if (
+        sort.field not in {"title", "priority_score", "latest_absolute_change"}
+        and not sort.field.startswith("period:")
+        and not sort.field.startswith("statistics:")
+    ):
         sort = SummarySort(field="latest_absolute_change", direction="desc")
     all_rows = _sort_rows(all_rows, sort, periods)
 
