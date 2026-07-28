@@ -213,6 +213,21 @@ def _previous_period_start(d: date, interval: TimeSeriesInterval) -> date:
     return start
 
 
+def _next_period_start(d: date, interval: TimeSeriesInterval) -> date:
+    start = _period_start(d, interval)
+    if interval == TimeSeriesInterval.DAY:
+        return start + timedelta(days=1)
+    if interval == TimeSeriesInterval.WEEK:
+        return start + timedelta(weeks=1)
+    if interval == TimeSeriesInterval.MONTH:
+        if start.month == 12:
+            return date(start.year + 1, 1, 1)
+        return date(start.year, start.month + 1, 1)
+    if interval == TimeSeriesInterval.YEAR:
+        return date(start.year + 1, 1, 1)
+    return start
+
+
 def _format_period(d: date, interval: TimeSeriesInterval) -> str:
     if interval == TimeSeriesInterval.DAY:
         return d.isoformat()

@@ -774,6 +774,83 @@ export function getInsightTimeSeries(
   return apiClient.get(`/api/ai/insights/${insightId}/time-series?${query.toString()}`);
 }
 
+// ── Cross-project percent-change summary ─────────────────────────────────────
+
+export interface PercentChangeSummarySort {
+  field: string;
+  direction: "asc" | "desc";
+}
+
+export interface PercentChangeSummaryRequest {
+  project_ids: number[];
+  interval: TimeSeriesInterval;
+  range: TimeSeriesRange;
+  search?: string;
+  sort?: PercentChangeSummarySort;
+  cursor?: string | null;
+  page_size?: number;
+}
+
+export interface PercentChangeSummaryPeriod {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+  is_latest: boolean;
+}
+
+export interface PercentChangeSummaryCell {
+  current_value: number | null;
+  previous_value: number | null;
+  percent_change_ratio: number | null;
+  status: "positive" | "negative" | "zero" | "unavailable";
+  comparison_status: string;
+  partial: boolean;
+  warnings: string[];
+}
+
+export interface PercentChangeSummaryRow {
+  insight_id: string;
+  title: string;
+  project_id: number;
+  project_name: string;
+  project_color: string | null;
+  priority_score: number | null;
+  source_grain: string | null;
+  supported_intervals: string[];
+  data_through: string | null;
+  cells: Record<string, PercentChangeSummaryCell>;
+}
+
+export interface PercentChangeSummaryPageInfo {
+  page_size: number;
+  total_in_scope: number;
+  total_eligible: number;
+  total_excluded: number;
+  next_cursor: string | null;
+}
+
+export interface PercentChangeSummaryResponse {
+  schema_version: number;
+  interval: string;
+  range: string;
+  as_of: string;
+  comparison_label: string;
+  periods: PercentChangeSummaryPeriod[];
+  rows: PercentChangeSummaryRow[];
+  interval_support_counts: Record<string, number>;
+  page: PercentChangeSummaryPageInfo;
+  excluded_by_reason: Record<string, number>;
+  warnings: string[];
+}
+
+export function getPercentChangeSummary(
+  body: PercentChangeSummaryRequest,
+  signal?: AbortSignal,
+): Promise<PercentChangeSummaryResponse> {
+  return apiClient.post("/api/ai/insights/percent-change-summary", body, { signal });
+}
+
 export interface SaveCardToDashboardPayload {
   project_id: number;
   source_project_id?: number | null;

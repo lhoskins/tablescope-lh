@@ -17,51 +17,12 @@ import type {
   TimeSeriesViewMode,
   TimeSeriesViewState,
 } from "@/lib/api/home-intelligence";
+import {
+  clampInterval,
+  inferDefaultInterval,
+  isTimeSeriesEligible,
+} from "@/lib/insights/time-series";
 import { IconChevronRight, IconChevronDown } from "@tabler/icons-react";
-
-function parseDateLabel(label: unknown): string | null {
-  const s = String(label ?? "").trim();
-  if (/^\d{4}(-\d{2})?(-\d{2})?(-W\d{2})?$/.test(s) || /^\d{4}$/.test(s)) {
-    return s;
-  }
-  return null;
-}
-
-function isTimeSeriesEligible(card: InsightCard): boolean {
-  const chart = card.chart;
-  if (!chart) return false;
-  const type = chart.type;
-  if (!["line", "area", "bar"].includes(type)) return false;
-  const series = chart.data?.series;
-  if (!series || series.length === 0) {
-    const rows = chart.data?.rows;
-    if (!rows || rows.length === 0) return false;
-    return rows.some((r) => parseDateLabel(r[chart.roles?.x ?? ""] ?? r["label"]));
-  }
-  return series.some((s) => parseDateLabel(s.label));
-}
-
-function inferDefaultInterval(card: InsightCard): TimeSeriesInterval {
-  if (card.timeSeriesView?.interval) return card.timeSeriesView.interval;
-  const series = card.chart?.data?.series ?? [];
-  const first = String(series[0]?.label ?? "");
-  if (/^\d{4}-W\d{2}$/.test(first)) return "week";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(first)) return "day";
-  if (/^\d{4}-\d{2}$/.test(first) || /^\d{4}-Q\d$/.test(first)) return "month";
-  if (/^\d{4}$/.test(first)) return "year";
-  return "month";
-}
-
-function clampInterval(
-  interval: TimeSeriesInterval,
-  supported: string[] | undefined,
-): TimeSeriesInterval {
-  if (!supported || supported.length === 0) return interval;
-  if (supported.includes(interval)) return interval;
-  const order: TimeSeriesInterval[] = ["day", "week", "month", "year"];
-  const candidates = order.filter((i) => supported.includes(i));
-  return candidates[candidates.length - 1] ?? (supported[0] as TimeSeriesInterval);
-}
 
 function buildValueChart(
   card: InsightCard,
