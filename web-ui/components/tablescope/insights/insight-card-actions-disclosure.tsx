@@ -2,7 +2,6 @@
 
 import { useId, useState, type ReactNode } from "react";
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 
 export interface InsightCardActionsDisclosureProps {
@@ -28,10 +27,8 @@ export function InsightCardActionsDisclosure({
 
   return (
     <div className={cn("mt-3 flex flex-col items-start", className)}>
-      <Button
+      <button
         type="button"
-        variant="primary"
-        size="sm"
         aria-expanded={expanded}
         aria-controls={contentId}
         title={
@@ -40,11 +37,15 @@ export function InsightCardActionsDisclosure({
             : "Show data sources and actions"
         }
         onClick={() => setExpanded((value) => !value)}
-        className="rounded-full px-3 py-1 text-[12px]"
+        className="inline-flex min-h-8 items-center gap-1.5 bg-transparent px-2 py-1 text-small font-medium text-ink-tertiary transition-colors hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
       >
         <span>More Actions</span>
-        {expanded ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-      </Button>
+        {expanded ? (
+          <IconChevronUp size={16} className="text-current" aria-hidden />
+        ) : (
+          <IconChevronDown size={16} className="text-current" aria-hidden />
+        )}
+      </button>
 
       {expanded && (
         <div
