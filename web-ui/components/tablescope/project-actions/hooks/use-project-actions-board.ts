@@ -6,7 +6,20 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { projectActionsApi, type ProjectActionFilters, type ProjectActionListItem, type ProjectActionListResponse, type ProjectActionStatus, type ProjectActionPriority, type ProjectActionSortBy, type ProjectActionGroupBy, type ProjectActionView, type ProjectActionSubtask, type ProjectAction } from "@/lib/api/project-actions";
+import {
+  projectActionsApi,
+  type ProjectActionFilters,
+  type ProjectActionListItem,
+  type ProjectActionListResponse,
+  type ProjectActionStatus,
+  type ProjectActionPriority,
+  type ProjectActionSortBy,
+  type ProjectActionGroupBy,
+  type ProjectActionView,
+  type ProjectActionSubtask,
+  type ProjectAction,
+  type CreateProjectActionPayload,
+} from "@/lib/api/project-actions";
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
 
 export interface BoardPreferences {
@@ -162,16 +175,24 @@ export function useProjectActionsBoard(
     mutationFn: ({
       actionId,
       subtaskId,
+      expected_version,
     }: {
       actionId: number;
       subtaskId: number;
-    }) => projectActionsApi.archiveSubtask(projectId, actionId, subtaskId),
+      expected_version?: number;
+    }) => projectActionsApi.archiveSubtask(projectId, actionId, subtaskId, expected_version),
     onSuccess: () => invalidateBoard(),
   });
 
   const bulkUpdate = useMutation({
     mutationFn: (payload: Parameters<typeof projectActionsApi.bulkUpdate>[1]) =>
       projectActionsApi.bulkUpdate(projectId, payload),
+    onSuccess: () => invalidateBoard(),
+  });
+
+  const createAction = useMutation({
+    mutationFn: (payload: CreateProjectActionPayload) =>
+      projectActionsApi.create(projectId, payload),
     onSuccess: () => invalidateBoard(),
   });
 
@@ -191,6 +212,7 @@ export function useProjectActionsBoard(
     updateSubtask,
     archiveSubtask,
     bulkUpdate,
+    createAction,
     currentUserId,
   };
 }
