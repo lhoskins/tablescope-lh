@@ -1,11 +1,12 @@
 "use client";
 
 import { cn } from "@/lib/cn";
-import {
-  type TimeSeriesInterval,
-  type TimeSeriesRange,
-  type TimeSeriesViewMode,
-} from "@/lib/api/home-intelligence";
+import type { TimeSeriesViewMode } from "@/lib/api/home-intelligence";
+import type {
+  TimeSeriesInterval,
+  TimeSeriesRange,
+} from "@/lib/insights/time-series";
+import { TimeSeriesIntervalRangeControls } from "./time-series-interval-range-controls";
 
 interface TimeSeriesViewControlsProps {
   mode: TimeSeriesViewMode;
@@ -22,21 +23,6 @@ interface TimeSeriesViewControlsProps {
 const MODE_OPTIONS: { value: TimeSeriesViewMode; label: string }[] = [
   { value: "value", label: "Value" },
   { value: "percent_change", label: "% Change" },
-];
-
-const INTERVAL_OPTIONS: { value: TimeSeriesInterval; label: string }[] = [
-  { value: "day", label: "Day" },
-  { value: "week", label: "Week" },
-  { value: "month", label: "Month" },
-  { value: "year", label: "Year" },
-];
-
-const RANGE_OPTIONS: { value: TimeSeriesRange; label: string }[] = [
-  { value: "7d", label: "7D" },
-  { value: "30d", label: "30D" },
-  { value: "90d", label: "90D" },
-  { value: "1y", label: "1Y" },
-  { value: "2y", label: "2Y" },
 ];
 
 function ToggleButton({
@@ -80,7 +66,13 @@ export function TimeSeriesViewControls({
   onIntervalChange,
   onRangeChange,
 }: TimeSeriesViewControlsProps) {
-  const supported = new Set<TimeSeriesInterval>(supportedIntervals ?? INTERVAL_OPTIONS.map((i) => i.value));
+  const supportCounts = supportedIntervals?.reduce(
+    (acc, iv) => {
+      acc[iv] = (acc[iv] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
 
   return (
     <div className="space-y-2" role="group" aria-label="Time series view controls">
@@ -96,37 +88,17 @@ export function TimeSeriesViewControls({
             />
           ))}
         </div>
-        <span className="ml-1 text-[11px] font-medium text-ink-tertiary">Interval</span>
-        <div className="flex items-center gap-1">
-          {INTERVAL_OPTIONS.map((opt) => (
-            <ToggleButton
-              key={opt.value}
-              label={opt.label}
-              active={interval === opt.value}
-              disabled={!supported.has(opt.value)}
-              onClick={() => onIntervalChange(opt.value)}
-            />
-          ))}
+        <div className="ml-1 flex items-center">
+          <TimeSeriesIntervalRangeControls
+            interval={interval}
+            range={range}
+            supportCounts={supportCounts}
+            comparisonLabel={mode === "percent_change" ? comparisonLabel : undefined}
+            loading={loading}
+            onIntervalChange={onIntervalChange}
+            onRangeChange={onRangeChange}
+          />
         </div>
-        <span className="ml-1 text-[11px] font-medium text-ink-tertiary">Range</span>
-        <div className="flex items-center gap-1">
-          {RANGE_OPTIONS.map((opt) => (
-            <ToggleButton
-              key={opt.value}
-              label={opt.label}
-              active={range === opt.value}
-              onClick={() => onRangeChange(opt.value)}
-            />
-          ))}
-        </div>
-        {comparisonLabel && mode === "percent_change" && (
-          <span className="ml-auto text-[11px] text-ink-tertiary">{comparisonLabel}</span>
-        )}
-        {loading && (
-          <span className="text-[11px] text-ink-tertiary" aria-live="polite">
-            Loading…
-          </span>
-        )}
       </div>
     </div>
   );

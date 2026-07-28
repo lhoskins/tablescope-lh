@@ -46,6 +46,7 @@ from app.routes.query import (
 from app.services import dashboard_widget as dw
 from app.services import home_intel_queue as q
 from app.services import home_intelligence as hi
+from app.services import percent_change_summary as pcs
 from app.services import time_series_transform as tst
 from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.home_intel_queue import get_redis
@@ -1542,5 +1543,80 @@ async def get_insight_time_series(
         )
     except Exception:
         logger.exception("time-series cache write failed")
+
+    return response.model_dump(mode="json")
+
+
+@router.post("/insights/percent-change-summary")
+async def get_percent_change_summary(
+    request: pcs.PercentChangeSummaryRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Return a cross-project percent-change summary aligned to one shared axis.
+
+    The caller may supply a subset of project IDs; the server intersects that
+    list with the projects the user is authorized to view. Unauthorized IDs are
+    ignored and are never reflected in counts or response bodies.
+    """
+    accessible = await _accessible_projects(session, context)
+
+    if request.project_ids:
+        allowed = [p for p in accessible if p.id in set(request.project_ids)]
+    else:
+        allowed = accessible
+
+    snap = await session.scalar(
+        select(IntelligenceSnapshot).where(
+            IntelligenceSnapshot.user_id == context.user_id,
+        )
+    )
+    snapshot_payload: dict[str, Any] = {}
+    snapshot_fingerprint = "none"
+    if snap and snap.payload:
+        snapshot_payload = snap.payload
+        snapshot_fingerprint = (
+            snap.updated_at.isoformat() if snap.updated_at else "none"
+        )
+
+    as_of = datetime.now(UTC).date()
+    project_id_str = ",".join(str(p.id) for p in sorted(allowed, key=lambda p: p.id))
+    sort = request.sort or pcs.SummarySort()
+    cache_key = (
+        f"pcs:{context.tenant_id}:{context.user_id}:{snapshot_fingerprint}:"
+        f"{project_id_str}:{request.interval}:{request.range}:{as_of}:"
+        f"{request.search or ''}:{sort.field}:{sort.direction}:"
+        f"{request.cursor or ''}:{request.page_size}:v1"
+    )
+
+    try:
+        redis = get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(str(cached))
+    except Exception:
+        logger.exception("percent-change-summary cache read failed")
+
+    try:
+        response = await asyncio.to_thread(
+            pcs.build_percent_change_summary,
+            allowed,
+            snapshot_payload,
+            request,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        await redis.setex(
+            cache_key,
+            120,
+            json.dumps(response.model_dump(mode="json"), default=str),
+        )
+    except Exception:
+        logger.exception("percent-change-summary cache write failed")
 
     return response.model_dump(mode="json")
