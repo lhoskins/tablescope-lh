@@ -64,7 +64,7 @@ describe("IntelligenceStrip", () => {
   it("calls the clear-cache handler and respects the disabled state", () => {
     const { rerender } = renderStrip({ isClearingCache: false });
     const clearButton = screen.getByRole("button", { name: /Clear Business Insight cache/i });
-    expect(clearButton.disabled).toBe(false);
+    expect((clearButton as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(clearButton);
     expect(handlers.onClearCache).toHaveBeenCalledTimes(1);
 
@@ -81,7 +81,7 @@ describe("IntelligenceStrip", () => {
         isClearingCache
       />,
     );
-    expect(screen.getByRole("button", { name: /Clear Business Insight cache/i }).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Clear Business Insight cache/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("updates the depth value", () => {
