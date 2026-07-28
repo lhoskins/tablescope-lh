@@ -91,6 +91,10 @@ export type VisualizationOptions = {
   // Bar coloring / cumulative behaviours
   colorBySign?: boolean;
   cumulative?: boolean;
+  // Percent-change time series
+  signedPercentAxis?: boolean;
+  percentChangeTooltip?: boolean;
+  comparisonLabel?: string;
   // Radar / Radial bar
   domainMin?: number;
   domainMax?: number;

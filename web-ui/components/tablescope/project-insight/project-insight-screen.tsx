@@ -41,10 +41,7 @@ import {
 } from "@/components/tablescope/insight-panel";
 import { AIQuestionResultModal } from "@/components/ai/AIQuestionResultModal";
 import type { AiCardContext } from "@/lib/api/ai-actions";
-import {
-  renderBold,
-  InsightChartBlock,
-} from "@/components/tablescope/home/intelligence-card";
+import { renderBold } from "@/components/tablescope/home/intelligence-card";
 import { InsightsPanel, HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import {
   InsightAnalysisDetails,
@@ -75,8 +72,10 @@ import {
   type InsightCard as InsightCardData,
   type InsightChart,
   type InsightExplanation,
+  type TimeSeriesViewState,
   type VizCandidate,
 } from "@/lib/api/home-intelligence";
+import { InsightTimeSeriesChart } from "@/components/tablescope/insights/insight-time-series-chart";
 import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
 import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { formatLastUpdated } from "@/lib/format-datetime";
@@ -132,6 +131,7 @@ function toProjectInsightCard(card: InsightCardData): ProjectInsightCard {
     confidenceEvaluation: card.confidenceEvaluation as unknown as Record<string, unknown>,
     visualizationDecision: card.visualizationDecision as unknown as Record<string, unknown>,
     chartCandidates: card.chartCandidates as unknown as Record<string, unknown>[],
+    timeSeriesView: card.timeSeriesView,
   };
 }
 
@@ -975,6 +975,9 @@ function InsightCardItem({
   const [chartDialogOpen, setChartDialogOpen] = useState(false);
   const [feedbackInitial, setFeedbackInitial] = useState<InsightSentiment>("agree");
   const [selectedChart, setSelectedChart] = useState<VizCandidate | null>(null);
+  const [timeSeriesView, setTimeSeriesView] = useState<TimeSeriesViewState | undefined>(
+    card.timeSeriesView,
+  );
   const hasFeedback = feedback != null && feedback.status === "active";
   const { data: identity } = useCurrentUser();
   const canCreateAction =
@@ -1015,8 +1018,9 @@ function InsightCardItem({
       confidenceEvaluation: card.confidenceEvaluation as unknown as InsightCardData["confidenceEvaluation"],
       visualizationDecision: card.visualizationDecision as unknown as InsightCardData["visualizationDecision"],
       chartCandidates: card.chartCandidates as unknown as InsightCardData["chartCandidates"],
+      timeSeriesView,
     };
-  }, [card, projectId, projectName]);
+  }, [card, projectId, projectName, timeSeriesView]);
 
   const displayCard = useMemo<InsightCardData>(() => {
     const chart = insightCardData.chart;
@@ -1233,12 +1237,16 @@ function InsightCardItem({
       )}
       {displayCard.chart && (
         <div className="mt-3">
-          {displayCard.chart.title && (
+          {displayCard.chart.title && displayCard.chart.type !== "kpi_grid" && (
             <div className="mb-1 text-[12px] text-ink-tertiary">
               {displayCard.chart.title}
             </div>
           )}
-          <InsightChartBlock chart={displayCard.chart} />
+          <InsightTimeSeriesChart
+            card={displayCard}
+            projectId={Number(displayCard.projectId)}
+            onViewChange={setTimeSeriesView}
+          />
         </div>
       )}
       <InsightCardActionsDisclosure

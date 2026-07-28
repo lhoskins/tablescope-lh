@@ -360,6 +360,8 @@ export interface InsightCard {
   visualizationDecision?: VizDecision;
   /** Ranked compatible chart candidates the user can switch to. */
   chartCandidates?: VizCandidate[];
+  /** Active time-series view (mode/interval/range) captured for Home pins and dashboards. */
+  timeSeriesView?: TimeSeriesViewState;
 }
 
 export interface ProjectResult {
@@ -699,6 +701,77 @@ export function saveDashboardSuggestion(body: {
   }[];
 }): Promise<{ status: string; dashboard_id: number; name: string }> {
   return apiClient.post("/api/ai/home/save-dashboard", body);
+}
+
+export type TimeSeriesViewMode = "value" | "percent_change";
+export type TimeSeriesInterval = "day" | "week" | "month" | "year";
+export type TimeSeriesRange = "7d" | "30d" | "90d" | "1y" | "2y";
+
+export interface TimeSeriesMetric {
+  name: string;
+  aggregation: string | null;
+  is_rate_or_ratio: boolean;
+  value_format: string | null;
+}
+
+export interface TimeSeriesPoint {
+  label: string;
+  period_start: string;
+  period_end: string;
+  current_value: number | null;
+  previous_value: number | null;
+  percent_change_ratio: number | null;
+  percent_change_label: string | null;
+  comparison_status: string;
+  partial: boolean;
+  warnings: string[];
+}
+
+export interface TimeSeriesCalculation {
+  formula: string;
+  interval: string;
+  range: string;
+  range_start: string | null;
+  range_end: string | null;
+  as_of: string | null;
+  previous_periods_included: number;
+  notes: string[];
+}
+
+export interface TimeSeriesResponse {
+  insight_id: string;
+  metric: TimeSeriesMetric;
+  interval: string;
+  range: string;
+  timezone: string;
+  comparison_label: string;
+  points: TimeSeriesPoint[];
+  calculation: TimeSeriesCalculation;
+  warnings: string[];
+  eligible: boolean;
+  source_grain: string | null;
+  supported_intervals: string[];
+}
+
+export interface TimeSeriesViewState {
+  mode: TimeSeriesViewMode;
+  interval: TimeSeriesInterval;
+  range: TimeSeriesRange;
+}
+
+export function getInsightTimeSeries(
+  insightId: string,
+  params: {
+    project_id: number;
+    interval: TimeSeriesInterval;
+    range: TimeSeriesRange;
+  },
+): Promise<TimeSeriesResponse> {
+  const query = new URLSearchParams();
+  query.set("project_id", String(params.project_id));
+  query.set("interval", params.interval);
+  query.set("range", params.range);
+  return apiClient.get(`/api/ai/insights/${insightId}/time-series?${query.toString()}`);
 }
 
 export interface SaveCardToDashboardPayload {
