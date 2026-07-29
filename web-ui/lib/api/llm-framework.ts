@@ -8,6 +8,9 @@ export interface LLMFrameworkStatus {
   two_person_approval_required: boolean;
   auto_rollback_enabled: boolean;
   manifest_signing_key_fingerprint: string;
+  embedding_migration_enabled: boolean;
+  fp16_conversion_enabled: boolean;
+  embedding_recall_threshold: number;
 }
 
 export interface RuntimeTarget {
@@ -254,4 +257,60 @@ export function rollbackLLMDeployment(deploymentId: number): Promise<{ deploymen
 
 export function upsertLLMRoutingProfile(request: RoutingProfileRequest): Promise<RoutingProfile> {
   return apiClient.put<RoutingProfile>("/api/llm-framework/routing", request);
+}
+
+export interface EmbeddingMigration {
+  id: number;
+  tenant_id: number;
+  artifact_id: number;
+  source_collection: string;
+  target_collection: string;
+  embedding_model: string;
+  embedding_dim: number;
+  status: string;
+  recall_score: number | null;
+  points_total: number | null;
+  points_indexed: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReindexPayload {
+  tenant_id: number;
+  embedding_model: string;
+  embedding_dim: number;
+}
+
+export function reindexLLMArtifact(artifactId: number, payload: ReindexPayload): Promise<{ migration_id: number; status: string; job_id: string | null }> {
+  return apiClient.post(`/api/llm-framework/artifacts/${artifactId}/reindex`, payload);
+}
+
+export function getLLMEmbeddingMigrations(): Promise<EmbeddingMigration[]> {
+  return apiClient.get<EmbeddingMigration[]>("/api/llm-framework/embedding-migrations");
+}
+
+export interface ModelConversion {
+  id: number;
+  source_artifact_id: number;
+  output_artifact_id: number | null;
+  quantization: string | null;
+  status: string;
+  converter_version: string | null;
+  output_size_bytes: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConvertPayload {
+  repo_url: string;
+  quantization?: string | null;
+  converter_version?: string | null;
+}
+
+export function convertLLMCatalogEntry(payload: ConvertPayload): Promise<{ source_artifact_id: number; conversion_id: number; status: string; job_id: string | null }> {
+  return apiClient.post("/api/llm-framework/catalog/convert", payload);
+}
+
+export function getLLMModelConversions(): Promise<ModelConversion[]> {
+  return apiClient.get<ModelConversion[]>("/api/llm-framework/model-conversions");
 }

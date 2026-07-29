@@ -39,6 +39,12 @@ class ModelVault:
     def _artifact_dir(self, artifact_id: int) -> Path:
         return self.base_path / "artifacts" / str(artifact_id)
 
+    def storage_dir(self, artifact_id: int) -> Path:
+        """Resolved artifact directory for multi-file source models."""
+        d = self._artifact_dir(artifact_id)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     def storage_path(self, artifact_id: int, filename: str) -> Path:
         """Resolved, absolute storage path for an artifact file."""
         if "/" in filename or "\\" in filename or filename.startswith("."):

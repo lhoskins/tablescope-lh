@@ -11,12 +11,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import require_human_platform_admin, require_platform_admin
 from app.config import get_settings
 from app.database import get_db
+from app.models.llm_framework import LLMEmbeddingMigration, LLMModelConversion
 from app.schemas.llm_framework import (
     ActivateRequest,
     ActivateResponse,
@@ -24,12 +26,18 @@ from app.schemas.llm_framework import (
     CapabilitiesResponse,
     CatalogDetail,
     CatalogSearchResult,
+    ConvertRequest,
+    ConvertResponse,
+    EmbeddingMigrationSummary,
     InstallRequest,
     InstallResponse,
     InventoryResponse,
     ModelArtifactDetail,
+    ModelConversionSummary,
     PreflightResponse,
     QuarantineReleaseResponse,
+    ReindexRequest,
+    ReindexResponse,
     RollbackResponse,
     StageArtifactRequest,
     StageArtifactResponse,
@@ -41,6 +49,7 @@ from app.services.llm_deployment import (
     preflight_install,
     rollback_deployment,
 )
+from app.services.llm_embedding_migration import EmbeddingMigrationError, start_embedding_migration
 from app.services.llm_framework import (
     CAPABILITIES,
     create_artifact_and_stage,
@@ -53,6 +62,7 @@ from app.services.llm_framework import (
     search_catalog,
     validate_routing_capability,
 )
+from app.services.llm_model_conversion import ModelConversionError, create_source_artifact_and_convert
 
 router = APIRouter(prefix="/llm-framework", tags=["llm-framework"])
 
@@ -84,6 +94,9 @@ class FrameworkStatusResponse(BaseModel):
     two_person_approval_required: bool
     auto_rollback_enabled: bool
     manifest_signing_key_fingerprint: str
+    embedding_migration_enabled: bool
+    fp16_conversion_enabled: bool
+    embedding_recall_threshold: float
 
 
 @router.get("/status", response_model=FrameworkStatusResponse)
@@ -99,6 +112,9 @@ async def get_llm_framework_status(
         "two_person_approval_required": settings.llm_two_person_approval_required,
         "auto_rollback_enabled": settings.llm_auto_rollback_enabled,
         "manifest_signing_key_fingerprint": settings.llm_manifest_signing_key_fingerprint,
+        "embedding_migration_enabled": settings.llm_embedding_migration_enabled,
+        "fp16_conversion_enabled": settings.llm_fp16_conversion_enabled,
+        "embedding_recall_threshold": settings.llm_embedding_recall_threshold,
     }
 
 
@@ -348,3 +364,90 @@ async def rollback_llm_deployment(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
     return {"deployment_id": deployment.id, "status": deployment.status}
+
+
+@router.post("/artifacts/{artifact_id}/reindex", response_model=ReindexResponse, status_code=202)
+async def reindex_llm_artifact(
+    artifact_id: int,
+    request: ReindexRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_human_platform_admin),
+) -> dict[str, Any]:
+    """Start an embedding-model re-index migration for one tenant."""
+    _require_enabled()
+    settings = get_settings()
+    if not settings.llm_embedding_migration_enabled:
+        raise HTTPException(status_code=503, detail="Embedding migration is disabled")
+
+    try:
+        migration = await start_embedding_migration(
+            session,
+            artifact_id=artifact_id,
+            tenant_id=request.tenant_id,
+            embedding_model=request.embedding_model,
+            embedding_dim=request.embedding_dim,
+            requested_by_user_id=context.user_id,
+        )
+    except EmbeddingMigrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    from app.tasks.workflows import enqueue_reindex_embedding_model
+    job_id = await enqueue_reindex_embedding_model(migration.id, context.user_id)
+    await session.commit()
+    return {
+        "migration_id": migration.id,
+        "status": migration.status,
+        "job_id": job_id,
+    }
+
+
+@router.get("/embedding-migrations", response_model=list[EmbeddingMigrationSummary])
+async def list_embedding_migrations(
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(require_platform_admin),
+) -> list[Any]:
+    """List all embedding re-index migrations."""
+    _require_enabled()
+    result = await session.scalars(select(LLMEmbeddingMigration).order_by(LLMEmbeddingMigration.created_at.desc()))
+    return list(result.all())
+
+
+@router.post("/catalog/convert", response_model=ConvertResponse, status_code=202)
+async def convert_fp16_catalog_entry(
+    request: ConvertRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_human_platform_admin),
+) -> dict[str, Any]:
+    """Start an FP16 / safetensors -> GGUF conversion from a Hugging Face repo."""
+    _require_enabled()
+    settings = get_settings()
+    if not settings.llm_fp16_conversion_enabled:
+        raise HTTPException(status_code=503, detail="FP16 conversion is disabled")
+
+    try:
+        artifact, conversion, job_id = await create_source_artifact_and_convert(
+            session,
+            repo_url=request.repo_url,
+            quantization=request.quantization,
+            requested_by_user_id=context.user_id,
+        )
+    except ModelConversionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await session.commit()
+    return {
+        "source_artifact_id": artifact.id,
+        "conversion_id": conversion.id,
+        "status": conversion.status,
+        "job_id": job_id,
+    }
+
+
+@router.get("/model-conversions", response_model=list[ModelConversionSummary])
+async def list_model_conversions(
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(require_platform_admin),
+) -> list[Any]:
+    """List all FP16 -> GGUF conversions."""
+    _require_enabled()
+    result = await session.scalars(select(LLMModelConversion).order_by(LLMModelConversion.created_at.desc()))
+    return list(result.all())

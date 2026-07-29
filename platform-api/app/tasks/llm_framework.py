@@ -23,7 +23,12 @@ from app.models.llm_framework import (
 from app.services.llm_approval_policy import ApprovalPolicy
 from app.services.llm_catalog_client import HuggingFaceCatalogClient
 from app.services.llm_deployment import DeploymentError, create_deployment, install_artifact
+from app.services.llm_embedding_migration import (
+    EmbeddingMigrationError,
+    run_embedding_migration,
+)
 from app.services.llm_manifest import build_manifest, sign_manifest
+from app.services.llm_model_conversion import ModelConversionError, run_fp16_conversion
 from app.services.llm_model_vault import ModelVault, VaultError
 from app.services.llm_scanner import scan_file
 
@@ -277,3 +282,75 @@ async def deploy_llm_artifact(
     finally:
         if redis:
             await redis.delete(f"llm:deploy:{artifact_id}:{target_id}")
+
+
+async def reindex_embedding_model(
+    ctx: dict[str, Any],
+    migration_id: int,
+    requested_by_user_id: int,
+) -> dict[str, Any]:
+    """Re-index a tenant's Qdrant collection with a new embedding model."""
+    settings = get_settings()
+    if not settings.llm_framework_enabled or not settings.llm_embedding_migration_enabled:
+        raise RuntimeError("Embedding migration is disabled")
+
+    redis = ctx.get("redis")
+    if redis:
+        locked = await redis.set(f"llm:reindex:{migration_id}", "1", nx=True, ex=3600)
+        if not locked:
+            raise Retry(defer=30)
+
+    try:
+        async with SessionLocal() as session:
+            result = await run_embedding_migration(session, migration_id)
+            await session.commit()
+            return result
+    except EmbeddingMigrationError as exc:
+        logger.exception("Embedding migration %s failed", migration_id)
+        async with SessionLocal() as session:
+            from app.models.llm_framework import LLMEmbeddingMigration
+            migration = await session.get(LLMEmbeddingMigration, migration_id)
+            if migration:
+                migration.status = "failed"
+                migration.detail = str(exc)[:1024]
+                await session.commit()
+        return {"migration_id": migration_id, "status": "failed", "reason": str(exc)}
+    finally:
+        if redis:
+            await redis.delete(f"llm:reindex:{migration_id}")
+
+
+async def convert_fp16_to_gguf(
+    ctx: dict[str, Any],
+    conversion_id: int,
+    requested_by_user_id: int,
+) -> dict[str, Any]:
+    """Convert an FP16/safetensors artifact to a signed GGUF artifact."""
+    settings = get_settings()
+    if not settings.llm_framework_enabled or not settings.llm_fp16_conversion_enabled:
+        raise RuntimeError("FP16 conversion is disabled")
+
+    redis = ctx.get("redis")
+    if redis:
+        locked = await redis.set(f"llm:convert:{conversion_id}", "1", nx=True, ex=7200)
+        if not locked:
+            raise Retry(defer=60)
+
+    try:
+        async with SessionLocal() as session:
+            result = await run_fp16_conversion(session, conversion_id)
+            await session.commit()
+            return result
+    except ModelConversionError as exc:
+        logger.exception("FP16 conversion %s failed", conversion_id)
+        async with SessionLocal() as session:
+            from app.models.llm_framework import LLMModelConversion
+            conversion = await session.get(LLMModelConversion, conversion_id)
+            if conversion:
+                conversion.status = "failed"
+                conversion.detail = str(exc)[:1024]
+                await session.commit()
+        return {"conversion_id": conversion_id, "status": "failed", "reason": str(exc)}
+    finally:
+        if redis:
+            await redis.delete(f"llm:convert:{conversion_id}")

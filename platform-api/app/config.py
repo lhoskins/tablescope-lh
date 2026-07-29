@@ -121,6 +121,16 @@ class Settings(BaseSettings):
     llm_huggingface_token: str = ""
     # Phase 4: allow dynamic routing profile changes and activation.
     llm_dynamic_routing_enabled: bool = False
+    # Phase 5: enable embedding-model re-index migrations (dual collection,
+    # re-embed, recall comparison, cut-over). Disabled until the AI server
+    # vector-store backend is wired.
+    llm_embedding_migration_enabled: bool = False
+    # Phase 6: enable FP16 / safetensors -> GGUF conversion. The converter must
+    # be a sandboxed command or container; the platform-api never installs the
+    # conversion toolchain itself.
+    llm_fp16_conversion_enabled: bool = False
+    llm_fp16_converter_command: str = ""
+    llm_embedding_recall_threshold: float = 0.95
     # URL of the deployment agent on the AI host. If empty, deployment tasks
     # fail closed with a descriptive quarantine reason.
     llm_deployment_agent_url: str = ""

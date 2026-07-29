@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -62,6 +63,10 @@ class LLMRuntimeTarget(TimestampMixin, Base):
     routing_profiles: Mapped[list[LLMRoutingProfile]] = relationship(back_populates="target")
 
 
+_ARTIFACT_FORMATS = ["gguf", "safetensors", "pytorch", "fp16", "unknown"]
+_FORMATS_SQL = ", ".join(f"'{f}'" for f in _ARTIFACT_FORMATS)
+
+
 class LLMModelArtifact(TimestampMixin, Base):
     __tablename__ = "llm_model_artifacts"
 
@@ -71,8 +76,8 @@ class LLMModelArtifact(TimestampMixin, Base):
             name="ck_llm_model_artifacts_status",
         ),
         CheckConstraint(
-            "format = 'gguf'",
-            name="ck_llm_model_artifacts_format_gguf",
+            f"format IN ({_FORMATS_SQL})",
+            name="ck_llm_model_artifacts_format",
         ),
     )
 
@@ -83,6 +88,7 @@ class LLMModelArtifact(TimestampMixin, Base):
     commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     quantization: Mapped[str | None] = mapped_column(String(32), nullable=True)
     format: Mapped[str] = mapped_column(String(32), nullable=False, default="gguf")
+    embedding_dim: Mapped[int | None] = mapped_column(Integer, nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     manifest: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
@@ -264,3 +270,79 @@ class LLMAuditEvent(Base):
         server_default="now()",
         nullable=False,
     )
+
+
+class LLMEmbeddingMigration(TimestampMixin, Base):
+    __tablename__ = "llm_embedding_migrations"
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'creating_target', 'reindexing', 'comparing', 'completed', 'failed', 'rolled_back')",
+            name="ck_llm_embedding_migrations_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    artifact_id: Mapped[int] = mapped_column(
+        ForeignKey("llm_model_artifacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_collection: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_collection: Mapped[str] = mapped_column(String(255), nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    embedding_dim: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    recall_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    points_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    points_indexed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    artifact: Mapped[LLMModelArtifact] = relationship(back_populates="embedding_migrations")
+
+
+class LLMModelConversion(TimestampMixin, Base):
+    __tablename__ = "llm_model_conversions"
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'downloading', 'converting', 'verifying', 'completed', 'failed')",
+            name="ck_llm_model_conversions_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_artifact_id: Mapped[int] = mapped_column(
+        ForeignKey("llm_model_artifacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    output_artifact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_model_artifacts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    quantization: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    converter_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    converter_command: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_manifest: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    output_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    source_artifact: Mapped[LLMModelArtifact] = relationship(
+        foreign_keys=[source_artifact_id],
+        back_populates="source_conversions",
+    )
+    output_artifact: Mapped[LLMModelArtifact | None] = relationship(
+        foreign_keys=[output_artifact_id],
+        back_populates="output_conversion",
+    )
+
+
+LLMModelArtifact.embedding_migrations = relationship(
+    "LLMEmbeddingMigration", back_populates="artifact", cascade="all, delete-orphan"
+)
+LLMModelArtifact.source_conversions = relationship(
+    "LLMModelConversion", foreign_keys=[LLMModelConversion.source_artifact_id], back_populates="source_artifact"
+)
+LLMModelArtifact.output_conversion = relationship(
+    "LLMModelConversion", foreign_keys=[LLMModelConversion.output_artifact_id], back_populates="output_artifact", uselist=False
+)

@@ -8,6 +8,10 @@ import {
   getLLMCapabilities,
   searchLLMCatalog,
   stageLLMArtifact,
+  reindexLLMArtifact,
+  getLLMEmbeddingMigrations,
+  convertLLMCatalogEntry,
+  getLLMModelConversions,
   type CatalogSearchResult,
   type LLMInventory,
 } from "@/lib/api/llm-framework";
@@ -343,8 +347,226 @@ function CatalogResultCard({
   );
 }
 
+function MigrationsPanel() {
+  const [artifactId, setArtifactId] = useState("");
+  const [tenantId, setTenantId] = useState("");
+  const [embeddingModel, setEmbeddingModel] = useState("nomic-embed-text");
+  const [embeddingDim, setEmbeddingDim] = useState("768");
+
+  const statusQuery = useQuery({
+    queryKey: ["llm-framework", "status"],
+    queryFn: getLLMFrameworkStatus,
+  });
+  const query = useQuery({
+    queryKey: ["llm-framework", "embedding-migrations"],
+    queryFn: getLLMEmbeddingMigrations,
+    refetchInterval: 5000,
+  });
+  const mutation = useMutation({
+    mutationFn: (payload: { artifact_id: number; tenant_id: number; embedding_model: string; embedding_dim: number }) =>
+      reindexLLMArtifact(payload.artifact_id, {
+        tenant_id: payload.tenant_id,
+        embedding_model: payload.embedding_model,
+        embedding_dim: payload.embedding_dim,
+      }),
+    onSuccess: () => query.refetch(),
+  });
+
+  const isEnabled = statusQuery.data?.embedding_migration_enabled ?? false;
+
+  return (
+    <div className="space-y-4">
+      <Section title="Start embedding re-index">
+        <div className="grid gap-3 sm:grid-cols-5">
+          <input
+            type="number"
+            placeholder="Artifact ID"
+            className="rounded-md border border-line-tertiary px-3 py-2 text-sm"
+            value={artifactId}
+            onChange={(e) => setArtifactId(e.target.value)}
+          />
+          <input
+            type="number"
+            placeholder="Tenant ID"
+            className="rounded-md border border-line-tertiary px-3 py-2 text-sm"
+            value={tenantId}
+            onChange={(e) => setTenantId(e.target.value)}
+          />
+          <input
+            type="text"
+            placeholder="Embedding model"
+            className="rounded-md border border-line-tertiary px-3 py-2 text-sm"
+            value={embeddingModel}
+            onChange={(e) => setEmbeddingModel(e.target.value)}
+          />
+          <input
+            type="number"
+            placeholder="Embedding dim"
+            className="rounded-md border border-line-tertiary px-3 py-2 text-sm"
+            value={embeddingDim}
+            onChange={(e) => setEmbeddingDim(e.target.value)}
+          />
+          <button
+            onClick={() =>
+              mutation.mutate({
+                artifact_id: Number(artifactId),
+                tenant_id: Number(tenantId),
+                embedding_model: embeddingModel,
+                embedding_dim: Number(embeddingDim),
+              })
+            }
+            disabled={!artifactId || !tenantId || mutation.isPending}
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {mutation.isPending ? "Starting..." : "Re-index"}
+          </button>
+        </div>
+        {mutation.isError && <p className="text-sm text-red-600">{(mutation.error as Error)?.message ?? "Failed to start"}</p>}
+        {mutation.isSuccess && <p className="text-sm text-emerald-600">Migration {mutation.data.migration_id} queued.</p>}
+        {!isEnabled && <p className="text-sm text-ink-tertiary">Embedding migration is disabled in configuration.</p>}
+      </Section>
+
+      <Section title="Embedding migrations">
+        {query.isLoading ? (
+          <p className="text-sm text-ink-tertiary">Loading...</p>
+        ) : query.data?.length === 0 ? (
+          <p className="text-sm text-ink-tertiary">No embedding migrations yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-line-tertiary text-ink-tertiary">
+                <tr>
+                  <th className="py-2 pr-4 font-medium">ID</th>
+                  <th className="py-2 pr-4 font-medium">Tenant</th>
+                  <th className="py-2 pr-4 font-medium">Artifact</th>
+                  <th className="py-2 pr-4 font-medium">Model</th>
+                  <th className="py-2 pr-4 font-medium">Dim</th>
+                  <th className="py-2 pr-4 font-medium">Status</th>
+                  <th className="py-2 pr-4 font-medium">Indexed</th>
+                  <th className="py-2 pr-4 font-medium">Recall</th>
+                  <th className="py-2 pr-4 font-medium">Updated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line-tertiary text-ink-secondary">
+                {query.data?.map((m) => (
+                  <tr key={m.id}>
+                    <td className="py-2 pr-4">{m.id}</td>
+                    <td className="py-2 pr-4">{m.tenant_id}</td>
+                    <td className="py-2 pr-4">{m.artifact_id}</td>
+                    <td className="py-2 pr-4">{m.embedding_model}</td>
+                    <td className="py-2 pr-4">{m.embedding_dim}</td>
+                    <td className="py-2 pr-4"><StatusBadge status={m.status} /></td>
+                    <td className="py-2 pr-4">{m.points_indexed ?? 0} / {m.points_total ?? 0}</td>
+                    <td className="py-2 pr-4">{m.recall_score != null ? m.recall_score.toFixed(3) : "-"}</td>
+                    <td className="py-2 pr-4">{formatDate(m.updated_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+function ConversionsPanel() {
+  const [repoUrl, setRepoUrl] = useState("");
+  const [quantization, setQuantization] = useState("Q4_K_M");
+
+  const statusQuery = useQuery({
+    queryKey: ["llm-framework", "status"],
+    queryFn: getLLMFrameworkStatus,
+  });
+  const query = useQuery({
+    queryKey: ["llm-framework", "model-conversions"],
+    queryFn: getLLMModelConversions,
+    refetchInterval: 5000,
+  });
+  const mutation = useMutation({
+    mutationFn: (payload: { repo_url: string; quantization: string }) => convertLLMCatalogEntry(payload),
+    onSuccess: () => query.refetch(),
+  });
+
+  const isEnabled = statusQuery.data?.fp16_conversion_enabled ?? false;
+
+  return (
+    <div className="space-y-4">
+      <Section title="Start FP16 to GGUF conversion">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <input
+            type="text"
+            placeholder="Hugging Face repo URL (e.g. https://huggingface.co/org/model)"
+            className="flex-1 rounded-md border border-line-tertiary px-3 py-2 text-sm"
+            value={repoUrl}
+            onChange={(e) => setRepoUrl(e.target.value)}
+          />
+          <input
+            type="text"
+            placeholder="Quantization"
+            className="rounded-md border border-line-tertiary px-3 py-2 text-sm"
+            value={quantization}
+            onChange={(e) => setQuantization(e.target.value)}
+          />
+          <button
+            onClick={() => mutation.mutate({ repo_url: repoUrl, quantization })}
+            disabled={!repoUrl || mutation.isPending}
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {mutation.isPending ? "Starting..." : "Convert"}
+          </button>
+        </div>
+        {mutation.isError && <p className="text-sm text-red-600">{(mutation.error as Error)?.message ?? "Failed to start"}</p>}
+        {mutation.isSuccess && (
+          <p className="text-sm text-emerald-600">
+            Conversion {mutation.data.conversion_id} queued (source artifact {mutation.data.source_artifact_id}).
+          </p>
+        )}
+        {!isEnabled && <p className="text-sm text-ink-tertiary">FP16 conversion is disabled in configuration.</p>}
+      </Section>
+
+      <Section title="FP16 to GGUF conversions">
+        {query.isLoading ? (
+          <p className="text-sm text-ink-tertiary">Loading...</p>
+        ) : query.data?.length === 0 ? (
+          <p className="text-sm text-ink-tertiary">No conversions yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-line-tertiary text-ink-tertiary">
+                <tr>
+                  <th className="py-2 pr-4 font-medium">ID</th>
+                  <th className="py-2 pr-4 font-medium">Source artifact</th>
+                  <th className="py-2 pr-4 font-medium">Quantization</th>
+                  <th className="py-2 pr-4 font-medium">Status</th>
+                  <th className="py-2 pr-4 font-medium">Output artifact</th>
+                  <th className="py-2 pr-4 font-medium">Size</th>
+                  <th className="py-2 pr-4 font-medium">Updated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line-tertiary text-ink-secondary">
+                {query.data?.map((c) => (
+                  <tr key={c.id}>
+                    <td className="py-2 pr-4">{c.id}</td>
+                    <td className="py-2 pr-4">{c.source_artifact_id}</td>
+                    <td className="py-2 pr-4">{c.quantization ?? "-"}</td>
+                    <td className="py-2 pr-4"><StatusBadge status={c.status} /></td>
+                    <td className="py-2 pr-4">{c.output_artifact_id ?? "-"}</td>
+                    <td className="py-2 pr-4">{formatBytes(c.output_size_bytes)}</td>
+                    <td className="py-2 pr-4">{formatDate(c.updated_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
 export default function LLMFrameworkPage() {
-  const [tab, setTab] = useState<"inventory" | "catalog">("inventory");
+  const [tab, setTab] = useState<"inventory" | "catalog" | "migrations" | "conversions">("inventory");
 
   const statusQuery = useQuery({
     queryKey: ["llm-framework", "status"],
@@ -401,6 +623,26 @@ export default function LLMFrameworkPage() {
             >
               Catalog
             </button>
+            <button
+              onClick={() => setTab("migrations")}
+              className={`px-4 py-2 text-sm font-medium ${
+                tab === "migrations"
+                  ? "border-b-2 border-brand-600 text-brand-700"
+                  : "text-ink-tertiary hover:text-ink-primary"
+              }`}
+            >
+              Migrations
+            </button>
+            <button
+              onClick={() => setTab("conversions")}
+              className={`px-4 py-2 text-sm font-medium ${
+                tab === "conversions"
+                  ? "border-b-2 border-brand-600 text-brand-700"
+                  : "text-ink-tertiary hover:text-ink-primary"
+              }`}
+            >
+              Conversions
+            </button>
           </div>
 
           {tab === "inventory" ? (
@@ -435,6 +677,24 @@ export default function LLMFrameworkPage() {
                     <div className="text-ink-tertiary">Auto rollback</div>
                     <div className="font-medium text-ink-primary">
                       {statusQuery.data?.auto_rollback_enabled ? "Enabled" : "Disabled"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-ink-tertiary">Embedding migration</div>
+                    <div className="font-medium text-ink-primary">
+                      {statusQuery.data?.embedding_migration_enabled ? "Enabled" : "Disabled"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-ink-tertiary">FP16 conversion</div>
+                    <div className="font-medium text-ink-primary">
+                      {statusQuery.data?.fp16_conversion_enabled ? "Enabled" : "Disabled"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-ink-tertiary">Recall threshold</div>
+                    <div className="font-medium text-ink-primary">
+                      {statusQuery.data?.embedding_recall_threshold ?? "-"}
                     </div>
                   </div>
                   <div>
@@ -476,12 +736,18 @@ export default function LLMFrameworkPage() {
                 </>
               )}
             </>
-          ) : isCatalogEnabled ? (
-            <Section title="Hugging Face Catalog">
-              <CatalogPanel />
-            </Section>
+          ) : tab === "catalog" ? (
+            isCatalogEnabled ? (
+              <Section title="Hugging Face Catalog">
+                <CatalogPanel />
+              </Section>
+            ) : (
+              <p className="text-sm text-ink-tertiary">Catalog is disabled.</p>
+            )
+          ) : tab === "migrations" ? (
+            <MigrationsPanel />
           ) : (
-            <p className="text-sm text-ink-tertiary">Catalog is disabled.</p>
+            <ConversionsPanel />
           )}
         </>
       )}

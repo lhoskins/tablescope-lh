@@ -227,3 +227,63 @@ class RoutingProfileRequest(BaseModel):
 
 class RoutingProfileResponse(RoutingProfileSummary):
     pass
+
+
+class ReindexRequest(BaseModel):
+    tenant_id: int
+    embedding_model: str
+    embedding_dim: int
+
+
+class ReindexResponse(BaseModel):
+    migration_id: int
+    status: str
+    job_id: str | None = None
+    points_total: int | None = None
+    points_indexed: int | None = None
+    recall_score: float | None = None
+
+
+class ConvertRequest(BaseModel):
+    repo_url: str
+    quantization: str | None = None
+    converter_version: str | None = None
+
+
+class ConvertResponse(BaseModel):
+    source_artifact_id: int
+    conversion_id: int
+    status: str
+    job_id: str | None = None
+
+
+class EmbeddingMigrationSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    artifact_id: int
+    source_collection: str
+    target_collection: str
+    embedding_model: str
+    embedding_dim: int
+    status: str
+    recall_score: float | None
+    points_total: int | None
+    points_indexed: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ModelConversionSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    source_artifact_id: int
+    output_artifact_id: int | None
+    quantization: str | None
+    status: str
+    converter_version: str | None
+    output_size_bytes: int | None
+    created_at: datetime
+    updated_at: datetime
