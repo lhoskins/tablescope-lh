@@ -490,3 +490,72 @@ they are all correct:
 - Redis is never the sole record of a deployment.
 - The agent is not a remote shell and takes no arbitrary paths or commands.
 - Rollback retention is mandatory before a replace.
+
+---
+
+## 5. Phase 1 review (commit `39d69a5`)
+
+Phase 1 is in good shape and picked up the validation findings:
+
+| Finding | Status |
+|---|---|
+| §0.1 nav in Platform Administration, `isPlatformAdmin` | ✅ correct — the tenant-admin trap avoided |
+| §0.4 `require_platform_admin` bypassing tenant membership | ✅ built, and documents why |
+| §0.5 migration `0070`, `down_revision = "0069"` | ✅ correct chain |
+| §0.3 dedicated `llm_audit_events` | ✅ one of 8 tables created |
+| §0.2 GGUF-only default | ✅ `LLM_MODEL_CATALOG_GGUF_ONLY=true` |
+| §1.4 `GET /capabilities`, `POST /quarantine-release` | ✅ both present |
+| §1.7 flags in the compose env anchor | ✅ worker inherits them |
+
+Two things to fix before Phase 4. Neither blocks Phase 2 or 3.
+
+### 5.1 `embed` is offered as a routable capability — remove it
+
+```python
+# platform-api/app/services/llm_framework.py
+CAPABILITIES = ["generate", "chat", "embed", "summarize", "classify", "code"]
+```
+
+`embed` must not be routable (§1.2). `EMBEDDING_DIM = 768` is a module constant
+baked into every per-tenant Qdrant collection at creation; swapping the embedding
+model invalidates every stored vector, and the same-dimension case is the
+dangerous one — Qdrant keeps answering and retrieval quietly degrades to noise
+with nothing raising an error.
+
+Also note `llm_routing_profiles.capability` is an unconstrained `String(64)` with
+no `CheckConstraint` or enum, so nothing at the database level stops it either.
+
+Do:
+1. Remove `"embed"` from `CAPABILITIES`, or return it flagged
+   `{"routable": false, "reason": "..."}` so the UI can explain the absence.
+2. Add a `CheckConstraint` on `capability` to the routable set — cheap now, and
+   it makes the invariant survive a future caller that forgets.
+3. Reject an `embed` assignment at the API with the reason, per §1.2's
+   acceptance criterion.
+
+### 5.2 Any service API key currently gets full platform admin
+
+```python
+async def require_platform_admin(...):
+    if context.is_service:
+        return context      # ← unconditional
+```
+
+Reasonable for worker-driven jobs, but §8 states the service identity must be
+**"No"** for *Approve production replacement*. If Phase 4's approve endpoint
+reuses this guard, a service key satisfies it — and two-person approval collapses
+to whoever holds the key, which is exactly the control the plan exists to
+enforce.
+
+Do: keep `require_platform_admin` for read and worker paths, and add a separate
+`require_human_platform_admin` (no service bypass) for **approve, activate,
+rollback and delete**. Add a test asserting a service identity receives `403`
+from the approve endpoint.
+
+### 5.3 Capability vocabulary diverges from the plan
+
+Phase 1 ships `generate / chat / embed / summarize / classify / code`; the plan
+(§9.1) specifies `general_reasoning / sql_generation / insight_interpretation /
+dashboard_planning`. The plan's names map to how TableScope actually routes work,
+which is what a routing profile has to address. Reconcile now, while nothing
+depends on the strings — after Phase 4 this becomes a data migration.
