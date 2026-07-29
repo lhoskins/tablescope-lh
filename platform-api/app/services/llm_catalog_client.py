@@ -199,7 +199,7 @@ class HuggingFaceCatalogClient:
         response = await self._request(
             "GET",
             f"/api/models/{repo_id}",
-            params={"expand[]": ["cardData", "siblings"]},
+            params={"expand[]": ["cardData", "siblings", "sha"]},
         )
         return _parse_model_info(response.json())
 
