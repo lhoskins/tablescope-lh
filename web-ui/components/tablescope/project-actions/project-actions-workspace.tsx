@@ -21,14 +21,10 @@ import {
   type ProjectActionView,
   type ProjectAction,
   type ProjectActionFilters,
-  type ProjectActionGroupSummary,
 } from "@/lib/api/project-actions";
 import {
   IconPlus,
   IconSearch,
-  IconUserCircle,
-  IconFilter,
-  IconArrowsSort,
   IconChevronDown,
   IconChevronRight,
   IconMessage,
@@ -39,8 +35,6 @@ import {
   IconTrendingUp,
   IconShieldCheck,
   IconSparkles,
-  IconTable,
-  IconCheck,
   IconCalendar,
   IconTrash,
 } from "@tabler/icons-react";
@@ -84,11 +78,11 @@ const PRIORITY_LABELS: Record<ProjectActionPriority, string> = {
   critical: "Critical",
 };
 
-const PRIORITY_COLORS: Record<ProjectActionPriority, string> = {
-  low: "bg-success-bg text-success",
-  medium: "bg-brand-50 text-brand-700",
-  high: "bg-warning-bg text-warning",
-  critical: "bg-danger-bg text-danger",
+const PRIORITY_TEXT_COLORS: Record<ProjectActionPriority, string> = {
+  low: "text-success",
+  medium: "text-brand-600",
+  high: "text-warning",
+  critical: "text-danger",
 };
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {
@@ -120,6 +114,14 @@ const GROUP_LABELS: Record<string, string> = {
   all: "All actions",
 };
 
+const DUE_STATE_ORDER: Record<string, number> = {
+  overdue: 0,
+  due_today: 1,
+  due_this_week: 2,
+  upcoming: 3,
+  no_due: 4,
+};
+
 const SORT_OPTIONS: {
   key: string;
   label: string;
@@ -146,22 +148,16 @@ const COLUMNS: { key: string; label: string; width: string }[] = [
   { key: "updated", label: "Updated", width: "90px" },
 ];
 
-const RISK_IMPACT_OPTIONS = [
-  { value: "", label: "All risk impacts" },
-  { value: "critical", label: "Critical" },
-  { value: "high", label: "High" },
-  { value: "medium", label: "Medium" },
-  { value: "low", label: "Low" },
-  { value: "watch", label: "Watch" },
-  { value: "warning", label: "Warning" },
+const GROUP_BY_OPTIONS: { value: ProjectActionGroupBy; label: string }[] = [
+  { value: "status", label: "Status" },
+  { value: "priority", label: "Priority" },
+  { value: "owner", label: "Owner" },
+  { value: "due_state", label: "Due date" },
+  { value: "source_type", label: "Source" },
+  { value: "none", label: "None" },
 ];
 
-const SOURCE_TYPE_OPTIONS = [
-  { value: "", label: "All sources" },
-  { value: "insight", label: "Insight" },
-  { value: "manual", label: "Manual" },
-  { value: "risk", label: "Risk" },
-];
+const SUBTASK_GRID = "24px minmax(160px, 1fr) 140px 120px 100px 70px 44px 44px";
 
 function formatDateShort(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -223,16 +219,60 @@ function groupTone(group: string): "brand" | "warning" | "danger" | "success" | 
   return "neutral";
 }
 
-function useGridTemplate(visibleColumns: string[]) {
+function groupBorderClass(tone: ReturnType<typeof groupTone>): string {
+  switch (tone) {
+    case "danger":
+      return "border-l-red-500";
+    case "warning":
+      return "border-l-amber-500";
+    case "success":
+      return "border-l-emerald-500";
+    case "brand":
+      return "border-l-brand-500";
+    default:
+      return "border-l-gray-400";
+  }
+}
+
+function groupTextClass(tone: ReturnType<typeof groupTone>): string {
+  switch (tone) {
+    case "danger":
+      return "text-red-600";
+    case "warning":
+      return "text-amber-600";
+    case "success":
+      return "text-emerald-600";
+    case "brand":
+      return "text-brand-600";
+    default:
+      return "text-ink-primary";
+  }
+}
+
+function groupLabel(
+  group: string,
+  groupBy: ProjectActionGroupBy,
+  members: { user_id: number; display_name: string | null; email: string }[],
+): string {
+  if (groupBy === "owner") {
+    if (group === "unassigned") return "Unassigned";
+    const m = members.find((m) => String(m.user_id) === group);
+    return m?.display_name || m?.email || group;
+  }
+  if (groupBy === "due_state") {
+    return DUE_STATE_ORDER[group] !== undefined ? GROUP_LABELS[group] || group : group;
+  }
+  if (groupBy === "source_type") return SOURCE_TYPE_LABELS[group] || group;
+  return GROUP_LABELS[group] || group;
+}
+
+function useGridTemplate() {
   return useMemo(() => {
-    const widths = ["40px"];
-    widths.push("minmax(220px, 1fr)");
-    for (const col of COLUMNS) {
-      if (visibleColumns.includes(col.key)) widths.push(col.width);
-    }
+    const widths = ["40px", "minmax(220px, 1fr)"];
+    for (const col of COLUMNS) widths.push(col.width);
     widths.push("44px");
     return widths.join(" ");
-  }, [visibleColumns]);
+  }, []);
 }
 
 export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
@@ -287,23 +327,134 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
   const [addingGroup, setAddingGroup] = useState<string | null>(null);
   const [newActionTitle, setNewActionTitle] = useState("");
 
-  const gridTemplate = useGridTemplate(prefs.visibleColumns);
+  const gridTemplate = useGridTemplate();
 
-  const toggleExpand = async (id: number) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-    if (!detailMap[id]) {
-      const action = await fetchDetail(id);
-      setDetailMap((m) => ({ ...m, [id]: action }));
+  const viewItems = useMemo(() => {
+    if (prefs.view === "archived") return items.filter((i) => i.archived_at);
+    if (prefs.view === "my-actions") return items.filter((i) => !i.archived_at && i.owner_user_id === currentUserId);
+    if (prefs.view === "timeline") {
+      return [...items]
+        .filter((i) => !i.archived_at)
+        .sort((a, b) => {
+          const da = a.due_date ? new Date(a.due_date).getTime() : Number.MAX_SAFE_INTEGER;
+          const db = b.due_date ? new Date(b.due_date).getTime() : Number.MAX_SAFE_INTEGER;
+          return da - db;
+        });
     }
-  };
+    return items.filter((i) => !i.archived_at);
+  }, [items, prefs.view, currentUserId]);
+
+  const viewSummary = useMemo(() => {
+    const active = viewItems.filter(
+      (i) => !i.archived_at && !["completed", "cancelled"].includes(i.status),
+    ).length;
+    const overdue = viewItems.filter(
+      (i) =>
+        !i.archived_at && !["completed", "cancelled"].includes(i.status) && isOverdue(i),
+    ).length;
+    const avgItems = viewItems.filter(
+      (i) => !i.archived_at && !["completed", "cancelled"].includes(i.status),
+    );
+    const avg_progress = avgItems.length
+      ? Math.round(avgItems.reduce((s, i) => s + i.percent_complete, 0) / avgItems.length)
+      : 0;
+    const risk_mitigations_completed = viewItems.filter(
+      (i) =>
+        i.status === "completed" &&
+        !i.archived_at &&
+        ((i.source_insight_type || "").toLowerCase() === "risk" ||
+          (i.source_insight_snapshot?.insight_type as string) === "risk"),
+    ).length;
+    return { active, overdue, avg_progress, risk_mitigations_completed };
+  }, [viewItems]);
+
+  const groupByForView = prefs.groupBy;
+
+  const grouped = useMemo(() => {
+    const byKey: Record<string, ProjectActionListItem[]> = {};
+    for (const item of viewItems) {
+      let key: string = item.status;
+      if (groupByForView === "priority") key = item.priority;
+      if (groupByForView === "owner") key = item.owner_user_id == null ? "unassigned" : String(item.owner_user_id);
+      if (groupByForView === "due_state") key = item.due_date ? (isOverdue(item) ? "overdue" : "upcoming") : "no_due";
+      if (groupByForView === "source_type") key = item.source_type || "none";
+      if (groupByForView === "none") key = "all";
+      byKey[key] = byKey[key] ?? [];
+      byKey[key].push(item);
+    }
+    return byKey;
+  }, [viewItems, groupByForView]);
+
+  const groupMeta = useMemo(() => {
+    const keys = new Set(Object.keys(grouped));
+    if (addingGroup) keys.add(addingGroup);
+    const order = Array.from(keys).sort((a, b) => {
+      if (groupByForView === "status") {
+        const ai = STATUS_ORDER.indexOf(a as ProjectActionStatus);
+        const bi = STATUS_ORDER.indexOf(b as ProjectActionStatus);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+      }
+      if (groupByForView === "priority") {
+        const orderP = ["critical", "high", "medium", "low"];
+        const ai = orderP.indexOf(a);
+        const bi = orderP.indexOf(b);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+      }
+      if (groupByForView === "due_state") {
+        const ai = DUE_STATE_ORDER[a] ?? 99;
+        const bi = DUE_STATE_ORDER[b] ?? 99;
+        if (ai !== bi) return ai - bi;
+      }
+      if (groupByForView === "owner") {
+        const an = Number(a);
+        const bn = Number(b);
+        if (!Number.isNaN(an) && !Number.isNaN(bn)) return an - bn;
+      }
+      return a.localeCompare(b);
+    });
+
+    return order.map((key) => {
+      const groupItems = grouped[key] ?? [];
+      const overdue_count = groupItems.filter(
+        (i) => !i.archived_at && !["completed", "cancelled"].includes(i.status) && isOverdue(i),
+      ).length;
+      const activeItems = groupItems.filter(
+        (i) => !i.archived_at && !["completed", "cancelled"].includes(i.status),
+      );
+      const avg_progress = activeItems.length
+        ? Math.round(activeItems.reduce((s, i) => s + i.percent_complete, 0) / activeItems.length)
+        : 0;
+      return {
+        group: key,
+        label: groupLabel(key, groupByForView, members),
+        count: groupItems.length,
+        overdue_count,
+        avg_progress,
+        items: groupItems,
+      };
+    });
+  }, [grouped, addingGroup, groupByForView, members]);
+
+  const toggleExpand = useCallback(
+    async (id: number) => {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+      if (!detailMap[id]) {
+        const action = await fetchDetail(id);
+        setDetailMap((m) => ({ ...m, [id]: action }));
+      }
+    },
+    [fetchDetail, detailMap],
+  );
 
   const handleStatusChange = (id: number, status: ProjectActionStatus, version: number) => {
     updateAction.mutate({ actionId: id, payload: { status, expected_version: version } });
@@ -321,17 +472,25 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     updateAction.mutate({ actionId: id, payload: { due_date, expected_version: version } });
   };
 
-  const handleArchive = (id: number) => archiveAction.mutate(id);
+  const handleArchive = (id: number, version: number) => {
+    archiveAction.mutate({ actionId: id, expected_version: version });
+  };
+
   const handleRestore = (id: number) => restoreAction.mutate(id);
 
-  const handleSubtaskStatusChange = (actionId: number, subtaskId: number, status: ProjectActionStatus) => {
+  const handleSubtaskStatusChange = (
+    actionId: number,
+    subtaskId: number,
+    status: ProjectActionStatus,
+  ) => {
     const action = detailMap[actionId];
     const sub = action?.subtasks.find((s) => s.id === subtaskId);
     if (!sub) return;
     updateSubtask.mutate(
       { actionId, subtaskId, payload: { status, expected_version: sub.lock_version } },
       {
-        onSuccess: () => fetchDetail(actionId).then((a) => setDetailMap((m) => ({ ...m, [actionId]: a }))),
+        onSuccess: () =>
+          fetchDetail(actionId).then((a) => setDetailMap((m) => ({ ...m, [actionId]: a }))),
       },
     );
   };
@@ -340,10 +499,10 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     actionId: number,
     subtaskId: number,
     payload: Partial<{
+      title: string;
       owner_user_id: number | null;
       due_date: string | null;
       effort_points: number | null;
-      status: ProjectActionStatus;
     }>,
   ) => {
     const action = detailMap[actionId];
@@ -352,7 +511,8 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     updateSubtask.mutate(
       { actionId, subtaskId, payload: { ...payload, expected_version: sub.lock_version } },
       {
-        onSuccess: () => fetchDetail(actionId).then((a) => setDetailMap((m) => ({ ...m, [actionId]: a }))),
+        onSuccess: () =>
+          fetchDetail(actionId).then((a) => setDetailMap((m) => ({ ...m, [actionId]: a }))),
       },
     );
   };
@@ -364,7 +524,8 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     archiveSubtask.mutate(
       { actionId, subtaskId, expected_version: sub.lock_version },
       {
-        onSuccess: () => fetchDetail(actionId).then((a) => setDetailMap((m) => ({ ...m, [actionId]: a }))),
+        onSuccess: () =>
+          fetchDetail(actionId).then((a) => setDetailMap((m) => ({ ...m, [actionId]: a }))),
       },
     );
   };
@@ -386,56 +547,6 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     );
   };
 
-  const grouped = useMemo(() => {
-    const byKey: Record<string, ProjectActionListItem[]> = {};
-    for (const item of items) {
-      let key: string = item.status;
-      if (prefs.groupBy === "priority") key = item.priority;
-      if (prefs.groupBy === "owner") key = item.owner_user_id == null ? "unassigned" : String(item.owner_user_id);
-      if (prefs.groupBy === "due_state") key = item.due_date ? (isOverdue(item) ? "overdue" : "upcoming") : "no_due";
-      if (prefs.groupBy === "source_type") key = item.source_type || "none";
-      if (prefs.groupBy === "none") key = "all";
-      byKey[key] = byKey[key] ?? [];
-      byKey[key].push(item);
-    }
-    return byKey;
-  }, [items, prefs.groupBy]);
-
-  const groupMeta = useMemo(() => {
-    const keys = new Set<string>();
-    for (const g of summary.groups) keys.add(g.group);
-    if (addingGroup) keys.add(addingGroup);
-
-    const order = Array.from(keys).sort((a, b) => {
-      if (prefs.groupBy === "status") {
-        const ai = STATUS_ORDER.indexOf(a as ProjectActionStatus);
-        const bi = STATUS_ORDER.indexOf(b as ProjectActionStatus);
-        if (ai !== -1 && bi !== -1) return ai - bi;
-        if (ai !== -1) return -1;
-        if (bi !== -1) return 1;
-      }
-      if (prefs.groupBy === "priority") {
-        const orderP = ["critical", "high", "medium", "low"];
-        const ai = orderP.indexOf(a);
-        const bi = orderP.indexOf(b);
-        if (ai !== -1 && bi !== -1) return ai - bi;
-      }
-      return a.localeCompare(b);
-    });
-
-    return order.map((key) => {
-      const found = summary.groups.find((g) => g.group === key);
-      return {
-        group: key,
-        label: found?.label ?? GROUP_LABELS[key] ?? key,
-        count: found?.count ?? 0,
-        overdue_count: found?.overdue_count ?? 0,
-        avg_progress: found?.avg_progress ?? 0,
-        items: grouped[key] ?? [],
-      };
-    });
-  }, [summary.groups, grouped, addingGroup, prefs.groupBy]);
-
   const toggleGroup = (group: string) => {
     savePrefs({
       collapsedGroups: prefs.collapsedGroups.includes(group)
@@ -453,26 +564,20 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     });
   };
 
-  const togglePersonFilter = () => {
-    setFilters((f) => ({
-      ...f,
-      owner_user_id: f.owner_user_id === currentUserId ? undefined : currentUserId,
-    }));
-  };
-
-  const startAdding = (group: string) => {
-    setAddingGroup(group);
+  const startAdding = (group?: string) => {
+    const target = group ?? (groupByForView === "status" ? "not_started" : "all");
+    setAddingGroup(target);
     setNewActionTitle("");
-    if (prefs.collapsedGroups.includes(group)) {
+    if (prefs.collapsedGroups.includes(target)) {
       savePrefs({
-        collapsedGroups: prefs.collapsedGroups.filter((g) => g !== group),
+        collapsedGroups: prefs.collapsedGroups.filter((g) => g !== target),
       });
     }
   };
 
   const submitNewAction = (group: string, title: string) => {
     if (!title.trim()) return;
-    const isStatusGroup = prefs.groupBy === "status" && STATUS_ORDER.includes(group as ProjectActionStatus);
+    const isStatusGroup = groupByForView === "status" && STATUS_ORDER.includes(group as ProjectActionStatus);
     createAction.mutate(
       {
         title: title.trim(),
@@ -490,18 +595,10 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
     );
   };
 
-  const toggleColumn = (key: string) => {
-    savePrefs({
-      visibleColumns: prefs.visibleColumns.includes(key)
-        ? prefs.visibleColumns.filter((k) => k !== key)
-        : [...prefs.visibleColumns, key],
-    });
-  };
-
   const handleBulkStatus = (status: ProjectActionStatus) => {
     const expected: Record<number, number> = {};
     for (const id of selected) {
-      const item = items.find((i) => i.id === id);
+      const item = viewItems.find((i) => i.id === id);
       if (item) expected[id] = item.lock_version;
     }
     bulkUpdate.mutate({ action_ids: Array.from(selected), expected_versions: expected, status });
@@ -509,7 +606,10 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
   };
 
   const handleBulkArchive = () => {
-    for (const id of selected) archiveAction.mutate(id);
+    for (const id of selected) {
+      const item = viewItems.find((i) => i.id === id);
+      if (item) archiveAction.mutate({ actionId: id, expected_version: item.lock_version });
+    }
     setSelected(new Set());
   };
 
@@ -519,7 +619,7 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
       activeNav="project-actions"
       breadcrumbLabel="Project Actions"
     >
-      <div className="flex flex-col gap-5 p-4" role="treegrid" aria-label="Project actions board">
+      <div className="flex flex-col gap-5 p-4" aria-label="Project actions board">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold text-ink-primary">Project Actions</h1>
@@ -528,11 +628,11 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <SummaryCard value={summary.active} label="Active" icon={IconClipboardList} tone="brand" />
-            <SummaryCard value={summary.overdue} label="Overdue" icon={IconClock} tone="danger" />
-            <SummaryCard value={`${summary.avg_progress}%`} label="Avg progress" icon={IconTrendingUp} tone="brand" />
+            <SummaryCard value={viewSummary.active} label="Active" icon={IconClipboardList} tone="brand" />
+            <SummaryCard value={viewSummary.overdue} label="Overdue" icon={IconClock} tone="danger" />
+            <SummaryCard value={`${viewSummary.avg_progress}%`} label="Avg progress" icon={IconTrendingUp} tone="brand" />
             <SummaryCard
-              value={summary.risk_mitigations_completed}
+              value={viewSummary.risk_mitigations_completed}
               label="Risks mitigated"
               icon={IconShieldCheck}
               tone="success"
@@ -569,13 +669,8 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
           prefs={prefs}
           savePrefs={savePrefs}
           members={members}
-          currentUserId={currentUserId}
-          visibleColumns={prefs.visibleColumns}
-          toggleColumn={toggleColumn}
           canManage={canManage}
-          personActive={filters.owner_user_id === currentUserId && currentUserId !== undefined}
-          onTogglePerson={togglePersonFilter}
-          onNewAction={() => startAdding("not_started")}
+          onNewAction={() => startAdding()}
         />
 
         {selected.size > 0 && canManage && (
@@ -606,13 +701,36 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
         {boardQuery.isLoading ? (
           <div className="flex h-48 items-center justify-center text-ink-secondary">
             <IconLoader2 className="mr-2 animate-spin" size={20} />
-            Loading actions...
+            Loading actions…
           </div>
-        ) : items.length === 0 ? (
+        ) : viewItems.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center rounded-lg border border-dashed border-line-tertiary text-ink-secondary">
             <IconClipboardList size={32} stroke={1.2} />
             <p className="mt-2 text-[13px]">No actions match the current filters.</p>
           </div>
+        ) : prefs.view === "timeline" ? (
+          <TimelineView
+            projectId={projectId}
+            items={viewItems}
+            gridTemplate={gridTemplate}
+            selected={selected}
+            onSelect={toggleSelect}
+            onExpand={toggleExpand}
+            expandedRows={expanded}
+            detailMap={detailMap}
+            canManage={canManage}
+            onStatusChange={handleStatusChange}
+            onPriorityChange={handlePriorityChange}
+            onOwnerChange={handleOwnerChange}
+            onDueChange={handleDueChange}
+            onArchive={handleArchive}
+            onRestore={handleRestore}
+            onSubtaskStatusChange={handleSubtaskStatusChange}
+            onSubtaskFieldChange={handleSubtaskFieldChange}
+            onSubtaskArchive={handleSubtaskArchive}
+            onAddSubtask={submitSubtask}
+            members={members}
+          />
         ) : (
           <div className="flex flex-col gap-4">
             {groupMeta.map((group) => (
@@ -623,7 +741,6 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
                 expanded={!prefs.collapsedGroups.includes(group.group)}
                 onToggle={() => toggleGroup(group.group)}
                 gridTemplate={gridTemplate}
-                visibleColumns={prefs.visibleColumns}
                 selected={selected}
                 onSelect={toggleSelect}
                 onExpand={toggleExpand}
@@ -656,6 +773,135 @@ export function ProjectActionsWorkspace({ projectId }: { projectId: string }) {
   );
 }
 
+function ColumnHeader({ gridTemplate }: { gridTemplate: string }) {
+  return (
+    <div
+      className="grid items-center gap-2 border-b border-line-tertiary bg-bg-secondary/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-tertiary"
+      style={{ gridTemplateColumns: gridTemplate }}
+    >
+      <div />
+      <div>Action</div>
+      {COLUMNS.map((col) => (
+        <div key={col.key}>{col.label}</div>
+      ))}
+      <div />
+    </div>
+  );
+}
+
+function TimelineView({
+  projectId,
+  items,
+  gridTemplate,
+  selected,
+  onSelect,
+  onExpand,
+  expandedRows,
+  detailMap,
+  canManage,
+  onStatusChange,
+  onPriorityChange,
+  onOwnerChange,
+  onDueChange,
+  onArchive,
+  onRestore,
+  onSubtaskStatusChange,
+  onSubtaskFieldChange,
+  onSubtaskArchive,
+  onAddSubtask,
+  members,
+}: {
+  projectId: string;
+  items: ProjectActionListItem[];
+  gridTemplate: string;
+  selected: Set<number>;
+  onSelect: (id: number) => void;
+  onExpand: (id: number) => void;
+  expandedRows: Set<number>;
+  detailMap: Record<number, ProjectAction>;
+  canManage: boolean;
+  onStatusChange: (id: number, status: ProjectActionStatus, version: number) => void;
+  onPriorityChange: (id: number, priority: ProjectActionPriority, version: number) => void;
+  onOwnerChange: (id: number, owner_user_id: number | null, version: number) => void;
+  onDueChange: (id: number, due_date: string | null, version: number) => void;
+  onArchive: (id: number, version: number) => void;
+  onRestore: (id: number) => void;
+  onSubtaskStatusChange: (actionId: number, subtaskId: number, status: ProjectActionStatus) => void;
+  onSubtaskFieldChange: (
+    actionId: number,
+    subtaskId: number,
+    payload: Partial<{
+      title: string;
+      owner_user_id: number | null;
+      due_date: string | null;
+      effort_points: number | null;
+    }>,
+  ) => void;
+  onSubtaskArchive: (actionId: number, subtaskId: number) => void;
+  onAddSubtask: (actionId: number, title: string) => void;
+  members: { user_id: number; display_name: string | null; email: string }[];
+}) {
+  const sections = useMemo(() => {
+    const groups: Record<string, { label: string; sort: number; items: ProjectActionListItem[] }> = {};
+    for (const item of items) {
+      let key: string;
+      let label: string;
+      let sort: number;
+      if (!item.due_date) {
+        key = "no-due";
+        label = "No due date";
+        sort = Number.MAX_SAFE_INTEGER;
+      } else {
+        const d = new Date(item.due_date);
+        key = `${d.getFullYear()}-${d.getMonth()}`;
+        label = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+        sort = d.getFullYear() * 12 + d.getMonth();
+      }
+      if (!groups[key]) groups[key] = { label, sort, items: [] };
+      groups[key].items.push(item);
+    }
+    return Object.values(groups).sort((a, b) => a.sort - b.sort);
+  }, [items]);
+
+  return (
+    <div className="flex flex-col gap-4">
+      {sections.map((section) => (
+        <div key={section.label} className="rounded-lg border border-line-tertiary bg-bg-primary p-4">
+          <h3 className="mb-3 text-[13px] font-semibold text-ink-primary">{section.label}</h3>
+          <div className="overflow-x-auto">
+            <ColumnHeader gridTemplate={gridTemplate} />
+            {section.items.map((item) => (
+              <ActionRow
+                key={item.id}
+                projectId={projectId}
+                item={item}
+                gridTemplate={gridTemplate}
+                selected={selected.has(item.id)}
+                onSelect={() => onSelect(item.id)}
+                onExpand={() => onExpand(item.id)}
+                expanded={expandedRows.has(item.id)}
+                detail={detailMap[item.id]}
+                canManage={canManage}
+                onStatusChange={onStatusChange}
+                onPriorityChange={onPriorityChange}
+                onOwnerChange={onOwnerChange}
+                onDueChange={onDueChange}
+                onArchive={() => onArchive(item.id, item.lock_version)}
+                onRestore={() => onRestore(item.id)}
+                onSubtaskStatusChange={onSubtaskStatusChange}
+                onSubtaskFieldChange={onSubtaskFieldChange}
+                onSubtaskArchive={onSubtaskArchive}
+                onAddSubtask={onAddSubtask}
+                members={members}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SummaryCard({
   value,
   label,
@@ -664,19 +910,15 @@ function SummaryCard({
 }: {
   value: string | number;
   label: string;
-  icon: typeof IconClipboardList;
+  icon: React.ComponentType<{ size?: number; className?: string; stroke?: number }>;
   tone: "brand" | "danger" | "success";
 }) {
   const toneClass =
-    tone === "brand"
-      ? "text-brand-600"
-      : tone === "danger"
-        ? "text-danger"
-        : "text-success";
+    tone === "brand" ? "text-brand-600" : tone === "danger" ? "text-danger" : "text-success";
   return (
-    <div className="flex flex-col gap-1 rounded-lg border border-line-tertiary bg-bg-primary p-3 shadow-sm">
-      <Icon size={18} className={toneClass} />
-      <div className="text-xl font-semibold text-ink-primary">{value}</div>
+    <div className="flex flex-col rounded-lg border border-line-tertiary bg-bg-primary p-4">
+      <Icon size={20} className={cn("mb-2", toneClass)} stroke={1.5} />
+      <div className="text-2xl font-semibold text-ink-primary">{value}</div>
       <div className="text-[12px] text-ink-secondary">{label}</div>
     </div>
   );
@@ -690,198 +932,62 @@ function Toolbar({
   prefs,
   savePrefs,
   members,
-  currentUserId,
-  visibleColumns,
-  toggleColumn,
   canManage,
-  personActive,
-  onTogglePerson,
   onNewAction,
 }: {
   search: string;
-  setSearch: (s: string) => void;
+  setSearch: (v: string) => void;
   filters: ProjectActionFilters;
-  setFilters: (f: ProjectActionFilters) => void;
-  prefs: {
-    view: ProjectActionView;
-    groupBy: ProjectActionGroupBy;
-    sortBy: ProjectActionSortBy;
-    sortDirection: "asc" | "desc";
-    visibleColumns: string[];
-  };
-  savePrefs: (p: Partial<typeof prefs>) => void;
+  setFilters: React.Dispatch<React.SetStateAction<ProjectActionFilters>>;
+  prefs: { groupBy: ProjectActionGroupBy; sortBy: ProjectActionSortBy; sortDirection: "asc" | "desc" };
+  savePrefs: (next: { groupBy?: ProjectActionGroupBy; sortBy?: ProjectActionSortBy; sortDirection?: "asc" | "desc" }) => void;
   members: { user_id: number; display_name: string | null; email: string }[];
-  currentUserId?: number;
-  visibleColumns: string[];
-  toggleColumn: (k: string) => void;
   canManage: boolean;
-  personActive: boolean;
-  onTogglePerson: () => void;
   onNewAction: () => void;
 }) {
-  const activeSort = SORT_OPTIONS.find(
-    (s) => s.sortBy === prefs.sortBy && s.sortDirection === prefs.sortDirection,
-  );
-
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
-  const [columnsOpen, setColumnsOpen] = useState(false);
-  const filterRef = useRef<HTMLDivElement>(null);
-  const sortRef = useRef<HTMLDivElement>(null);
-  const columnsRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false);
-      if (sortRef.current && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
-      if (columnsRef.current && !columnsRef.current.contains(e.target as Node)) setColumnsOpen(false);
-    }
-    if (filterOpen || sortOpen || columnsOpen) {
-      document.addEventListener("mousedown", handleClick);
-      return () => document.removeEventListener("mousedown", handleClick);
-    }
-  }, [filterOpen, sortOpen, columnsOpen]);
+  const ownerValue = filters.owner_user_id != null ? String(filters.owner_user_id) : "";
+  const statusValue = filters.status ?? "";
+  const priorityValue = filters.priority ?? "";
+  const overdueChecked = filters.overdue === true;
+  const sortValue = `${prefs.sortBy}:${prefs.sortDirection}`;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {canManage && (
-        <Button size="sm" onClick={onNewAction}>
-          <IconPlus size={16} />
-          New action
-          <IconChevronDown size={14} />
-        </Button>
-      )}
-
-      <div className="flex items-center gap-1.5 rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5">
-        <IconSearch size={14} className="text-ink-tertiary" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search"
-          className="bg-transparent text-[13px] text-ink-primary outline-none placeholder:text-ink-tertiary"
-          aria-label="Search actions"
-        />
-      </div>
-
-      <button
-        type="button"
-        onClick={onTogglePerson}
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[13px] font-medium transition-colors",
-          personActive
-            ? "border-brand-200 bg-brand-50 text-brand-700"
-            : "border-line-tertiary bg-bg-primary text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
-        )}
-      >
-        <IconUserCircle size={14} />
-        Person
-      </button>
-
-      <div className="relative" ref={filterRef}>
-        <button
-          type="button"
-          onClick={() => setFilterOpen((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-line-tertiary bg-bg-primary px-2.5 py-1.5 text-[13px] font-medium text-ink-secondary transition-colors hover:bg-bg-secondary hover:text-ink-primary"
-        >
-          <IconFilter size={14} />
-          Filter
-        </button>
-        {filterOpen && (
-          <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-lg border border-line-tertiary bg-bg-primary p-3 shadow-md">
-            <FilterPanel filters={filters} setFilters={setFilters} />
-          </div>
-        )}
-      </div>
-
-      <div className="relative" ref={sortRef}>
-        <button
-          type="button"
-          onClick={() => setSortOpen((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-line-tertiary bg-bg-primary px-2.5 py-1.5 text-[13px] font-medium text-ink-secondary transition-colors hover:bg-bg-secondary hover:text-ink-primary"
-        >
-          <IconArrowsSort size={14} />
-          Sort
-        </button>
-        {sortOpen && (
-          <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-lg border border-line-tertiary bg-bg-primary py-1 shadow-md">
-            {SORT_OPTIONS.map((opt) => (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => {
-                  savePrefs({ sortBy: opt.sortBy, sortDirection: opt.sortDirection });
-                  setSortOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between px-3 py-2 text-left text-[13px] hover:bg-bg-secondary",
-                  activeSort?.key === opt.key ? "text-brand-600" : "text-ink-primary",
-                )}
-              >
-                {opt.label}
-                {activeSort?.key === opt.key && <IconCheck size={14} />}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="relative inline-flex items-center rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px]">
-        <span className="text-ink-tertiary">Group by</span>
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <IconSearch
+            size={14}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+          />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search actions"
+            className="h-8 w-48 rounded-md border border-line-tertiary bg-bg-primary pl-8 pr-2 text-[13px] text-ink-primary outline-none focus:border-brand-500"
+          />
+        </div>
         <select
-          value={prefs.groupBy}
-          onChange={(e) => savePrefs({ groupBy: e.target.value as ProjectActionGroupBy })}
-          className="appearance-none bg-transparent pl-1.5 pr-5 text-[13px] font-medium text-ink-primary outline-none"
+          value={ownerValue}
+          onChange={(e) => {
+            const v = e.target.value;
+            setFilters((prev) => ({ ...prev, owner_user_id: v ? Number(v) : undefined }));
+          }}
+          className="h-8 rounded-md border border-line-tertiary bg-bg-primary px-2 text-[13px] text-ink-primary outline-none focus:border-brand-500"
         >
-          <option value="status">Status</option>
-          <option value="priority">Priority</option>
-          <option value="owner">Owner</option>
-          <option value="due_state">Due date</option>
-          <option value="source_type">Source</option>
-          <option value="none">None</option>
+          <option value="">All owners</option>
+          {members.map((m) => (
+            <option key={m.user_id} value={m.user_id}>
+              {m.display_name || m.email}
+            </option>
+          ))}
         </select>
-        <IconChevronDown size={12} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-tertiary" />
-      </div>
-
-      <div className="relative" ref={columnsRef}>
-        <button
-          type="button"
-          onClick={() => setColumnsOpen((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-line-tertiary bg-bg-primary px-2.5 py-1.5 text-[13px] font-medium text-ink-secondary transition-colors hover:bg-bg-secondary hover:text-ink-primary"
-        >
-          <IconTable size={14} />
-          Columns
-        </button>
-        {columnsOpen && (
-          <div className="absolute left-0 top-full z-20 mt-1 w-44 rounded-lg border border-line-tertiary bg-bg-primary py-1 shadow-md">
-            <label className="flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-ink-secondary">
-              <input type="checkbox" checked disabled className="opacity-50" />
-              Action
-            </label>
-            {COLUMNS.map((col) => (
-              <label
-                key={col.key}
-                className="flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-ink-primary hover:bg-bg-secondary"
-              >
-                <input
-                  type="checkbox"
-                  checked={visibleColumns.includes(col.key)}
-                  onChange={() => toggleColumn(col.key)}
-                />
-                {col.label}
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="ml-auto flex flex-wrap items-center gap-2">
         <select
-          value={String(filters.status ?? "")}
+          value={statusValue}
           onChange={(e) =>
-            setFilters({ ...filters, status: (e.target.value || undefined) as ProjectActionStatus | undefined })
+            setFilters((prev) => ({ ...prev, status: (e.target.value as ProjectActionStatus) || undefined }))
           }
-          className="rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
+          className="h-8 rounded-md border border-line-tertiary bg-bg-primary px-2 text-[13px] text-ink-primary outline-none focus:border-brand-500"
         >
           <option value="">All statuses</option>
           {Object.entries(STATUS_BADGE_LABELS).map(([k, label]) => (
@@ -890,13 +996,12 @@ function Toolbar({
             </option>
           ))}
         </select>
-
         <select
-          value={String(filters.priority ?? "")}
+          value={priorityValue}
           onChange={(e) =>
-            setFilters({ ...filters, priority: (e.target.value || undefined) as ProjectActionPriority | undefined })
+            setFilters((prev) => ({ ...prev, priority: (e.target.value as ProjectActionPriority) || undefined }))
           }
-          className="rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
+          className="h-8 rounded-md border border-line-tertiary bg-bg-primary px-2 text-[13px] text-ink-primary outline-none focus:border-brand-500"
         >
           <option value="">All priorities</option>
           {Object.entries(PRIORITY_LABELS).map(([k, label]) => (
@@ -905,105 +1010,55 @@ function Toolbar({
             </option>
           ))}
         </select>
-
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
+        <label className="inline-flex items-center gap-1.5 text-[13px] text-ink-secondary">
           <input
             type="checkbox"
-            checked={Boolean(filters.overdue)}
-            onChange={(e) => setFilters({ ...filters, overdue: e.target.checked || undefined })}
+            checked={overdueChecked}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, overdue: e.target.checked || undefined }))
+            }
+            className="rounded border-line-tertiary"
           />
           Overdue only
         </label>
       </div>
-    </div>
-  );
-}
 
-function FilterPanel({
-  filters,
-  setFilters,
-}: {
-  filters: ProjectActionFilters;
-  setFilters: (f: ProjectActionFilters) => void;
-}) {
-  return (
-    <div className="space-y-3">
-      <div>
-        <label className="text-caption text-ink-secondary">Source</label>
-        <select
-          value={filters.source_type ?? ""}
-          onChange={(e) => setFilters({ ...filters, source_type: e.target.value || undefined })}
-          className="mt-1 w-full rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
-        >
-          {SOURCE_TYPE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="text-caption text-ink-secondary">Risk impact</label>
-        <select
-          value={filters.risk_impact ?? ""}
-          onChange={(e) => setFilters({ ...filters, risk_impact: e.target.value || undefined })}
-          className="mt-1 w-full rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
-        >
-          {RISK_IMPACT_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-caption text-ink-secondary">Due from</label>
-          <input
-            type="date"
-            value={filters.due_from ?? ""}
-            onChange={(e) => setFilters({ ...filters, due_from: e.target.value || undefined })}
-            className="mt-1 w-full rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
-          />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1 text-[13px] text-ink-secondary">
+          <span className="text-ink-tertiary">Group by</span>
+          <select
+            value={prefs.groupBy}
+            onChange={(e) => savePrefs({ groupBy: e.target.value as ProjectActionGroupBy })}
+            className="h-8 rounded-md border border-line-tertiary bg-bg-primary px-2 text-[13px] text-ink-primary outline-none focus:border-brand-500"
+          >
+            {GROUP_BY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </div>
-        <div>
-          <label className="text-caption text-ink-secondary">Due to</label>
-          <input
-            type="date"
-            value={filters.due_to ?? ""}
-            onChange={(e) => setFilters({ ...filters, due_to: e.target.value || undefined })}
-            className="mt-1 w-full rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
-          />
+        <div className="flex items-center gap-1 text-[13px] text-ink-secondary">
+          <span className="text-ink-tertiary">Sort by</span>
+          <select
+            value={sortValue}
+            onChange={(e) => {
+              const [sortBy, sortDirection] = e.target.value.split(":");
+              savePrefs({ sortBy: sortBy as ProjectActionSortBy, sortDirection: sortDirection as "asc" | "desc" });
+            }}
+            className="h-8 rounded-md border border-line-tertiary bg-bg-primary px-2 text-[13px] text-ink-primary outline-none focus:border-brand-500"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </div>
+        <Button variant="primary" size="sm" onClick={onNewAction} disabled={!canManage}>
+          <IconPlus size={14} /> New action
+        </Button>
       </div>
-      <label className="flex items-center gap-2 text-[13px] text-ink-secondary">
-        <input
-          type="checkbox"
-          checked={Boolean(filters.has_incomplete_required_subtasks)}
-          onChange={(e) =>
-            setFilters({
-              ...filters,
-              has_incomplete_required_subtasks: e.target.checked || undefined,
-            })
-          }
-        />
-        Has incomplete required subtasks
-      </label>
-      <button
-        type="button"
-        onClick={() =>
-          setFilters({
-            status: filters.status,
-            priority: filters.priority,
-            overdue: filters.overdue,
-            owner_user_id: filters.owner_user_id,
-            q: filters.q,
-          })
-        }
-        className="text-[12px] text-brand-600 hover:text-brand-700"
-      >
-        Clear advanced filters
-      </button>
     </div>
   );
 }
@@ -1014,7 +1069,6 @@ function GroupSection({
   expanded,
   onToggle,
   gridTemplate,
-  visibleColumns,
   selected,
   onSelect,
   onExpand,
@@ -1040,11 +1094,10 @@ function GroupSection({
   onCancelAdd,
 }: {
   projectId: string;
-  group: ProjectActionGroupSummary & { items: ProjectActionListItem[] };
+  group: { group: string; label: string; count: number; overdue_count: number; avg_progress: number; items: ProjectActionListItem[] };
   expanded: boolean;
   onToggle: () => void;
   gridTemplate: string;
-  visibleColumns: string[];
   selected: Set<number>;
   onSelect: (id: number) => void;
   onExpand: (id: number) => void;
@@ -1053,47 +1106,45 @@ function GroupSection({
   canManage: boolean;
   onStatusChange: (id: number, status: ProjectActionStatus, version: number) => void;
   onPriorityChange: (id: number, priority: ProjectActionPriority, version: number) => void;
-  onOwnerChange: (id: number, owner: number | null, version: number) => void;
-  onDueChange: (id: number, due: string | null, version: number) => void;
-  onArchive: (id: number) => void;
+  onOwnerChange: (id: number, owner_user_id: number | null, version: number) => void;
+  onDueChange: (id: number, due_date: string | null, version: number) => void;
+  onArchive: (id: number, version: number) => void;
   onRestore: (id: number) => void;
   onSubtaskStatusChange: (actionId: number, subtaskId: number, status: ProjectActionStatus) => void;
   onSubtaskFieldChange: (
     actionId: number,
     subtaskId: number,
-    payload: Partial<{ owner_user_id: number | null; due_date: string | null; effort_points: number | null; status: ProjectActionStatus }>,
+    payload: Partial<{ title: string; owner_user_id: number | null; due_date: string | null; effort_points: number | null }>,
   ) => void;
   onSubtaskArchive: (actionId: number, subtaskId: number) => void;
   onAddSubtask: (actionId: number, title: string) => void;
   members: { user_id: number; display_name: string | null; email: string }[];
   adding: boolean;
   newActionTitle: string;
-  setNewActionTitle: (s: string) => void;
+  setNewActionTitle: (v: string) => void;
   onAddAction: () => void;
   onSubmitNewAction: (group: string, title: string) => void;
   onCancelAdd: () => void;
 }) {
-  const allSelected = group.items.length > 0 && group.items.every((i) => selected.has(i.id));
   const tone = groupTone(group.group);
-  const dotColor =
-    prefsGroupColor(group.group) ??
-    (tone === "danger" ? "bg-danger" : tone === "warning" ? "bg-warning" : tone === "success" ? "bg-success" : "bg-brand-500");
-
   return (
-    <div className="rounded-lg border border-line-tertiary bg-bg-primary">
+    <div
+      className={cn(
+        "rounded-lg border border-line-tertiary bg-bg-primary overflow-hidden border-l-4",
+        groupBorderClass(tone),
+      )}
+    >
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center justify-between gap-2 rounded-t-lg px-3 py-2.5 text-left hover:bg-bg-secondary"
-        aria-expanded={expanded}
+        className="flex w-full items-center justify-between px-4 py-3 hover:bg-bg-secondary"
       >
         <div className="flex items-center gap-2">
           <IconChevronDown
             size={16}
             className={cn("text-ink-tertiary transition-transform", !expanded && "-rotate-90")}
           />
-          <span className={cn("h-2.5 w-2.5 rounded-full", dotColor)} aria-hidden />
-          <span className="text-[13px] font-semibold text-ink-primary">{group.label}</span>
+          <span className={cn("text-[13px] font-semibold", groupTextClass(tone))}>{group.label}</span>
           <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[11px] font-medium text-ink-secondary">
             {group.count}
           </span>
@@ -1101,79 +1152,77 @@ function GroupSection({
             <span className="text-[11px] text-danger">{group.overdue_count} overdue</span>
           )}
         </div>
+        <span className="text-[12px] text-ink-tertiary">Avg progress {group.avg_progress}%</span>
       </button>
 
       {expanded && (
-        <div className="border-t border-line-tertiary">
-          <div className="overflow-x-auto">
-            {group.items.map((item) => (
-              <ActionRow
-                key={item.id}
-                projectId={projectId}
-                item={item}
-                gridTemplate={gridTemplate}
-                visibleColumns={visibleColumns}
-                selected={selected.has(item.id)}
-                onSelect={() => onSelect(item.id)}
-                expanded={expandedRows.has(item.id)}
-                onExpand={() => onExpand(item.id)}
-                detail={detailMap[item.id]}
-                canManage={canManage}
-                onStatusChange={onStatusChange}
-                onPriorityChange={onPriorityChange}
-                onOwnerChange={onOwnerChange}
-                onDueChange={onDueChange}
-                onArchive={onArchive}
-                onRestore={onRestore}
-                onSubtaskStatusChange={onSubtaskStatusChange}
-                onSubtaskFieldChange={onSubtaskFieldChange}
-                onSubtaskArchive={onSubtaskArchive}
-                onAddSubtask={onAddSubtask}
-                members={members}
-              />
-            ))}
+        <div className="overflow-x-auto">
+          <ColumnHeader gridTemplate={gridTemplate} />
+          {group.items.map((item) => (
+            <ActionRow
+              key={item.id}
+              projectId={projectId}
+              item={item}
+              gridTemplate={gridTemplate}
+              selected={selected.has(item.id)}
+              onSelect={() => onSelect(item.id)}
+              onExpand={() => onExpand(item.id)}
+              expanded={expandedRows.has(item.id)}
+              detail={detailMap[item.id]}
+              canManage={canManage}
+              onStatusChange={onStatusChange}
+              onPriorityChange={onPriorityChange}
+              onOwnerChange={onOwnerChange}
+              onDueChange={onDueChange}
+              onArchive={() => onArchive(item.id, item.lock_version)}
+              onRestore={() => onRestore(item.id)}
+              onSubtaskStatusChange={onSubtaskStatusChange}
+              onSubtaskFieldChange={onSubtaskFieldChange}
+              onSubtaskArchive={onSubtaskArchive}
+              onAddSubtask={onAddSubtask}
+              members={members}
+            />
+          ))}
 
-            {adding && (
-              <div
-                className="grid items-center gap-2 border-t border-line-tertiary px-3 py-2 hover:bg-bg-secondary"
-                style={{ gridTemplateColumns: gridTemplate }}
-              >
-                <div className="flex items-center justify-center">
-                  <IconPlus size={14} className="text-ink-tertiary" />
-                </div>
-                <div className="min-w-0">
-                  <input
-                    type="text"
-                    value={newActionTitle}
-                    onChange={(e) => setNewActionTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") onSubmitNewAction(group.group, newActionTitle);
-                      if (e.key === "Escape") onCancelAdd();
-                    }}
-                    placeholder="New action"
-                    autoFocus
-                    className="w-full rounded border border-line-tertiary bg-bg-primary px-2 py-1 text-[13px] text-ink-primary outline-none focus:border-brand-500"
-                  />
-                </div>
-                <div className="col-span-full mt-1 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onSubmitNewAction(group.group, newActionTitle)}
-                    className="rounded bg-brand-500 px-2 py-1 text-[12px] text-white hover:bg-brand-600"
-                  >
-                    Add
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onCancelAdd}
-                    className="rounded px-2 py-1 text-[12px] text-ink-secondary hover:bg-bg-secondary"
-                  >
-                    Cancel
-                  </button>
-                </div>
+          {adding && (
+            <div
+              className="grid items-center gap-2 border-b border-line-tertiary bg-bg-secondary/30 px-3 py-2"
+              style={{ gridTemplateColumns: gridTemplate }}
+            >
+              <div />
+              <div className="flex min-w-0 items-center gap-2">
+                <IconPlus size={14} className="text-ink-tertiary" />
+                <input
+                  type="text"
+                  value={newActionTitle}
+                  onChange={(e) => setNewActionTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") onSubmitNewAction(group.group, newActionTitle);
+                    if (e.key === "Escape") onCancelAdd();
+                  }}
+                  placeholder="New action"
+                  autoFocus
+                  className="min-w-0 flex-1 rounded border border-line-tertiary bg-bg-primary px-2 py-1 text-[13px] text-ink-primary outline-none focus:border-brand-500"
+                />
               </div>
-            )}
-          </div>
+              <div className="col-span-full mt-1 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSubmitNewAction(group.group, newActionTitle)}
+                  className="rounded bg-brand-500 px-2 py-1 text-[12px] text-white hover:bg-brand-600"
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={onCancelAdd}
+                  className="rounded px-2 py-1 text-[12px] text-ink-secondary hover:bg-bg-secondary"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between border-t border-line-tertiary px-3 py-2">
             {canManage ? (
@@ -1197,22 +1246,14 @@ function GroupSection({
   );
 }
 
-function prefsGroupColor(group: string): string | null {
-  if (STATUS_ORDER.includes(group as ProjectActionStatus)) {
-    return STATUS_DOT_COLORS[group as ProjectActionStatus];
-  }
-  return null;
-}
-
 function ActionRow({
   projectId,
   item,
   gridTemplate,
-  visibleColumns,
   selected,
   onSelect,
-  expanded,
   onExpand,
+  expanded,
   detail,
   canManage,
   onStatusChange,
@@ -1230,24 +1271,23 @@ function ActionRow({
   projectId: string;
   item: ProjectActionListItem;
   gridTemplate: string;
-  visibleColumns: string[];
   selected: boolean;
   onSelect: () => void;
-  expanded: boolean;
   onExpand: () => void;
-  detail?: ProjectAction;
+  expanded: boolean;
+  detail: ProjectAction | undefined;
   canManage: boolean;
   onStatusChange: (id: number, status: ProjectActionStatus, version: number) => void;
   onPriorityChange: (id: number, priority: ProjectActionPriority, version: number) => void;
-  onOwnerChange: (id: number, owner: number | null, version: number) => void;
-  onDueChange: (id: number, due: string | null, version: number) => void;
-  onArchive: (id: number) => void;
-  onRestore: (id: number) => void;
+  onOwnerChange: (id: number, owner_user_id: number | null, version: number) => void;
+  onDueChange: (id: number, due_date: string | null, version: number) => void;
+  onArchive: () => void;
+  onRestore: () => void;
   onSubtaskStatusChange: (actionId: number, subtaskId: number, status: ProjectActionStatus) => void;
   onSubtaskFieldChange: (
     actionId: number,
     subtaskId: number,
-    payload: Partial<{ owner_user_id: number | null; due_date: string | null; effort_points: number | null; status: ProjectActionStatus }>,
+    payload: Partial<{ title: string; owner_user_id: number | null; due_date: string | null; effort_points: number | null }>,
   ) => void;
   onSubtaskArchive: (actionId: number, subtaskId: number) => void;
   onAddSubtask: (actionId: number, title: string) => void;
@@ -1258,7 +1298,7 @@ function ActionRow({
   const activeSubtasks = detail?.subtasks.filter((s) => !s.archived_at) ?? [];
 
   return (
-    <div className="border-b border-line-tertiary last:border-b-0" role="row" aria-expanded={expanded}>
+    <div className="border-b border-line-tertiary last:border-b-0">
       <div
         className="grid cursor-pointer items-center gap-2 px-3 py-2.5 transition-colors hover:bg-bg-secondary"
         style={{ gridTemplateColumns: gridTemplate }}
@@ -1278,7 +1318,7 @@ function ActionRow({
         </div>
 
         <div className="flex min-w-0 flex-col">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={(e) => {
@@ -1295,8 +1335,8 @@ function ActionRow({
             </button>
             <Link
               href={`/projects/${projectId}/actions/${item.id}`}
-              className="truncate text-[13px] font-semibold text-ink-primary hover:text-brand-600 hover:underline"
               onClick={(e) => e.stopPropagation()}
+              className="truncate text-[13px] font-semibold text-ink-primary hover:text-brand-600 hover:underline"
             >
               {item.title}
             </Link>
@@ -1318,41 +1358,42 @@ function ActionRow({
           </div>
         </div>
 
-        {visibleColumns.includes("owner") && (
-          <OwnerCell value={item.owner_user_id} members={members} canManage={canManage} onChange={(v) => onOwnerChange(item.id, v, item.lock_version)} />
-        )}
-        {visibleColumns.includes("status") && (
-          <StatusCell value={item.status} canManage={canManage} onChange={(v) => onStatusChange(item.id, v, item.lock_version)} />
-        )}
-        {visibleColumns.includes("priority") && (
-          <PriorityCell value={item.priority} canManage={canManage} onChange={(v) => onPriorityChange(item.id, v, item.lock_version)} />
-        )}
-        {visibleColumns.includes("progress") && (
-          <ProgressCell
-            percent={progress}
-            completed={item.completed_required_subtasks}
-            total={item.required_subtasks}
-          />
-        )}
-        {visibleColumns.includes("due") && (
-          <DueCell
-            value={item.due_date}
-            overdue={overdue}
-            canManage={canManage}
-            onChange={(v) => onDueChange(item.id, v, item.lock_version)}
-          />
-        )}
-        {visibleColumns.includes("risk") && <RiskCell impact={item.risk_impact} />}
-        {visibleColumns.includes("source") && <SourceCell item={item} />}
-        {visibleColumns.includes("updated") && (
-          <div className="truncate text-[12px] text-ink-tertiary">{timeAgo(item.updated_at)}</div>
-        )}
-
-        <RowMenu projectId={projectId} item={item} canManage={canManage} onArchive={() => onArchive(item.id)} onRestore={() => onRestore(item.id)} />
+        <OwnerCell
+          value={item.owner_user_id}
+          members={members}
+          canManage={canManage}
+          onChange={(v) => onOwnerChange(item.id, v, item.lock_version)}
+        />
+        <StatusCell
+          value={item.status}
+          canManage={canManage}
+          onChange={(v) => onStatusChange(item.id, v, item.lock_version)}
+        />
+        <PriorityCell
+          value={item.priority}
+          canManage={canManage}
+          onChange={(v) => onPriorityChange(item.id, v, item.lock_version)}
+        />
+        <ProgressCell
+          percent={progress}
+          completed={item.completed_required_subtasks}
+          total={item.required_subtasks}
+          status={item.status}
+        />
+        <DueCell
+          value={item.due_date}
+          overdue={overdue}
+          canManage={canManage}
+          onChange={(v) => onDueChange(item.id, v, item.lock_version)}
+        />
+        <RiskCell impact={item.risk_impact} />
+        <SourceCell item={item} />
+        <div className="truncate text-[12px] text-ink-tertiary">{timeAgo(item.updated_at)}</div>
+        <RowMenu projectId={projectId} item={item} canManage={canManage} onArchive={onArchive} onRestore={onRestore} />
       </div>
 
       {expanded && (
-        <div className="col-span-full border-t border-line-tertiary bg-bg-secondary/50 px-12 py-4">
+        <div className="border-t border-line-tertiary bg-bg-secondary/50 px-8 py-4">
           <SubtaskPanel
             actionId={item.id}
             subtasks={activeSubtasks}
@@ -1365,6 +1406,343 @@ function ActionRow({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function SubtaskPanel({
+  actionId,
+  subtasks,
+  canManage,
+  onStatusChange,
+  onFieldChange,
+  onArchive,
+  onAddSubtask,
+  members,
+}: {
+  actionId: number;
+  subtasks: ProjectActionSubtask[];
+  canManage: boolean;
+  onStatusChange: (actionId: number, subtaskId: number, status: ProjectActionStatus) => void;
+  onFieldChange: (
+    actionId: number,
+    subtaskId: number,
+    payload: Partial<{ title: string; owner_user_id: number | null; due_date: string | null; effort_points: number | null }>,
+  ) => void;
+  onArchive: (actionId: number, subtaskId: number) => void;
+  onAddSubtask: (actionId: number, title: string) => void;
+  members: { user_id: number; display_name: string | null; email: string }[];
+}) {
+  const [newTitle, setNewTitle] = useState("");
+
+  return (
+    <div className="rounded-lg border border-line-tertiary bg-bg-primary p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-[13px] font-semibold text-ink-primary">Subitems</h3>
+        <span className="text-[12px] text-ink-tertiary">{subtasks.length} subitems</span>
+      </div>
+      <div className="space-y-1">
+        <div
+          className="grid items-center gap-2 border-b border-line-tertiary bg-bg-secondary/50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-ink-tertiary"
+          style={{ gridTemplateColumns: SUBTASK_GRID }}
+        >
+          <div />
+          <div>Subitem</div>
+          <div>Owner</div>
+          <div>Status</div>
+          <div>Due date</div>
+          <div>Effort</div>
+          <div className="text-center">Completed</div>
+          <div className="text-right">Actions</div>
+        </div>
+
+        {subtasks.map((sub) => (
+          <SubtaskRow
+            key={sub.id}
+            actionId={actionId}
+            subtask={sub}
+            canManage={canManage}
+            onStatusChange={onStatusChange}
+            onFieldChange={onFieldChange}
+            onArchive={() => onArchive(actionId, sub.id)}
+            members={members}
+          />
+        ))}
+
+        {canManage && (
+          <div className="flex items-center gap-2 pt-2">
+            <input
+              type="text"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newTitle.trim()) {
+                  onAddSubtask(actionId, newTitle.trim());
+                  setNewTitle("");
+                }
+                if (e.key === "Escape") setNewTitle("");
+              }}
+              placeholder="New subitem"
+              className="min-w-0 flex-1 rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary outline-none focus:border-brand-500"
+            />
+            <Button
+              size="sm"
+              onClick={() => {
+                if (newTitle.trim()) {
+                  onAddSubtask(actionId, newTitle.trim());
+                  setNewTitle("");
+                }
+              }}
+            >
+              <IconPlus size={14} /> Add
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SubtaskRow({
+  actionId,
+  subtask,
+  canManage,
+  onStatusChange,
+  onFieldChange,
+  onArchive,
+  members,
+}: {
+  actionId: number;
+  subtask: ProjectActionSubtask;
+  canManage: boolean;
+  onStatusChange: (actionId: number, subtaskId: number, status: ProjectActionStatus) => void;
+  onFieldChange: (
+    actionId: number,
+    subtaskId: number,
+    payload: Partial<{ title: string; owner_user_id: number | null; due_date: string | null; effort_points: number | null }>,
+  ) => void;
+  onArchive: () => void;
+  members: { user_id: number; display_name: string | null; email: string }[];
+}) {
+  const completed = subtask.status === "completed";
+  const [title, setTitle] = useState(subtask.title);
+
+  useEffect(() => {
+    setTitle(subtask.title);
+  }, [subtask.title]);
+
+  return (
+    <div
+      className="grid items-center gap-2 rounded-md border border-line-tertiary px-2 py-1.5"
+      style={{ gridTemplateColumns: SUBTASK_GRID }}
+    >
+      <div />
+      {canManage ? (
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => title !== subtask.title && onFieldChange(actionId, subtask.id, { title })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              title !== subtask.title && onFieldChange(actionId, subtask.id, { title });
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-[13px] text-ink-primary outline-none focus:border-brand-500"
+        />
+      ) : (
+        <span className="text-[13px] text-ink-primary">{subtask.title}</span>
+      )}
+
+      <OwnerCell
+        value={subtask.owner_user_id}
+        members={members}
+        canManage={canManage}
+        onChange={(v) => onFieldChange(actionId, subtask.id, { owner_user_id: v })}
+      />
+      <StatusCell
+        value={subtask.status}
+        canManage={canManage}
+        onChange={(v) => onStatusChange(actionId, subtask.id, v)}
+      />
+      <InlineDate
+        value={subtask.due_date}
+        canManage={canManage}
+        onChange={(v) => onFieldChange(actionId, subtask.id, { due_date: v })}
+      />
+      <input
+        type="number"
+        min={1}
+        max={10}
+        value={subtask.effort_points ?? ""}
+        disabled={!canManage}
+        onChange={(e) => {
+          const v = e.target.value ? Number(e.target.value) : null;
+          onFieldChange(actionId, subtask.id, { effort_points: v });
+        }}
+        placeholder="-"
+        className="w-full rounded border border-line-tertiary bg-bg-primary px-1 py-0.5 text-center text-[12px] text-ink-primary outline-none focus:border-brand-500 disabled:bg-bg-secondary"
+      />
+      <div className="flex items-center justify-center">
+        <input
+          type="checkbox"
+          checked={completed}
+          disabled={!canManage}
+          onChange={(e) =>
+            onStatusChange(actionId, subtask.id, e.target.checked ? "completed" : "not_started")
+          }
+          aria-label={`Mark ${subtask.title} complete`}
+        />
+      </div>
+      {canManage && (
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            onClick={onArchive}
+            className="text-ink-tertiary hover:text-danger"
+            aria-label={`Archive ${subtask.title}`}
+          >
+            <IconTrash size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProgressCell({
+  percent,
+  completed,
+  total,
+  status,
+}: {
+  percent: number;
+  completed: number;
+  total: number;
+  status: ProjectActionStatus;
+}) {
+  const segments = Math.max(total || 1, 1);
+  const completedColor =
+    status === "completed"
+      ? "bg-emerald-500"
+      : status === "in_progress"
+        ? "bg-amber-500"
+        : status === "blocked"
+          ? "bg-red-500"
+          : "bg-brand-500";
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 gap-0.5">
+          {Array.from({ length: segments }).map((_, i) => (
+            <div
+              key={i}
+              className={cn(
+                "h-2 flex-1 rounded-sm",
+                i < (completed || 0) ? completedColor : "bg-bg-tertiary",
+              )}
+            />
+          ))}
+        </div>
+        <span className="w-8 text-right text-[12px] font-semibold text-ink-primary">{percent}%</span>
+      </div>
+      {total > 0 && (
+        <span className="text-[11px] text-ink-tertiary">
+          {completed} of {total} subtasks
+        </span>
+      )}
+    </div>
+  );
+}
+
+function DueCell({
+  value,
+  overdue,
+  canManage,
+  onChange,
+}: {
+  value: string | null;
+  overdue: boolean;
+  canManage: boolean;
+  onChange: (v: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const display = formatDateShort(value) || "mm/dd/yyyy";
+  return (
+    <div className="flex items-center gap-1">
+      <IconCalendar
+        size={12}
+        className={cn("shrink-0", overdue ? "text-danger" : "text-ink-tertiary")}
+      />
+      {canManage && editing ? (
+        <input
+          type="date"
+          value={value ? value.split("T")[0] : ""}
+          onChange={(e) => onChange(e.target.value || null)}
+          onClick={(e) => e.stopPropagation()}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => e.key === "Enter" && setEditing(false)}
+          autoFocus
+          className={cn(
+            "min-w-0 flex-1 rounded border bg-transparent px-1 py-0.5 text-[12px] outline-none",
+            overdue ? "border-danger text-danger" : "border-line-tertiary text-ink-primary",
+          )}
+        />
+      ) : (
+        <button
+          type="button"
+          disabled={!canManage}
+          onClick={(e) => {
+            e.stopPropagation();
+            setEditing(true);
+          }}
+          className={cn(
+            "truncate text-left text-[12px] disabled:cursor-default hover:bg-bg-secondary",
+            overdue ? "text-danger" : "text-ink-secondary",
+          )}
+        >
+          {display}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PriorityCell({
+  value,
+  canManage,
+  onChange,
+}: {
+  value: ProjectActionPriority;
+  canManage: boolean;
+  onChange: (v: ProjectActionPriority) => void;
+}) {
+  const color = PRIORITY_TEXT_COLORS[value];
+  if (!canManage) {
+    return <span className={cn("text-[12px] font-medium", color)}>{PRIORITY_LABELS[value]}</span>;
+  }
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as ProjectActionPriority)}
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          "w-full appearance-none border-0 bg-transparent py-1 pr-6 text-[12px] font-medium outline-none",
+          color,
+        )}
+      >
+        {Object.entries(PRIORITY_LABELS).map(([k, label]) => (
+          <option key={k} value={k}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <IconChevronDown
+        size={12}
+        className={cn("pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 opacity-70", color)}
+      />
     </div>
   );
 }
@@ -1445,133 +1823,17 @@ function StatusCell({
           </option>
         ))}
       </select>
-      <IconChevronDown size={12} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-current opacity-70" />
-    </div>
-  );
-}
-
-function PriorityCell({
-  value,
-  canManage,
-  onChange,
-}: {
-  value: ProjectActionPriority;
-  canManage: boolean;
-  onChange: (v: ProjectActionPriority) => void;
-}) {
-  const color = PRIORITY_COLORS[value];
-  if (!canManage) {
-    return <span className={cn("inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium", color)}>{PRIORITY_LABELS[value]}</span>;
-  }
-  return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as ProjectActionPriority)}
-        onClick={(e) => e.stopPropagation()}
-        className={cn(
-          "w-full appearance-none rounded-full border-0 py-1 pl-2.5 pr-6 text-[11px] font-medium outline-none",
-          color,
-        )}
-      >
-        {Object.entries(PRIORITY_LABELS).map(([k, label]) => (
-          <option key={k} value={k}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <IconChevronDown size={12} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-current opacity-70" />
-    </div>
-  );
-}
-
-function ProgressCell({ percent, completed, total }: { percent: number; completed: number; total: number }) {
-  const hasSegments = total > 0;
-  return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <div className="flex items-center gap-2">
-        <div className="flex flex-1 gap-0.5">
-          {hasSegments ? (
-            Array.from({ length: Math.max(total, 1) }).map((_, i) => (
-              <div
-                key={i}
-                className={cn("h-2 flex-1 rounded-sm", i < completed ? "bg-brand-500" : "bg-bg-tertiary")}
-              />
-            ))
-          ) : (
-            <div className="h-2 flex-1 rounded-sm bg-bg-tertiary">
-              <div className="h-full rounded-sm bg-brand-500" style={{ width: `${percent}%` }} />
-            </div>
-          )}
-        </div>
-        <span className="text-[12px] font-semibold text-ink-primary w-8 text-right">{percent}%</span>
-      </div>
-      {total > 0 && (
-        <span className="text-[11px] text-ink-tertiary">
-          {completed} of {total} subtasks
-        </span>
-      )}
-    </div>
-  );
-}
-
-function DueCell({
-  value,
-  overdue,
-  canManage,
-  onChange,
-}: {
-  value: string | null;
-  overdue: boolean;
-  canManage: boolean;
-  onChange: (v: string | null) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const display = formatDateShort(value) || "-";
-  return (
-    <div className="flex items-center gap-1">
-      <IconCalendar size={12} className={cn("shrink-0", overdue ? "text-danger" : "text-ink-tertiary")} />
-      {canManage && editing ? (
-        <input
-          type="date"
-          value={value ? value.split("T")[0] : ""}
-          onChange={(e) => onChange(e.target.value || null)}
-          onClick={(e) => e.stopPropagation()}
-          onBlur={() => setEditing(false)}
-          onKeyDown={(e) => e.key === "Enter" && setEditing(false)}
-          autoFocus
-          className={cn(
-            "min-w-0 flex-1 rounded border bg-transparent px-1 py-0.5 text-[12px] outline-none",
-            overdue ? "border-danger text-danger" : "border-line-tertiary text-ink-primary",
-          )}
-        />
-      ) : (
-        <button
-          type="button"
-          disabled={!canManage}
-          onClick={(e) => {
-            e.stopPropagation();
-            setEditing(true);
-          }}
-          className={cn(
-            "truncate text-left text-[12px] disabled:cursor-default disabled:hover:bg-transparent hover:bg-bg-secondary",
-            overdue ? "text-danger" : "text-ink-secondary",
-          )}
-        >
-          {display}
-        </button>
-      )}
+      <IconChevronDown
+        size={12}
+        className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-current opacity-70"
+      />
     </div>
   );
 }
 
 function RiskCell({ impact }: { impact: string | null }) {
   if (!impact) return <span className="text-[12px] text-ink-tertiary">-</span>;
-  return (
-    <Badge tone={riskImpactTone(impact)} size="sm">
-      {riskImpactLabel(impact)}
-    </Badge>
-  );
+  return <Badge tone={riskImpactTone(impact)} size="sm">{riskImpactLabel(impact)}</Badge>;
 }
 
 function SourceCell({ item }: { item: ProjectActionListItem }) {
@@ -1674,169 +1936,6 @@ function RowMenu({
             </>
           )}
         </div>
-      )}
-    </div>
-  );
-}
-
-function SubtaskPanel({
-  actionId,
-  subtasks,
-  canManage,
-  onStatusChange,
-  onFieldChange,
-  onArchive,
-  onAddSubtask,
-  members,
-}: {
-  actionId: number;
-  subtasks: ProjectActionSubtask[];
-  canManage: boolean;
-  onStatusChange: (actionId: number, subtaskId: number, status: ProjectActionStatus) => void;
-  onFieldChange: (
-    actionId: number,
-    subtaskId: number,
-    payload: Partial<{ owner_user_id: number | null; due_date: string | null; effort_points: number | null; status: ProjectActionStatus }>,
-  ) => void;
-  onArchive: (actionId: number, subtaskId: number) => void;
-  onAddSubtask: (actionId: number, title: string) => void;
-  members: { user_id: number; display_name: string | null; email: string }[];
-}) {
-  const [newTitle, setNewTitle] = useState("");
-
-  return (
-    <div className="rounded-lg border border-line-tertiary bg-bg-primary p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-[13px] font-semibold text-ink-primary">Subitems</h3>
-        <span className="text-[12px] text-ink-tertiary">{subtasks.length} subitems</span>
-      </div>
-
-      <div className="space-y-1">
-        {subtasks.map((sub) => (
-          <SubtaskRow
-            key={sub.id}
-            actionId={actionId}
-            subtask={sub}
-            canManage={canManage}
-            onStatusChange={onStatusChange}
-            onFieldChange={onFieldChange}
-            onArchive={onArchive}
-            members={members}
-          />
-        ))}
-
-        {canManage && (
-          <div className="flex items-center gap-2 pt-2">
-            <input
-              type="text"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && newTitle.trim()) {
-                  onAddSubtask(actionId, newTitle.trim());
-                  setNewTitle("");
-                }
-                if (e.key === "Escape") setNewTitle("");
-              }}
-              placeholder="New subitem"
-              className="min-w-0 flex-1 rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary outline-none focus:border-brand-500"
-            />
-            <Button
-              size="sm"
-              onClick={() => {
-                if (newTitle.trim()) {
-                  onAddSubtask(actionId, newTitle.trim());
-                  setNewTitle("");
-                }
-              }}
-            >
-              <IconPlus size={14} /> Add
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SubtaskRow({
-  actionId,
-  subtask,
-  canManage,
-  onStatusChange,
-  onFieldChange,
-  onArchive,
-  members,
-}: {
-  actionId: number;
-  subtask: ProjectActionSubtask;
-  canManage: boolean;
-  onStatusChange: (actionId: number, subtaskId: number, status: ProjectActionStatus) => void;
-  onFieldChange: (
-    actionId: number,
-    subtaskId: number,
-    payload: Partial<{ owner_user_id: number | null; due_date: string | null; effort_points: number | null; status: ProjectActionStatus }>,
-  ) => void;
-  onArchive: (actionId: number, subtaskId: number) => void;
-  members: { user_id: number; display_name: string | null; email: string }[];
-}) {
-  const completed = subtask.status === "completed";
-  const owner = members.find((m) => m.user_id === subtask.owner_user_id);
-  const ownerName = owner ? owner.display_name || owner.email : "Unassigned";
-
-  return (
-    <div className="grid grid-cols-[28px_1fr_140px_120px_110px_70px_44px_32px] items-center gap-2 rounded-md border border-line-tertiary px-2 py-1.5">
-      <input
-        type="checkbox"
-        checked={completed}
-        disabled={!canManage}
-        onChange={(e) => onStatusChange(actionId, subtask.id, e.target.checked ? "completed" : "not_started")}
-        aria-label={`Mark ${subtask.title} complete`}
-      />
-      <span className="truncate text-[13px] text-ink-primary">{subtask.title}</span>
-
-      <OwnerCell value={subtask.owner_user_id} members={members} canManage={canManage} onChange={(v) => onFieldChange(actionId, subtask.id, { owner_user_id: v })} />
-
-      <StatusCell value={subtask.status} canManage={canManage} onChange={(v) => onStatusChange(actionId, subtask.id, v)} />
-
-      <InlineDate
-        value={subtask.due_date}
-        canManage={canManage}
-        onChange={(v) => onFieldChange(actionId, subtask.id, { due_date: v })}
-      />
-
-      <input
-        type="number"
-        min={1}
-        max={10}
-        value={subtask.effort_points ?? ""}
-        disabled={!canManage}
-        onChange={(e) => {
-          const v = e.target.value ? Number(e.target.value) : null;
-          onFieldChange(actionId, subtask.id, { effort_points: v });
-        }}
-        placeholder="-"
-        className="w-full rounded border border-line-tertiary bg-bg-primary px-1 py-0.5 text-center text-[12px] text-ink-primary disabled:bg-bg-secondary"
-      />
-
-      <div className="flex items-center justify-center">
-        <input
-          type="checkbox"
-          checked={completed}
-          disabled={!canManage}
-          onChange={(e) => onStatusChange(actionId, subtask.id, e.target.checked ? "completed" : "not_started")}
-        />
-      </div>
-
-      {canManage && (
-        <button
-          type="button"
-          onClick={() => onArchive(actionId, subtask.id)}
-          aria-label={`Archive ${subtask.title}`}
-          className="text-ink-tertiary hover:text-danger"
-        >
-          <IconTrash size={14} />
-        </button>
       )}
     </div>
   );

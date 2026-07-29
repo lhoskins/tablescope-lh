@@ -476,35 +476,24 @@ function SubtaskRow({
   const ownerName = owner ? owner.display_name || owner.email : "Unassigned";
 
   return (
-    <div className="grid grid-cols-[1fr_120px_110px_70px_44px_32px] items-center gap-2 rounded-md border border-line-tertiary bg-bg-primary px-3 py-2">
-      <div className="flex items-center gap-2">
+    <div className="grid grid-cols-[1fr_120px_110px_100px_70px_44px_32px] items-center gap-2 rounded-md border border-line-tertiary bg-bg-primary px-3 py-2">
+      {canEdit ? (
         <input
-          type="checkbox"
-          checked={completed}
-          disabled={!canEdit}
-          onChange={(e) =>
-            update.mutate({ status: e.target.checked ? "completed" : "not_started" })
-          }
-          aria-label={`Mark ${subtask.title} complete`}
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => title !== subtask.title && update.mutate({ title })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              title !== subtask.title && update.mutate({ title });
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className="min-w-0 flex-1 rounded border border-line-tertiary bg-bg-primary px-2 py-0.5 text-[13px] text-ink-primary outline-none focus:border-brand-500"
         />
-        {canEdit ? (
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => title !== subtask.title && update.mutate({ title })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                title !== subtask.title && update.mutate({ title });
-                (e.target as HTMLInputElement).blur();
-              }
-            }}
-            className="min-w-0 flex-1 rounded border border-line-tertiary bg-bg-primary px-2 py-0.5 text-[13px] text-ink-primary outline-none focus:border-brand-500"
-          />
-        ) : (
-          <span className="text-[13px] text-ink-primary">{subtask.title}</span>
-        )}
-      </div>
+      ) : (
+        <span className="text-[13px] text-ink-primary">{subtask.title}</span>
+      )}
 
       <div className="flex min-w-0 items-center gap-1.5">
         <Avatar name={ownerName} size="sm" />
@@ -551,6 +540,17 @@ function SubtaskRow({
         onChange={(v) => update.mutate({ due_date: v })}
       />
 
+      <input
+        type="number"
+        min={1}
+        max={10}
+        value={subtask.effort_points ?? ""}
+        disabled={!canEdit}
+        onChange={(e) => update.mutate({ effort_points: e.target.value ? Number(e.target.value) : null })}
+        placeholder="-"
+        className="w-full rounded border border-line-tertiary bg-bg-primary px-1 py-0.5 text-center text-[12px] text-ink-primary outline-none focus:border-brand-500 disabled:bg-bg-secondary"
+      />
+
       <div className="flex items-center justify-center">
         <input
           type="checkbox"
@@ -585,7 +585,7 @@ function InlineDate({
   onChange: (v: string | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const display = formatDateShort(value) || "-";
+  const display = formatDateShort(value) || "mm/dd/yyyy";
   if (canEdit && editing) {
     return (
       <input

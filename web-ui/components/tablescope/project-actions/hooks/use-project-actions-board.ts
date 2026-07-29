@@ -104,20 +104,9 @@ export function useProjectActionsBoard(
     queryFn: () => projectActionsApi.board(projectId, boardFilters),
   });
 
-  const detailCache = useMemo(
-    () => new Map<number, ProjectAction>(),
-    [],
-  );
-
   const fetchDetail = useCallback(
-    async (actionId: number) => {
-      const cached = detailCache.get(actionId);
-      if (cached) return cached;
-      const data = await projectActionsApi.get(projectId, actionId);
-      detailCache.set(actionId, data);
-      return data;
-    },
-    [projectId, detailCache],
+    async (actionId: number) => projectActionsApi.get(projectId, actionId),
+    [projectId],
   );
 
   const invalidateBoard = useCallback(() => {
@@ -138,7 +127,13 @@ export function useProjectActionsBoard(
   });
 
   const archiveAction = useMutation({
-    mutationFn: (actionId: number) => projectActionsApi.archive(projectId, actionId),
+    mutationFn: ({
+      actionId,
+      expected_version,
+    }: {
+      actionId: number;
+      expected_version?: number;
+    }) => projectActionsApi.archive(projectId, actionId, expected_version),
     onSuccess: () => invalidateBoard(),
   });
 
