@@ -189,3 +189,23 @@ async def enqueue_stage_llm_artifact(
         return job.job_id if job else ""
     finally:
         await pool.close()
+
+
+async def enqueue_deploy_llm_artifact(
+    artifact_id: int,
+    target_id: int,
+    requested_by_user_id: int,
+) -> str:
+    """Enqueue a verified artifact for installation on a runtime target."""
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    pool = await create_pool(redis_settings)
+    try:
+        job = await pool.enqueue_job(
+            "deploy_llm_artifact",
+            artifact_id=artifact_id,
+            target_id=target_id,
+            requested_by_user_id=requested_by_user_id,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()

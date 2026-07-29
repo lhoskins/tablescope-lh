@@ -117,6 +117,11 @@ services:
       LLM_MANIFEST_SIGNING_KEY_PATH: ${LLM_MANIFEST_SIGNING_KEY_PATH:-/opt/tablescope/model-vault/signing.pem}
       LLM_MANIFEST_SIGNING_KEY_FINGERPRINT: ${LLM_MANIFEST_SIGNING_KEY_FINGERPRINT:-}
       LLM_HUGGINGFACE_TOKEN: ${LLM_HUGGINGFACE_TOKEN:-}
+      LLM_DYNAMIC_ROUTING_ENABLED: ${LLM_DYNAMIC_ROUTING_ENABLED:-false}
+      LLM_DEPLOYMENT_AGENT_URL: ${LLM_DEPLOYMENT_AGENT_URL:-}
+      LLM_OLLAMA_URL: ${LLM_OLLAMA_URL:-http://ollama:11434}
+      LLM_MODEL_INSTALL_PATH: ${LLM_MODEL_INSTALL_PATH:-/mnt/tablescope-ai/ollama/models/imported}
+      LLM_OLLAMA_ROLLBACK_SLOTS: ${LLM_OLLAMA_ROLLBACK_SLOTS:-1}
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       # Read-write access to per-tenant root so the platform API can manage

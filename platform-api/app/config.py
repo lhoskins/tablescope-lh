@@ -119,6 +119,18 @@ class Settings(BaseSettings):
     llm_manifest_signing_key_fingerprint: str = ""
     # Optional Hugging Face token for accessing gated models.
     llm_huggingface_token: str = ""
+    # Phase 4: allow dynamic routing profile changes and activation.
+    llm_dynamic_routing_enabled: bool = False
+    # URL of the deployment agent on the AI host. If empty, deployment tasks
+    # fail closed with a descriptive quarantine reason.
+    llm_deployment_agent_url: str = ""
+    # Internal Ollama API URL used by the deployment agent and preflight checks.
+    llm_ollama_url: str = "http://ollama:11434"
+    # Path on the AI host where GGUF files are installed before ollama create.
+    # The agent writes here and Ollama's Modelfile references this path.
+    llm_model_install_path: str = "/mnt/tablescope-ai/ollama/models/imported"
+    # Number of Ollama model slots reserved for the previous (rollback) model.
+    llm_ollama_rollback_slots: int = 1
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
     # Max projects analysed concurrently by the Home intelligence SSE stream.

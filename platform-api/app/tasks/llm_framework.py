@@ -22,6 +22,7 @@ from app.models.llm_framework import (
 )
 from app.services.llm_approval_policy import ApprovalPolicy
 from app.services.llm_catalog_client import HuggingFaceCatalogClient
+from app.services.llm_deployment import DeploymentError, create_deployment, install_artifact
 from app.services.llm_manifest import build_manifest, sign_manifest
 from app.services.llm_model_vault import ModelVault, VaultError
 from app.services.llm_scanner import scan_file
@@ -224,3 +225,55 @@ async def stage_llm_artifact(ctx: dict[str, Any], artifact_id: int, requested_by
     finally:
         if redis:
             await redis.delete(f"llm:stage:{artifact_id}")
+
+
+async def deploy_llm_artifact(
+    ctx: dict[str, Any],
+    artifact_id: int,
+    target_id: int,
+    requested_by_user_id: int,
+) -> dict[str, Any]:
+    """Install a verified artifact on a runtime target and create a deployment.
+
+    The deployment is left inactive; activation and canary are Phase 4.
+    """
+    settings = get_settings()
+    if not settings.llm_framework_enabled or not settings.llm_deployment_enabled:
+        raise RuntimeError("LLM deployment is disabled")
+
+    redis = ctx.get("redis")
+    if redis:
+        locked = await redis.set(f"llm:deploy:{artifact_id}:{target_id}", "1", nx=True, ex=3600)
+        if not locked:
+            raise Retry(defer=30)
+
+    try:
+        async with SessionLocal() as session:
+            installation = await install_artifact(
+                session,
+                artifact_id=artifact_id,
+                target_id=target_id,
+                requested_by_user_id=requested_by_user_id,
+            )
+            deployment = await create_deployment(
+                session,
+                installation_id=installation.id,
+                requested_by_user_id=requested_by_user_id,
+            )
+            await session.commit()
+            return {
+                "installation_id": installation.id,
+                "deployment_id": deployment.id,
+                "status": installation.status,
+            }
+    except DeploymentError as exc:
+        logger.exception("Deployment failed for artifact %s target %s", artifact_id, target_id)
+        return {
+            "artifact_id": artifact_id,
+            "target_id": target_id,
+            "status": "failed",
+            "reason": str(exc),
+        }
+    finally:
+        if redis:
+            await redis.delete(f"llm:deploy:{artifact_id}:{target_id}")

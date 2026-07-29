@@ -18,24 +18,40 @@ from app.auth.rbac import require_human_platform_admin, require_platform_admin
 from app.config import get_settings
 from app.database import get_db
 from app.schemas.llm_framework import (
+    ActivateRequest,
+    ActivateResponse,
+    ApproveDeploymentResponse,
     CapabilitiesResponse,
     CatalogDetail,
     CatalogSearchResult,
+    InstallRequest,
+    InstallResponse,
     InventoryResponse,
     ModelArtifactDetail,
+    PreflightResponse,
     QuarantineReleaseResponse,
+    RollbackResponse,
     StageArtifactRequest,
     StageArtifactResponse,
+)
+from app.services.llm_deployment import (
+    DeploymentError,
+    activate_deployment,
+    approve_deployment,
+    preflight_install,
+    rollback_deployment,
 )
 from app.services.llm_framework import (
     CAPABILITIES,
     create_artifact_and_stage,
+    enqueue_deploy_llm_artifact,
     enqueue_stage_llm_artifact,
     get_artifact,
     get_catalog_detail,
     get_inventory,
     release_quarantined_artifact,
     search_catalog,
+    validate_routing_capability,
 )
 
 router = APIRouter(prefix="/llm-framework", tags=["llm-framework"])
@@ -221,3 +237,114 @@ async def release_quarantined_llm_artifact(
         "previous_status": "quarantined",
         "status": artifact.status,
     }
+
+
+@router.post("/artifacts/{artifact_id}/preflight", response_model=PreflightResponse)
+async def run_llm_preflight(
+    artifact_id: int,
+    request: InstallRequest,
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(require_platform_admin),
+) -> dict[str, Any]:
+    _require_enabled()
+    try:
+        report = await preflight_install(session, artifact_id=artifact_id, target_id=request.target_id)
+    except DeploymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "artifact_id": artifact_id,
+        "target_id": request.target_id,
+        "target_reachable": report.target_reachable,
+        "disk_ok": report.disk_ok,
+        "slot_ok": report.slot_ok,
+        "detail": report.detail,
+    }
+
+
+@router.post("/artifacts/{artifact_id}/install", response_model=InstallResponse, status_code=202)
+async def install_llm_artifact(
+    artifact_id: int,
+    request: InstallRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_human_platform_admin),
+) -> dict[str, Any]:
+    _require_enabled()
+    settings = get_settings()
+    if not settings.llm_deployment_enabled:
+        raise HTTPException(status_code=503, detail="LLM deployment is disabled")
+    artifact = await get_artifact(session, artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if artifact.status != "verified":
+        raise HTTPException(status_code=400, detail="Artifact is not verified")
+    job_id = await enqueue_deploy_llm_artifact(
+        artifact_id=artifact_id,
+        target_id=request.target_id,
+        requested_by_user_id=context.user_id,
+    )
+    return {
+        "installation_id": 0,
+        "deployment_id": 0,
+        "status": "queued",
+        "job_id": job_id,
+    }
+
+
+@router.post("/deployments/{deployment_id}/approve", response_model=ApproveDeploymentResponse)
+async def approve_llm_deployment(
+    deployment_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_human_platform_admin),
+) -> dict[str, Any]:
+    _require_enabled()
+    try:
+        deployment = await approve_deployment(session, deployment_id, context.user_id)
+    except DeploymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await session.commit()
+    return {"deployment_id": deployment.id, "status": deployment.status}
+
+
+@router.post("/deployments/{deployment_id}/activate", response_model=ActivateResponse)
+async def activate_llm_deployment(
+    deployment_id: int,
+    request: ActivateRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_human_platform_admin),
+) -> dict[str, Any]:
+    _require_enabled()
+    settings = get_settings()
+    if not settings.llm_dynamic_routing_enabled:
+        raise HTTPException(status_code=503, detail="Dynamic routing is disabled")
+    try:
+        capability = await validate_routing_capability(request.capability)
+        deployment = await activate_deployment(
+            session,
+            deployment_id=deployment_id,
+            capability=capability,
+            target_id=request.target_id,
+        )
+    except DeploymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await session.commit()
+    return {
+        "deployment_id": deployment.id,
+        "status": deployment.status,
+        "capability": capability,
+        "target_id": request.target_id,
+    }
+
+
+@router.post("/deployments/{deployment_id}/rollback", response_model=RollbackResponse)
+async def rollback_llm_deployment(
+    deployment_id: int,
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(require_human_platform_admin),
+) -> dict[str, Any]:
+    _require_enabled()
+    try:
+        deployment = await rollback_deployment(session, deployment_id)
+    except DeploymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await session.commit()
+    return {"deployment_id": deployment.id, "status": deployment.status}

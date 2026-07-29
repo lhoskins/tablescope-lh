@@ -160,3 +160,70 @@ class StageArtifactResponse(BaseModel):
     artifact_id: int
     job_id: str
     status: str
+
+
+class PreflightResponse(BaseModel):
+    artifact_id: int
+    target_id: int
+    target_reachable: bool
+    disk_ok: bool
+    slot_ok: bool
+    detail: str | None
+
+
+class InstallRequest(BaseModel):
+    target_id: int
+
+
+class InstallResponse(BaseModel):
+    installation_id: int
+    deployment_id: int
+    status: str
+    job_id: str | None = None
+
+
+class DeploymentResponse(BaseModel):
+    id: int
+    installation_id: int
+    requested_by_user_id: int | None
+    approved_by_user_id: int | None
+    status: str
+    previous_deployment_id: int | None
+    stabilized_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ApproveDeploymentResponse(BaseModel):
+    deployment_id: int
+    status: str
+
+
+class ActivateRequest(BaseModel):
+    capability: str
+    target_id: int
+
+
+class ActivateResponse(BaseModel):
+    deployment_id: int
+    status: str
+    capability: str
+    target_id: int
+
+
+class RollbackResponse(BaseModel):
+    deployment_id: int
+    status: str
+
+
+class RoutingProfileRequest(BaseModel):
+    capability: str
+    target_id: int
+    installation_id: int
+    priority: int = 1
+    is_active: bool = True
+    expected_version: int | None = None  # optimistic concurrency placeholder
+
+
+class RoutingProfileResponse(RoutingProfileSummary):
+    pass

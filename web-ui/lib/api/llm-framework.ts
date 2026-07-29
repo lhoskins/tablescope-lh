@@ -138,6 +138,48 @@ export interface StageArtifactResponse {
   status: string;
 }
 
+export interface PreflightResponse {
+  artifact_id: number;
+  target_id: number;
+  target_reachable: boolean;
+  disk_ok: boolean;
+  slot_ok: boolean;
+  detail: string | null;
+}
+
+export interface InstallResponse {
+  installation_id: number;
+  deployment_id: number;
+  status: string;
+  job_id: string | null;
+}
+
+export interface DeploymentResponse {
+  id: number;
+  installation_id: number;
+  requested_by_user_id: number | null;
+  approved_by_user_id: number | null;
+  status: string;
+  previous_deployment_id: number | null;
+  stabilized_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActivateRequest {
+  capability: string;
+  target_id: number;
+}
+
+export interface RoutingProfileRequest {
+  capability: string;
+  target_id: number;
+  installation_id: number;
+  priority?: number;
+  is_active?: boolean;
+  expected_version?: number | null;
+}
+
 export function getLLMFrameworkStatus(): Promise<LLMFrameworkStatus> {
   return apiClient.get<LLMFrameworkStatus>("/api/llm-framework/status");
 }
@@ -175,4 +217,41 @@ export function releaseLLMArtifactQuarantine(artifactId: number): Promise<{ arti
     `/api/llm-framework/artifacts/${artifactId}/quarantine-release`,
     {}
   );
+}
+
+export function preflightLLMInstall(artifactId: number, targetId: number): Promise<PreflightResponse> {
+  return apiClient.post<PreflightResponse>(`/api/llm-framework/artifacts/${artifactId}/preflight`, {
+    target_id: targetId,
+  });
+}
+
+export function installLLMArtifact(artifactId: number, targetId: number): Promise<InstallResponse> {
+  return apiClient.post<InstallResponse>(`/api/llm-framework/artifacts/${artifactId}/install`, {
+    target_id: targetId,
+  });
+}
+
+export function approveLLMDeployment(deploymentId: number): Promise<{ deployment_id: number; status: string }> {
+  return apiClient.post<{ deployment_id: number; status: string }>(
+    `/api/llm-framework/deployments/${deploymentId}/approve`,
+    {}
+  );
+}
+
+export function activateLLMDeployment(deploymentId: number, request: ActivateRequest): Promise<{ deployment_id: number; status: string; capability: string; target_id: number }> {
+  return apiClient.post<{ deployment_id: number; status: string; capability: string; target_id: number }>(
+    `/api/llm-framework/deployments/${deploymentId}/activate`,
+    request
+  );
+}
+
+export function rollbackLLMDeployment(deploymentId: number): Promise<{ deployment_id: number; status: string }> {
+  return apiClient.post<{ deployment_id: number; status: string }>(
+    `/api/llm-framework/deployments/${deploymentId}/rollback`,
+    {}
+  );
+}
+
+export function upsertLLMRoutingProfile(request: RoutingProfileRequest): Promise<RoutingProfile> {
+  return apiClient.put<RoutingProfile>("/api/llm-framework/routing", request);
 }
