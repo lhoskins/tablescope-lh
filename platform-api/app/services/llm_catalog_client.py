@@ -28,7 +28,12 @@ _GGUF_SUFFIX = ".gguf"
 
 def _is_allowed_host(host: str) -> bool:
     host = host.lower()
-    return host == "huggingface.co" or host.endswith(".huggingface.co")
+    return (
+        host == "huggingface.co"
+        or host.endswith(".huggingface.co")
+        or host == "hf.co"
+        or host.endswith(".hf.co")
+    )
 
 
 def _validate_url(url: str) -> None:
@@ -108,7 +113,7 @@ class HuggingFaceCatalogClient:
 
     All network calls use bounded timeouts, a small number of retries with
     exponential backoff, and strict egress allowlist validation. Redirects are
-    followed only onto ``*.huggingface.co`` hosts.
+    followed only onto ``*.huggingface.co`` and ``*.hf.co`` hosts.
     """
 
     def __init__(self) -> None:
