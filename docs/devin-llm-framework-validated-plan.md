@@ -192,13 +192,49 @@ Phase 1, with these specifics:
 - `OLLAMA_KEEP_ALIVE=30m` means an unloaded model may linger; health checks must
   assert the *active* model answers, not merely that Ollama is up.
 
-### 1.2 §9.1 Capabilities — `embedding` needs an owner
+### 1.2 §9.1 Capabilities — `embedding` is NOT routable like the others
 
-The capability list includes `embedding`, and the AI server runs Qdrant. Before
-implementing, confirm **what currently produces embeddings** — Ollama, the AI
-API, or something else. If embeddings come from a different path, `embedding`
-must not be in the Phase 1 routing profile, or activation will appear to succeed
-while changing nothing.
+Resolved, and it changes the design. Embeddings **are** served by Ollama, so they
+look routable — but they are not:
+
+```python
+# ai-server/tablescope-ai-api/app/core/config.py
+embedding_model: str = "nomic-embed-text"
+
+# ai-server/tablescope-ai-api/app/services/llm_client.py
+await client.post(f"{settings.ollama_url}/api/embeddings",
+                  json={"model": settings.embedding_model, "prompt": text})
+
+# ai-server/tablescope-ai-api/app/services/vector_store.py
+EMBEDDING_DIM = 768  # nomic-embed-text dimension
+client.create_collection(..., vectors_config=VectorParams(size=EMBEDDING_DIM, ...))
+```
+
+**The vector dimension is hard-coded and baked into every Qdrant collection at
+creation time.** Swapping the embedding model changes the dimension (or, worse,
+keeps 768 while changing the vector *space*), and every stored vector in every
+per-tenant collection becomes meaningless. A same-dimension swap is the dangerous
+case: Qdrant keeps accepting queries and retrieval quietly degrades to noise,
+with no error to alert anyone.
+
+So an embedding change is **not an atomic routing flip** — it is a re-index
+migration:
+
+1. create a new collection at the new dimension, alongside the old;
+2. re-embed every document with the new model;
+3. verify recall against a fixed query set on both collections;
+4. cut over reads;
+5. retain the old collection for rollback;
+6. drop it only after a retention window.
+
+**Phase 4 must exclude `embedding` from the routing profile.** Keep
+`general_reasoning`, `sql_generation`, `insight_interpretation`,
+`dashboard_planning`. Give embedding its own phase (§3.5) or leave it on the
+environment variable. Offering an "Activate" button that silently corrupts
+retrieval is worse than not offering it.
+
+Add to the acceptance criteria: *the routing profile cannot assign a model to
+`embedding`, and the API rejects an attempt with a message explaining why.*
 
 ### 1.3 §11 Model Vault — the disk math is missing
 
@@ -307,23 +343,29 @@ These were listed in §33 as things Devin must determine. They are settled:
 | Frontend route | `web-ui/app/admin/settings/llm-framework/page.tsx` |
 | Platform auth guard | does **not** exist — build `require_platform_admin()` first (§0.4) |
 
-Still genuinely open, and requiring a human decision:
+### Open decisions — with defaults so work is not blocked
 
-1. **Network interpretation** — private mTLS channel vs absolute air gap. The
-   plan handles both; infrastructure has to say which.
-2. **Where the deployment agent runs** — a new service in
-   `ai-server/docker-compose.yml`, on the same host as Ollama, with only
-   `/mnt/tablescope-ai/ollama` writable.
-3. **Embedding capability owner** (§1.2).
-4. **GGUF-only vs conversion pipeline** (§0.2) — this changes scope materially,
-   and it is the one that decides whether the approved mockups are buildable
-   as drawn.
+Devin should **proceed on the defaults below** and flag them in the PR
+description. Each is reversible within its phase; none blocks Phase 1 or 2.
+
+| Decision | Default to build against | Who can override |
+|---|---|---|
+| Network interpretation | **Private mTLS channel** (the plan's own primary recommendation). Build the offline bundle path as a documented, *unused* fallback. | Infrastructure/security |
+| Deployment agent location | New service in `ai-server/docker-compose.yml`, same host as Ollama, only `/mnt/tablescope-ai/ollama` writable, no published port | Infrastructure |
+| Embedding capability | **Excluded from routing** — see §1.2, it is a re-index migration, not a flip | Product, after §3.5 |
+| Catalog scope | **Pre-quantized GGUF only** (§0.2) | Product — this one materially changes scope and the mockups |
+
+Only the last needs a real answer before Phase 2 ships, because it decides
+whether the approved catalog screen is buildable as drawn.
 
 ---
 
-## 3. Revised phase 1
+## 3. Delivery phases
 
-Phase 1 in the original plan is sound but should absorb the corrections:
+### 3.1 Phase 1 — foundation, RBAC, read-only inventory
+
+Every phase must be deployable with all later flags off. Phase 1 in the original
+plan is sound but should absorb the corrections:
 
 1. `require_platform_admin()` dependency + tests (§0.4) — **first**, everything
    else depends on it.
@@ -340,6 +382,96 @@ Phase 1 in the original plan is sound but should absorb the corrections:
 Acceptance for Phase 1: a super admin sees the module with real runtime-target
 inventory read from the database; a tenant admin gets `403` from every endpoint
 and no navigation entry; `alembic upgrade head` is clean from `0069`.
+
+---
+
+### 3.2 Phase 2 — Hugging Face catalog and Model Vault
+
+Flags: `LLM_FRAMEWORK_ENABLED=true`, `LLM_FRAMEWORK_HF_CATALOG_ENABLED=true`,
+deployment and routing still off.
+
+1. `catalog_client.py` — server-side Hugging Face search, worker-only. Bounded
+   timeouts, backoff, cancellation, rate-limit handling. **Egress allowlist with
+   redirect validation**; never accept a download URL from the browser.
+2. `approval_policy.py` — the configurable allowlist from §10.4. Default it to
+   **GGUF formats only** (§0.2). The policy decides approval; the LLM never does.
+3. License capture and `llm_license_approvals` rows. Ambiguous or missing license
+   metadata ⇒ **Review required**, staging blocked.
+4. `model_vault.py` — download to a per-job temp dir, per-artifact Redis lock plus
+   the DB uniqueness constraint, traversal/symlink/quota defences, atomic move
+   into `artifacts/`, quarantine on failure.
+5. `scanner.py` + `manifest.py` — per-file SHA-256, malware scan, GGUF structural
+   validation, strict-limit JSON parsing, canonical signed manifest.
+6. `POST /artifacts/stage` returns `202` with a durable id; arq task registered in
+   `WorkerSettings.functions`.
+7. UI: catalog tab, detail panel, stage dialog, job progress that survives reload.
+
+**Exit criteria.** A pre-quantized GGUF model can be searched, license-recorded,
+staged, scanned, hashed and signed; a tampered file quarantines; a tenant admin
+gets `403` from every endpoint; nothing has touched the AI server.
+
+**The disk assertion from §1.3 belongs here**, at stage time — not at transfer
+time, which is too late to fail gracefully.
+
+### 3.3 Phase 3 — the deployment agent and transfer
+
+Flag: `LLM_FRAMEWORK_DEPLOYMENT_ENABLED=true`. Models install **inactive**.
+
+1. Deployment agent service on the AI host. mTLS, short-lived job authorization,
+   writes only under `LLM_MODEL_INSTALL_PATH`, read-only root filesystem
+   elsewhere. **Not a remote shell**: no arbitrary commands, no arbitrary paths.
+2. **The agent holds the manifest-verification public key out of band** (§1.9).
+   It must not accept a key delivered with the artifact.
+3. `POST /targets/{id}/preflight` — the §13 attestation, plus the free-space
+   inequality on *both* sides (§1.3) and the reserved rollback slot (§1.1).
+4. Chunked transfer with resume; the agent **recalculates every hash** and
+   verifies the manifest signature before anything is installed.
+5. `OllamaAdapter.install()` — write the GGUF, generate the Modelfile from
+   validated fields only, `ollama create`. **`ollama pull` fails closed.**
+6. Signed receipt returned and verified by platform-api; `llm_installations` row.
+
+**Exit criteria.** A staged artifact installs on the AI server, appears in
+Installed as inactive, and **live traffic is provably unchanged** — same model
+answering, same routing version. Network tests from §25 pass: the AI server
+cannot resolve Hugging Face, the browser cannot reach the agent.
+
+### 3.4 Phase 4 — routing, canary, activation, rollback
+
+Flag: `LLM_FRAMEWORK_DYNAMIC_ROUTING_ENABLED=true`, **last**.
+
+1. `llm_routing_profiles` with optimistic concurrency; `PUT /routing` requires
+   `expected_version` and returns `409` on stale writes.
+2. Capabilities: `general_reasoning`, `sql_generation`, `insight_interpretation`,
+   `dashboard_planning`. **`embedding` is rejected** (§1.2).
+3. Two-person approval for replacing an active production model; approval binds
+   to artifact + target + capabilities + options and invalidates on any change.
+4. Canary suite on synthetic data only. **Drop "no network egress attempt"** —
+   that is a network test, not a canary (§1.6).
+5. Activation per §16.3, with platform-level draining (Ollama has no drain API,
+   §1.1): stop routing new requests to the old model, let outstanding ones finish
+   or time out, then switch.
+6. `stabilizing` state (§1.5) + automatic rollback inside the window.
+7. Routing version in signed AI requests; Redis cache invalidated on activation;
+   the environment-variable model remains the fallback during rollout.
+
+**Exit criteria.** The §26 manual validation runs end to end on one non-critical
+capability, including a deliberate canary failure that leaves the current model
+active, and a rollback that restores it.
+
+### 3.5 Phase 5 (conditional) — embedding model changes
+
+Only if product wants embedding models managed here. This is a **re-index
+migration**, not an activation (§1.2): dual collections, re-embed, recall
+comparison against a fixed query set, cut over, retain, then drop. `EMBEDDING_DIM`
+must become a per-collection property rather than a module constant before any of
+this is possible.
+
+### 3.6 Phase 6 (conditional) — FP16 → GGUF conversion
+
+Only if the catalog must offer non-GGUF repositories (§0.2). Pinned converter
+version, sandboxed with no network, and **a second manifest generated after
+conversion** — the post-conversion bytes are what reach the runtime, and nothing
+has hashed them yet. Do not fold this into Phase 2; it has its own threat model.
 
 ---
 
