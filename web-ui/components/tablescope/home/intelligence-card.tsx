@@ -19,6 +19,7 @@ import {
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { canManageProjectActions } from "@/lib/auth";
 import { InsightAnalysisStrip } from "./insight-analysis-strip";
+import { InsightTimeSeriesChart } from "../insights/insight-time-series-chart";
 import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
 import type {
   VisualizationOptions,
@@ -29,6 +30,7 @@ import type {
   InsightCallout,
   InsightCard as InsightCardData,
   InsightChart,
+  TimeSeriesViewState,
   VizCandidate,
 } from "@/lib/api/home-intelligence";
 import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
@@ -338,6 +340,9 @@ export function IntelligenceCard({
     useState<InsightSentiment>("agree");
   const [chartDialogOpen, setChartDialogOpen] = useState(false);
   const [selectedChart, setSelectedChart] = useState<VizCandidate | null>(null);
+  const [timeSeriesView, setTimeSeriesView] = useState<TimeSeriesViewState | undefined>(
+    card.timeSeriesView,
+  );
   const { data: identity } = useCurrentUser();
   const canCreateAction =
     onCreateAction &&
@@ -353,10 +358,11 @@ export function IntelligenceCard({
   const stableInsightId = card.insightId || card.id;
 
   const displayCard = useMemo<InsightCardData>(() => {
-    if (!selectedChart || !card.chart) return card;
+    const base = timeSeriesView ? { ...card, timeSeriesView } : card;
+    if (!selectedChart || !card.chart) return base;
     const d = selectedChart.decision;
     return {
-      ...card,
+      ...base,
       chart: {
         ...card.chart,
         type: d.chartType as InsightChart["type"],
@@ -365,7 +371,7 @@ export function IntelligenceCard({
       chartType: d.chartType,
       visualizationDecision: d,
     };
-  }, [card, selectedChart]);
+  }, [card, selectedChart, timeSeriesView]);
 
   const hasSources = tables.length > 0 || documents.length > 0;
   const sourceContent = hasSources ? (
@@ -577,7 +583,7 @@ export function IntelligenceCard({
 
       {displayCard.chart && (
         <div className="mt-3">
-          {displayCard.chart.title && (
+          {displayCard.chart.title && displayCard.chart.type !== "kpi_grid" && (
             <div className="mb-1 text-small text-ink-tertiary">
               {displayCard.chart.title}
             </div>
@@ -585,7 +591,11 @@ export function IntelligenceCard({
           {displayCard.chart.type === "kpi_grid" && displayCard.chart.data.kpis ? (
             <KpiGridView kpis={displayCard.chart.data.kpis} />
           ) : (
-            <InsightChartView chart={displayCard.chart} />
+            <InsightTimeSeriesChart
+              card={displayCard}
+              projectId={Number(displayCard.projectId)}
+              onViewChange={setTimeSeriesView}
+            />
           )}
         </div>
       )}

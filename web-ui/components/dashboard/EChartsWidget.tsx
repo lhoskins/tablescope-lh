@@ -164,6 +164,38 @@ function formatNumber(v: number, format?: string): string {
   return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+function signedPercent(v: number): string {
+  if (!Number.isFinite(v)) return "—";
+  const pct = v * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+function percentChangeTooltipFormatter(params: any) {
+  const rows = Array.isArray(params) ? params : [params];
+  if (!rows.length) return "";
+  const axis = rows[0].axisValueLabel ?? rows[0].name ?? "";
+  return (
+    axis +
+    rows
+      .map((p: any) => {
+        const v = typeof p.value === "number" ? p.value : Number(p.value ?? 0);
+        const data = p.data;
+        const current =
+          typeof data?.currentValue === "number"
+            ? formatNumber(data.currentValue)
+            : "—";
+        const previous =
+          typeof data?.previousValue === "number"
+            ? formatNumber(data.previousValue)
+            : "—";
+        const change = typeof v === "number" ? signedPercent(v) : "—";
+        return `<br/>${p.marker} ${p.seriesName}<br/>Period: ${axis}<br/>% change: ${change}<br/>Current: ${current}<br/>Previous: ${previous}`;
+      })
+      .join("")
+  );
+}
+
 function useChartTheme() {
   const [isDark, setIsDark] = useState(false);
   useEffect(() => {
@@ -381,6 +413,14 @@ function buildLineOption(
   const names = seriesNames.length > 0 ? seriesNames : [yKey];
   const rightSet = new Set(opts.rightAxisSeries ?? (dualAxis && names.length > 1 ? [names[1]] : []));
 
+  const signedPercentAxis = opts.yAxisFormat === "percent" && opts.signedPercentAxis;
+  const yAxisFormatter = signedPercentAxis
+    ? signedPercent
+    : (v: number) => formatNumber(v, opts.yAxisFormat);
+  const tooltipFormatterFn = opts.percentChangeTooltip
+    ? (params: any) => percentChangeTooltipFormatter(params)
+    : (params: any) => tooltipFormatter(params, opts.yAxisFormat);
+
   const series = names.map((name, i) => ({
     name,
     type: "line" as const,
@@ -391,9 +431,10 @@ function buildLineOption(
     showSymbol: !!opts.showDots,
     data: chartData.map((row) => {
       const v = toNumber(row[name]);
-      return v === null ? null : v;
+      if (v === null) return null;
+      return opts.percentChangeTooltip ? { value: v, ...row } : v;
     }),
-    itemStyle: { color: colors[i % colors.length] },
+    itemStyle: opts.colorBySign ? undefined : { color: colors[i % colors.length] },
     lineStyle: { width: 2.5, type: dash as any },
     label: { show: !tiny && !!opts.showLabels, position: "top", fontSize: 9, color: colorsForChart.text, formatter: (p: any) => formatNumber(Number(p.value ?? 0), opts.yAxisFormat) },
     areaStyle: widget.type === "area" ? { opacity: opts.fillOpacity ?? 0.35 } : undefined,
@@ -405,17 +446,30 @@ function buildLineOption(
     aria: { enabled: true, description: `${widget.title || widget.type} chart` },
     color: colors,
     grid: commonGrid(tiny),
-    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "axis", formatter: (params: any) => tooltipFormatter(params, opts.yAxisFormat) },
+    tooltip: opts.showTooltip === false || tiny ? { show: false } : { trigger: "axis", formatter: tooltipFormatterFn },
     legend: showLegend ? getLegendConfig(opts, isDark) : undefined,
     xAxis: { type: "category" as const, data: chartData.map((r) => String(r[xKey] ?? "")), show: !tiny, axisLabel: { rotate: opts.xAxisLabelRotate ?? (chartData.length > 8 ? -30 : 0), fontSize: 10, color: colorsForChart.text }, axisLine: { lineStyle: { color: colorsForChart.line } }, splitLine: { show: false } },
     yAxis: [
-      { type: "value" as const, show: !tiny, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined },
-      ...(dualAxis && !tiny ? [{ type: "value" as const, show: true, position: "right" as const, axisLabel: { formatter: (v: number) => formatNumber(v, opts.yAxisFormat), fontSize: 10, color: colorsForChart.text }, splitLine: { show: false } }] : []),
+      { type: "value" as const, show: !tiny, axisLabel: { formatter: yAxisFormatter, fontSize: 10, color: colorsForChart.text }, splitLine: showGrid ? { lineStyle: { color: colorsForChart.grid } } : undefined },
+      ...(dualAxis && !tiny ? [{ type: "value" as const, show: true, position: "right" as const, axisLabel: { formatter: yAxisFormatter, fontSize: 10, color: colorsForChart.text }, splitLine: { show: false } }] : []),
     ],
     series,
     dataZoom: !tiny && opts.dataZoom ? [{ type: "inside" as const }, { type: "slider" as const, start: 0, end: 100, height: 16, bottom: 0 }] : undefined,
     animation: animate,
   };
+
+  if (opts.colorBySign) {
+    option.visualMap = {
+      show: false,
+      type: "piecewise" as const,
+      pieces: [
+        { gt: 0, color: "#16a34a" },
+        { lt: 0, color: "#dc2626" },
+        { value: 0, color: "#6b7280" },
+      ],
+      outOfRange: { color: "#6b7280" },
+    };
+  }
 
   const markLineData = buildReferenceLines(opts.referenceLines);
   if (markLineData) {

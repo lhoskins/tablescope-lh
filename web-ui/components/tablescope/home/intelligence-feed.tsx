@@ -41,6 +41,7 @@ import {
   useReturnTarget,
   useScrollToReturnTarget,
 } from "@/lib/insights/return-target";
+import { PercentChangeSummaryPanel } from "./percent-change-summary-panel";
 
 type Status = "idle" | "streaming" | "complete" | "error";
 
@@ -606,7 +607,6 @@ export function IntelligenceFeed({
         isClearingCache={clearingCache}
         granularity={granularity}
         onGranularityChange={handleGranularity}
-        synthesisHeadline={synthesis?.headline ?? null}
         availableProjects={knownProjects}
         selectedProjectIds={selectedProjectIds}
         onToggleProject={toggleProject}
@@ -684,6 +684,12 @@ export function IntelligenceFeed({
               onFeedbackRespond={handleFeedbackRespond}
               governanceById={governanceById}
               onCreateAction={onCreateAction}
+            />
+            <PercentChangeSummaryPanel
+              projectIds={[...selectedProjectIds].map((id) => Number(id))}
+              snapshotFingerprint={
+                status === "complete" ? lastUpdated?.toISOString() ?? null : null
+              }
             />
             <Section
               title="Deeper analysis"
