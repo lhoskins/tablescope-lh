@@ -179,6 +179,19 @@ class SupabaseAuthService:
             link_type="magiclink", email=email, redirect_to=redirect_to
         )
 
+    async def generate_recovery_link(
+        self, email: str, *, redirect_to: str | None = None
+    ) -> str:
+        """Generate a single-use password-recovery action link.
+
+        The returned link is a GoTrue /verify URL. Callers that need the
+        token_hash for a client-side verifyOtp flow should extract it from the
+        query string (token=...).
+        """
+        return await self._generate_link(
+            link_type="recovery", email=email, redirect_to=redirect_to
+        )
+
     async def create_or_invite_user(
         self,
         email: str,
