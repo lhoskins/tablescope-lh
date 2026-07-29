@@ -21,6 +21,13 @@ function formatDate(value: string | null | undefined): string {
   return new Date(value).toLocaleString();
 }
 
+function formatCapability(value: string): string {
+  return value
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-lg border border-line-tertiary bg-bg-primary p-4 shadow-sm">
@@ -261,7 +268,7 @@ export default function LLMFrameworkPage() {
                   key={cap}
                   className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700"
                 >
-                  {cap}
+                  {formatCapability(cap)}
                 </span>
               ))}
             </div>

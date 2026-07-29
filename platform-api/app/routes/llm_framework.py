@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
-from app.auth.rbac import require_platform_admin
+from app.auth.rbac import require_human_platform_admin, require_platform_admin
 from app.config import get_settings
 from app.database import get_db
 from app.schemas.llm_framework import (
@@ -111,7 +111,7 @@ async def get_llm_artifact_detail(
 async def release_quarantined_llm_artifact(
     artifact_id: int,
     session: AsyncSession = Depends(get_db),
-    _: RequestContext = Depends(require_platform_admin),
+    _: RequestContext = Depends(require_human_platform_admin),
 ) -> dict[str, Any]:
     _require_enabled()
     artifact = await release_quarantined_artifact(session, artifact_id)

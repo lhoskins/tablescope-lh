@@ -102,10 +102,14 @@ async def require_platform_admin(
 ) -> RequestContext:
     """Platform-scoped administrator guard.
 
-    Authorises super-admins and the global ``root_admin`` role. Unlike
-    :func:`require_role`, this does *not* require an active tenant membership,
-    because platform infrastructure (LLM runtimes, model deployments) is not
-    tenant-scoped.
+    Authorises super-admins, the global ``root_admin`` role, and service
+    identities. Unlike :func:`require_role`, this does *not* require an active
+    tenant membership, because platform infrastructure (LLM runtimes, model
+    deployments) is not tenant-scoped.
+
+    Service callers are allowed because this guard is intended for read and
+    worker-driven paths. Mutating governance actions such as approval,
+    activation, rollback, and deletion require :func:`require_human_platform_admin`.
     """
     if context.is_service:
         return context
@@ -121,3 +125,22 @@ async def require_platform_admin(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Requires platform administrator",
     )
+
+
+async def require_human_platform_admin(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(get_request_context),
+) -> RequestContext:
+    """Platform-scoped administrator guard that rejects service identities.
+
+    Use this for governance mutations (approve, activate, rollback, delete,
+    quarantine-release) where the service identity must not be able to unilaterally
+    change platform infrastructure. A service key must never approve its own
+    production replacement.
+    """
+    if context.is_service:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Service identities cannot perform this action",
+        )
+    return await require_platform_admin(session=session, context=context)

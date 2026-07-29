@@ -3,14 +3,44 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
 _JSON = JSONB().with_variant(JSON(), "sqlite")
+
+
+class LLMRoutingCapability(StrEnum):
+    """Routable capability labels for LLM routing profiles.
+
+    ``embedding`` is deliberately excluded: ``EMBEDDING_DIM`` is a per-collection
+    constant in Qdrant, so swapping an embedding model silently degrades retrieval
+    without raising an error. It is handled as a separate re-index migration.
+    """
+
+    GENERAL_REASONING = "general_reasoning"
+    SQL_GENERATION = "sql_generation"
+    INSIGHT_INTERPRETATION = "insight_interpretation"
+    DASHBOARD_PLANNING = "dashboard_planning"
+
+
+ROUTING_CAPABILITIES: list[str] = [c.value for c in LLMRoutingCapability]
+
+_CAPABILITY_IN_SQL = ", ".join(f"'{c.value}'" for c in LLMRoutingCapability)
 
 
 class LLMRuntimeTarget(TimestampMixin, Base):
@@ -104,6 +134,13 @@ class LLMInstallation(TimestampMixin, Base):
 
 class LLMRoutingProfile(TimestampMixin, Base):
     __tablename__ = "llm_routing_profiles"
+
+    __table_args__ = (
+        CheckConstraint(
+            f"capability IN ({_CAPABILITY_IN_SQL})",
+            name="ck_llm_routing_profiles_capability",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     capability: Mapped[str] = mapped_column(String(64), nullable=False, index=True)

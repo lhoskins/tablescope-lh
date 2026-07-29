@@ -6,20 +6,38 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.llm_framework import (
+    ROUTING_CAPABILITIES,
     LLMInstallation,
     LLMModelArtifact,
     LLMRoutingProfile,
     LLMRuntimeTarget,
 )
 
-CAPABILITIES = [
-    "generate",
-    "chat",
-    "embed",
-    "summarize",
-    "classify",
-    "code",
-]
+CAPABILITIES = ROUTING_CAPABILITIES
+
+
+class InvalidCapabilityError(ValueError):
+    """Raised when a capability is not routable or is explicitly excluded."""
+
+
+async def validate_routing_capability(capability: str) -> str:
+    """Return a normalized capability label if it is routable.
+
+    ``embedding`` is rejected even if a caller passes it, because swapping an
+    embedding model silently invalidates existing Qdrant vectors. See §1.2.
+    """
+    normalized = capability.strip().lower()
+    if normalized == "embed" or normalized == "embedding":
+        raise InvalidCapabilityError(
+            "Embedding models cannot be routed through the LLM framework; "
+            "they require a separate re-index migration."
+        )
+    if normalized not in ROUTING_CAPABILITIES:
+        raise InvalidCapabilityError(
+            f"'{capability}' is not a routable capability. "
+            f"Routable capabilities are: {', '.join(ROUTING_CAPABILITIES)}"
+        )
+    return normalized
 
 
 async def get_inventory(session: AsyncSession) -> dict:

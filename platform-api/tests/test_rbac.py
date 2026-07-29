@@ -9,7 +9,13 @@ from fastapi import HTTPException
 
 from app.auth.context import RequestContext
 from app.auth.jwt import TokenClaims
-from app.auth.rbac import Role, require_permission, require_platform_admin, require_role
+from app.auth.rbac import (
+    Role,
+    require_human_platform_admin,
+    require_permission,
+    require_platform_admin,
+    require_role,
+)
 
 
 def _context(role: str = "viewer", permissions: list[str] | None = None) -> RequestContext:
@@ -89,3 +95,28 @@ async def test_platform_admin_allows_service_caller() -> None:
     session = AsyncMock()
     result = await require_platform_admin(session=session, context=ctx)
     assert result.is_service
+
+
+async def test_human_platform_admin_allows_root_admin() -> None:
+    session = _mock_session(role="root_admin")
+    ctx = await require_human_platform_admin(session=session, context=_context("root_admin"))
+    assert ctx.role == "root_admin"
+
+
+async def test_human_platform_admin_rejects_service_caller() -> None:
+    ctx = RequestContext(
+        claims=TokenClaims(sub="service:test", tenant_id=0, user_id=0, role="admin", permissions=["service:*"]),
+        is_service=True,
+    )
+    session = AsyncMock()
+    with pytest.raises(HTTPException) as exc:
+        await require_human_platform_admin(session=session, context=ctx)
+    assert exc.value.status_code == 403
+    assert "service ident" in exc.value.detail.lower()
+
+
+async def test_human_platform_admin_rejects_tenant_admin() -> None:
+    session = _mock_session(role="tenant_admin")
+    with pytest.raises(HTTPException) as exc:
+        await require_human_platform_admin(session=session, context=_context("tenant_admin"))
+    assert exc.value.status_code == 403
