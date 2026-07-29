@@ -52,7 +52,9 @@ class ModelVault:
 
     def temp_dir(self) -> Path:
         """Create a temporary per-job directory inside the vault."""
-        temp = Path(tempfile.mkdtemp(prefix="stage-", dir=str(self.base_path / "tmp")))
+        tmp_root = self.base_path / "tmp"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        temp = Path(tempfile.mkdtemp(prefix="stage-", dir=str(tmp_root)))
         return temp
 
     def _total_vault_bytes(self) -> int:
