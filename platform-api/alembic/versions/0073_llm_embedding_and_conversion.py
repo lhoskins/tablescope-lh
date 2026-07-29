@@ -41,7 +41,10 @@ _FORMATS = ["gguf", "safetensors", "pytorch", "fp16", "unknown"]
 
 def upgrade() -> None:
     # Allow non-GGUF source artifacts for the FP16 -> GGUF conversion pipeline.
-    op.drop_constraint("ck_llm_model_artifacts_format_gguf", "llm_model_artifacts", type_="check")
+    # The older single-format constraint may not exist in all environments, so
+    # drop it idempotently on PostgreSQL before adding the new one.
+    if op.get_context().dialect.name == "postgresql":
+        op.execute("ALTER TABLE llm_model_artifacts DROP CONSTRAINT IF EXISTS ck_llm_model_artifacts_format_gguf")
     op.create_check_constraint(
         "ck_llm_model_artifacts_format",
         "llm_model_artifacts",
