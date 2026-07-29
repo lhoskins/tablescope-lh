@@ -1256,7 +1256,6 @@ function ActionRow({
   const progress = item.percent_complete ?? 0;
   const overdue = isOverdue(item);
   const activeSubtasks = detail?.subtasks.filter((s) => !s.archived_at) ?? [];
-  const hasSubtasks = item.total_subtasks > 0;
 
   return (
     <div className="border-b border-line-tertiary last:border-b-0" role="row" aria-expanded={expanded}>
@@ -1289,14 +1288,10 @@ function ActionRow({
               className="shrink-0"
               aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
             >
-              {hasSubtasks ? (
-                <IconChevronRight
-                  size={14}
-                  className={cn("text-ink-tertiary transition-transform", expanded && "rotate-90")}
-                />
-              ) : (
-                <span className="inline-block w-3.5" />
-              )}
+              <IconChevronRight
+                size={14}
+                className={cn("text-ink-tertiary transition-transform", expanded && "rotate-90")}
+              />
             </button>
             <Link
               href={`/projects/${projectId}/actions/${item.id}`}
