@@ -57,6 +57,17 @@ function inputToDate(value: string): string | null {
   return new Date(value).toISOString();
 }
 
+function formatDateShort(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "md" }) {
   const sizeClass = size === "sm" ? "h-6 w-6 text-[10px]" : "h-8 w-8 text-[11px]";
   return (
@@ -518,12 +529,10 @@ function SubtaskRow({
         <IconChevronDown size={12} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-current opacity-70" />
       </div>
 
-      <input
-        type="date"
-        value={subtask.due_date ? subtask.due_date.split("T")[0] : ""}
-        disabled={!canEdit}
-        onChange={(e) => update.mutate({ due_date: e.target.value || null })}
-        className="rounded border border-line-tertiary bg-bg-primary px-1 py-0.5 text-[12px] text-ink-primary disabled:bg-bg-secondary"
+      <InlineDate
+        value={subtask.due_date}
+        canEdit={canEdit}
+        onChange={(v) => update.mutate({ due_date: v })}
       />
 
       <div className="flex items-center justify-center">
@@ -547,5 +556,41 @@ function SubtaskRow({
         </button>
       )}
     </div>
+  );
+}
+
+function InlineDate({
+  value,
+  canEdit,
+  onChange,
+}: {
+  value: string | null;
+  canEdit: boolean;
+  onChange: (v: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const display = formatDateShort(value) || "-";
+  if (canEdit && editing) {
+    return (
+      <input
+        type="date"
+        value={value ? value.split("T")[0] : ""}
+        onChange={(e) => onChange(e.target.value || null)}
+        onBlur={() => setEditing(false)}
+        onKeyDown={(e) => e.key === "Enter" && setEditing(false)}
+        autoFocus
+        className="rounded border border-line-tertiary bg-bg-primary px-1 py-0.5 text-[12px] text-ink-primary outline-none focus:border-brand-500"
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={!canEdit}
+      onClick={() => setEditing(true)}
+      className="truncate rounded px-1 py-0.5 text-left text-[12px] text-ink-secondary disabled:cursor-default disabled:hover:bg-transparent hover:bg-bg-secondary"
+    >
+      {display}
+    </button>
   );
 }

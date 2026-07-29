@@ -1531,25 +1531,40 @@ function DueCell({
   canManage: boolean;
   onChange: (v: string | null) => void;
 }) {
-  const dateValue = value ? value.split("T")[0] : "";
+  const [editing, setEditing] = useState(false);
+  const display = formatDateShort(value) || "-";
   return (
     <div className="flex items-center gap-1">
       <IconCalendar size={12} className={cn("shrink-0", overdue ? "text-danger" : "text-ink-tertiary")} />
-      {canManage ? (
+      {canManage && editing ? (
         <input
           type="date"
-          value={dateValue}
+          value={value ? value.split("T")[0] : ""}
           onChange={(e) => onChange(e.target.value || null)}
           onClick={(e) => e.stopPropagation()}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => e.key === "Enter" && setEditing(false)}
+          autoFocus
           className={cn(
             "min-w-0 flex-1 rounded border bg-transparent px-1 py-0.5 text-[12px] outline-none",
             overdue ? "border-danger text-danger" : "border-line-tertiary text-ink-primary",
           )}
         />
       ) : (
-        <span className={cn("truncate text-[12px]", overdue ? "text-danger" : "text-ink-secondary")}>
-          {formatDateShort(value) || "-"}
-        </span>
+        <button
+          type="button"
+          disabled={!canManage}
+          onClick={(e) => {
+            e.stopPropagation();
+            setEditing(true);
+          }}
+          className={cn(
+            "truncate text-left text-[12px] disabled:cursor-default disabled:hover:bg-transparent hover:bg-bg-secondary",
+            overdue ? "text-danger" : "text-ink-secondary",
+          )}
+        >
+          {display}
+        </button>
       )}
     </div>
   );
@@ -1789,12 +1804,10 @@ function SubtaskRow({
 
       <StatusCell value={subtask.status} canManage={canManage} onChange={(v) => onStatusChange(actionId, subtask.id, v)} />
 
-      <input
-        type="date"
-        value={subtask.due_date ? subtask.due_date.split("T")[0] : ""}
-        disabled={!canManage}
-        onChange={(e) => onFieldChange(actionId, subtask.id, { due_date: e.target.value || null })}
-        className="rounded border border-line-tertiary bg-bg-primary px-1 py-0.5 text-[12px] text-ink-primary disabled:bg-bg-secondary"
+      <InlineDate
+        value={subtask.due_date}
+        canManage={canManage}
+        onChange={(v) => onFieldChange(actionId, subtask.id, { due_date: v })}
       />
 
       <input
@@ -1831,6 +1844,46 @@ function SubtaskRow({
         </button>
       )}
     </div>
+  );
+}
+
+function InlineDate({
+  value,
+  canManage,
+  onChange,
+}: {
+  value: string | null;
+  canManage: boolean;
+  onChange: (v: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const display = formatDateShort(value) || "-";
+  if (canManage && editing) {
+    return (
+      <input
+        type="date"
+        value={value ? value.split("T")[0] : ""}
+        onChange={(e) => onChange(e.target.value || null)}
+        onClick={(e) => e.stopPropagation()}
+        onBlur={() => setEditing(false)}
+        onKeyDown={(e) => e.key === "Enter" && setEditing(false)}
+        autoFocus
+        className="rounded border border-line-tertiary bg-bg-primary px-1 py-0.5 text-[12px] text-ink-primary outline-none focus:border-brand-500"
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={!canManage}
+      onClick={(e) => {
+        e.stopPropagation();
+        setEditing(true);
+      }}
+      className="truncate rounded px-1 py-0.5 text-left text-[12px] text-ink-secondary disabled:cursor-default disabled:hover:bg-transparent hover:bg-bg-secondary"
+    >
+      {display}
+    </button>
   );
 }
 
