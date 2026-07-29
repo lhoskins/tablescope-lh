@@ -25,7 +25,7 @@ from app.models.llm_framework import (
     LLMRoutingProfile,
     LLMRuntimeTarget,
 )
-from app.services.llm_model_vault import ModelVault
+from app.services.llm_model_vault import ModelVault, VaultError
 from app.services.llm_ollama_adapter import OllamaAdapter
 
 logger = logging.getLogger(__name__)
@@ -60,8 +60,13 @@ async def preflight_install(
     vault = ModelVault()
     artifact_size = artifact.size_bytes or 0
 
-    # App-server side: room in the vault for the temp copy.
-    vault.assert_disk_space(vault.base_path, artifact_size * 2 + 5 * 1024 ** 3)
+    # App-server side: room for temp copy plus final artifact.
+    # assert_disk_space adds its own 5 GiB reserve, so only pass the transient
+    # requirement (temp + final) here.
+    try:
+        vault.assert_disk_space(vault.base_path, artifact_size * 2)
+    except VaultError as exc:
+        raise DeploymentError(str(exc)) from exc
 
     # Runtime side: Ollama reachable and capacity OK.
     adapter = OllamaAdapter(
