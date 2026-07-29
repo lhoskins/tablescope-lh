@@ -390,16 +390,32 @@ function LabeledDate({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
+  const display = formatDateShort(value || null) || "-";
   return (
     <div className="space-y-1.5">
       <label className="text-[12px] font-medium text-ink-secondary">{label}</label>
-      <input
-        type="date"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        className="w-full rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-[13px] text-ink-primary outline-none focus:border-brand-500 disabled:bg-bg-secondary"
-      />
+      {editing ? (
+        <input
+          type="date"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => e.key === "Enter" && setEditing(false)}
+          disabled={disabled}
+          autoFocus
+          className="w-full rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-[13px] text-ink-primary outline-none focus:border-brand-500 disabled:bg-bg-secondary"
+        />
+      ) : (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setEditing(true)}
+          className="w-full rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-left text-[13px] text-ink-primary disabled:cursor-default disabled:bg-bg-secondary hover:bg-bg-secondary"
+        >
+          {display}
+        </button>
+      )}
     </div>
   );
 }
