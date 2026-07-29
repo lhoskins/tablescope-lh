@@ -1951,7 +1951,7 @@ function InlineDate({
   onChange: (v: string | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const display = formatDateShort(value) || "-";
+  const display = formatDateShort(value) || "mm/dd/yyyy";
   if (canManage && editing) {
     return (
       <input

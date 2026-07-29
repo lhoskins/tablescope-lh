@@ -391,7 +391,7 @@ function LabeledDate({
   disabled?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
-  const display = formatDateShort(value || null) || "-";
+  const display = formatDateShort(value || null) || "mm/dd/yyyy";
   return (
     <div className="space-y-1.5">
       <label className="text-[12px] font-medium text-ink-secondary">{label}</label>
