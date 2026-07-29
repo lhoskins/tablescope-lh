@@ -67,6 +67,16 @@ from app.models.knowledge_graph_lifecycle import (
     KnowledgeGraphVersion,
 )
 from app.models.knowledge_graph_snapshot import AIProjectGraphSnapshot
+from app.models.llm_framework import (
+    LLMArtifactFile,
+    LLMAuditEvent,
+    LLMDeployment,
+    LLMDeploymentAttempt,
+    LLMInstallation,
+    LLMModelArtifact,
+    LLMRoutingProfile,
+    LLMRuntimeTarget,
+)
 from app.models.mfa_phone_factor import MfaPhoneFactor
 from app.models.mfa_sms_event import MfaSmsEvent
 from app.models.organization_vdb import OrganizationVDB
@@ -164,6 +174,14 @@ __all__ = [
     "KnowledgeGraphBuild",
     "KnowledgeGraphHealthCheck",
     "KnowledgeGraphVersion",
+    "LLMArtifactFile",
+    "LLMAuditEvent",
+    "LLMDeployment",
+    "LLMDeploymentAttempt",
+    "LLMInstallation",
+    "LLMModelArtifact",
+    "LLMRoutingProfile",
+    "LLMRuntimeTarget",
     "MethodCatalog",
     "MethodCatalogAuditLog",
     "MethodCatalogVersion",

@@ -85,6 +85,33 @@ class Settings(BaseSettings):
     tablescope_ai_api_url: str = ""
     tablescope_ai_signing_secret: str = ""
     tablescope_ai_default_scope: str = "project"
+
+    # --- LLM Framework (offline Ollama model deployment) ---
+    # Master switch. When false, /api/llm-framework/* returns 503 and the UI
+    # is hidden. Phase 1 is read-only inventory, so enabling it only exposes
+    # runtime/installation/routing data, not model downloads or activation.
+    llm_framework_enabled: bool = True
+    # Phase 1 restricts the catalog to pre-quantized GGUF artifacts. Setting
+    # this to true blocks any FP16 / safetensors / conversion pipeline paths.
+    llm_model_catalog_gguf_only: bool = True
+    # Allow staging and activation of a verified artifact on a runtime target.
+    # Kept off until the deployment agent and canary pipeline are wired.
+    llm_deployment_enabled: bool = False
+    # Require two distinct platform administrators to approve a production
+    # model replacement before activation.
+    llm_two_person_approval_required: bool = True
+    # Automatically roll back an activation that fails its stabilization window.
+    llm_auto_rollback_enabled: bool = True
+    # Max bytes allowed in the model vault on the app server. The preflight
+    # check uses twice the artifact size plus reserve.
+    llm_model_vault_max_bytes: int = 107_374_182_400  # 100 GiB
+    # Path to the model vault on the app server (/opt/tablescope is mounted
+    # into platform-api, platform-api-worker, and the deployment agent).
+    llm_model_vault_path: str = "/opt/tablescope/model-vault"
+    # Public-key fingerprint of the trusted manifest-signing key. The agent
+    # verifies artifacts against a key baked into its image, not fetched from
+    # the app server at deploy time.
+    llm_manifest_signing_key_fingerprint: str = ""
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
     # Max projects analysed concurrently by the Home intelligence SSE stream.

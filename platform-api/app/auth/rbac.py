@@ -6,9 +6,12 @@ from collections.abc import Awaitable, Callable
 from enum import StrEnum
 
 from fastapi import Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.context import RequestContext
+from app.auth.context import RequestContext, get_request_context
 from app.auth.membership import require_membership
+from app.database import get_db
+from app.models.user import User
 
 
 class Role(StrEnum):
@@ -91,3 +94,30 @@ def require_permission(
         return context
 
     return _dependency
+
+
+async def require_platform_admin(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(get_request_context),
+) -> RequestContext:
+    """Platform-scoped administrator guard.
+
+    Authorises super-admins and the global ``root_admin`` role. Unlike
+    :func:`require_role`, this does *not* require an active tenant membership,
+    because platform infrastructure (LLM runtimes, model deployments) is not
+    tenant-scoped.
+    """
+    if context.is_service:
+        return context
+    user = await session.get(User, context.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authentication required",
+        )
+    if user.is_super_admin or user.role == Role.ROOT_ADMIN:
+        return context
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Requires platform administrator",
+    )
