@@ -32,6 +32,7 @@ from app.database import SessionLocal
 from app.models.shared_vdb import SharedVDB
 from app.models.user_vdb import UserVDB
 from app.services.vdb_management import VDBManagementService
+from app.tasks.llm_framework import stage_llm_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -1275,6 +1276,7 @@ class WorkerSettings:
         reprocess_project,
         refresh_business_insight_result,
         rebuild_project_insight,
+        stage_llm_artifact,
     ]
     cron_jobs: ClassVar[list] = [
         # Detect source drift every 15 minutes and mark affected graphs stale.

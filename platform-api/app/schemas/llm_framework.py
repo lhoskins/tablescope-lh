@@ -35,12 +35,23 @@ class ArtifactFileSummary(BaseModel):
     hash_value: str
 
 
+class LicenseApprovalSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    status: str
+    license_type: str | None
+    license_url: str | None
+    notes: str | None
+    approved_at: datetime | None
+
+
 class ModelArtifactSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
-    publisher: str | None
+    publisher: str
     repo_url: str | None
     commit_sha: str | None
     quantization: str | None
@@ -56,6 +67,7 @@ class ModelArtifactSummary(BaseModel):
 
 class ModelArtifactDetail(ModelArtifactSummary):
     files: list[ArtifactFileSummary]
+    license_approval: LicenseApprovalSummary | None
 
 
 class InstallationSummary(BaseModel):
@@ -109,4 +121,42 @@ class QuarantineReleaseResponse(BaseModel):
 
     artifact_id: int
     previous_status: str
+    status: str
+
+
+class CatalogFileResult(BaseModel):
+    filename: str
+    size: int | None
+    lfs: bool
+
+
+class CatalogSearchResult(BaseModel):
+    repo_id: str
+    publisher: str
+    name: str
+    tags: list[str]
+    license: str | None
+    description: str | None
+    downloads: int | None
+    likes: int | None
+    last_modified: str | None
+    gguf_files: list[CatalogFileResult]
+    gguf_total_bytes: int | None
+
+
+class CatalogDetail(CatalogSearchResult):
+    commit_sha: str | None
+    siblings: list[CatalogFileResult]
+    license_url: str | None
+
+
+class StageArtifactRequest(BaseModel):
+    repo_url: str
+    quantization: str | None = None
+    name: str | None = None
+
+
+class StageArtifactResponse(BaseModel):
+    artifact_id: int
+    job_id: str
     status: str

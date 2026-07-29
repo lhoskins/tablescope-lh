@@ -1,7 +1,8 @@
 """LLM Framework administration routes.
 
 Phase 1 is read-only inventory plus lightweight artifact lifecycle helpers.
-No model downloads, conversion, or activation happen here.
+Phase 2 adds Hugging Face catalog search and staged artifact download.
+No model activation happens here.
 """
 
 from __future__ import annotations
@@ -18,15 +19,23 @@ from app.config import get_settings
 from app.database import get_db
 from app.schemas.llm_framework import (
     CapabilitiesResponse,
+    CatalogDetail,
+    CatalogSearchResult,
     InventoryResponse,
     ModelArtifactDetail,
     QuarantineReleaseResponse,
+    StageArtifactRequest,
+    StageArtifactResponse,
 )
 from app.services.llm_framework import (
     CAPABILITIES,
+    create_artifact_and_stage,
+    enqueue_stage_llm_artifact,
     get_artifact,
+    get_catalog_detail,
     get_inventory,
     release_quarantined_artifact,
+    search_catalog,
 )
 
 router = APIRouter(prefix="/llm-framework", tags=["llm-framework"])
@@ -40,10 +49,20 @@ def _require_enabled() -> None:
         )
 
 
+def _require_catalog_enabled() -> None:
+    _require_enabled()
+    if not get_settings().llm_framework_hf_catalog_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM Framework catalog is disabled",
+        )
+
+
 class FrameworkStatusResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     enabled: bool
+    hf_catalog_enabled: bool
     gguf_only: bool
     deployment_enabled: bool
     two_person_approval_required: bool
@@ -58,6 +77,7 @@ async def get_llm_framework_status(
     settings = get_settings()
     return {
         "enabled": settings.llm_framework_enabled,
+        "hf_catalog_enabled": settings.llm_framework_hf_catalog_enabled,
         "gguf_only": settings.llm_model_catalog_gguf_only,
         "deployment_enabled": settings.llm_deployment_enabled,
         "two_person_approval_required": settings.llm_two_person_approval_required,
@@ -94,6 +114,83 @@ async def get_llm_capabilities(
     }
 
 
+@router.get("/catalog/search", response_model=list[CatalogSearchResult])
+async def search_llm_catalog(
+    q: str,
+    limit: int = 20,
+    _: RequestContext = Depends(require_platform_admin),
+) -> list[CatalogSearchResult]:
+    _require_catalog_enabled()
+    models = await search_catalog(q, limit=min(limit, 50))
+    return [
+        CatalogSearchResult(
+            repo_id=m.repo_id,
+            publisher=m.publisher,
+            name=m.name,
+            tags=m.tags,
+            license=m.license,
+            description=m.description,
+            downloads=m.downloads,
+            likes=m.likes,
+            last_modified=m.last_modified,
+            gguf_files=[
+                {"filename": f.filename, "size": f.size, "lfs": f.lfs}
+                for f in m.gguf_files
+            ],
+            gguf_total_bytes=sum((f.size or 0) for f in m.gguf_files) or None,
+        )
+        for m in models
+    ]
+
+
+@router.get("/catalog/detail", response_model=CatalogDetail)
+async def get_llm_catalog_detail(
+    repo_url: str,
+    _: RequestContext = Depends(require_platform_admin),
+) -> CatalogDetail:
+    _require_catalog_enabled()
+    m = await get_catalog_detail(repo_url)
+    return CatalogDetail(
+        repo_id=m.repo_id,
+        publisher=m.publisher,
+        name=m.name,
+        commit_sha=m.commit_sha,
+        tags=m.tags,
+        license=m.license,
+        description=m.description,
+        downloads=m.downloads,
+        likes=m.likes,
+        last_modified=m.last_modified,
+        license_url=m.license_url,
+        gguf_files=[
+            {"filename": f.filename, "size": f.size, "lfs": f.lfs}
+            for f in m.gguf_files
+        ],
+        siblings=[
+            {"filename": f.filename, "size": f.size, "lfs": f.lfs}
+            for f in m.siblings
+        ],
+        gguf_total_bytes=sum((f.size or 0) for f in m.gguf_files) or None,
+    )
+
+
+@router.post("/artifacts/stage", response_model=StageArtifactResponse, status_code=202)
+async def stage_llm_artifact_from_catalog(
+    request: StageArtifactRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_human_platform_admin),
+) -> dict[str, Any]:
+    _require_catalog_enabled()
+    artifact, job_id = await create_artifact_and_stage(
+        session,
+        repo_url=request.repo_url,
+        quantization=request.quantization,
+        name=request.name,
+        requested_by_user_id=context.user_id,
+    )
+    return {"artifact_id": artifact.id, "job_id": job_id, "status": artifact.status}
+
+
 @router.get("/artifacts/{artifact_id}", response_model=ModelArtifactDetail)
 async def get_llm_artifact_detail(
     artifact_id: int,
@@ -111,12 +208,14 @@ async def get_llm_artifact_detail(
 async def release_quarantined_llm_artifact(
     artifact_id: int,
     session: AsyncSession = Depends(get_db),
-    _: RequestContext = Depends(require_human_platform_admin),
+    context: RequestContext = Depends(require_human_platform_admin),
 ) -> dict[str, Any]:
     _require_enabled()
     artifact = await release_quarantined_artifact(session, artifact_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
+    # Re-queue the staging worker so the artifact is re-verified.
+    await enqueue_stage_llm_artifact(artifact.id, context.user_id)
     return {
         "artifact_id": artifact.id,
         "previous_status": "quarantined",

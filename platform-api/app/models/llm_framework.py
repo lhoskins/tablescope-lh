@@ -65,9 +65,20 @@ class LLMRuntimeTarget(TimestampMixin, Base):
 class LLMModelArtifact(TimestampMixin, Base):
     __tablename__ = "llm_model_artifacts"
 
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'downloading', 'verifying', 'staged', 'verified', 'quarantined', 'failed')",
+            name="ck_llm_model_artifacts_status",
+        ),
+        CheckConstraint(
+            "format = 'gguf'",
+            name="ck_llm_model_artifacts_format_gguf",
+        ),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    publisher: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    publisher: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     repo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     quantization: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -78,6 +89,10 @@ class LLMModelArtifact(TimestampMixin, Base):
     manifest_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
     manifest_public_key_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
     quarantine_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    staged_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     verified_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -88,6 +103,10 @@ class LLMModelArtifact(TimestampMixin, Base):
         cascade="all, delete-orphan",
     )
     installations: Mapped[list[LLMInstallation]] = relationship(back_populates="artifact")
+    license_approval: Mapped[LLMLicenseApproval | None] = relationship(
+        back_populates="artifact",
+        uselist=False,
+    )
 
 
 class LLMArtifactFile(TimestampMixin, Base):
@@ -104,6 +123,33 @@ class LLMArtifactFile(TimestampMixin, Base):
     storage_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     artifact: Mapped[LLMModelArtifact] = relationship(back_populates="files")
+
+
+class LLMLicenseApproval(TimestampMixin, Base):
+    __tablename__ = "llm_license_approvals"
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'review_required', 'approved', 'rejected')",
+            name="ck_llm_license_approvals_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    artifact_id: Mapped[int] = mapped_column(
+        ForeignKey("llm_model_artifacts.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    license_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    license_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    license_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    approved_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    artifact: Mapped[LLMModelArtifact] = relationship(back_populates="license_approval")
 
 
 class LLMInstallation(TimestampMixin, Base):

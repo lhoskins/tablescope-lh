@@ -107,13 +107,16 @@ services:
       # Phase 1: read-only runtime/installation/routing inventory. No downloads,
       # no activation. The worker inherits these via the shared env anchor.
       LLM_FRAMEWORK_ENABLED: ${LLM_FRAMEWORK_ENABLED:-true}
+      LLM_FRAMEWORK_HF_CATALOG_ENABLED: ${LLM_FRAMEWORK_HF_CATALOG_ENABLED:-true}
       LLM_MODEL_CATALOG_GGUF_ONLY: ${LLM_MODEL_CATALOG_GGUF_ONLY:-true}
       LLM_DEPLOYMENT_ENABLED: ${LLM_DEPLOYMENT_ENABLED:-false}
       LLM_TWO_PERSON_APPROVAL_REQUIRED: ${LLM_TWO_PERSON_APPROVAL_REQUIRED:-true}
       LLM_AUTO_ROLLBACK_ENABLED: ${LLM_AUTO_ROLLBACK_ENABLED:-true}
       LLM_MODEL_VAULT_MAX_BYTES: ${LLM_MODEL_VAULT_MAX_BYTES:-107374182400}
       LLM_MODEL_VAULT_PATH: ${LLM_MODEL_VAULT_PATH:-/opt/tablescope/model-vault}
+      LLM_MANIFEST_SIGNING_KEY_PATH: ${LLM_MANIFEST_SIGNING_KEY_PATH:-/opt/tablescope/model-vault/signing.pem}
       LLM_MANIFEST_SIGNING_KEY_FINGERPRINT: ${LLM_MANIFEST_SIGNING_KEY_FINGERPRINT:-}
+      LLM_HUGGINGFACE_TOKEN: ${LLM_HUGGINGFACE_TOKEN:-}
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       # Read-write access to per-tenant root so the platform API can manage
