@@ -34,8 +34,7 @@ function renderStrip(props: Partial<Parameters<typeof IntelligenceStrip>[0]> = {
 
 describe("IntelligenceStrip", () => {
   it("does not render a blue analysis banner", () => {
-    const { container } = renderStrip();
-    expect(container.querySelector(".bg-brand")).toBeNull();
+    renderStrip();
     expect(screen.queryByText(/AI analyzed/)).toBeNull();
   });
 

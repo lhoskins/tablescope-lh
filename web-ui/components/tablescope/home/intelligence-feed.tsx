@@ -1,14 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  IconAlertTriangle,
-  IconBulb,
-  IconChartBar,
-  IconRefresh,
-  IconTrash,
-  IconTrendingUp,
-} from "@tabler/icons-react";
+
 import {
   clearBusinessInsightCache,
   getIntelligenceSnapshot,
@@ -25,134 +18,13 @@ import {
 import { SaveInsightToDashboardModal } from "./save-insight-to-dashboard-modal";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 import { formatLastUpdated } from "@/lib/format-datetime";
-import { IntelligenceCard, LoadingCard } from "./intelligence-card";
-import {
-  useInsightFeedback,
-  type SaveInsightFeedbackArgs,
-} from "@/lib/hooks/use-insight-feedback";
-import type { GovernanceItem, InsightFeedbackRecord } from "@/lib/api/insight-feedback";
-import { IntelligenceStrip, type FilterableProject } from "./intelligence-strip";
-import {
-  InsightPanel,
-  PanelEmpty,
-} from "@/components/tablescope/insight-panel";
-import {
-  insightAnchorId,
-  useReturnTarget,
-  useScrollToReturnTarget,
-} from "@/lib/insights/return-target";
-import { PercentChangeSummaryPanel } from "./percent-change-summary-panel";
+import { LoadingCard } from "./intelligence-card";
+import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
+import type { InsightCardActionHandlers } from "@/components/tablescope/insights/insight-section";
+import type { FilterableProject } from "./intelligence-strip";
+import { IntelligenceWorkspace } from "@/components/tablescope/insights/intelligence-workspace";
 
 type Status = "idle" | "streaming" | "complete" | "error";
-
-function pinFingerprintKey(card: InsightCard): string | undefined {
-  return (
-    card.evidenceFingerprint?.resultFingerprint ??
-    card.insightId ??
-    card.id ??
-    undefined
-  );
-}
-
-function Section({
-  title,
-  icon,
-  cards,
-  emptyText,
-  loading,
-  defaultOpen,
-  feedbackById,
-  savingFeedback,
-  onSaveToDashboard,
-  onPin,
-  pinnedByFingerprint,
-  onFeedbackSave,
-  onFeedbackRemove,
-  onFeedbackRespond,
-  governanceById,
-  onCreateAction,
-  actionsDisclosure = "collapsible",
-}: {
-  title: string;
-  icon: React.ReactNode;
-  cards: InsightCard[];
-  emptyText: string;
-  loading: boolean;
-  defaultOpen?: boolean;
-  feedbackById: Record<string, InsightFeedbackRecord>;
-  savingFeedback: boolean;
-  onSaveToDashboard?: (card: InsightCard) => void;
-  onPin?: (card: InsightCard) => void;
-  pinnedByFingerprint?: Map<string, number>;
-  onFeedbackSave?: (card: InsightCard, payload: Omit<SaveInsightFeedbackArgs, "insightId" | "projectId" | "insightType" | "cardSnapshot" | "explanationSnapshot">) => void;
-  onFeedbackRemove?: (card: InsightCard) => void;
-  onFeedbackRespond?: (card: InsightCard, response: string) => void;
-  governanceById?: Record<string, GovernanceItem>;
-  onCreateAction?: (card: InsightCard) => void;
-  actionsDisclosure?: "always-visible" | "collapsible";
-}) {
-  // A reader returning from a card's full analysis must find that card, so the
-  // panel holding it opens regardless of its usual default.
-  const returnTarget = useReturnTarget();
-  const holdsReturnTarget =
-    returnTarget != null &&
-    cards.some((c) => (c.insightId || c.id) === returnTarget);
-
-  return (
-    <InsightPanel
-      title={title}
-      icon={icon}
-      collapsible
-      defaultOpen={defaultOpen || holdsReturnTarget}
-      forceOpen={holdsReturnTarget}
-      count={cards.length}
-    >
-      {cards.length === 0 ? (
-        loading ? null : <PanelEmpty text={emptyText} />
-      ) : (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {cards.map((card) => {
-            const key = pinFingerprintKey(card) || card.insightId || card.id;
-            const isPinned = Boolean(
-              pinnedByFingerprint && key && pinnedByFingerprint.has(key),
-            );
-            const anchor = card.insightId || card.id;
-            return (
-              <div
-                key={key}
-                id={anchor ? insightAnchorId(anchor) : undefined}
-                className="scroll-mt-24 rounded-lg transition-shadow data-[returned=true]:ring-2 data-[returned=true]:ring-brand-500"
-              >
-              <IntelligenceCard
-                card={card}
-                pinned={isPinned}
-                feedback={feedbackById[card.insightId || card.id]}
-                savingFeedback={savingFeedback}
-                onSaveToDashboard={onSaveToDashboard}
-                onPin={onPin}
-                onFeedbackSave={
-                  onFeedbackSave
-                    ? (payload) => onFeedbackSave(card, payload)
-                    : undefined
-                }
-                onFeedbackRemove={
-                  onFeedbackRemove ? () => onFeedbackRemove(card) : undefined
-                }
-                onFeedbackRespond={
-                  onFeedbackRespond ? (response) => onFeedbackRespond(card, response) : undefined
-                }
-                governance={governanceById?.[card.insightId || card.id]}
-                onCreateAction={onCreateAction ? () => onCreateAction(card) : undefined}
-                actionsDisclosure={actionsDisclosure}
-              />
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </InsightPanel>
-  );
-}
 
 export interface IntelligenceFeedProps {
   onPin?: (card: InsightCard) => void;
@@ -190,8 +62,8 @@ export function IntelligenceFeed({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [settings, setSettings] = useState<IntelligenceSettings | null>(null);
   const [, forceTick] = useState(0);
-  const [stale, setStale] = useState(false);
-  const [staleProjectIds, setStaleProjectIds] = useState<string[]>([]);
+  const [, setStale] = useState(false);
+  const [, setStaleProjectIds] = useState<string[]>([]);
 
   interface ProjectSelection {
     ids: Set<string>;
@@ -506,28 +378,6 @@ export function IntelligenceFeed({
     [respondToReview],
   );
 
-  const risks = allInsights.filter(
-    (c) =>
-      c.insightType.startsWith("risk_") ||
-      c.severity === "critical" ||
-      c.severity === "urgent" ||
-      c.severity === "warning",
-  );
-  const trends = allInsights.filter(
-    (c) => c.insightType.startsWith("trend_") && !risks.includes(c),
-  );
-  const opportunities = allInsights.filter(
-    (c) =>
-      (c.insightType.startsWith("opportunity_") ||
-        c.severity === "opportunity") &&
-      !risks.includes(c) &&
-      !trends.includes(c),
-  );
-  const analysis = allInsights.filter(
-    (c) =>
-      !risks.includes(c) && !trends.includes(c) && !opportunities.includes(c),
-  );
-
   const visibleProjects = useMemo(
     () => projects.filter((p) => selectedProjectIds.has(p.id)),
     [projects, selectedProjectIds],
@@ -537,11 +387,6 @@ export function IntelligenceFeed({
   const running = status === "streaming";
 
   const granularity = settings?.granularity ?? 3;
-  const hasCards = allInsights.length > 0;
-
-  // Bring the card a reader came back to into view, once the feed has rendered
-  // it. The browser's own hash scrolling fires before the cards exist.
-  useScrollToReturnTarget(useReturnTarget(), hasCards);
 
   const handleGranularity = (value: number) => {
     setSettings((prev) => (prev ? { ...prev, granularity: value } : prev));
@@ -549,11 +394,11 @@ export function IntelligenceFeed({
       /* keep optimistic value; will reconcile on next load */
     });
     // Keep the current cards visible until the new run finishes.
-    startStream(settings?.cross_project ?? true, value, hasCards);
+    startStream(settings?.cross_project ?? true, value, allInsights.length > 0);
   };
 
   const handleRefresh = () => {
-    startStream(settings?.cross_project ?? true, granularity, hasCards);
+    startStream(settings?.cross_project ?? true, granularity, allInsights.length > 0);
   };
 
   const [clearingCache, setClearingCache] = useState(false);
@@ -590,30 +435,30 @@ export function IntelligenceFeed({
     [pushToast],
   );
 
+  const selectedProjectIdsArray = useMemo(
+    () => [...selectedProjectIds],
+    [selectedProjectIds],
+  );
+
+  const hasCards = allInsights.length > 0;
+
+  const emptySelection =
+    knownProjects.length > 0 ? (
+      <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
+        Select one or more projects to view Business Insights.
+      </div>
+    ) : null;
+
   const empty =
-    status === "complete" &&
-    allInsights.length === 0 &&
-    visibleProjects.length === 0;
+    status === "complete" && visibleProjects.length === 0 ? (
+      <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
+        No projects to analyze yet. Create a project and connect data to see AI
+        intelligence here.
+      </div>
+    ) : null;
 
   return (
     <div className="space-y-4">
-      <IntelligenceStrip
-        projectCount={selectedProjectIds.size}
-        totalProjectCount={availableProjectIds.size}
-        running={running}
-        lastUpdatedLabel={formatLastUpdated(lastUpdated)}
-        onRefresh={handleRefresh}
-        onClearCache={handleClearCache}
-        isClearingCache={clearingCache}
-        granularity={granularity}
-        onGranularityChange={handleGranularity}
-        availableProjects={knownProjects}
-        selectedProjectIds={selectedProjectIds}
-        onToggleProject={toggleProject}
-        onSelectAll={selectAllProjects}
-        onClear={clearProjects}
-      />
-
       {synthesis && selectedProjectIds.size > 0 &&
         synthesis.projectIds &&
         synthesis.projectIds.length === selectedProjectIds.size &&
@@ -624,117 +469,64 @@ export function IntelligenceFeed({
         </div>
       )}
 
-      <div className="space-y-6">
-        {selectedProjectIds.size === 0 && knownProjects.length > 0 ? (
-          <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
-            Select one or more projects to view Business Insights.
-          </div>
-        ) : (
-          <>
-            <Section
-              title="Risks"
-              icon={<IconAlertTriangle size={16} className="text-warning" />}
-              cards={risks}
-              defaultOpen={false}
-              emptyText="No risks detected from your projects yet."
-              loading={running}
-              feedbackById={feedbackById}
-              savingFeedback={savingFeedback}
-              onSaveToDashboard={handleSaveToDashboard}
-              onPin={onPin}
-              pinnedByFingerprint={pinnedByFingerprint}
-              onFeedbackSave={handleFeedbackSave}
-              onFeedbackRemove={handleFeedbackRemove}
-              onFeedbackRespond={handleFeedbackRespond}
-              governanceById={governanceById}
-              onCreateAction={onCreateAction}
-            />
-            <Section
-              title="Trends"
-              icon={<IconTrendingUp size={16} className="text-ink-secondary" />}
-              cards={trends}
-              defaultOpen={false}
-              emptyText="No trends detected from your projects yet."
-              loading={running}
-              feedbackById={feedbackById}
-              savingFeedback={savingFeedback}
-              onSaveToDashboard={handleSaveToDashboard}
-              onPin={onPin}
-              pinnedByFingerprint={pinnedByFingerprint}
-              onFeedbackSave={handleFeedbackSave}
-              onFeedbackRemove={handleFeedbackRemove}
-              onFeedbackRespond={handleFeedbackRespond}
-              governanceById={governanceById}
-              onCreateAction={onCreateAction}
-            />
-            <Section
-              title="Opportunities"
-              icon={<IconBulb size={16} className="text-success" />}
-              cards={opportunities}
-              defaultOpen={false}
-              emptyText="No opportunities detected from your projects yet."
-              loading={running}
-              feedbackById={feedbackById}
-              savingFeedback={savingFeedback}
-              onSaveToDashboard={handleSaveToDashboard}
-              onPin={onPin}
-              pinnedByFingerprint={pinnedByFingerprint}
-              onFeedbackSave={handleFeedbackSave}
-              onFeedbackRemove={handleFeedbackRemove}
-              onFeedbackRespond={handleFeedbackRespond}
-              governanceById={governanceById}
-              onCreateAction={onCreateAction}
-            />
-            <PercentChangeSummaryPanel
-              projectIds={[...selectedProjectIds].map((id) => Number(id))}
-              snapshotFingerprint={
-                status === "complete" ? lastUpdated?.toISOString() ?? null : null
-              }
-            />
-            <Section
-              title="Deeper analysis"
-              icon={<IconChartBar size={16} className="text-brand-500" />}
-              cards={analysis}
-              defaultOpen={false}
-              emptyText="No additional analysis available."
-              loading={running}
-              feedbackById={feedbackById}
-              savingFeedback={savingFeedback}
-              onSaveToDashboard={handleSaveToDashboard}
-              onPin={onPin}
-              pinnedByFingerprint={pinnedByFingerprint}
-              onFeedbackSave={handleFeedbackSave}
-              onFeedbackRemove={handleFeedbackRemove}
-              onFeedbackRespond={handleFeedbackRespond}
-              governanceById={governanceById}
-              onCreateAction={onCreateAction}
-            />
+      <IntelligenceWorkspace
+        scope="business"
+        projectIds={selectedProjectIdsArray.map((id) => Number(id))}
+        cards={allInsights}
+        running={running}
+        lastUpdated={lastUpdated}
+        snapshotFingerprint={status === "complete" ? lastUpdated?.toISOString() ?? null : null}
+        toolbar={{
+          projectCount: selectedProjectIds.size,
+          totalProjectCount: availableProjectIds.size,
+          running,
+          lastUpdatedLabel: formatLastUpdated(lastUpdated),
+          onRefresh: handleRefresh,
+          onClearCache: handleClearCache,
+          isClearingCache: clearingCache,
+          granularity,
+          onGranularityChange: handleGranularity,
+          availableProjects: knownProjects,
+          selectedProjectIds,
+          onToggleProject: toggleProject,
+          onSelectAll: selectAllProjects,
+          onClear: clearProjects,
+        }}
+        actions={{
+          onSaveToDashboard: handleSaveToDashboard,
+          onPin,
+          onCreateAction: onCreateAction,
+          onFeedbackSave: handleFeedbackSave,
+          onFeedbackRemove: handleFeedbackRemove,
+          onFeedbackRespond: handleFeedbackRespond,
+        }}
+        feedback={{ feedbackById, savingFeedback, governanceById }}
+        pinnedByFingerprint={pinnedByFingerprint}
+        emptyMessages={{
+          risks: "No risks detected from your projects yet.",
+          trends: "No trends detected from your projects yet.",
+          opportunities: "No opportunities detected from your projects yet.",
+          analysis: "No additional analysis available.",
+        }}
+        emptySelection={emptySelection}
+        empty={empty}
+      />
 
-            {pending.length > 0 && (
-              <div className="space-y-3">
-                {pending.map((p) => (
-                  <LoadingCard key={p.id} projectName={p.name} />
-                ))}
-              </div>
-            )}
+      {pending.length > 0 && (
+        <div className="space-y-3">
+          {pending.map((p) => (
+            <LoadingCard key={p.id} projectName={p.name} />
+          ))}
+        </div>
+      )}
 
-            {empty && (
-              <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
-                No projects to analyze yet. Create a project and connect data to
-                see AI intelligence here.
-              </div>
-            )}
-
-            {status === "complete" &&
-              allInsights.length === 0 &&
-              visibleProjects.length > 0 && (
-                <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
-                  No new insights are available right now.
-                </div>
-              )}
-          </>
-        )}
-      </div>
+      {status === "complete" &&
+        allInsights.length === 0 &&
+        visibleProjects.length > 0 && (
+        <div className="rounded-lg border border-dashed border-line-secondary p-8 text-center text-small text-ink-tertiary">
+          No new insights are available right now.
+        </div>
+      )}
 
       {saveCard && (
         <SaveInsightToDashboardModal
