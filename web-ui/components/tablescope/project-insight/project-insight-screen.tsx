@@ -81,6 +81,10 @@ import { useInsightFeedback } from "@/lib/hooks/use-insight-feedback";
 import { formatLastUpdated } from "@/lib/format-datetime";
 import { createHomePin, getHomePins } from "@/lib/api/home-pins";
 import {
+  createConversation,
+  listConversations,
+} from "@/lib/api/conversational-analytics";
+import {
   projectInsightApi,
   type ProjectInsight,
   type ProjectInsightCard,
@@ -470,6 +474,25 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       evidenceSummary: card.summary,
     });
 
+  // Hand off Project Insight questions to the AI Assistant under a single
+  // per-project "Project Insights" conversation.
+  const handleAsk = useCallback(
+    async (message: string) => {
+      const q = message.trim();
+      if (!q) return;
+      const pid = Number(projectId);
+      const convos = await listConversations(pid);
+      const match = convos.find((c) => c.title === "Project Insights");
+      const conversationId = match
+        ? match.id
+        : (await createConversation({ project_id: pid, title: "Project Insights" })).id;
+      router.push(
+        `/ai?projectId=${pid}&conversation=${conversationId}&q=${encodeURIComponent(q)}`,
+      );
+    },
+    [projectId, router],
+  );
+
   return (
     <ProjectShell
       projectId={projectId}
@@ -523,7 +546,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
                 conversational-analytics assistant; the pills generate query/
                 dashboard/insight suggestions for this project only. */}
             <div className="space-y-6 py-2">
-              <HomeAiSuggestions projectId={Number(projectId)} />
+              <HomeAiSuggestions projectId={Number(projectId)} onAsk={handleAsk} />
             </div>
 
             {/* 1. Executive Project Summary */}

@@ -169,9 +169,12 @@ async def create_conversation(
     if req.project_id is not None:
         await _check_project_access(session, context, req.project_id)
 
-    title = req.title or "New conversation"
-    if req.initial_message:
+    if req.title:
+        title = req.title
+    elif req.initial_message:
         title = req.initial_message[:80] + ("…" if len(req.initial_message) > 80 else "")
+    else:
+        title = "New conversation"
 
     conversation = AnalyticsConversation(
         tenant_id=context.tenant_id,

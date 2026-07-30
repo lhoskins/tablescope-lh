@@ -8,7 +8,6 @@ import {
   IconSparkles,
   IconPlus,
   IconTrash,
-  IconMessageCircle,
   IconRefresh,
   IconDots,
   IconPencil,
@@ -92,15 +91,20 @@ function AiAssistantPageInner() {
     if (!getUserMeta()) router.replace("/login");
   }, [router]);
 
-  // Hydrate project + prompt from a deep link (e.g. "Open in AI Assistant").
+  // Hydrate project + prompt + existing conversation from a deep link.
   useEffect(() => {
     if (paramsRead) return;
     const q = searchParams.get("q");
     const pid = searchParams.get("projectId");
+    const cid = searchParams.get("conversation");
     if (q) setInput(q);
     if (pid) {
       const n = Number(pid);
       if (!Number.isNaN(n)) setProjectId(n);
+    }
+    if (cid) {
+      const n = Number(cid);
+      if (!Number.isNaN(n)) setActiveId(n);
     }
     setParamsRead(true);
   }, [searchParams, paramsRead]);
@@ -112,21 +116,6 @@ function AiAssistantPageInner() {
       }),
     [queryClient],
   );
-
-  // Auto-start a conversation seeded from the deep-link parameters once.
-  useEffect(() => {
-    if (!paramsRead || autoStarted || !input.trim() || projectId == null || activeId != null)
-      return;
-    setAutoStarted(true);
-    const question = input.trim();
-    setInput("");
-    createConversation({ project_id: projectId, initial_message: question })
-      .then((convo) => {
-        setActiveId(convo.id);
-        invalidateConvos();
-      })
-      .catch(() => setInput(question));
-  }, [paramsRead, autoStarted, input, projectId, activeId, invalidateConvos]);
 
   const invalidateActive = (id: number) =>
     queryClient.invalidateQueries({
@@ -180,19 +169,32 @@ function AiAssistantPageInner() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [turns.length, busy]);
 
-  const send = (raw: string) => {
-    const question = raw.trim();
-    if (!question || busy) return;
-    const pid = active?.project_id ?? projectId;
-    if (pid == null) {
-      // Prompt for the project instead of silently guessing one.
-      setNeedsProject(true);
-      return;
-    }
-    setNeedsProject(false);
-    setInput("");
-    sendMutation.mutate({ question, pid });
-  };
+  const send = useCallback(
+    (raw: string) => {
+      const question = raw.trim();
+      if (!question || busy) return;
+      const pid = active?.project_id ?? projectId;
+      if (pid == null) {
+        // Prompt for the project instead of silently guessing one.
+        setNeedsProject(true);
+        return;
+      }
+      setNeedsProject(false);
+      setInput("");
+      sendMutation.mutate({ question, pid });
+    },
+    [active, projectId, busy, sendMutation],
+  );
+
+  // Auto-start a conversation seeded from the deep-link parameters once.
+  useEffect(() => {
+    if (!paramsRead || autoStarted || !input.trim()) return;
+    // Need either an existing conversation (submit) or a project to create one.
+    if (activeId == null && projectId == null) return;
+    setAutoStarted(true);
+    const question = input.trim();
+    send(question);
+  }, [paramsRead, autoStarted, input, projectId, activeId, send]);
 
   const retryLast = () => {
     if (busy || !sendMutation.variables) return;
@@ -222,7 +224,7 @@ function AiAssistantPageInner() {
     >
       <div className="flex h-[calc(100vh-9rem)] gap-0 overflow-hidden rounded-lg border border-line-tertiary">
         {/* Left sidebar — conversations */}
-        <aside className="flex w-60 shrink-0 flex-col border-r border-line-tertiary bg-bg-secondary">
+        <aside className="flex w-[260px] shrink-0 flex-col border-r border-line-tertiary bg-bg-secondary">
           <div className="border-b border-line-tertiary p-2.5">
             <Button
               variant="secondary"
@@ -447,7 +449,7 @@ function ConversationRow({
   return (
     <div
       className={cn(
-        "group relative flex items-center gap-2 rounded-md px-2 py-2 text-[13px]",
+        "group relative flex items-center rounded-md py-2 pl-2 pr-1 text-[13px]",
         active
           ? "bg-brand-50 text-brand-700"
           : "text-ink-secondary hover:bg-bg-primary",
@@ -457,7 +459,6 @@ function ConversationRow({
         setMenuOpen(true);
       }}
     >
-      <IconMessageCircle size={14} className="shrink-0" />
       {editing ? (
         <input
           autoFocus
@@ -474,7 +475,7 @@ function ConversationRow({
         <button
           type="button"
           onClick={onSelect}
-          className="min-w-0 flex-1 truncate text-left"
+          className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap scrollbar-none text-left"
           title={conversation.title}
         >
           {conversation.title}
