@@ -7,12 +7,16 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  IconChartLine,
   IconChevronDown,
   IconChevronRight,
+  IconClock,
+  IconGauge,
   IconMinus,
   IconPencil,
   IconPlus,
   IconRefresh,
+  IconTarget,
   IconTrash,
   IconTrendingDown,
   IconTrendingUp,
@@ -183,12 +187,73 @@ function matchStatusTone(status: string | null | undefined): BadgeProps["tone"] 
   }
 }
 
+function likelihoodTone(likelihood: string | null | undefined): BadgeProps["tone"] {
+  switch (likelihood) {
+    case "rare":
+    case "unlikely":
+      return "success";
+    case "possible":
+      return "brand";
+    case "likely":
+      return "warning";
+    case "almost_certain":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
+function impactTone(impact: string | null | undefined): BadgeProps["tone"] {
+  switch (impact) {
+    case "negligible":
+    case "insignificant":
+    case "minor":
+      return "success";
+    case "moderate":
+      return "brand";
+    case "major":
+      return "warning";
+    case "severe":
+    case "catastrophic":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
 function displayName(memberMap: Map<number, ProjectMember>, userId: number | null | undefined): string {
   if (userId == null) return "—";
   const member = memberMap.get(userId);
   if (member?.display_name) return member.display_name;
   if (member?.email) return member.email;
   return `User ${userId}`;
+}
+
+function initials(name: string | null | undefined): string {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function formatTarget(
+  value: number | null | undefined,
+  directionality: string | null | undefined,
+  format?: string | null,
+  unit?: string | null
+): string {
+  if (value == null) return "—";
+  const op = directionality === "lower_is_better" ? "≤ " : directionality === "higher_is_better" ? "≥ " : "";
+  return op + fmtNumber(value, format, unit);
+}
+
+function metricIcon(metricId: number) {
+  const icons = [
+    <IconChartLine key="chart" size={18} className="text-brand" />,
+    <IconClock key="clock" size={18} className="text-warning" />,
+    <IconGauge key="gauge" size={18} className="text-success" />,
+  ];
+  return icons[metricId % icons.length];
 }
 
 export function BusinessContextScreen({ projectId }: { projectId: string }) {
@@ -298,6 +363,14 @@ export function BusinessContextScreen({ projectId }: { projectId: string }) {
       }
     >
       <div className="space-y-6">
+        {!isLoading && (
+          <div>
+            <h1 className="text-2xl font-semibold text-ink-primary">Goal Setting</h1>
+            <p className="mt-1 text-sm text-ink-secondary">
+              Define project success, track the KPIs that prove it, and manage project-wide risks.
+            </p>
+          </div>
+        )}
         {isLoading ? (
           <Card>
             <CardBody>
@@ -438,6 +511,22 @@ function SuccessCriteriaSection({
   const [editingKpi, setEditingKpi] = useState<number | null>(null);
   const [confirmDeleteGoal, setConfirmDeleteGoal] = useState<number | null>(null);
   const [confirmDeleteKpi, setConfirmDeleteKpi] = useState<number | null>(null);
+  const [sortBy, setSortBy] = useState<"updated_at" | "position">("updated_at");
+  const [sortAsc, setSortAsc] = useState(false);
+
+  const sortedGoals = useMemo(() => {
+    const list = [...goals];
+    list.sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === "updated_at") {
+        cmp = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+      } else {
+        cmp = (a.position || 0) - (b.position || 0);
+      }
+      return sortAsc ? cmp : -cmp;
+    });
+    return list;
+  }, [goals, sortBy, sortAsc]);
 
   const getKpiTargetValue = (metric: ProjectMetric): number | null => {
     const target = metric.targets?.find((t) => t.active && t.status !== "archived");
@@ -515,14 +604,29 @@ function SuccessCriteriaSection({
   return (
     <Card>
       <CardBody className="p-0">
-        <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-primary">Success Criteria</h3>
-          {canEdit && !addingGoal && (
-            <Button variant="primary" size="sm" onClick={() => { setAddingGoal(true); setGoalDraft({ status: "not_started", priority: "medium" }); }}>
-              <IconPlus size={14} />
-              Add success criterion
-            </Button>
-          )}
+        <div className="flex items-start justify-between border-b border-line-tertiary px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-primary">Success Criteria</h3>
+            <p className="mt-0.5 text-xs text-ink-secondary">Define the outcomes that will demonstrate project success.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-ink-secondary">Sort by</span>
+            <select
+              className="input h-8 text-xs"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as "updated_at" | "position")}
+            >
+              <option value="updated_at">Updated</option>
+              <option value="position">Position</option>
+            </select>
+            <button
+              onClick={() => setSortAsc((v) => !v)}
+              className="rounded-md border border-line-secondary p-1 text-ink-secondary hover:bg-bg-secondary"
+              title={sortAsc ? "Ascending" : "Descending"}
+            >
+              {sortAsc ? <IconChevronDown size={16} className="rotate-180" /> : <IconChevronDown size={16} />}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-ink-tertiary">
@@ -546,17 +650,20 @@ function SuccessCriteriaSection({
           />
         )}
 
-        {goals.map((goal) => {
+        {sortedGoals.map((goal) => {
           const children = metrics.filter((m) => m.success_criterion_id === goal.id);
           const progress = goalProgress(goal, metrics);
           const isOpen = expanded.has(goal.id);
           return (
             <div key={goal.id} className="border-t border-line-tertiary">
-              <div className="grid grid-cols-12 items-center gap-2 px-4 py-3 text-sm">
+              <div className="group grid grid-cols-12 items-center gap-2 px-4 py-3 text-sm">
                 <div className="col-span-4 flex items-center gap-2">
                   <button onClick={() => toggle(goal.id)} className="text-ink-tertiary hover:text-ink-primary">
                     {isOpen ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
                   </button>
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success-bg text-success">
+                    <IconTarget size={16} />
+                  </span>
                   {editingGoal === goal.id ? null : (
                     <>
                       <span className="font-medium text-ink-primary">{goal.title}</span>
@@ -573,7 +680,18 @@ function SuccessCriteriaSection({
                     </>
                   )}
                 </div>
-                <div className="col-span-1 text-ink-secondary">{displayName(memberMap, goal.owner_id)}</div>
+                <div className="col-span-1 flex items-center gap-1.5 text-ink-secondary">
+                  {goal.owner_id ? (
+                    <>
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-bg-secondary text-[10px] font-semibold text-ink-secondary">
+                        {initials(memberMap.get(goal.owner_id ?? -1)?.display_name || memberMap.get(goal.owner_id ?? -1)?.email)}
+                      </span>
+                      <span className="truncate">{displayName(memberMap, goal.owner_id)}</span>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </div>
                 <div className="col-span-1">
                   <Badge tone={goalStatusTone(goal.status)} size="sm">{goal.status.replace("_", " ")}</Badge>
                 </div>
@@ -652,6 +770,16 @@ function SuccessCriteriaSection({
             </div>
           );
         })}
+
+        {canEdit && !addingGoal && (
+          <button
+            onClick={() => { setAddingGoal(true); setGoalDraft({ status: "not_started", priority: "medium" }); }}
+            className="m-4 flex w-[calc(100%-2rem)] items-center justify-center gap-2 rounded-md border border-dashed border-line-secondary px-4 py-3 text-sm font-medium text-ink-secondary hover:bg-bg-secondary"
+          >
+            <IconPlus size={16} />
+            Add success criterion
+          </button>
+        )}
 
         {goals.length === 0 && !addingGoal && <div className="px-4 py-6 text-sm text-ink-secondary">No success criteria defined yet.</div>}
       </CardBody>
@@ -776,9 +904,14 @@ function KpiRow({
 
   return (
     <div className="grid grid-cols-12 items-center gap-2 border-t border-line-tertiary px-3 py-2 text-sm">
-      <div className="col-span-3 font-medium text-ink-primary">{metric.name}</div>
+      <div className="col-span-3 flex items-center gap-2 font-medium text-ink-primary">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-bg-secondary text-ink-secondary">
+          {metricIcon(metric.id)}
+        </span>
+        {metric.name}
+      </div>
       <div className="col-span-1 text-ink-secondary">{fmtNumber(currentValue, metric.format, metric.unit)}</div>
-      <div className="col-span-1 text-ink-secondary">{fmtNumber(targetValue, metric.format, metric.unit)}</div>
+      <div className="col-span-1 text-ink-secondary">{formatTarget(targetValue, metric.directionality, metric.format, metric.unit)}</div>
       <div className="col-span-1">
         {trend === "up" ? <IconTrendingUp size={16} className="text-success" /> : trend === "down" ? <IconTrendingDown size={16} className="text-danger" /> : <IconMinus size={16} className="text-ink-tertiary" />}
       </div>
@@ -852,8 +985,11 @@ function RisksSection({ risks, memberMap, canEdit, onCreateRisk, onUpdateRisk, o
   return (
     <Card>
       <CardBody className="p-0">
-        <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-primary">Project Risks</h3>
+        <div className="flex items-start justify-between border-b border-line-tertiary px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-primary">Project Risks</h3>
+            <p className="mt-0.5 text-xs text-ink-secondary">Track conditions that could affect the overall project, independent of a specific success criterion.</p>
+          </div>
           {canEdit && !adding && !editing && (
             <Button variant="primary" size="sm" onClick={startAdd}>
               <IconPlus size={14} /> Add project risk
@@ -902,11 +1038,13 @@ function RisksSection({ risks, memberMap, canEdit, onCreateRisk, onUpdateRisk, o
         {risks.length === 0 && !adding && <div className="px-4 py-6 text-sm text-ink-secondary">No project risks defined yet.</div>}
 
         {canEdit && !adding && !editing && risks.length > 0 && (
-          <div className="border-t border-line-tertiary px-4 py-3">
-            <Button variant="brandSoft" size="sm" onClick={startAdd}>
-              <IconPlus size={14} /> Add another risk
-            </Button>
-          </div>
+          <button
+            onClick={startAdd}
+            className="m-4 flex w-[calc(100%-2rem)] items-center justify-center gap-2 rounded-md border border-dashed border-line-secondary px-4 py-3 text-sm font-medium text-ink-secondary hover:bg-bg-secondary"
+          >
+            <IconPlus size={16} />
+            Add another risk
+          </button>
         )}
       </CardBody>
 
@@ -1006,12 +1144,26 @@ function RiskRow({
     );
   }
 
+  const ownerName = displayName(memberMap, risk.owner_id);
+  const ownerInitials = initials(memberMap.get(risk.owner_id ?? -1)?.display_name || memberMap.get(risk.owner_id ?? -1)?.email);
+
   return (
     <div className="grid grid-cols-12 items-center gap-2 border-t border-line-tertiary px-4 py-3 text-sm">
       <div className="col-span-2 font-medium text-ink-primary">{risk.title}</div>
-      <div className="col-span-1 text-ink-secondary">{displayName(memberMap, risk.owner_id)}</div>
-      <div className="col-span-1"><Badge tone="neutral" size="sm">{risk.likelihood || "—"}</Badge></div>
-      <div className="col-span-1"><Badge tone="neutral" size="sm">{risk.impact || "—"}</Badge></div>
+      <div className="col-span-1 flex items-center gap-1.5 text-ink-secondary">
+        {risk.owner_id ? (
+          <>
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-bg-secondary text-[10px] font-semibold text-ink-secondary">
+              {ownerInitials}
+            </span>
+            <span className="truncate">{ownerName}</span>
+          </>
+        ) : (
+          "—"
+        )}
+      </div>
+      <div className="col-span-1"><Badge tone={likelihoodTone(risk.likelihood)} size="sm">{risk.likelihood || "—"}</Badge></div>
+      <div className="col-span-1"><Badge tone={impactTone(risk.impact)} size="sm">{risk.impact || "—"}</Badge></div>
       <div className="col-span-1"><Badge tone={riskSeverityTone(risk.severity)} size="sm">{risk.severity || "—"}</Badge></div>
       <div className="col-span-1"><Badge tone={riskStatusTone(risk.status)} size="sm">{risk.status}</Badge></div>
       <div className="col-span-3 truncate text-ink-secondary" title={risk.mitigation || undefined}>{risk.mitigation || "—"}</div>
