@@ -32,6 +32,7 @@ from app.database import SessionLocal
 from app.models.shared_vdb import SharedVDB
 from app.models.user_vdb import UserVDB
 from app.services.vdb_management import VDBManagementService
+from app.tasks.kpi_source_matching import match_kpi_data_source
 from app.tasks.llm_framework import (
     convert_fp16_to_gguf,
     deploy_llm_artifact,
@@ -1311,6 +1312,7 @@ class WorkerSettings:
         reprocess_project,
         refresh_business_insight_result,
         rebuild_project_insight,
+        match_kpi_data_source,
         stage_llm_artifact,
         deploy_llm_artifact,
         reindex_embedding_model,

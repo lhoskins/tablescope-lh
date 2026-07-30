@@ -218,6 +218,18 @@ class ProjectMetric(TimestampMixin, Base):
     )
     source_mapping: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
     expression: Mapped[str | None] = mapped_column(Text, nullable=True)
+    success_criterion_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_goals.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_match_status: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # searching, candidate_found, validated, matched, no_match, error
+    latest_value: Mapped[float | None] = mapped_column(Numeric(19, 6), nullable=True)
+    latest_value_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     owner_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
@@ -228,6 +240,9 @@ class ProjectMetric(TimestampMixin, Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    success_criterion: Mapped[ProjectGoal | None] = relationship(
+        "ProjectGoal", foreign_keys=[success_criterion_id]
+    )
     targets: Mapped[list[ProjectMetricTarget]] = relationship(
         back_populates="metric",
         cascade="all, delete-orphan",
@@ -263,6 +278,10 @@ class ProjectMetric(TimestampMixin, Base):
             "source_query_id": self.source_query_id,
             "source_mapping": self.source_mapping,
             "expression": self.expression,
+            "success_criterion_id": self.success_criterion_id,
+            "source_match_status": self.source_match_status,
+            "latest_value": float(self.latest_value) if self.latest_value is not None else None,
+            "latest_value_at": self.latest_value_at.isoformat() if self.latest_value_at else None,
             "owner_id": self.owner_id,
             "cadence": self.cadence,
             "active": self.active,
@@ -372,10 +391,13 @@ class ProjectRisk(TimestampMixin, Base):
     )  # rare, unlikely, possible, likely, almost_certain
     impact: Mapped[str | None] = mapped_column(
         String(20), nullable=True
-    )  # negligible, minor, moderate, major, severe
+    )  # negligible, insignificant, minor, moderate, major, severe, catastrophic
     severity: Mapped[str | None] = mapped_column(
         String(20), nullable=True
-    )  # low, medium, high, critical
+    )  # low, medium, high, critical (server-computed)
+    rating_matrix_version: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     owner_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
@@ -425,6 +447,7 @@ class ProjectRisk(TimestampMixin, Base):
             "likelihood": self.likelihood,
             "impact": self.impact,
             "severity": self.severity,
+            "rating_matrix_version": self.rating_matrix_version,
             "owner_id": self.owner_id,
             "mitigation": self.mitigation,
             "contingency": self.contingency,

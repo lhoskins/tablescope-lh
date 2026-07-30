@@ -143,6 +143,9 @@ class Settings(BaseSettings):
     llm_ollama_rollback_slots: int = 1
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
+    # Business Context (Goal Setting) workspace feature flags.
+    business_context_v2_enabled: bool = True
+    business_context_kpi_matching_enabled: bool = True
     # Max projects analysed concurrently by the Home intelligence SSE stream.
     # Bounds AI/Ollama load so a large project count doesn't flood the server
     # and silently time out into empty "0 insights" results.

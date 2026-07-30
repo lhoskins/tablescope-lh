@@ -7,89 +7,191 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
-  IconPlus,
-  IconTrash,
+  IconChevronDown,
+  IconChevronRight,
+  IconMinus,
   IconPencil,
-  IconCheck,
-  IconX,
-  IconSettings,
-  IconTarget,
-  IconFlag,
+  IconPlus,
+  IconRefresh,
+  IconTrash,
+  IconTrendingDown,
   IconTrendingUp,
-  IconRobot,
-  IconHistory,
-  IconBulb,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatTile } from "@/components/ui/stat-tile";
+import { Badge, type BadgeProps } from "@/components/ui/badge";
+import { Card, CardBody } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
-import { cn } from "@/lib/cn";
 import {
   getProjectContext,
-  updateProjectSettings,
   createGoal,
   updateGoal,
   deleteGoal,
-  reorderGoals,
   createMetric,
   updateMetric,
   deleteMetric,
-  reorderMetrics,
   createRisk,
   updateRisk,
   deleteRisk,
-  reorderRisks,
-  createTarget,
-  updateTarget,
-  deleteTarget,
-  listProjectContextAudit,
+  startKpiSourceMatch,
   type ProjectContext,
-  type ProjectBusinessContext,
   type ProjectGoal,
   type ProjectMetric,
   type ProjectRisk,
-  type ProjectMetricTarget,
-  type ProjectContextAuditEvent,
+  type MetricCreateRequest,
 } from "@/lib/api/project-context";
+import { useProjectMembers, type ProjectMember } from "@/lib/ui/use-project-data";
 
-const TABS = [
-  { key: "settings", label: "General Settings", icon: IconSettings },
-  { key: "goals", label: "Goals", icon: IconTrendingUp },
-  { key: "metrics", label: "Metrics & Targets", icon: IconTarget },
-  { key: "risks", label: "Risks", icon: IconFlag },
-  { key: "ai", label: "AI Context", icon: IconRobot },
-  { key: "audit", label: "Audit History", icon: IconHistory },
-];
-
-const PRIORITIES = ["low", "medium", "high", "critical"];
 const GOAL_STATUSES = ["not_started", "in_progress", "at_risk", "achieved", "cancelled"];
 const RISK_LIKELIHOOD = ["rare", "unlikely", "possible", "likely", "almost_certain"];
-const RISK_IMPACT = ["insignificant", "minor", "moderate", "major", "catastrophic"];
-const RISK_SEVERITY = ["low", "medium", "high", "critical"];
-const RISK_STATUSES = ["open", "mitigating", "monitoring", "closed"];
-const TARGET_TYPES = ["single_value", "range", "threshold", "milestone"];
-const COMPARISON_OPS = [">=", ">", "<=", "<", "==", "!="];
-const METRIC_DIRECTIONALITY = ["higher_is_better", "lower_is_better", "neutral"];
-const METRIC_AGGREGATIONS = ["sum", "average", "count", "min", "max", "last", "custom"];
-
+const RISK_IMPACT = ["negligible", "insignificant", "minor", "moderate", "major", "severe", "catastrophic"];
+const RISK_STATUSES = ["open", "mitigating", "monitoring", "mitigated", "closed", "accepted"];
+const METRIC_DIRECTIONALITY = [
+  { value: "higher_is_better", label: "Higher is better" },
+  { value: "lower_is_better", label: "Lower is better" },
+  { value: "neutral", label: "Neutral" },
+];
 function fmtDate(ts: string | null | undefined): string {
   if (!ts) return "—";
   const d = new Date(ts);
   return Number.isNaN(d.getTime())
     ? ts
-    : d.toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
+    : d.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function fmtDateShort(ts: string | null | undefined): string {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime())
+    ? ts
+    : d.toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", year: "numeric" });
+}
+
+function fmtNumber(value: number | null | undefined, format?: string | null, unit?: string | null): string {
+  if (value == null) return "—";
+  let text: string;
+  if (format === "percent") {
+    text = `${(value * 100).toFixed(1)}%`;
+  } else if (format === "currency") {
+    text = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
+  } else {
+    text = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+  }
+  return unit ? `${text} ${unit}` : text;
+}
+
+function metricProgress(metric: ProjectMetric): number {
+  const target = metric.targets?.find((t) => t.active && t.status !== "archived");
+  const current = metric.latest_value != null ? Number(metric.latest_value) : null;
+  const targetValue = target?.target_value != null ? Number(target.target_value) : null;
+  if (current == null || targetValue == null || targetValue === 0) return 0;
+  const ratio = metric.directionality === "lower_is_better" ? targetValue / current : current / targetValue;
+  return Math.min(Math.max(Math.round(ratio * 100), 0), 100);
+}
+
+function metricOnTrack(metric: ProjectMetric): boolean {
+  const target = metric.targets?.find((t) => t.active && t.status !== "archived");
+  const current = metric.latest_value != null ? Number(metric.latest_value) : null;
+  const targetValue = target?.target_value != null ? Number(target.target_value) : null;
+  if (current == null || targetValue == null) return false;
+  if (metric.directionality === "lower_is_better") return current <= targetValue;
+  if (metric.directionality === "higher_is_better") return current >= targetValue;
+  return current === targetValue;
+}
+
+function metricTrend(metric: ProjectMetric): "up" | "down" | "flat" {
+  const target = metric.targets?.find((t) => t.active && t.status !== "archived");
+  const current = metric.latest_value != null ? Number(metric.latest_value) : null;
+  const targetValue = target?.target_value != null ? Number(target.target_value) : null;
+  if (current == null || targetValue == null) return "flat";
+  if (metric.directionality === "lower_is_better") {
+    return current <= targetValue ? "down" : "up";
+  }
+  return current >= targetValue ? "up" : "down";
+}
+
+function goalProgress(goal: ProjectGoal, metrics: ProjectMetric[]): number {
+  const children = metrics.filter((m) => m.success_criterion_id === goal.id);
+  if (children.length === 0) return 0;
+  const total = children.reduce((sum, m) => sum + metricProgress(m), 0);
+  return Math.round(total / children.length);
+}
+
+function goalOnTrack(goal: ProjectGoal, metrics: ProjectMetric[]): boolean {
+  const children = metrics.filter((m) => m.success_criterion_id === goal.id);
+  if (children.length === 0) return false;
+  return children.every((m) => metricOnTrack(m));
+}
+
+function goalStatusTone(status: string): BadgeProps["tone"] {
+  switch (status) {
+    case "achieved":
+      return "success";
+    case "in_progress":
+      return "brand";
+    case "at_risk":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
+function riskSeverityTone(severity: string | null | undefined): BadgeProps["tone"] {
+  switch (severity) {
+    case "critical":
+      return "danger";
+    case "high":
+      return "warning";
+    case "medium":
+      return "brand";
+    default:
+      return "success";
+  }
+}
+
+function riskStatusTone(status: string): BadgeProps["tone"] {
+  switch (status) {
+    case "open":
+      return "danger";
+    case "mitigating":
+      return "warning";
+    case "monitoring":
+      return "brand";
+    case "closed":
+    case "mitigated":
+      return "success";
+    default:
+      return "neutral";
+  }
+}
+
+function matchStatusTone(status: string | null | undefined): BadgeProps["tone"] {
+  switch (status) {
+    case "matched":
+      return "success";
+    case "candidate_found":
+    case "validated":
+      return "warning";
+    case "searching":
+      return "brand";
+    case "error":
+    case "no_match":
+      return "danger";
+    default:
+      return "outline";
+  }
+}
+
+function displayName(memberMap: Map<number, ProjectMember>, userId: number | null | undefined): string {
+  if (userId == null) return "—";
+  const member = memberMap.get(userId);
+  if (member?.display_name) return member.display_name;
+  if (member?.email) return member.email;
+  return `User ${userId}`;
 }
 
 export function BusinessContextScreen({ projectId }: { projectId: string }) {
-  const [activeTab, setActiveTab] = useState("settings");
   const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
 
@@ -99,250 +201,141 @@ export function BusinessContextScreen({ projectId }: { projectId: string }) {
     queryFn: () => getProjectContext(projectId),
   });
 
+  const membersQuery = useProjectMembers(projectId);
+  const memberMap = useMemo(() => {
+    const map = new Map<number, ProjectMember>();
+    for (const m of membersQuery.data ?? []) {
+      map.set(m.user_id, m);
+    }
+    return map;
+  }, [membersQuery.data]);
+
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: contextQueryKey });
     void refetch();
   };
 
-  const auditQueryKey = ["project-context-audit", projectId];
-  const { data: auditData } = useQuery<{
-    items: ProjectContextAuditEvent[];
-    total: number;
-  }>({
-    queryKey: auditQueryKey,
-    queryFn: () => listProjectContextAudit(projectId, { limit: 100 }),
-    enabled: activeTab === "audit",
-  });
-
   const onError = (e: unknown) => {
-    push(
-      e instanceof Error ? e.message : "An unexpected error occurred",
-      "error",
-    );
+    push(e instanceof Error ? e.message : "An unexpected error occurred", "error");
   };
-
-  const settingsMutation = useMutation({
-    mutationFn: (body: Parameters<typeof updateProjectSettings>[1]) =>
-      updateProjectSettings(projectId, body),
-    onSuccess: () => {
-      push("Settings saved", "success");
-      refresh();
-    },
-    onError,
-  });
 
   const goalCreate = useMutation({
     mutationFn: createGoal.bind(null, projectId),
-    onSuccess: () => {
-      push("Goal created", "success");
-      refresh();
-    },
+    onSuccess: () => { push("Success criterion created", "success"); refresh(); },
     onError,
   });
   const goalUpdate = useMutation({
     mutationFn: (args: { goalId: number; body: Parameters<typeof updateGoal>[2] }) =>
       updateGoal(projectId, args.goalId, args.body),
-    onSuccess: () => {
-      push("Goal updated", "success");
-      refresh();
-    },
+    onSuccess: () => { push("Success criterion updated", "success"); refresh(); },
     onError,
   });
   const goalDelete = useMutation({
     mutationFn: deleteGoal.bind(null, projectId),
-    onSuccess: () => {
-      push("Goal deleted", "success");
-      refresh();
-    },
+    onSuccess: () => { push("Success criterion deleted", "success"); refresh(); },
     onError,
   });
 
   const metricCreate = useMutation({
     mutationFn: createMetric.bind(null, projectId),
-    onSuccess: () => {
-      push("Metric created", "success");
-      refresh();
-    },
+    onSuccess: () => { push("KPI created", "success"); refresh(); },
     onError,
   });
   const metricUpdate = useMutation({
     mutationFn: (args: { metricId: number; body: Parameters<typeof updateMetric>[2] }) =>
       updateMetric(projectId, args.metricId, args.body),
-    onSuccess: () => {
-      push("Metric updated", "success");
-      refresh();
-    },
+    onSuccess: () => { push("KPI updated", "success"); refresh(); },
     onError,
   });
   const metricDelete = useMutation({
     mutationFn: deleteMetric.bind(null, projectId),
-    onSuccess: () => {
-      push("Metric deleted", "success");
-      refresh();
-    },
+    onSuccess: () => { push("KPI deleted", "success"); refresh(); },
     onError,
   });
 
   const riskCreate = useMutation({
     mutationFn: createRisk.bind(null, projectId),
-    onSuccess: () => {
-      push("Risk created", "success");
-      refresh();
-    },
+    onSuccess: () => { push("Risk created", "success"); refresh(); },
     onError,
   });
   const riskUpdate = useMutation({
     mutationFn: (args: { riskId: number; body: Parameters<typeof updateRisk>[2] }) =>
       updateRisk(projectId, args.riskId, args.body),
-    onSuccess: () => {
-      push("Risk updated", "success");
-      refresh();
-    },
+    onSuccess: () => { push("Risk updated", "success"); refresh(); },
     onError,
   });
   const riskDelete = useMutation({
     mutationFn: deleteRisk.bind(null, projectId),
-    onSuccess: () => {
-      push("Risk deleted", "success");
-      refresh();
-    },
+    onSuccess: () => { push("Risk deleted", "success"); refresh(); },
     onError,
   });
 
-  const targetCreate = useMutation({
-    mutationFn: (args: { metricId: number; body: Parameters<typeof createTarget>[2] }) =>
-      createTarget(projectId, args.metricId, args.body),
-    onSuccess: () => {
-      push("Target created", "success");
-      refresh();
-    },
-    onError,
-  });
-  const targetUpdate = useMutation({
-    mutationFn: (args: {
-      metricId: number;
-      targetId: number;
-      body: Parameters<typeof updateTarget>[3];
-    }) => updateTarget(projectId, args.metricId, args.targetId, args.body),
-    onSuccess: () => {
-      push("Target updated", "success");
-      refresh();
-    },
-    onError,
-  });
-  const targetDelete = useMutation({
-    mutationFn: (args: { metricId: number; targetId: number }) =>
-      deleteTarget(projectId, args.metricId, args.targetId),
-    onSuccess: () => {
-      push("Target deleted", "success");
-      refresh();
-    },
+  const kpiMatch = useMutation({
+    mutationFn: (metricId: number) => startKpiSourceMatch(projectId, metricId),
+    onSuccess: (res) => push(res.message, "success"),
     onError,
   });
 
   const canEdit = data?.permissions.can_edit ?? false;
-  const version = data?.version ?? 0;
+
+  const goals = data?.goals ?? [];
+  const metrics = data?.metrics ?? [];
+  const risks = data?.risks ?? [];
+
+  const onTrackCount = metrics.filter((m) => metricOnTrack(m)).length;
+  const onTrackPercent = metrics.length ? Math.round((onTrackCount / metrics.length) * 100) : 0;
 
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="project-business-context"
-      breadcrumbLabel="Business Context"
+      breadcrumbLabel="Goal Setting"
       actions={
-        <Button variant="secondary" onClick={() => void refetch()}>
-          <IconBulb size={14} />
+        <Button variant="secondary" size="sm" onClick={() => void refetch()}>
+          <IconRefresh size={14} />
           Refresh
         </Button>
       }
     >
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile label="Goals" value={data?.goals?.length ?? 0} />
-          <StatTile label="Metrics" value={data?.metrics?.length ?? 0} />
-          <StatTile label="Risks" value={data?.risks?.length ?? 0} />
-          <StatTile
-            label="AI Context"
-            value={data?.settings?.ai_context_enabled ? "Enabled" : "Disabled"}
-            hint={data?.settings?.ai_context_enabled ? "Injected into insights" : "Not used"}
-          />
-        </div>
-
-        <div className="flex flex-wrap gap-2 border-b border-line-tertiary">
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setActiveTab(tab.key)}
-                className={cn(
-                  "flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] font-medium transition-colors",
-                  activeTab === tab.key
-                    ? "border-brand text-brand-700"
-                    : "border-transparent text-ink-secondary hover:text-ink-primary",
-                )}
-              >
-                <Icon size={16} />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {isLoading && (
+      <div className="space-y-6">
+        {isLoading ? (
           <Card>
             <CardBody>
-              <div className="text-sm text-ink-secondary">Loading business context…</div>
+              <div className="text-sm text-ink-secondary">Loading goal setting…</div>
             </CardBody>
           </Card>
-        )}
+        ) : (
+          <>
+            <SummaryCards
+              goalCount={goals.length}
+              kpiCount={metrics.length}
+              riskCount={risks.length}
+              onTrackPercent={onTrackPercent}
+            />
 
-        {!isLoading && activeTab === "settings" && (
-          <SettingsPanel
-            settings={data?.settings}
-            version={version}
-            canEdit={canEdit}
-            onSave={settingsMutation.mutate}
-            isSaving={settingsMutation.isPending}
-          />
-        )}
-        {!isLoading && activeTab === "goals" && (
-          <GoalsPanel
-            goals={data?.goals ?? []}
-            canEdit={canEdit}
-            onCreate={(body) => goalCreate.mutate(body)}
-            onUpdate={(id, body) => goalUpdate.mutate({ goalId: id, body })}
-            onDelete={(id) => goalDelete.mutate(id)}
-          />
-        )}
-        {!isLoading && activeTab === "metrics" && (
-          <MetricsPanel
-            metrics={data?.metrics ?? []}
-            canEdit={canEdit}
-            onCreate={(body) => metricCreate.mutate(body)}
-            onUpdate={(id, body) => metricUpdate.mutate({ metricId: id, body })}
-            onDelete={(id) => metricDelete.mutate(id)}
-            onCreateTarget={(metricId, body) => targetCreate.mutate({ metricId, body })}
-            onUpdateTarget={(metricId, targetId, body) =>
-              targetUpdate.mutate({ metricId, targetId, body })
-            }
-            onDeleteTarget={(metricId, targetId) => targetDelete.mutate({ metricId, targetId })}
-          />
-        )}
-        {!isLoading && activeTab === "risks" && (
-          <RisksPanel
-            risks={data?.risks ?? []}
-            canEdit={canEdit}
-            onCreate={(body) => riskCreate.mutate(body)}
-            onUpdate={(id, body) => riskUpdate.mutate({ riskId: id, body })}
-            onDelete={(id) => riskDelete.mutate(id)}
-          />
-        )}
-        {!isLoading && activeTab === "ai" && (
-          <AiContextPanel settings={data?.settings} canEdit={canEdit} onSave={settingsMutation.mutate} />
-        )}
-        {!isLoading && activeTab === "audit" && (
-          <AuditPanel events={auditData?.items ?? []} total={auditData?.total ?? 0} />
+            <SuccessCriteriaSection
+              goals={goals}
+              metrics={metrics}
+              memberMap={memberMap}
+              canEdit={canEdit}
+              onCreateGoal={(body) => goalCreate.mutate(body)}
+              onUpdateGoal={(id, body) => goalUpdate.mutate({ goalId: id, body })}
+              onDeleteGoal={(id) => goalDelete.mutate(id)}
+              onCreateMetric={(body) => metricCreate.mutate(body)}
+              onUpdateMetric={(id, body) => metricUpdate.mutate({ metricId: id, body })}
+              onDeleteMetric={(id) => metricDelete.mutate(id)}
+              onMatchMetric={(metricId) => kpiMatch.mutate(metricId)}
+            />
+
+            <RisksSection
+              risks={risks}
+              memberMap={memberMap}
+              canEdit={canEdit}
+              onCreateRisk={(body) => riskCreate.mutate(body)}
+              onUpdateRisk={(id, body) => riskUpdate.mutate({ riskId: id, body })}
+              onDeleteRisk={(id) => riskDelete.mutate(id)}
+            />
+          </>
         )}
       </div>
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
@@ -350,1304 +343,687 @@ export function BusinessContextScreen({ projectId }: { projectId: string }) {
   );
 }
 
-function SettingsPanel({
-  settings,
-  version,
-  canEdit,
-  onSave,
-  isSaving,
+function SummaryCards({
+  goalCount,
+  kpiCount,
+  riskCount,
+  onTrackPercent,
 }: {
-  settings: ProjectBusinessContext | null | undefined;
-  version: number;
-  canEdit: boolean;
-  onSave: (body: Parameters<typeof updateProjectSettings>[1]) => void;
-  isSaving: boolean;
+  goalCount: number;
+  kpiCount: number;
+  riskCount: number;
+  onTrackPercent: number;
 }) {
-  const [form, setForm] = useState<Partial<ProjectBusinessContext>>(() =>
-    settings ? { ...settings } : {},
-  );
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave({ ...form, expected_version: version });
-  };
-
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>General Settings</CardTitle>
-      </CardHeader>
-      <CardBody>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Business Owner ID">
-              <input
-                type="number"
-                className="input"
-                value={form.business_owner_id ?? ""}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    business_owner_id: e.target.value ? Number(e.target.value) : null,
-                  }))
-                }
-                disabled={!canEdit}
-              />
-            </Field>
-            <Field label="Business Function">
-              <input
-                type="text"
-                className="input"
-                value={form.business_function ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, business_function: e.target.value }))}
-                disabled={!canEdit}
-              />
-            </Field>
-            <Field label="Industry">
-              <input
-                type="text"
-                className="input"
-                value={form.industry ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, industry: e.target.value }))}
-                disabled={!canEdit}
-              />
-            </Field>
-            <Field label="Reporting Cadence">
-              <input
-                type="text"
-                className="input"
-                value={form.reporting_cadence ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, reporting_cadence: e.target.value }))}
-                disabled={!canEdit}
-              />
-            </Field>
-            <Field label="Default Timezone">
-              <input
-                type="text"
-                className="input"
-                value={form.timezone ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
-                disabled={!canEdit}
-              />
-            </Field>
-            <Field label="Default Currency">
-              <input
-                type="text"
-                className="input"
-                value={form.currency ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
-                disabled={!canEdit}
-              />
-            </Field>
-            <Field label="Fiscal Year Start Month (1-12)">
-              <input
-                type="number"
-                min={1}
-                max={12}
-                className="input"
-                value={form.fiscal_year_start_month ?? ""}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    fiscal_year_start_month: e.target.value ? Number(e.target.value) : null,
-                  }))
-                }
-                disabled={!canEdit}
-              />
-            </Field>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <SummaryCard label="Success criteria" value={goalCount} />
+      <SummaryCard label="KPIs" value={kpiCount} />
+      <SummaryCard label="Project risks" value={riskCount} />
+      <Card>
+        <CardBody className="p-4">
+          <div className="text-sm text-ink-secondary">On track</div>
+          <div className="mt-1 flex items-end gap-2">
+            <span className="text-3xl font-semibold text-ink-primary">{onTrackPercent}%</span>
           </div>
-          <Field label="Purpose / Business Context">
-            <textarea
-              className="input min-h-[80px]"
-              value={form.purpose ?? ""}
-              onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))}
-              disabled={!canEdit}
+          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-bg-secondary">
+            <div
+              className="h-full rounded-full bg-success transition-all"
+              style={{ width: `${onTrackPercent}%` }}
             />
-          </Field>
-          {canEdit && (
-            <div className="flex justify-end">
-              <Button type="submit" variant="primary" disabled={isSaving}>
-                {isSaving ? "Saving…" : "Save Settings"}
-              </Button>
-            </div>
-          )}
-        </form>
-      </CardBody>
-    </Card>
-  );
-}
-
-function AiContextPanel({
-  settings,
-  canEdit,
-  onSave,
-}: {
-  settings: ProjectBusinessContext | null | undefined;
-  canEdit: boolean;
-  onSave: (body: Parameters<typeof updateProjectSettings>[1]) => void;
-}) {
-  const [enabled, setEnabled] = useState(settings?.ai_context_enabled ?? false);
-  const [instructions, setInstructions] = useState(settings?.ai_instructions ?? "");
-  const [notes, setNotes] = useState(settings?.interpretation_notes ?? "");
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave({
-      ai_context_enabled: enabled,
-      ai_instructions: instructions || null,
-      interpretation_notes: notes || null,
-      expected_version: settings?.version ?? 0,
-    });
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>AI Context Injection</CardTitle>
-      </CardHeader>
-      <CardBody>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              disabled={!canEdit}
-            />
-            Enable AI context injection for Business Insight, Project Insight, and Conversational Analytics
-          </label>
-          <Field label="Bounded AI Instructions">
-            <textarea
-              className="input min-h-[100px]"
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              disabled={!canEdit}
-              placeholder="Project-specific guidance for the AI, e.g. always compare totals to prior month."
-            />
-          </Field>
-          <Field label="Interpretation Notes">
-            <textarea
-              className="input min-h-[80px]"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={!canEdit}
-              placeholder="Notes on how metrics, targets, and risks should be interpreted."
-            />
-          </Field>
-          {canEdit && (
-            <div className="flex justify-end">
-              <Button type="submit" variant="primary">
-                Save AI Context
-              </Button>
-            </div>
-          )}
-        </form>
-      </CardBody>
-    </Card>
-  );
-}
-
-interface GoalDraft extends Partial<ProjectGoal> {
-  linked_metric_ids?: number[];
-  linked_risk_ids?: number[];
-}
-
-function GoalsPanel({
-  goals,
-  canEdit,
-  onCreate,
-  onUpdate,
-  onDelete,
-}: {
-  goals: ProjectGoal[];
-  canEdit: boolean;
-  onCreate: (body: Parameters<typeof createGoal>[1]) => void;
-  onUpdate: (id: number, body: Parameters<typeof updateGoal>[2]) => void;
-  onDelete: (id: number) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<number | null>(null);
-  const [draft, setDraft] = useState<GoalDraft>({});
-  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
-
-  const startEdit = (goal: ProjectGoal) => {
-    setEditing(goal.id);
-    setDraft({ ...goal });
-  };
-
-  const startAdd = () => {
-    setAdding(true);
-    setDraft({ priority: "medium", status: "not_started", linked_metric_ids: [], linked_risk_ids: [] });
-  };
-
-  const submit = () => {
-    const body = {
-      title: draft.title || "Untitled goal",
-      description: draft.description || null,
-      category: draft.category || null,
-      priority: draft.priority || "medium",
-      owner_id: draft.owner_id ?? null,
-      status: draft.status || "not_started",
-      start_date: draft.start_date || null,
-      target_date: draft.target_date || null,
-      linked_metric_ids: draft.linked_metric_ids || [],
-      linked_risk_ids: draft.linked_risk_ids || [],
-    };
-    if (editing) {
-      onUpdate(editing, { ...body, expected_version: draft.version ?? 0 });
-    } else {
-      onCreate(body);
-    }
-    setAdding(false);
-    setEditing(null);
-    setDraft({});
-  };
-
-  const cancel = () => {
-    setAdding(false);
-    setEditing(null);
-    setDraft({});
-  };
-
-  return (
-    <div className="space-y-3">
-      {canEdit && !adding && !editing && (
-        <div className="flex justify-end">
-          <Button variant="primary" size="sm" onClick={startAdd}>
-            <IconPlus size={14} />
-            Add goal
-          </Button>
-        </div>
-      )}
-      {(adding || editing !== null) && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{editing ? "Edit goal" : "New goal"}</CardTitle>
-          </CardHeader>
-          <CardBody>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Title">
-                <input
-                  className="input"
-                  value={draft.title ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-                />
-              </Field>
-              <Field label="Category">
-                <input
-                  className="input"
-                  value={draft.category ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}
-                />
-              </Field>
-              <Field label="Priority">
-                <select
-                  className="input"
-                  value={draft.priority ?? "medium"}
-                  onChange={(e) => setDraft((d) => ({ ...d, priority: e.target.value }))}
-                >
-                  {PRIORITIES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Status">
-                <select
-                  className="input"
-                  value={draft.status ?? "not_started"}
-                  onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))}
-                >
-                  {GOAL_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Owner ID">
-                <input
-                  type="number"
-                  className="input"
-                  value={draft.owner_id ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      owner_id: e.target.value ? Number(e.target.value) : null,
-                    }))
-                  }
-                />
-              </Field>
-              <Field label="Start date">
-                <input
-                  type="date"
-                  className="input"
-                  value={draft.start_date?.slice(0, 10) ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, start_date: e.target.value || null }))
-                  }
-                />
-              </Field>
-              <Field label="Target date">
-                <input
-                  type="date"
-                  className="input"
-                  value={draft.target_date?.slice(0, 10) ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, target_date: e.target.value || null }))
-                  }
-                />
-              </Field>
-            </div>
-            <Field label="Description" className="mt-3">
-              <textarea
-                className="input min-h-[80px]"
-                value={draft.description ?? ""}
-                onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-              />
-            </Field>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={cancel}>
-                <IconX size={14} />
-                Cancel
-              </Button>
-              <Button variant="primary" size="sm" onClick={submit}>
-                <IconCheck size={14} />
-                Save
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
-      )}
-      <div className="space-y-2">
-        {goals.map((goal) => (
-          <Card key={goal.id} className="p-0">
-            <CardBody className="p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-medium text-ink-primary">{goal.title}</h4>
-                    <Badge tone={goal.priority === "high" || goal.priority === "critical" ? "danger" : "neutral"}>
-                      {goal.priority}
-                    </Badge>
-                    <Badge tone="outline">{goal.status}</Badge>
-                  </div>
-                  {goal.description && (
-                    <p className="mt-1 text-sm text-ink-secondary">{goal.description}</p>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-ink-tertiary">
-                    <span>Target: {goal.target_date ? fmtDate(goal.target_date) : "—"}</span>
-                    <span>Version: {goal.version}</span>
-                  </div>
-                </div>
-                {canEdit && (
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => startEdit(goal)} title="Edit">
-                      <IconPencil size={14} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setConfirmDelete(goal.id)}
-                      title="Delete"
-                    >
-                      <IconTrash size={14} />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </CardBody>
-          </Card>
-        ))}
-        {goals.length === 0 && (
-          <div className="text-sm text-ink-secondary">No goals defined yet.</div>
-        )}
-      </div>
-      <ConfirmDialog
-        open={confirmDelete !== null}
-        title="Delete goal?"
-        message="This will archive the goal. It can be restored later."
-        confirmLabel="Delete"
-        onConfirm={() => {
-          if (confirmDelete !== null) onDelete(confirmDelete);
-          setConfirmDelete(null);
-        }}
-        onCancel={() => setConfirmDelete(null)}
-      />
+          </div>
+        </CardBody>
+      </Card>
     </div>
   );
 }
 
-interface RiskDraft extends Partial<ProjectRisk> {
-  linked_goal_ids?: number[];
-  linked_metric_ids?: number[];
+function SummaryCard({ label, value }: { label: string; value: number }) {
+  return (
+    <Card>
+      <CardBody className="p-4">
+        <div className="text-sm text-ink-secondary">{label}</div>
+        <div className="mt-1 text-3xl font-semibold text-ink-primary">{value}</div>
+      </CardBody>
+    </Card>
+  );
 }
 
-function RisksPanel({
-  risks,
-  canEdit,
-  onCreate,
-  onUpdate,
-  onDelete,
-}: {
-  risks: ProjectRisk[];
-  canEdit: boolean;
-  onCreate: (body: Parameters<typeof createRisk>[1]) => void;
-  onUpdate: (id: number, body: Parameters<typeof updateRisk>[2]) => void;
-  onDelete: (id: number) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<number | null>(null);
-  const [draft, setDraft] = useState<RiskDraft>({});
-  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+interface KpiDraftState {
+  id?: number;
+  name?: string;
+  description?: string | null;
+  latest_value?: number | null;
+  target_value?: number | null;
+  directionality?: string;
+  cadence?: string | null;
+  unit?: string | null;
+  format?: string | null;
+  owner_id?: number | null;
+  version?: number;
+}
 
-  const startEdit = (risk: ProjectRisk) => {
-    setEditing(risk.id);
-    setDraft({ ...risk });
+interface SuccessCriteriaSectionProps {
+  goals: ProjectGoal[];
+  metrics: ProjectMetric[];
+  memberMap: Map<number, ProjectMember>;
+  canEdit: boolean;
+  onCreateGoal: (body: Parameters<typeof createGoal>[1]) => void;
+  onUpdateGoal: (id: number, body: Parameters<typeof updateGoal>[2]) => void;
+  onDeleteGoal: (id: number) => void;
+  onCreateMetric: (body: Parameters<typeof createMetric>[1]) => void;
+  onUpdateMetric: (id: number, body: Parameters<typeof updateMetric>[2]) => void;
+  onDeleteMetric: (id: number) => void;
+  onMatchMetric: (metricId: number) => void;
+}
+
+function SuccessCriteriaSection({
+  goals,
+  metrics,
+  memberMap,
+  canEdit,
+  onCreateGoal,
+  onUpdateGoal,
+  onDeleteGoal,
+  onCreateMetric,
+  onUpdateMetric,
+  onDeleteMetric,
+  onMatchMetric,
+}: SuccessCriteriaSectionProps) {
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set(goals.map((g) => g.id)));
+  const [addingGoal, setAddingGoal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<number | null>(null);
+  const [goalDraft, setGoalDraft] = useState<Partial<ProjectGoal>>({});
+  const [addingKpiForGoal, setAddingKpiForGoal] = useState<number | null>(null);
+  const [kpiDraft, setKpiDraft] = useState<KpiDraftState>({});
+  const [editingKpi, setEditingKpi] = useState<number | null>(null);
+  const [confirmDeleteGoal, setConfirmDeleteGoal] = useState<number | null>(null);
+  const [confirmDeleteKpi, setConfirmDeleteKpi] = useState<number | null>(null);
+
+  const getKpiTargetValue = (metric: ProjectMetric): number | null => {
+    const target = metric.targets?.find((t) => t.active && t.status !== "archived");
+    return target?.target_value != null ? Number(target.target_value) : null;
   };
 
-  const startAdd = () => {
-    setAdding(true);
-    setDraft({
-      likelihood: "possible",
-      impact: "moderate",
-      severity: "medium",
-      status: "open",
-      linked_goal_ids: [],
-      linked_metric_ids: [],
+  const toggle = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
   };
 
-  const submit = () => {
+  const saveGoal = () => {
+    const body = {
+      title: goalDraft.title || "Untitled criterion",
+      description: goalDraft.description || null,
+      category: goalDraft.category || null,
+      priority: goalDraft.priority || "medium",
+      owner_id: goalDraft.owner_id ?? null,
+      status: goalDraft.status || "not_started",
+      start_date: goalDraft.start_date || null,
+      target_date: goalDraft.target_date || null,
+      linked_metric_ids: [],
+      linked_risk_ids: [],
+    };
+    if (editingGoal) {
+      onUpdateGoal(editingGoal, { ...body, expected_version: goalDraft.version ?? 0 });
+    } else {
+      onCreateGoal(body);
+    }
+    setAddingGoal(false);
+    setEditingGoal(null);
+    setGoalDraft({});
+  };
+
+  const saveKpi = (goalId: number) => {
+    const targetValue = kpiDraft.target_value ?? null;
+    const body: MetricCreateRequest = {
+      name: kpiDraft.name || "Untitled KPI",
+      description: kpiDraft.description ?? null,
+      business_definition: null,
+      unit: kpiDraft.unit ?? null,
+      format: kpiDraft.format ?? null,
+      directionality: kpiDraft.directionality || "higher_is_better",
+      aggregation: "sum",
+      source_type: null,
+      source_query_id: null,
+      source_mapping: {},
+      expression: null,
+      success_criterion_id: goalId,
+      owner_id: kpiDraft.owner_id ?? null,
+      cadence: kpiDraft.cadence ?? null,
+      targets: targetValue != null
+        ? [{
+            target_type: "single_value",
+            target_value: targetValue,
+            comparison_operator: kpiDraft.directionality === "lower_is_better" ? "<=" : ">=",
+            status: "active",
+          }]
+        : [],
+    };
+    if (editingKpi) {
+      onUpdateMetric(editingKpi, { ...body, expected_version: kpiDraft.version ?? 0 });
+    } else {
+      onCreateMetric(body);
+    }
+    setAddingKpiForGoal(null);
+    setEditingKpi(null);
+    setKpiDraft({});
+  };
+
+  return (
+    <Card>
+      <CardBody className="p-0">
+        <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-primary">Success Criteria</h3>
+          {canEdit && !addingGoal && (
+            <Button variant="primary" size="sm" onClick={() => { setAddingGoal(true); setGoalDraft({ status: "not_started", priority: "medium" }); }}>
+              <IconPlus size={14} />
+              Add success criterion
+            </Button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-ink-tertiary">
+          <div className="col-span-4">Success Criterion</div>
+          <div className="col-span-1">Owner</div>
+          <div className="col-span-1">Status</div>
+          <div className="col-span-2">Progress</div>
+          <div className="col-span-2">Target Date</div>
+          <div className="col-span-1">KPIs</div>
+          <div className="col-span-1">Updated</div>
+        </div>
+
+        {(addingGoal || editingGoal !== null) && (
+          <InlineGoalForm
+            draft={goalDraft}
+            setDraft={setGoalDraft}
+            onSave={saveGoal}
+            onCancel={() => { setAddingGoal(false); setEditingGoal(null); setGoalDraft({}); }}
+            memberMap={memberMap}
+            isEditing={editingGoal !== null}
+          />
+        )}
+
+        {goals.map((goal) => {
+          const children = metrics.filter((m) => m.success_criterion_id === goal.id);
+          const progress = goalProgress(goal, metrics);
+          const isOpen = expanded.has(goal.id);
+          return (
+            <div key={goal.id} className="border-t border-line-tertiary">
+              <div className="grid grid-cols-12 items-center gap-2 px-4 py-3 text-sm">
+                <div className="col-span-4 flex items-center gap-2">
+                  <button onClick={() => toggle(goal.id)} className="text-ink-tertiary hover:text-ink-primary">
+                    {isOpen ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+                  </button>
+                  {editingGoal === goal.id ? null : (
+                    <>
+                      <span className="font-medium text-ink-primary">{goal.title}</span>
+                      {canEdit && (
+                        <div className="ml-2 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                          <Button variant="ghost" size="icon" onClick={() => { setEditingGoal(goal.id); setGoalDraft({ ...goal }); }} title="Edit">
+                            <IconPencil size={14} />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setConfirmDeleteGoal(goal.id)} title="Delete">
+                            <IconTrash size={14} />
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="col-span-1 text-ink-secondary">{displayName(memberMap, goal.owner_id)}</div>
+                <div className="col-span-1">
+                  <Badge tone={goalStatusTone(goal.status)} size="sm">{goal.status.replace("_", " ")}</Badge>
+                </div>
+                <div className="col-span-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-16 overflow-hidden rounded-full bg-bg-secondary">
+                      <div className="h-full rounded-full bg-brand" style={{ width: `${progress}%` }} />
+                    </div>
+                    <span className="text-xs text-ink-secondary">{progress}%</span>
+                  </div>
+                </div>
+                <div className="col-span-2 text-ink-secondary">{fmtDateShort(goal.target_date)}</div>
+                <div className="col-span-1 text-ink-secondary">{children.length}</div>
+                <div className="col-span-1 text-xs text-ink-tertiary">{fmtDate(goal.updated_at)}</div>
+              </div>
+
+              {isOpen && (
+                <div className="bg-bg-secondary px-4 pb-4">
+                  <div className="rounded-md border border-line-tertiary bg-bg-primary">
+                    <div className="grid grid-cols-12 gap-2 border-b border-line-tertiary px-3 py-2 text-xs font-medium uppercase tracking-wide text-ink-tertiary">
+                      <div className="col-span-3">KPI</div>
+                      <div className="col-span-1">Current</div>
+                      <div className="col-span-1">Target</div>
+                      <div className="col-span-1">Trend</div>
+                      <div className="col-span-2">Frequency</div>
+                      <div className="col-span-2">Data Source</div>
+                      <div className="col-span-1">Match Status</div>
+                      <div className="col-span-1"></div>
+                    </div>
+
+                    {children.map((metric) => (
+                      <KpiRow
+                        key={metric.id}
+                        metric={metric}
+                        memberMap={memberMap}
+                        canEdit={canEdit}
+                        editing={editingKpi === metric.id}
+                        draft={kpiDraft}
+                        setDraft={setKpiDraft}
+                        onEdit={() => { setEditingKpi(metric.id); setKpiDraft({ id: metric.id, name: metric.name, description: metric.description, latest_value: metric.latest_value, target_value: getKpiTargetValue(metric), directionality: metric.directionality, cadence: metric.cadence, unit: metric.unit, format: metric.format, owner_id: metric.owner_id, version: metric.version }); }}
+                        onDelete={() => setConfirmDeleteKpi(metric.id)}
+                        onMatch={() => onMatchMetric(metric.id)}
+                        onSave={() => saveKpi(goal.id)}
+                        onCancel={() => { setEditingKpi(null); setKpiDraft({}); }}
+                      />
+                    ))}
+
+                    {children.length === 0 && <div className="px-3 py-3 text-sm text-ink-secondary">No KPIs yet.</div>}
+
+                    {canEdit && addingKpiForGoal === goal.id && (
+                      <div className="grid grid-cols-12 items-center gap-2 border-t border-line-tertiary px-3 py-2 text-sm">
+                        <div className="col-span-3"><input className="input" placeholder="KPI name" value={kpiDraft.name ?? ""} onChange={(e) => setKpiDraft((d) => ({ ...d, name: e.target.value }))} /></div>
+                        <div className="col-span-1"><input type="number" className="input" placeholder="Current" value={kpiDraft.latest_value ?? ""} onChange={(e) => setKpiDraft((d) => ({ ...d, latest_value: e.target.value ? Number(e.target.value) : null }))} /></div>
+                        <div className="col-span-1"><input type="number" className="input" placeholder="Target" value={kpiDraft.target_value ?? ""} onChange={(e) => setKpiDraft((d) => ({ ...d, target_value: e.target.value ? Number(e.target.value) : null }))} /></div>
+                        <div className="col-span-1"><select className="input" value={kpiDraft.directionality ?? "higher_is_better"} onChange={(e) => setKpiDraft((d) => ({ ...d, directionality: e.target.value }))}>{METRIC_DIRECTIONALITY.map((x) => (<option key={x.value} value={x.value}>{x.label}</option>))}</select></div>
+                        <div className="col-span-2"><input className="input" placeholder="Frequency" value={kpiDraft.cadence ?? ""} onChange={(e) => setKpiDraft((d) => ({ ...d, cadence: e.target.value }))} /></div>
+                        <div className="col-span-2"><input className="input" placeholder="Unit / format" value={kpiDraft.unit ?? ""} onChange={(e) => setKpiDraft((d) => ({ ...d, unit: e.target.value }))} /></div>
+                        <div className="col-span-1"></div>
+                        <div className="col-span-1 flex gap-1">
+                          <Button variant="primary" size="sm" onClick={() => saveKpi(goal.id)}>Save</Button>
+                          <Button variant="ghost" size="sm" onClick={() => setAddingKpiForGoal(null)}>Cancel</Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {canEdit && addingKpiForGoal !== goal.id && (
+                      <div className="border-t border-line-tertiary px-3 py-2">
+                        <Button variant="brandSoft" size="sm" onClick={() => { setAddingKpiForGoal(goal.id); setKpiDraft({ directionality: "higher_is_better" }); }}>
+                          <IconPlus size={14} /> Add KPI
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {goals.length === 0 && !addingGoal && <div className="px-4 py-6 text-sm text-ink-secondary">No success criteria defined yet.</div>}
+      </CardBody>
+
+      <ConfirmDialog
+        open={confirmDeleteGoal !== null}
+        title="Delete success criterion?"
+        message="This will archive the success criterion and its linked KPIs remain available."
+        confirmLabel="Delete"
+        onConfirm={() => { if (confirmDeleteGoal !== null) onDeleteGoal(confirmDeleteGoal); setConfirmDeleteGoal(null); }}
+        onCancel={() => setConfirmDeleteGoal(null)}
+      />
+      <ConfirmDialog
+        open={confirmDeleteKpi !== null}
+        title="Delete KPI?"
+        message="This will archive the KPI. It can be restored later."
+        confirmLabel="Delete"
+        onConfirm={() => { if (confirmDeleteKpi !== null) onDeleteMetric(confirmDeleteKpi); setConfirmDeleteKpi(null); }}
+        onCancel={() => setConfirmDeleteKpi(null)}
+      />
+    </Card>
+  );
+}
+
+function InlineGoalForm({
+  draft,
+  setDraft,
+  onSave,
+  onCancel,
+  memberMap,
+  isEditing,
+}: {
+  draft: Partial<ProjectGoal>;
+  setDraft: (d: Partial<ProjectGoal> | ((prev: Partial<ProjectGoal>) => Partial<ProjectGoal>)) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  memberMap: Map<number, ProjectMember>;
+  isEditing: boolean;
+}) {
+  const members = Array.from(memberMap.values());
+  return (
+    <div className="grid grid-cols-12 items-center gap-2 border-t border-line-tertiary px-4 py-3 text-sm">
+      <div className="col-span-4">
+        <input className="input" placeholder="Success criterion title" value={draft.title ?? ""} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} />
+      </div>
+      <div className="col-span-1">
+        <select className="input" value={draft.owner_id ?? ""} onChange={(e) => setDraft((d) => ({ ...d, owner_id: e.target.value ? Number(e.target.value) : null }))}>
+          <option value="">—</option>
+          {members.map((m) => (<option key={m.user_id} value={m.user_id}>{m.display_name || m.email}</option>))}
+        </select>
+      </div>
+      <div className="col-span-1">
+        <select className="input" value={draft.status ?? "not_started"} onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))}>
+          {GOAL_STATUSES.map((s) => (<option key={s} value={s}>{s.replace("_", " ")}</option>))}
+        </select>
+      </div>
+      <div className="col-span-2"></div>
+      <div className="col-span-2">
+        <input type="date" className="input" value={draft.target_date?.slice(0, 10) ?? ""} onChange={(e) => setDraft((d) => ({ ...d, target_date: e.target.value || null }))} />
+      </div>
+      <div className="col-span-1"></div>
+      <div className="col-span-1 flex gap-1">
+        <Button variant="primary" size="sm" onClick={onSave}>{isEditing ? "Save" : "Add"}</Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
+function KpiRow({
+  metric,
+  memberMap,
+  canEdit,
+  editing,
+  draft,
+  setDraft,
+  onEdit,
+  onDelete,
+  onMatch,
+  onSave,
+  onCancel,
+}: {
+  metric: ProjectMetric;
+  memberMap: Map<number, ProjectMember>;
+  canEdit: boolean;
+  editing: boolean;
+  draft: KpiDraftState;
+  setDraft: (d: KpiDraftState | ((prev: KpiDraftState) => KpiDraftState)) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onMatch: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const target = metric.targets?.find((t) => t.active && t.status !== "archived");
+  const trend = metricTrend(metric);
+  const currentValue = metric.latest_value != null ? Number(metric.latest_value) : null;
+  const targetValue = target?.target_value != null ? Number(target.target_value) : null;
+
+  if (editing) {
+    return (
+      <div className="grid grid-cols-12 items-center gap-2 border-t border-line-tertiary px-3 py-2 text-sm">
+        <div className="col-span-3"><input className="input" value={draft.name ?? ""} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} /></div>
+        <div className="col-span-1"><input type="number" className="input" value={draft.latest_value ?? ""} onChange={(e) => setDraft((d) => ({ ...d, latest_value: e.target.value ? Number(e.target.value) : null }))} /></div>
+        <div className="col-span-1"><input type="number" className="input" value={draft.target_value ?? ""} onChange={(e) => setDraft((d) => ({ ...d, target_value: e.target.value ? Number(e.target.value) : null }))} /></div>
+        <div className="col-span-1"><select className="input" value={draft.directionality ?? "higher_is_better"} onChange={(e) => setDraft((d) => ({ ...d, directionality: e.target.value }))}>{METRIC_DIRECTIONALITY.map((x) => (<option key={x.value} value={x.value}>{x.label}</option>))}</select></div>
+        <div className="col-span-2"><input className="input" value={draft.cadence ?? ""} onChange={(e) => setDraft((d) => ({ ...d, cadence: e.target.value }))} /></div>
+        <div className="col-span-2"><input className="input" value={draft.unit ?? ""} onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))} /></div>
+        <div className="col-span-1"></div>
+        <div className="col-span-1 flex gap-1">
+          <Button variant="primary" size="sm" onClick={onSave}>Save</Button>
+          <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+        </div>
+      </div>
+    );
+  }
+
+  const mapping = metric.source_mapping as Record<string, unknown> | null;
+  const dataSource = metric.source_match_status === "matched" && mapping && "matched_query_name" in mapping
+    ? String(mapping.matched_query_name)
+    : metric.source_type || "—";
+
+  return (
+    <div className="grid grid-cols-12 items-center gap-2 border-t border-line-tertiary px-3 py-2 text-sm">
+      <div className="col-span-3 font-medium text-ink-primary">{metric.name}</div>
+      <div className="col-span-1 text-ink-secondary">{fmtNumber(currentValue, metric.format, metric.unit)}</div>
+      <div className="col-span-1 text-ink-secondary">{fmtNumber(targetValue, metric.format, metric.unit)}</div>
+      <div className="col-span-1">
+        {trend === "up" ? <IconTrendingUp size={16} className="text-success" /> : trend === "down" ? <IconTrendingDown size={16} className="text-danger" /> : <IconMinus size={16} className="text-ink-tertiary" />}
+      </div>
+      <div className="col-span-2 text-ink-secondary">{metric.cadence || "—"}</div>
+      <div className="col-span-2 text-ink-secondary">{dataSource}</div>
+      <div className="col-span-1">
+        <Badge tone={matchStatusTone(metric.source_match_status)} size="sm">{metric.source_match_status || "Unmatched"}</Badge>
+      </div>
+      <div className="col-span-1 flex gap-1">
+        {!metric.source_match_status || metric.source_match_status === "no_match" ? (
+          <Button variant="brandSoft" size="sm" onClick={onMatch}>Match</Button>
+        ) : null}
+        {canEdit && (
+          <>
+            <Button variant="ghost" size="icon" onClick={onEdit} title="Edit"><IconPencil size={14} /></Button>
+            <Button variant="ghost" size="icon" onClick={onDelete} title="Delete"><IconTrash size={14} /></Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface RisksSectionProps {
+  risks: ProjectRisk[];
+  memberMap: Map<number, ProjectMember>;
+  canEdit: boolean;
+  onCreateRisk: (body: Parameters<typeof createRisk>[1]) => void;
+  onUpdateRisk: (id: number, body: Parameters<typeof updateRisk>[2]) => void;
+  onDeleteRisk: (id: number) => void;
+}
+
+function RisksSection({ risks, memberMap, canEdit, onCreateRisk, onUpdateRisk, onDeleteRisk }: RisksSectionProps) {
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState<Partial<ProjectRisk>>({});
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const members = Array.from(memberMap.values());
+
+  const saveRisk = () => {
     const body = {
       title: draft.title || "Untitled risk",
       description: draft.description || null,
       category: draft.category || null,
       likelihood: draft.likelihood || "possible",
       impact: draft.impact || "moderate",
-      severity: draft.severity || "medium",
       owner_id: draft.owner_id ?? null,
       mitigation: draft.mitigation || null,
       contingency: draft.contingency || null,
       status: draft.status || "open",
       review_date: draft.review_date || null,
       source_reference: draft.source_reference || null,
-      linked_goal_ids: draft.linked_goal_ids || [],
-      linked_metric_ids: draft.linked_metric_ids || [],
+      linked_goal_ids: [],
+      linked_metric_ids: [],
     };
     if (editing) {
-      onUpdate(editing, { ...body, expected_version: draft.version ?? 0 });
+      onUpdateRisk(editing, { ...body, expected_version: draft.version ?? 0 });
     } else {
-      onCreate(body);
+      onCreateRisk(body);
     }
     setAdding(false);
     setEditing(null);
     setDraft({});
   };
 
-  const cancel = () => {
-    setAdding(false);
-    setEditing(null);
-    setDraft({});
+  const startAdd = () => {
+    setAdding(true);
+    setDraft({ likelihood: "possible", impact: "moderate", status: "open" });
   };
 
   return (
-    <div className="space-y-3">
-      {canEdit && !adding && !editing && (
-        <div className="flex justify-end">
-          <Button variant="primary" size="sm" onClick={startAdd}>
-            <IconPlus size={14} />
-            Add risk
-          </Button>
+    <Card>
+      <CardBody className="p-0">
+        <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-primary">Project Risks</h3>
+          {canEdit && !adding && !editing && (
+            <Button variant="primary" size="sm" onClick={startAdd}>
+              <IconPlus size={14} /> Add project risk
+            </Button>
+          )}
         </div>
-      )}
-      {(adding || editing !== null) && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{editing ? "Edit risk" : "New risk"}</CardTitle>
-          </CardHeader>
-          <CardBody>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Title">
-                <input
-                  className="input"
-                  value={draft.title ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-                />
-              </Field>
-              <Field label="Category">
-                <input
-                  className="input"
-                  value={draft.category ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}
-                />
-              </Field>
-              <Field label="Likelihood">
-                <select
-                  className="input"
-                  value={draft.likelihood ?? "possible"}
-                  onChange={(e) => setDraft((d) => ({ ...d, likelihood: e.target.value }))}
-                >
-                  {RISK_LIKELIHOOD.map((x) => (
-                    <option key={x} value={x}>
-                      {x}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Impact">
-                <select
-                  className="input"
-                  value={draft.impact ?? "moderate"}
-                  onChange={(e) => setDraft((d) => ({ ...d, impact: e.target.value }))}
-                >
-                  {RISK_IMPACT.map((x) => (
-                    <option key={x} value={x}>
-                      {x}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Severity">
-                <select
-                  className="input"
-                  value={draft.severity ?? "medium"}
-                  onChange={(e) => setDraft((d) => ({ ...d, severity: e.target.value }))}
-                >
-                  {RISK_SEVERITY.map((x) => (
-                    <option key={x} value={x}>
-                      {x}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Status">
-                <select
-                  className="input"
-                  value={draft.status ?? "open"}
-                  onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))}
-                >
-                  {RISK_STATUSES.map((x) => (
-                    <option key={x} value={x}>
-                      {x}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Owner ID">
-                <input
-                  type="number"
-                  className="input"
-                  value={draft.owner_id ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      owner_id: e.target.value ? Number(e.target.value) : null,
-                    }))
-                  }
-                />
-              </Field>
-              <Field label="Review date">
-                <input
-                  type="date"
-                  className="input"
-                  value={draft.review_date?.slice(0, 10) ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, review_date: e.target.value || null }))
-                  }
-                />
-              </Field>
-            </div>
-            <Field label="Description" className="mt-3">
-              <textarea
-                className="input min-h-[80px]"
-                value={draft.description ?? ""}
-                onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-              />
-            </Field>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <Field label="Mitigation">
-                <textarea
-                  className="input min-h-[60px]"
-                  value={draft.mitigation ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, mitigation: e.target.value }))}
-                />
-              </Field>
-              <Field label="Contingency">
-                <textarea
-                  className="input min-h-[60px]"
-                  value={draft.contingency ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, contingency: e.target.value }))}
-                />
-              </Field>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={cancel}>
-                <IconX size={14} />
-                Cancel
-              </Button>
-              <Button variant="primary" size="sm" onClick={submit}>
-                <IconCheck size={14} />
-                Save
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
-      )}
-      <div className="space-y-2">
-        {risks.map((risk) => (
-          <Card key={risk.id} className="p-0">
-            <CardBody className="p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-medium text-ink-primary">{risk.title}</h4>
-                    <Badge tone={risk.severity === "critical" ? "danger" : "warning"}>
-                      {risk.severity}
-                    </Badge>
-                    <Badge tone="outline">{risk.status}</Badge>
-                  </div>
-                  {risk.description && (
-                    <p className="mt-1 text-sm text-ink-secondary">{risk.description}</p>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-ink-tertiary">
-                    <span>Likelihood: {risk.likelihood}</span>
-                    <span>Impact: {risk.impact}</span>
-                    <span>Review: {risk.review_date ? fmtDate(risk.review_date) : "—"}</span>
-                  </div>
-                </div>
-                {canEdit && (
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => startEdit(risk)} title="Edit">
-                      <IconPencil size={14} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setConfirmDelete(risk.id)}
-                      title="Delete"
-                    >
-                      <IconTrash size={14} />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </CardBody>
-          </Card>
-        ))}
-        {risks.length === 0 && (
-          <div className="text-sm text-ink-secondary">No risks defined yet.</div>
+
+        <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-ink-tertiary">
+          <div className="col-span-2">Risk</div>
+          <div className="col-span-1">Owner</div>
+          <div className="col-span-1">Likelihood</div>
+          <div className="col-span-1">Impact</div>
+          <div className="col-span-1">Rating</div>
+          <div className="col-span-1">Status</div>
+          <div className="col-span-3">Mitigation</div>
+          <div className="col-span-1">Updated</div>
+          <div className="col-span-1"></div>
+        </div>
+
+        {(adding || editing !== null) && (
+          <InlineRiskForm
+            draft={draft}
+            setDraft={setDraft}
+            members={members}
+            onSave={saveRisk}
+            onCancel={() => { setAdding(false); setEditing(null); setDraft({}); }}
+          />
         )}
-      </div>
+
+        {risks.map((risk) => (
+          <RiskRow
+            key={risk.id}
+            risk={risk}
+            memberMap={memberMap}
+            canEdit={canEdit}
+            editing={editing === risk.id}
+            draft={draft}
+            setDraft={setDraft}
+            onEdit={() => { setEditing(risk.id); setDraft({ ...risk }); }}
+            onDelete={() => setConfirmDelete(risk.id)}
+            onSave={saveRisk}
+            onCancel={() => { setEditing(null); setDraft({}); }}
+          />
+        ))}
+
+        {risks.length === 0 && !adding && <div className="px-4 py-6 text-sm text-ink-secondary">No project risks defined yet.</div>}
+
+        {canEdit && !adding && !editing && risks.length > 0 && (
+          <div className="border-t border-line-tertiary px-4 py-3">
+            <Button variant="brandSoft" size="sm" onClick={startAdd}>
+              <IconPlus size={14} /> Add another risk
+            </Button>
+          </div>
+        )}
+      </CardBody>
+
       <ConfirmDialog
         open={confirmDelete !== null}
         title="Delete risk?"
         message="This will archive the risk. It can be restored later."
         confirmLabel="Delete"
-        onConfirm={() => {
-          if (confirmDelete !== null) onDelete(confirmDelete);
-          setConfirmDelete(null);
-        }}
+        onConfirm={() => { if (confirmDelete !== null) onDeleteRisk(confirmDelete); setConfirmDelete(null); }}
         onCancel={() => setConfirmDelete(null)}
       />
-    </div>
-  );
-}
-
-interface MetricDraft {
-  id?: number;
-  name?: string;
-  description?: string | null;
-  business_definition?: string | null;
-  unit?: string | null;
-  format?: string | null;
-  directionality?: string;
-  aggregation?: string;
-  source_type?: string | null;
-  source_query_id?: number | null;
-  source_mapping?: unknown;
-  expression?: string | null;
-  owner_id?: number | null;
-  cadence?: string | null;
-  position?: number;
-  version?: number;
-  targets?: Partial<ProjectMetricTarget>[];
-}
-
-function MetricsPanel({
-  metrics,
-  canEdit,
-  onCreate,
-  onUpdate,
-  onDelete,
-  onCreateTarget,
-  onUpdateTarget,
-  onDeleteTarget,
-}: {
-  metrics: ProjectMetric[];
-  canEdit: boolean;
-  onCreate: (body: Parameters<typeof createMetric>[1]) => void;
-  onUpdate: (id: number, body: Parameters<typeof updateMetric>[2]) => void;
-  onDelete: (id: number) => void;
-  onCreateTarget: (metricId: number, body: Parameters<typeof createTarget>[2]) => void;
-  onUpdateTarget: (metricId: number, targetId: number, body: Parameters<typeof updateTarget>[3]) => void;
-  onDeleteTarget: (metricId: number, targetId: number) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<number | null>(null);
-  const [draft, setDraft] = useState<MetricDraft>({});
-  const [confirmDelete, setConfirmDelete] = useState<{ metricId: number; targetId?: number } | null>(null);
-  const [addingTarget, setAddingTarget] = useState<number | null>(null);
-  const [targetDraft, setTargetDraft] = useState<Partial<ProjectMetricTarget>>({});
-  const [editingTarget, setEditingTarget] = useState<{ metricId: number; targetId: number } | null>(null);
-
-  const startEdit = (metric: ProjectMetric) => {
-    setEditing(metric.id);
-    setDraft({ ...metric });
-  };
-
-  const startAdd = () => {
-    setAdding(true);
-    setDraft({
-      directionality: "higher_is_better",
-      aggregation: "sum",
-      targets: [],
-    });
-  };
-
-  const submitMetric = () => {
-    const body = {
-      name: draft.name || "Untitled metric",
-      description: draft.description || null,
-      business_definition: draft.business_definition || null,
-      unit: draft.unit || null,
-      format: draft.format || null,
-      directionality: draft.directionality || "higher_is_better",
-      aggregation: draft.aggregation || "sum",
-      source_type: draft.source_type || null,
-      source_query_id: draft.source_query_id ?? null,
-      source_mapping: draft.source_mapping ?? {},
-      expression: draft.expression || null,
-      owner_id: draft.owner_id ?? null,
-      cadence: draft.cadence || null,
-      targets: (draft.targets ?? []).filter(
-        (t) => t.target_type,
-      ) as Parameters<typeof createMetric>[1]["targets"],
-    };
-    if (editing) {
-      onUpdate(editing, { ...body, expected_version: draft.version ?? 0 });
-    } else {
-      onCreate(body);
-    }
-    setAdding(false);
-    setEditing(null);
-    setDraft({});
-  };
-
-  const cancelMetric = () => {
-    setAdding(false);
-    setEditing(null);
-    setDraft({});
-  };
-
-  const saveTarget = (metricId: number) => {
-    const body = {
-      target_type: targetDraft.target_type || "single_value",
-      target_value: targetDraft.target_value ?? null,
-      lower_bound: targetDraft.lower_bound ?? null,
-      upper_bound: targetDraft.upper_bound ?? null,
-      comparison_operator: targetDraft.comparison_operator || null,
-      warning_threshold: targetDraft.warning_threshold ?? null,
-      critical_threshold: targetDraft.critical_threshold ?? null,
-      baseline: targetDraft.baseline ?? null,
-      effective_start: targetDraft.effective_start || null,
-      effective_end: targetDraft.effective_end || null,
-      period: targetDraft.period || null,
-      notes: targetDraft.notes || null,
-      status: targetDraft.status || "draft",
-    };
-    if (editingTarget) {
-      onUpdateTarget(metricId, editingTarget.targetId, { ...body, expected_version: targetDraft.version ?? 0 });
-    } else {
-      onCreateTarget(metricId, body);
-    }
-    setAddingTarget(null);
-    setEditingTarget(null);
-    setTargetDraft({});
-  };
-
-  const cancelTarget = () => {
-    setAddingTarget(null);
-    setEditingTarget(null);
-    setTargetDraft({});
-  };
-
-  const startEditTarget = (metricId: number, target: ProjectMetricTarget) => {
-    setEditingTarget({ metricId, targetId: target.id });
-    setTargetDraft({ ...target });
-  };
-
-  return (
-    <div className="space-y-3">
-      {canEdit && !adding && !editing && (
-        <div className="flex justify-end">
-          <Button variant="primary" size="sm" onClick={startAdd}>
-            <IconPlus size={14} />
-            Add metric
-          </Button>
-        </div>
-      )}
-      {(adding || editing !== null) && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{editing ? "Edit metric" : "New metric"}</CardTitle>
-          </CardHeader>
-          <CardBody>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Name">
-                <input
-                  className="input"
-                  value={draft.name ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-                />
-              </Field>
-              <Field label="Unit">
-                <input
-                  className="input"
-                  value={draft.unit ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))}
-                />
-              </Field>
-              <Field label="Directionality">
-                <select
-                  className="input"
-                  value={draft.directionality ?? "higher_is_better"}
-                  onChange={(e) => setDraft((d) => ({ ...d, directionality: e.target.value }))}
-                >
-                  {METRIC_DIRECTIONALITY.map((x) => (
-                    <option key={x} value={x}>
-                      {x}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Aggregation">
-                <select
-                  className="input"
-                  value={draft.aggregation ?? "sum"}
-                  onChange={(e) => setDraft((d) => ({ ...d, aggregation: e.target.value }))}
-                >
-                  {METRIC_AGGREGATIONS.map((x) => (
-                    <option key={x} value={x}>
-                      {x}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Format">
-                <input
-                  className="input"
-                  value={draft.format ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, format: e.target.value }))}
-                  placeholder="number, currency, percent"
-                />
-              </Field>
-              <Field label="Cadence">
-                <input
-                  className="input"
-                  value={draft.cadence ?? ""}
-                  onChange={(e) => setDraft((d) => ({ ...d, cadence: e.target.value }))}
-                />
-              </Field>
-              <Field label="Owner ID">
-                <input
-                  type="number"
-                  className="input"
-                  value={draft.owner_id ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      owner_id: e.target.value ? Number(e.target.value) : null,
-                    }))
-                  }
-                />
-              </Field>
-              <Field label="Source Query ID">
-                <input
-                  type="number"
-                  className="input"
-                  value={draft.source_query_id ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      source_query_id: e.target.value ? Number(e.target.value) : null,
-                    }))
-                  }
-                />
-              </Field>
-            </div>
-            <Field label="Business Definition" className="mt-3">
-              <textarea
-                className="input min-h-[60px]"
-                value={draft.business_definition ?? ""}
-                onChange={(e) => setDraft((d) => ({ ...d, business_definition: e.target.value }))}
-              />
-            </Field>
-            <Field label="Expression / SQL reference" className="mt-3">
-              <input
-                className="input"
-                value={draft.expression ?? ""}
-                onChange={(e) => setDraft((d) => ({ ...d, expression: e.target.value }))}
-              />
-            </Field>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={cancelMetric}>
-                <IconX size={14} />
-                Cancel
-              </Button>
-              <Button variant="primary" size="sm" onClick={submitMetric}>
-                <IconCheck size={14} />
-                Save
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
-      )}
-      <div className="space-y-3">
-        {metrics.map((metric) => (
-          <Card key={metric.id} className="p-0">
-            <CardBody className="p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-medium text-ink-primary">{metric.name}</h4>
-                    <Badge tone="brand">{metric.aggregation}</Badge>
-                    <Badge tone="outline">{metric.directionality}</Badge>
-                  </div>
-                  {metric.business_definition && (
-                    <p className="mt-1 text-sm text-ink-secondary">{metric.business_definition}</p>
-                  )}
-                </div>
-                {canEdit && (
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => startEdit(metric)} title="Edit">
-                      <IconPencil size={14} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setConfirmDelete({ metricId: metric.id })}
-                      title="Delete"
-                    >
-                      <IconTrash size={14} />
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <h5 className="text-sm font-medium text-ink-primary">Targets</h5>
-                  {canEdit && addingTarget !== metric.id && editingTarget?.metricId !== metric.id && (
-                    <Button variant="brandSoft" size="sm" onClick={() => setAddingTarget(metric.id)}>
-                      <IconPlus size={14} />
-                      Add target
-                    </Button>
-                  )}
-                </div>
-                {(addingTarget === metric.id || editingTarget?.metricId === metric.id) && (
-                  <div className="mb-3 rounded-md border border-line-tertiary bg-bg-primary p-3">
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <Field label="Type">
-                        <select
-                          className="input"
-                          value={targetDraft.target_type ?? "single_value"}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({ ...t, target_type: e.target.value }))
-                          }
-                        >
-                          {TARGET_TYPES.map((x) => (
-                            <option key={x} value={x}>
-                              {x}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="Target value">
-                        <input
-                          type="number"
-                          step="any"
-                          className="input"
-                          value={targetDraft.target_value ?? ""}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({
-                              ...t,
-                              target_value: e.target.value ? Number(e.target.value) : null,
-                            }))
-                          }
-                        />
-                      </Field>
-                      <Field label="Comparison">
-                        <select
-                          className="input"
-                          value={targetDraft.comparison_operator ?? ""}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({
-                              ...t,
-                              comparison_operator: e.target.value || null,
-                            }))
-                          }
-                        >
-                          <option value="">—</option>
-                          {COMPARISON_OPS.map((x) => (
-                            <option key={x} value={x}>
-                              {x}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="Lower bound">
-                        <input
-                          type="number"
-                          step="any"
-                          className="input"
-                          value={targetDraft.lower_bound ?? ""}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({
-                              ...t,
-                              lower_bound: e.target.value ? Number(e.target.value) : null,
-                            }))
-                          }
-                        />
-                      </Field>
-                      <Field label="Upper bound">
-                        <input
-                          type="number"
-                          step="any"
-                          className="input"
-                          value={targetDraft.upper_bound ?? ""}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({
-                              ...t,
-                              upper_bound: e.target.value ? Number(e.target.value) : null,
-                            }))
-                          }
-                        />
-                      </Field>
-                      <Field label="Warning threshold">
-                        <input
-                          type="number"
-                          step="any"
-                          className="input"
-                          value={targetDraft.warning_threshold ?? ""}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({
-                              ...t,
-                              warning_threshold: e.target.value ? Number(e.target.value) : null,
-                            }))
-                          }
-                        />
-                      </Field>
-                      <Field label="Critical threshold">
-                        <input
-                          type="number"
-                          step="any"
-                          className="input"
-                          value={targetDraft.critical_threshold ?? ""}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({
-                              ...t,
-                              critical_threshold: e.target.value ? Number(e.target.value) : null,
-                            }))
-                          }
-                        />
-                      </Field>
-                      <Field label="Baseline">
-                        <input
-                          type="number"
-                          step="any"
-                          className="input"
-                          value={targetDraft.baseline ?? ""}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({
-                              ...t,
-                              baseline: e.target.value ? Number(e.target.value) : null,
-                            }))
-                          }
-                        />
-                      </Field>
-                      <Field label="Effective start">
-                        <input
-                          type="date"
-                          className="input"
-                          value={targetDraft.effective_start?.slice(0, 10) ?? ""}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({
-                              ...t,
-                              effective_start: e.target.value || null,
-                            }))
-                          }
-                        />
-                      </Field>
-                      <Field label="Effective end">
-                        <input
-                          type="date"
-                          className="input"
-                          value={targetDraft.effective_end?.slice(0, 10) ?? ""}
-                          onChange={(e) =>
-                            setTargetDraft((t) => ({
-                              ...t,
-                              effective_end: e.target.value || null,
-                            }))
-                          }
-                        />
-                      </Field>
-                    </div>
-                    <Field label="Notes" className="mt-3">
-                      <textarea
-                        className="input min-h-[60px]"
-                        value={targetDraft.notes ?? ""}
-                        onChange={(e) => setTargetDraft((t) => ({ ...t, notes: e.target.value }))}
-                      />
-                    </Field>
-                    <div className="mt-3 flex justify-end gap-2">
-                      <Button variant="ghost" size="sm" onClick={cancelTarget}>
-                        Cancel
-                      </Button>
-                      <Button variant="primary" size="sm" onClick={() => saveTarget(metric.id)}>
-                        Save target
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                <div className="space-y-2">
-                  {metric.targets?.map((target) => (
-                    <div
-                      key={target.id}
-                      className="flex items-center justify-between rounded-md border border-line-tertiary px-3 py-2"
-                    >
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="font-medium">{target.target_type}</span>
-                        <span className="text-ink-secondary">value: {target.target_value ?? "—"}</span>
-                        <span className="text-ink-secondary">
-                          {target.comparison_operator} {target.warning_threshold ?? "—"} warn /{" "}
-                          {target.critical_threshold ?? "—"} crit
-                        </span>
-                        <Badge tone="outline" size="sm">
-                          {target.status}
-                        </Badge>
-                      </div>
-                      {canEdit && (
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => startEditTarget(metric.id, target)}
-                          >
-                            <IconPencil size={14} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setConfirmDelete({ metricId: metric.id, targetId: target.id })}
-                          >
-                            <IconTrash size={14} />
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {(!metric.targets || metric.targets.length === 0) && (
-                    <div className="text-sm text-ink-secondary">No targets for this metric.</div>
-                  )}
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-        ))}
-        {metrics.length === 0 && (
-          <div className="text-sm text-ink-secondary">No metrics defined yet.</div>
-        )}
-      </div>
-      <ConfirmDialog
-        open={confirmDelete !== null}
-        title={confirmDelete?.targetId ? "Delete target?" : "Delete metric?"}
-        message="This will archive the item. It can be restored later."
-        confirmLabel="Delete"
-        onConfirm={() => {
-          if (confirmDelete) {
-            if (confirmDelete.targetId) {
-              onDeleteTarget(confirmDelete.metricId, confirmDelete.targetId);
-            } else {
-              onDelete(confirmDelete.metricId);
-            }
-          }
-          setConfirmDelete(null);
-        }}
-        onCancel={() => setConfirmDelete(null)}
-      />
-    </div>
-  );
-}
-
-function AuditPanel({
-  events,
-  total,
-}: {
-  events: ProjectContextAuditEvent[];
-  total: number;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Audit History ({total})</CardTitle>
-      </CardHeader>
-      <CardBody>
-        <div className="space-y-2">
-          {events.map((event) => (
-            <div
-              key={event.id}
-              className="flex flex-col gap-1 rounded-md border border-line-tertiary px-3 py-2 text-sm"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-ink-primary">{event.event_type}</span>
-                <span className="text-xs text-ink-tertiary">{fmtDate(event.created_at)}</span>
-              </div>
-              <div className="text-ink-secondary">
-                Entity: {event.entity_type} #{event.entity_id ?? "—"} | Actor: {event.actor_type} #{event.actor_user_id ?? "system"}
-              </div>
-              {event.version != null && (
-                <div className="text-xs text-ink-tertiary">Version: {event.version}</div>
-              )}
-            </div>
-          ))}
-          {events.length === 0 && (
-            <div className="text-sm text-ink-secondary">No audit events yet.</div>
-          )}
-        </div>
-      </CardBody>
     </Card>
   );
 }
 
-function Field({
-  label,
-  children,
-  className,
+function InlineRiskForm({
+  draft,
+  setDraft,
+  members,
+  onSave,
+  onCancel,
 }: {
-  label: string;
-  children: React.ReactNode;
-  className?: string;
+  draft: Partial<ProjectRisk>;
+  setDraft: (d: Partial<ProjectRisk> | ((prev: Partial<ProjectRisk>) => Partial<ProjectRisk>)) => void;
+  members: ProjectMember[];
+  onSave: () => void;
+  onCancel: () => void;
 }) {
   return (
-    <label className={cn("block", className)}>
-      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-tertiary">
-        {label}
-      </span>
-      {children}
-    </label>
+    <div className="grid grid-cols-12 items-center gap-2 border-t border-line-tertiary px-4 py-3 text-sm">
+      <div className="col-span-2"><input className="input" placeholder="Risk title" value={draft.title ?? ""} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} /></div>
+      <div className="col-span-1">
+        <select className="input" value={draft.owner_id ?? ""} onChange={(e) => setDraft((d) => ({ ...d, owner_id: e.target.value ? Number(e.target.value) : null }))}>
+          <option value="">—</option>
+          {members.map((m) => (<option key={m.user_id} value={m.user_id}>{m.display_name || m.email}</option>))}
+        </select>
+      </div>
+      <div className="col-span-1">
+        <select className="input" value={draft.likelihood ?? "possible"} onChange={(e) => setDraft((d) => ({ ...d, likelihood: e.target.value }))}>
+          {RISK_LIKELIHOOD.map((x) => (<option key={x} value={x}>{x}</option>))}
+        </select>
+      </div>
+      <div className="col-span-1">
+        <select className="input" value={draft.impact ?? "moderate"} onChange={(e) => setDraft((d) => ({ ...d, impact: e.target.value }))}>
+          {RISK_IMPACT.map((x) => (<option key={x} value={x}>{x}</option>))}
+        </select>
+      </div>
+      <div className="col-span-1 text-ink-secondary" title="Calculated on save">—</div>
+      <div className="col-span-1">
+        <select className="input" value={draft.status ?? "open"} onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))}>
+          {RISK_STATUSES.map((x) => (<option key={x} value={x}>{x}</option>))}
+        </select>
+      </div>
+      <div className="col-span-3"><input className="input" placeholder="Mitigation" value={draft.mitigation ?? ""} onChange={(e) => setDraft((d) => ({ ...d, mitigation: e.target.value }))} /></div>
+      <div className="col-span-1"></div>
+      <div className="col-span-1 flex gap-1">
+        <Button variant="primary" size="sm" onClick={onSave}>Save</Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
   );
 }
 
+function RiskRow({
+  risk,
+  memberMap,
+  canEdit,
+  editing,
+  draft,
+  setDraft,
+  onEdit,
+  onDelete,
+  onSave,
+  onCancel,
+}: {
+  risk: ProjectRisk;
+  memberMap: Map<number, ProjectMember>;
+  canEdit: boolean;
+  editing: boolean;
+  draft: Partial<ProjectRisk>;
+  setDraft: (d: Partial<ProjectRisk> | ((prev: Partial<ProjectRisk>) => Partial<ProjectRisk>)) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const members = Array.from(memberMap.values());
+  if (editing) {
+    return (
+      <InlineRiskForm
+        draft={draft}
+        setDraft={setDraft}
+        members={members}
+        onSave={onSave}
+        onCancel={onCancel}
+      />
+    );
+  }
 
+  return (
+    <div className="grid grid-cols-12 items-center gap-2 border-t border-line-tertiary px-4 py-3 text-sm">
+      <div className="col-span-2 font-medium text-ink-primary">{risk.title}</div>
+      <div className="col-span-1 text-ink-secondary">{displayName(memberMap, risk.owner_id)}</div>
+      <div className="col-span-1"><Badge tone="neutral" size="sm">{risk.likelihood || "—"}</Badge></div>
+      <div className="col-span-1"><Badge tone="neutral" size="sm">{risk.impact || "—"}</Badge></div>
+      <div className="col-span-1"><Badge tone={riskSeverityTone(risk.severity)} size="sm">{risk.severity || "—"}</Badge></div>
+      <div className="col-span-1"><Badge tone={riskStatusTone(risk.status)} size="sm">{risk.status}</Badge></div>
+      <div className="col-span-3 truncate text-ink-secondary" title={risk.mitigation || undefined}>{risk.mitigation || "—"}</div>
+      <div className="col-span-1 text-xs text-ink-tertiary">{fmtDate(risk.updated_at)}</div>
+      <div className="col-span-1 flex gap-1">
+        {canEdit && (
+          <>
+            <Button variant="ghost" size="icon" onClick={onEdit} title="Edit"><IconPencil size={14} /></Button>
+            <Button variant="ghost" size="icon" onClick={onDelete} title="Delete"><IconTrash size={14} /></Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
