@@ -327,7 +327,7 @@ class ProjectContextAuditEventRead(BaseModel):
 
 class ProjectContextAuditList(BaseModel):
     items: list[ProjectContextAuditEventRead]
-
+    total: int
 
 class KpiSourceMatchJobCreate(BaseModel):
     expected_version: int | None = None
