@@ -4,6 +4,7 @@ import {
   IconSparkles,
   IconBulb,
   IconFileText,
+  IconDatabaseShare,
 
   IconTopologyStar3,
   IconHistory,
@@ -43,6 +44,12 @@ function isInsightReviewer(user?: CurrentUser): boolean {
   if (user.permissions?.includes(REVIEW_PERMISSION)) return true;
   const adminRoles = ["admin", "tenant_admin", "root_admin"];
   return adminRoles.includes(user.rawRole ?? "");
+}
+
+function canManageAdminTools(user?: CurrentUser): boolean {
+  if (!user) return false;
+  const adminRoles = ["admin", "tenant_admin", "root_admin"];
+  return adminRoles.includes(user.rawRole ?? "") || Boolean(user.isSuperAdmin);
 }
 
 export function homeNavGroups(user?: CurrentUser): NavGroup[] {
@@ -96,7 +103,16 @@ export function homeNavGroups(user?: CurrentUser): NavGroup[] {
           href: "/database-connectors",
           icon: IconDatabase,
         },
-
+        ...(canManageAdminTools(user)
+          ? [
+              {
+                key: "admin-data-source-assignments" as NavKey,
+                label: "Data Source Assignments",
+                href: "/admin/data-source-assignments",
+                icon: IconDatabaseShare,
+              },
+            ]
+          : []),
       ],
     },
   ];
@@ -160,7 +176,7 @@ export function projectNavGroups(projectId: string): NavGroup[] {
         },
         {
           key: "project-business-context",
-          label: "Business Context",
+          label: "Goal Setting",
           href: `${base}/business-context`,
           icon: IconBuildingBank,
         },

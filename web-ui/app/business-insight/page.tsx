@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useMemo, useState } from "react";
+import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconHelpCircle } from "@tabler/icons-react";
@@ -23,6 +23,7 @@ import { TurnBubble } from "@/components/tablescope/conversation/conversation-tu
 import {
   createConversation,
   getConversation,
+  listConversations,
   submitTurn,
   type Conversation,
   type ConversationTurn,
@@ -123,6 +124,34 @@ export default function BusinessInsightPage() {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [createActionOpen, setCreateActionOpen] = useState(false);
+
+  // Resume the single Business Insights conversation instead of creating a new
+  // one every time the page is opened.
+  const hasResumedRef = useRef(false);
+  useEffect(() => {
+    if (hasResumedRef.current) return;
+    hasResumedRef.current = true;
+    let cancelled = false;
+    async function resume() {
+      try {
+        const convos = await listConversations();
+        const match = convos.find(
+          (c) => c.title === "Business Insights" && c.project_id == null,
+        );
+        if (!match) return;
+        const full = await getConversation(match.id);
+        if (cancelled) return;
+        setChatConversationId(full.id);
+        setChatTurns(full.turns);
+      } catch {
+        // ignore resume errors; the user can start a fresh conversation
+      }
+    }
+    void resume();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
 
   const handleCreateAction = useCallback((card: InsightCard) => {

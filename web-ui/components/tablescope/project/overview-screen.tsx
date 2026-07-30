@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   IconUsers,
@@ -29,6 +29,7 @@ import { TurnBubble } from "@/components/tablescope/conversation/conversation-tu
 import {
   createConversation,
   getConversation,
+  listConversations,
   submitTurn,
   type Conversation,
   type ConversationTurn,
@@ -129,6 +130,35 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
+  // Resume the single Project Insights conversation for this project so
+  // successive asks (including from the AI Assistant) share history.
+  const hasResumedRef = useRef(false);
+  useEffect(() => {
+    if (hasResumedRef.current) return;
+    hasResumedRef.current = true;
+    let cancelled = false;
+    async function resume() {
+      try {
+        const pid = Number(projectId);
+        const convos = await listConversations(pid);
+        const match = convos.find(
+          (c) => c.title === "Project Insights" && c.project_id === pid,
+        );
+        if (!match) return;
+        const full = await getConversation(match.id);
+        if (cancelled) return;
+        setChatConversationId(full.id);
+        setChatTurns(full.turns);
+      } catch {
+        // ignore resume errors
+      }
+    }
+    void resume();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
   const pollConversation = useCallback(async (id: number): Promise<Conversation> => {
     for (let i = 0; i < 60; i++) {
       const data = await getConversation(id);
@@ -147,6 +177,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         if (chatConversationId == null) {
           const created = await createConversation({
             project_id: Number(projectId),
+            title: "Project Insights",
             initial_message: message,
           });
           const polled = await pollConversation(created.id);
@@ -167,12 +198,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
     [chatConversationId, projectId, pollConversation],
   );
 
-  const goAsk = (prompt: string) => {
-    const q = prompt.trim();
-    router.push(
-      `/projects/${projectId}/ai${q ? `?q=${encodeURIComponent(q)}` : ""}`,
-    );
-  };
+
 
   return (
     <ProjectShell
@@ -196,7 +222,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         <ContextPanel
           title="AI Context"
           askPlaceholder="Ask about this project…"
-          onAsk={goAsk}
+          onAsk={handleAsk}
         >
           <IsolationCard
             tenant={tenant.name}

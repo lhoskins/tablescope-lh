@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import {
   hasSupabaseSession,
   setPasswordAndExchange,
   storeToken,
   storeUserMeta,
+  verifyRecoveryToken,
 } from "@/lib/auth";
 
 export default function SetPasswordPage() {
   const router = useRouter();
   const params = useParams<{ slug: string }>();
+  const searchParams = useSearchParams();
   const tenantSlug = params.slug;
 
   const [ready, setReady] = useState(false);
@@ -20,20 +22,41 @@ export default function SetPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // The invite/recovery link establishes a Supabase session from the URL hash.
+  // The invite/recovery link establishes a Supabase session either from a URL
+  // hash fragment (magic link) or from a token_hash passed in the query string
+  // (Tablescope-branded reset email).
   useEffect(() => {
     let cancelled = false;
     async function check() {
-      // Give supabase-js a tick to parse the hash and persist the session.
-      for (let i = 0; i < 20; i += 1) {
-        if (cancelled) return;
-        if (await hasSupabaseSession()) {
-          if (!cancelled) setReady(true);
+      const tokenHash = searchParams.get("token_hash");
+      const type = searchParams.get("type");
+      if (tokenHash && type === "recovery") {
+        try {
+          await verifyRecoveryToken(tokenHash);
+        } catch (err) {
+          if (!cancelled) {
+            setError(
+              (err as Error).message ||
+                "This link is invalid or has expired. Request a new one from the sign-in page.",
+            );
+          }
           return;
         }
-        await new Promise((r) => setTimeout(r, 150));
+      } else {
+        // Wait for supabase-js to detect the session from a magic/recovery hash.
+        for (let i = 0; i < 20; i += 1) {
+          if (cancelled) return;
+          if (await hasSupabaseSession()) {
+            if (!cancelled) setReady(true);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 150));
+        }
       }
-      if (!cancelled) {
+      if (cancelled) return;
+      if (await hasSupabaseSession()) {
+        setReady(true);
+      } else {
         setError(
           "This link is invalid or has expired. Request a new one from the sign-in page.",
         );
@@ -43,7 +66,7 @@ export default function SetPasswordPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [searchParams]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
