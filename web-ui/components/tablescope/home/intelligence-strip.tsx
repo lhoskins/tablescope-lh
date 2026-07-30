@@ -3,6 +3,7 @@
 import { useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { IconFilter, IconRefresh, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { DepthControl } from "@/components/tablescope/insights/depth-control";
 
 export interface FilterableProject {
   id: string;
@@ -10,16 +11,9 @@ export interface FilterableProject {
   accent?: string;
 }
 
-const GRANULARITY_LABELS: Record<number, string> = {
-  1: "Executive",
-  2: "Strategic",
-  3: "Balanced",
-  4: "Detailed",
-  5: "Granular",
-};
-
 export interface IntelligenceStripProps {
-  projectCount: number;
+  scope?: "business" | "project";
+  projectCount?: number;
   /** Total accessible projects; when provided, a subset is rendered as "Showing X of Y". */
   totalProjectCount?: number;
   running: boolean;
@@ -139,7 +133,8 @@ function ProjectFilter({
 }
 
 export function IntelligenceStrip({
-  projectCount,
+  scope = "business",
+  projectCount = 0,
   totalProjectCount,
   running,
   lastUpdatedLabel,
@@ -154,22 +149,38 @@ export function IntelligenceStrip({
   onSelectAll,
   onClear,
 }: IntelligenceStripProps) {
+  const isProject = scope === "project";
   const isFiltered =
-    totalProjectCount != null && totalProjectCount > 0 && projectCount < totalProjectCount;
+    !isProject &&
+    totalProjectCount != null &&
+    totalProjectCount > 0 &&
+    projectCount < totalProjectCount;
+
+  const toolbarLabel = isProject ? "Project Insights toolbar" : "Business Insights toolbar";
+  const clearCacheLabel = isProject
+    ? "Clear Project Insight cache"
+    : "Clear Business Insight cache";
+  const refreshLabel = isProject ? "Refresh project insights" : "Refresh intelligence";
+
+  const runningText = isProject
+    ? "Analyzing this project…"
+    : `Analyzing ${projectCount} project${projectCount === 1 ? "" : "s"}…`;
 
   return (
     <div
       className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
-      aria-label="Business Insights toolbar"
+      aria-label={toolbarLabel}
     >
       <div className="flex flex-wrap items-center gap-3">
-        <ProjectFilter
-          availableProjects={availableProjects}
-          selectedProjectIds={selectedProjectIds}
-          onToggleProject={onToggleProject}
-          onSelectAll={onSelectAll}
-          onClear={onClear}
-        />
+        {!isProject && (
+          <ProjectFilter
+            availableProjects={availableProjects}
+            selectedProjectIds={selectedProjectIds}
+            onToggleProject={onToggleProject}
+            onSelectAll={onSelectAll}
+            onClear={onClear}
+          />
+        )}
         {isFiltered && (
           <span className="text-small text-ink-tertiary">
             {projectCount} of {totalProjectCount} projects
@@ -184,7 +195,7 @@ export function IntelligenceStrip({
             aria-live="polite"
           >
             <IconSparkles size={16} className="animate-pulse" aria-hidden />
-            Analyzing {projectCount} project{projectCount === 1 ? "" : "s"}…
+            {runningText}
           </span>
         )}
 
@@ -193,19 +204,10 @@ export function IntelligenceStrip({
           title="Slide from high-level executive insights to fine-grained, detailed analyses"
         >
           <span className="hidden sm:inline">Depth</span>
-          <input
-            type="range"
-            min={1}
-            max={5}
-            step={1}
+          <DepthControl
             value={granularity}
-            onChange={(e) => onGranularityChange(Number(e.target.value))}
-            aria-label="Insight granularity"
-            className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-bg-tertiary accent-brand"
+            onChange={onGranularityChange}
           />
-          <span className="w-16 text-ink-primary">
-            {GRANULARITY_LABELS[granularity] ?? "Balanced"}
-          </span>
         </label>
 
         {lastUpdatedLabel && (
@@ -217,8 +219,8 @@ export function IntelligenceStrip({
             type="button"
             onClick={onClearCache}
             disabled={isClearingCache}
-            title="Clear cached Business Insight cards"
-            aria-label="Clear Business Insight cache"
+            title={clearCacheLabel}
+            aria-label={clearCacheLabel}
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-ink-secondary transition-colors hover:bg-bg-tertiary disabled:opacity-50"
           >
             <IconTrash size={15} />
@@ -228,7 +230,8 @@ export function IntelligenceStrip({
         <button
           type="button"
           onClick={onRefresh}
-          aria-label="Refresh intelligence"
+          aria-label={refreshLabel}
+          title={refreshLabel}
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-ink-secondary transition-colors hover:bg-bg-tertiary"
         >
           <IconRefresh

@@ -166,6 +166,7 @@ export default function BusinessInsightPage() {
       try {
         if (chatConversationId == null) {
           const created = await createConversation({
+            title: "Business Insights",
             initial_message: message,
           });
           const polled = await pollConversation(created.id);
