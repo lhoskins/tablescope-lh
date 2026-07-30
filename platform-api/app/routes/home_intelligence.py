@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
+from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models.audit_event import AuditEvent
 from app.models.business_insight_result import BusinessInsightResult
@@ -45,7 +46,10 @@ from app.routes.query import (
 from app.services import dashboard_widget as dw
 from app.services import home_intel_queue as q
 from app.services import home_intelligence as hi
+from app.services import percent_change_summary as pcs
+from app.services import time_series_transform as tst
 from app.services.ai_intelligence_client import AIUnavailableError
+from app.services.home_intel_queue import get_redis
 from app.services.presentation_engine import PresentationMode
 from app.services.response_envelope import attach_envelope
 from app.services.teiid_sql import (
@@ -1417,3 +1421,202 @@ async def save_card_to_dashboard(
         "query_id": query.id,
         "widget_id": widget_config["id"],
     }
+
+
+def _find_card_in_payload(payload: Any, insight_id: str) -> dict[str, Any] | None:
+    """Flatten nested insight lists and locate a card by insightId or id."""
+    if not isinstance(payload, dict):
+        return None
+    for key in (
+        "insights",
+        "risks",
+        "trends",
+        "opportunities",
+        "analysis",
+        "trendDetection",
+        "recommendedKpis",
+    ):
+        items = payload.get(key)
+        if not isinstance(items, list):
+            continue
+        for card in items:
+            if isinstance(card, dict) and (
+                card.get("insightId") == insight_id or str(card.get("id")) == insight_id
+            ):
+                return card
+    results = payload.get("results")
+    if isinstance(results, list):
+        for r in results:
+            card = _find_card_in_payload(r, insight_id)
+            if card is not None:
+                return card
+    return None
+
+
+async def _resolve_insight_card(
+    session: AsyncSession,
+    context: RequestContext,
+    project: Project,
+    insight_id: str,
+) -> dict[str, Any] | None:
+    """Find the canonical insight card across all authorized snapshot stores."""
+    snap = await session.scalar(
+        select(IntelligenceSnapshot).where(IntelligenceSnapshot.user_id == context.user_id)
+    )
+    if snap and snap.payload:
+        card = _find_card_in_payload(snap.payload, insight_id)
+        if card and str(card.get("projectId") or card.get("project_id") or "") == str(project.id):
+            return card
+
+    pis = await session.scalar(
+        select(ProjectIntelligenceSnapshot).where(
+            ProjectIntelligenceSnapshot.tenant_id == context.tenant_id,
+            ProjectIntelligenceSnapshot.user_id == context.user_id,
+            ProjectIntelligenceSnapshot.project_id == project.id,
+            ProjectIntelligenceSnapshot.suite == "project_insight",
+        )
+    )
+    if pis and pis.payload:
+        card = _find_card_in_payload(pis.payload, insight_id)
+        if card:
+            return card
+
+    bis = await session.scalar(
+        select(BusinessInsightResult).where(
+            BusinessInsightResult.tenant_id == context.tenant_id,
+            BusinessInsightResult.project_id == project.id,
+        )
+    )
+    if bis and bis.payload:
+        card = _find_card_in_payload(bis.payload, insight_id)
+        if card:
+            return card
+    return None
+
+
+@router.get("/insights/{insight_id}/time-series")
+async def get_insight_time_series(
+    insight_id: str,
+    project_id: int,
+    interval: str = "month",
+    range: str = "1y",
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Return deterministic time-series points and percent-change for a card."""
+    project = await session.get(Project, project_id)
+    if (
+        project is None
+        or project.tenant_id != context.tenant_id
+        or not await _has_access(session, context, project)
+    ):
+        raise HTTPException(status_code=404, detail="Insight not found")
+
+    card = await _resolve_insight_card(session, context, project, insight_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Insight not found")
+
+    fp = (card.get("evidenceFingerprint") or {}).get("resultFingerprint") or ""
+    cache_key = (
+        f"ts:{context.tenant_id}:{project.id}:{insight_id}:{interval}:{range}:"
+        f"{fp or card.get('insightId') or card.get('id')}:v1"
+    )
+    try:
+        redis = get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(str(cached))
+    except Exception:
+        logger.exception("time-series cache read failed")
+
+    timezone_name = "UTC"
+    response = tst.transform_card_time_series(
+        card, insight_id, interval, range, timezone_name
+    )
+
+    try:
+        ttl = max(60, get_settings().home_intelligence_run_result_ttl_seconds)
+        await redis.setex(
+            cache_key,
+            ttl,
+            json.dumps(response.model_dump(mode="json"), default=str),
+        )
+    except Exception:
+        logger.exception("time-series cache write failed")
+
+    return response.model_dump(mode="json")
+
+
+@router.post("/insights/percent-change-summary")
+async def get_percent_change_summary(
+    request: pcs.PercentChangeSummaryRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Return a cross-project percent-change summary aligned to one shared axis.
+
+    The caller may supply a subset of project IDs; the server intersects that
+    list with the projects the user is authorized to view. Unauthorized IDs are
+    ignored and are never reflected in counts or response bodies.
+    """
+    accessible = await _accessible_projects(session, context)
+
+    if request.project_ids:
+        allowed = [p for p in accessible if p.id in set(request.project_ids)]
+    else:
+        allowed = accessible
+
+    snap = await session.scalar(
+        select(IntelligenceSnapshot).where(
+            IntelligenceSnapshot.user_id == context.user_id,
+        )
+    )
+    snapshot_payload: dict[str, Any] = {}
+    snapshot_fingerprint = "none"
+    if snap and snap.payload:
+        snapshot_payload = snap.payload
+        snapshot_fingerprint = (
+            snap.updated_at.isoformat() if snap.updated_at else "none"
+        )
+
+    as_of = datetime.now(UTC).date()
+    project_id_str = ",".join(str(p.id) for p in sorted(allowed, key=lambda p: p.id))
+    sort = request.sort or pcs.SummarySort()
+    cache_key = (
+        f"pcs:{context.tenant_id}:{context.user_id}:{snapshot_fingerprint}:"
+        f"{project_id_str}:{request.interval}:{request.range}:{as_of}:"
+        f"{request.search or ''}:{sort.field}:{sort.direction}:"
+        f"{request.cursor or ''}:{request.page_size}:v1"
+    )
+
+    try:
+        redis = get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(str(cached))
+    except Exception:
+        logger.exception("percent-change-summary cache read failed")
+
+    try:
+        response = await asyncio.to_thread(
+            pcs.build_percent_change_summary,
+            allowed,
+            snapshot_payload,
+            request,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        await redis.setex(
+            cache_key,
+            120,
+            json.dumps(response.model_dump(mode="json"), default=str),
+        )
+    except Exception:
+        logger.exception("percent-change-summary cache write failed")
+
+    return response.model_dump(mode="json")

@@ -23,6 +23,19 @@ class DirectLoginRequest(BaseModel):
     tenant_slug: str | None = None
 
 
+class ForgotPasswordRequest(BaseModel):
+    """Request a password-reset email for a tenant user."""
+
+    email: str = Field(min_length=1)
+    tenant_slug: str = Field(min_length=1)
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Generic response to avoid email enumeration."""
+
+    message: str = "If that email has an account, a password-reset link is on its way."
+
+
 class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "Bearer"

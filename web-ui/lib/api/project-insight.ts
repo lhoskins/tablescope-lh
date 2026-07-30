@@ -128,6 +128,8 @@ export interface ProjectInsightCard {
   confidenceEvaluation?: Record<string, unknown>;
   visualizationDecision?: Record<string, unknown>;
   chartCandidates?: Record<string, unknown>[];
+  /** Active time-series view (mode/interval/range) captured for Home pins and dashboards. */
+  timeSeriesView?: import("./home-intelligence").TimeSeriesViewState;
 }
 
 export interface WhatChangedSinceLastVisit {

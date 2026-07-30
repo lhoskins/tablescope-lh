@@ -32,6 +32,12 @@ from app.database import SessionLocal
 from app.models.shared_vdb import SharedVDB
 from app.models.user_vdb import UserVDB
 from app.services.vdb_management import VDBManagementService
+from app.tasks.llm_framework import (
+    convert_fp16_to_gguf,
+    deploy_llm_artifact,
+    reindex_embedding_model,
+    stage_llm_artifact,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1250,6 +1256,36 @@ async def analyze_project_intelligence(
         await q.release_tenant_slot(tenant_id)
 
 
+async def enqueue_reindex_embedding_model(migration_id: int, requested_by_user_id: int) -> str:
+    """Enqueue an embedding re-index migration."""
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    pool = await create_pool(redis_settings)
+    try:
+        job = await pool.enqueue_job(
+            "reindex_embedding_model",
+            migration_id=migration_id,
+            requested_by_user_id=requested_by_user_id,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def enqueue_convert_fp16_to_gguf(conversion_id: int, requested_by_user_id: int) -> str:
+    """Enqueue an FP16 -> GGUF conversion."""
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    pool = await create_pool(redis_settings)
+    try:
+        job = await pool.enqueue_job(
+            "convert_fp16_to_gguf",
+            conversion_id=conversion_id,
+            requested_by_user_id=requested_by_user_id,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
 async def _configure_worker_logging(ctx: dict[str, Any]) -> None:
     """Configure structured logging for the arq worker."""
     from app.logging_config import configure_logging
@@ -1275,6 +1311,10 @@ class WorkerSettings:
         reprocess_project,
         refresh_business_insight_result,
         rebuild_project_insight,
+        stage_llm_artifact,
+        deploy_llm_artifact,
+        reindex_embedding_model,
+        convert_fp16_to_gguf,
     ]
     cron_jobs: ClassVar[list] = [
         # Detect source drift every 15 minutes and mark affected graphs stale.

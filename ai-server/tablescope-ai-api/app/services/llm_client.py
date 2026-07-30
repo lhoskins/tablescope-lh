@@ -271,21 +271,29 @@ async def repair_sql(
     )
 
 
-async def generate_embeddings(texts: list[str]) -> list[list[float]]:
-    """Generate embeddings using nomic-embed-text."""
+async def generate_embeddings(texts: list[str], *, model: str | None = None) -> list[list[float]]:
+    """Generate embeddings using the configured or requested model."""
     embeddings = []
+    selected_model = model or settings.embedding_model
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         for text in texts:
             resp = await client.post(
                 f"{settings.ollama_url}/api/embeddings",
                 json={
-                    "model": settings.embedding_model,
+                    "model": selected_model,
                     "prompt": text,
                 },
             )
             resp.raise_for_status()
             embeddings.append(resp.json()["embedding"])
     return embeddings
+
+
+async def generate_embeddings_with_model(
+    texts: list[str], *, model: str
+) -> list[list[float]]:
+    """Generate embeddings with an explicit model name."""
+    return await generate_embeddings(texts, model=model)
 
 
 async def generate_embedding(text: str) -> list[float]:

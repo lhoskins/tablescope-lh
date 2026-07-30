@@ -104,7 +104,10 @@ export function SaveInsightToDashboardModal({
       labelColumn: card.labelColumn,
       valueColumn: card.valueColumn,
       valueColumn2: card.valueColumn2,
-      visualizationOptions: getDefaultOptions(card.chartType || "bar"),
+      visualizationOptions: {
+        ...getDefaultOptions(card.chartType || "bar"),
+        ...(card.timeSeriesView ? { timeSeriesView: card.timeSeriesView } : {}),
+      },
     };
     if (mode === "existing" && selectedDashboardId !== null) {
       payload.dashboard_id = selectedDashboardId;
