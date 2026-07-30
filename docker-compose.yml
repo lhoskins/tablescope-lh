@@ -126,6 +126,9 @@ services:
       LLM_OLLAMA_URL: ${LLM_OLLAMA_URL:-http://ollama:11434}
       LLM_MODEL_INSTALL_PATH: ${LLM_MODEL_INSTALL_PATH:-/mnt/tablescope-ai/ollama/models/imported}
       LLM_OLLAMA_ROLLBACK_SLOTS: ${LLM_OLLAMA_ROLLBACK_SLOTS:-1}
+      # Business Context (Goal Setting) workspace
+      BUSINESS_CONTEXT_V2_ENABLED: ${BUSINESS_CONTEXT_V2_ENABLED:-true}
+      BUSINESS_CONTEXT_KPI_MATCHING_ENABLED: ${BUSINESS_CONTEXT_KPI_MATCHING_ENABLED:-true}
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       # Read-write access to per-tenant root so the platform API can manage
