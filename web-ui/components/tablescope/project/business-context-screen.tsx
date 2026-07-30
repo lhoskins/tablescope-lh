@@ -105,14 +105,23 @@ function metricOnTrack(metric: ProjectMetric): boolean {
 }
 
 function metricTrend(metric: ProjectMetric): "up" | "down" | "flat" {
+  const meta = metricTrendMeta(metric);
+  return meta.direction;
+}
+
+function metricTrendMeta(metric: ProjectMetric): { direction: "up" | "down" | "flat"; label: string; tone: BadgeProps["tone"] } {
   const target = metric.targets?.find((t) => t.active && t.status !== "archived");
   const current = metric.latest_value != null ? Number(metric.latest_value) : null;
   const targetValue = target?.target_value != null ? Number(target.target_value) : null;
-  if (current == null || targetValue == null) return "flat";
-  if (metric.directionality === "lower_is_better") {
-    return current <= targetValue ? "down" : "up";
+  if (current == null || targetValue == null) return { direction: "flat", label: "—", tone: "neutral" };
+  let onTrack = false;
+  if (metric.directionality === "lower_is_better") onTrack = current <= targetValue;
+  else if (metric.directionality === "higher_is_better") onTrack = current >= targetValue;
+  else onTrack = current === targetValue;
+  if (onTrack) {
+    return { direction: "up", label: "Improving", tone: "success" };
   }
-  return current >= targetValue ? "up" : "down";
+  return { direction: "down", label: "Watch", tone: "warning" };
 }
 
 function goalProgress(goal: ProjectGoal, metrics: ProjectMetric[]): number {
@@ -428,34 +437,29 @@ function SummaryCards({
   onTrackPercent: number;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <SummaryCard label="Success criteria" value={goalCount} />
-      <SummaryCard label="KPIs" value={kpiCount} />
-      <SummaryCard label="Project risks" value={riskCount} />
-      <Card>
-        <CardBody className="p-4">
-          <div className="text-sm text-ink-secondary">On track</div>
-          <div className="mt-1 flex items-end gap-2">
-            <span className="text-3xl font-semibold text-ink-primary">{onTrackPercent}%</span>
-          </div>
-          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-bg-secondary">
-            <div
-              className="h-full rounded-full bg-success transition-all"
-              style={{ width: `${onTrackPercent}%` }}
-            />
-          </div>
-        </CardBody>
-      </Card>
-    </div>
-  );
-}
-
-function SummaryCard({ label, value }: { label: string; value: number }) {
-  return (
     <Card>
-      <CardBody className="p-4">
-        <div className="text-sm text-ink-secondary">{label}</div>
-        <div className="mt-1 text-3xl font-semibold text-ink-primary">{value}</div>
+      <CardBody className="p-0">
+        <div className="grid grid-cols-1 divide-y divide-line-tertiary sm:grid-cols-2 sm:divide-y-0 sm:divide-x lg:grid-cols-4">
+          <div className="flex items-center gap-3 px-6 py-4">
+            <span className="text-3xl font-semibold text-ink-primary">{goalCount}</span>
+            <span className="text-sm text-ink-secondary">Success criteria</span>
+          </div>
+          <div className="flex items-center gap-3 px-6 py-4">
+            <span className="text-3xl font-semibold text-ink-primary">{kpiCount}</span>
+            <span className="text-sm text-ink-secondary">KPIs</span>
+          </div>
+          <div className="flex items-center gap-3 px-6 py-4">
+            <span className="text-3xl font-semibold text-ink-primary">{riskCount}</span>
+            <span className="text-sm text-ink-secondary">Project risks</span>
+          </div>
+          <div className="flex items-center gap-3 px-6 py-4">
+            <span className="text-3xl font-semibold text-ink-primary">{onTrackPercent}%</span>
+            <span className="text-sm text-ink-secondary">On track</span>
+            <div className="ml-auto h-2 w-24 overflow-hidden rounded-full bg-bg-secondary">
+              <div className="h-full rounded-full bg-success" style={{ width: `${onTrackPercent}%` }} />
+            </div>
+          </div>
+        </div>
       </CardBody>
     </Card>
   );
@@ -711,7 +715,11 @@ function SuccessCriteriaSection({
               {isOpen && (
                 <div className="bg-bg-secondary px-4 pb-4">
                   <div className="rounded-md border border-line-tertiary bg-bg-primary">
-                    <div className="grid grid-cols-12 gap-2 border-b border-line-tertiary px-3 py-2 text-xs font-medium uppercase tracking-wide text-ink-tertiary">
+                    <div className="border-b border-line-tertiary px-3 py-2">
+                      <div className="text-sm font-semibold text-ink-primary">KPIs</div>
+                      <div className="text-xs text-ink-secondary">Key indicators used to evaluate this success criterion.</div>
+                    </div>
+                    <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs font-medium uppercase tracking-wide text-ink-tertiary">
                       <div className="col-span-3">KPI</div>
                       <div className="col-span-1">Current</div>
                       <div className="col-span-1">Target</div>
@@ -875,7 +883,7 @@ function KpiRow({
   onCancel: () => void;
 }) {
   const target = metric.targets?.find((t) => t.active && t.status !== "archived");
-  const trend = metricTrend(metric);
+  const trendMeta = metricTrendMeta(metric);
   const currentValue = metric.latest_value != null ? Number(metric.latest_value) : null;
   const targetValue = target?.target_value != null ? Number(target.target_value) : null;
 
@@ -913,7 +921,10 @@ function KpiRow({
       <div className="col-span-1 text-ink-secondary">{fmtNumber(currentValue, metric.format, metric.unit)}</div>
       <div className="col-span-1 text-ink-secondary">{formatTarget(targetValue, metric.directionality, metric.format, metric.unit)}</div>
       <div className="col-span-1">
-        {trend === "up" ? <IconTrendingUp size={16} className="text-success" /> : trend === "down" ? <IconTrendingDown size={16} className="text-danger" /> : <IconMinus size={16} className="text-ink-tertiary" />}
+        <Badge tone={trendMeta.tone} size="sm" className="gap-1">
+          {trendMeta.direction === "up" ? <IconTrendingUp size={14} /> : trendMeta.direction === "down" ? <IconTrendingDown size={14} /> : <IconMinus size={14} />}
+          {trendMeta.label}
+        </Badge>
       </div>
       <div className="col-span-2 text-ink-secondary">{metric.cadence || "—"}</div>
       <div className="col-span-2 text-ink-secondary">{dataSource}</div>
