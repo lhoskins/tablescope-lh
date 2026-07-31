@@ -24,7 +24,7 @@ import type {
   ProjectSummary,
   TenantSummary,
 } from "@/lib/ui/types";
-import { BrandMark } from "./brand-mark";
+
 import {
   homeNavGroups,
   projectNavGroups,
@@ -188,9 +188,10 @@ export function Sidebar({
           <Link
             href="/"
             title="Tablescope home"
+            aria-label="Tablescope home"
             className="transition-opacity hover:opacity-80"
           >
-            <BrandMark />
+            <span className="text-h2 font-bold text-ink-primary">T</span>
           </Link>
           <button
             type="button"
@@ -206,10 +207,10 @@ export function Sidebar({
         <div className="flex items-center gap-2 px-4 py-3.5">
           <Link
             href="/"
+            aria-label="Tablescope home"
             className="flex min-w-0 flex-1 items-center gap-2 transition-opacity hover:opacity-80"
           >
-            <BrandMark />
-            <span className="truncate text-h2 text-ink-primary">Tablescope</span>
+            <span className="truncate text-h2 font-bold text-ink-primary">Tablescope</span>
           </Link>
           <button
             type="button"
