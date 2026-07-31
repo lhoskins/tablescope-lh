@@ -187,7 +187,7 @@ export function InsightCardActionToolbar({
       <div className="mt-3 space-y-2 border-t border-line-tertiary pt-3">
         <InsightCardSourceRow card={card} />
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2" data-export-hide>
         {canCreateAction && onCreateAction && (
           <Button
             type="button"
