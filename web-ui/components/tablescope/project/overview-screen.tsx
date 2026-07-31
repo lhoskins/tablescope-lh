@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,7 +28,6 @@ import { TurnBubble } from "@/components/tablescope/conversation/conversation-tu
 import {
   createConversation,
   getConversation,
-  listConversations,
   submitTurn,
   type Conversation,
   type ConversationTurn,
@@ -98,6 +97,7 @@ async function pollConversation(id: number): Promise<Conversation> {
 }
 
 export function OverviewScreen({ projectId }: { projectId: string }) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { project, tenant, user } = useProjectShell(projectId);
   const { data: queries } = useProjectQueries(projectId);
@@ -115,33 +115,11 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const [chatConversationId, setChatConversationId] = useState<number | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
-  const hasResumedRef = useRef(false);
 
-  useEffect(() => {
-    if (hasResumedRef.current) return;
-    hasResumedRef.current = true;
-    let cancelled = false;
-    async function resume() {
-      try {
-        const pid = Number(projectId);
-        const convos = await listConversations(pid);
-        const match =
-          convos.find((c) => c.surface === PROJECT_INSIGHTS_SURFACE && c.project_id === pid) ??
-          convos.find((c) => c.title === PROJECT_INSIGHTS_TITLE && c.project_id === pid);
-        if (!match) return;
-        const full = await getConversation(match.id);
-        if (cancelled) return;
-        setChatConversationId(full.id);
-        setChatTurns(full.turns);
-      } catch {
-        // ignore resume errors
-      }
-    }
-    void resume();
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
+  const openInAssistant = useCallback(() => {
+    if (chatConversationId == null) return;
+    router.push(`/ai?conversation=${chatConversationId}&projectId=${projectId}`);
+  }, [chatConversationId, projectId, router]);
 
   const handleAsk = useCallback(
     async (message: string) => {
@@ -335,6 +313,14 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
         {(chatTurns.length > 0 || chatBusy || chatError) && (
           <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-h3 text-ink-primary">Ask Anything</h3>
+              {chatConversationId && (
+                <Button variant="ghost" size="sm" onClick={openInAssistant}>
+                  Open in AI Assistant
+                </Button>
+              )}
+            </div>
             {chatTurns.map((t, i) => (
               <TurnBubble
                 key={t.id}
