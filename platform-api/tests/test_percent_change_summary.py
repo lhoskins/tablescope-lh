@@ -5,8 +5,22 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from datetime import date
 
 from app.services import percent_change_summary as pcs
+
+
+@pytest.fixture(autouse=True)
+def _fixed_today(monkeypatch):
+    """Freeze percent-change summary's "today" so tests are deterministic."""
+    fixed = date(2026, 6, 30)
+
+    class _FixedDate:
+        @staticmethod
+        def today():
+            return fixed
+
+    monkeypatch.setattr(pcs, "date", _FixedDate)
 
 
 def _project(pid: int, name: str = "Project"):
