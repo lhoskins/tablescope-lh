@@ -15,6 +15,7 @@ import {
   IconUsers,
   IconServer,
   IconRobot,
+  IconShieldCheck,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import type { CurrentUser } from "@/lib/ui/types";
@@ -26,6 +27,14 @@ export interface SettingsNavItem {
   icon: React.ComponentType<{ size?: number; className?: string }>;
   section: string;
   visible: () => boolean;
+}
+
+const REVIEW_PERMISSION = "insight_feedback.review";
+
+function isInsightReviewer(user?: CurrentUser): boolean {
+  if (!user) return false;
+  if (user.permissions?.includes(REVIEW_PERMISSION)) return true;
+  return ["admin", "tenant_admin", "root_admin"].includes(user.rawRole ?? "");
 }
 
 export function useSettingsNavItems(user?: CurrentUser): {
@@ -109,6 +118,14 @@ export function useSettingsNavItems(user?: CurrentUser): {
       icon: IconBrain,
       section: "Intelligence",
       visible: () => isAdmin,
+    },
+    {
+      key: "insight-feedback-review",
+      label: "Insight Review",
+      href: "/admin/settings/insight-feedback",
+      icon: IconShieldCheck,
+      section: "Intelligence",
+      visible: () => isAdmin || isInsightReviewer(user),
     },
     {
       key: "platform-tenants",

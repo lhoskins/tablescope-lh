@@ -27,7 +27,6 @@ import { projectInsightApi, type ProjectInsight } from "@/lib/api/project-insigh
 import {
   createConversation,
   getConversation,
-  listConversations,
   submitTurn,
   type Conversation,
   type ConversationTurn,
@@ -327,29 +326,6 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const [chatError, setChatError] = useState<string | null>(null);
   const [chatPending, setChatPending] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (Number.isNaN(projectIdNum)) return;
-    listConversations(projectIdNum)
-      .then((summaries) => {
-        if (cancelled) return;
-        const existing = summaries.find(
-          (c) => c.surface === "project_insights",
-        );
-        if (existing) {
-          getConversation(existing.id)
-            .then((conversation) => {
-              if (!cancelled) setChatConversation(conversation);
-            })
-            .catch(() => {});
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [projectIdNum]);
-
   const handleProjectAsk = useCallback(
     async (message: string) => {
       setChatBusy(true);
@@ -387,7 +363,11 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
 
   const openInAssistant = () => {
     if (!chatConversation) return;
-    router.push(`/projects/${projectId}/ai?conversation=${chatConversation.id}`);
+    const params = new URLSearchParams({ conversation: String(chatConversation.id) });
+    if (chatConversation.project_id != null) {
+      params.set("projectId", String(chatConversation.project_id));
+    }
+    router.push(`/ai?${params.toString()}`);
   };
 
   const analysisChildren = useMemo(() => {

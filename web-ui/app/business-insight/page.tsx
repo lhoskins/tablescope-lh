@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useMemo, useRef, useState } from "react";
+import { useEffect, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconHelpCircle } from "@tabler/icons-react";
@@ -23,7 +23,6 @@ import { TurnBubble } from "@/components/tablescope/conversation/conversation-tu
 import {
   createConversation,
   getConversation,
-  listConversations,
   submitTurn,
   type Conversation,
   type ConversationTurn,
@@ -126,38 +125,6 @@ export default function BusinessInsightPage() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [createActionOpen, setCreateActionOpen] = useState(false);
 
-  // Resume the single Business Insights conversation instead of creating a new
-  // one every time the page is opened.
-  const hasResumedRef = useRef(false);
-  useEffect(() => {
-    if (hasResumedRef.current) return;
-    hasResumedRef.current = true;
-    let cancelled = false;
-    async function resume() {
-      try {
-        const convos = await listConversations();
-        const matches = convos
-          .filter((c) => c.surface === "business_insights")
-          .sort(
-            (a, b) =>
-              new Date(b.updated_at).getTime() -
-              new Date(a.updated_at).getTime(),
-          );
-        const match = matches[0];
-        if (!match) return;
-        const full = await getConversation(match.id);
-        if (cancelled) return;
-        setChatConversationId(full.id);
-        setChatTurns(full.turns);
-      } catch {
-        // ignore resume errors; the user can start a fresh conversation
-      }
-    }
-    void resume();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
 
 
@@ -242,6 +209,11 @@ export default function BusinessInsightPage() {
     [chatConversationId, pollConversation],
   );
 
+  const openInAssistant = useCallback(() => {
+    if (chatConversationId == null) return;
+    router.push(`/ai?conversation=${chatConversationId}`);
+  }, [chatConversationId, router]);
+
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
 
@@ -277,6 +249,14 @@ export default function BusinessInsightPage() {
           <HomeAiSuggestions onAsk={handleAsk} cardActions={cardActions} />
           {(chatTurns.length > 0 || chatBusy || chatError) && (
             <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-h3 text-ink-primary">Ask Anything</h3>
+                {chatConversationId && (
+                  <Button variant="ghost" size="sm" onClick={openInAssistant}>
+                    Open in AI Assistant
+                  </Button>
+                )}
+              </div>
               {chatTurns.map((t, i) => (
                 <TurnBubble
                   key={t.id}

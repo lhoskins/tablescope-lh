@@ -39,7 +39,7 @@ describe("Project Insights sidebar entry", () => {
     expect(all.some((i) => i.key === "project-dashboards")).toBe(false);
   });
 
-  it("orders the workflow sidebar as Project Home, Project Insights, Project Actions, Goal Setting, Scopes", () => {
+  it("orders the workflow sidebar as Project Home, Project Insights, Project Actions, Goals, Scopes", () => {
     const all = project?.items ?? [];
     const keys = all.map((i) => i.key);
     expect(keys).toEqual([
@@ -64,10 +64,10 @@ describe("Project Insights sidebar entry", () => {
     );
   });
 
-  it("keeps Goal Setting and Scopes in the workflow sidebar", () => {
+  it("keeps Goals and Scopes in the workflow sidebar", () => {
     const all = project?.items ?? [];
     const goal = all.find((i) => i.key === "project-business-context");
-    expect(goal?.label).toBe("Goal Setting");
+    expect(goal?.label).toBe("Goals");
     expect(goal?.icon).toBe(IconBuildingBank);
     const scopes = all.find((i) => i.key === "project-scopes");
     expect(scopes?.icon).toBe(IconBinaryTree);

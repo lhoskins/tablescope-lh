@@ -280,7 +280,7 @@ export function InsightCardActionToolbar({
             <InsightCardSourceRow card={card} />
 
             <div
-              className="flex flex-wrap items-center gap-1"
+              className="flex flex-wrap items-center justify-end gap-1"
               data-export-hide
             >
               <IconButton

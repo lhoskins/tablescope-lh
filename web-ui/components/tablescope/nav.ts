@@ -13,7 +13,6 @@ import {
   IconBook2,
   IconLibrary,
   IconBuildingBank,
-  IconShieldCheck,
   IconClipboardList,
   type Icon,
 } from "@tabler/icons-react";
@@ -31,15 +30,6 @@ export interface NavItem {
 export interface NavGroup {
   heading?: string;
   items: NavItem[];
-}
-
-const REVIEW_PERMISSION = "insight_feedback.review";
-
-function isInsightReviewer(user?: CurrentUser): boolean {
-  if (!user) return false;
-  if (user.permissions?.includes(REVIEW_PERMISSION)) return true;
-  const adminRoles = ["admin", "tenant_admin", "root_admin"];
-  return adminRoles.includes(user.rawRole ?? "");
 }
 
 function canManageAdminTools(user?: CurrentUser): boolean {
@@ -72,16 +62,6 @@ export function homeNavGroups(user?: CurrentUser): NavGroup[] {
           href: "/ai",
           icon: IconSparkles,
         },
-        ...(isInsightReviewer(user)
-          ? [
-              {
-                key: "insight-feedback-review" as NavKey,
-                label: "Insight Review",
-                href: "/insight-feedback/review",
-                icon: IconShieldCheck,
-              },
-            ]
-          : []),
       ],
     },
     {
@@ -140,7 +120,7 @@ export function projectNavGroups(projectId: string): NavGroup[] {
         },
         {
           key: "project-business-context",
-          label: "Goal Setting",
+          label: "Goals",
           href: `${base}/business-context`,
           icon: IconBuildingBank,
         },
