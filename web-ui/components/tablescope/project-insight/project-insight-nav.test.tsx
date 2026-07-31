@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { IconSparkles, IconLayoutDashboard, IconClipboardList } from "@tabler/icons-react";
+import {
+  IconSparkles,
+  IconClipboardList,
+  IconBuildingBank,
+  IconBinaryTree,
+} from "@tabler/icons-react";
 import { projectNavGroups } from "@/components/tablescope/nav";
 
 describe("Project Insights sidebar entry", () => {
@@ -26,31 +31,45 @@ describe("Project Insights sidebar entry", () => {
     expect(all.some((i) => i.key === "project-ai-assistant")).toBe(false);
   });
 
-  it("restores the Dashboards nav item after Documents", () => {
+  it("moves resource links (Data Sources, Tables, Documents, Dashboards) to the top tab bar", () => {
     const all = project?.items ?? [];
-    const docsIndex = all.findIndex((i) => i.key === "project-documents");
-    const dashboards = all.find((i) => i.key === "project-dashboards");
-    expect(dashboards).toBeTruthy();
-    expect(dashboards?.label).toBe("Dashboards");
-    expect(dashboards?.href).toBe("/projects/42/dashboards");
-    expect(dashboards?.icon).toBe(IconLayoutDashboard);
-    expect(docsIndex).toBeGreaterThanOrEqual(0);
-    expect(all.findIndex((i) => i.key === "project-dashboards")).toBe(
-      docsIndex + 1,
-    );
+    expect(all.some((i) => i.key === "project-data-sources")).toBe(false);
+    expect(all.some((i) => i.key === "project-queries")).toBe(false);
+    expect(all.some((i) => i.key === "project-documents")).toBe(false);
+    expect(all.some((i) => i.key === "project-dashboards")).toBe(false);
   });
 
-  it("keeps the Project Actions nav item after Dashboards", () => {
+  it("orders the workflow sidebar as Project Home, Project Insights, Project Actions, Goal Setting, Scopes", () => {
     const all = project?.items ?? [];
-    const dashboardsIndex = all.findIndex((i) => i.key === "project-dashboards");
+    const keys = all.map((i) => i.key);
+    expect(keys).toEqual([
+      "overview",
+      "project-insights",
+      "project-actions",
+      "project-business-context",
+      "project-scopes",
+    ]);
+  });
+
+  it("keeps the Project Actions nav item after Project Insights", () => {
+    const all = project?.items ?? [];
     const actions = all.find((i) => i.key === "project-actions");
     expect(actions).toBeTruthy();
     expect(actions?.label).toBe("Project Actions");
     expect(actions?.href).toBe("/projects/42/actions");
     expect(actions?.icon).toBe(IconClipboardList);
-    expect(dashboardsIndex).toBeGreaterThanOrEqual(0);
+    const insightsIndex = all.findIndex((i) => i.key === "project-insights");
     expect(all.findIndex((i) => i.key === "project-actions")).toBe(
-      dashboardsIndex + 1,
+      insightsIndex + 1,
     );
+  });
+
+  it("keeps Goal Setting and Scopes in the workflow sidebar", () => {
+    const all = project?.items ?? [];
+    const goal = all.find((i) => i.key === "project-business-context");
+    expect(goal?.label).toBe("Goal Setting");
+    expect(goal?.icon).toBe(IconBuildingBank);
+    const scopes = all.find((i) => i.key === "project-scopes");
+    expect(scopes?.icon).toBe(IconBinaryTree);
   });
 });

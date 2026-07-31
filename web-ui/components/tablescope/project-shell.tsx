@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { AppShell } from "./app-shell";
 import { Breadcrumb } from "./top-bar";
+import { ProjectResourceTabs } from "./project/project-resource-tabs";
 import { getUserMeta } from "@/lib/auth";
 import { useProjectShell } from "@/lib/ui/use-project-data";
 import type { NavKey } from "@/lib/ui/types";
@@ -61,6 +62,7 @@ export function ProjectShell({
         </div>
       }
       topBarRight={actions}
+      subHeader={<ProjectResourceTabs projectId={projectId} />}
       contextPanel={contextPanel}
     >
       {children}

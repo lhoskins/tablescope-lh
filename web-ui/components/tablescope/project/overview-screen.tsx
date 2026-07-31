@@ -1,29 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconUsers,
-  IconTable,
-  IconDatabase,
   IconLoader2,
+  IconDatabase,
+  IconCode,
+  IconFileText,
+  IconLayoutDashboard,
+  IconSparkles,
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { MembersDialog } from "@/components/tablescope/project/members-dialog";
 import { ShareToggle } from "@/components/tablescope/project/share-toggle";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
-import { ProjectFileDropzone } from "@/components/tablescope/project/project-file-dropzone";
-import {
-  DataSourceResultView,
-} from "@/components/tablescope/project/detail-views";
-import {
-  ContextPanel,
-  ContextSection,
-  IsolationCard,
-} from "@/components/tablescope/context-panel";
+import { ContextPanel, ContextSection, IsolationCard } from "@/components/tablescope/context-panel";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
 import {
@@ -34,8 +33,10 @@ import {
   type Conversation,
   type ConversationTurn,
 } from "@/lib/api/conversational-analytics";
+import { projectInsightApi, type ProjectInsight, type ProjectInsightCard } from "@/lib/api/project-insight";
 import { cn } from "@/lib/cn";
-import { timeAgo } from "@/lib/ui/format";
+import { timeAgo, aiStatusLabel, aiStatusTone } from "@/lib/ui/format";
+import type { AiStatus, ProjectSummary } from "@/lib/ui/types";
 import {
   useProjectShell,
   useProjectQueries,
@@ -44,10 +45,9 @@ import {
   useProjectMembers,
   useProjectActivity,
   useProjectGraph,
-  type SavedQuery,
   type DataSource,
+  type ActivityEvent,
 } from "@/lib/ui/use-project-data";
-import { useAccordion } from "@/lib/ui/use-accordion";
 
 function isDatabase(s: DataSource): boolean {
   return s.sourceType === "database_table";
@@ -55,14 +55,50 @@ function isDatabase(s: DataSource): boolean {
 function isSaas(s: DataSource): boolean {
   return s.sourceType === "saas_object";
 }
-function sourceTypeLabel(s: DataSource): string {
-  if (isDatabase(s)) return s.dbType ?? "Database";
-  if (isSaas(s)) return s.connectorType ?? "SaaS API";
-  return (s.sourceType || "File").toUpperCase();
+
+function severityTone(severity: string) {
+  switch (severity) {
+    case "critical":
+    case "urgent":
+      return "danger" as const;
+    case "warning":
+    case "watch":
+      return "warning" as const;
+    case "opportunity":
+    case "recommendation":
+      return "success" as const;
+    case "trend":
+    case "informational":
+    default:
+      return "neutral" as const;
+  }
+}
+
+function insightCategory(insightType: string) {
+  const map: Record<string, string> = {
+    risk: "Risk",
+    trend: "Trend",
+    opportunity: "Opportunity",
+    analysis: "Analysis",
+  };
+  return map[insightType] || insightType;
+}
+
+const PROJECT_INSIGHTS_TITLE = "Project Insights";
+const PROJECT_INSIGHTS_SURFACE = "project_insights";
+
+async function pollConversation(id: number): Promise<Conversation> {
+  for (let i = 0; i < 60; i++) {
+    const data = await getConversation(id);
+    const last = data.turns[data.turns.length - 1];
+    if (!last || last.status !== "pending") return data;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return getConversation(id);
 }
 
 export function OverviewScreen({ projectId }: { projectId: string }) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const { project, tenant, user } = useProjectShell(projectId);
   const { data: queries } = useProjectQueries(projectId);
   const { data: sources } = useProjectDataSources(projectId);
@@ -72,67 +108,15 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const { data: graph } = useProjectGraph(projectId);
 
   const [showMembers, setShowMembers] = useState(false);
-  // Single-expand accordion: at most one section open, all may be collapsed.
-  const { toggle, isOpen } = useAccordion();
   const { toasts, push, dismiss } = useToasts();
-  const [detail, setDetail] = useState<
-    { kind: "query"; id: number } | { kind: "source"; name: string } | null
-  >(null);
 
-  const queryRows = useMemo(() => queries ?? [], [queries]);
-  const sourceRows = useMemo(
-    () => (sources ?? []).filter((s) => !s.archived),
-    [sources],
-  );
-  const dashboardRows = useMemo(() => dashboards ?? [], [dashboards]);
-  const tableNodes = useMemo(
-    () =>
-      (graph?.nodes ?? []).filter((n) =>
-        ["table", "data_source", "datasource"].some((t) =>
-          n.type.toLowerCase().includes(t),
-        ),
-      ),
-    [graph],
-  );
-  const edges = graph?.edges ?? [];
-  const aiActions = (activity?.events ?? []).filter(
-    (e) => e.category === "ai",
-  );
-
-  const connectedSources = sourceRows.filter((s) => !isSaas(s)).length;
-  const publishedDashboards = dashboardRows.filter(
-    (d) => d.status === "published",
-  ).length;
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const newQueriesThisWeek = queryRows.filter(
-    (q) => new Date(q.created_at).getTime() >= weekAgo,
-  ).length;
-  const memberCount = (members ?? []).filter((m) => m.is_active).length;
-
-
-  const detailSource =
-    detail?.kind === "source"
-      ? (sourceRows.find((s) => (s.viewName || s.fileName) === detail.name) ??
-        null)
-      : null;
-
-  // All tables, most-recently-updated first. The Tables accordion shows the
-  // full list (no truncation) when expanded.
-  const sortedQueries = [...queryRows].sort(
-    (a, b) =>
-      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-  );
-
-
-
+  // ── Ask Anything: one shared Project Insights conversation per project.
   const [chatTurns, setChatTurns] = useState<ConversationTurn[]>([]);
   const [chatConversationId, setChatConversationId] = useState<number | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
-
-  // Resume the single Project Insights conversation for this project so
-  // successive asks (including from the AI Assistant) share history.
   const hasResumedRef = useRef(false);
+
   useEffect(() => {
     if (hasResumedRef.current) return;
     hasResumedRef.current = true;
@@ -141,9 +125,9 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
       try {
         const pid = Number(projectId);
         const convos = await listConversations(pid);
-        const match = convos.find(
-          (c) => c.title === "Project Insights" && c.project_id === pid,
-        );
+        const match =
+          convos.find((c) => c.surface === PROJECT_INSIGHTS_SURFACE && c.project_id === pid) ??
+          convos.find((c) => c.title === PROJECT_INSIGHTS_TITLE && c.project_id === pid);
         if (!match) return;
         const full = await getConversation(match.id);
         if (cancelled) return;
@@ -159,16 +143,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
     };
   }, [projectId]);
 
-  const pollConversation = useCallback(async (id: number): Promise<Conversation> => {
-    for (let i = 0; i < 60; i++) {
-      const data = await getConversation(id);
-      const last = data.turns[data.turns.length - 1];
-      if (!last || last.status !== "pending") return data;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    return getConversation(id);
-  }, []);
-
   const handleAsk = useCallback(
     async (message: string) => {
       setChatBusy(true);
@@ -177,7 +151,8 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         if (chatConversationId == null) {
           const created = await createConversation({
             project_id: Number(projectId),
-            title: "Project Insights",
+            title: PROJECT_INSIGHTS_TITLE,
+            surface: PROJECT_INSIGHTS_SURFACE,
             initial_message: message,
           });
           const polled = await pollConversation(created.id);
@@ -195,34 +170,78 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         setChatBusy(false);
       }
     },
-    [chatConversationId, projectId, pollConversation],
+    [chatConversationId, projectId],
   );
 
+  // ── Recent insights from the latest Project Insight snapshot.
+  const { data: projectInsight } = useQuery<ProjectInsight>({
+    queryKey: ["project", projectId, "insight", "recent"],
+    queryFn: () => projectInsightApi.get(projectId),
+    enabled: Boolean(projectId),
+    staleTime: 5 * 60 * 1000,
+  });
 
+  const recentInsights = useMemo(() => {
+    if (!projectInsight) return [];
+    const all: Array<ProjectInsightCard & { category: string }> = [
+      ...projectInsight.risks.map((c) => ({ ...c, category: "risk" })),
+      ...projectInsight.trends.map((c) => ({ ...c, category: "trend" })),
+      ...projectInsight.opportunities.map((c) => ({ ...c, category: "opportunity" })),
+      ...projectInsight.analysis.map((c) => ({ ...c, category: "analysis" })),
+    ];
+    return all
+      .filter((c) => c.title?.trim())
+      .sort((a, b) => {
+        const ta = new Date(a.executedAt ?? projectInsight.generatedAt).getTime();
+        const tb = new Date(b.executedAt ?? projectInsight.generatedAt).getTime();
+        return tb - ta;
+      })
+      .slice(0, 5);
+  }, [projectInsight]);
+
+  // ── Derived counts
+  const queryRows = useMemo(() => queries ?? [], [queries]);
+  const sourceRows = useMemo(
+    () => (sources ?? []).filter((s) => !s.archived),
+    [sources],
+  );
+  const dashboardRows = useMemo(() => dashboards ?? [], [dashboards]);
+  const connectedSources = sourceRows.filter((s) => !isSaas(s)).length;
+  const publishedDashboards = dashboardRows.filter(
+    (d) => d.status.toLowerCase() === "published",
+  ).length;
+  const memberCount = (members ?? []).filter((m) => m.is_active).length;
+  const aiActions = (activity?.events ?? []).filter((e) => e.category === "ai");
+  const tableNodes = useMemo(
+    () =>
+      (graph?.nodes ?? []).filter((n) =>
+        ["table", "data_source", "datasource"].some((t) =>
+          n.type.toLowerCase().includes(t),
+        ),
+      ),
+    [graph],
+  );
+  const edges = graph?.edges ?? [];
+
+  const canEditProject = user.rawRole !== "viewer";
+
+  const handleSourceCreated = () => {
+    void queryClient.invalidateQueries({ queryKey: ["project", projectId, "datasources"] });
+    void queryClient.invalidateQueries({ queryKey: ["project", projectId, "activity"] });
+    push("Data source connected", "success");
+  };
 
   return (
     <ProjectShell
       projectId={projectId}
       activeNav="overview"
       breadcrumbLabel="Overview"
-      actions={
-        <>
-          <ShareToggle
-            projectId={projectId}
-            shared={project?.visibility === "shared"}
-            onToast={push}
-          />
-          <Button variant="secondary" onClick={() => setShowMembers(true)}>
-            <IconUsers size={14} />
-            Members
-          </Button>
-        </>
-      }
       contextPanel={
         <ContextPanel
           title="AI Context"
           askPlaceholder="Ask about this project…"
           onAsk={handleAsk}
+          collapsible
         >
           <IsolationCard
             tenant={tenant.name}
@@ -241,59 +260,45 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             </div>
           ) : null}
 
-          <ContextSection title="Relationship Chain">
-            {edges.length === 0 ? (
-              <p className="text-small text-ink-tertiary">
-                No relationships mapped yet.
-              </p>
-            ) : (
-              <ul className="space-y-1 text-[13px] text-ink-secondary">
-                {edges.slice(0, 4).map((e) => {
-                  const byId = new Map(
-                    (graph?.nodes ?? []).map((n) => [n.id, n.label]),
-                  );
-                  return (
-                    <li key={e.id} className="truncate">
-                      <span className="text-ink-primary">
-                        {byId.get(e.source)}
-                      </span>{" "}
-                      <span className="text-ink-tertiary">{e.type} →</span>{" "}
-                      <span className="text-ink-primary">
-                        {byId.get(e.target)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+          <ContextSection title="Context health">
+            <div className="flex items-center gap-2 text-[13px] text-ink-secondary">
+              <span className="inline-block h-2 w-2 rounded-full bg-success" />
+              Project isolation active
+            </div>
+            <p className="mt-1 text-small text-ink-tertiary">
+              {sourceRows.length} source{sourceRows.length === 1 ? "" : "s"} connected ·{" "}
+              {tableNodes.length} table{tableNodes.length === 1 ? "" : "s"} in scope
+            </p>
           </ContextSection>
 
-          <ContextSection title="In-Scope Tables">
-            {tableNodes.length === 0 ? (
-              <p className="text-small text-ink-tertiary">
-                {sourceRows.length} sources connected.
-              </p>
-            ) : (
-              <ul className="space-y-1 text-[13px] text-ink-secondary">
-                {tableNodes.slice(0, 3).map((n) => (
-                  <li key={n.id} className="truncate">
-                    {n.label}
-                  </li>
-                ))}
-                {tableNodes.length > 3 && (
-                  <li className="text-ink-tertiary">
-                    +{tableNodes.length - 3} more in scope
-                  </li>
-                )}
-              </ul>
-            )}
+          <ContextSection title="In-scope assets">
+            <ul className="space-y-1 text-[13px] text-ink-secondary">
+              <li className="flex justify-between">
+                <span>Data Sources</span>
+                <span className="tabular-nums text-ink-primary">{sourceRows.length}</span>
+              </li>
+              <li className="flex justify-between">
+                <span>Tables</span>
+                <span className="tabular-nums text-ink-primary">{queryRows.length}</span>
+              </li>
+              <li className="flex justify-between">
+                <span>Documents</span>
+                <span className="tabular-nums text-ink-primary">
+                  {project?.documentCount ?? 0}
+                </span>
+              </li>
+              <li className="flex justify-between">
+                <span>Dashboards</span>
+                <span className="tabular-nums text-ink-primary">
+                  {project?.dashboardCount ?? dashboardRows.length}
+                </span>
+              </li>
+            </ul>
           </ContextSection>
 
           <ContextSection title="Recent AI Actions">
             {aiActions.length === 0 ? (
-              <p className="text-small text-ink-tertiary">
-                No AI actions yet.
-              </p>
+              <p className="text-small text-ink-tertiary">No AI actions yet.</p>
             ) : (
               <ul className="space-y-1.5">
                 {aiActions.slice(0, 4).map((e) => (
@@ -301,9 +306,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
                     key={e.id}
                     className="flex items-center justify-between gap-2 text-[13px]"
                   >
-                    <span className="min-w-0 truncate text-ink-secondary">
-                      {e.title}
-                    </span>
+                    <span className="min-w-0 truncate text-ink-secondary">{e.title}</span>
                     <span className="shrink-0 text-small text-ink-tertiary">
                       {timeAgo(e.ts)}
                     </span>
@@ -315,42 +318,21 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         </ContextPanel>
       }
     >
-      {detailSource ? (
-        <DataSourceResultView
-          projectId={projectId}
-          source={detailSource}
-          backLabel="Overview"
-          onBack={() => setDetail(null)}
+      <div className="space-y-5">
+        <ProjectHeader
+          project={project}
+          memberCount={memberCount}
+          aiStatus={project?.aiStatus ?? "idle"}
+          onMembers={() => setShowMembers(true)}
+          onToast={push}
         />
-      ) : (
-      <div className="space-y-4">
-        <header className="flex items-start gap-3">
-          <span
-            className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg"
-            style={{ backgroundColor: project?.accent ?? "var(--brand-50)" }}
-          />
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-h1 text-ink-primary">
-                {project?.name ?? "Project"}
-              </h1>
-              <Badge tone="success">+ AI Ready</Badge>
-            </div>
-            <p className="mt-0.5 text-small text-ink-tertiary">
-              {project?.visibility === "shared" ? "Shared" : "Private"} project
-              {memberCount > 0 && ` · ${memberCount} member${memberCount === 1 ? "" : "s"}`}
-              {project?.updatedLabel && ` · Updated ${project.updatedLabel}`}
-            </p>
-          </div>
-        </header>
-
-
 
         <HomeAiSuggestions
           projectId={Number(projectId)}
           showAskBox={true}
           onAsk={handleAsk}
         />
+
         {(chatTurns.length > 0 || chatBusy || chatError) && (
           <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
             {chatTurns.map((t, i) => (
@@ -367,166 +349,60 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
                 TableScope is thinking…
               </div>
             )}
-            {chatError && (
-              <p className="text-small text-danger">{chatError}</p>
-            )}
+            {chatError && <p className="text-small text-danger">{chatError}</p>}
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <StatTile
-            label="Data Sources"
-            value={sourceRows.length}
-            hint={`${connectedSources} connected`}
+        <section aria-label="Project KPIs">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <StatTile
+              label="Data Sources"
+              value={sourceRows.length}
+              hint={`${connectedSources} connected`}
+            />
+            <StatTile
+              label="Tables"
+              value={project?.queryCount ?? queryRows.length}
+              hint={
+                queryRows.filter((q) => q.ai_generated).length > 0
+                  ? `${queryRows.filter((q) => q.ai_generated).length} AI-generated`
+                  : undefined
+              }
+            />
+            <StatTile
+              label="Documents"
+              value={project?.documentCount ?? 0}
+              hint={`${edges.length} relationship${edges.length === 1 ? "" : "s"}`}
+            />
+            <StatTile
+              label="Dashboards"
+              value={project?.dashboardCount ?? dashboardRows.length}
+              hint={`${publishedDashboards} published`}
+            />
+            <StatTile
+              label="AI Actions"
+              value={activity?.stats?.ai_actions ?? aiActions.length}
+              hint="All audited"
+              hintTone="success"
+            />
+          </div>
+        </section>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <RecentInsightsCard
+            projectId={projectId}
+            insights={recentInsights}
+            generatedAt={projectInsight?.generatedAt}
           />
-          <StatTile
-            label="Tables"
-            value={project?.queryCount ?? queryRows.length}
-            hint={
-              newQueriesThisWeek > 0
-                ? `↑ ${newQueriesThisWeek} this week`
-                : undefined
-            }
-          />
-          <StatTile
-            label="Documents"
-            value={project?.documentCount ?? 0}
-            hint={`${edges.length} relationships`}
-          />
-          <StatTile
-            label="Dashboards"
-            value={project?.dashboardCount ?? dashboardRows.length}
-            hint={`${publishedDashboards} published`}
-          />
-          <StatTile
-            label="AI Actions"
-            value={activity?.stats.ai_actions ?? aiActions.length}
-            hint="All audited"
-            hintTone="success"
+          <ProjectActivityCard events={activity?.events ?? []} />
+          <QuickActionsCard
+            projectId={projectId}
+            canEdit={canEditProject}
+            onSourceCreated={handleSourceCreated}
           />
         </div>
-
-        <OverviewAccordionSection
-          type="tables"
-          title="Tables"
-          subtitle="Saved and AI-generated tables in this project"
-          count={queryRows.length}
-          open={isOpen("tables")}
-          onToggle={() => toggle("tables")}
-        >
-          {sortedQueries.length === 0 ? (
-            <div className="px-4 py-10 text-center text-small text-ink-tertiary">
-              No tables yet.
-            </div>
-          ) : (
-            <div className="max-h-[32rem] overflow-y-auto">
-              <table className="w-full text-left text-[13px]">
-                <thead>
-                  <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
-                    <Th>Name</Th>
-                    <Th>Source</Th>
-                    <Th>Origin</Th>
-                    <Th>Visibility</Th>
-                    <Th className="text-right">Updated</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedQueries.map((q) => (
-                    <QueryRow
-                      key={q.id}
-                      q={q}
-                      onClick={() => router.push(`/projects/${projectId}/queries?q=${q.id}`)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </OverviewAccordionSection>
-
-        <OverviewAccordionSection
-          type="sources"
-          title="Data Sources"
-          subtitle="Connected databases, files, and SaaS objects"
-          count={sourceRows.length}
-          open={isOpen("sources")}
-          onToggle={() => toggle("sources")}
-        >
-          {sourceRows.length === 0 ? (
-            <div className="px-4 py-10 text-center text-small text-ink-tertiary">
-              No data sources connected yet.
-            </div>
-          ) : (
-            <>
-              <div className="max-h-[32rem] overflow-y-auto">
-              <table className="w-full text-left text-[13px]">
-                <thead>
-                  <tr className="border-b border-line-tertiary text-caption uppercase tracking-wide text-ink-tertiary">
-                    <Th>Name</Th>
-                    <Th>Type</Th>
-                    <Th className="text-right">Tables</Th>
-                    <Th>Status</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sourceRows.map((s) => (
-                    <tr
-                      key={s.viewName || s.fileName}
-                      onClick={() =>
-                        setDetail({
-                          kind: "source",
-                          name: s.viewName || s.fileName,
-                        })
-                      }
-                      className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-secondary"
-                    >
-                      <td className="px-4 py-2.5 font-medium text-ink-primary">
-                        {s.viewName || s.fileName}
-                      </td>
-                      <td className="px-4 py-2.5 text-ink-secondary">
-                        {sourceTypeLabel(s)}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-ink-secondary">
-                        {s.columnTypes?.length ?? "—"}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <Badge tone={isSaas(s) ? "warning" : "success"}>
-                          {isSaas(s) ? "Pending auth" : "Connected"}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              </div>
-              <div className="flex justify-end border-t border-line-tertiary px-4 py-2.5">
-                <button
-                  type="button"
-                  onClick={() => router.push(`/projects/${projectId}/data-sources`)}
-                  className="text-small font-medium text-brand-700 hover:underline"
-                >
-                  Connect new
-                </button>
-              </div>
-            </>
-          )}
-        </OverviewAccordionSection>
-
-        <section className="space-y-2 rounded-xl border border-line-tertiary bg-bg-primary p-4">
-          <div>
-            <h3 className="text-h3 text-ink-primary">Add a data source</h3>
-            <p className="text-small text-ink-tertiary">
-              Upload a CSV or Excel file to this project; you will continue in
-              the Data Source Builder.
-            </p>
-          </div>
-          <ProjectFileDropzone
-            project={project ?? undefined}
-            tenantName={tenant.name}
-          />
-        </section>
       </div>
-      )}
+
       <MembersDialog
         open={showMembers}
         projectId={projectId}
@@ -537,128 +413,243 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   );
 }
 
-function QueryRow({ q, onClick }: { q: SavedQuery; onClick?: () => void }) {
-  const source = [q.left_datasource, q.right_datasource]
-    .filter(Boolean)
-    .join(", ");
+function ProjectHeader({
+  project,
+  memberCount,
+  aiStatus,
+  onMembers,
+  onToast,
+}: {
+  project: ProjectSummary | null;
+  memberCount: number;
+  aiStatus: AiStatus;
+  onMembers: () => void;
+  onToast: (message: string, tone?: "success" | "error" | "info") => void;
+}) {
+  const statusLabel = aiStatusLabel(aiStatus);
+  const statusTone = aiStatusTone(aiStatus);
   return (
-    <tr
-      onClick={onClick}
-      className="cursor-pointer border-b border-line-tertiary last:border-0 hover:bg-bg-secondary"
-    >
-      <td className="px-4 py-2.5 font-medium text-ink-primary">{q.name}</td>
-      <td className="px-4 py-2.5 text-ink-secondary">{source || "—"}</td>
-      <td className="px-4 py-2.5">
-        <Badge tone={q.ai_generated ? "ai" : "outline"}>
-          {q.ai_generated ? "AI" : "Manual"}
-        </Badge>
-      </td>
-      <td className="px-4 py-2.5">
-        <Badge tone={q.is_shared ? "success" : "neutral"}>
-          {q.is_shared ? "Shared" : "Private"}
-        </Badge>
-      </td>
-      <td className="px-4 py-2.5 text-right text-ink-tertiary">
-        {timeAgo(q.updated_at)}
-      </td>
-    </tr>
+    <header className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-line-tertiary bg-bg-primary p-4">
+      <div className="flex items-start gap-3">
+        <span
+          className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-lg font-semibold text-white"
+          style={{ backgroundColor: project?.accent ?? "var(--brand-500)" }}
+        >
+          {(project?.name ?? "P").slice(0, 1).toUpperCase()}
+        </span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-h1 text-ink-primary">{project?.name ?? "Project"}</h1>
+            <Badge tone={statusTone} title={`Project status: ${statusLabel}`}>
+              {statusLabel}
+            </Badge>
+          </div>
+          <p className="mt-0.5 text-small text-ink-tertiary">
+            {project?.visibility === "shared" ? "Shared" : "Private"} project
+            {memberCount > 0 && ` · ${memberCount} member${memberCount === 1 ? "" : "s"}`}
+            {project?.updatedLabel && ` · Updated ${project.updatedLabel}`}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <ShareToggle
+          projectId={String(project?.id ?? "")}
+          shared={project?.visibility === "shared"}
+          onToast={onToast}
+        />
+        <Button variant="secondary" onClick={onMembers}>
+          <IconUsers size={14} />
+          Members
+        </Button>
+      </div>
+    </header>
   );
 }
 
-function Th({
-  children,
-  className,
+function RecentInsightsCard({
+  projectId,
+  insights,
+  generatedAt,
 }: {
-  children: React.ReactNode;
-  className?: string;
+  projectId: string;
+  insights: Array<ProjectInsightCard & { category: string }>;
+  generatedAt?: string;
 }) {
-  return <th className={cn("px-4 py-2 font-medium", className)}>{children}</th>;
+  return (
+    <Card className="flex flex-col">
+      <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
+        <span className="text-h3 text-ink-primary">Recent insights</span>
+        <Link
+          href={`/projects/${projectId}/insight`}
+          className="text-[12px] font-medium text-brand-700 hover:underline"
+        >
+          View all
+        </Link>
+      </div>
+      <div className="flex-1 p-2">
+        {insights.length === 0 ? (
+          <div className="px-2 py-8 text-center text-small text-ink-tertiary">
+            No insights yet. Ask anything or generate insights to see findings here.
+          </div>
+        ) : (
+          <ul className="space-y-1">
+            {insights.map((insight) => (
+              <li key={insight.id}>
+                <a
+                  href={`/projects/${projectId}/insight`}
+                  className="group flex items-start gap-2 rounded-md px-2 py-2 hover:bg-bg-secondary"
+                >
+                  <Badge tone={severityTone(insight.severity)} size="sm">
+                    {insightCategory(insight.category)}
+                  </Badge>
+                  <span className="min-w-0 flex-1 text-[13px] font-medium text-ink-primary group-hover:text-brand-700">
+                    {insight.title}
+                  </span>
+                  <span className="shrink-0 text-small text-ink-tertiary">
+                    {timeAgo(insight.executedAt ?? generatedAt ?? new Date().toISOString())}
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
+  );
 }
 
-const OVERVIEW_SECTION_STYLES = {
-  tables: {
-    background: "#F8FBFF",
-    border: "#D7E8FF",
-    accent: "#1E6FD9",
-    Icon: IconTable,
-  },
-  sources: {
-    background: "#F7FFFB",
-    border: "#D4F0E2",
-    accent: "#2EA66F",
-    Icon: IconDatabase,
-  },
-} as const;
+const ACTIVITY_META: Record<
+  string,
+  { icon: typeof IconSparkles; tone: "ai" | "brand" | "neutral" | "success" }
+> = {
+  ai: { icon: IconSparkles, tone: "ai" },
+  query: { icon: IconCode, tone: "brand" },
+  upload: { icon: IconDatabase, tone: "success" },
+  dashboard: { icon: IconLayoutDashboard, tone: "neutral" },
+  sync: { icon: IconDatabase, tone: "neutral" },
+};
 
-function OverviewAccordionSection({
-  type,
-  title,
-  subtitle,
-  count,
-  open,
-  onToggle,
-  children,
-}: {
-  type: "tables" | "sources";
-  title: string;
-  subtitle: string;
-  count: number;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  const style = OVERVIEW_SECTION_STYLES[type];
-  const Icon = style.Icon;
+function ProjectActivityCard({ events }: { events: ActivityEvent[] }) {
+  const rows = events.slice(0, 6);
   return (
-    <div
-      className="overflow-hidden rounded-xl border"
-      style={{ background: style.background, borderColor: style.border }}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
-      >
-        <span
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-          style={{ background: `${style.accent}1A`, color: style.accent }}
-        >
-          <Icon size={18} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            <span
-              className="text-h3 font-semibold"
-              style={{ color: style.accent }}
-            >
-              {title}
-            </span>
-            <span
-              className="rounded-full px-2 py-0.5 text-caption font-medium tabular-nums"
-              style={{ background: `${style.accent}1A`, color: style.accent }}
-            >
-              {count}
-            </span>
-          </span>
-          <span className="block text-small text-ink-tertiary">{subtitle}</span>
-        </span>
-        <span
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-body font-semibold"
-          style={{ borderColor: style.border, color: style.accent }}
-          aria-hidden
-        >
-          {open ? "−" : "+"}
-        </span>
-      </button>
-      {open && (
-        <div
-          className="border-t bg-bg-primary"
-          style={{ borderColor: style.border }}
-        >
-          {children}
-        </div>
-      )}
-    </div>
+    <Card className="flex flex-col">
+      <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
+        <span className="text-h3 text-ink-primary">Project activity</span>
+      </div>
+      <div className="flex-1 p-2">
+        {rows.length === 0 ? (
+          <div className="px-2 py-8 text-center text-small text-ink-tertiary">
+            No recent activity.
+          </div>
+        ) : (
+          <ul className="space-y-0.5">
+            {rows.map((e) => {
+              const meta = ACTIVITY_META[e.category] ?? ACTIVITY_META.sync;
+              const Icon = meta.icon;
+              return (
+                <li
+                  key={e.id}
+                  className="flex items-start gap-2.5 rounded-md px-2 py-2 text-[13px]"
+                >
+                  <span
+                    className={cn(
+                      "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                      meta.tone === "ai" && "bg-ai-bg text-ai",
+                      meta.tone === "brand" && "bg-brand-50 text-brand-700",
+                      meta.tone === "success" && "bg-success-bg text-success",
+                      meta.tone === "neutral" && "bg-bg-secondary text-ink-secondary",
+                    )}
+                  >
+                    <Icon size={14} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-ink-primary">{e.title}</p>
+                    <p className="text-small text-ink-tertiary">
+                      {e.actor} · {timeAgo(e.ts)}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function QuickActionsCard({
+  projectId,
+  canEdit,
+  onSourceCreated,
+}: {
+  projectId: string;
+  canEdit: boolean;
+  onSourceCreated: () => void;
+}) {
+  const router = useRouter();
+  const actions = [
+    {
+      label: "Add data source",
+      icon: IconDatabase,
+      onClick: undefined as (() => void) | undefined,
+      content: (
+        <ConnectorsMenu
+          projectId={Number(projectId)}
+          onCreated={onSourceCreated}
+          label="Add data source"
+        />
+      ),
+    },
+    {
+      label: "Create table",
+      icon: IconCode,
+      onClick: () => router.push(`/projects/${projectId}/queries`),
+    },
+    {
+      label: "Upload document",
+      icon: IconFileText,
+      onClick: () => router.push(`/projects/${projectId}/documents`),
+    },
+    {
+      label: "New dashboard",
+      icon: IconLayoutDashboard,
+      onClick: () => router.push(`/projects/${projectId}/dashboards`),
+    },
+  ];
+
+  return (
+    <Card className="flex flex-col">
+      <div className="border-b border-line-tertiary px-4 py-3">
+        <span className="text-h3 text-ink-primary">Quick actions</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 p-3">
+        {actions.map((action) => {
+          const Icon = action.icon;
+          const disabled = !canEdit;
+          return (
+            <div key={action.label}>
+              {action.content ? (
+                <div className="[&>div]:w-full [&_button]:w-full [&_button]:justify-center">
+                  {action.content}
+                </div>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={disabled}
+                  onClick={action.onClick}
+                  title={disabled ? "You do not have permission to create project resources" : action.label}
+                  className="w-full"
+                >
+                  <Icon size={14} />
+                  {action.label}
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
