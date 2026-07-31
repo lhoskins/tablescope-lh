@@ -120,3 +120,13 @@ async def test_human_platform_admin_rejects_tenant_admin() -> None:
     with pytest.raises(HTTPException) as exc:
         await require_human_platform_admin(session=session, context=_context("tenant_admin"))
     assert exc.value.status_code == 403
+
+
+async def test_post_runtime_targets_route_rejects_service_caller(client, service_headers) -> None:
+    r = await client.post(
+        "/api/llm-framework/runtime-targets",
+        json={"name": "test-target", "host": "http://ollama:11434"},
+        headers=service_headers,
+    )
+    assert r.status_code == 403
+    assert "service ident" in r.text.lower()

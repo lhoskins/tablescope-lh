@@ -67,6 +67,7 @@ from app.routes import upload as upload_routes
 from app.routes import user_preferences as user_preferences_routes
 from app.routes import users as users_routes
 from app.services.connection_pool import pool_manager
+from app.services.llm_framework import ensure_primary_runtime_target_registered
 from app.services.project_context import ProjectContextConcurrencyError
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,19 @@ async def _reconcile_db_sources_on_startup() -> None:
             logger.warning(
                 "Startup DB-source reconcile attempt %s failed: %s", attempt, exc
             )
+
+
+async def _ensure_primary_llm_runtime_target() -> None:
+    """Register the configured primary Ollama target if no target exists yet."""
+    from app.database import SessionLocal
+
+    await asyncio.sleep(3)
+    try:
+        async with SessionLocal() as session:
+            await ensure_primary_runtime_target_registered(session)
+        logger.info("Primary LLM runtime target ensured")
+    except Exception as exc:
+        logger.warning("Primary LLM runtime target registration failed: %s", exc)
 
 
 async def _seed_reference_catalogs() -> None:
@@ -141,11 +155,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         get_engine_mode().value,
     )
     reconcile_task = asyncio.create_task(_reconcile_db_sources_on_startup())
+    llm_target_task = asyncio.create_task(_ensure_primary_llm_runtime_target())
     seed_task = asyncio.create_task(_seed_reference_catalogs())
     try:
         yield
     finally:
         reconcile_task.cancel()
+        llm_target_task.cancel()
         seed_task.cancel()
         await pool_manager.close_all()
         logger.info("Platform API shutdown complete")

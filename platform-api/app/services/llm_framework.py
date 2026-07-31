@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from arq import create_pool
@@ -14,12 +15,15 @@ from sqlalchemy.orm import selectinload
 from app.config import get_settings
 from app.models.llm_framework import (
     ROUTING_CAPABILITIES,
+    LLMAuditEvent,
+    LLMDeployment,
     LLMInstallation,
     LLMModelArtifact,
     LLMRoutingProfile,
     LLMRuntimeTarget,
 )
 from app.services.llm_catalog_client import CatalogModel, HuggingFaceCatalogClient
+from app.services.llm_ollama_adapter import OllamaAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +91,179 @@ async def get_artifact(session: AsyncSession, artifact_id: int) -> LLMModelArtif
         .options(selectinload(LLMModelArtifact.license_approval))
     )
     return (await session.execute(stmt)).scalar_one_or_none()
+
+
+class DuplicateRuntimeTargetError(ValueError):
+    """Raised when a target with the same name already exists."""
+
+
+async def register_runtime_target(
+    session: AsyncSession,
+    *,
+    name: str,
+    host: str,
+    runtime_type: str = "ollama",
+    version: str | None = None,
+    max_loaded_models: int | None = None,
+    keep_alive_minutes: int | None = None,
+    labels: dict | None = None,
+) -> LLMRuntimeTarget:
+    """Register a runtime target. Probes reachability but does not require it."""
+    existing = await session.scalar(
+        select(LLMRuntimeTarget).where(LLMRuntimeTarget.name == name)
+    )
+    if existing is not None:
+        raise DuplicateRuntimeTargetError(f"A runtime target named '{name}' already exists")
+
+    is_reachable = False
+    last_seen_at = None
+    if runtime_type == "ollama":
+        try:
+            result = await OllamaAdapter(base_url=host).preflight(
+                artifact_size=0, reserve_bytes=0
+            )
+            is_reachable = result.reachable
+            if is_reachable:
+                last_seen_at = datetime.now(UTC)
+        except Exception:
+            logger.warning("Reachability probe failed for new target %s (%s)", name, host)
+
+    target = LLMRuntimeTarget(
+        name=name,
+        runtime_type=runtime_type,
+        host=host,
+        version=version,
+        status="active",
+        is_reachable=is_reachable,
+        last_seen_at=last_seen_at,
+        max_loaded_models=max_loaded_models,
+        keep_alive_minutes=keep_alive_minutes,
+        labels=labels or {},
+    )
+    session.add(target)
+    await session.flush()
+    return target
+
+
+async def ensure_primary_runtime_target_registered(session: AsyncSession) -> None:
+    """Idempotently register the configured primary Ollama target on startup."""
+    settings = get_settings()
+    existing = await session.scalar(
+        select(LLMRuntimeTarget).where(LLMRuntimeTarget.host == settings.llm_ollama_url)
+    )
+    if existing is not None:
+        return
+    try:
+        await register_runtime_target(
+            session, name="primary-ollama", host=settings.llm_ollama_url
+        )
+        await session.commit()
+    except DuplicateRuntimeTargetError:
+        await session.rollback()
+
+
+async def list_deployments(session: AsyncSession, *, limit: int = 50) -> list[dict]:
+    """Return deployments joined with artifact and target names, newest first."""
+    rows = (
+        await session.execute(
+            select(LLMDeployment, LLMInstallation, LLMModelArtifact, LLMRuntimeTarget)
+            .join(LLMInstallation, LLMDeployment.installation_id == LLMInstallation.id)
+            .join(LLMModelArtifact, LLMInstallation.artifact_id == LLMModelArtifact.id)
+            .join(LLMRuntimeTarget, LLMInstallation.target_id == LLMRuntimeTarget.id)
+            .order_by(LLMDeployment.created_at.desc())
+            .limit(min(limit, 200))
+        )
+    ).all()
+    return [
+        {
+            "id": d.id,
+            "installation_id": d.installation_id,
+            "artifact_id": a.id,
+            "artifact_name": a.name,
+            "target_id": t.id,
+            "target_name": t.name,
+            "requested_by_user_id": d.requested_by_user_id,
+            "approved_by_user_id": d.approved_by_user_id,
+            "status": d.status,
+            "previous_deployment_id": d.previous_deployment_id,
+            "stabilized_at": d.stabilized_at,
+            "created_at": d.created_at,
+            "updated_at": d.updated_at,
+        }
+        for d, i, a, t in rows
+    ]
+
+
+async def record_llm_audit_event(
+    session: AsyncSession,
+    *,
+    actor_user_id: int | None,
+    action: str,
+    entity_type: str,
+    entity_id: int | None,
+    details: dict | None = None,
+) -> None:
+    """Write a platform-scoped audit event for an LLM framework action."""
+    session.add(
+        LLMAuditEvent(
+            actor_user_id=actor_user_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details=details or {},
+        )
+    )
+
+
+async def upsert_routing_profile(
+    session: AsyncSession,
+    *,
+    capability: str,
+    target_id: int,
+    installation_id: int,
+    priority: int = 1,
+    is_active: bool = True,
+) -> LLMRoutingProfile:
+    """Create or update a routing profile and ensure at most one active profile per capability."""
+    normalized = await validate_routing_capability(capability)
+    target = await session.get(LLMRuntimeTarget, target_id)
+    if target is None:
+        raise ValueError("Runtime target not found")
+    installation = await session.get(LLMInstallation, installation_id)
+    if installation is None or installation.status != "installed":
+        raise ValueError("Installation is not installed")
+
+    profile = await session.scalar(
+        select(LLMRoutingProfile).where(
+            LLMRoutingProfile.capability == normalized,
+            LLMRoutingProfile.target_id == target_id,
+            LLMRoutingProfile.installation_id == installation_id,
+        )
+    )
+    if profile is None:
+        profile = LLMRoutingProfile(
+            capability=normalized,
+            target_id=target_id,
+            installation_id=installation_id,
+        )
+        session.add(profile)
+
+    if is_active:
+        for existing in (
+            await session.scalars(
+                select(LLMRoutingProfile).where(
+                    LLMRoutingProfile.capability == normalized,
+                    LLMRoutingProfile.is_active.is_(True),
+                )
+            )
+        ).all():
+            existing.is_active = False
+
+    profile.is_active = is_active
+    profile.priority = priority
+    profile.config = {"installation_id": installation_id}
+    await session.flush()
+    return profile
 
 
 async def release_quarantined_artifact(

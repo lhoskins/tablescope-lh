@@ -23,11 +23,13 @@ from app.schemas.llm_framework import (
     ActivateRequest,
     ActivateResponse,
     ApproveDeploymentResponse,
+    AuditEventSummary,
     CapabilitiesResponse,
     CatalogDetail,
     CatalogSearchResult,
     ConvertRequest,
     ConvertResponse,
+    DeploymentSummary,
     EmbeddingMigrationSummary,
     InstallRequest,
     InstallResponse,
@@ -39,6 +41,10 @@ from app.schemas.llm_framework import (
     ReindexRequest,
     ReindexResponse,
     RollbackResponse,
+    RoutingProfileRequest,
+    RoutingProfileResponse,
+    RuntimeTargetCreate,
+    RuntimeTargetSummary,
     StageArtifactRequest,
     StageArtifactResponse,
 )
@@ -52,14 +58,20 @@ from app.services.llm_deployment import (
 from app.services.llm_embedding_migration import EmbeddingMigrationError, start_embedding_migration
 from app.services.llm_framework import (
     CAPABILITIES,
+    DuplicateRuntimeTargetError,
+    InvalidCapabilityError,
     create_artifact_and_stage,
     enqueue_deploy_llm_artifact,
     enqueue_stage_llm_artifact,
     get_artifact,
     get_catalog_detail,
     get_inventory,
+    list_deployments,
+    record_llm_audit_event,
+    register_runtime_target,
     release_quarantined_artifact,
     search_catalog,
+    upsert_routing_profile,
     validate_routing_capability,
 )
 from app.services.llm_model_conversion import ModelConversionError, create_source_artifact_and_convert
@@ -96,6 +108,7 @@ class FrameworkStatusResponse(BaseModel):
     manifest_signing_key_fingerprint: str
     embedding_migration_enabled: bool
     fp16_conversion_enabled: bool
+    dynamic_routing_enabled: bool
     embedding_recall_threshold: float
 
 
@@ -114,6 +127,7 @@ async def get_llm_framework_status(
         "manifest_signing_key_fingerprint": settings.llm_manifest_signing_key_fingerprint,
         "embedding_migration_enabled": settings.llm_embedding_migration_enabled,
         "fp16_conversion_enabled": settings.llm_fp16_conversion_enabled,
+        "dynamic_routing_enabled": settings.llm_dynamic_routing_enabled,
         "embedding_recall_threshold": settings.llm_embedding_recall_threshold,
     }
 
@@ -131,6 +145,37 @@ async def get_llm_inventory(
         "installations": inventory["installations"],
         "routing_profiles": inventory["routing_profiles"],
     }
+
+
+@router.post("/runtime-targets", response_model=RuntimeTargetSummary, status_code=201)
+async def create_llm_runtime_target(
+    request: RuntimeTargetCreate,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_human_platform_admin),
+) -> Any:
+    _require_enabled()
+    try:
+        target = await register_runtime_target(
+            session,
+            name=request.name,
+            host=request.host,
+            runtime_type=request.runtime_type,
+            version=request.version,
+            max_loaded_models=request.max_loaded_models,
+            keep_alive_minutes=request.keep_alive_minutes,
+            labels=request.labels,
+        )
+    except DuplicateRuntimeTargetError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await record_llm_audit_event(
+        session,
+        actor_user_id=context.user_id,
+        action="register_target",
+        entity_type="runtime_target",
+        entity_id=target.id,
+        details={"host": request.host, "runtime_type": request.runtime_type},
+    )
+    return target
 
 
 @router.get("/capabilities", response_model=CapabilitiesResponse)
@@ -220,6 +265,14 @@ async def stage_llm_artifact_from_catalog(
         name=request.name,
         requested_by_user_id=context.user_id,
     )
+    await record_llm_audit_event(
+        session,
+        actor_user_id=context.user_id,
+        action="stage_artifact",
+        entity_type="artifact",
+        entity_id=artifact.id,
+        details={"repo_url": request.repo_url, "quantization": request.quantization},
+    )
     return {"artifact_id": artifact.id, "job_id": job_id, "status": artifact.status}
 
 
@@ -248,6 +301,14 @@ async def release_quarantined_llm_artifact(
         raise HTTPException(status_code=404, detail="Artifact not found")
     # Re-queue the staging worker so the artifact is re-verified.
     await enqueue_stage_llm_artifact(artifact.id, context.user_id)
+    await record_llm_audit_event(
+        session,
+        actor_user_id=context.user_id,
+        action="quarantine_release",
+        entity_type="artifact",
+        entity_id=artifact.id,
+        details={"previous_status": "quarantined", "status": artifact.status},
+    )
     return {
         "artifact_id": artifact.id,
         "previous_status": "quarantined",
@@ -298,6 +359,14 @@ async def install_llm_artifact(
         target_id=request.target_id,
         requested_by_user_id=context.user_id,
     )
+    await record_llm_audit_event(
+        session,
+        actor_user_id=context.user_id,
+        action="install",
+        entity_type="artifact",
+        entity_id=artifact_id,
+        details={"target_id": request.target_id, "job_id": job_id},
+    )
     return {
         "installation_id": 0,
         "deployment_id": 0,
@@ -317,6 +386,14 @@ async def approve_llm_deployment(
         deployment = await approve_deployment(session, deployment_id, context.user_id)
     except DeploymentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await record_llm_audit_event(
+        session,
+        actor_user_id=context.user_id,
+        action="approve",
+        entity_type="deployment",
+        entity_id=deployment.id,
+        details={"status": deployment.status},
+    )
     await session.commit()
     return {"deployment_id": deployment.id, "status": deployment.status}
 
@@ -342,6 +419,14 @@ async def activate_llm_deployment(
         )
     except DeploymentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await record_llm_audit_event(
+        session,
+        actor_user_id=context.user_id,
+        action="activate",
+        entity_type="deployment",
+        entity_id=deployment.id,
+        details={"capability": capability, "target_id": request.target_id},
+    )
     await session.commit()
     return {
         "deployment_id": deployment.id,
@@ -355,15 +440,88 @@ async def activate_llm_deployment(
 async def rollback_llm_deployment(
     deployment_id: int,
     session: AsyncSession = Depends(get_db),
-    _: RequestContext = Depends(require_human_platform_admin),
+    context: RequestContext = Depends(require_human_platform_admin),
 ) -> dict[str, Any]:
     _require_enabled()
     try:
         deployment = await rollback_deployment(session, deployment_id)
     except DeploymentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await record_llm_audit_event(
+        session,
+        actor_user_id=context.user_id,
+        action="rollback",
+        entity_type="deployment",
+        entity_id=deployment.id,
+        details={},
+    )
     await session.commit()
     return {"deployment_id": deployment.id, "status": deployment.status}
+
+
+@router.get("/deployments", response_model=list[DeploymentSummary])
+async def list_llm_deployments(
+    limit: int = 50,
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(require_platform_admin),
+) -> Any:
+    _require_enabled()
+    return await list_deployments(session, limit=limit)
+
+
+@router.get("/audit-events", response_model=list[AuditEventSummary])
+async def list_llm_audit_events(
+    limit: int = 50,
+    session: AsyncSession = Depends(get_db),
+    _: RequestContext = Depends(require_platform_admin),
+) -> Any:
+    _require_enabled()
+    from app.models.llm_framework import LLMAuditEvent
+
+    events = (
+        await session.scalars(
+            select(LLMAuditEvent).order_by(LLMAuditEvent.created_at.desc()).limit(min(limit, 200))
+        )
+    ).all()
+    return events
+
+
+@router.put("/routing", response_model=RoutingProfileResponse)
+async def upsert_llm_routing_profile(
+    request: RoutingProfileRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_human_platform_admin),
+) -> Any:
+    _require_enabled()
+    settings = get_settings()
+    if not settings.llm_dynamic_routing_enabled:
+        raise HTTPException(status_code=503, detail="Dynamic routing is disabled")
+    try:
+        profile = await upsert_routing_profile(
+            session,
+            capability=request.capability,
+            target_id=request.target_id,
+            installation_id=request.installation_id,
+            priority=request.priority,
+            is_active=request.is_active,
+        )
+    except (ValueError, InvalidCapabilityError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await record_llm_audit_event(
+        session,
+        actor_user_id=context.user_id,
+        action="upsert_routing_profile",
+        entity_type="routing_profile",
+        entity_id=profile.id,
+        details={
+            "capability": profile.capability,
+            "target_id": profile.target_id,
+            "installation_id": profile.installation_id,
+            "is_active": profile.is_active,
+        },
+    )
+    await session.commit()
+    return profile
 
 
 @router.post("/artifacts/{artifact_id}/reindex", response_model=ReindexResponse, status_code=202)

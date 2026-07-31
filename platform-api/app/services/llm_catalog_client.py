@@ -183,6 +183,8 @@ class HuggingFaceCatalogClient:
             "limit": limit,
             "full": "full",
             "config": "false",
+            "sort": "downloads",
+            "direction": "-1",
         }
         response = await self._request("GET", "/api/models", params=params)
         payload = response.json()

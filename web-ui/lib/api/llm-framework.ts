@@ -10,6 +10,7 @@ export interface LLMFrameworkStatus {
   manifest_signing_key_fingerprint: string;
   embedding_migration_enabled: boolean;
   fp16_conversion_enabled: boolean;
+  dynamic_routing_enabled: boolean;
   embedding_recall_threshold: number;
 }
 
@@ -88,6 +89,32 @@ export interface RoutingProfile {
   config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+export interface Deployment {
+  id: number;
+  installation_id: number;
+  artifact_id: number;
+  artifact_name: string;
+  target_id: number;
+  target_name: string;
+  requested_by_user_id: number | null;
+  approved_by_user_id: number | null;
+  status: string;
+  previous_deployment_id: number | null;
+  stabilized_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuditEvent {
+  id: number;
+  actor_user_id: number | null;
+  action: string;
+  entity_type: string | null;
+  entity_id: number | null;
+  details: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface LLMInventory {
@@ -181,6 +208,16 @@ export interface RoutingProfileRequest {
   priority?: number;
   is_active?: boolean;
   expected_version?: number | null;
+}
+
+export interface RuntimeTargetCreate {
+  name: string;
+  host: string;
+  runtime_type?: string;
+  version?: string | null;
+  max_loaded_models?: number | null;
+  keep_alive_minutes?: number | null;
+  labels?: Record<string, unknown>;
 }
 
 export function getLLMFrameworkStatus(): Promise<LLMFrameworkStatus> {
@@ -313,4 +350,16 @@ export function convertLLMCatalogEntry(payload: ConvertPayload): Promise<{ sourc
 
 export function getLLMModelConversions(): Promise<ModelConversion[]> {
   return apiClient.get<ModelConversion[]>("/api/llm-framework/model-conversions");
+}
+
+export function getLLMDeployments(): Promise<Deployment[]> {
+  return apiClient.get<Deployment[]>("/api/llm-framework/deployments");
+}
+
+export function getLLMAuditEvents(): Promise<AuditEvent[]> {
+  return apiClient.get<AuditEvent[]>("/api/llm-framework/audit-events");
+}
+
+export function registerLLMRuntimeTarget(payload: RuntimeTargetCreate): Promise<RuntimeTarget> {
+  return apiClient.post<RuntimeTarget>("/api/llm-framework/runtime-targets", payload);
 }
