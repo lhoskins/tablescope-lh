@@ -23,8 +23,10 @@ import { TurnBubble } from "@/components/tablescope/conversation/conversation-tu
 import {
   createConversation,
   getConversation,
+  listConversations,
   submitTurn,
   type Conversation,
+  type ConversationSummary,
   type ConversationTurn,
 } from "@/lib/api/conversational-analytics";
 import { IconLoader2 } from "@tabler/icons-react";
@@ -109,6 +111,7 @@ export default function BusinessInsightPage() {
       pinMutation.mutate({
         pin_type: "insight_card",
         pin_key: `insight:${card.projectId}:${card.insightType}:${key}`,
+        destination: "home",
         title: card.title,
         project_id: Number(card.projectId),
         frozen_payload: card as unknown as Record<string, unknown>,
@@ -124,6 +127,27 @@ export default function BusinessInsightPage() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [createActionOpen, setCreateActionOpen] = useState(false);
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
+
+  // Resume a canonical "Business Insights" conversation on mount so every ask
+  // appends to the same thread instead of spawning a new one.
+  const { data: conversationSummaries = [] } = useQuery<ConversationSummary[]>({
+    queryKey: ["conversations", "business-insight"],
+    queryFn: () => listConversations(),
+  });
+
+  useEffect(() => {
+    if (chatConversationId != null) return;
+    const canonical = conversationSummaries
+      .filter((c: ConversationSummary) => c.title === "Business Insights")
+      .sort(
+        (a, b) =>
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+      )[0];
+    if (canonical) {
+      setChatConversationId(canonical.id);
+      getConversation(canonical.id).then((conv) => setChatTurns(conv.turns));
+    }
+  }, [conversationSummaries, chatConversationId]);
 
   const handleCreateAction = useCallback((card: InsightCard) => {
     const insight: ActionableInsight = {
@@ -163,16 +187,24 @@ export default function BusinessInsightPage() {
     async (message: string) => {
       setChatBusy(true);
       setChatError(null);
+      // One idempotency key per turn, sent both when creating a conversation and
+      // when submitting a follow-up turn.
+      const requestId = crypto.randomUUID();
       try {
         if (chatConversationId == null) {
           const created = await createConversation({
+            title: "Business Insights",
             initial_message: message,
+            client_request_id: requestId,
           });
           const polled = await pollConversation(created.id);
           setChatConversationId(created.id);
           setChatTurns(polled.turns);
         } else {
-          const res = await submitTurn(chatConversationId, { message });
+          const res = await submitTurn(chatConversationId, {
+            message,
+            client_request_id: requestId,
+          });
           setChatTurns((prev) => [...prev, res.turn]);
           const polled = await pollConversation(res.conversation_id);
           setChatTurns(polled.turns);

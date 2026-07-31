@@ -47,6 +47,9 @@ from app.services.analytical_method_engine.method_registry import (
     catalog_status as analytical_catalog_status,
 )
 from app.services.auto_scope import _get_or_create_ai_scope_set
+from app.services.business_insight_project_resolver import (
+    resolve_business_insight_project,
+)
 from app.services.intent_engine import IntentDecision, classify_intent
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
@@ -842,22 +845,30 @@ async def route_prompt(
     if target_id is not None:
         await _check_project_access(session, context, target_id)
     else:
-        member_sub = select(ProjectMember.project_id).where(
-            ProjectMember.user_id == context.user_id,
-            ProjectMember.is_active.is_(True),
+        # Resolve the best authorized project from the prompt text, then fall back
+        # to the most recently updated project if the resolver is not confident.
+        resolved = await resolve_business_insight_project(
+            session, context, prompt
         )
-        target_id = await session.scalar(
-            select(Project.id)
-            .where(
-                Project.tenant_id == context.tenant_id,
-                or_(
-                    Project.owner_id == context.user_id,
-                    Project.id.in_(member_sub),
-                ),
+        if resolved.status == "resolved" and resolved.project_id:
+            target_id = resolved.project_id
+        else:
+            member_sub = select(ProjectMember.project_id).where(
+                ProjectMember.user_id == context.user_id,
+                ProjectMember.is_active.is_(True),
             )
-            .order_by(Project.updated_at.desc())
-            .limit(1)
-        )
+            target_id = await session.scalar(
+                select(Project.id)
+                .where(
+                    Project.tenant_id == context.tenant_id,
+                    or_(
+                        Project.owner_id == context.user_id,
+                        Project.id.in_(member_sub),
+                    ),
+                )
+                .order_by(Project.updated_at.desc())
+                .limit(1)
+            )
 
     if target_id is not None:
         return RoutePromptResponse(

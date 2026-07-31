@@ -4,6 +4,7 @@ export interface HomePin {
   id: number;
   pin_type: "insight_card" | "live_widget";
   pin_key: string;
+  destination: "home" | "insights_panel";
   title: string;
   project_id: number | null;
   config: Record<string, unknown>;
@@ -27,6 +28,7 @@ export interface HomePinLayout {
 export interface CreateHomePinPayload {
   pin_type: "insight_card" | "live_widget";
   pin_key: string;
+  destination?: "home" | "insights_panel";
   title: string;
   project_id?: number | null;
   config?: Record<string, unknown>;

@@ -39,6 +39,8 @@ export function buildExistingSources(items: MyDataSource[]): SessionSource[] {
         backendId: item.id,
         existing: true,
         projectId: item.projectId,
+        createdAt: item.createdAt,
+        loadedAt: item.createdAt,
         fileMetadata: {
           name: item.name,
           rows: 0,
@@ -69,6 +71,8 @@ export function buildExistingSources(items: MyDataSource[]): SessionSource[] {
       backendId: item.id,
       existing: true,
       projectId: item.projectId,
+      createdAt: item.createdAt,
+      loadedAt: item.createdAt,
       tables: [
         {
           // Show the data-source name (not the raw table name) in the lists.
