@@ -302,6 +302,7 @@ export default function BusinessInsightPage() {
           pinnedByFingerprint={pinnedByFingerprint}
           onCreateAction={handleCreateAction}
           availableProjects={allProjects ?? []}
+          actionsDisclosure="collapsible"
         />
       </div>
 

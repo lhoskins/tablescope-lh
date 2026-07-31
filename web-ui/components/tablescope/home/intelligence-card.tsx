@@ -392,7 +392,7 @@ export function IntelligenceCard({
   ) : null;
 
   const actionContent = (
-    <>
+    <div data-export-hide className="contents">
       <button
         type="button"
         onClick={() => setExplainOpen(true)}
@@ -410,8 +410,6 @@ export function IntelligenceCard({
         <IconChartBar size={14} />
         Chart suggestion
       </button>
-
-      <RAnalyticsBadge envelope={card.analyticalMethod} />
 
       {canCreateAction && (
         <button
@@ -526,7 +524,7 @@ export function IntelligenceCard({
           )}
         </>
       )}
-    </>
+    </div>
   );
 
   const projectIdNumber = Number(card.projectId);
@@ -556,6 +554,7 @@ export function IntelligenceCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <div className="flex items-center gap-1.5">
+            <RAnalyticsBadge envelope={card.analyticalMethod} />
             <InsightGovernanceBadge status={governance?.governance_status} />
             <span
               className={`rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
@@ -571,6 +570,7 @@ export function IntelligenceCard({
           {pinned ? (
             <button
               type="button"
+              data-export-hide
               onClick={onUnpin ? () => onUnpin(displayCard) : undefined}
               aria-label={onUnpin ? "Unpin from Home" : "Pinned to Home"}
               title={onUnpin ? "Unpin from Home" : "Pinned to Home"}
@@ -582,6 +582,7 @@ export function IntelligenceCard({
           ) : onPin ? (
             <button
               type="button"
+              data-export-hide
               onClick={() => onPin(displayCard)}
               aria-label="Pin to Home"
               title="Pin to Home"

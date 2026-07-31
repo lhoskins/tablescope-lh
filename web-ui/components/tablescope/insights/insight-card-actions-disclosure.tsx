@@ -26,7 +26,7 @@ export function InsightCardActionsDisclosure({
   const hasSources = sources != null && sources !== false;
 
   return (
-    <div className={cn("mt-3 flex flex-col items-start", className)}>
+    <div data-export-hide className={cn("mt-3 flex flex-col items-start", className)}>
       <button
         type="button"
         aria-expanded={expanded}

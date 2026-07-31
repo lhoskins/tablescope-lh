@@ -602,7 +602,11 @@ class ProjectContextService:
             )
 
     async def _check_metric_name_unique(
-        self, project_id: int, name: str, exclude_id: int | None = None
+        self,
+        project_id: int,
+        name: str,
+        success_criterion_id: int | None = None,
+        exclude_id: int | None = None,
     ) -> None:
         stmt = select(ProjectMetric).where(
             ProjectMetric.tenant_id == self.context.tenant_id,
@@ -610,18 +614,24 @@ class ProjectContextService:
             ProjectMetric.active.is_(True),
             ProjectMetric.name == name,
         )
+        if success_criterion_id is None:
+            stmt = stmt.where(ProjectMetric.success_criterion_id.is_(None))
+        else:
+            stmt = stmt.where(ProjectMetric.success_criterion_id == success_criterion_id)
         if exclude_id is not None:
             stmt = stmt.where(ProjectMetric.id != exclude_id)
         existing = await self.session.scalar(stmt)
         if existing is not None:
             raise HTTPException(
-                status_code=400, detail=f"Metric name '{name}' already exists in this project"
+                status_code=400, detail=f"Metric name '{name}' already exists for this success criterion"
             )
 
     async def create_metric(self, project_id: int, payload: ProjectMetricCreate) -> ProjectMetric:
         await self._require_project(project_id, write=True)
         await self._validate_metric_payload(payload, project_id=project_id)
-        await self._check_metric_name_unique(project_id, payload.name)
+        await self._check_metric_name_unique(
+            project_id, payload.name, payload.success_criterion_id
+        )
 
         max_position = (
             await self.session.scalar(
@@ -701,7 +711,12 @@ class ProjectContextService:
         await self._validate_metric_payload(payload, project_id=project_id)
 
         if payload.name is not None:
-            await self._check_metric_name_unique(project_id, payload.name, exclude_id=metric.id)
+            await self._check_metric_name_unique(
+                project_id,
+                payload.name,
+                payload.success_criterion_id,
+                exclude_id=metric.id,
+            )
 
         previous = metric.to_redacted_dict()
 

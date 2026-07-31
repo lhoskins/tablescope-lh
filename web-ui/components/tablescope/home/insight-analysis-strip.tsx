@@ -18,21 +18,21 @@ import type { InsightCard, ProposedAction } from "@/lib/api/home-intelligence";
 const ACTION_KIND_LABELS: Record<string, string> = {
   mitigate: "Mitigate",
   capture: "Capture",
-  investigate: "Investigate",
   monitor: "Monitor",
 };
 
 export function InsightAnalysisStrip({ card }: { card: InsightCard }) {
-  const diagnostics = card.diagnostics ?? [];
-  const actions = card.proposedActions ?? [];
+  const diagnostics = (card.diagnostics ?? []).filter(
+    (d) => !d.title?.startsWith("Claim:"),
+  );
+  const actions = (card.proposedActions ?? []).filter(
+    (a) => a.kind !== "investigate",
+  );
   if (diagnostics.length === 0) return null;
 
   const insightId = card.insightId ?? card.id;
-  const lead =
-    diagnostics.find((d) => !d.title?.startsWith("Claim:")) ?? diagnostics[0];
-  const action =
-    actions.find((a) => a.kind !== "investigate") ??
-    (actions[0] as ProposedAction | undefined);
+  const lead = diagnostics[0];
+  const action = actions[0] as ProposedAction | undefined;
 
   return (
     <div className="mt-3 rounded-lg border border-line-tertiary bg-bg-secondary/60 p-3">

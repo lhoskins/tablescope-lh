@@ -32,6 +32,7 @@ export interface IntelligenceFeedProps {
   onCreateAction?: (card: InsightCard) => void;
   /** Accessible projects used to populate the filter and default selection. */
   availableProjects?: FilterableProject[];
+  actionsDisclosure?: "always-visible" | "collapsible";
 }
 
 const EMPTY_PROJECTS: FilterableProject[] = [];
@@ -41,6 +42,7 @@ export function IntelligenceFeed({
   pinnedByFingerprint,
   onCreateAction,
   availableProjects: propAvailableProjects,
+  actionsDisclosure,
 }: IntelligenceFeedProps = {}) {
   // Normalize the accessible project list to a stable reference so the filter
   // state and memoized derived lists don't churn when the parent passes a new
@@ -510,6 +512,7 @@ export function IntelligenceFeed({
         }}
         emptySelection={emptySelection}
         empty={empty}
+        actionsDisclosure={actionsDisclosure}
       />
 
       {pending.length > 0 && (
