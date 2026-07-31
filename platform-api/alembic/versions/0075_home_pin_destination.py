@@ -1,6 +1,6 @@
 """Add destination column to home_pins and update unique constraint.
 
-Revision ID: 0070
+Revision ID: 0075
 Revises: 0069
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0070"
+revision: str = "0075"
 down_revision: str | None = "0069"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
