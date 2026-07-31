@@ -87,4 +87,27 @@ describe("OtpInput", () => {
       expect(document.activeElement).not.toBe(input);
     });
   });
+
+  // The reported failure: typing a code in order produced a scrambled result
+  // ("digits pushed to the right"). setSelectionRange() in the caret-restore
+  // effect fires a native "select" event (standard input behaviour, not a
+  // test artifact), which onSelect fed back into setCaretIndex — so the
+  // component's own caret restore for keystroke N clobbered the caret index
+  // that keystroke N had just computed, and keystroke N+1 inserted at the
+  // wrong position.
+  describe("typing in order", () => {
+    function Controlled() {
+      const [value, setValue] = React.useState("");
+      return <OtpInput value={value} onChange={setValue} autoFocus />;
+    }
+
+    it("keeps digits in the order they were typed", async () => {
+      render(<Controlled />);
+      const input = screen.getByLabelText(/verification code/i) as HTMLInputElement;
+      for (const digit of ["1", "2", "3", "4", "5", "6"]) {
+        fireEvent.keyDown(input, { key: digit });
+      }
+      await waitFor(() => expect(input.value).toBe("123456"));
+    });
+  });
 });

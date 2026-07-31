@@ -47,11 +47,25 @@ export function OtpInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFocus]);
 
+  // setSelectionRange() below fires a native "select" event when it changes
+  // the selection (this is standard input behaviour, not test-only), and that
+  // event is wired to updateCaretFromInput via onSelect. Left unguarded, the
+  // component's own caret-restore triggers "user changed selection", which
+  // then overwrites the caretIndex a keystroke just computed with a stale
+  // read — producing scrambled digit order. This flag marks the very next
+  // select event as self-inflicted so updateCaretFromInput can ignore it.
+  const suppressNextSelect = useRef(false);
+
   useLayoutEffect(() => {
+    suppressNextSelect.current = true;
     inputRef.current?.setSelectionRange(caretIndex, caretIndex);
   }, [caretIndex, digits]);
 
   function updateCaretFromInput() {
+    if (suppressNextSelect.current) {
+      suppressNextSelect.current = false;
+      return;
+    }
     const input = inputRef.current;
     if (!input) return;
     let idx = input.selectionStart ?? digits.length;
