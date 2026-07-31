@@ -30,6 +30,9 @@ from app.routes.ai_proxy import _ask_and_run_core, _forward_prose_answer
 from app.services import ai_intelligence_client
 from app.services.ai_governance import ai_governance_service, infer_governance_key
 from app.services.ai_intelligence_client import AIUnavailableError
+from app.services.business_insight_project_resolver import (
+    resolve_business_insight_project,
+)
 from app.services.project_ai_context import build_project_ai_context
 
 logger = logging.getLogger(__name__)
@@ -746,10 +749,22 @@ async def execute_turn(
     # New analysis or query-changing follow-up
     project_id = conversation.project_id
     if project_id is None:
-        turn.status = "error"
-        turn.error_code = "no_project"
-        turn.assistant_message = "This conversation is not attached to a project."
-        return
+        # Business Insight and similar flows may have created the conversation
+        # before project resolution existed; resolve from the question now.
+        resolved = await resolve_business_insight_project(
+            session, context, question
+        )
+        if resolved.status == "resolved" and resolved.project_id:
+            project_id = resolved.project_id
+            conversation.project_id = project_id
+        else:
+            turn.status = "error"
+            turn.error_code = "no_project"
+            turn.assistant_message = (
+                "I couldn't tell which project this question belongs to. "
+                "Please ask from a project page or mention a project name."
+            )
+            return
 
     project_context: dict[str, Any] | None = None
     try:

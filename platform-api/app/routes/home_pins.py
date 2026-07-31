@@ -36,6 +36,7 @@ router = APIRouter(prefix="/home-pins", tags=["Home Pins"])
 
 _PIN_TYPE_PATTERN = re.compile(r"^(insight_card|live_widget)$")
 _PIN_KEY_PATTERN = re.compile(r"^(insight|widget):[\w-]+(:[\w-]+)*$")
+_PIN_DESTINATION_PATTERN = re.compile(r"^(home|insights_panel)$")
 
 
 class _LayoutInput(BaseModel):
@@ -49,6 +50,7 @@ class CreateHomePinRequest(BaseModel):
     pin_type: str
     pin_key: str
     title: str
+    destination: str = "home"
     project_id: int | None = None
     config: dict[str, Any] = {}
     layout: _LayoutInput | None = None
@@ -66,6 +68,13 @@ class CreateHomePinRequest(BaseModel):
     def _validate_pin_key(cls, v: str) -> str:
         if not v or len(v) > 255 or not _PIN_KEY_PATTERN.match(v):
             raise ValueError("invalid pin_key")
+        return v
+
+    @field_validator("destination")
+    @classmethod
+    def _validate_destination(cls, v: str) -> str:
+        if not _PIN_DESTINATION_PATTERN.match(v):
+            raise ValueError("destination must be 'home' or 'insights_panel'")
         return v
 
 
@@ -93,6 +102,7 @@ class HomePinRead(BaseModel):
     id: int
     pin_type: str
     pin_key: str
+    destination: str
     title: str
     project_id: int | None = None
     config: dict[str, Any]
@@ -114,6 +124,7 @@ def _pin_read(pin: HomePin) -> dict[str, Any]:
         "id": pin.id,
         "pin_type": pin.pin_type,
         "pin_key": pin.pin_key,
+        "destination": pin.destination,
         "title": pin.title,
         "project_id": pin.project_id,
         "config": pin.config or {},
@@ -169,6 +180,7 @@ async def _require_project_access(
 
 @router.get("", response_model=list[HomePinRead])
 async def list_home_pins(
+    destination: str = "home",
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[dict[str, Any]]:
@@ -179,6 +191,7 @@ async def list_home_pins(
             HomePin.tenant_id == context.tenant_id,
             HomePin.user_id == context.user_id,
             HomePin.is_pinned.is_(True),
+            HomePin.destination == destination,
         )
         .order_by(HomePin.layout["position"].as_string(), HomePin.id)
     )
@@ -199,6 +212,7 @@ async def create_home_pin(
             HomePin.tenant_id == context.tenant_id,
             HomePin.user_id == context.user_id,
             HomePin.pin_key == req.pin_key,
+            HomePin.destination == req.destination,
         )
     )
     if existing is not None:
@@ -211,6 +225,7 @@ async def create_home_pin(
         project_id=project.id if project else None,
         pin_type=req.pin_type,
         pin_key=req.pin_key,
+        destination=req.destination,
         title=req.title,
         config=req.config,
         layout=layout,

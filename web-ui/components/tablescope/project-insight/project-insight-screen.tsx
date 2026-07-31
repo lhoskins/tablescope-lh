@@ -147,6 +147,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       pinMutation.mutate({
         pin_type: "insight_card",
         pin_key: `insight:${card.projectId}:${card.insightType}:${key}`,
+        destination: "home",
         title: card.title,
         project_id: Number(card.projectId),
         frozen_payload: card as unknown as Record<string, unknown>,
