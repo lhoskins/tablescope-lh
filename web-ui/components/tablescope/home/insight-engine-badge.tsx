@@ -63,8 +63,10 @@ export function RAnalyticsBadge({
 
 export function InsightAnalysisDetails({
   envelope,
+  executedAt,
 }: {
   envelope?: MethodEnvelope | null;
+  executedAt?: string | null;
 }) {
   if (!envelope) {
     return (
@@ -88,7 +90,7 @@ export function InsightAnalysisDetails({
         </span>
       </summary>
       <div className="mt-2">
-        <MethodEnvelopeBlock envelope={envelope} />
+        <MethodEnvelopeBlock envelope={envelope} executedAt={executedAt} />
       </div>
     </details>
   );

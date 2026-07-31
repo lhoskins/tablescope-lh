@@ -174,10 +174,6 @@ function expandSection(name: string) {
   );
 }
 
-function expandCardActions(card: HTMLElement) {
-  fireEvent.click(within(card).getByRole("button", { name: /More Actions/i }));
-}
-
 describe("ProjectInsightScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -383,7 +379,6 @@ describe("ProjectInsightScreen", () => {
     );
     const card = heading.closest("article") as HTMLElement;
     expect(within(card).getByText("Critical")).toBeTruthy();
-    expandCardActions(card);
     expect(within(card).getByRole("button", { name: "Explain" })).toBeTruthy();
     expect(
       within(card).getByRole("button", { name: "Add to dashboard" }),

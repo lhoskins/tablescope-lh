@@ -413,7 +413,10 @@ export function InsightExplanationPanel({
         )}
 
         <Section title="Analysis details">
-          <InsightAnalysisDetails envelope={card.analyticalMethod} />
+          <InsightAnalysisDetails
+            envelope={card.analyticalMethod}
+            executedAt={card.executedAt}
+          />
         </Section>
 
         <div className="mt-5 flex items-center justify-between border-t border-line-tertiary pt-4">

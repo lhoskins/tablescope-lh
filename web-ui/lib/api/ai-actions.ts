@@ -95,6 +95,8 @@ export interface SuggestedSource {
 export interface MethodEnvelope {
   method?: string | null;
   methodName?: string | null;
+  /** Optional version of the primary method. */
+  methodVersion?: string | null;
   tier?: number | null;
   analysisIntent?: string | null;
   status?: string | null;
@@ -110,6 +112,8 @@ export interface MethodEnvelope {
   fallbackFrom?: string | null;
   resultSchemaVersion?: number | null;
   chartContract?: Record<string, unknown> | null;
+  /** Supporting analytical methods or sub-analyses that informed the result. */
+  supportingMethods?: string[] | null;
 }
 
 /**
