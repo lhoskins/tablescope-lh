@@ -35,6 +35,11 @@ import {
 } from "./insight-feedback-status";
 import { InsightCardActionToolbar } from "@/components/tablescope/insights/insight-card-action-toolbar";
 import { exportInsightCardPng, insightPngFilename } from "@/lib/insights/export-png";
+import {
+  canExportInsightCsv,
+  exportInsightCardCsv,
+  insightCsvFilename,
+} from "@/lib/insights/export-csv";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
 
@@ -322,6 +327,7 @@ export function IntelligenceCard({
   responding = false,
   governance,
   onCreateAction,
+  actionsDisclosure,
 }: IntelligenceCardProps) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -333,6 +339,7 @@ export function IntelligenceCard({
     card.timeSeriesView,
   );
   const [pngExporting, setPngExporting] = useState(false);
+  const [csvExporting, setCsvExporting] = useState(false);
   const { toasts, push: pushToast, dismiss } = useToasts();
   const { data: identity } = useCurrentUser();
 
@@ -377,6 +384,23 @@ export function IntelligenceCard({
       setPngExporting(false);
     }
   };
+
+  const handleExportCsv = async () => {
+    setCsvExporting(true);
+    try {
+      await exportInsightCardCsv(displayCard);
+      pushToast(`CSV downloaded: ${insightCsvFilename(displayCard)}`, "success");
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : "Failed to export CSV", "error");
+    } finally {
+      setCsvExporting(false);
+    }
+  };
+
+  const canExportCsv = useMemo(
+    () => canExportInsightCsv(displayCard),
+    [displayCard],
+  );
 
   return (
     <article
@@ -491,6 +515,7 @@ export function IntelligenceCard({
       {!hideActions && (
         <InsightCardActionToolbar
           card={displayCard}
+          actionsDisclosure={actionsDisclosure}
           canCreateAction={canCreateAction}
           onCreateAction={canCreateAction ? onCreateAction : undefined}
           onExplain={() => setExplainOpen(true)}
@@ -500,6 +525,8 @@ export function IntelligenceCard({
           }
           onDownloadPng={handleDownloadPng}
           isPngExporting={pngExporting}
+          onExportCsv={canExportCsv ? handleExportCsv : undefined}
+          isCsvExporting={csvExporting}
           feedback={feedback}
           onFeedbackClick={
             onFeedbackSave ? handleFeedbackClick : undefined
