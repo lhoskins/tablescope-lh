@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
-from datetime import date
 
 from app.services import percent_change_summary as pcs
 
