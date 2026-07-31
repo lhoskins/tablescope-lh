@@ -1,10 +1,14 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconChartBar,
-  IconClipboardList,
+  IconChevronDown,
+  IconChevronUp,
+  IconClipboardPlus,
   IconDownload,
+  IconFileSpreadsheet,
   IconFileText,
   IconInfoCircle,
   IconLayoutDashboard,
@@ -17,13 +21,22 @@ import {
 } from "@tabler/icons-react";
 import type { SVGProps } from "react";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 import type { InsightCard, VizCandidate } from "@/lib/api/home-intelligence";
-import type { InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
+import type {
+  InsightFeedbackRecord,
+  InsightSentiment,
+} from "@/lib/api/insight-feedback";
 
 export interface InsightCardActionToolbarProps {
   card: InsightCard;
+  actionsDisclosure?: "always-visible" | "collapsible";
   canCreateAction: boolean;
   onCreateAction?: () => void;
   onExplain?: () => void;
@@ -31,6 +44,8 @@ export interface InsightCardActionToolbarProps {
   onAddToDashboard?: () => void;
   onDownloadPng?: () => void;
   isPngExporting?: boolean;
+  onExportCsv?: () => void;
+  isCsvExporting?: boolean;
   feedback?: InsightFeedbackRecord | null;
   onFeedbackClick?: (sentiment: InsightSentiment) => void;
   feedbackStatus?: ReactNode;
@@ -139,13 +154,23 @@ function IconButton({
           {busy ? <IconLoader2 size={18} className="animate-spin" /> : icon}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{tooltip ?? label}</TooltipContent>
+      <TooltipContent side="bottom">{tooltip ?? label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function ToolbarDivider() {
+  return (
+    <div
+      className="mx-1 h-6 w-px bg-line-tertiary"
+      aria-hidden="true"
+    />
   );
 }
 
 export function InsightCardActionToolbar({
   card,
+  actionsDisclosure = "always-visible",
   canCreateAction,
   onCreateAction,
   onExplain,
@@ -153,11 +178,42 @@ export function InsightCardActionToolbar({
   onAddToDashboard,
   onDownloadPng,
   isPngExporting,
+  onExportCsv,
+  isCsvExporting,
   feedback,
   onFeedbackClick,
   feedbackStatus,
   selectedChart,
 }: InsightCardActionToolbarProps) {
+  const insightId = card.insightId || card.id;
+  const regionId = useMemo(() => `insight-actions-${insightId}`, [insightId]);
+  const [expanded, setExpandedState] = useState(actionsDisclosure === "always-visible");
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const regionRef = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef(false);
+
+  useEffect(() => {
+    if (actionsDisclosure === "always-visible") {
+      setExpandedState(true);
+    }
+  }, [actionsDisclosure]);
+
+  useEffect(() => {
+    if (!expanded && returnFocus.current && toggleRef.current) {
+      returnFocus.current = false;
+      toggleRef.current.focus();
+    }
+  }, [expanded]);
+
+  const setExpanded = (next: boolean) => {
+    if (!next && regionRef.current?.contains(document.activeElement)) {
+      returnFocus.current = true;
+    }
+    setExpandedState(next);
+  };
+
+  const toggleExpanded = () => setExpanded(!expanded);
+
   const hasChart = card.chart != null;
   const isKpiGrid = card.chart?.type === "kpi_grid";
 
@@ -179,120 +235,179 @@ export function InsightCardActionToolbar({
         ? "This insight does not have a value column and cannot be added to a dashboard"
         : undefined;
 
-  const agreeSelected = feedback?.sentiment === "agree" && feedback?.status === "active";
-  const disagreeSelected = feedback?.sentiment === "disagree" && feedback?.status === "active";
+  const canExportCsv = Boolean(onExportCsv);
+  const csvDisabledReason = !onExportCsv
+    ? "CSV export is not available for this insight"
+    : undefined;
+
+  const agreeSelected =
+    feedback?.sentiment === "agree" && feedback?.status === "active";
+  const disagreeSelected =
+    feedback?.sentiment === "disagree" && feedback?.status === "active";
+
+  const showDisclosure = actionsDisclosure === "collapsible";
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="mt-3 space-y-2 border-t border-line-tertiary pt-3">
-        <InsightCardSourceRow card={card} />
-
-        <div className="flex flex-wrap items-center gap-2" data-export-hide>
-        {canCreateAction && onCreateAction && (
-          <Button
+      <div className="mt-3">
+        {showDisclosure && (
+          <button
+            ref={toggleRef}
             type="button"
-            variant="primary"
-            size="sm"
-            onClick={onCreateAction}
-            className="gap-1.5"
+            aria-expanded={expanded}
+            aria-controls={regionId}
+            onClick={toggleExpanded}
+            className="inline-flex h-11 items-center gap-1 rounded-md px-3 text-[13px] font-medium text-ink-tertiary transition-colors hover:bg-bg-secondary hover:text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
           >
-            <IconClipboardList size={16} />
-            Create action
-          </Button>
+            More Actions
+            {expanded ? (
+              <IconChevronUp size={16} aria-hidden />
+            ) : (
+              <IconChevronDown size={16} aria-hidden />
+            )}
+          </button>
         )}
 
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={onExplain}
-          className="gap-1.5"
-        >
-          <IconInfoCircle size={16} />
-          Explain
-        </Button>
+        {(!showDisclosure || expanded) && (
+          <div
+            ref={regionRef}
+            id={regionId}
+            className={cn(
+              "space-y-2 border-t border-line-tertiary pt-3",
+              showDisclosure && "mt-2",
+            )}
+          >
+            <InsightCardSourceRow card={card} />
 
-        <div className="grow" aria-hidden="true" />
+            <div
+              className="flex flex-wrap items-center gap-1"
+              data-export-hide
+            >
+              <IconButton
+                label="Create Action"
+                tooltip={
+                  canCreateAction
+                    ? "Create Action"
+                    : "You do not have permission to create actions"
+                }
+                icon={<IconClipboardPlus size={18} />}
+                onClick={onCreateAction}
+                disabled={!canCreateAction || !onCreateAction}
+              />
 
-        {onFeedbackClick && (
-          <>
-            <IconButton
-              label={agreeSelected ? "Edit helpful feedback" : "Helpful"}
-              icon={
-                agreeSelected ? (
-                  <IconThumbUpFilled size={18} />
-                ) : (
-                  <IconThumbUp size={18} />
-                )
-              }
-              onClick={() => onFeedbackClick("agree")}
-              active={agreeSelected}
-              ariaPressed={agreeSelected}
-              className={agreeSelected ? "text-success hover:bg-success/10" : undefined}
-            />
-            <IconButton
-              label={disagreeSelected ? "Edit not helpful feedback" : "Not helpful"}
-              icon={
-                disagreeSelected ? (
-                  <IconThumbDownFilled size={18} />
-                ) : (
-                  <IconThumbDown size={18} />
-                )
-              }
-              onClick={() => onFeedbackClick("disagree")}
-              active={disagreeSelected}
-              ariaPressed={disagreeSelected}
-              className={disagreeSelected ? "text-danger hover:bg-danger/10" : undefined}
-            />
-            {feedbackStatus}
-          </>
+              <IconButton
+                label="Explain"
+                icon={<IconInfoCircle size={18} />}
+                onClick={onExplain}
+                disabled={!onExplain}
+              />
+
+              <ToolbarDivider />
+
+              {onFeedbackClick && (
+                <>
+                  <IconButton
+                    label={agreeSelected ? "Edit Agree" : "Agree"}
+                    tooltip="Agree"
+                    icon={
+                      agreeSelected ? (
+                        <IconThumbUpFilled size={18} />
+                      ) : (
+                        <IconThumbUp size={18} />
+                      )
+                    }
+                    onClick={() => onFeedbackClick("agree")}
+                    active={agreeSelected}
+                    ariaPressed={agreeSelected}
+                    className={
+                      agreeSelected ? "text-success hover:bg-success/10" : undefined
+                    }
+                  />
+                  <IconButton
+                    label={disagreeSelected ? "Edit Disagree" : "Disagree"}
+                    tooltip="Disagree"
+                    icon={
+                      disagreeSelected ? (
+                        <IconThumbDownFilled size={18} />
+                      ) : (
+                        <IconThumbDown size={18} />
+                      )
+                    }
+                    onClick={() => onFeedbackClick("disagree")}
+                    active={disagreeSelected}
+                    ariaPressed={disagreeSelected}
+                    className={
+                      disagreeSelected ? "text-danger hover:bg-danger/10" : undefined
+                    }
+                  />
+                </>
+              )}
+
+              {feedbackStatus}
+
+              {canChangeChart ? (
+                <IconButton
+                  label="Chart options"
+                  icon={<IconChartBar size={18} />}
+                  onClick={onChartOptions}
+                  active={selectedChart != null}
+                />
+              ) : (
+                <IconButton
+                  label="Chart options"
+                  tooltip={chartDisabledReason}
+                  icon={<IconChartBar size={18} />}
+                  disabled
+                />
+              )}
+
+              <ToolbarDivider />
+
+              {canAddToDashboard ? (
+                <IconButton
+                  label="Add to dashboard"
+                  icon={<IconLayoutDashboard size={18} />}
+                  onClick={onAddToDashboard}
+                />
+              ) : (
+                <IconButton
+                  label="Add to dashboard"
+                  tooltip={dashboardDisabledReason}
+                  icon={<IconLayoutDashboard size={18} />}
+                  disabled
+                />
+              )}
+
+              <IconButton
+                label={isPngExporting ? "Downloading PNG" : "Download PNG"}
+                tooltip="Download PNG"
+                icon={<IconDownload size={18} />}
+                onClick={onDownloadPng}
+                busy={isPngExporting}
+                disabled={isPngExporting}
+              />
+
+              {canExportCsv ? (
+                <IconButton
+                  label={isCsvExporting ? "Exporting CSV" : "Export to CSV"}
+                  tooltip="Export to CSV"
+                  icon={<IconFileSpreadsheet size={18} />}
+                  onClick={onExportCsv}
+                  busy={isCsvExporting}
+                  disabled={isCsvExporting}
+                />
+              ) : (
+                <IconButton
+                  label="Export to CSV"
+                  tooltip={csvDisabledReason}
+                  icon={<IconFileSpreadsheet size={18} />}
+                  disabled
+                />
+              )}
+            </div>
+          </div>
         )}
-
-        {canChangeChart ? (
-          <IconButton
-            label="Chart options"
-            icon={<IconChartBar size={18} />}
-            onClick={onChartOptions}
-            active={selectedChart != null}
-          />
-        ) : (
-          <IconButton
-            label="Chart options"
-            tooltip={chartDisabledReason}
-            icon={<IconChartBar size={18} />}
-            disabled
-          />
-        )}
-
-        <div
-          className="mx-1 h-6 w-px bg-line-tertiary"
-          aria-hidden="true"
-        />
-
-        {canAddToDashboard ? (
-          <IconButton
-            label="Add to dashboard"
-            icon={<IconLayoutDashboard size={18} />}
-            onClick={onAddToDashboard}
-          />
-        ) : (
-          <IconButton
-            label="Add to dashboard"
-            tooltip={dashboardDisabledReason}
-            icon={<IconLayoutDashboard size={18} />}
-            disabled
-          />
-        )}
-
-        <IconButton
-          label={isPngExporting ? "Downloading PNG" : "Download PNG"}
-          icon={<IconDownload size={18} />}
-          onClick={onDownloadPng}
-          busy={isPngExporting}
-          disabled={isPngExporting}
-        />
       </div>
-    </div>
     </TooltipProvider>
   );
 }

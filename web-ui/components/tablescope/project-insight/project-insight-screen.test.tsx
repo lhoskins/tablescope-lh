@@ -379,6 +379,7 @@ describe("ProjectInsightScreen", () => {
     );
     const card = heading.closest("article") as HTMLElement;
     expect(within(card).getByText("Critical")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "More Actions" }));
     expect(within(card).getByRole("button", { name: "Explain" })).toBeTruthy();
     expect(
       within(card).getByRole("button", { name: "Add to dashboard" }),

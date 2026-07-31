@@ -49,7 +49,7 @@ describe("IntelligenceCard pin control", () => {
 });
 
 describe("IntelligenceCard Option 2 toolbar", () => {
-  it("renders Create action, Explain, and source row by default", () => {
+  it("renders Create Action, Explain, and source row by default", () => {
     const onCreateAction = vi.fn();
     const onExplain = vi.fn();
     render(
@@ -59,20 +59,29 @@ describe("IntelligenceCard Option 2 toolbar", () => {
         onSaveToDashboard={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: "Create action" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create Action" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Explain" })).toBeTruthy();
     expect(screen.getByText("demo_table")).toBeTruthy();
     expect(screen.getByRole("button", { name: "1 more source" })).toBeTruthy();
   });
 
-  it("does not show a More Actions disclosure toggle", () => {
+  it("shows a More Actions disclosure toggle when collapsible and hides content until expanded", () => {
     render(<IntelligenceCard card={baseCard} actionsDisclosure="collapsible" />);
-    expect(screen.queryByRole("button", { name: /More Actions/i })).toBeNull();
+    const toggle = screen.getByRole("button", { name: /More Actions/i });
+    expect(toggle).toBeTruthy();
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("button", { name: "Create Action" })).toBeNull();
+    expect(screen.queryByText("demo_table")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Create Action" })).toBeTruthy();
+    expect(screen.getByText("demo_table")).toBeTruthy();
   });
 
   it("hides all toolbar actions when hideActions is true", () => {
     render(<IntelligenceCard card={baseCard} hideActions />);
-    expect(screen.queryByRole("button", { name: "Create action" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create Action" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Explain" })).toBeNull();
     expect(screen.queryByText("demo_table")).toBeNull();
   });
@@ -83,7 +92,7 @@ describe("IntelligenceCard Option 2 toolbar", () => {
     expect(screen.getByText("Explain insight")).toBeTruthy();
   });
 
-  it("calls onCreateAction when Create action is clicked", () => {
+  it("calls onCreateAction when Create Action is clicked", () => {
     const onCreateAction = vi.fn();
     render(
       <IntelligenceCard
@@ -92,7 +101,7 @@ describe("IntelligenceCard Option 2 toolbar", () => {
         onSaveToDashboard={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Create action" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Action" }));
     expect(onCreateAction).toHaveBeenCalled();
   });
 
@@ -106,7 +115,7 @@ describe("IntelligenceCard Option 2 toolbar", () => {
       />,
     );
     // admin can manage actions, so the button is present in the default mock.
-    expect(screen.getByRole("button", { name: "Create action" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create Action" })).toBeTruthy();
   });
 
   it("does not render a standalone R Analytics badge", () => {
