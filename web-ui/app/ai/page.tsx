@@ -78,6 +78,9 @@ function AiAssistantPageInner() {
     enabled: activeId != null,
   });
   const turns = active?.turns ?? [];
+  const assistantConversations = (conversations ?? []).filter(
+    (c) => c.surface === "ai_assistant",
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // A conversation is scoped to one project for grounded answers; reflect it
@@ -240,12 +243,12 @@ function AiAssistantPageInner() {
             </Button>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {(conversations ?? []).length === 0 && (
+            {assistantConversations.length === 0 && (
               <p className="px-2 py-4 text-small text-ink-tertiary">
                 No conversations yet.
               </p>
             )}
-            {(conversations ?? []).map((c) => (
+            {assistantConversations.map((c) => (
               <ConversationRow
                 key={c.id}
                 conversation={c}

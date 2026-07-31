@@ -26,6 +26,10 @@ import {
   type ProjectResult,
   type InsightCard,
 } from "@/lib/api/home-intelligence";
+import type {
+  GovernanceItem,
+  InsightFeedbackRecord,
+} from "@/lib/api/insight-feedback";
 import {
   IntelligenceCard,
   InsightChartBlock,
@@ -128,10 +132,32 @@ function HomeAskBox({
   );
 }
 
+export interface HomeAiSuggestionsCardActions {
+  onPin?: (card: InsightCard) => void;
+  onSaveToDashboard?: (card: InsightCard) => void;
+  onCreateAction?: (card: InsightCard) => void;
+  onFeedbackSave?: (
+    card: InsightCard,
+    payload: {
+      sentiment: "agree" | "disagree";
+      reason_codes: string[];
+      comment: string;
+    },
+  ) => void;
+  onFeedbackRemove?: (card: InsightCard) => void;
+  onFeedbackRespond?: (card: InsightCard, response: string) => void;
+  feedbackById?: Record<string, InsightFeedbackRecord>;
+  savingFeedback?: boolean;
+  governanceById?: Record<string, GovernanceItem>;
+  pinnedByFingerprint?: Map<string, number>;
+  actionsDisclosure?: "always-visible" | "collapsible";
+}
+
 export function HomeAiSuggestions({
   projectId,
   showAskBox,
   onAsk,
+  cardActions,
 }: {
   /** When set, every suggestion pill generates for this project only and the
    *  per-project section headers are hidden. Omitted, the original Home
@@ -141,6 +167,7 @@ export function HomeAiSuggestions({
   showAskBox?: boolean;
   /** Optional ask handler. When provided, the ask box calls this instead of routing via /api/ai/route-prompt. */
   onAsk?: (prompt: string) => void | Promise<void>;
+  cardActions?: HomeAiSuggestionsCardActions;
 } = {}) {
   const scoped = projectId != null;
   const askVisible = showAskBox ?? !scoped;
@@ -239,6 +266,7 @@ export function HomeAiSuggestions({
             <InsightsPanel
               projects={insightProjects ?? []}
               showProjectHeader={!scoped}
+              cardActions={cardActions}
             />
           )}
         </div>
@@ -506,13 +534,11 @@ function pinFingerprintKey(card: InsightCard): string | undefined {
 export function InsightsPanel({
   projects,
   showProjectHeader = true,
-  onPin,
-  pinnedByFingerprint,
+  cardActions,
 }: {
   projects: ProjectResult[];
   showProjectHeader?: boolean;
-  onPin?: (card: InsightCard) => void;
-  pinnedByFingerprint?: Map<string, number>;
+  cardActions?: HomeAiSuggestionsCardActions;
 }) {
   const withResults = projects.filter((p) => p.insights.length > 0);
   if (withResults.length === 0) {
@@ -531,15 +557,49 @@ export function InsightsPanel({
             {p.insights.map((card) => {
               const key = pinFingerprintKey(card) || card.insightId || card.id;
               const isPinned = Boolean(
-                pinnedByFingerprint && key && pinnedByFingerprint.has(key),
+                cardActions?.pinnedByFingerprint &&
+                  key &&
+                  cardActions.pinnedByFingerprint.has(key),
               );
+              const insightId = card.insightId || card.id;
+              const feedback = insightId
+                ? cardActions?.feedbackById?.[insightId]
+                : undefined;
+              const governance = insightId
+                ? cardActions?.governanceById?.[insightId]
+                : undefined;
               return (
                 <IntelligenceCard
                   key={card.id}
                   card={card}
                   pinned={isPinned}
-                  hideActions
-                  onPin={onPin}
+                  actionsDisclosure={cardActions?.actionsDisclosure}
+                  onPin={cardActions?.onPin}
+                  onSaveToDashboard={cardActions?.onSaveToDashboard}
+                  onCreateAction={
+                    cardActions?.onCreateAction
+                      ? () => cardActions.onCreateAction!(card)
+                      : undefined
+                  }
+                  onFeedbackSave={
+                    cardActions?.onFeedbackSave
+                      ? (payload) => cardActions.onFeedbackSave!(card, payload)
+                      : undefined
+                  }
+                  onFeedbackRemove={
+                    cardActions?.onFeedbackRemove
+                      ? () => cardActions.onFeedbackRemove!(card)
+                      : undefined
+                  }
+                  onFeedbackRespond={
+                    cardActions?.onFeedbackRespond
+                      ? (response) =>
+                          cardActions.onFeedbackRespond!(card, response)
+                      : undefined
+                  }
+                  feedback={feedback}
+                  savingFeedback={cardActions?.savingFeedback}
+                  governance={governance}
                 />
               );
             })}

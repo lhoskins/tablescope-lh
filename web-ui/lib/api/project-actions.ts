@@ -304,6 +304,35 @@ export const projectActionsApi = {
   ): Promise<{ count: number; action_ids: number[] }> =>
     apiClient.post(`/api/projects/${projectId}/actions:count-for-insight`, body),
 
+  draftFromInsight: (
+    projectId: string,
+    body: {
+      insight_type: string;
+      title: string;
+      summary: string;
+      recommended_action?: string | null;
+      severity?: string;
+      sources?: { tables?: string[]; documents?: string[] };
+      supporting_sources?: string[];
+      explanation?: Record<string, unknown> | null;
+    },
+  ): Promise<{
+    title: string;
+    description: string;
+    subtasks: CreateProjectActionSubtaskPayload[];
+    success_criteria: {
+      name: string;
+      description: string;
+      target_value: string | number | null;
+      directionality: string;
+      cadence: string;
+      unit: string;
+      format: string;
+    }[];
+    model_used: string;
+    request_id: string;
+  }> => apiClient.post(`/api/projects/${projectId}/actions/draft-from-insight`, body),
+
   get: (projectId: string, actionId: number): Promise<ProjectAction> =>
     apiClient.get(`/api/projects/${projectId}/actions/${actionId}`),
 

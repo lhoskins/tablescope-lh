@@ -5,6 +5,7 @@ import {
   IconChartBar,
   IconChevronRight,
   IconClipboardList,
+  IconDownload,
   IconFileText,
   IconInfoCircle,
   IconLayoutDashboard,
@@ -44,6 +45,7 @@ import {
   InsightGovernanceBadge,
 } from "./insight-feedback-status";
 import { InsightCardActionsDisclosure } from "@/components/tablescope/insights/insight-card-actions-disclosure";
+import { exportInsightCardPng, insightPngFilename } from "@/lib/insights/export-png";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
 
 /** Remove every remaining `**` marker (matched pairs handled by renderBold). */
@@ -508,6 +510,20 @@ export function IntelligenceCard({
               <IconPlus size={14} /> Add to report
             </button>
           )}
+          {displayCard.chart && displayCard.chart.type !== "kpi_grid" && (
+            <button
+              type="button"
+              onClick={() =>
+                exportInsightCardPng(
+                  stableInsightId,
+                  insightPngFilename(displayCard),
+                ).catch(() => undefined)
+              }
+              className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
+            >
+              <IconDownload size={14} /> Export PNG
+            </button>
+          )}
         </>
       )}
     </>
@@ -517,6 +533,7 @@ export function IntelligenceCard({
 
   return (
     <article
+      data-insight-card-id={stableInsightId}
       className={
         frozen
           ? "flex h-full flex-col p-3"

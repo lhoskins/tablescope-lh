@@ -111,6 +111,7 @@ export function CreateActionFromInsightDialog({
   const [dueDate, setDueDate] = useState("");
   const [subtasks, setSubtasks] = useState<CreateProjectActionSubtaskPayload[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [draftLoading, setDraftLoading] = useState(false);
   const [existingCount, setExistingCount] = useState(0);
   const [existingIds, setExistingIds] = useState<number[]>([]);
 
@@ -146,6 +147,53 @@ export function CreateActionFromInsightDialog({
     if (currentUserId && members.some((m) => m.user_id === currentUserId)) {
       setOwnerUserId(String(currentUserId));
     }
+
+    let cancelled = false;
+
+    // Fetch a structured AI draft; keep the manual pre-fill as a fallback.
+    if (insight.projectId) {
+      setDraftLoading(true);
+      projectActionsApi
+        .draftFromInsight(insight.projectId, {
+          insight_type: insight.insightType,
+          title: insight.title,
+          summary: insight.summary,
+          recommended_action: insight.recommendedAction,
+          severity: insight.severity,
+          sources: {
+            tables: insight.sources?.tables ?? [],
+            documents: insight.sources?.documents ?? [],
+          },
+          supporting_sources: insight.supportingSources ?? [],
+          explanation: insight.explanation ?? undefined,
+        })
+        .then((draft) => {
+          if (cancelled) return;
+          if (draft.title) setTitle(trimText(draft.title));
+          if (draft.description) setDescription(trimText(draft.description));
+          if (draft.subtasks?.length > 0) {
+            setSubtasks(
+              draft.subtasks.map((st) => ({
+                title: trimText(st.title) || "",
+                description: st.description || null,
+                status: st.status ?? "not_started",
+                percent_complete: st.percent_complete ?? 0,
+                owner_user_id: (st.owner_user_id ?? Number(identity?.user?.id ?? "")) || null,
+                due_date: st.due_date ?? null,
+                is_required: st.is_required ?? true,
+              })),
+            );
+          }
+        })
+        .catch(() => {
+          // leave the manual pre-fill in place
+        })
+        .finally(() => setDraftLoading(false));
+    }
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, insight, identity, members]);
 
   useEffect(() => {
@@ -434,8 +482,8 @@ export function CreateActionFromInsightDialog({
             <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!trimText(title) || submitting}>
-              {submitting ? "Creating..." : "Create action"}
+            <Button type="submit" disabled={!trimText(title) || submitting || draftLoading}>
+              {submitting ? "Creating..." : draftLoading ? "Drafting..." : "Create action"}
             </Button>
           </div>
         </form>

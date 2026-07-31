@@ -294,9 +294,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       .then((summaries) => {
         if (cancelled) return;
         const existing = summaries.find(
-          (c) =>
-            c.title === PROJECT_INSIGHTS_TITLE ||
-            c.title.toLowerCase().startsWith("project insight"),
+          (c) => c.surface === "project_insights",
         );
         if (existing) {
           getConversation(existing.id)
@@ -322,6 +320,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
           const created = await createConversation({
             project_id: projectIdNum,
             title: PROJECT_INSIGHTS_TITLE,
+            surface: "project_insights",
             initial_message: message,
           });
           const polled = await pollConversation(created.id);
@@ -436,6 +435,34 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     [push],
   );
 
+  const cardActions = useMemo(
+    () => ({
+      onPin: handlePinInsight,
+      onSaveToDashboard: handleSaveToDashboard,
+      onCreateAction: handleCreateAction,
+      onFeedbackSave: handleFeedbackSave,
+      onFeedbackRemove: handleFeedbackRemove,
+      onFeedbackRespond: handleFeedbackRespond,
+      feedbackById,
+      savingFeedback,
+      governanceById,
+      pinnedByFingerprint,
+      actionsDisclosure: "collapsible" as const,
+    }),
+    [
+      handlePinInsight,
+      handleSaveToDashboard,
+      handleCreateAction,
+      handleFeedbackSave,
+      handleFeedbackRemove,
+      handleFeedbackRespond,
+      feedbackById,
+      savingFeedback,
+      governanceById,
+      pinnedByFingerprint,
+    ],
+  );
+
   return (
     <ProjectShell
       projectId={projectId}
@@ -456,6 +483,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               projectId={projectIdNum}
               showAskBox
               onAsk={handleProjectAsk}
+              cardActions={cardActions}
             />
 
             {((chatConversation?.turns?.length ?? 0) > 0 || chatBusy || chatError || chatPending) && (

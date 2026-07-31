@@ -205,6 +205,7 @@ async def finalize_upload(
         compute_view_name,
         convert_to_csv_if_needed,
         detect_column_types,
+        display_source,
         sanitize_csv_content,
         sanitize_filename,
         sanitize_xlsx_content,
@@ -233,6 +234,8 @@ async def finalize_upload(
         final_filename, content = convert_to_csv_if_needed(clean_name, content)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    display_name, _ = display_source(final_filename, original_format)
 
     endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
     servlet_url = f"{endpoint.servlet_url}/TeiidExcelImporterTest/upload"
@@ -263,7 +266,7 @@ async def finalize_upload(
 
     # Detect column types and create FileSourceMeta
     column_types = detect_column_types(content, final_filename)
-    view_name = compute_view_name(final_filename)
+    view_name = compute_view_name(display_name)
 
     resolved_project_id: int | None = None
     if project_id is not None:
@@ -284,7 +287,7 @@ async def finalize_upload(
             owner_id=user.id,
             project_id=resolved_project_id,
             view_name=view_name,
-            file_name=final_filename,
+            file_name=display_name,
             vdb_type="user",
             source_format=original_format,
             column_types=column_types or None,
@@ -292,7 +295,7 @@ async def finalize_upload(
         session.add(meta)
     else:
         meta = existing_meta
-        meta.file_name = final_filename
+        meta.file_name = display_name
         meta.source_format = original_format
         if column_types:
             meta.column_types = column_types
@@ -463,7 +466,7 @@ async def finalize_upload(
     return {
         "data_source_id": meta.id,
         "view_name": view_name,
-        "file_name": final_filename,
+        "file_name": display_name,
         "project_id": resolved_project_id,
         "status": "active",
         "message": "Data source created with AI metadata.",

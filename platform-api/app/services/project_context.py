@@ -426,6 +426,74 @@ class ProjectContextService:
         await self._require_project(project_id, write=True)
         goal = await self.get_goal(project_id, goal_id)
         previous = goal.to_redacted_dict()
+
+        metric_ids = {link.metric_id for link in goal.metric_links}
+        risk_ids = {link.risk_id for link in goal.risk_links}
+
+        # Soft-delete metrics that are exclusively linked to this criterion; otherwise
+        # just detach them from the criterion being archived.
+        if metric_ids:
+            metrics_with_other_links = {
+                row
+                for row in await self.session.scalars(
+                    select(ProjectGoalMetricLink.metric_id)
+                    .join(ProjectGoal, ProjectGoal.id == ProjectGoalMetricLink.goal_id)
+                    .where(
+                        ProjectGoalMetricLink.metric_id.in_(metric_ids),
+                        ProjectGoalMetricLink.goal_id != goal.id,
+                        ProjectGoal.active.is_(True),
+                    )
+                )
+            }
+            metrics = (
+                await self.session.scalars(
+                    select(ProjectMetric).where(ProjectMetric.id.in_(metric_ids))
+                )
+            ).all()
+            for metric in metrics:
+                if metric.id not in metrics_with_other_links:
+                    metric.active = False
+                    metric.version += 1
+                elif metric.success_criterion_id == goal.id:
+                    metric.success_criterion_id = None
+                    metric.version += 1
+            await self.session.execute(
+                delete(ProjectGoalMetricLink).where(
+                    ProjectGoalMetricLink.goal_id == goal.id,
+                    ProjectGoalMetricLink.metric_id.in_(metric_ids),
+                )
+            )
+
+        # Soft-delete risks that are exclusively linked to this criterion.
+        if risk_ids:
+            risks_with_other_links = {
+                row
+                for row in await self.session.scalars(
+                    select(ProjectGoalRiskLink.risk_id)
+                    .join(ProjectGoal, ProjectGoal.id == ProjectGoalRiskLink.goal_id)
+                    .where(
+                        ProjectGoalRiskLink.risk_id.in_(risk_ids),
+                        ProjectGoalRiskLink.goal_id != goal.id,
+                        ProjectGoal.active.is_(True),
+                    )
+                )
+            }
+            risks = (
+                await self.session.scalars(
+                    select(ProjectRisk).where(ProjectRisk.id.in_(risk_ids))
+                )
+            ).all()
+            for risk in risks:
+                if risk.id not in risks_with_other_links:
+                    risk.active = False
+                    risk.version += 1
+            await self.session.execute(
+                delete(ProjectGoalRiskLink).where(
+                    ProjectGoalRiskLink.goal_id == goal.id,
+                    ProjectGoalRiskLink.risk_id.in_(risk_ids),
+                )
+            )
+
         goal.active = False
         goal.version += 1
         await self.session.flush()

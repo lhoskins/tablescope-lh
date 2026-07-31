@@ -476,6 +476,35 @@ async def generate_sql(
         )
 
 
+async def generate_action_draft(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    insight: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Generate a structured action draft (title, description, subtasks, success criteria).
+
+    Returns ``None`` when the AI service is disabled or unreachable.
+    """
+    return await _post(
+        "/ai/actions/draft",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "insight_type": insight.get("insight_type", "insight"),
+            "title": insight.get("title", ""),
+            "summary": insight.get("summary", ""),
+            "recommended_action": insight.get("recommended_action", ""),
+            "severity": insight.get("severity", "info"),
+            "sources": insight.get("sources", {}),
+            "supporting_sources": insight.get("supporting_sources", []),
+            "explanation": insight.get("explanation"),
+        },
+    )
+
+
 async def ask(
     *,
     tenant_id: int,

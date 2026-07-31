@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { IconArrowRight, IconTargetArrow } from "@tabler/icons-react";
-import type { InsightCard } from "@/lib/api/home-intelligence";
+import type { InsightCard, ProposedAction } from "@/lib/api/home-intelligence";
 
 /**
  * Compact Deeper-analysis summary shown on an insight card.
@@ -15,14 +15,24 @@ import type { InsightCard } from "@/lib/api/home-intelligence";
  * Renders nothing when a card has not been dissected, so a card never
  * advertises an analysis that does not exist.
  */
+const ACTION_KIND_LABELS: Record<string, string> = {
+  mitigate: "Mitigate",
+  capture: "Capture",
+  investigate: "Investigate",
+  monitor: "Monitor",
+};
+
 export function InsightAnalysisStrip({ card }: { card: InsightCard }) {
   const diagnostics = card.diagnostics ?? [];
   const actions = card.proposedActions ?? [];
   if (diagnostics.length === 0) return null;
 
   const insightId = card.insightId ?? card.id;
-  const lead = diagnostics[0];
-  const action = actions[0];
+  const lead =
+    diagnostics.find((d) => !d.title?.startsWith("Claim:")) ?? diagnostics[0];
+  const action =
+    actions.find((a) => a.kind !== "investigate") ??
+    (actions[0] as ProposedAction | undefined);
 
   return (
     <div className="mt-3 rounded-lg border border-line-tertiary bg-bg-secondary/60 p-3">
@@ -41,6 +51,11 @@ export function InsightAnalysisStrip({ card }: { card: InsightCard }) {
               />
               <span>
                 <span className="font-medium text-ink-primary">{action.headline}</span>
+                {ACTION_KIND_LABELS[action.kind] ? (
+                  <span className="ml-1 rounded bg-bg-tertiary px-1.5 py-0.5 text-[11px] font-medium text-ink-tertiary">
+                    {ACTION_KIND_LABELS[action.kind]}
+                  </span>
+                ) : null}
                 {action.confidence === "low" ? (
                   <span className="ml-1 text-ink-tertiary">
                     (needs confirmation)

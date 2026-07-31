@@ -137,7 +137,7 @@ export default function BusinessInsightPage() {
       try {
         const convos = await listConversations();
         const matches = convos
-          .filter((c) => c.title === "Business Insights")
+          .filter((c) => c.surface === "business_insights")
           .sort(
             (a, b) =>
               new Date(b.updated_at).getTime() -
@@ -183,6 +183,16 @@ export default function BusinessInsightPage() {
     setCreateActionOpen(true);
   }, []);
 
+  const cardActions = useMemo(
+    () => ({
+      onPin: handlePinInsight,
+      onCreateAction: handleCreateAction,
+      pinnedByFingerprint,
+      actionsDisclosure: "collapsible" as const,
+    }),
+    [handlePinInsight, handleCreateAction, pinnedByFingerprint],
+  );
+
   const pollConversation = useCallback(
     async (id: number): Promise<Conversation> => {
       for (let i = 0; i < 60; i++) {
@@ -207,6 +217,7 @@ export default function BusinessInsightPage() {
         if (chatConversationId == null) {
           const created = await createConversation({
             title: "Business Insights",
+            surface: "business_insights",
             initial_message: message,
             client_request_id: requestId,
           });
@@ -263,7 +274,7 @@ export default function BusinessInsightPage() {
     >
       <div className="space-y-6 pb-24">
         <div className="mx-auto w-full max-w-content space-y-6">
-          <HomeAiSuggestions onAsk={handleAsk} />
+          <HomeAiSuggestions onAsk={handleAsk} cardActions={cardActions} />
           {(chatTurns.length > 0 || chatBusy || chatError) && (
             <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
               {chatTurns.map((t, i) => (

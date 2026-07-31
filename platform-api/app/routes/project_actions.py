@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -43,6 +44,7 @@ from app.schemas.project_action import (
     ProjectActionSubtaskUpdate,
     ProjectActionUpdate,
 )
+from app.services.ai_intelligence_client import AIUnavailableError, generate_action_draft
 from app.services.project_ai_context import invalidate_project_ai_context
 from app.services.project_insight_service import mark_project_insight_stale
 
@@ -206,6 +208,7 @@ async def _get_action(
     project_id: int,
     action_id: int,
     active_only: bool = True,
+    exclude_deleted: bool = True,
 ) -> ProjectAction:
     stmt = (
         select(ProjectAction)
@@ -217,7 +220,12 @@ async def _get_action(
         )
     )
     if active_only:
-        stmt = stmt.where(ProjectAction.archived_at.is_(None))
+        stmt = stmt.where(
+            ProjectAction.archived_at.is_(None),
+            ProjectAction.deleted_at.is_(None),
+        )
+    elif exclude_deleted:
+        stmt = stmt.where(ProjectAction.deleted_at.is_(None))
     action = await session.scalar(stmt)
     if action is None:
         raise HTTPException(
@@ -448,6 +456,7 @@ async def list_actions(
     base = select(ProjectAction).where(
         ProjectAction.tenant_id == context.tenant_id,
         ProjectAction.project_id == project_id,
+        ProjectAction.deleted_at.is_(None),
     )
     if not include_archived:
         base = base.where(ProjectAction.archived_at.is_(None))
@@ -682,6 +691,46 @@ async def create_action(
     return ProjectActionOut.model_validate(action)
 
 
+class DraftActionFromInsightRequest(BaseModel):
+    insight_type: str
+    title: str
+    summary: str
+    recommended_action: str = ""
+    severity: str = "info"
+    sources: dict[str, Any] = Field(default_factory=dict)
+    supporting_sources: list[str] = Field(default_factory=list)
+    explanation: dict[str, Any] | None = None
+
+
+@router.post("/{project_id}/actions/draft-from-insight")
+async def draft_action_from_insight(
+    project_id: int,
+    body: DraftActionFromInsightRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Generate a structured action draft from an insight using the AI server."""
+    await _require_project_access(project_id, session, context)
+    try:
+        draft = await generate_action_draft(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            insight=body.model_dump(),
+        )
+    except AIUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    if draft is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service is disabled or unavailable",
+        )
+    return draft
+
+
 @router.post(
     "/{project_id}/actions:count-for-insight",
     response_model=ProjectActionCountForInsightResponse,
@@ -709,6 +758,7 @@ async def count_for_insight(
                 ProjectAction.project_id == project_id,
                 ProjectAction.source_insight_fingerprint == fingerprint,
                 ProjectAction.archived_at.is_(None),
+                ProjectAction.deleted_at.is_(None),
             )
         )
     ).all()
@@ -752,6 +802,7 @@ async def board_actions(
     base = select(ProjectAction).where(
         ProjectAction.tenant_id == context.tenant_id,
         ProjectAction.project_id == project_id,
+        ProjectAction.deleted_at.is_(None),
     )
     if not include_archived:
         base = base.where(ProjectAction.archived_at.is_(None))
@@ -1134,6 +1185,45 @@ async def archive_action(
     await session.commit()
     await _after_mutation(session, context, project_id)
     return {"status": "archived", "id": action.id, "lock_version": action.lock_version}
+
+
+@router.delete("/{project_id}/actions/{action_id}/permanent")
+async def delete_action_permanently(
+    project_id: int,
+    action_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """Permanently tombstone an already-archived action. Requires prior archival."""
+    await _require_project_access(project_id, session, context)
+    action = await _get_action(
+        session, context, project_id, action_id, active_only=False
+    )
+    if action.archived_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Archive the action before deletion",
+        )
+    previous = {
+        "title": action.title,
+        "archived_at": action.archived_at.isoformat() if action.archived_at else None,
+    }
+    action.deleted_at = datetime.now(UTC)
+    action.lock_version = action.lock_version + 1
+    action.updated_by_user_id = context.user_id
+
+    await _audit(
+        session,
+        context=context,
+        event_type="project_action_deleted_permanently",
+        project_id=project_id,
+        action_id=action.id,
+        title=action.title,
+        payload=previous,
+    )
+    await session.commit()
+    await _after_mutation(session, context, project_id)
+    return {"status": "deleted", "id": action.id, "lock_version": action.lock_version}
 
 
 @router.post(

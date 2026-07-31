@@ -45,6 +45,7 @@ export interface ConversationTurn {
 export interface Conversation {
   id: number;
   project_id: number | null;
+  surface: string;
   title: string;
   status: string;
   active_datasource_id: number | null;
@@ -55,6 +56,7 @@ export interface Conversation {
 export interface ConversationSummary {
   id: number;
   project_id: number | null;
+  surface: string;
   title: string;
   status: string;
   updated_at: string;
@@ -63,6 +65,7 @@ export interface ConversationSummary {
 export interface CreateConversationRequest {
   project_id?: number;
   title?: string;
+  surface?: string;
   initial_message?: string;
   data_source_id?: number;
   client_request_id?: string;
