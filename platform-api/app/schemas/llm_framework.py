@@ -25,6 +25,16 @@ class RuntimeTargetSummary(BaseModel):
     updated_at: datetime
 
 
+class RuntimeTargetCreate(BaseModel):
+    name: str
+    host: str
+    runtime_type: str = "ollama"
+    version: str | None = None
+    max_loaded_models: int | None = None
+    keep_alive_minutes: int | None = None
+    labels: dict = {}
+
+
 class ArtifactFileSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -214,6 +224,36 @@ class ActivateResponse(BaseModel):
 class RollbackResponse(BaseModel):
     deployment_id: int
     status: str
+
+
+class DeploymentSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    installation_id: int
+    artifact_id: int
+    artifact_name: str
+    target_id: int
+    target_name: str
+    requested_by_user_id: int | None
+    approved_by_user_id: int | None
+    status: str
+    previous_deployment_id: int | None
+    stabilized_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AuditEventSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    actor_user_id: int | None
+    action: str
+    entity_type: str | None
+    entity_id: int | None
+    details: dict
+    created_at: datetime
 
 
 class RoutingProfileRequest(BaseModel):

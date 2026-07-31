@@ -202,8 +202,12 @@ async def activate_deployment(
     deployment = await session.get(LLMDeployment, deployment_id)
     if deployment is None:
         raise DeploymentError("Deployment not found")
-    if deployment.status not in ("pending", "approved"):
-        raise DeploymentError(f"Deployment is {deployment.status}, cannot activate")
+    required_status = "approved" if settings.llm_two_person_approval_required else "pending"
+    allowed_statuses = ("approved",) if settings.llm_two_person_approval_required else ("pending", "approved")
+    if deployment.status not in allowed_statuses:
+        raise DeploymentError(
+            f"Deployment is {deployment.status}, requires {required_status} to activate"
+        )
 
     installation = await session.get(LLMInstallation, deployment.installation_id)
     if installation is None:

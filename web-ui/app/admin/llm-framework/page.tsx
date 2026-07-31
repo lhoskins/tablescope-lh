@@ -3,17 +3,29 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  activateLLMDeployment,
+  approveLLMDeployment,
+  getLLMAuditEvents,
+  getLLMCapabilities,
+  getLLMDeployments,
   getLLMFrameworkStatus,
   getLLMInventory,
-  getLLMCapabilities,
+  getLLMEmbeddingMigrations,
+  getLLMModelConversions,
+  installLLMArtifact,
+  preflightLLMInstall,
+  registerLLMRuntimeTarget,
+  rollbackLLMDeployment,
   searchLLMCatalog,
   stageLLMArtifact,
   reindexLLMArtifact,
-  getLLMEmbeddingMigrations,
   convertLLMCatalogEntry,
-  getLLMModelConversions,
+  upsertLLMRoutingProfile,
+  type AuditEvent,
   type CatalogSearchResult,
+  type Deployment,
   type LLMInventory,
+  type RuntimeTarget,
 } from "@/lib/api/llm-framework";
 
 function formatBytes(value: number | null | undefined): string {
@@ -97,7 +109,46 @@ function TargetsTable({ targets }: { targets: LLMInventory["targets"] }) {
   );
 }
 
-function ArtifactsTable({ artifacts }: { artifacts: LLMInventory["artifacts"] }) {
+function ArtifactsTable({
+  artifacts,
+  targets,
+  deploymentEnabled,
+  onInstall,
+}: {
+  artifacts: LLMInventory["artifacts"];
+  targets: RuntimeTarget[];
+  deploymentEnabled: boolean;
+  onInstall: () => void;
+}) {
+  const [selectedTarget, setSelectedTarget] = useState<Record<number, number>>({});
+  const [preflightResult, setPreflightResult] = useState<Record<number, { ok: boolean; detail: string | null }>>({});
+
+  const preflightMutation = useMutation({
+    mutationFn: ({ artifactId, targetId }: { artifactId: number; targetId: number }) =>
+      preflightLLMInstall(artifactId, targetId),
+    onSuccess: (data, variables) => {
+      setPreflightResult((prev) => ({
+        ...prev,
+        [variables.artifactId]: {
+          ok: data.target_reachable && data.disk_ok && data.slot_ok,
+          detail: data.detail,
+        },
+      }));
+    },
+    onError: (error: Error, variables) => {
+      setPreflightResult((prev) => ({
+        ...prev,
+        [variables.artifactId]: { ok: false, detail: error.message },
+      }));
+    },
+  });
+
+  const installMutation = useMutation({
+    mutationFn: ({ artifactId, targetId }: { artifactId: number; targetId: number }) =>
+      installLLMArtifact(artifactId, targetId),
+    onSuccess: () => onInstall(),
+  });
+
   if (artifacts.length === 0) {
     return <p className="text-sm text-ink-tertiary">No model artifacts in the vault.</p>;
   }
@@ -113,20 +164,83 @@ function ArtifactsTable({ artifacts }: { artifacts: LLMInventory["artifacts"] })
             <th className="py-2 pr-4 font-medium">Size</th>
             <th className="py-2 pr-4 font-medium">Status</th>
             <th className="py-2 pr-4 font-medium">Verified</th>
+            <th className="py-2 pr-4 font-medium">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-line-tertiary text-ink-secondary">
-          {artifacts.map((a) => (
-            <tr key={a.id}>
-              <td className="py-2 pr-4 font-medium text-ink-primary">{a.name}</td>
-              <td className="py-2 pr-4">{a.publisher ?? "-"}</td>
-              <td className="py-2 pr-4">{a.format}</td>
-              <td className="py-2 pr-4">{a.quantization ?? "-"}</td>
-              <td className="py-2 pr-4">{formatBytes(a.size_bytes)}</td>
-              <td className="py-2 pr-4"><StatusBadge status={a.status} /></td>
-              <td className="py-2 pr-4">{formatDate(a.verified_at)}</td>
-            </tr>
-          ))}
+          {artifacts.map((a) => {
+            const canInstall = a.status === "verified" && deploymentEnabled && targets.length > 0;
+            return (
+              <tr key={a.id}>
+                <td className="py-2 pr-4 font-medium text-ink-primary">{a.name}</td>
+                <td className="py-2 pr-4">{a.publisher ?? "-"}</td>
+                <td className="py-2 pr-4">{a.format}</td>
+                <td className="py-2 pr-4">{a.quantization ?? "-"}</td>
+                <td className="py-2 pr-4">{formatBytes(a.size_bytes)}</td>
+                <td className="py-2 pr-4"><StatusBadge status={a.status} /></td>
+                <td className="py-2 pr-4">{formatDate(a.verified_at)}</td>
+                <td className="py-2 pr-4">
+                  {canInstall ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={selectedTarget[a.id] || ""}
+                          onChange={(e) =>
+                            setSelectedTarget((prev) => ({ ...prev, [a.id]: Number(e.target.value) }))
+                          }
+                          className="rounded-md border border-line-tertiary bg-bg-primary px-2 py-1 text-sm text-ink-primary"
+                        >
+                          <option value="">Select target</option>
+                          {targets.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() =>
+                            selectedTarget[a.id] &&
+                            preflightMutation.mutate({ artifactId: a.id, targetId: selectedTarget[a.id] })
+                          }
+                          disabled={!selectedTarget[a.id] || preflightMutation.isPending}
+                          className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                        >
+                          {preflightMutation.isPending ? "Preflight…" : "Preflight"}
+                        </button>
+                        <button
+                          onClick={() =>
+                            selectedTarget[a.id] &&
+                            installMutation.mutate({ artifactId: a.id, targetId: selectedTarget[a.id] })
+                          }
+                          disabled={
+                            !selectedTarget[a.id] ||
+                            installMutation.isPending ||
+                            !preflightResult[a.id]?.ok
+                          }
+                          className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          {installMutation.isPending ? "Installing…" : "Install"}
+                        </button>
+                      </div>
+                      {preflightResult[a.id] && (
+                        <p
+                          className={`text-xs ${
+                            preflightResult[a.id].ok ? "text-emerald-600" : "text-red-600"
+                          }`}
+                        >
+                          {preflightResult[a.id].ok
+                            ? "Target ready"
+                            : preflightResult[a.id].detail || "Preflight failed"}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-ink-tertiary">—</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -197,6 +311,377 @@ function RoutingTable({ routing_profiles }: { routing_profiles: LLMInventory["ro
   );
 }
 
+function RegisterTargetForm({ onSuccess }: { onSuccess: () => void }) {
+  const [name, setName] = useState("");
+  const [host, setHost] = useState("");
+  const [runtimeType, setRuntimeType] = useState("ollama");
+  const [version, setVersion] = useState("");
+  const [maxModels, setMaxModels] = useState("");
+  const [keepAlive, setKeepAlive] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: registerLLMRuntimeTarget,
+    onSuccess: () => {
+      setName("");
+      setHost("");
+      setVersion("");
+      setMaxModels("");
+      setKeepAlive("");
+      onSuccess();
+    },
+  });
+
+  return (
+    <form
+      className="grid gap-3 sm:grid-cols-6"
+      onSubmit={(e) => {
+        e.preventDefault();
+        mutation.mutate({
+          name,
+          host,
+          runtime_type: runtimeType,
+          version: version || null,
+          max_loaded_models: maxModels ? Number(maxModels) : null,
+          keep_alive_minutes: keepAlive ? Number(keepAlive) : null,
+        });
+      }}
+    >
+      <input
+        type="text"
+        placeholder="Name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+        required
+      />
+      <input
+        type="text"
+        placeholder="Host URL"
+        value={host}
+        onChange={(e) => setHost(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+        required
+      />
+      <input
+        type="text"
+        placeholder="Runtime type"
+        value={runtimeType}
+        onChange={(e) => setRuntimeType(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="text"
+        placeholder="Version"
+        value={version}
+        onChange={(e) => setVersion(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="number"
+        placeholder="Max loaded models"
+        value={maxModels}
+        onChange={(e) => setMaxModels(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <input
+        type="number"
+        placeholder="Keep alive (min)"
+        value={keepAlive}
+        onChange={(e) => setKeepAlive(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <div className="sm:col-span-6 flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={!name || !host || mutation.isPending}
+          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+        >
+          {mutation.isPending ? "Registering…" : "Register target"}
+        </button>
+        {mutation.isError && <p className="text-sm text-red-600">{(mutation.error as Error)?.message ?? "Failed"}</p>}
+        {mutation.isSuccess && <p className="text-sm text-emerald-600">Target registered.</p>}
+      </div>
+    </form>
+  );
+}
+
+function RoutingProfileForm({
+  capabilities,
+  targets,
+  installations,
+  onSuccess,
+}: {
+  capabilities: string[];
+  targets: RuntimeTarget[];
+  installations: LLMInventory["installations"];
+  onSuccess: () => void;
+}) {
+  const [capability, setCapability] = useState(capabilities[0] || "");
+  const [targetId, setTargetId] = useState("");
+  const [installationId, setInstallationId] = useState("");
+  const [priority, setPriority] = useState("1");
+  const [isActive, setIsActive] = useState(true);
+
+  const mutation = useMutation({
+    mutationFn: upsertLLMRoutingProfile,
+    onSuccess: () => {
+      setTargetId("");
+      setInstallationId("");
+      setPriority("1");
+      onSuccess();
+    },
+  });
+
+  return (
+    <form
+      className="grid gap-3 sm:grid-cols-6"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!capability || !targetId || !installationId) return;
+        mutation.mutate({
+          capability,
+          target_id: Number(targetId),
+          installation_id: Number(installationId),
+          priority: Number(priority),
+          is_active: isActive,
+        });
+      }}
+    >
+      <select
+        value={capability}
+        onChange={(e) => setCapability(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+        required
+      >
+        <option value="">Capability</option>
+        {capabilities.map((c) => (
+          <option key={c} value={c}>
+            {formatCapability(c)}
+          </option>
+        ))}
+      </select>
+      <select
+        value={targetId}
+        onChange={(e) => setTargetId(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+        required
+      >
+        <option value="">Target</option>
+        {targets.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+      <select
+        value={installationId}
+        onChange={(e) => setInstallationId(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+        required
+      >
+        <option value="">Installation</option>
+        {installations.map((i) => (
+          <option key={i.id} value={i.id}>
+            {i.artifact_id} on {i.target_id}
+          </option>
+        ))}
+      </select>
+      <input
+        type="number"
+        placeholder="Priority"
+        value={priority}
+        onChange={(e) => setPriority(e.target.value)}
+        className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-2 text-sm text-ink-primary"
+      />
+      <label className="flex items-center gap-2 text-sm text-ink-primary">
+        <input
+          type="checkbox"
+          checked={isActive}
+          onChange={(e) => setIsActive(e.target.checked)}
+          className="rounded border-line-tertiary"
+        />
+        Active
+      </label>
+      <div className="flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={!capability || !targetId || !installationId || mutation.isPending}
+          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+        >
+          {mutation.isPending ? "Saving…" : "Save routing profile"}
+        </button>
+        {mutation.isError && <p className="text-sm text-red-600">{(mutation.error as Error)?.message ?? "Failed"}</p>}
+        {mutation.isSuccess && <p className="text-sm text-emerald-600">Profile saved.</p>}
+      </div>
+    </form>
+  );
+}
+
+function DeploymentsPanel({
+  capabilities,
+}: {
+  capabilities: string[];
+}) {
+  const statusQuery = useQuery({
+    queryKey: ["llm-framework", "status"],
+    queryFn: getLLMFrameworkStatus,
+  });
+  const deploymentsQuery = useQuery({
+    queryKey: ["llm-framework", "deployments"],
+    queryFn: getLLMDeployments,
+    refetchInterval: 5000,
+  });
+  const auditQuery = useQuery({
+    queryKey: ["llm-framework", "audit-events"],
+    queryFn: getLLMAuditEvents,
+    refetchInterval: 5000,
+  });
+
+  const [selectedCapability, setSelectedCapability] = useState<Record<number, string>>({});
+
+  const approveMutation = useMutation({
+    mutationFn: approveLLMDeployment,
+    onSuccess: () => deploymentsQuery.refetch(),
+  });
+  const activateMutation = useMutation({
+    mutationFn: ({ deploymentId, request }: { deploymentId: number; request: { capability: string; target_id: number } }) =>
+      activateLLMDeployment(deploymentId, request),
+    onSuccess: () => deploymentsQuery.refetch(),
+  });
+  const rollbackMutation = useMutation({
+    mutationFn: rollbackLLMDeployment,
+    onSuccess: () => deploymentsQuery.refetch(),
+  });
+
+  const isDeploymentEnabled = statusQuery.data?.deployment_enabled ?? false;
+  const requiresApproval = statusQuery.data?.two_person_approval_required ?? true;
+
+  return (
+    <div className="space-y-4">
+      <Section title="Deployments">
+        {!isDeploymentEnabled && <p className="text-sm text-ink-tertiary">Deployment is disabled in configuration.</p>}
+        {deploymentsQuery.isLoading ? (
+          <p className="text-sm text-ink-tertiary">Loading...</p>
+        ) : deploymentsQuery.data?.length === 0 ? (
+          <p className="text-sm text-ink-tertiary">No deployments yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-line-tertiary text-ink-tertiary">
+                <tr>
+                  <th className="py-2 pr-4 font-medium">ID</th>
+                  <th className="py-2 pr-4 font-medium">Artifact</th>
+                  <th className="py-2 pr-4 font-medium">Target</th>
+                  <th className="py-2 pr-4 font-medium">Status</th>
+                  <th className="py-2 pr-4 font-medium">Requested by</th>
+                  <th className="py-2 pr-4 font-medium">Approved by</th>
+                  <th className="py-2 pr-4 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line-tertiary text-ink-secondary">
+                {deploymentsQuery.data?.map((d: Deployment) => (
+                  <tr key={d.id}>
+                    <td className="py-2 pr-4">{d.id}</td>
+                    <td className="py-2 pr-4 font-medium text-ink-primary">{d.artifact_name}</td>
+                    <td className="py-2 pr-4">{d.target_name}</td>
+                    <td className="py-2 pr-4"><StatusBadge status={d.status} /></td>
+                    <td className="py-2 pr-4">{d.requested_by_user_id ?? "-"}</td>
+                    <td className="py-2 pr-4">{d.approved_by_user_id ?? "-"}</td>
+                    <td className="py-2 pr-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {d.status === "pending" && (
+                          <button
+                            onClick={() => approveMutation.mutate(d.id)}
+                            disabled={approveMutation.isPending}
+                            className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                          >
+                            {approveMutation.isPending ? "Approving…" : "Approve"}
+                          </button>
+                        )}
+                        {d.status === "approved" && (
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={selectedCapability[d.id] || ""}
+                              onChange={(e) =>
+                                setSelectedCapability((prev) => ({ ...prev, [d.id]: e.target.value }))
+                              }
+                              className="rounded-md border border-line-tertiary bg-bg-primary px-2 py-1 text-xs text-ink-primary"
+                            >
+                              <option value="">Capability</option>
+                              {capabilities.map((c) => (
+                                <option key={c} value={c}>
+                                  {formatCapability(c)}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() =>
+                                selectedCapability[d.id] &&
+                                activateMutation.mutate({
+                                  deploymentId: d.id,
+                                  request: { capability: selectedCapability[d.id], target_id: d.target_id },
+                                })
+                              }
+                              disabled={!selectedCapability[d.id] || activateMutation.isPending}
+                              className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                              {activateMutation.isPending ? "Activating…" : "Activate"}
+                            </button>
+                          </div>
+                        )}
+                        {(d.status === "active" || d.status === "stabilizing") && (
+                          <button
+                            onClick={() => rollbackMutation.mutate(d.id)}
+                            disabled={rollbackMutation.isPending}
+                            className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                          >
+                            {rollbackMutation.isPending ? "Rolling back…" : "Rollback"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+
+      <Section title="Audit events">
+        {auditQuery.isLoading ? (
+          <p className="text-sm text-ink-tertiary">Loading...</p>
+        ) : auditQuery.data?.length === 0 ? (
+          <p className="text-sm text-ink-tertiary">No audit events yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-line-tertiary text-ink-tertiary">
+                <tr>
+                  <th className="py-2 pr-4 font-medium">Action</th>
+                  <th className="py-2 pr-4 font-medium">Entity</th>
+                  <th className="py-2 pr-4 font-medium">Actor</th>
+                  <th className="py-2 pr-4 font-medium">When</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line-tertiary text-ink-secondary">
+                {auditQuery.data?.map((e: AuditEvent) => (
+                  <tr key={e.id}>
+                    <td className="py-2 pr-4 font-medium text-ink-primary">{e.action}</td>
+                    <td className="py-2 pr-4">{e.entity_type} {e.entity_id ?? "-"}</td>
+                    <td className="py-2 pr-4">{e.actor_user_id ?? "system"}</td>
+                    <td className="py-2 pr-4">{formatDate(e.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
 function CatalogPanel() {
   const [query, setQuery] = useState("");
   const [selectedQuantization, setSelectedQuantization] = useState<Record<string, string>>({});
@@ -205,7 +690,7 @@ function CatalogPanel() {
   const searchQuery = useQuery({
     queryKey: ["llm-framework", "catalog", query],
     queryFn: () => searchLLMCatalog(query),
-    enabled: query.length > 0,
+    enabled: true,
   });
 
   const stageMutation = useMutation({
@@ -239,6 +724,10 @@ function CatalogPanel() {
           {searchQuery.isFetching ? "Searching…" : "Search"}
         </button>
       </div>
+
+      {query === "" && (
+        <p className="text-sm text-ink-tertiary">Browse popular GGUF models from Hugging Face, or type to search.</p>
+      )}
 
       {staged && (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
@@ -566,7 +1055,7 @@ function ConversionsPanel() {
 }
 
 export default function LLMFrameworkPage() {
-  const [tab, setTab] = useState<"inventory" | "catalog" | "migrations" | "conversions">("inventory");
+  const [tab, setTab] = useState<"inventory" | "catalog" | "migrations" | "conversions" | "deployments">("inventory");
 
   const statusQuery = useQuery({
     queryKey: ["llm-framework", "status"],
@@ -575,7 +1064,7 @@ export default function LLMFrameworkPage() {
   const inventoryQuery = useQuery({
     queryKey: ["llm-framework", "inventory"],
     queryFn: getLLMInventory,
-    refetchInterval: tab === "catalog" ? 5000 : false,
+    refetchInterval: tab === "inventory" || tab === "deployments" ? 5000 : false,
   });
   const capabilitiesQuery = useQuery({
     queryKey: ["llm-framework", "capabilities"],
@@ -632,6 +1121,16 @@ export default function LLMFrameworkPage() {
               }`}
             >
               Migrations
+            </button>
+            <button
+              onClick={() => setTab("deployments")}
+              className={`px-4 py-2 text-sm font-medium ${
+                tab === "deployments"
+                  ? "border-b-2 border-brand-600 text-brand-700"
+                  : "text-ink-tertiary hover:text-ink-primary"
+              }`}
+            >
+              Deployments
             </button>
             <button
               onClick={() => setTab("conversions")}
@@ -692,6 +1191,12 @@ export default function LLMFrameworkPage() {
                     </div>
                   </div>
                   <div>
+                    <div className="text-ink-tertiary">Dynamic routing</div>
+                    <div className="font-medium text-ink-primary">
+                      {statusQuery.data?.dynamic_routing_enabled ? "Enabled" : "Disabled"}
+                    </div>
+                  </div>
+                  <div>
                     <div className="text-ink-tertiary">Recall threshold</div>
                     <div className="font-medium text-ink-primary">
                       {statusQuery.data?.embedding_recall_threshold ?? "-"}
@@ -722,16 +1227,43 @@ export default function LLMFrameworkPage() {
               {inventoryQuery.data && (
                 <>
                   <Section title="Runtime targets">
-                    <TargetsTable targets={inventoryQuery.data.targets} />
+                    <RegisterTargetForm onSuccess={() => inventoryQuery.refetch()} />
+                    <div className="mt-4">
+                      <TargetsTable targets={inventoryQuery.data.targets} />
+                    </div>
                   </Section>
                   <Section title="Model artifacts">
-                    <ArtifactsTable artifacts={inventoryQuery.data.artifacts} />
+                    <ArtifactsTable
+                      artifacts={inventoryQuery.data.artifacts}
+                      targets={inventoryQuery.data.targets}
+                      deploymentEnabled={statusQuery.data?.deployment_enabled ?? false}
+                      onInstall={() => inventoryQuery.refetch()}
+                    />
                   </Section>
                   <Section title="Installations">
                     <InstallationsTable installations={inventoryQuery.data.installations} />
                   </Section>
                   <Section title="Routing profiles">
-                    <RoutingTable routing_profiles={inventoryQuery.data.routing_profiles} />
+                    {statusQuery.data?.dynamic_routing_enabled ? (
+                      <>
+                        <RoutingProfileForm
+                          capabilities={capabilitiesQuery.data?.capabilities ?? []}
+                          targets={inventoryQuery.data.targets}
+                          installations={inventoryQuery.data.installations}
+                          onSuccess={() => inventoryQuery.refetch()}
+                        />
+                        <div className="mt-4">
+                          <RoutingTable routing_profiles={inventoryQuery.data.routing_profiles} />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm text-ink-tertiary">Dynamic routing is disabled in configuration.</p>
+                        <div className="mt-4">
+                          <RoutingTable routing_profiles={inventoryQuery.data.routing_profiles} />
+                        </div>
+                      </>
+                    )}
                   </Section>
                 </>
               )}
@@ -746,6 +1278,8 @@ export default function LLMFrameworkPage() {
             )
           ) : tab === "migrations" ? (
             <MigrationsPanel />
+          ) : tab === "deployments" ? (
+            <DeploymentsPanel capabilities={capabilitiesQuery.data?.capabilities ?? []} />
           ) : (
             <ConversionsPanel />
           )}
