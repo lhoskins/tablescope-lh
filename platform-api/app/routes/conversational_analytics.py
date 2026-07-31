@@ -31,6 +31,7 @@ router = APIRouter(prefix="/conversational-analytics", tags=["Conversational Ana
 class CreateConversationRequest(BaseModel):
     project_id: int | None = Field(default=None, description="Project to scope the conversation to.")
     title: str | None = Field(default=None, max_length=255)
+    surface: str = Field(default="ai_assistant", max_length=32)
     initial_message: str | None = Field(default=None)
     data_source_id: int | None = Field(default=None)
     client_request_id: str | None = Field(default=None, max_length=64)
@@ -49,6 +50,7 @@ class SubmitTurnRequest(BaseModel):
 class ConversationSummary(BaseModel):
     id: int
     project_id: int | None
+    surface: str
     title: str
     status: str
     updated_at: datetime
@@ -71,6 +73,7 @@ class TurnResponse(BaseModel):
 class ConversationResponse(BaseModel):
     id: int
     project_id: int | None
+    surface: str
     title: str
     status: str
     active_datasource_id: int | None
@@ -154,6 +157,7 @@ def _conversation_to_response(conversation: AnalyticsConversation) -> Conversati
     return ConversationResponse(
         id=conversation.id,
         project_id=conversation.project_id,
+        surface=conversation.surface,
         title=conversation.title,
         status=conversation.status,
         active_datasource_id=conversation.active_datasource_id,
@@ -168,14 +172,18 @@ async def create_conversation(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> ConversationResponse:
-    """Create a new conversation. If an initial message is provided, run the first turn."""
+    """Create or resume a canonical conversation by (surface, project_id).
+
+    Business/Project Insights use a dedicated surface so repeated asks stay in
+    one thread instead of creating a new conversation per question.
+    """
     if req.project_id is not None:
         await _check_project_access(session, context, req.project_id)
 
-    # If no project is supplied and there is an initial message, resolve the best
-    # authorized project from the question (Business Insight asks, etc.).
+    surface = req.surface or "ai_assistant"
+    # Only auto-resolve a project for the generic AI assistant surface.
     resolved_project_id = req.project_id
-    if resolved_project_id is None and req.initial_message:
+    if surface == "ai_assistant" and resolved_project_id is None and req.initial_message:
         resolved = await resolve_business_insight_project(
             session, context, req.initial_message
         )
@@ -185,20 +193,34 @@ async def create_conversation(
     if resolved_project_id is not None:
         await _check_project_access(session, context, resolved_project_id)
 
-    title = req.title or "New conversation"
-    if req.initial_message and not req.title:
-        title = req.initial_message[:80] + ("…" if len(req.initial_message) > 80 else "")
-
-    conversation = AnalyticsConversation(
-        tenant_id=context.tenant_id,
-        user_id=context.user_id,
-        project_id=resolved_project_id,
-        active_datasource_id=req.data_source_id,
-        title=title,
-        status="active",
+    # Canonical lookup by (user, surface, project).
+    existing = await session.scalar(
+        select(AnalyticsConversation).where(
+            AnalyticsConversation.tenant_id == context.tenant_id,
+            AnalyticsConversation.user_id == context.user_id,
+            AnalyticsConversation.surface == surface,
+            AnalyticsConversation.project_id == resolved_project_id,
+            AnalyticsConversation.status == "active",
+        )
     )
-    session.add(conversation)
-    await session.flush()
+    if existing is not None:
+        conversation = existing
+    else:
+        title = req.title or "New conversation"
+        if req.initial_message and not req.title:
+            title = req.initial_message[:80] + ("…" if len(req.initial_message) > 80 else "")
+
+        conversation = AnalyticsConversation(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=resolved_project_id,
+            surface=surface,
+            active_datasource_id=req.data_source_id,
+            title=title,
+            status="active",
+        )
+        session.add(conversation)
+        await session.flush()
 
     if req.initial_message:
         turn = AnalyticsConversationTurn(
@@ -247,6 +269,7 @@ async def list_conversations(
         ConversationSummary(
             id=c.id,
             project_id=c.project_id,
+            surface=c.surface,
             title=c.title,
             status=c.status,
             updated_at=c.updated_at,

@@ -40,6 +40,9 @@ class AnalyticsConversation(Base, TimestampMixin):
         index=True,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="New conversation")
+    surface: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="ai_assistant", server_default="ai_assistant"
+    )
     active_datasource_id: Mapped[int | None] = mapped_column(
         ForeignKey("file_source_meta.id", ondelete="SET NULL"),
         nullable=True,
@@ -62,6 +65,13 @@ class AnalyticsConversation(Base, TimestampMixin):
 
     __table_args__ = (
         sa.Index("ix_analytics_conversations_tenant_user", "tenant_id", "user_id"),
+        sa.Index(
+            "ix_analytics_conversations_surface_project",
+            "tenant_id",
+            "user_id",
+            "surface",
+            "project_id",
+        ),
     )
 
 

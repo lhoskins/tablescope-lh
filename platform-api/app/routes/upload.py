@@ -102,6 +102,10 @@ async def upload_file(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Preserve the original extension for display/naming while the on-disk file
+    # stays the CSV representation the Teiid pipeline requires.
+    display_name, _ = display_source(filename, original_format)
+
     endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
     servlet_url = (
         f"{endpoint.servlet_url}/TeiidExcelImporterTest/upload"
@@ -162,9 +166,10 @@ async def upload_file(
             detail=teiid_result["error"],
         )
 
-    # Build the datasource name from the filename (matches servlet convention)
-    base_name = filename.rsplit(".", 1)[0].replace(" ", "_")
-    extension = filename.rsplit(".", 1)[-1].upper() if "." in filename else ""
+    # Build the datasource name from the original upload name (not the CSV
+    # intermediate filename) so XLSX/JSON/XML sources keep their real extension.
+    base_name = display_name.rsplit(".", 1)[0].replace(" ", "_")
+    extension = display_name.rsplit(".", 1)[-1].upper() if "." in display_name else ""
     datasource_name = f"{base_name}_{extension}" if extension else base_name
 
     # Sync uploaded file to S3 if enabled
@@ -193,7 +198,7 @@ async def upload_file(
 
     # Upsert the file-source metadata row (project association, archive flag,
     # column types). Keyed by (tenant, owner, view_name).
-    view_name = compute_view_name(filename)
+    view_name = compute_view_name(display_name)
     existing = await session.scalar(
         select(FileSourceMeta).where(
             FileSourceMeta.tenant_id == context.tenant_id,
@@ -208,14 +213,14 @@ async def upload_file(
                 owner_id=user.id,
                 project_id=resolved_project_id,
                 view_name=view_name,
-                file_name=filename,
+                file_name=display_name,
                 vdb_type=resolved_vdb_type,
                 source_format=original_format,
                 column_types=column_types or None,
             )
         )
     else:
-        existing.file_name = filename
+        existing.file_name = display_name
         existing.vdb_type = resolved_vdb_type
         existing.source_format = original_format
         if column_types:
@@ -243,7 +248,7 @@ async def upload_file(
                 session,
                 project_id=resolved_project_id,
                 owner_id=user.id,
-                display_name=file.filename,
+                display_name=display_name,
                 view_name=view_name,
                 columns=col_names,
             )
@@ -260,7 +265,7 @@ async def upload_file(
         "path": f"/opt/wildfly/teiidfiles/customers/{tenant.id}/{user.id}/uploads/{filename}",
         "size": len(content),
         "datasource": datasource_name,
-        "fileName": filename,
+        "fileName": display_name,
         "viewName": view_name,
         "columnTypes": column_types,
         "projectId": resolved_project_id,
@@ -425,6 +430,58 @@ async def set_file_source_project(
     return meta.to_dict()
 
 
+@router.get("/datasources/{view_name}/preflight-delete")
+async def preflight_delete_file_source(
+    view_name: str,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Return whether a file data source can be permanently deleted."""
+    from app.routes.database_sources import find_query_dependencies
+
+    meta = await session.scalar(
+        select(FileSourceMeta).where(
+            FileSourceMeta.tenant_id == context.tenant_id,
+            FileSourceMeta.owner_id == context.user_id,
+            FileSourceMeta.view_name == view_name,
+        )
+    )
+    if meta is None:
+        raise HTTPException(status_code=404, detail="Data source not found")
+
+    blockers: list[dict[str, str]] = []
+    if not meta.archived:
+        blockers.append({
+            "category": "not_archived",
+            "message": "Archive the data source before deleting it.",
+        })
+
+    deps = await find_query_dependencies(
+        session, tenant_id=context.tenant_id, view_name=view_name
+    )
+    if deps:
+        blockers.append({
+            "category": "active_dependencies",
+            "message": f"{len(deps)} active saved quer{'y' if len(deps) == 1 else 'ies'} depend on this source.",
+        })
+
+    from app.models.data_source_ai_profile import DataSourceAIProfile
+
+    ai_profile = await session.scalar(
+        select(DataSourceAIProfile).where(DataSourceAIProfile.data_source_id == meta.id)
+    )
+    ai_profile_count = 1 if ai_profile else 0
+
+    return {
+        "view_name": view_name,
+        "safe": len(blockers) == 0 and meta.archived,
+        "archived": meta.archived,
+        "blockers": blockers,
+        "active_query_dependencies": deps,
+        "ai_profile_count": ai_profile_count,
+    }
+
+
 @router.delete("/datasources/{view_name}")
 async def delete_file_source(
     view_name: str,
@@ -583,24 +640,38 @@ async def replace_file_source(
         / "uploads"
     )
 
+    # Locate the metadata row first so we know the original source format and
+    # can map the display view_name back to the physical (possibly converted) file.
+    meta = await session.scalar(
+        select(FileSourceMeta).where(
+            FileSourceMeta.tenant_id == context.tenant_id,
+            FileSourceMeta.owner_id == user.id,
+            FileSourceMeta.view_name == view_name,
+        )
+    )
+    if meta is None:
+        raise HTTPException(status_code=404, detail="Data source not found")
+
     # Resolve the existing physical file backing this view.
     existing_path: Path | None = None
     existing_name: str | None = None
     if uploads_dir.is_dir():
         for f in uploads_dir.iterdir():
-            if f.is_file() and compute_view_name(f.name) == view_name:
-                existing_path = f
-                existing_name = f.name
-                break
+            if f.is_file():
+                physical_display_name, _ = display_source(f.name, meta.source_format)
+                if compute_view_name(physical_display_name) == view_name:
+                    existing_path = f
+                    existing_name = f.name
+                    break
     if existing_path is None or existing_name is None:
         raise HTTPException(status_code=404, detail="Data source not found")
 
     # 1) Same-name check.
-    if file.filename != existing_name:
+    if sanitize_filename(file.filename) != sanitize_filename(meta.file_name):
         raise HTTPException(
             status_code=409,
             detail=(
-                f'File name mismatch: expected "{existing_name}", '
+                f'File name mismatch: expected "{meta.file_name}", '
                 f'got "{file.filename}". Replacement must use the same file name.'
             ),
         )
@@ -630,13 +701,6 @@ async def replace_file_source(
         )
 
     # 3) Re-import the new file through the Teiid servlet (overwrites the view).
-    meta = await session.scalar(
-        select(FileSourceMeta).where(
-            FileSourceMeta.tenant_id == context.tenant_id,
-            FileSourceMeta.owner_id == user.id,
-            FileSourceMeta.view_name == view_name,
-        )
-    )
     resolved_vdb_type = meta.vdb_type if meta else "user"
     servlet_url = f"{endpoint.servlet_url}/TeiidExcelImporterTest/upload"
     try:
@@ -679,15 +743,13 @@ async def replace_file_source(
     if isinstance(teiid_result, dict) and "error" in teiid_result:
         raise HTTPException(status_code=422, detail=teiid_result["error"])
 
-    # 4) Update metadata column types (preserve project association/archive).
-    if meta is None:
-        meta = FileSourceMeta(
-            tenant_id=context.tenant_id,
-            owner_id=user.id,
-            view_name=view_name,
-            file_name=file.filename,
-        )
-        session.add(meta)
+    # 4) Update metadata column types and display name (preserve project association/archive).
+    new_original_format = (
+        file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else None
+    )
+    new_display_name, _ = display_source(existing_name, new_original_format)
+    meta.file_name = new_display_name
+    meta.source_format = new_original_format
     meta.column_types = incoming_types or None
     await session.commit()
 
@@ -695,7 +757,7 @@ async def replace_file_source(
     return {
         "status": "replaced",
         "view_name": view_name,
-        "fileName": file.filename,
+        "fileName": new_display_name,
         "addedColumns": added,
         "columnTypes": incoming_types,
     }
