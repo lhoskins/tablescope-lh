@@ -31,32 +31,15 @@ export async function exportInsightCardPng(
     throw new Error("Insight card not found");
   }
 
-  const width = article.offsetWidth;
-  const clone = article.cloneNode(true) as HTMLElement;
-
-  // Remove interactive/actionable controls from the exported image.
-  clone.querySelectorAll('[data-export-hide]').forEach((el) => {
-    el.remove();
+  const dataUrl = await toPng(article, {
+    pixelRatio: 2,
+    backgroundColor: "#ffffff",
+    cacheBust: true,
+    filter: (node) => {
+      if (!(node instanceof HTMLElement)) return true;
+      return !node.hasAttribute("data-export-hide");
+    },
   });
 
-  clone.style.position = "fixed";
-  clone.style.top = "0";
-  clone.style.left = "-9999px";
-  clone.style.width = `${width}px`;
-  clone.style.maxWidth = "none";
-  clone.style.zIndex = "-1";
-  clone.style.visibility = "visible";
-
-  document.body.appendChild(clone);
-
-  try {
-    const dataUrl = await toPng(clone, {
-      pixelRatio: 2,
-      backgroundColor: "#ffffff",
-      cacheBust: true,
-    });
-    triggerDownload(dataUrl, filename || "insight.png");
-  } finally {
-    clone.remove();
-  }
+  triggerDownload(dataUrl, filename || "insight.png");
 }
