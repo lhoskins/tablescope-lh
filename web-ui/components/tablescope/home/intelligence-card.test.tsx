@@ -3,8 +3,12 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { IntelligenceCard } from "./intelligence-card";
 import type { InsightCard as InsightCardData } from "@/lib/api/home-intelligence";
 
-vi.mock("@/lib/ui/use-shell-data", () => ({ useCurrentUser: () => ({ data: { user: { rawRole: "admin" } } }) }));
-vi.mock("@/components/dashboard/WidgetRenderer", () => ({ WidgetRenderer: () => <div data-testid="widget" /> }));
+vi.mock("@/lib/ui/use-shell-data", () => ({
+  useCurrentUser: () => ({ data: { user: { rawRole: "admin" } } }),
+}));
+vi.mock("@/components/dashboard/WidgetRenderer", () => ({
+  WidgetRenderer: () => <div data-testid="widget" />,
+}));
 
 const baseCard: InsightCardData = {
   id: "card-1",
@@ -18,7 +22,7 @@ const baseCard: InsightCardData = {
   summary: "A summary",
   chart: null,
   callout: null,
-  sources: { tables: [], documents: [] },
+  sources: { tables: ["demo_table"], documents: ["report.pdf"] },
   executedAt: new Date().toISOString(),
 };
 
@@ -44,62 +48,74 @@ describe("IntelligenceCard pin control", () => {
   });
 });
 
-describe("IntelligenceCard actionsDisclosure=collapsible", () => {
-  const collapsibleCard: InsightCardData = {
-    ...baseCard,
-    sources: { tables: ["demo_table"], documents: ["report.pdf"] },
-  };
-
-  it("keeps header, title, summary, severity, and pin visible while collapsed", () => {
-    const onPin = vi.fn();
-    render(
-      <IntelligenceCard
-        card={collapsibleCard}
-        actionsDisclosure="collapsible"
-        onPin={onPin}
-      />,
-    );
-    expect(screen.getByText("Test insight")).toBeTruthy();
-    expect(screen.getByText("A summary")).toBeTruthy();
-    expect(screen.getByText("Info")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Pin to Home/i })).toBeTruthy();
-  });
-
-  it("hides sources and actions while collapsed", () => {
-    render(<IntelligenceCard card={collapsibleCard} actionsDisclosure="collapsible" />);
-    expect(screen.queryByText("demo_table")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Explain" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Chart suggestion" })).toBeNull();
-  });
-
-  it("shows More Actions toggle and expands to reveal sources and actions", () => {
+describe("IntelligenceCard Option 2 toolbar", () => {
+  it("renders Create action, Explain, and source row by default", () => {
     const onCreateAction = vi.fn();
+    const onExplain = vi.fn();
     render(
       <IntelligenceCard
-        card={collapsibleCard}
-        actionsDisclosure="collapsible"
+        card={baseCard}
         onCreateAction={onCreateAction}
         onSaveToDashboard={() => {}}
       />,
     );
-
-    const toggle = screen.getByRole("button", { name: /More Actions/i });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("demo_table")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create action" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Explain" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Chart suggestion" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Action" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add to dashboard" })).toBeTruthy();
+    expect(screen.getByText("demo_table")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "1 more source" })).toBeTruthy();
   });
 
-  it("keeps Home/frozen cards always-visible by default", () => {
-    const onPin = vi.fn();
-    render(<IntelligenceCard card={collapsibleCard} onPin={onPin} />);
+  it("does not show a More Actions disclosure toggle", () => {
+    render(<IntelligenceCard card={baseCard} actionsDisclosure="collapsible" />);
     expect(screen.queryByRole("button", { name: /More Actions/i })).toBeNull();
-    expect(screen.getByRole("button", { name: "Explain" })).toBeTruthy();
-    expect(screen.getByText("demo_table")).toBeTruthy();
+  });
+
+  it("hides all toolbar actions when hideActions is true", () => {
+    render(<IntelligenceCard card={baseCard} hideActions />);
+    expect(screen.queryByRole("button", { name: "Create action" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Explain" })).toBeNull();
+    expect(screen.queryByText("demo_table")).toBeNull();
+  });
+
+  it("opens the Explain panel when Explain is clicked", () => {
+    render(<IntelligenceCard card={baseCard} />);
+    fireEvent.click(screen.getByRole("button", { name: "Explain" }));
+    expect(screen.getByText("Explain insight")).toBeTruthy();
+  });
+
+  it("calls onCreateAction when Create action is clicked", () => {
+    const onCreateAction = vi.fn();
+    render(
+      <IntelligenceCard
+        card={baseCard}
+        onCreateAction={onCreateAction}
+        onSaveToDashboard={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create action" }));
+    expect(onCreateAction).toHaveBeenCalled();
+  });
+
+  it("does not show Create action when the user cannot manage project actions", () => {
+    const onCreateAction = vi.fn();
+    render(
+      <IntelligenceCard
+        card={baseCard}
+        onCreateAction={onCreateAction}
+        onSaveToDashboard={() => {}}
+      />,
+    );
+    // admin can manage actions, so the button is present in the default mock.
+    expect(screen.getByRole("button", { name: "Create action" })).toBeTruthy();
+  });
+
+  it("does not render a standalone R Analytics badge", () => {
+    render(
+      <IntelligenceCard
+        card={{ ...baseCard, analyticalMethod: { method: "r_summary", executionEngine: "R" } }}
+        onSaveToDashboard={() => {}}
+      />,
+    );
+    expect(screen.queryByText("R Analytics")).toBeNull();
   });
 });

@@ -2,19 +2,9 @@
 
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import {
-  IconChartBar,
   IconChevronRight,
-  IconClipboardList,
-  IconDownload,
-  IconFileText,
-  IconInfoCircle,
-  IconLayoutDashboard,
   IconPin,
   IconPinnedFilled,
-  IconPlus,
-  IconTable,
-  IconThumbDown,
-  IconThumbUp,
 } from "@tabler/icons-react";
 
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
@@ -35,7 +25,6 @@ import type {
   VizCandidate,
 } from "@/lib/api/home-intelligence";
 import type { GovernanceItem, InsightFeedbackRecord, InsightSentiment } from "@/lib/api/insight-feedback";
-import { RAnalyticsBadge } from "./insight-engine-badge";
 import { ChartSuggestionDialog } from "./chart-suggestion-dialog";
 import { InsightExplanationPanel } from "./insight-explanation-panel";
 import { InsightFeedbackDialog } from "./insight-feedback-dialog";
@@ -44,8 +33,9 @@ import {
   InsightFeedbackStatusDialog,
   InsightGovernanceBadge,
 } from "./insight-feedback-status";
-import { InsightCardActionsDisclosure } from "@/components/tablescope/insights/insight-card-actions-disclosure";
+import { InsightCardActionToolbar } from "@/components/tablescope/insights/insight-card-action-toolbar";
 import { exportInsightCardPng, insightPngFilename } from "@/lib/insights/export-png";
+import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";
 
 /** Remove every remaining `**` marker (matched pairs handled by renderBold). */
@@ -319,7 +309,6 @@ export interface IntelligenceCardProps {
 export function IntelligenceCard({
   card,
   hideActions,
-  onAddToReport,
   onPin,
   onUnpin,
   onSaveToDashboard,
@@ -333,30 +322,21 @@ export function IntelligenceCard({
   responding = false,
   governance,
   onCreateAction,
-  actionsDisclosure = "always-visible",
 }: IntelligenceCardProps) {
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
-  const [feedbackInitial, setFeedbackInitial] =
-    useState<InsightSentiment>("agree");
+  const [feedbackInitial, setFeedbackInitial] = useState<InsightSentiment>("agree");
   const [chartDialogOpen, setChartDialogOpen] = useState(false);
   const [selectedChart, setSelectedChart] = useState<VizCandidate | null>(null);
   const [timeSeriesView, setTimeSeriesView] = useState<TimeSeriesViewState | undefined>(
     card.timeSeriesView,
   );
+  const [pngExporting, setPngExporting] = useState(false);
+  const { toasts, push: pushToast, dismiss } = useToasts();
   const { data: identity } = useCurrentUser();
-  const canCreateAction =
-    onCreateAction &&
-    canManageProjectActions(identity?.user?.rawRole, identity?.user?.isSuperAdmin);
-  const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.info;
-  const canSaveToDashboard = Boolean(
-    card.sql?.trim() && card.valueColumn?.trim(),
-  );
-  const hasFeedback = feedback != null && feedback.status === "active";
-  const tables = card.sources?.tables ?? [];
-  const documents = card.sources?.documents ?? [];
 
+  const projectIdNumber = Number(card.projectId);
   const stableInsightId = card.insightId || card.id;
 
   const displayCard = useMemo<InsightCardData>(() => {
@@ -375,159 +355,28 @@ export function IntelligenceCard({
     };
   }, [card, selectedChart, timeSeriesView]);
 
-  const hasSources = tables.length > 0 || documents.length > 0;
-  const sourceContent = hasSources ? (
-    <>
-      {tables.map((t) => (
-        <span key={t} className="inline-flex items-center gap-1">
-          <IconTable size={13} /> {t}
-        </span>
-      ))}
-      {documents.slice(0, 2).map((d) => (
-        <span key={d} className="inline-flex items-center gap-1">
-          <IconFileText size={13} /> {d}
-        </span>
-      ))}
-    </>
-  ) : null;
+  const sev = CARD_SEVERITY[card.severity] ?? CARD_SEVERITY.info;
 
-  const actionContent = (
-    <div data-export-hide className="contents">
-      <button
-        type="button"
-        onClick={() => setExplainOpen(true)}
-        className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-      >
-        <IconInfoCircle size={14} />
-        Explain
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setChartDialogOpen(true)}
-        className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-      >
-        <IconChartBar size={14} />
-        Chart suggestion
-      </button>
-
-      {canCreateAction && (
-        <button
-          type="button"
-          onClick={onCreateAction}
-          className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-        >
-          <IconClipboardList size={14} />
-          Action
-        </button>
-      )}
-
-      {onFeedbackSave && stableInsightId && (
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setFeedbackInitial("agree");
-              setFeedbackOpen(true);
-            }}
-            aria-label={
-              hasFeedback && feedback?.sentiment === "agree"
-                ? "Edit agree feedback"
-                : "Agree"
-            }
-            title={
-              hasFeedback && feedback?.sentiment === "agree"
-                ? "Edit agree feedback"
-                : "Agree"
-            }
-            className={`inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary ${
-              hasFeedback && feedback?.sentiment === "agree"
-                ? "border-success bg-success/10 text-success hover:bg-success/20"
-                : ""
-            }`}
-          >
-            <IconThumbUp size={14} />
-            Agree
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setFeedbackInitial("disagree");
-              setFeedbackOpen(true);
-            }}
-            aria-label={
-              hasFeedback && feedback?.sentiment === "disagree"
-                ? "Edit disagree feedback"
-                : "Disagree"
-            }
-            title={
-              hasFeedback && feedback?.sentiment === "disagree"
-                ? "Edit disagree feedback"
-                : "Disagree"
-            }
-            className={`inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary ${
-              hasFeedback && feedback?.sentiment === "disagree"
-                ? "border-danger bg-danger/10 text-danger hover:bg-danger/20"
-                : ""
-            }`}
-          >
-            <IconThumbDown size={14} />
-            Disagree
-          </button>
-          <InsightFeedbackStatusBadge
-            feedback={feedback}
-            onClick={() => setStatusDialogOpen(true)}
-          />
-        </div>
-      )}
-
-      {!hideActions && (
-        <>
-          {onSaveToDashboard && (
-            <button
-              type="button"
-              disabled={!canSaveToDashboard}
-              title={
-                canSaveToDashboard
-                  ? "Add this insight to a project dashboard"
-                  : "This insight does not have query data and cannot be added to a dashboard"
-              }
-              onClick={() => onSaveToDashboard(displayCard)}
-              className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <IconLayoutDashboard size={14} />
-              Add to dashboard
-            </button>
-          )}
-          {onAddToReport && (
-            <button
-              type="button"
-              onClick={() => onAddToReport(displayCard)}
-              className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-            >
-              <IconPlus size={14} /> Add to report
-            </button>
-          )}
-          {displayCard.chart && displayCard.chart.type !== "kpi_grid" && (
-            <button
-              type="button"
-              onClick={() =>
-                exportInsightCardPng(
-                  stableInsightId,
-                  insightPngFilename(displayCard),
-                ).catch(() => undefined)
-              }
-              className="inline-flex items-center gap-1 rounded-md border border-line-tertiary px-2.5 py-1 text-small font-medium text-ink-secondary transition-colors hover:border-line-secondary hover:bg-bg-tertiary"
-            >
-              <IconDownload size={14} /> Export PNG
-            </button>
-          )}
-        </>
-      )}
-    </div>
+  const canCreateAction = Boolean(
+    onCreateAction &&
+      canManageProjectActions(identity?.user?.rawRole, identity?.user?.isSuperAdmin),
   );
 
-  const projectIdNumber = Number(card.projectId);
+  const handleFeedbackClick = (sentiment: InsightSentiment) => {
+    setFeedbackInitial(sentiment);
+    setFeedbackOpen(true);
+  };
+
+  const handleDownloadPng = async () => {
+    setPngExporting(true);
+    try {
+      await exportInsightCardPng(stableInsightId, insightPngFilename(displayCard));
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : "Failed to download PNG", "error");
+    } finally {
+      setPngExporting(false);
+    }
+  };
 
   return (
     <article
@@ -554,7 +403,6 @@ export function IntelligenceCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <div className="flex items-center gap-1.5">
-            <RAnalyticsBadge envelope={card.analyticalMethod} />
             <InsightGovernanceBadge status={governance?.governance_status} />
             <span
               className={`rounded-full px-2 py-0.5 text-small font-medium ${sev.chip}`}
@@ -640,22 +488,35 @@ export function IntelligenceCard({
           who cannot open an authenticated drill-down. */}
       {!hideActions && <InsightAnalysisStrip card={card} />}
 
-      {actionsDisclosure === "collapsible" ? (
-        <InsightCardActionsDisclosure
-          insightId={stableInsightId}
-          sources={sourceContent}
-          actions={actionContent}
+      {!hideActions && (
+        <InsightCardActionToolbar
+          card={displayCard}
+          canCreateAction={canCreateAction}
+          onCreateAction={canCreateAction ? onCreateAction : undefined}
+          onExplain={() => setExplainOpen(true)}
+          onChartOptions={() => setChartDialogOpen(true)}
+          onAddToDashboard={
+            onSaveToDashboard ? () => onSaveToDashboard(displayCard) : undefined
+          }
+          onDownloadPng={handleDownloadPng}
+          isPngExporting={pngExporting}
+          feedback={feedback}
+          onFeedbackClick={
+            onFeedbackSave ? handleFeedbackClick : undefined
+          }
+          feedbackStatus={
+            feedback ? (
+              <InsightFeedbackStatusBadge
+                feedback={feedback}
+                onClick={() => setStatusDialogOpen(true)}
+              />
+            ) : undefined
+          }
+          selectedChart={selectedChart}
         />
-      ) : (
-        <footer className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line-tertiary pt-3">
-          <div className="flex flex-wrap items-center gap-3 text-small text-ink-tertiary">
-            {sourceContent}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {actionContent}
-          </div>
-        </footer>
       )}
+
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
 
       <InsightExplanationPanel
         card={displayCard}

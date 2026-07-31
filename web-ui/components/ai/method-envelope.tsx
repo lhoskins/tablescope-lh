@@ -18,8 +18,10 @@ export function asText(item: unknown): string {
 
 export function MethodEnvelopeBlock({
   envelope,
+  executedAt,
 }: {
   envelope: MethodEnvelope;
+  executedAt?: string | null;
 }) {
   const name = envelope.methodName ?? envelope.method;
   if (!name) return null;
@@ -48,9 +50,17 @@ export function MethodEnvelopeBlock({
             Fallback: {envelope.executionEngine} (from {envelope.fallbackFrom})
           </span>
         )}
+        {envelope.methodVersion && <span>Version: {envelope.methodVersion}</span>}
+        {envelope.resultSchemaVersion != null && (
+          <span>Schema v{envelope.resultSchemaVersion}</span>
+        )}
+        {envelope.supportingMethods && envelope.supportingMethods.length > 0 && (
+          <span>Supporting: {envelope.supportingMethods.join(", ")}</span>
+        )}
         {envelope.tier != null && <span>Tier {envelope.tier}</span>}
         {envelope.n != null && <span>n = {envelope.n}</span>}
         {envelope.usableN != null && <span>usable n = {envelope.usableN}</span>}
+        {executedAt && <span>Executed: {new Date(executedAt).toLocaleString()}</span>}
       </div>
       {resultEntries.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-ink-secondary">
