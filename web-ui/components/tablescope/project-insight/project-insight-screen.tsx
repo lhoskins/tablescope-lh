@@ -39,6 +39,44 @@ import {
 const INSIGHT_KEY = (projectId: string) => ["project", projectId, "insight"];
 const PROJECT_INSIGHTS_TITLE = "Project Insights";
 
+const EMPTY_PROJECT_INSIGHT: ProjectInsight = {
+  project: { id: 0, name: "", status: "" },
+  generatedAt: "",
+  lastUpdatedAt: "",
+  executiveSummary: {
+    summary: "",
+    critical: [],
+    warnings: [],
+    opportunities: [],
+    recommendations: [],
+  },
+  questionsToAsk: [],
+  questionsNeedingData: [],
+  trendDetection: [],
+  recommendedDashboards: [],
+  recommendedQueries: [],
+  recommendedKpis: [],
+  risks: [],
+  trends: [],
+  opportunities: [],
+  analysis: [],
+  whatChangedSinceLastVisit: {
+    newFilesAdded: 0,
+    changedDataSources: 0,
+    newRisksIdentified: 0,
+    newQueries: 0,
+    newDashboards: 0,
+    updatedKnowledgeGraph: 0,
+    changeLogLink: "",
+  },
+  insightValidationWorkflow: [],
+  aiAvailable: false,
+  graphStatus: "",
+  graphMode: "limited",
+  graphBlockingReasons: [],
+  graphDisclosure: "",
+};
+
 function cardToActionableInsight(card: InsightCard): ActionableInsight {
   return {
     insightId: card.insightId || card.id,
@@ -167,7 +205,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   }, []);
 
   const {
-    data,
+    data: rawData,
     isLoading,
     isError,
   } = useQuery<ProjectInsight>({
@@ -179,6 +217,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       return latest?.stale ? 5_000 : false;
     },
   });
+
+  const insight = rawData ?? EMPTY_PROJECT_INSIGHT;
 
   const refresh = useMutation({
     mutationFn: () => projectInsightApi.refresh(projectId),
@@ -351,10 +391,10 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   };
 
   const analysisChildren = useMemo(() => {
-    const questions = (data?.questionsToAsk ?? []).filter((q) =>
+    const questions = (insight.questionsToAsk ?? []).filter((q) =>
       q.question?.trim(),
     );
-    const needing = (data?.questionsNeedingData ?? []).filter((q) =>
+    const needing = (insight.questionsNeedingData ?? []).filter((q) =>
       (q.question || q.businessQuestion || q.title)?.trim(),
     );
     if (questions.length === 0 && needing.length === 0) return null;
@@ -414,13 +454,13 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
         )}
       </div>
     );
-  }, [data?.questionsToAsk, data?.questionsNeedingData, handleProjectAsk]);
+  }, [insight.questionsToAsk, insight.questionsNeedingData, handleProjectAsk]);
 
   const running = refresh.isPending || insightsQuery.isFetching;
 
   const lastUpdated = useMemo(
-    () => (data?.lastUpdatedAt ? new Date(data.lastUpdatedAt) : null),
-    [data?.lastUpdatedAt],
+    () => (insight.lastUpdatedAt ? new Date(insight.lastUpdatedAt) : null),
+    [insight.lastUpdatedAt],
   );
 
   const handleSaveToDashboard = useCallback((card: InsightCard) => {
@@ -477,7 +517,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
             title="Couldn't load Project Insight"
             body="Something went wrong building this project's insight. Try refreshing."
           />
-        ) : !data ? null : (
+        ) : (
           <>
             <HomeAiSuggestions
               projectId={projectIdNum}
@@ -525,7 +565,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               </div>
             )}
 
-            <ExecutiveProjectSummary summary={data.executiveSummary} />
+            <ExecutiveProjectSummary summary={insight.executiveSummary} />
 
             <IntelligenceWorkspace
               scope="project"
@@ -533,7 +573,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               cards={allInsightCards}
               running={running}
               lastUpdated={lastUpdated}
-              snapshotFingerprint={data.lastUpdatedAt ?? null}
+              snapshotFingerprint={insight.lastUpdatedAt ?? null}
               toolbar={{
                 projectCount: 1,
                 totalProjectCount: 1,
