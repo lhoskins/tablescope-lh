@@ -416,7 +416,7 @@ export function BusinessContextScreen({ projectId }: { projectId: string }) {
     <ProjectShell
       projectId={projectId}
       activeNav="project-business-context"
-      breadcrumbLabel="Goal Setting"
+      breadcrumbLabel="Goals"
       actions={
         <Button variant="secondary" size="sm" onClick={() => void refetch()}>
           <IconRefresh size={14} />
@@ -427,7 +427,7 @@ export function BusinessContextScreen({ projectId }: { projectId: string }) {
       <div className="space-y-6">
         {!isLoading && (
           <div>
-            <h1 className="text-2xl font-semibold text-ink-primary">Goal Setting</h1>
+            <h1 className="text-2xl font-semibold text-ink-primary">Goals</h1>
             <p className="mt-1 text-sm text-ink-secondary">
               Define project success, track the KPIs that prove it, and manage project-wide risks.
             </p>
@@ -436,7 +436,7 @@ export function BusinessContextScreen({ projectId }: { projectId: string }) {
         {isLoading ? (
           <Card>
             <CardBody>
-              <div className="text-sm text-ink-secondary">Loading goal setting…</div>
+              <div className="text-sm text-ink-secondary">Loading goals…</div>
             </CardBody>
           </Card>
         ) : (

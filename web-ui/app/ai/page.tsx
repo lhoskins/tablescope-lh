@@ -78,9 +78,7 @@ function AiAssistantPageInner() {
     enabled: activeId != null,
   });
   const turns = active?.turns ?? [];
-  const assistantConversations = (conversations ?? []).filter(
-    (c) => c.surface === "ai_assistant",
-  );
+  const assistantConversations = conversations ?? [];
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // A conversation is scoped to one project for grounded answers; reflect it
@@ -176,17 +174,17 @@ function AiAssistantPageInner() {
     (raw: string) => {
       const question = raw.trim();
       if (!question || busy) return;
-      const pid = active?.project_id ?? projectId;
-      if (pid == null) {
-        // Prompt for the project instead of silently guessing one.
+      if (activeId == null && projectId == null) {
+        // Prompt for the project only when creating a brand-new conversation.
         setNeedsProject(true);
         return;
       }
       setNeedsProject(false);
       setInput("");
+      const pid = active?.project_id ?? projectId ?? 0;
       sendMutation.mutate({ question, pid });
     },
-    [active, projectId, busy, sendMutation],
+    [active, activeId, projectId, busy, sendMutation],
   );
 
   // Auto-start a conversation seeded from the deep-link parameters once.
