@@ -14,6 +14,7 @@ import {
   IconBrain,
   IconUsers,
   IconServer,
+  IconRobot,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import type { CurrentUser } from "@/lib/ui/types";
@@ -122,6 +123,14 @@ export function useSettingsNavItems(user?: CurrentUser): {
       label: "Users",
       href: "/admin/users",
       icon: IconUsers,
+      section: "Platform Administration",
+      visible: () => isPlatformAdmin,
+    },
+    {
+      key: "llm-framework",
+      label: "LLM Framework",
+      href: "/admin/settings/llm-framework",
+      icon: IconRobot,
       section: "Platform Administration",
       visible: () => isPlatformAdmin,
     },

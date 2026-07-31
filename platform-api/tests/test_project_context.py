@@ -238,14 +238,14 @@ async def test_risk_lifecycle(client, service_headers):
             "title": "Supplier delay",
             "likelihood": "possible",
             "impact": "major",
-            "severity": "high",
             "status": "open",
         },
         headers=headers,
     )
     assert r.status_code == 201, r.text
     risk = r.json()
-    assert risk["severity"] == "high"
+    # Server computes severity from likelihood x impact.
+    assert risk["severity"] == "medium"
 
     r = await client.patch(
         f"/api/projects/{pid}/risks/{risk['id']}",

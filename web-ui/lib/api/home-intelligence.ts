@@ -360,6 +360,8 @@ export interface InsightCard {
   visualizationDecision?: VizDecision;
   /** Ranked compatible chart candidates the user can switch to. */
   chartCandidates?: VizCandidate[];
+  /** Active time-series view (mode/interval/range) captured for Home pins and dashboards. */
+  timeSeriesView?: TimeSeriesViewState;
 }
 
 export interface ProjectResult {
@@ -699,6 +701,166 @@ export function saveDashboardSuggestion(body: {
   }[];
 }): Promise<{ status: string; dashboard_id: number; name: string }> {
   return apiClient.post("/api/ai/home/save-dashboard", body);
+}
+
+export type TimeSeriesViewMode = "value" | "percent_change";
+export type TimeSeriesInterval = "day" | "week" | "month" | "year";
+export type TimeSeriesRange = "7d" | "30d" | "90d" | "1y" | "2y";
+
+export interface TimeSeriesMetric {
+  name: string;
+  aggregation: string | null;
+  is_rate_or_ratio: boolean;
+  value_format: string | null;
+}
+
+export interface TimeSeriesPoint {
+  label: string;
+  period_start: string;
+  period_end: string;
+  current_value: number | null;
+  previous_value: number | null;
+  percent_change_ratio: number | null;
+  percent_change_label: string | null;
+  comparison_status: string;
+  partial: boolean;
+  warnings: string[];
+}
+
+export interface TimeSeriesCalculation {
+  formula: string;
+  interval: string;
+  range: string;
+  range_start: string | null;
+  range_end: string | null;
+  as_of: string | null;
+  previous_periods_included: number;
+  notes: string[];
+}
+
+export interface TimeSeriesResponse {
+  insight_id: string;
+  metric: TimeSeriesMetric;
+  interval: string;
+  range: string;
+  timezone: string;
+  comparison_label: string;
+  points: TimeSeriesPoint[];
+  calculation: TimeSeriesCalculation;
+  warnings: string[];
+  eligible: boolean;
+  source_grain: string | null;
+  supported_intervals: string[];
+}
+
+export interface TimeSeriesViewState {
+  mode: TimeSeriesViewMode;
+  interval: TimeSeriesInterval;
+  range: TimeSeriesRange;
+}
+
+export function getInsightTimeSeries(
+  insightId: string,
+  params: {
+    project_id: number;
+    interval: TimeSeriesInterval;
+    range: TimeSeriesRange;
+  },
+): Promise<TimeSeriesResponse> {
+  const query = new URLSearchParams();
+  query.set("project_id", String(params.project_id));
+  query.set("interval", params.interval);
+  query.set("range", params.range);
+  return apiClient.get(`/api/ai/insights/${insightId}/time-series?${query.toString()}`);
+}
+
+// ── Cross-project percent-change summary ─────────────────────────────────────
+
+export interface PercentChangeSummarySort {
+  field: string;
+  direction: "asc" | "desc";
+}
+
+export interface PercentChangeSummaryRequest {
+  project_ids: number[];
+  interval: TimeSeriesInterval;
+  range: TimeSeriesRange;
+  search?: string;
+  sort?: PercentChangeSummarySort;
+  cursor?: string | null;
+  page_size?: number;
+}
+
+export interface PercentChangeSummaryPeriod {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+  is_latest: boolean;
+}
+
+export interface PercentChangeSummaryCell {
+  current_value: number | null;
+  previous_value: number | null;
+  percent_change_ratio: number | null;
+  status: "positive" | "negative" | "zero" | "unavailable";
+  comparison_status: string;
+  partial: boolean;
+  warnings: string[];
+}
+
+export interface PercentChangeSummaryStatistics {
+  latest: number | null;
+  min: number | null;
+  max: number | null;
+  median: number | null;
+  average: number | null;
+  standard_deviation: number | null;
+  cumulative_change: number | null;
+  valid_count: number;
+}
+
+export interface PercentChangeSummaryRow {
+  insight_id: string;
+  title: string;
+  project_id: number;
+  project_name: string;
+  project_color: string | null;
+  priority_score: number | null;
+  source_grain: string | null;
+  supported_intervals: string[];
+  data_through: string | null;
+  cells: Record<string, PercentChangeSummaryCell>;
+  statistics: PercentChangeSummaryStatistics;
+}
+
+export interface PercentChangeSummaryPageInfo {
+  page_size: number;
+  total_in_scope: number;
+  total_eligible: number;
+  total_excluded: number;
+  next_cursor: string | null;
+}
+
+export interface PercentChangeSummaryResponse {
+  schema_version: number;
+  interval: string;
+  range: string;
+  as_of: string;
+  comparison_label: string;
+  periods: PercentChangeSummaryPeriod[];
+  rows: PercentChangeSummaryRow[];
+  interval_support_counts: Record<string, number>;
+  page: PercentChangeSummaryPageInfo;
+  excluded_by_reason: Record<string, number>;
+  warnings: string[];
+}
+
+export function getPercentChangeSummary(
+  body: PercentChangeSummaryRequest,
+  signal?: AbortSignal,
+): Promise<PercentChangeSummaryResponse> {
+  return apiClient.post("/api/ai/insights/percent-change-summary", body, { signal });
 }
 
 export interface SaveCardToDashboardPayload {

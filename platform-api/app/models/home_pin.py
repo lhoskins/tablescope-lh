@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -46,6 +46,13 @@ class HomePin(TimestampMixin, Base):
         index=True,
     )
     pin_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    destination: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="home",
+        server_default=text("'home'"),
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     config: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
     layout: Mapped[dict] = mapped_column(_JSON, nullable=False, default=dict)
@@ -69,6 +76,7 @@ class HomePin(TimestampMixin, Base):
             "tenant_id",
             "user_id",
             "pin_key",
-            name="uix_home_pins_tenant_user_key",
+            "destination",
+            name="uix_home_pins_tenant_user_key_destination",
         ),
     )

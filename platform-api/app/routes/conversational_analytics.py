@@ -20,6 +20,9 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.models import AnalyticsConversation, AnalyticsConversationTurn, Project, ProjectMember
+from app.services.business_insight_project_resolver import (
+    resolve_business_insight_project,
+)
 from app.services.conversational_analytics import execute_turn
 
 router = APIRouter(prefix="/conversational-analytics", tags=["Conversational Analytics"])
@@ -169,14 +172,27 @@ async def create_conversation(
     if req.project_id is not None:
         await _check_project_access(session, context, req.project_id)
 
+    # If no project is supplied and there is an initial message, resolve the best
+    # authorized project from the question (Business Insight asks, etc.).
+    resolved_project_id = req.project_id
+    if resolved_project_id is None and req.initial_message:
+        resolved = await resolve_business_insight_project(
+            session, context, req.initial_message
+        )
+        if resolved.status == "resolved":
+            resolved_project_id = resolved.project_id
+
+    if resolved_project_id is not None:
+        await _check_project_access(session, context, resolved_project_id)
+
     title = req.title or "New conversation"
-    if req.initial_message:
+    if req.initial_message and not req.title:
         title = req.initial_message[:80] + ("…" if len(req.initial_message) > 80 else "")
 
     conversation = AnalyticsConversation(
         tenant_id=context.tenant_id,
         user_id=context.user_id,
-        project_id=req.project_id,
+        project_id=resolved_project_id,
         active_datasource_id=req.data_source_id,
         title=title,
         status="active",

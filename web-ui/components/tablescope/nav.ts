@@ -176,7 +176,7 @@ export function projectNavGroups(projectId: string): NavGroup[] {
         },
         {
           key: "project-business-context",
-          label: "Business Context",
+          label: "Goal Setting",
           href: `${base}/business-context`,
           icon: IconBuildingBank,
         },

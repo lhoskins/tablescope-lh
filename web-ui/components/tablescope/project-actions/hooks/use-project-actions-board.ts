@@ -6,7 +6,20 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { projectActionsApi, type ProjectActionFilters, type ProjectActionListItem, type ProjectActionListResponse, type ProjectActionStatus, type ProjectActionPriority, type ProjectActionSortBy, type ProjectActionGroupBy, type ProjectActionView, type ProjectActionSubtask, type ProjectAction } from "@/lib/api/project-actions";
+import {
+  projectActionsApi,
+  type ProjectActionFilters,
+  type ProjectActionListItem,
+  type ProjectActionListResponse,
+  type ProjectActionStatus,
+  type ProjectActionPriority,
+  type ProjectActionSortBy,
+  type ProjectActionGroupBy,
+  type ProjectActionView,
+  type ProjectActionSubtask,
+  type ProjectAction,
+  type CreateProjectActionPayload,
+} from "@/lib/api/project-actions";
 import { useCurrentUser } from "@/lib/ui/use-shell-data";
 
 export interface BoardPreferences {
@@ -91,20 +104,9 @@ export function useProjectActionsBoard(
     queryFn: () => projectActionsApi.board(projectId, boardFilters),
   });
 
-  const detailCache = useMemo(
-    () => new Map<number, ProjectAction>(),
-    [],
-  );
-
   const fetchDetail = useCallback(
-    async (actionId: number) => {
-      const cached = detailCache.get(actionId);
-      if (cached) return cached;
-      const data = await projectActionsApi.get(projectId, actionId);
-      detailCache.set(actionId, data);
-      return data;
-    },
-    [projectId, detailCache],
+    async (actionId: number) => projectActionsApi.get(projectId, actionId),
+    [projectId],
   );
 
   const invalidateBoard = useCallback(() => {
@@ -125,7 +127,13 @@ export function useProjectActionsBoard(
   });
 
   const archiveAction = useMutation({
-    mutationFn: (actionId: number) => projectActionsApi.archive(projectId, actionId),
+    mutationFn: ({
+      actionId,
+      expected_version,
+    }: {
+      actionId: number;
+      expected_version?: number;
+    }) => projectActionsApi.archive(projectId, actionId, expected_version),
     onSuccess: () => invalidateBoard(),
   });
 
@@ -162,16 +170,24 @@ export function useProjectActionsBoard(
     mutationFn: ({
       actionId,
       subtaskId,
+      expected_version,
     }: {
       actionId: number;
       subtaskId: number;
-    }) => projectActionsApi.archiveSubtask(projectId, actionId, subtaskId),
+      expected_version?: number;
+    }) => projectActionsApi.archiveSubtask(projectId, actionId, subtaskId, expected_version),
     onSuccess: () => invalidateBoard(),
   });
 
   const bulkUpdate = useMutation({
     mutationFn: (payload: Parameters<typeof projectActionsApi.bulkUpdate>[1]) =>
       projectActionsApi.bulkUpdate(projectId, payload),
+    onSuccess: () => invalidateBoard(),
+  });
+
+  const createAction = useMutation({
+    mutationFn: (payload: CreateProjectActionPayload) =>
+      projectActionsApi.create(projectId, payload),
     onSuccess: () => invalidateBoard(),
   });
 
@@ -191,6 +207,7 @@ export function useProjectActionsBoard(
     updateSubtask,
     archiveSubtask,
     bulkUpdate,
+    createAction,
     currentUserId,
   };
 }

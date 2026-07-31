@@ -18,7 +18,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import ai, health
+from app.routers import ai, health, internal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,3 +40,4 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(ai.router)
+app.include_router(internal.router, prefix="/internal")

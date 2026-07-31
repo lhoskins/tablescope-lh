@@ -85,8 +85,67 @@ class Settings(BaseSettings):
     tablescope_ai_api_url: str = ""
     tablescope_ai_signing_secret: str = ""
     tablescope_ai_default_scope: str = "project"
+
+    # --- LLM Framework (offline Ollama model deployment) ---
+    # Master switch. When false, /api/llm-framework/* returns 503 and the UI
+    # is hidden. Phase 1 is read-only inventory, so enabling it only exposes
+    # runtime/installation/routing data, not model downloads or activation.
+    llm_framework_enabled: bool = True
+    # Phase 2: enable the Hugging Face catalog search and staging flow.
+    llm_framework_hf_catalog_enabled: bool = True
+    # Phase 1 restricts the catalog to pre-quantized GGUF artifacts. Setting
+    # this to true blocks any FP16 / safetensors / conversion pipeline paths.
+    llm_model_catalog_gguf_only: bool = True
+    # Allow staging and activation of a verified artifact on a runtime target.
+    # Kept off until the deployment agent and canary pipeline are wired.
+    llm_deployment_enabled: bool = False
+    # Require two distinct platform administrators to approve a production
+    # model replacement before activation.
+    llm_two_person_approval_required: bool = True
+    # Automatically roll back an activation that fails its stabilization window.
+    llm_auto_rollback_enabled: bool = True
+    # Max bytes allowed in the model vault on the app server. The preflight
+    # check uses twice the artifact size plus reserve.
+    llm_model_vault_max_bytes: int = 107_374_182_400  # 100 GiB
+    # Path to the model vault on the app server (/opt/tablescope is mounted
+    # into platform-api, platform-api-worker, and the deployment agent).
+    llm_model_vault_path: str = "/opt/tablescope/model-vault"
+    # Ed25519/RSA signing key used to sign the artifact manifest. The public
+    # key is baked into the deployment agent so it never has to fetch it.
+    llm_manifest_signing_key_path: str = "/opt/tablescope/model-vault/signing.pem"
+    # Public-key fingerprint of the trusted manifest-signing key. The agent
+    # verifies artifacts against a key baked into its image, not fetched from
+    # the app server at deploy time.
+    llm_manifest_signing_key_fingerprint: str = ""
+    # Optional Hugging Face token for accessing gated models.
+    llm_huggingface_token: str = ""
+    # Phase 4: allow dynamic routing profile changes and activation.
+    llm_dynamic_routing_enabled: bool = False
+    # Phase 5: enable embedding-model re-index migrations (dual collection,
+    # re-embed, recall comparison, cut-over). Disabled until the AI server
+    # vector-store backend is wired.
+    llm_embedding_migration_enabled: bool = False
+    # Phase 6: enable FP16 / safetensors -> GGUF conversion. The converter must
+    # be a sandboxed command or container; the platform-api never installs the
+    # conversion toolchain itself.
+    llm_fp16_conversion_enabled: bool = False
+    llm_fp16_converter_command: str = ""
+    llm_embedding_recall_threshold: float = 0.95
+    # URL of the deployment agent on the AI host. If empty, deployment tasks
+    # fail closed with a descriptive quarantine reason.
+    llm_deployment_agent_url: str = ""
+    # Internal Ollama API URL used by the deployment agent and preflight checks.
+    llm_ollama_url: str = "http://ollama:11434"
+    # Path on the AI host where GGUF files are installed before ollama create.
+    # The agent writes here and Ollama's Modelfile references this path.
+    llm_model_install_path: str = "/mnt/tablescope-ai/ollama/models/imported"
+    # Number of Ollama model slots reserved for the previous (rollback) model.
+    llm_ollama_rollback_slots: int = 1
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
+    # Business Context (Goal Setting) workspace feature flags.
+    business_context_v2_enabled: bool = True
+    business_context_kpi_matching_enabled: bool = True
     # Max projects analysed concurrently by the Home intelligence SSE stream.
     # Bounds AI/Ollama load so a large project count doesn't flood the server
     # and silently time out into empty "0 insights" results.

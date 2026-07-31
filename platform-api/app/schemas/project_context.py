@@ -172,6 +172,10 @@ class ProjectMetricBase(BaseModel):
     source_query_id: int | None = None
     source_mapping: dict | None = None
     expression: str | None = Field(default=None, max_length=4000)
+    success_criterion_id: int | None = None
+    source_match_status: str | None = Field(default=None, max_length=20)
+    latest_value: float | None = None
+    latest_value_at: datetime | None = None
     owner_id: int | None = None
     cadence: str | None = Field(default=None, max_length=50)
 
@@ -192,6 +196,7 @@ class ProjectMetricUpdate(BaseModel):
     source_query_id: int | None = None
     source_mapping: dict | None = None
     expression: str | None = Field(default=None, max_length=4000)
+    success_criterion_id: int | None = None
     owner_id: int | None = None
     cadence: str | None = Field(default=None, max_length=50)
     active: bool | None = None
@@ -227,6 +232,7 @@ class ProjectRiskBase(BaseModel):
     likelihood: str | None = Field(default=None, max_length=20)
     impact: str | None = Field(default=None, max_length=20)
     severity: str | None = Field(default=None, max_length=20)
+    rating_matrix_version: int | None = None
     owner_id: int | None = None
     mitigation: str | None = Field(default=None, max_length=4000)
     contingency: str | None = Field(default=None, max_length=4000)
@@ -322,3 +328,12 @@ class ProjectContextAuditEventRead(BaseModel):
 class ProjectContextAuditList(BaseModel):
     items: list[ProjectContextAuditEventRead]
     total: int
+
+class KpiSourceMatchJobCreate(BaseModel):
+    expected_version: int | None = None
+
+
+class KpiSourceMatchJobRead(BaseModel):
+    ok: bool
+    job_id: str
+    message: str

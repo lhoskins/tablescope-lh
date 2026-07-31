@@ -72,6 +72,10 @@ export interface SessionSource {
   existing?: boolean;
   /** Project the existing source currently belongs to (for Teiid routing). */
   projectId?: number | null;
+  /** Immutable creation timestamp (ISO 8601). Used for the "New" badge. */
+  createdAt?: string | null;
+  /** Optional loaded-at timestamp (ISO 8601); falls back to createdAt. */
+  loadedAt?: string | null;
 }
 
 export interface ExistingProjectSource {

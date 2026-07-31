@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useMemo, useState } from "react";
+import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconHelpCircle } from "@tabler/icons-react";
@@ -23,6 +23,7 @@ import { TurnBubble } from "@/components/tablescope/conversation/conversation-tu
 import {
   createConversation,
   getConversation,
+  listConversations,
   submitTurn,
   type Conversation,
   type ConversationTurn,
@@ -109,6 +110,7 @@ export default function BusinessInsightPage() {
       pinMutation.mutate({
         pin_type: "insight_card",
         pin_key: `insight:${card.projectId}:${card.insightType}:${key}`,
+        destination: "home",
         title: card.title,
         project_id: Number(card.projectId),
         frozen_payload: card as unknown as Record<string, unknown>,
@@ -123,7 +125,42 @@ export default function BusinessInsightPage() {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [createActionOpen, setCreateActionOpen] = useState(false);
+
+  // Resume the single Business Insights conversation instead of creating a new
+  // one every time the page is opened.
+  const hasResumedRef = useRef(false);
+  useEffect(() => {
+    if (hasResumedRef.current) return;
+    hasResumedRef.current = true;
+    let cancelled = false;
+    async function resume() {
+      try {
+        const convos = await listConversations();
+        const matches = convos
+          .filter((c) => c.title === "Business Insights")
+          .sort(
+            (a, b) =>
+              new Date(b.updated_at).getTime() -
+              new Date(a.updated_at).getTime(),
+          );
+        const match = matches[0];
+        if (!match) return;
+        const full = await getConversation(match.id);
+        if (cancelled) return;
+        setChatConversationId(full.id);
+        setChatTurns(full.turns);
+      } catch {
+        // ignore resume errors; the user can start a fresh conversation
+      }
+    }
+    void resume();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
+
+
 
   const handleCreateAction = useCallback((card: InsightCard) => {
     const insight: ActionableInsight = {
@@ -163,16 +200,24 @@ export default function BusinessInsightPage() {
     async (message: string) => {
       setChatBusy(true);
       setChatError(null);
+      // One idempotency key per turn, sent both when creating a conversation and
+      // when submitting a follow-up turn.
+      const requestId = crypto.randomUUID();
       try {
         if (chatConversationId == null) {
           const created = await createConversation({
+            title: "Business Insights",
             initial_message: message,
+            client_request_id: requestId,
           });
           const polled = await pollConversation(created.id);
           setChatConversationId(created.id);
           setChatTurns(polled.turns);
         } else {
-          const res = await submitTurn(chatConversationId, { message });
+          const res = await submitTurn(chatConversationId, {
+            message,
+            client_request_id: requestId,
+          });
           setChatTurns((prev) => [...prev, res.turn]);
           const polled = await pollConversation(res.conversation_id);
           setChatTurns(polled.turns);

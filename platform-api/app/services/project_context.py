@@ -44,6 +44,7 @@ from app.schemas.project_context import (
 )
 from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
 from app.services.project_ai_context import invalidate_project_ai_context
+from app.services.risk_rating import RATING_MATRIX_VERSION, compute_severity
 
 logger = logging.getLogger(__name__)
 
@@ -500,6 +501,37 @@ class ProjectContextService:
                     detail=f"Invalid source_query_id: {payload.source_query_id}",
                 )
         await self._validate_owner(payload.owner_id if hasattr(payload, "owner_id") else None)
+        if getattr(payload, "success_criterion_id", None) is not None:
+            await self._validate_success_criterion_id(project_id, payload.success_criterion_id)
+
+    async def _validate_success_criterion_id(
+        self, project_id: int, goal_id: int | None
+    ) -> None:
+        if goal_id is None:
+            return
+        goal = await self.session.get(ProjectGoal, goal_id)
+        if (
+            goal is None
+            or goal.project_id != project_id
+            or goal.tenant_id != self.context.tenant_id
+            or not goal.active
+        ):
+            raise HTTPException(status_code=400, detail=f"Invalid success_criterion_id: {goal_id}")
+
+    async def _sync_metric_success_criterion_link(self, metric: ProjectMetric) -> None:
+        """Keep the legacy M:N goal-metric link in sync with success_criterion_id."""
+        await self.session.execute(
+            delete(ProjectGoalMetricLink).where(
+                ProjectGoalMetricLink.metric_id == metric.id
+            )
+        )
+        if metric.success_criterion_id is not None:
+            self.session.add(
+                ProjectGoalMetricLink(
+                    goal_id=metric.success_criterion_id,
+                    metric_id=metric.id,
+                )
+            )
 
     async def _check_metric_name_unique(
         self, project_id: int, name: str, exclude_id: int | None = None
@@ -547,11 +579,14 @@ class ProjectContextService:
             source_query_id=payload.source_query_id,
             source_mapping=payload.source_mapping or {},
             expression=payload.expression,
+            success_criterion_id=payload.success_criterion_id,
             owner_id=payload.owner_id,
             cadence=payload.cadence,
             position=max_position + 1,
         )
         self.session.add(metric)
+        await self.session.flush()
+        await self._sync_metric_success_criterion_link(metric)
         await self.session.flush()
 
         for t_payload in payload.targets:
@@ -614,6 +649,7 @@ class ProjectContextService:
             "source_query_id",
             "source_mapping",
             "expression",
+            "success_criterion_id",
             "owner_id",
             "cadence",
             "active",
@@ -626,6 +662,9 @@ class ProjectContextService:
 
         metric.version += 1
         await self.session.flush()
+        if payload.success_criterion_id is not None:
+            await self._sync_metric_success_criterion_link(metric)
+            await self.session.flush()
         invalidate_project_ai_context(self.context.tenant_id, project_id)
         await self._mark_knowledge_graph_stale(project_id, "Project context updated")
 
@@ -880,9 +919,12 @@ class ProjectContextService:
         if hasattr(payload, "impact") and payload.impact is not None:
             if payload.impact not in _VALID_IMPACT:
                 raise HTTPException(status_code=400, detail=f"Invalid impact: {payload.impact}")
-        if hasattr(payload, "severity") and payload.severity is not None:
-            if payload.severity not in _VALID_SEVERITY:
-                raise HTTPException(status_code=400, detail=f"Invalid severity: {payload.severity}")
+        if getattr(payload, "severity", None) is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="severity is computed by the server from likelihood and impact "
+                "and cannot be set directly.",
+            )
         if hasattr(payload, "status") and payload.status is not None:
             if payload.status not in _VALID_RISK_STATUSES:
                 raise HTTPException(status_code=400, detail=f"Invalid risk status: {payload.status}")
@@ -936,7 +978,8 @@ class ProjectContextService:
             category=payload.category,
             likelihood=payload.likelihood,
             impact=payload.impact,
-            severity=payload.severity,
+            severity=compute_severity(payload.likelihood, payload.impact),
+            rating_matrix_version=RATING_MATRIX_VERSION,
             owner_id=payload.owner_id,
             mitigation=payload.mitigation,
             contingency=payload.contingency,
@@ -995,7 +1038,6 @@ class ProjectContextService:
             "category",
             "likelihood",
             "impact",
-            "severity",
             "owner_id",
             "mitigation",
             "contingency",
@@ -1007,6 +1049,10 @@ class ProjectContextService:
             value = getattr(payload, field)
             if value is not None:
                 setattr(risk, field, value)
+
+        if payload.likelihood is not None or payload.impact is not None:
+            risk.severity = compute_severity(risk.likelihood, risk.impact)
+            risk.rating_matrix_version = RATING_MATRIX_VERSION
 
         risk.version += 1
         if payload.linked_goal_ids is not None or payload.linked_metric_ids is not None:

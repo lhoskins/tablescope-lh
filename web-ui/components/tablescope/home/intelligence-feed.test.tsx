@@ -22,6 +22,9 @@ vi.mock("@/lib/api/home-intelligence", async (importActual) => ({
 
 vi.mock("@/lib/api/insight-feedback", () => ({
   batchGetInsightFeedback: vi.fn().mockResolvedValue({ items: [] }),
+  batchGetInsightGovernance: vi.fn().mockResolvedValue({ items: [] }),
+  deleteInsightFeedback: vi.fn().mockResolvedValue({}),
+  respondToInsightFeedbackRequest: vi.fn().mockResolvedValue({}),
 }));
 
 const RISK: InsightCard = {
@@ -204,13 +207,16 @@ describe("IntelligenceFeed", () => {
       },
     });
     renderFeed();
-    fireEvent.click(screen.getByRole("button", { name: /Trends/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Trends/ }));
     await screen.findByText("Spend concentrated");
     const card = screen.getByText("Spend concentrated").closest("article") as HTMLElement;
-    fireEvent.click(within(card).getByRole("button", { name: /More Actions/i }));
     fireEvent.click(within(card).getByRole("button", { name: "Explain" }));
-    expect(await screen.findByText("Analytical method: Pareto analysis")).toBeTruthy();
-    expect(screen.getByText("Quality: reliable")).toBeTruthy();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByText("Analysis details", { selector: "summary" }),
+    );
+    expect(await within(dialog).findByText("Analytical method: Pareto analysis")).toBeTruthy();
+    expect(within(dialog).getByText("Quality: reliable")).toBeTruthy();
   });
 
   it("does not re-request intelligence on toggle", async () => {
@@ -218,10 +224,10 @@ describe("IntelligenceFeed", () => {
     await screen.findByRole("button", { name: /Risks/ });
     const before = streamHomeIntelligence.mock.calls.length;
 
-    fireEvent.click(screen.getByRole("button", { name: /Trends/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Trends/ }));
     expect(streamHomeIntelligence.mock.calls.length).toBe(before);
 
-    fireEvent.click(screen.getByRole("button", { name: /Opportunities/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Opportunities/ }));
     expect(streamHomeIntelligence.mock.calls.length).toBe(before);
   });
 

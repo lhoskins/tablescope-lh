@@ -22,6 +22,8 @@ export interface FlatItem {
   /** Whether the item is currently selected for assignment (table "adding"). */
   selected: boolean;
   isFile: boolean;
+  /** Immutable creation timestamp (ISO 8601); used for the "New" badge. */
+  createdAt?: string | null;
 }
 
 function formatBytes(bytes?: number): string {
@@ -58,6 +60,7 @@ export function flattenCreated(
         sizeOrStatus: formatBytes(source.fileMetadata?.sizeBytes),
         selected: (table?.state ?? "unselected") === "adding",
         isFile: true,
+        createdAt: source.createdAt,
       });
       continue;
     }
@@ -76,6 +79,7 @@ export function flattenCreated(
         sizeOrStatus: "—",
         selected: table.state === "adding",
         isFile: false,
+        createdAt: source.createdAt,
       });
     }
   }

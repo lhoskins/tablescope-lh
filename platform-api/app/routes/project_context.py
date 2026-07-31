@@ -11,6 +11,8 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
 from app.schemas.project_context import (
+    KpiSourceMatchJobCreate,
+    KpiSourceMatchJobRead,
     ProjectBusinessContextRead,
     ProjectBusinessContextUpdate,
     ProjectContextAuditEventRead,
@@ -31,6 +33,7 @@ from app.schemas.project_context import (
     ReorderRequest,
 )
 from app.services.project_context import ProjectContextService
+from app.tasks.kpi_source_matching import enqueue_match_kpi_data_source
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["project-context"])
@@ -212,6 +215,33 @@ async def delete_target(
 ) -> Response:
     await service.delete_target(project_id, metric_id, target_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{project_id}/metrics/{metric_id}/source-match-jobs",
+    response_model=KpiSourceMatchJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_kpi_source_match_job(
+    project_id: int,
+    metric_id: int,
+    payload: KpiSourceMatchJobCreate,
+    service: ProjectContextService = Depends(_service),
+) -> KpiSourceMatchJobRead:
+    """Enqueue a background job to find a candidate data source for a KPI."""
+    metric = await service.get_metric(project_id, metric_id)
+    service._check_version(metric.version, payload.expected_version)
+    job_id = await enqueue_match_kpi_data_source(
+        tenant_id=service.context.tenant_id,
+        project_id=project_id,
+        metric_id=metric_id,
+        requested_by_user_id=service.context.user_id,
+    )
+    return KpiSourceMatchJobRead(
+        ok=bool(job_id),
+        job_id=job_id,
+        message="Match job queued." if job_id else "Failed to queue match job.",
+    )
 
 
 # ── Risks ─────────────────────────────────────────────────────────────────

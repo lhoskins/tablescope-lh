@@ -85,6 +85,10 @@ export interface ProjectMetric {
   source_query_id: number | null;
   source_mapping: unknown;
   expression: string | null;
+  success_criterion_id: number | null;
+  source_match_status: string | null;
+  latest_value: number | null;
+  latest_value_at: string | null;
   owner_id: number | null;
   cadence: string | null;
   active: boolean;
@@ -105,6 +109,7 @@ export interface ProjectRisk {
   likelihood: string | null;
   impact: string | null;
   severity: string | null;
+  rating_matrix_version: number | null;
   owner_id: number | null;
   mitigation: string | null;
   contingency: string | null;
@@ -189,6 +194,7 @@ export interface MetricCreateRequest {
   source_query_id?: number | null;
   source_mapping?: unknown;
   expression?: string | null;
+  success_criterion_id?: number | null;
   owner_id?: number | null;
   cadence?: string | null;
   targets?: MetricTargetCreateRequest[];
@@ -316,6 +322,17 @@ export function reorderMetrics(
   body: ReorderRequest,
 ): Promise<{ ok: boolean }> {
   return apiClient.patch<{ ok: boolean }>(`/api/projects/${projectId}/metrics/reorder`, body);
+}
+
+export function startKpiSourceMatch(
+  projectId: number | string,
+  metricId: number,
+  expected_version?: number,
+): Promise<{ ok: boolean; job_id: string; message: string }> {
+  return apiClient.post<{ ok: boolean; job_id: string; message: string }>(
+    `/api/projects/${projectId}/metrics/${metricId}/source-match-jobs`,
+    { expected_version },
+  );
 }
 
 export function createTarget(

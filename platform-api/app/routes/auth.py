@@ -9,6 +9,7 @@ platform-api token, so they perform their own credential verification.
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -28,9 +29,13 @@ from app.schemas.auth import (
     AuthTokenResponse,
     CurrentUserResponse,
     DirectLoginRequest,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
 )
 from app.services.allowed_domains import enforce_allowed_domain
+from app.services.email import send_transactional_email
 from app.services.mfa_phone_service import mfa_aal_for_user
+from app.services.supabase_auth_service import SupabaseAuthService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -250,3 +255,63 @@ async def refresh_token(
         tenant_slug=tenant.slug if tenant else None,
         permissions=permissions,
     )
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    session: AsyncSession = Depends(get_db),
+) -> ForgotPasswordResponse:
+    """Send a password-reset email through Tablescope's transactional email.
+
+    Supabase Auth does not have a custom SMTP provider configured in this
+    project, so the reset link is generated via the GoTrue admin API and
+    delivered through the application's own email channel. The link carries a
+    one-time token_hash that the set-password page exchanges for a Supabase
+    session with verifyOtp.
+    """
+    settings = get_settings()
+    generic = ForgotPasswordResponse()
+    tenant = await session.scalar(
+        select(Tenant).where(Tenant.slug == payload.tenant_slug)
+    )
+    if tenant is None:
+        return generic
+    user = await session.scalar(
+        select(User).where(
+            User.email.ilike(payload.email),
+            User.tenant_id == tenant.id,
+            User.is_active.is_(True),
+        )
+    )
+    if user is None or not user.external_id:
+        return generic
+    try:
+        svc = SupabaseAuthService()
+        action_link = await svc.generate_recovery_link(
+            user.email,
+            redirect_to=settings.app_base_url.rstrip("/"),
+        )
+        match = re.search(r"[?&]token=([0-9a-f]+)", action_link)
+        token_hash = match.group(1) if match else None
+        if not token_hash:
+            logger.warning(
+                "generate_recovery_link returned no token: %s", action_link
+            )
+            return generic
+        reset_link = (
+            f"{settings.app_base_url.rstrip('/')}/{payload.tenant_slug}/set-password"
+            f"?token_hash={token_hash}&type=recovery"
+        )
+        await send_transactional_email(
+            to=user.email,
+            template="password_reset",
+            variables={
+                "first_name": user.first_name or "",
+                "reset_link": reset_link,
+                "expiration_time": "15 minutes",
+            },
+        )
+    except Exception:
+        logger.exception("Forgot-password flow failed for %s", payload.email)
+    return generic
