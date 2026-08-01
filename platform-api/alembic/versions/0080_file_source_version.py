@@ -1,7 +1,7 @@
 """Add file_source_version table for data-source update versioning.
 
-Revision ID: 0079
-Revises: 0078
+Revision ID: 0080
+Revises: 0079
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0079"
-down_revision: str | None = "0078"
+revision: str = "0080"
+down_revision: str | None = "0079"
 branch_labels: tuple[str, ...] | None = None
 depends_on: tuple[str, ...] | None = None
 
