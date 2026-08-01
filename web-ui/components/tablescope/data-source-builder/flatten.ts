@@ -25,6 +25,10 @@ export interface FlatItem {
   isFile: boolean;
   /** Immutable creation timestamp (ISO 8601); used for the "New" badge. */
   createdAt?: string | null;
+  /** For files: how the bytes were acquired. Drives the origin badge. */
+  origin?: "local_upload" | "url" | "network_path";
+  /** Host the file came from, when it was not a local upload. */
+  originHost?: string;
 }
 
 function formatBytes(bytes?: number): string {
@@ -62,6 +66,8 @@ export function flattenCreated(
         selected: (table?.state ?? "unselected") === "adding",
         isFile: true,
         createdAt: source.createdAt,
+        origin: source.fileMetadata?.acquisitionMethod ?? "local_upload",
+        originHost: source.fileMetadata?.sourceHost,
       });
       continue;
     }

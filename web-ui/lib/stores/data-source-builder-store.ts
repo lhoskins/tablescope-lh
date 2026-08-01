@@ -39,9 +39,17 @@ export interface FileMetadata {
   rows: number;
   columns: string[];
   sheets?: string[];
-  /** Server-side upload session id used to finalize the file on apply. */
-  uploadSessionId?: string;
+  /** Server-side import job id used to finalize the file on apply. */
+  importJobId?: string;
   sizeBytes?: number;
+  /** How the bytes were acquired; drives the origin badge. */
+  acquisitionMethod?: "local_upload" | "url" | "network_path";
+  /**
+   * Host the file came from, for display only. Full URLs and network paths
+   * are deliberately not kept here: this store is persisted to localStorage,
+   * and a locator can carry a signed token or a private folder structure.
+   */
+  sourceHost?: string;
 }
 
 export interface PreviewField {

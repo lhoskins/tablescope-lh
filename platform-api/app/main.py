@@ -34,6 +34,7 @@ from app.routes import data_source_assignments as data_source_assignments_routes
 from app.routes import database_sources as database_sources_routes
 from app.routes import document_families as document_families_routes
 from app.routes import file_analysis as file_analysis_routes
+from app.routes import file_imports as file_imports_routes
 from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
 from app.routes import home_intelligence as home_intelligence_routes
@@ -244,6 +245,8 @@ def create_app() -> FastAPI:
     app.include_router(grid_preferences_routes.router, prefix=api_prefix)
     app.include_router(upload_routes.router, prefix=api_prefix)
     app.include_router(file_analysis_routes.router, prefix=api_prefix)
+    app.include_router(file_imports_routes.router, prefix=api_prefix)
+    app.include_router(file_imports_routes.connections_router, prefix=api_prefix)
     app.include_router(dashboards_routes.router, prefix=api_prefix)
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)
     app.include_router(ai_governance_routes.router, prefix=api_prefix)
