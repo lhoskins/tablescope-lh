@@ -159,6 +159,7 @@ const CONNECTOR_NAMES: Record<string, string> = {
   salesforce: "Salesforce",
   hubspot: "HubSpot",
   quickbooks: "QuickBooks",
+  servicenow: "ServiceNow",
 };
 
 export function connectorDisplayName(key: string): string {

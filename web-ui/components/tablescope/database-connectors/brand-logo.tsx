@@ -76,6 +76,16 @@ function SalesforceLogo({ size }: { size: number }) {
   );
 }
 
+function ServiceNowLogo({ size }: { size: number }) {
+  // Not in simple-icons (trademark); a simplified mark in ServiceNow green.
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-label="ServiceNow">
+      <rect x="2" y="2" width="20" height="20" rx="5" fill="#62D84E" />
+      <circle cx="12" cy="12" r="5" fill="none" stroke="#fff" strokeWidth="2.2" />
+    </svg>
+  );
+}
+
 const SI_ICONS: Record<string, SimpleIcon> = {
   postgresql: siPostgresql,
   mysql: siMysql,
@@ -95,6 +105,7 @@ export function BrandLogo({
   if (connector === "oracle") return <OracleLogo size={size} />;
   if (connector === "sqlserver") return <SqlServerLogo size={size} />;
   if (connector === "salesforce") return <SalesforceLogo size={size} />;
+  if (connector === "servicenow") return <ServiceNowLogo size={size} />;
   return null;
 }
 
@@ -107,6 +118,7 @@ export const CONNECTOR_CHIP: Record<string, string> = {
   salesforce: "bg-[#00A1E0]/10",
   hubspot: "bg-[#FF7A59]/10",
   quickbooks: "bg-[#2CA01C]/10",
+  servicenow: "bg-[#62D84E]/10",
 };
 
 export function connectorChip(connector: string): string {
