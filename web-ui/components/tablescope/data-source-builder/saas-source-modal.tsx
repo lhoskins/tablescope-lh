@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { IconCheck, IconLoader2, IconSearch, IconX } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,18 +31,25 @@ export function SaaSSourceModal({
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
 
-  const addSource = useBuilderStore((s) => s.addSource);
-  const markCreated = useBuilderStore((s) => s.markCreated);
-  const existingNames = useBuilderStore((s) =>
-    new Set(
-      s.sources
-        .filter(
-          (src) =>
-            src.isSaaS &&
-            src.connectionConfig.credential_id === String(credential.id),
-        )
-        .flatMap((src) => src.tables.map((t) => t.tableName)),
-    ),
+  const { sources, addSource, markCreated } = useBuilderStore(
+    useShallow((s) => ({
+      sources: s.sources,
+      addSource: s.addSource,
+      markCreated: s.markCreated,
+    })),
+  );
+  const existingNames = useMemo(
+    () =>
+      new Set(
+        sources
+          .filter(
+            (src) =>
+              src.isSaaS &&
+              src.connectionConfig.credential_id === String(credential.id),
+          )
+          .flatMap((src) => src.tables.map((t) => t.tableName)),
+      ),
+    [sources, credential.id],
   );
 
   useEffect(() => {

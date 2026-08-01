@@ -22,7 +22,9 @@ without a relationship-resolution pass, matching the other MVP connectors.
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
+import re
 
 import httpx
 
@@ -234,17 +236,38 @@ class ServiceNowConnector(SaasConnector):
             raise SaasConnectorError(_safe_error(exc)) from exc
         return records
 
+    _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    _DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+    def _coerce_value(self, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        if self._DATETIME_RE.match(value):
+            try:
+                return dt.datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return value
+        if self._DATE_RE.match(value):
+            try:
+                return dt.datetime.strptime(value, "%Y-%m-%d").date()
+            except ValueError:
+                return value
+        return value
+
     def _normalize(self, item: dict, selected_fields: list[str]) -> dict:
         row: dict = {
             "sys_id": item.get("sys_id"),
             "number": item.get("number"),
-            "sys_created_on": item.get("sys_created_on") or None,
-            "sys_updated_on": item.get("sys_updated_on") or None,
+            "sys_created_on": self._coerce_value(item.get("sys_created_on") or None),
+            "sys_updated_on": self._coerce_value(item.get("sys_updated_on") or None),
             RAW_JSON_KEY: item,
         }
         for name in selected_fields:
             value = item.get(name)
-            row[name] = value if value not in (None, "") else None
+            if value in (None, ""):
+                row[name] = None
+            else:
+                row[name] = self._coerce_value(value)
         return row
 
 
