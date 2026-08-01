@@ -227,7 +227,12 @@ async function uploadFile<T>(
     try {
       const payload = await response.json();
       code = payload?.code ?? payload?.error ?? null;
-      if (payload?.detail) detail = payload.detail;
+      if (payload?.detail) {
+        detail =
+          typeof payload.detail === "string"
+            ? payload.detail
+            : (payload.detail?.message ?? JSON.stringify(payload.detail));
+      }
     } catch {
       /* ignore */
     }

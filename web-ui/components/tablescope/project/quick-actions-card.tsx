@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   IconChevronRight,
   IconCode,
@@ -11,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
+import { UnifiedUploadDialog } from "@/components/uploads/unified-upload-dialog";
 import { cn } from "@/lib/cn";
 
 export function QuickActionsCard({
@@ -25,6 +28,8 @@ export function QuickActionsCard({
   className?: string;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const [uploadOpen, setUploadOpen] = useState(false);
   const actions = [
     {
       label: "Add data source",
@@ -44,9 +49,11 @@ export function QuickActionsCard({
       onClick: () => router.push(`/projects/${projectId}/queries`),
     },
     {
+      // Opens the governed intake rather than navigating to Documents: a
+      // spreadsheet picked here becomes a Data Source, not a document.
       label: "Upload file",
       icon: IconFileText,
-      onClick: () => router.push(`/projects/${projectId}/documents`),
+      onClick: () => setUploadOpen(true),
     },
     {
       label: "New dashboard",
@@ -88,6 +95,19 @@ export function QuickActionsCard({
           );
         })}
       </ul>
+      <UnifiedUploadDialog
+        open={uploadOpen}
+        projectId={Number(projectId)}
+        onClose={() => setUploadOpen(false)}
+        onUploadsDone={() => {
+          queryClient.invalidateQueries({
+            queryKey: ["project", projectId, "datasources"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["project-documents", Number(projectId)],
+          });
+        }}
+      />
     </Card>
   );
 }
