@@ -59,6 +59,8 @@ class ApiClient:
     def _request(self, method: str, path: str, *, data: bytes | None = None,
                  headers: dict | None = None):
         url = path if path.startswith("http") else f"{self.base}{path}"
+        if not url.startswith("http"):
+            raise ApiError(f"{method} {url} → no base URL configured")
         req = urllib.request.Request(url, data=data, method=method,
                                      headers=self._headers(headers))
         try:
@@ -124,6 +126,7 @@ class Report:
     projects_created: int = 0
     projects_existing: int = 0
     created: int = 0
+    replaced: int = 0
     skipped: int = 0
     failed: int = 0
     failures: list[str] = field(default_factory=list)
@@ -132,7 +135,8 @@ class Report:
         lines = [
             "── Demo Company Import Report ──",
             f"Projects: {self.projects_created} created, {self.projects_existing} existing",
-            f"Artifacts: {self.created} uploaded, {self.skipped} skipped, {self.failed} failed",
+            f"Artifacts: {self.created} uploaded, {self.replaced} replaced, "
+            f"{self.skipped} skipped, {self.failed} failed",
         ]
         for f in self.failures:
             lines.append(f"  ! {f}")
@@ -143,7 +147,8 @@ class Report:
 class DemoImporter:
     def __init__(self, client: ApiClient, manifest: dict, root: Path, *,
                  dry_run: bool = False, sample: bool = False,
-                 shared: bool = True, verbose: bool = True) -> None:
+                 shared: bool = True, verbose: bool = True,
+                 refresh: bool = False) -> None:
         self.c = client
         self.m = manifest
         self.root = root
@@ -151,6 +156,7 @@ class DemoImporter:
         self.sample = sample
         self.shared = shared
         self.verbose = verbose
+        self.refresh = refresh
         self.report = Report()
         self._projects: dict[str, int] = {}
         self._datasource_views: set[str] = set()
@@ -194,8 +200,6 @@ class DemoImporter:
 
     # -- idempotency caches ----------------------------------------------
     def _load_existing(self) -> None:
-        if self.dry_run:
-            return
         try:
             for ds in (self.c.get("/api/upload/datasources?include_archived=true") or []):
                 if isinstance(ds, dict) and ds.get("viewName"):
@@ -247,7 +251,40 @@ class DemoImporter:
                 self.report.failed += 1
                 self.report.failures.append(f"{a.get('path')}: {e}")
                 self._log(f"  ! failed: {a.get('path')}: {e}")
+        if self.refresh and not self.dry_run:
+            self._reprocess_ai()
         return self.report
+
+    def _reprocess_ai(self) -> None:
+        """Refresh AI-derived content for the affected projects and home snapshot."""
+        pids = {pid for pid in self._projects.values() if pid and pid > 0}
+        if not pids:
+            return
+        # AI refresh endpoints can run for several minutes; raise the timeout.
+        original_timeout = self.c.timeout
+        self.c.timeout = max(self.c.timeout, 1200.0)
+        try:
+            self._log("Reprocessing AI content for affected projects…")
+            for pid in sorted(pids):
+                try:
+                    resp = self.c.post_json(f"/api/projects/{pid}/graph/refresh", {})
+                    node_count = (resp or {}).get("nodeCount", "?")
+                    self._log(f"  ~ refreshed project {pid} graph "
+                              f"({node_count} nodes)")
+                except ApiError as e:
+                    self._log(f"  ! project {pid} graph refresh failed: {e}")
+            try:
+                self._log("  ~ refreshing home intelligence snapshot…")
+                resp = self.c.get("/api/home-intelligence/stream?cross_project=true")
+                raw = (resp or {}).get("raw", "")
+                if '"type": "done"' in raw or "'type': 'done'" in raw:
+                    self._log("  ~ home intelligence snapshot refreshed.")
+                else:
+                    self._log("  ! home intelligence stream did not signal completion")
+            except ApiError as e:
+                self._log(f"  ! home intelligence refresh failed: {e}")
+        finally:
+            self.c.timeout = original_timeout
 
     def _process(self, a: dict) -> None:
         rel = a["path"]
@@ -335,13 +372,23 @@ class DemoImporter:
 
     def _upload_csv(self, a: dict, pid: int, path: Path, filename: str) -> None:
         view = compute_view_name(filename)
-        if view in self._datasource_views:
+        exists = view in self._datasource_views
+        if exists and not self.refresh:
             self.report.skipped += 1
             self._log(f"  = skip (exists): {a['path']}")
             return
         if self.dry_run:
+            verb = "replace" if exists else "upload"
             self.report.created += 1
-            self._log(f"  + would upload CSV → {a['destination_project']}: {a['path']}")
+            self._log(f"  + would {verb} CSV → {a['destination_project']}: {a['path']}")
+            return
+        if exists:
+            self.c.post_multipart(
+                f"/api/upload/datasources/{view}/replace",
+                fields={}, file_field="file", filename=filename,
+                file_bytes=path.read_bytes(), content_type="text/csv")
+            self.report.replaced += 1
+            self._log(f"  ~ replaced CSV → {a['destination_project']}: {a['path']}")
             return
         self.c.post_multipart(
             "/api/upload",

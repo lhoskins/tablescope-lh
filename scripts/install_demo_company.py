@@ -69,6 +69,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                       help="Upload only the small sample subset.")
     mode.add_argument("--all", action="store_true",
                       help="Upload everything.")
+    mode.add_argument("--refresh-existing", action="store_true",
+                      help="Replace already-uploaded CSV data sources with "
+                           "freshly generated data instead of skipping them "
+                           "(same file name; the new file's columns must be "
+                           "a superset of what's already loaded). Documents "
+                           "and Company Library assets are never affected — "
+                           "their content doesn't depend on the calendar "
+                           "window, so re-uploading them is unnecessary.")
 
     api = p.add_argument_group("api")
     api.add_argument("--api-url", default=os.environ.get("TABLESCOPE_API_URL"))
@@ -133,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         importer = DemoImporter(ApiClient(""), manifest, out_root,
-                                dry_run=True, sample=args.sample, verbose=verbose)
+                                dry_run=True, sample=args.sample, verbose=verbose,
+                                refresh=args.refresh_existing)
         report = importer.run()
         print("\n" + report.summary())
         return 0
@@ -156,7 +165,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: login failed: {e}", file=sys.stderr)
             return 1
     importer = DemoImporter(client, manifest, out_root, sample=args.sample,
-                            shared=not args.no_shared, verbose=verbose)
+                            shared=not args.no_shared, verbose=verbose,
+                            refresh=args.refresh_existing)
     try:
         report = importer.run()
     except ApiError as e:
