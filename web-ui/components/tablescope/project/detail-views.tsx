@@ -376,7 +376,7 @@ export function DataSourceResultView({
       apiClient.post<QueryResult>("/api/query/datasource", {
         tableName: safeTableName(tableName),
         project_id: Number(projectId),
-        limit: 500,
+        limit: 10000,
       }),
     enabled: Boolean(projectId && tableName),
     retry: false,
