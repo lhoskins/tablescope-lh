@@ -55,6 +55,7 @@ from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.database_data_source_assignment import (
     DatabaseDataSourceAssignment,
 )
+from app.models.file_import_job import FileImportJob
 from app.models.file_source_meta import FileSourceMeta
 from app.models.grid_preference import GridPreference
 from app.models.home_pin import HomePin
@@ -79,6 +80,7 @@ from app.models.llm_framework import (
 )
 from app.models.mfa_phone_factor import MfaPhoneFactor
 from app.models.mfa_sms_event import MfaSmsEvent
+from app.models.network_file_connection import NetworkFileConnection
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_action import ProjectAction, ProjectActionSubtask
@@ -164,6 +166,7 @@ __all__ = [
     "DatabaseConnection",
     "DatabaseDataSource",
     "DatabaseDataSourceAssignment",
+    "FileImportJob",
     "FileSourceMeta",
     "GridPreference",
     "HomePin",
@@ -188,6 +191,7 @@ __all__ = [
     "MethodSelectionMatrix",
     "MfaPhoneFactor",
     "MfaSmsEvent",
+    "NetworkFileConnection",
     "OrganizationVDB",
     "Project",
     "ProjectAction",

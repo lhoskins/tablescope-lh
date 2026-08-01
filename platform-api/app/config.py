@@ -330,6 +330,46 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SUPPORT_EMAIL", "TABLESCOPE_SUPPORT_EMAIL"),
     )
 
+    # --- File acquisition (Data Source Builder URL / UNC-SMB imports) ---
+    # Independent runtime flags so either acquisition method can be rolled
+    # back without touching local upload, database, or SaaS behaviour.
+    file_import_url_enabled: bool = True
+    file_import_network_enabled: bool = False
+    file_import_max_bytes: int = 104_857_600  # 100 MB
+    file_import_connect_timeout_seconds: float = 10.0
+    file_import_read_timeout_seconds: float = 60.0
+    file_import_total_timeout_seconds: float = 300.0
+    file_import_max_redirects: int = 5
+    file_import_max_concurrent_fetches: int = 4
+    file_import_quarantine_path: str = "/opt/tablescope/quarantine"
+    file_import_job_ttl_seconds: int = 86_400
+    # Comma-separated host suffix allowlist. Empty means "any public host".
+    file_import_allowed_url_domains: str = ""
+    # Comma-separated SMB host allowlist. Empty blocks every SMB host, so
+    # network import fails closed until operations approves specific hosts.
+    file_import_allowed_smb_hosts: str = ""
+    # Plain http:// fetches. Off by default; HTTPS-only is the contract.
+    file_import_allow_http: bool = False
+    # Malware scanning is real infrastructure (a private ClamAV service with
+    # operator-managed offline signature updates), not a toggle over an
+    # existing capability. When enabled and the scanner is unreachable the
+    # import fails closed unless fail_open is explicitly turned on.
+    file_import_malware_scan_enabled: bool = False
+    file_import_malware_scan_host: str = "clamav"
+    file_import_malware_scan_port: int = 3310
+    file_import_malware_scan_timeout_seconds: float = 30.0
+    file_import_malware_scan_fail_open: bool = False
+
+    @property
+    def file_import_url_domain_allowlist(self) -> list[str]:
+        raw = self.file_import_allowed_url_domains
+        return [d.strip().lower().lstrip(".") for d in raw.split(",") if d.strip()]
+
+    @property
+    def file_import_smb_host_allowlist(self) -> list[str]:
+        raw = self.file_import_allowed_smb_hosts
+        return [h.strip().lower() for h in raw.split(",") if h.strip()]
+
     @property
     def email_configured(self) -> bool:
         return bool(self.smtp_host and self.email_from)

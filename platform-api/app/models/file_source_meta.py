@@ -17,7 +17,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -79,6 +86,30 @@ class FileSourceMeta(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Acquisition provenance (added by migration 0079). A URL or UNC path is
+    # provenance for an immutable snapshot import, not a live connection, so
+    # only redacted locators and response metadata are kept here.
+    acquisition_method: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="local_upload",
+        server_default="local_upload",
+    )
+    import_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    source_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_locator_redacted: Mapped[str | None] = mapped_column(
+        String(1024), nullable=True
+    )
+    network_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("network_file_connections.id", ondelete="SET NULL"), nullable=True
+    )
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    remote_etag: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    remote_last_modified: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    retrieved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -90,4 +121,11 @@ class FileSourceMeta(TimestampMixin, Base):
             "archived": self.archived,
             "archived_at": self.archived_at.isoformat() if self.archived_at else None,
             "column_types": self.column_types or [],
+            "acquisition_method": self.acquisition_method,
+            "source_host": self.source_host,
+            "source_locator_redacted": self.source_locator_redacted,
+            "content_sha256": self.content_sha256,
+            "retrieved_at": (
+                self.retrieved_at.isoformat() if self.retrieved_at else None
+            ),
         }

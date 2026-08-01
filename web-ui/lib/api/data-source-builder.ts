@@ -57,8 +57,19 @@ export interface FilePreviewField {
   sample_values?: unknown[];
 }
 
+/** How a file's bytes reached the server. */
+export type AcquisitionMethod = "local_upload" | "url" | "network_path";
+
 export interface FilePreviewResult {
+  import_job_id: string;
+  /** Legacy alias for import_job_id, kept for older callers. */
   upload_session_id: string;
+  acquisition_method?: AcquisitionMethod;
+  content_family?: string;
+  /** Host only — never a query string or full network path. */
+  source_host?: string | null;
+  source_locator_redacted?: string | null;
+  sha256?: string | null;
   file: {
     file_name: string;
     file_type: string;
@@ -68,6 +79,22 @@ export interface FilePreviewResult {
     sheet_name: string | null;
   };
   fields: FilePreviewField[];
+}
+
+export interface ImportCapabilities {
+  local_upload_enabled: boolean;
+  url_import_enabled: boolean;
+  network_import_enabled: boolean;
+  max_file_size_bytes: number;
+  malware_scanning_enabled: boolean;
+  network_connections: { id: number; name: string; label: string }[];
+}
+
+export interface NetworkTestResult {
+  ok: boolean;
+  locator?: string;
+  file_name?: string;
+  file_size_bytes?: number;
 }
 
 // ── Project / existing-source types ──────────────────────────────────
@@ -303,11 +330,55 @@ export function analyzeFile(
 }
 
 export function finalizeFile(body: {
-  upload_session_id: string;
+  import_job_id: string;
   project_id?: number;
   display_name?: string;
 }): Promise<{ view_name?: string; data_source_id?: number }> {
   return apiClient.post("/api/data-sources/upload/finalize", body);
+}
+
+// ── Import calls (URL / network acquisition) ─────────────────────────
+
+export function getImportCapabilities(): Promise<ImportCapabilities> {
+  return apiClient.get<ImportCapabilities>(
+    "/api/data-sources/imports/capabilities",
+  );
+}
+
+export function importFromUrl(
+  url: string,
+  projectId?: number,
+): Promise<FilePreviewResult> {
+  return apiClient.post<FilePreviewResult>("/api/data-sources/imports/url", {
+    url,
+    project_id: projectId,
+  });
+}
+
+export function importFromNetwork(
+  connectionId: number,
+  path: string,
+  projectId?: number,
+): Promise<FilePreviewResult> {
+  return apiClient.post<FilePreviewResult>("/api/data-sources/imports/network", {
+    connection_id: connectionId,
+    path,
+    project_id: projectId,
+  });
+}
+
+export function testNetworkPath(
+  connectionId: number,
+  path?: string,
+): Promise<NetworkTestResult> {
+  return apiClient.post<NetworkTestResult>(
+    "/api/data-sources/imports/network/test",
+    { connection_id: connectionId, path },
+  );
+}
+
+export function cancelImport(importJobId: string): Promise<void> {
+  return apiClient.delete(`/api/data-sources/imports/${importJobId}`);
 }
 
 // ── Project assignment calls ─────────────────────────────────────────
@@ -463,12 +534,12 @@ async function applyFileAddition(
     }
     const already = finalized.get(source.id);
     if (!already) {
-      const sessionId = source.fileMetadata?.uploadSessionId;
-      if (!sessionId) {
-        throw new Error("Missing upload session — re-add the file.");
+      const jobId = source.fileMetadata?.importJobId;
+      if (!jobId) {
+        throw new Error("Missing import job — re-add the file.");
       }
       const res = await finalizeFile({
-        upload_session_id: sessionId,
+        import_job_id: jobId,
         project_id: Number(projectId),
         display_name: source.displayName,
       });

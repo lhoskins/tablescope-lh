@@ -3,11 +3,9 @@
 import { useRef, useState } from "react";
 import { IconCloudUpload, IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
-import {
-  useBuilderStore,
-  type SessionSource,
-} from "@/lib/stores/data-source-builder-store";
+import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { analyzeFile } from "@/lib/api/data-source-builder";
+import { sessionSourceFromPreview } from "./import-source";
 
 const MAX_BYTES = 100 * 1024 * 1024;
 const ALLOWED = ["csv", "xlsx", "xls"];
@@ -42,38 +40,7 @@ export function AiUploadDropzone({ onUploadsDone }: AiUploadDropzoneProps = {}) 
       return;
     }
     const preview = await analyzeFile(file);
-    const baseName = preview.file.file_name.replace(/\.[^.]+$/, "");
-    const viewName = `${baseName.replace(/\s+/g, "_")}_${preview.file.file_type.toUpperCase()}`;
-    const isExcel = ["xlsx", "xls"].includes(
-      preview.file.file_type.toLowerCase(),
-    );
-    const source: SessionSource = {
-      id: crypto.randomUUID(),
-      sourceType: isExcel ? "excel" : "csv",
-      displayName: preview.file.file_name,
-      connectionConfig: {},
-      status: "ready",
-      isFileUpload: true,
-      viewName,
-      fileMetadata: {
-        name: preview.file.file_name,
-        rows: preview.file.row_count,
-        columns: preview.fields.map((f) => f.field_name),
-        sheets: preview.file.sheet_name ? [preview.file.sheet_name] : undefined,
-        uploadSessionId: preview.upload_session_id,
-        sizeBytes: preview.file.file_size_bytes,
-      },
-      previewFields: preview.fields,
-      tables: [
-        {
-          tableName: viewName,
-          rows: preview.file.row_count,
-          cols: preview.file.column_count,
-          aiEnabled: true,
-          state: "adding",
-        },
-      ],
-    };
+    const source = sessionSourceFromPreview(preview);
     addSource(source);
     markCreated([source.id]);
   };

@@ -16,7 +16,7 @@ import { listMyDataSources } from "@/lib/api/data-source-builder";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { ActiveSourcesTable } from "./active-sources-table";
 import { buildExistingSources } from "./existing-sources";
-import { AiUploadDropzone } from "./ai-upload-dropzone";
+import { FileAcquisitionPanel } from "./file-acquisition-panel";
 import { AvailableSources } from "./available-sources";
 import { ConfirmationModal } from "./confirmation-modal";
 import { ConnectedDatabases } from "./connected-databases";
@@ -140,7 +140,7 @@ export function DataSourceBuilderWorkspace({
       {step === 1 ? (
         <>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-4">
-            <AiUploadDropzone />
+            <FileAcquisitionPanel />
 
             <div>
               <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">

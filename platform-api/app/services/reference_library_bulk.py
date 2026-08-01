@@ -22,7 +22,6 @@ import time
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-import httpx
 from sqlalchemy import select
 
 from app.services.reference_library_processing import (
@@ -30,16 +29,15 @@ from app.services.reference_library_processing import (
     store_reference_file,
 )
 from app.services.reference_library_service import find_duplicate_in_tier, normalize_domain_tag
+from app.services.safe_remote_fetch import (
+    RemoteFetchError,
+    fetch_remote_file,
+    redact_url,
+)
 
 logger = logging.getLogger(__name__)
 
-BROWSER_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-)
 MAX_BYTES = 75 * 1024 * 1024
-FETCH_TIMEOUT = 30.0
-MAX_REDIRECTS = 5
 MAX_CONCURRENT = 3
 DOMAIN_RATE_LIMIT_SEC = 0.5
 
@@ -173,32 +171,38 @@ class _DomainRateLimiter:
             self._last[domain] = time.monotonic()
 
 
-async def _fetch_url(client: httpx.AsyncClient, url: str) -> tuple[bytes, str]:
-    """Fetch a URL with size cap. Returns (data, ext). Raises on any failure."""
-    async with client.stream("GET", url) as resp:
-        if resp.status_code != 200:
-            raise ValueError(f"HTTP {resp.status_code}")
-        content_type = resp.headers.get("content-type", "").split(";")[0].strip().lower()
-        ext = CONTENT_TYPE_TO_EXT.get(content_type)
-        if ext is None:
-            # Fall back to URL extension for servers with generic content-type.
-            path = urlparse(url).path.lower()
-            if path.endswith(".pdf"):
-                ext = ".pdf"
-            elif path.endswith(".docx"):
-                ext = ".docx"
-            elif path.endswith((".html", ".htm")):
-                ext = ".html"
-            else:
-                raise ValueError(f"Unsupported content-type: {content_type or 'unknown'}")
-        chunks: list[bytes] = []
-        total = 0
-        async for chunk in resp.aiter_bytes():
-            total += len(chunk)
-            if total > MAX_BYTES:
-                raise ValueError("Response exceeds 75MB cap")
-            chunks.append(chunk)
-        return b"".join(chunks), ext
+async def _fetch_url(url: str) -> tuple[bytes, str]:
+    """Fetch a reference document. Returns (data, ext); raises on any failure.
+
+    Routed through the shared hardened fetcher so these operator-supplied CSV
+    URLs get the same SSRF controls as Data Source Builder imports: internal
+    and metadata addresses refused, credential-bearing URLs rejected, every
+    redirect hop revalidated, and a hard byte cap.
+    """
+    chunks: list[bytes] = []
+
+    try:
+        _, metadata = await fetch_remote_file(
+            url, max_bytes=MAX_BYTES, sink=chunks.append
+        )
+    except RemoteFetchError as exc:
+        raise ValueError(exc.message) from exc
+
+    ext = CONTENT_TYPE_TO_EXT.get(metadata.content_type or "")
+    if ext is None:
+        # Fall back to URL extension for servers with generic content-type.
+        path = urlparse(url).path.lower()
+        if path.endswith(".pdf"):
+            ext = ".pdf"
+        elif path.endswith(".docx"):
+            ext = ".docx"
+        elif path.endswith((".html", ".htm")):
+            ext = ".html"
+        else:
+            raise ValueError(
+                f"Unsupported content-type: {metadata.content_type or 'unknown'}"
+            )
+    return b"".join(chunks), ext
 
 
 async def run_batch(batch_id: int, *, retry_only: bool = False) -> None:
@@ -230,123 +234,121 @@ async def run_batch(batch_id: int, *, retry_only: bool = False) -> None:
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
     started = time.monotonic()
 
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(FETCH_TIMEOUT, connect=10.0),
-        follow_redirects=True,
-        max_redirects=MAX_REDIRECTS,
-        headers={"User-Agent": BROWSER_UA},
-    ) as client:
-
-        async def handle(
-            row_id: int,
-            url: str,
-            title: str,
-            domain: str,
-            existing_id: int | None,
-        ) -> None:
-            domain_host = urlparse(url).netloc
-            async with semaphore:
-                await limiter.wait(domain_host)
-                async with SessionLocal() as s:
-                    row = await s.get(ReferenceLibraryImportRow, row_id)
-                    if row is None:
-                        return
-                    row.status = "fetching"
-                    row.failure_reason = None
-                    await s.commit()
-
-                try:
-                    data, ext = await _fetch_url(client, url)
-                except Exception as exc:
-                    async with SessionLocal() as s:
-                        row = await s.get(ReferenceLibraryImportRow, row_id)
-                        if row is not None:
-                            row.status = "failed"
-                            row.failure_reason = str(exc)[:500]
-                            await s.commit()
-                    logger.info("bulk fetch failed row=%s url=%s: %s", row_id, url, exc)
+    async def handle(
+        row_id: int,
+        url: str,
+        title: str,
+        domain: str,
+        existing_id: int | None,
+    ) -> None:
+        domain_host = urlparse(url).netloc
+        async with semaphore:
+            await limiter.wait(domain_host)
+            async with SessionLocal() as s:
+                row = await s.get(ReferenceLibraryImportRow, row_id)
+                if row is None:
                     return
+                row.status = "fetching"
+                row.failure_reason = None
+                await s.commit()
 
-                # Create the document + store file, then process.
+            try:
+                data, ext = await _fetch_url(url)
+            except Exception as exc:
                 async with SessionLocal() as s:
                     row = await s.get(ReferenceLibraryImportRow, row_id)
-                    if row is None:
-                        return
-                    # Fill a matching metadata-only stub in place when one was
-                    # detected at validation, otherwise create a new document.
-                    doc = None
-                    if existing_id is not None:
-                        candidate = await s.get(ReferenceDocument, existing_id)
-                        if candidate is not None and not candidate.file_path:
-                            doc = candidate
-                            doc.issuing_body = doc.issuing_body or row.issuing_body
-                            doc.domain_tag = domain
-                            doc.applicability_tag = (
-                                doc.applicability_tag or row.applicability_tag
-                            )
-                            doc.source_url = url
-                            doc.version_label = doc.version_label or row.version_label
-                            doc.status = "processing"
-                    if doc is None:
-                        doc = ReferenceDocument(
-                            tier="industry",
-                            tenant_id=None,
-                            project_id=None,
-                            title=title,
-                            issuing_body=row.issuing_body,
-                            domain_tag=domain,
-                            applicability_tag=row.applicability_tag,
-                            source_url=url,
-                            version_label=row.version_label,
-                            status="processing",
-                            uploaded_by=uploaded_by,
+                    if row is not None:
+                        row.status = "failed"
+                        row.failure_reason = str(exc)[:500]
+                        await s.commit()
+                logger.info(
+                    "bulk fetch failed row=%s url=%s: %s",
+                    row_id,
+                    redact_url(url),
+                    exc,
+                )
+                return
+
+            # Create the document + store file, then process.
+            async with SessionLocal() as s:
+                row = await s.get(ReferenceLibraryImportRow, row_id)
+                if row is None:
+                    return
+                # Fill a matching metadata-only stub in place when one was
+                # detected at validation, otherwise create a new document.
+                doc = None
+                if existing_id is not None:
+                    candidate = await s.get(ReferenceDocument, existing_id)
+                    if candidate is not None and not candidate.file_path:
+                        doc = candidate
+                        doc.issuing_body = doc.issuing_body or row.issuing_body
+                        doc.domain_tag = domain
+                        doc.applicability_tag = (
+                            doc.applicability_tag or row.applicability_tag
                         )
-                        s.add(doc)
-                    await s.flush()
-                    path = store_reference_file(
+                        doc.source_url = url
+                        doc.version_label = doc.version_label or row.version_label
+                        doc.status = "processing"
+                if doc is None:
+                    doc = ReferenceDocument(
                         tier="industry",
-                        domain_tag=domain,
                         tenant_id=None,
                         project_id=None,
-                        document_id=doc.id,
-                        ext=ext,
-                        data=data,
+                        title=title,
+                        issuing_body=row.issuing_body,
+                        domain_tag=domain,
+                        applicability_tag=row.applicability_tag,
+                        source_url=url,
+                        version_label=row.version_label,
+                        status="processing",
+                        uploaded_by=uploaded_by,
                     )
-                    doc.file_path = path
-                    doc.file_type = ext.lstrip(".")
-                    doc.file_size_bytes = len(data)
-                    row.reference_document_id = doc.id
-                    row.status = "processing"
-                    await s.commit()
-                    doc_id = doc.id
-
-                await process_reference_document(doc_id)
-
-                async with SessionLocal() as s:
-                    row = await s.get(ReferenceLibraryImportRow, row_id)
-                    processed = await s.get(ReferenceDocument, doc_id)
-                    if row is not None and processed is not None:
-                        if processed.status in ("active", "draft"):
-                            row.status = "active"
-                        else:
-                            row.status = "failed"
-                            row.failure_reason = (
-                                processed.ai_error_message or "Processing failed"
-                            )
-                        await s.commit()
-
-        await asyncio.gather(
-            *[
-                handle(
-                    r.id,
-                    r.source_url,
-                    r.title,
-                    r.domain_tag or "Other",
-                    r.will_update_existing_id,
+                    s.add(doc)
+                await s.flush()
+                path = store_reference_file(
+                    tier="industry",
+                    domain_tag=domain,
+                    tenant_id=None,
+                    project_id=None,
+                    document_id=doc.id,
+                    ext=ext,
+                    data=data,
                 )
-                for r in eligible
-            ]
-        )
+                doc.file_path = path
+                doc.file_type = ext.lstrip(".")
+                doc.file_size_bytes = len(data)
+                row.reference_document_id = doc.id
+                row.status = "processing"
+                await s.commit()
+                doc_id = doc.id
+
+            await process_reference_document(doc_id)
+
+            async with SessionLocal() as s:
+                row = await s.get(ReferenceLibraryImportRow, row_id)
+                processed = await s.get(ReferenceDocument, doc_id)
+                if row is not None and processed is not None:
+                    if processed.status in ("active", "draft"):
+                        row.status = "active"
+                    else:
+                        row.status = "failed"
+                        row.failure_reason = (
+                            processed.ai_error_message or "Processing failed"
+                        )
+                    await s.commit()
+
+    await asyncio.gather(
+        *[
+            handle(
+                r.id,
+                r.source_url,
+                r.title,
+                r.domain_tag or "Other",
+                r.will_update_existing_id,
+            )
+            for r in eligible
+        ]
+    )
 
     # Finalize batch counts.
     async with SessionLocal() as session:
