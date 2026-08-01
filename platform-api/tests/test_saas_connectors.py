@@ -9,6 +9,8 @@ from app.connectors.registry import get_connector, supported_connectors
 from app.connectors.saas.hubspot import HubSpotConnector, _coerce, _pg_type_for
 from app.connectors.saas.servicenow import (
     ServiceNowConnector,
+)
+from app.connectors.saas.servicenow import (
     _pg_type_for as _servicenow_pg_type_for,
 )
 from app.services import saas_staging_service as staging
