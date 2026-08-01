@@ -81,6 +81,21 @@ export interface RenameConversationRequest {
   title: string;
 }
 
+export interface RecentConversationItem {
+  conversation_id: number;
+  turn_id: number;
+  surface: string;
+  question_preview: string;
+  result_preview: string;
+  result_type: string;
+  completed_at: string;
+}
+
+export interface RecentConversationsResponse {
+  project_id: number;
+  items: RecentConversationItem[];
+}
+
 export function createConversation(data: CreateConversationRequest): Promise<Conversation> {
   return apiClient.post<Conversation>("/api/conversational-analytics/conversations", data);
 }
@@ -88,6 +103,15 @@ export function createConversation(data: CreateConversationRequest): Promise<Con
 export function listConversations(projectId?: number): Promise<ConversationSummary[]> {
   const qs = projectId != null ? `?project_id=${projectId}` : "";
   return apiClient.get<ConversationSummary[]>(`/api/conversational-analytics/conversations${qs}`);
+}
+
+export function getRecentProjectConversations(
+  projectId: number | string,
+  limit = 4
+): Promise<RecentConversationsResponse> {
+  return apiClient.get<RecentConversationsResponse>(
+    `/api/conversational-analytics/projects/${projectId}/recent-conversations?limit=${limit}`
+  );
 }
 
 export function getConversation(conversationId: number): Promise<Conversation> {
