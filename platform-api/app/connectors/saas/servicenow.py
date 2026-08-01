@@ -134,7 +134,7 @@ class ServiceNowConnector(SaasConnector):
                     f"{base_url}/api/now/table/sys_dictionary",
                     params={
                         "sysparm_query": f"name={object_type}^internal_type!=collection^elementISNOTEMPTY",
-                        "sysparm_fields": "element,column_label,internal_type",
+                        "sysparm_fields": "element,column_label,internal_type.name",
                         "sysparm_display_value": "false",
                         "sysparm_limit": 500,
                     },
@@ -152,7 +152,11 @@ class ServiceNowConnector(SaasConnector):
             if not name or name in seen:
                 continue
             seen.add(name)
-            internal_type = row.get("internal_type") or "string"
+            raw_type = row.get("internal_type.name") or row.get("internal_type") or "string"
+            if isinstance(raw_type, dict):
+                internal_type: str = raw_type.get("value") or "string"
+            else:
+                internal_type = raw_type
             fields.append(
                 FieldInfo(
                     name=name,
