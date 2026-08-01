@@ -20,6 +20,7 @@ import { AiUploadDropzone } from "./ai-upload-dropzone";
 import { AvailableSources } from "./available-sources";
 import { ConfirmationModal } from "./confirmation-modal";
 import { ConnectedDatabases } from "./connected-databases";
+import { ConnectedSaaS } from "./connected-saas";
 import { ProjectsColumn } from "./projects-column";
 
 type Step = 1 | 2;
@@ -107,7 +108,7 @@ export function DataSourceBuilderWorkspace({
 
   const stepHint =
     step === 1
-      ? "Step 1 of 2: Create data sources from files or connected databases."
+      ? "Step 1 of 2: Create data sources from files, connected databases, or SaaS connectors."
       : "Step 2 of 2: Assign selected data sources to project(s).";
 
   // Recompute whenever sources or projects change (toggles/new project).
@@ -146,6 +147,13 @@ export function DataSourceBuilderWorkspace({
                 Connected Databases
               </h3>
               <ConnectedDatabases />
+            </div>
+
+            <div>
+              <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
+                SaaS Connections
+              </h3>
+              <ConnectedSaaS />
             </div>
 
             <ActiveSourcesTable />

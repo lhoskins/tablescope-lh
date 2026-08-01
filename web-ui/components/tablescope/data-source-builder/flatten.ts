@@ -2,6 +2,7 @@ import type {
   SessionSource,
   SourceType,
 } from "@/lib/stores/data-source-builder-store";
+import { CONNECTOR_LABELS } from "./util";
 
 /** One row in the Active / Available Data Sources list. */
 export interface FlatItem {
@@ -73,7 +74,7 @@ export function flattenCreated(
         sourceType: source.sourceType,
         name: table.tableName,
         sourceLabel: source.displayName,
-        typeLabel: `${source.connectionConfig.db_type ?? source.sourceType} table`,
+        typeLabel: `${source.isSaaS ? "SaaS" : "table"} · ${CONNECTOR_LABELS[source.sourceType] ?? source.sourceType}`,
         visibility: "Connected",
         columns: table.cols || 0,
         sizeOrStatus: "—",

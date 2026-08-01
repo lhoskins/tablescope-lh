@@ -135,6 +135,10 @@ export interface MyDataSource {
   dbType?: string | null;
   schemaName?: string | null;
   tableName?: string | null;
+  /** Backend source_type (e.g. "database_table", "saas_object"). */
+  sourceType?: string | null;
+  /** For SaaS-backed sources the connector key (e.g. "servicenow"). */
+  connectorType?: string | null;
   createdAt: string | null;
 }
 
@@ -231,6 +235,58 @@ export function createDbSource(body: {
   connection_name?: string;
 } & ConnectionParams): Promise<CreatedDbSource> {
   return apiClient.post<CreatedDbSource>("/api/database-sources", body);
+}
+
+// ── SaaS calls ────────────────────────────────────────────────────────
+
+export interface SaasObject {
+  name: string;
+  label: string;
+}
+
+export interface SaasField {
+  name: string;
+  label: string;
+  saas_type: string;
+  pg_type: string;
+}
+
+export function listSaaSObjects(credentialId: number): Promise<SaasObject[]> {
+  return apiClient
+    .post<{ objects: SaasObject[] }>("/api/saas-sources/objects", {
+      credential_id: credentialId,
+    })
+    .then((res) => res.objects);
+}
+
+export function listSaaSFields(
+  credentialId: number,
+  objectType: string,
+): Promise<SaasField[]> {
+  return apiClient
+    .post<{ fields: SaasField[] }>("/api/saas-sources/fields", {
+      credential_id: credentialId,
+      object_type: objectType,
+    })
+    .then((res) => res.fields);
+}
+
+export interface CreatedSaasSource {
+  id: number;
+  display_name: string;
+  teiid_view_name?: string;
+  database_data_source_id: number;
+}
+
+export function createSaasSource(body: {
+  credential_id: number;
+  connector_type: string;
+  object_type: string;
+  selected_fields: string[];
+  display_name: string;
+  project_id?: number;
+}): Promise<CreatedSaasSource> {
+  return apiClient.post<CreatedSaasSource>("/api/saas-sources", body);
 }
 
 // ── File calls ───────────────────────────────────────────────────────
@@ -361,6 +417,15 @@ export async function applyChanges(
     for (const add of pending.adding) {
       if (add.source.isFileUpload) {
         await applyFileAddition(add.source, add.projectId, add.projectName, finalizedFileViewName, results);
+      } else if (add.source.isSaaS) {
+        await applySaaSAddition(
+          add.source,
+          add.projectId,
+          add.projectName,
+          add.tableNames,
+          (projectCountBySource.get(add.source.id) ?? 1) > 1,
+          results,
+        );
       } else {
         await applyDbAddition(
           add.source,
@@ -470,6 +535,64 @@ async function applyDbAddition(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Treat "already exists" as a soft success (idempotent re-apply).
+      if (/already exists/i.test(message)) {
+        results.push({ label, kind: "add", ok: true });
+      } else {
+        results.push({ label, kind: "add", ok: false, error: message });
+      }
+    }
+  }
+}
+
+async function applySaaSAddition(
+  source: SessionSource,
+  projectId: string,
+  projectName: string,
+  tableNames: string[],
+  multiProject: boolean,
+  results: ApplyOpResult[],
+): Promise<void> {
+  // Already-created SaaS source: associate the existing record with the project.
+  if (source.existing && source.backendId != null) {
+    const label = `Add ${source.displayName} to ${projectName}`;
+    try {
+      await addDataSourcesToProject(projectId, [
+        { kind: "db", id: source.backendId },
+      ]);
+      results.push({ label, kind: "add", ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/already exists|already in/i.test(message)) {
+        results.push({ label, kind: "add", ok: true });
+      } else {
+        results.push({ label, kind: "add", ok: false, error: message });
+      }
+    }
+    return;
+  }
+  const credentialId = source.connectionConfig.credential_id
+    ? Number(source.connectionConfig.credential_id)
+    : null;
+  const connectorType = source.sourceType;
+  const selectedFields = source.selectedFields ?? [];
+  for (const objectType of tableNames) {
+    const displayName = multiProject
+      ? `${objectType} · ${projectName}`
+      : objectType;
+    const label = `Add ${objectType} to ${projectName}`;
+    try {
+      if (!credentialId) throw new Error("Missing SaaS credential.");
+      await createSaasSource({
+        credential_id: credentialId,
+        connector_type: connectorType,
+        object_type: objectType,
+        selected_fields: selectedFields,
+        display_name: displayName,
+        project_id: Number(projectId),
+      });
+      results.push({ label, kind: "add", ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       if (/already exists/i.test(message)) {
         results.push({ label, kind: "add", ok: true });
       } else {

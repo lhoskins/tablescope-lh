@@ -527,6 +527,8 @@ async def list_my_datasources(
                 "dbType": d.db_type,
                 "schemaName": d.schema_name,
                 "tableName": d.table_name,
+                "sourceType": d.source_type,
+                "connectorType": d.connector_type,
                 "createdAt": d.created_at.isoformat() if d.created_at else None,
             }
         )

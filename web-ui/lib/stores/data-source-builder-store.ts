@@ -11,7 +11,11 @@ export type SourceType =
   | "csv"
   | "excel"
   | "snowflake"
-  | "bigquery";
+  | "bigquery"
+  | "servicenow"
+  | "salesforce"
+  | "hubspot"
+  | "quickbooks";
 
 export type TableState = "adding" | "removing" | "existing" | "unselected";
 
@@ -56,6 +60,13 @@ export interface SessionSource {
   status: SourceStatus;
   tables: TableSelection[];
   isFileUpload: boolean;
+  /**
+   * True when this source is a SaaS object (ServiceNow, Salesforce, etc.).
+   * The tableName is the SaaS object type and selectedFields drives creation.
+   */
+  isSaaS?: boolean;
+  /** SaaS field names selected for sync. */
+  selectedFields?: string[];
   fileMetadata?: FileMetadata;
   /** Column preview rows for file sources (CSV/Excel). */
   previewFields?: PreviewField[];

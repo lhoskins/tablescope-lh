@@ -20,6 +20,10 @@ export const CONNECTOR_LABELS: Record<SourceType, string> = {
   excel: "Excel file",
   snowflake: "Snowflake",
   bigquery: "BigQuery",
+  servicenow: "ServiceNow",
+  salesforce: "Salesforce",
+  hubspot: "HubSpot",
+  quickbooks: "QuickBooks",
 };
 
 export function connectorIcon(sourceType: SourceType): Icon {
@@ -32,6 +36,12 @@ export function connectorIcon(sourceType: SourceType): Icon {
     case "snowflake":
     case "bigquery":
       return IconServer;
+    case "servicenow":
+    case "salesforce":
+    case "hubspot":
+    case "quickbooks":
+    case "rest_api":
+      return IconApi;
     default:
       return IconDatabase;
   }
@@ -47,6 +57,11 @@ export function categoryFor(sourceType: SourceType): SourceCategory {
     case "snowflake":
     case "bigquery":
       return "warehouse";
+    case "servicenow":
+    case "salesforce":
+    case "hubspot":
+    case "quickbooks":
+      return "api";
     default:
       return "database";
   }
