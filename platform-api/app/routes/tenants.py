@@ -609,6 +609,18 @@ async def _set_enforce_2fa(
     tenant = await session.get(Tenant, tenant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    if payload.enabled and not get_settings().twilio_verify_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Two-factor authentication cannot be enabled: the SMS "
+                   "provider is not configured for this deployment.",
+        )
+    if payload.enabled and context.aal != "aal2":
+        raise HTTPException(
+            status_code=409,
+            detail="Verify your own phone (step-up authentication) before "
+                   "requiring 2FA for the rest of the tenant.",
+        )
     old_value = tenant.enforce_2fa
     tenant.enforce_2fa = payload.enabled
     session.add(
