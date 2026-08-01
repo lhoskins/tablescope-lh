@@ -1,0 +1,71 @@
+SupplierID,SupplierName,RiskTier,FinancialRisk,GeographicRisk,SingleSource,MitigationStatus
+SUP-001,Apex Metalworks,High,Medium,High,N,None
+SUP-002,Cardinal Components,Medium,Low,High,N,In Progress
+SUP-003,Delta Forge,Low,Medium,High,N,None
+SUP-004,Evergreen Alloys,Medium,Medium,High,Y,Planned
+SUP-005,Frontier Fasteners,Low,High,Medium,N,None
+SUP-006,Granite Precision,Low,Low,Low,N,In Progress
+SUP-007,Harbor Electronics,Low,Medium,Low,N,Planned
+SUP-008,Ironwood Composites,Medium,High,Low,N,In Progress
+SUP-009,Juniper Coatings,Medium,High,Low,N,None
+SUP-010,Keystone Bearings,High,Low,High,Y,In Progress
+SUP-011,Lakeside Seals,Medium,Low,Medium,N,None
+SUP-012,Monarch Machining,Low,Medium,Medium,N,In Progress
+SUP-013,Northstar Wire,Medium,Medium,Low,N,None
+SUP-014,Orchard Plastics,Medium,Low,Medium,Y,None
+SUP-015,Pinnacle Castings,Low,Low,Low,N,None
+SUP-016,Quartz Sensors,Medium,Low,High,N,In Progress
+SUP-017,Redwood Rubber,Medium,Medium,Low,N,None
+SUP-018,Summit Sheetmetal,Medium,Medium,Low,Y,None
+SUP-019,Titan Tooling,Medium,High,Medium,N,In Progress
+SUP-020,Vertex Valves,Low,Low,Medium,N,Planned
+SUP-021,Supplier 021 LLC,High,Low,Medium,Y,In Progress
+SUP-022,Supplier 022 LLC,Medium,Low,Low,N,Planned
+SUP-023,Supplier 023 LLC,High,Low,Low,N,Planned
+SUP-024,Supplier 024 LLC,High,Medium,Medium,Y,None
+SUP-025,Supplier 025 LLC,Medium,High,Medium,N,None
+SUP-026,Supplier 026 LLC,Low,High,Low,Y,In Progress
+SUP-027,Supplier 027 LLC,Medium,High,Medium,Y,Planned
+SUP-028,Supplier 028 LLC,Low,Low,Low,N,Planned
+SUP-029,Supplier 029 LLC,Low,Low,Low,N,In Progress
+SUP-030,Supplier 030 LLC,Low,Medium,Low,N,In Progress
+SUP-031,Supplier 031 LLC,Medium,Medium,Low,N,None
+SUP-032,Supplier 032 LLC,Low,High,High,Y,In Progress
+SUP-033,Supplier 033 LLC,Medium,High,Medium,N,Planned
+SUP-034,Supplier 034 LLC,Medium,Medium,Low,N,In Progress
+SUP-035,Supplier 035 LLC,Medium,High,Medium,Y,Planned
+SUP-036,Supplier 036 LLC,Low,Low,Low,N,Planned
+SUP-037,Supplier 037 LLC,Low,High,Medium,N,In Progress
+SUP-038,Supplier 038 LLC,High,Low,Low,N,In Progress
+SUP-039,Supplier 039 LLC,Medium,Medium,Low,Y,Planned
+SUP-040,Supplier 040 LLC,Medium,Low,Medium,Y,None
+SUP-041,Supplier 041 LLC,Low,Low,High,Y,None
+SUP-042,Supplier 042 LLC,Low,High,Low,N,In Progress
+SUP-043,Supplier 043 LLC,Medium,Medium,Medium,N,Planned
+SUP-044,Supplier 044 LLC,Low,High,Medium,N,In Progress
+SUP-045,Supplier 045 LLC,Low,Medium,Low,Y,None
+SUP-046,Supplier 046 LLC,Medium,High,Medium,N,In Progress
+SUP-047,Supplier 047 LLC,High,Low,Low,N,Planned
+SUP-048,Supplier 048 LLC,Low,High,Medium,Y,None
+SUP-049,Supplier 049 LLC,Medium,Low,Low,Y,In Progress
+SUP-050,Supplier 050 LLC,High,High,Medium,N,In Progress
+SUP-051,Supplier 051 LLC,Low,High,High,N,None
+SUP-052,Supplier 052 LLC,Medium,High,Low,Y,Planned
+SUP-053,Supplier 053 LLC,Low,Low,Medium,Y,None
+SUP-054,Supplier 054 LLC,Medium,Medium,High,N,Planned
+SUP-055,Supplier 055 LLC,Low,Low,Medium,N,In Progress
+SUP-056,Supplier 056 LLC,Low,Medium,High,Y,Planned
+SUP-057,Supplier 057 LLC,Low,Medium,Low,N,None
+SUP-058,Supplier 058 LLC,Medium,High,Medium,Y,Planned
+SUP-059,Supplier 059 LLC,High,High,Low,N,None
+SUP-060,Supplier 060 LLC,Low,Low,Medium,Y,Planned
+SUP-061,Supplier 061 LLC,Medium,Medium,Low,N,Planned
+SUP-062,Supplier 062 LLC,Low,Low,Medium,Y,None
+SUP-063,Supplier 063 LLC,High,High,Medium,N,In Progress
+SUP-064,Supplier 064 LLC,Medium,High,Low,N,Planned
+SUP-065,Supplier 065 LLC,High,High,Medium,N,Planned
+SUP-066,Supplier 066 LLC,Low,Medium,High,Y,In Progress
+SUP-067,Supplier 067 LLC,Medium,Low,High,Y,None
+SUP-068,Supplier 068 LLC,Medium,Medium,Low,N,None
+SUP-069,Supplier 069 LLC,High,Low,Medium,Y,In Progress
+SUP-070,Supplier 070 LLC,Low,Medium,Low,Y,Planned

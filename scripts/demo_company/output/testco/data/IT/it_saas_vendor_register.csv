@@ -1,0 +1,26 @@
+VendorID,VendorName,Category,AnnualCostUSD,RenewalMonth,DataClassification
+SAAS-001,SAP #0,Security,350000,2026-04-01,Confidential
+SAAS-002,Atlassian #1,Collaboration,45000,2026-05-01,Confidential
+SAAS-003,Workday #2,ERP,120000,2026-06-01,Confidential
+SAAS-004,Atlassian #3,Security,120000,2026-07-01,Public
+SAAS-005,Salesforce #4,Analytics,12000,2026-04-01,Public
+SAAS-006,Salesforce #5,Security,350000,2027-01-01,Public
+SAAS-007,Datadog #6,ERP,12000,2026-12-01,Confidential
+SAAS-008,Salesforce #7,Collaboration,350000,2027-11-01,Internal
+SAAS-009,Slack #8,Collaboration,350000,2026-03-01,Internal
+SAAS-010,Atlassian #9,Collaboration,12000,2027-02-01,Public
+SAAS-011,Datadog #10,Analytics,350000,2027-09-01,Public
+SAAS-012,Zoom #11,Security,120000,2027-03-01,Public
+SAAS-013,Atlassian #12,Collaboration,350000,2027-02-01,Confidential
+SAAS-014,Zoom #13,Security,12000,2026-08-01,Public
+SAAS-015,Salesforce #14,Security,12000,2026-09-01,Internal
+SAAS-016,Datadog #15,ERP,12000,2027-09-01,Public
+SAAS-017,Workday #16,Analytics,12000,2026-08-01,Public
+SAAS-018,GitHub #17,Security,120000,2027-01-01,Confidential
+SAAS-019,Slack #18,Collaboration,45000,2027-06-01,Public
+SAAS-020,Datadog #19,ERP,120000,2027-03-01,Confidential
+SAAS-021,Atlassian #20,ERP,12000,2026-07-01,Confidential
+SAAS-022,Zoom #21,ERP,350000,2027-06-01,Public
+SAAS-023,SAP #22,Security,45000,2027-07-01,Public
+SAAS-024,Slack #23,Security,350000,2027-05-01,Internal
+SAAS-025,Datadog #24,Collaboration,12000,2026-05-01,Public

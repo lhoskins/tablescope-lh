@@ -1,0 +1,13 @@
+ProjectID,ProjectName,ProgramID,BudgetUSD,EAC_USD,VarianceUSD,VariancePct,Status
+EPRJ-001,Northwind Comet Automation,PGM-001,1200000,1144886.27,-55113.73,-4.6,On Track
+EPRJ-002,Cascade Falcon Line Transfer,PGM-002,400000,401605.79,1605.79,0.4,On Track
+EPRJ-003,Meridian Falcon Cost-Down,PGM-003,650000,832000.0,182000.0,28.0,Overrun
+EPRJ-004,Vantage Vector Line Transfer,PGM-004,1200000,1207497.23,7497.23,0.6,On Track
+EPRJ-005,Helios Orion Redesign,PGM-005,650000,653881.63,3881.63,0.6,On Track
+EPRJ-006,Atlas Orion Cost-Down,PGM-006,650000,663037.21,13037.21,2.0,On Track
+EPRJ-007,BlueLark Delta Cost-Down,PGM-007,900000,1152000.0,252000.0,28.0,Overrun
+EPRJ-008,Ironclad Apollo Redesign,PGM-008,900000,875321.25,-24678.75,-2.7,On Track
+EPRJ-009,Sterling Delta Cost-Down,PGM-009,650000,646431.71,-3568.29,-0.5,On Track
+EPRJ-010,Northwind Comet Line Transfer,PGM-001,250000,256093.7,6093.7,2.4,On Track
+EPRJ-011,Cascade Falcon Redesign,PGM-002,650000,650310.18,310.18,0.0,On Track
+EPRJ-012,Meridian Falcon Automation,PGM-003,400000,362929.9,-37070.1,-9.3,On Track

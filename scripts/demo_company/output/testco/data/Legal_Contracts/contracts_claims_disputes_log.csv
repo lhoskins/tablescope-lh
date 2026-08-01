@@ -1,0 +1,19 @@
+ClaimID,CounterParty,Type,AmountUSD,Status,OpenedDate
+CLM-0001,Summit Sheetmetal,Payment,38911.08,Closed,2026-04-18
+CLM-0002,Atlas Rail,Delivery,283724.77,Settled,2026-04-05
+CLM-0003,Quartz Sensors,Delivery,107972.61,Settled,2026-02-04
+CLM-0004,Vertex Valves,Payment,461210.93,Closed,2026-02-23
+CLM-0005,Summit Sheetmetal,Warranty,279254.66,Open,2026-01-09
+CLM-0006,Evergreen Alloys,Delivery,72414.19,Settled,2026-05-20
+CLM-0007,Quartz Sensors,Payment,236943.74,Open,2026-05-22
+CLM-0008,Sterling Marine,Payment,344916.17,Open,2026-01-20
+CLM-0009,Sterling Marine,Payment,215631.34,Settled,2026-02-07
+CLM-0010,Northwind Aerospace,Delivery,60782.82,Settled,2026-01-16
+CLM-0011,Helios Energy,IP,26456.89,Settled,2026-04-27
+CLM-0012,Vantage Robotics,IP,45325.53,Settled,2026-02-20
+CLM-0013,Northwind Aerospace,IP,33545.33,Closed,2026-02-21
+CLM-0014,Vertex Valves,Delivery,226986.87,Open,2026-01-13
+CLM-0015,Northwind Aerospace,Delivery,152299.32,Settled,2026-06-06
+CLM-0016,Evergreen Alloys,Delivery,78596.4,Closed,2026-06-08
+CLM-0017,Ironclad Industrial,Delivery,242058.76,Settled,2026-01-26
+CLM-0018,Keystone Bearings,IP,357868.35,Open,2026-04-02

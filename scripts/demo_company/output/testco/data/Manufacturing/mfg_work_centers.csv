@@ -1,0 +1,13 @@
+WorkCenterID,WorkCenterName,SiteID,Process,Shifts
+WC-001,Line 1 Machining,SITE-01,Machining,2
+WC-002,Line 2 Welding,SITE-01,Welding,2
+WC-003,Line 3 Assembly,SITE-01,Assembly,1
+WC-004,Line 1 Coating,SITE-02,Coating,1
+WC-005,Line 2 Inspection,SITE-02,Inspection,2
+WC-006,Line 3 Heat Treat,SITE-02,Heat Treat,2
+WC-007,Line 1 Fabrication,SITE-03,Fabrication,1
+WC-008,Line 2 Test,SITE-03,Test,2
+WC-009,Line 3 Kitting,SITE-03,Kitting,1
+WC-010,Line 1 Machining,SITE-04,Machining,3
+WC-011,Line 2 Welding,SITE-04,Welding,2
+WC-012,Line 3 Assembly,SITE-04,Assembly,3

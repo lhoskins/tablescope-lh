@@ -1,0 +1,37 @@
+OpportunityID,ProgramID,Customer,Stage,ExpectedCloseMonth,AmountUSD,ProbabilityPct,Slipped
+OPP-0001,PGM-001,Northwind Aerospace,Negotiate,2026-02-01,991663.85,60,N
+OPP-0002,PGM-001,Northwind Aerospace,Negotiate,2026-03-01,599196.37,60,N
+OPP-0003,PGM-001,Northwind Aerospace,Negotiate,2026-05-01,106757.6,60,N
+OPP-0004,PGM-001,Northwind Aerospace,Closed-Won,2027-05-01,173723.68,100,N
+OPP-0005,PGM-002,Cascade Defense Systems,Qualify,2027-08-01,1109207.49,20,N
+OPP-0006,PGM-002,Cascade Defense Systems,Verbal,2026-11-01,551771.14,85,N
+OPP-0007,PGM-002,Cascade Defense Systems,Qualify,2026-08-01,157075.68,20,N
+OPP-0008,PGM-002,Cascade Defense Systems,Closed-Lost,2027-09-01,1000452.38,0,N
+OPP-0009,PGM-002,Cascade Defense Systems,Propose,2026-10-01,729755.37,40,N
+OPP-0010,PGM-003,Meridian Motors,Closed-Won,2026-07-01,953981.33,100,N
+OPP-0011,PGM-003,Meridian Motors,Qualify,2027-07-01,395604.97,20,Y
+OPP-0012,PGM-003,Meridian Motors,Verbal,2027-03-01,965004.45,85,Y
+OPP-0013,PGM-003,Meridian Motors,Closed-Won,2026-01-01,491926.36,100,Y
+OPP-0014,PGM-004,Vantage Robotics,Qualify,2026-02-01,682204.11,20,N
+OPP-0015,PGM-004,Vantage Robotics,Qualify,2027-12-01,240051.21,20,N
+OPP-0016,PGM-004,Vantage Robotics,Verbal,2027-05-01,853781.18,85,N
+OPP-0017,PGM-004,Vantage Robotics,Closed-Lost,2026-09-01,641500.08,0,N
+OPP-0018,PGM-004,Vantage Robotics,Closed-Won,2026-08-01,188561.3,100,N
+OPP-0019,PGM-005,Helios Energy,Propose,2027-05-01,205021.48,40,N
+OPP-0020,PGM-005,Helios Energy,Closed-Won,2027-02-01,660247.24,100,N
+OPP-0021,PGM-005,Helios Energy,Negotiate,2026-09-01,639345.97,60,N
+OPP-0022,PGM-005,Helios Energy,Negotiate,2027-05-01,962822.06,60,N
+OPP-0023,PGM-006,Atlas Rail,Closed-Lost,2027-03-01,338174.13,0,N
+OPP-0024,PGM-006,Atlas Rail,Verbal,2026-08-01,964760.12,85,N
+OPP-0025,PGM-006,Atlas Rail,Verbal,2026-12-01,797973.35,85,N
+OPP-0026,PGM-006,Atlas Rail,Closed-Won,2026-05-01,269209.49,100,N
+OPP-0027,PGM-006,Atlas Rail,Propose,2027-11-01,704166.08,40,N
+OPP-0028,PGM-007,BlueLark Medical,Verbal,2026-01-01,484565.84,85,N
+OPP-0029,PGM-007,BlueLark Medical,Closed-Won,2026-05-01,712597.91,100,N
+OPP-0030,PGM-007,BlueLark Medical,Closed-Lost,2027-09-01,1049597.79,0,N
+OPP-0031,PGM-008,Ironclad Industrial,Verbal,2026-03-01,305218.4,85,N
+OPP-0032,PGM-008,Ironclad Industrial,Closed-Lost,2026-07-01,1106458.68,0,N
+OPP-0033,PGM-008,Ironclad Industrial,Negotiate,2026-04-01,1041833.12,60,N
+OPP-0034,PGM-009,Sterling Marine,Closed-Lost,2027-04-01,1128251.44,0,N
+OPP-0035,PGM-009,Sterling Marine,Verbal,2026-12-01,86981.66,85,N
+OPP-0036,PGM-009,Sterling Marine,Closed-Lost,2027-11-01,250198.51,0,N

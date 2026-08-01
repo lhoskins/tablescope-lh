@@ -1,0 +1,313 @@
+Month,Scenario,Version,AccountNumber,AccountName,BudgetUSD
+2026-01-01,Budget,FY26-Plan,4000,Product Revenue,5878156.85
+2026-01-01,Budget,FY26-Plan,4100,Service Revenue,650706.88
+2026-01-01,Budget,FY26-Plan,5000,Direct Material,1191113.4
+2026-01-01,Budget,FY26-Plan,5100,Direct Labor,983335.22
+2026-01-01,Budget,FY26-Plan,5200,Manufacturing Overhead,758975.56
+2026-01-01,Budget,FY26-Plan,5300,Scrap & Rework,162746.35
+2026-01-01,Budget,FY26-Plan,6000,Engineering Labor,819583.69
+2026-01-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,340456.64
+2026-01-01,Budget,FY26-Plan,6200,Sales & Marketing,335318.6
+2026-01-01,Budget,FY26-Plan,6300,General & Administrative,402488.91
+2026-01-01,Budget,FY26-Plan,6400,IT & Systems,127891.67
+2026-01-01,Budget,FY26-Plan,6500,Facilities & EHS,96975.18
+2026-01-01,Budget,FY26-Plan,7000,Depreciation,203540.33
+2026-02-01,Budget,FY26-Plan,4000,Product Revenue,6007643.16
+2026-02-01,Budget,FY26-Plan,4100,Service Revenue,664354.87
+2026-02-01,Budget,FY26-Plan,5000,Direct Material,1214882.59
+2026-02-01,Budget,FY26-Plan,5100,Direct Labor,992915.76
+2026-02-01,Budget,FY26-Plan,5200,Manufacturing Overhead,716100.28
+2026-02-01,Budget,FY26-Plan,5300,Scrap & Rework,156602.87
+2026-02-01,Budget,FY26-Plan,6000,Engineering Labor,809322.43
+2026-02-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,330052.22
+2026-02-01,Budget,FY26-Plan,6200,Sales & Marketing,317580.56
+2026-02-01,Budget,FY26-Plan,6300,General & Administrative,390268.32
+2026-02-01,Budget,FY26-Plan,6400,IT & Systems,131700.18
+2026-02-01,Budget,FY26-Plan,6500,Facilities & EHS,95504.66
+2026-02-01,Budget,FY26-Plan,7000,Depreciation,195618.88
+2026-03-01,Budget,FY26-Plan,4000,Product Revenue,6018031.83
+2026-03-01,Budget,FY26-Plan,4100,Service Revenue,671829.11
+2026-03-01,Budget,FY26-Plan,5000,Direct Material,1191210.08
+2026-03-01,Budget,FY26-Plan,5100,Direct Labor,1024907.58
+2026-03-01,Budget,FY26-Plan,5200,Manufacturing Overhead,757134.34
+2026-03-01,Budget,FY26-Plan,5300,Scrap & Rework,159609.29
+2026-03-01,Budget,FY26-Plan,6000,Engineering Labor,855269.43
+2026-03-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,332878.94
+2026-03-01,Budget,FY26-Plan,6200,Sales & Marketing,330594.91
+2026-03-01,Budget,FY26-Plan,6300,General & Administrative,399840.48
+2026-03-01,Budget,FY26-Plan,6400,IT & Systems,132971.8
+2026-03-01,Budget,FY26-Plan,6500,Facilities & EHS,96163.0
+2026-03-01,Budget,FY26-Plan,7000,Depreciation,196764.84
+2026-04-01,Budget,FY26-Plan,4000,Product Revenue,5941817.12
+2026-04-01,Budget,FY26-Plan,4100,Service Revenue,672839.84
+2026-04-01,Budget,FY26-Plan,5000,Direct Material,1250799.6
+2026-04-01,Budget,FY26-Plan,5100,Direct Labor,1034045.6
+2026-04-01,Budget,FY26-Plan,5200,Manufacturing Overhead,717924.3
+2026-04-01,Budget,FY26-Plan,5300,Scrap & Rework,159957.23
+2026-04-01,Budget,FY26-Plan,6000,Engineering Labor,862953.68
+2026-04-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,329242.56
+2026-04-01,Budget,FY26-Plan,6200,Sales & Marketing,319487.49
+2026-04-01,Budget,FY26-Plan,6300,General & Administrative,385396.93
+2026-04-01,Budget,FY26-Plan,6400,IT & Systems,131766.28
+2026-04-01,Budget,FY26-Plan,6500,Facilities & EHS,97121.22
+2026-04-01,Budget,FY26-Plan,7000,Depreciation,197753.15
+2026-05-01,Budget,FY26-Plan,4000,Product Revenue,5989957.1
+2026-05-01,Budget,FY26-Plan,4100,Service Revenue,662717.27
+2026-05-01,Budget,FY26-Plan,5000,Direct Material,1203090.07
+2026-05-01,Budget,FY26-Plan,5100,Direct Labor,1021361.81
+2026-05-01,Budget,FY26-Plan,5200,Manufacturing Overhead,747137.98
+2026-05-01,Budget,FY26-Plan,5300,Scrap & Rework,155141.47
+2026-05-01,Budget,FY26-Plan,6000,Engineering Labor,810328.57
+2026-05-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,328606.33
+2026-05-01,Budget,FY26-Plan,6200,Sales & Marketing,324739.57
+2026-05-01,Budget,FY26-Plan,6300,General & Administrative,406045.25
+2026-05-01,Budget,FY26-Plan,6400,IT & Systems,127697.33
+2026-05-01,Budget,FY26-Plan,6500,Facilities & EHS,99870.33
+2026-05-01,Budget,FY26-Plan,7000,Depreciation,203142.81
+2026-06-01,Budget,FY26-Plan,4000,Product Revenue,5874533.23
+2026-06-01,Budget,FY26-Plan,4100,Service Revenue,634145.38
+2026-06-01,Budget,FY26-Plan,5000,Direct Material,1252766.82
+2026-06-01,Budget,FY26-Plan,5100,Direct Labor,1028065.76
+2026-06-01,Budget,FY26-Plan,5200,Manufacturing Overhead,729919.61
+2026-06-01,Budget,FY26-Plan,5300,Scrap & Rework,155262.11
+2026-06-01,Budget,FY26-Plan,6000,Engineering Labor,847492.2
+2026-06-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,342062.78
+2026-06-01,Budget,FY26-Plan,6200,Sales & Marketing,318342.54
+2026-06-01,Budget,FY26-Plan,6300,General & Administrative,401328.42
+2026-06-01,Budget,FY26-Plan,6400,IT & Systems,131437.56
+2026-06-01,Budget,FY26-Plan,6500,Facilities & EHS,97101.04
+2026-06-01,Budget,FY26-Plan,7000,Depreciation,191505.0
+2026-07-01,Budget,FY26-Plan,4000,Product Revenue,6015631.13
+2026-07-01,Budget,FY26-Plan,4100,Service Revenue,659094.11
+2026-07-01,Budget,FY26-Plan,5000,Direct Material,1245499.77
+2026-07-01,Budget,FY26-Plan,5100,Direct Labor,1031276.72
+2026-07-01,Budget,FY26-Plan,5200,Manufacturing Overhead,757149.27
+2026-07-01,Budget,FY26-Plan,5300,Scrap & Rework,155952.48
+2026-07-01,Budget,FY26-Plan,6000,Engineering Labor,815464.55
+2026-07-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,333662.21
+2026-07-01,Budget,FY26-Plan,6200,Sales & Marketing,336346.62
+2026-07-01,Budget,FY26-Plan,6300,General & Administrative,403174.04
+2026-07-01,Budget,FY26-Plan,6400,IT & Systems,134325.31
+2026-07-01,Budget,FY26-Plan,6500,Facilities & EHS,100580.8
+2026-07-01,Budget,FY26-Plan,7000,Depreciation,190259.52
+2026-08-01,Budget,FY26-Plan,4000,Product Revenue,6010653.96
+2026-08-01,Budget,FY26-Plan,4100,Service Revenue,658544.08
+2026-08-01,Budget,FY26-Plan,5000,Direct Material,1201388.82
+2026-08-01,Budget,FY26-Plan,5100,Direct Labor,1015033.89
+2026-08-01,Budget,FY26-Plan,5200,Manufacturing Overhead,761490.82
+2026-08-01,Budget,FY26-Plan,5300,Scrap & Rework,162888.1
+2026-08-01,Budget,FY26-Plan,6000,Engineering Labor,806433.75
+2026-08-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,334574.39
+2026-08-01,Budget,FY26-Plan,6200,Sales & Marketing,317135.48
+2026-08-01,Budget,FY26-Plan,6300,General & Administrative,397973.1
+2026-08-01,Budget,FY26-Plan,6400,IT & Systems,130659.17
+2026-08-01,Budget,FY26-Plan,6500,Facilities & EHS,100827.14
+2026-08-01,Budget,FY26-Plan,7000,Depreciation,193150.76
+2026-09-01,Budget,FY26-Plan,4000,Product Revenue,6089846.25
+2026-09-01,Budget,FY26-Plan,4100,Service Revenue,676773.12
+2026-09-01,Budget,FY26-Plan,5000,Direct Material,1190099.33
+2026-09-01,Budget,FY26-Plan,5100,Direct Labor,989776.76
+2026-09-01,Budget,FY26-Plan,5200,Manufacturing Overhead,756109.27
+2026-09-01,Budget,FY26-Plan,5300,Scrap & Rework,161934.34
+2026-09-01,Budget,FY26-Plan,6000,Engineering Labor,838058.0
+2026-09-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,324687.26
+2026-09-01,Budget,FY26-Plan,6200,Sales & Marketing,325861.84
+2026-09-01,Budget,FY26-Plan,6300,General & Administrative,381714.55
+2026-09-01,Budget,FY26-Plan,6400,IT & Systems,134160.93
+2026-09-01,Budget,FY26-Plan,6500,Facilities & EHS,99799.71
+2026-09-01,Budget,FY26-Plan,7000,Depreciation,197155.37
+2026-10-01,Budget,FY26-Plan,4000,Product Revenue,5971446.58
+2026-10-01,Budget,FY26-Plan,4100,Service Revenue,651267.79
+2026-10-01,Budget,FY26-Plan,5000,Direct Material,1250649.22
+2026-10-01,Budget,FY26-Plan,5100,Direct Labor,1019857.68
+2026-10-01,Budget,FY26-Plan,5200,Manufacturing Overhead,748490.41
+2026-10-01,Budget,FY26-Plan,5300,Scrap & Rework,156625.42
+2026-10-01,Budget,FY26-Plan,6000,Engineering Labor,813887.68
+2026-10-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,333600.5
+2026-10-01,Budget,FY26-Plan,6200,Sales & Marketing,325147.12
+2026-10-01,Budget,FY26-Plan,6300,General & Administrative,403556.46
+2026-10-01,Budget,FY26-Plan,6400,IT & Systems,127312.22
+2026-10-01,Budget,FY26-Plan,6500,Facilities & EHS,98663.99
+2026-10-01,Budget,FY26-Plan,7000,Depreciation,196890.55
+2026-11-01,Budget,FY26-Plan,4000,Product Revenue,6081817.11
+2026-11-01,Budget,FY26-Plan,4100,Service Revenue,672901.95
+2026-11-01,Budget,FY26-Plan,5000,Direct Material,1259571.31
+2026-11-01,Budget,FY26-Plan,5100,Direct Labor,1017076.01
+2026-11-01,Budget,FY26-Plan,5200,Manufacturing Overhead,720076.6
+2026-11-01,Budget,FY26-Plan,5300,Scrap & Rework,161871.31
+2026-11-01,Budget,FY26-Plan,6000,Engineering Labor,810958.03
+2026-11-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,338128.92
+2026-11-01,Budget,FY26-Plan,6200,Sales & Marketing,330917.49
+2026-11-01,Budget,FY26-Plan,6300,General & Administrative,396179.1
+2026-11-01,Budget,FY26-Plan,6400,IT & Systems,129361.69
+2026-11-01,Budget,FY26-Plan,6500,Facilities & EHS,95260.86
+2026-11-01,Budget,FY26-Plan,7000,Depreciation,191771.66
+2026-12-01,Budget,FY26-Plan,4000,Product Revenue,5981422.53
+2026-12-01,Budget,FY26-Plan,4100,Service Revenue,638928.16
+2026-12-01,Budget,FY26-Plan,5000,Direct Material,1203093.66
+2026-12-01,Budget,FY26-Plan,5100,Direct Labor,1028232.57
+2026-12-01,Budget,FY26-Plan,5200,Manufacturing Overhead,718567.67
+2026-12-01,Budget,FY26-Plan,5300,Scrap & Rework,156040.37
+2026-12-01,Budget,FY26-Plan,6000,Engineering Labor,842287.78
+2026-12-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,333949.31
+2026-12-01,Budget,FY26-Plan,6200,Sales & Marketing,330910.68
+2026-12-01,Budget,FY26-Plan,6300,General & Administrative,403521.76
+2026-12-01,Budget,FY26-Plan,6400,IT & Systems,134121.98
+2026-12-01,Budget,FY26-Plan,6500,Facilities & EHS,100303.29
+2026-12-01,Budget,FY26-Plan,7000,Depreciation,191733.86
+2027-01-01,Budget,FY26-Plan,4000,Product Revenue,5885163.4
+2027-01-01,Budget,FY26-Plan,4100,Service Revenue,644911.69
+2027-01-01,Budget,FY26-Plan,5000,Direct Material,1246372.79
+2027-01-01,Budget,FY26-Plan,5100,Direct Labor,1034935.68
+2027-01-01,Budget,FY26-Plan,5200,Manufacturing Overhead,760166.47
+2027-01-01,Budget,FY26-Plan,5300,Scrap & Rework,160318.63
+2027-01-01,Budget,FY26-Plan,6000,Engineering Labor,851632.58
+2027-01-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,324121.85
+2027-01-01,Budget,FY26-Plan,6200,Sales & Marketing,319429.84
+2027-01-01,Budget,FY26-Plan,6300,General & Administrative,402763.61
+2027-01-01,Budget,FY26-Plan,6400,IT & Systems,126978.58
+2027-01-01,Budget,FY26-Plan,6500,Facilities & EHS,99998.02
+2027-01-01,Budget,FY26-Plan,7000,Depreciation,196066.32
+2027-02-01,Budget,FY26-Plan,4000,Product Revenue,5849046.56
+2027-02-01,Budget,FY26-Plan,4100,Service Revenue,644127.24
+2027-02-01,Budget,FY26-Plan,5000,Direct Material,1237652.78
+2027-02-01,Budget,FY26-Plan,5100,Direct Labor,1016214.61
+2027-02-01,Budget,FY26-Plan,5200,Manufacturing Overhead,750278.27
+2027-02-01,Budget,FY26-Plan,5300,Scrap & Rework,163909.32
+2027-02-01,Budget,FY26-Plan,6000,Engineering Labor,852660.61
+2027-02-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,333300.7
+2027-02-01,Budget,FY26-Plan,6200,Sales & Marketing,338361.59
+2027-02-01,Budget,FY26-Plan,6300,General & Administrative,391677.76
+2027-02-01,Budget,FY26-Plan,6400,IT & Systems,135349.36
+2027-02-01,Budget,FY26-Plan,6500,Facilities & EHS,97386.07
+2027-02-01,Budget,FY26-Plan,7000,Depreciation,193877.19
+2027-03-01,Budget,FY26-Plan,4000,Product Revenue,6094443.68
+2027-03-01,Budget,FY26-Plan,4100,Service Revenue,661306.3
+2027-03-01,Budget,FY26-Plan,5000,Direct Material,1219984.19
+2027-03-01,Budget,FY26-Plan,5100,Direct Labor,977355.44
+2027-03-01,Budget,FY26-Plan,5200,Manufacturing Overhead,752697.27
+2027-03-01,Budget,FY26-Plan,5300,Scrap & Rework,155392.77
+2027-03-01,Budget,FY26-Plan,6000,Engineering Labor,825212.22
+2027-03-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,340955.06
+2027-03-01,Budget,FY26-Plan,6200,Sales & Marketing,321285.18
+2027-03-01,Budget,FY26-Plan,6300,General & Administrative,404735.08
+2027-03-01,Budget,FY26-Plan,6400,IT & Systems,132359.37
+2027-03-01,Budget,FY26-Plan,6500,Facilities & EHS,98014.43
+2027-03-01,Budget,FY26-Plan,7000,Depreciation,195406.8
+2027-04-01,Budget,FY26-Plan,4000,Product Revenue,6063341.34
+2027-04-01,Budget,FY26-Plan,4100,Service Revenue,677380.33
+2027-04-01,Budget,FY26-Plan,5000,Direct Material,1210685.1
+2027-04-01,Budget,FY26-Plan,5100,Direct Labor,1029746.7
+2027-04-01,Budget,FY26-Plan,5200,Manufacturing Overhead,763720.77
+2027-04-01,Budget,FY26-Plan,5300,Scrap & Rework,154450.38
+2027-04-01,Budget,FY26-Plan,6000,Engineering Labor,807961.78
+2027-04-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,324601.36
+2027-04-01,Budget,FY26-Plan,6200,Sales & Marketing,326455.8
+2027-04-01,Budget,FY26-Plan,6300,General & Administrative,392883.41
+2027-04-01,Budget,FY26-Plan,6400,IT & Systems,134115.25
+2027-04-01,Budget,FY26-Plan,6500,Facilities & EHS,98915.45
+2027-04-01,Budget,FY26-Plan,7000,Depreciation,197582.14
+2027-05-01,Budget,FY26-Plan,4000,Product Revenue,6092255.71
+2027-05-01,Budget,FY26-Plan,4100,Service Revenue,662296.23
+2027-05-01,Budget,FY26-Plan,5000,Direct Material,1258123.83
+2027-05-01,Budget,FY26-Plan,5100,Direct Labor,975590.53
+2027-05-01,Budget,FY26-Plan,5200,Manufacturing Overhead,764159.65
+2027-05-01,Budget,FY26-Plan,5300,Scrap & Rework,162481.42
+2027-05-01,Budget,FY26-Plan,6000,Engineering Labor,840627.79
+2027-05-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,341786.98
+2027-05-01,Budget,FY26-Plan,6200,Sales & Marketing,337277.88
+2027-05-01,Budget,FY26-Plan,6300,General & Administrative,388044.88
+2027-05-01,Budget,FY26-Plan,6400,IT & Systems,131537.28
+2027-05-01,Budget,FY26-Plan,6500,Facilities & EHS,96770.23
+2027-05-01,Budget,FY26-Plan,7000,Depreciation,197729.13
+2027-06-01,Budget,FY26-Plan,4000,Product Revenue,6097563.61
+2027-06-01,Budget,FY26-Plan,4100,Service Revenue,644313.07
+2027-06-01,Budget,FY26-Plan,5000,Direct Material,1268752.86
+2027-06-01,Budget,FY26-Plan,5100,Direct Labor,1010544.53
+2027-06-01,Budget,FY26-Plan,5200,Manufacturing Overhead,715439.76
+2027-06-01,Budget,FY26-Plan,5300,Scrap & Rework,162309.79
+2027-06-01,Budget,FY26-Plan,6000,Engineering Labor,811696.14
+2027-06-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,334341.18
+2027-06-01,Budget,FY26-Plan,6200,Sales & Marketing,323623.01
+2027-06-01,Budget,FY26-Plan,6300,General & Administrative,380394.92
+2027-06-01,Budget,FY26-Plan,6400,IT & Systems,132111.95
+2027-06-01,Budget,FY26-Plan,6500,Facilities & EHS,96359.75
+2027-06-01,Budget,FY26-Plan,7000,Depreciation,193164.37
+2027-07-01,Budget,FY26-Plan,4000,Product Revenue,5783814.46
+2027-07-01,Budget,FY26-Plan,4100,Service Revenue,652639.02
+2027-07-01,Budget,FY26-Plan,5000,Direct Material,1261966.76
+2027-07-01,Budget,FY26-Plan,5100,Direct Labor,968557.2
+2027-07-01,Budget,FY26-Plan,5200,Manufacturing Overhead,753383.74
+2027-07-01,Budget,FY26-Plan,5300,Scrap & Rework,159623.6
+2027-07-01,Budget,FY26-Plan,6000,Engineering Labor,809093.97
+2027-07-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,326479.95
+2027-07-01,Budget,FY26-Plan,6200,Sales & Marketing,321615.07
+2027-07-01,Budget,FY26-Plan,6300,General & Administrative,383744.91
+2027-07-01,Budget,FY26-Plan,6400,IT & Systems,129757.23
+2027-07-01,Budget,FY26-Plan,6500,Facilities & EHS,100290.15
+2027-07-01,Budget,FY26-Plan,7000,Depreciation,192683.69
+2027-08-01,Budget,FY26-Plan,4000,Product Revenue,5979421.62
+2027-08-01,Budget,FY26-Plan,4100,Service Revenue,653699.97
+2027-08-01,Budget,FY26-Plan,5000,Direct Material,1223774.84
+2027-08-01,Budget,FY26-Plan,5100,Direct Labor,1028222.71
+2027-08-01,Budget,FY26-Plan,5200,Manufacturing Overhead,762195.8
+2027-08-01,Budget,FY26-Plan,5300,Scrap & Rework,162282.67
+2027-08-01,Budget,FY26-Plan,6000,Engineering Labor,824275.94
+2027-08-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,333198.88
+2027-08-01,Budget,FY26-Plan,6200,Sales & Marketing,317512.9
+2027-08-01,Budget,FY26-Plan,6300,General & Administrative,401465.99
+2027-08-01,Budget,FY26-Plan,6400,IT & Systems,131834.53
+2027-08-01,Budget,FY26-Plan,6500,Facilities & EHS,95716.31
+2027-08-01,Budget,FY26-Plan,7000,Depreciation,190588.31
+2027-09-01,Budget,FY26-Plan,4000,Product Revenue,5878053.55
+2027-09-01,Budget,FY26-Plan,4100,Service Revenue,662486.38
+2027-09-01,Budget,FY26-Plan,5000,Direct Material,1250552.66
+2027-09-01,Budget,FY26-Plan,5100,Direct Labor,974775.19
+2027-09-01,Budget,FY26-Plan,5200,Manufacturing Overhead,736460.54
+2027-09-01,Budget,FY26-Plan,5300,Scrap & Rework,162460.57
+2027-09-01,Budget,FY26-Plan,6000,Engineering Labor,805637.59
+2027-09-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,323378.37
+2027-09-01,Budget,FY26-Plan,6200,Sales & Marketing,337895.63
+2027-09-01,Budget,FY26-Plan,6300,General & Administrative,385052.44
+2027-09-01,Budget,FY26-Plan,6400,IT & Systems,128332.23
+2027-09-01,Budget,FY26-Plan,6500,Facilities & EHS,98085.15
+2027-09-01,Budget,FY26-Plan,7000,Depreciation,191635.83
+2027-10-01,Budget,FY26-Plan,4000,Product Revenue,5850944.17
+2027-10-01,Budget,FY26-Plan,4100,Service Revenue,665160.29
+2027-10-01,Budget,FY26-Plan,5000,Direct Material,1237604.67
+2027-10-01,Budget,FY26-Plan,5100,Direct Labor,996285.01
+2027-10-01,Budget,FY26-Plan,5200,Manufacturing Overhead,752517.72
+2027-10-01,Budget,FY26-Plan,5300,Scrap & Rework,162116.79
+2027-10-01,Budget,FY26-Plan,6000,Engineering Labor,808476.58
+2027-10-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,334080.66
+2027-10-01,Budget,FY26-Plan,6200,Sales & Marketing,334391.89
+2027-10-01,Budget,FY26-Plan,6300,General & Administrative,399205.74
+2027-10-01,Budget,FY26-Plan,6400,IT & Systems,134789.64
+2027-10-01,Budget,FY26-Plan,6500,Facilities & EHS,100606.93
+2027-10-01,Budget,FY26-Plan,7000,Depreciation,200340.62
+2027-11-01,Budget,FY26-Plan,4000,Product Revenue,5972704.18
+2027-11-01,Budget,FY26-Plan,4100,Service Revenue,658113.93
+2027-11-01,Budget,FY26-Plan,5000,Direct Material,1269455.8
+2027-11-01,Budget,FY26-Plan,5100,Direct Labor,998975.94
+2027-11-01,Budget,FY26-Plan,5200,Manufacturing Overhead,728028.25
+2027-11-01,Budget,FY26-Plan,5300,Scrap & Rework,154974.23
+2027-11-01,Budget,FY26-Plan,6000,Engineering Labor,856986.63
+2027-11-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,329018.58
+2027-11-01,Budget,FY26-Plan,6200,Sales & Marketing,325472.61
+2027-11-01,Budget,FY26-Plan,6300,General & Administrative,396812.54
+2027-11-01,Budget,FY26-Plan,6400,IT & Systems,127478.12
+2027-11-01,Budget,FY26-Plan,6500,Facilities & EHS,99009.77
+2027-11-01,Budget,FY26-Plan,7000,Depreciation,191242.91
+2027-12-01,Budget,FY26-Plan,4000,Product Revenue,5895326.99
+2027-12-01,Budget,FY26-Plan,4100,Service Revenue,640400.89
+2027-12-01,Budget,FY26-Plan,5000,Direct Material,1185931.54
+2027-12-01,Budget,FY26-Plan,5100,Direct Labor,1011525.94
+2027-12-01,Budget,FY26-Plan,5200,Manufacturing Overhead,737143.06
+2027-12-01,Budget,FY26-Plan,5300,Scrap & Rework,163377.79
+2027-12-01,Budget,FY26-Plan,6000,Engineering Labor,836396.22
+2027-12-01,Budget,FY26-Plan,6100,Non-Recurring Engineering,328799.0
+2027-12-01,Budget,FY26-Plan,6200,Sales & Marketing,337176.22
+2027-12-01,Budget,FY26-Plan,6300,General & Administrative,399796.52
+2027-12-01,Budget,FY26-Plan,6400,IT & Systems,132866.8
+2027-12-01,Budget,FY26-Plan,6500,Facilities & EHS,97534.21
+2027-12-01,Budget,FY26-Plan,7000,Depreciation,202052.0

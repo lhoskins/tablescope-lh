@@ -1,0 +1,15 @@
+AccountNumber,AccountName,AccountType,Category
+4000,Product Revenue,Revenue,Operating
+4100,Service Revenue,Revenue,Operating
+5000,Direct Material,COGS,Operating
+5100,Direct Labor,COGS,Operating
+5200,Manufacturing Overhead,COGS,Operating
+5300,Scrap & Rework,COGS,Operating
+6000,Engineering Labor,Opex,Operating
+6100,Non-Recurring Engineering,Opex,Operating
+6200,Sales & Marketing,Opex,Operating
+6300,General & Administrative,Opex,Operating
+6400,IT & Systems,Opex,Operating
+6500,Facilities & EHS,Opex,Operating
+7000,Depreciation,Opex,Operating
+1500,Capital Equipment,Asset,Balance Sheet

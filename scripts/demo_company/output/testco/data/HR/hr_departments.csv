@@ -1,0 +1,12 @@
+DeptID,DeptName,Function,CostCenter
+DEPT-01,Executive,Executive,CC1010
+DEPT-02,Finance,Finance,CC1020
+DEPT-03,HR,HR,CC1030
+DEPT-04,Manufacturing,Manufacturing,CC1040
+DEPT-05,Engineering,Engineering,CC1050
+DEPT-06,Sales,Sales,CC1060
+DEPT-07,Quality,Quality,CC1070
+DEPT-08,Procurement,Procurement,CC1080
+DEPT-09,IT,IT,CC1090
+DEPT-10,EHS,EHS,CC1100
+DEPT-11,Legal,Legal,CC1110

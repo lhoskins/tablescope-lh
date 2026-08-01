@@ -1,0 +1,51 @@
+ActionID,Description,Category,OwnerID,DueDate,Status
+ACT-0001,Close audit finding,Strategic,EMP-100028,2026-04-06,Open
+ACT-0002,Contain scrap,Financial,EMP-100002,2026-04-05,In Progress
+ACT-0003,Update forecast,Financial,EMP-100029,2026-06-09,In Progress
+ACT-0004,Rebaseline NRE,Operational,EMP-100022,2026-03-16,Overdue
+ACT-0005,Backfill role,Operational,EMP-100009,2026-03-14,Closed
+ACT-0006,Update forecast,Financial,EMP-100002,2026-02-11,Closed
+ACT-0007,Backfill role,Compliance,EMP-100024,2026-04-20,Open
+ACT-0008,Update forecast,Operational,EMP-100002,2026-02-19,Closed
+ACT-0009,Rebaseline NRE,Operational,EMP-100027,2026-05-24,Closed
+ACT-0010,Requalify supplier,Financial,EMP-100012,2026-05-22,Open
+ACT-0011,Rebaseline NRE,Operational,EMP-100008,2026-07-02,Open
+ACT-0012,Update forecast,Strategic,EMP-100020,2026-06-24,Closed
+ACT-0013,Close audit finding,Compliance,EMP-100025,2026-04-21,In Progress
+ACT-0014,Close audit finding,Operational,EMP-100021,2026-05-23,Overdue
+ACT-0015,Contain scrap,Operational,EMP-100016,2026-05-05,Overdue
+ACT-0016,Rebaseline NRE,Compliance,EMP-100011,2026-02-01,Open
+ACT-0017,Close audit finding,Strategic,EMP-100026,2026-02-14,Closed
+ACT-0018,Requalify supplier,Compliance,EMP-100019,2026-06-21,Closed
+ACT-0019,Contain scrap,Compliance,EMP-100029,2026-05-13,In Progress
+ACT-0020,Close audit finding,Financial,EMP-100026,2026-04-19,In Progress
+ACT-0021,Rebaseline NRE,Financial,EMP-100005,2026-03-01,Closed
+ACT-0022,Update forecast,Operational,EMP-100018,2026-04-06,In Progress
+ACT-0023,Backfill role,Operational,EMP-100016,2026-01-19,Overdue
+ACT-0024,Close audit finding,Strategic,EMP-100007,2026-01-19,Closed
+ACT-0025,Update forecast,Operational,EMP-100006,2026-03-26,Overdue
+ACT-0026,Update forecast,Strategic,EMP-100017,2026-01-22,In Progress
+ACT-0027,Update forecast,Compliance,EMP-100004,2026-02-22,Open
+ACT-0028,Backfill role,Financial,EMP-100015,2026-03-21,Closed
+ACT-0029,Rebaseline NRE,Operational,EMP-100018,2026-03-21,Overdue
+ACT-0030,Requalify supplier,Compliance,EMP-100027,2026-06-16,Closed
+ACT-0031,Contain scrap,Operational,EMP-100014,2026-05-17,Overdue
+ACT-0032,Update forecast,Strategic,EMP-100023,2026-06-22,Open
+ACT-0033,Update forecast,Strategic,EMP-100016,2026-01-02,Closed
+ACT-0034,Requalify supplier,Operational,EMP-100026,2026-03-12,Open
+ACT-0035,Update forecast,Compliance,EMP-100003,2026-06-18,Open
+ACT-0036,Update forecast,Strategic,EMP-100025,2026-06-13,Closed
+ACT-0037,Backfill role,Compliance,EMP-100013,2026-06-17,Open
+ACT-0038,Requalify supplier,Compliance,EMP-100004,2026-02-21,Closed
+ACT-0039,Contain scrap,Operational,EMP-100023,2026-05-15,Overdue
+ACT-0040,Requalify supplier,Operational,EMP-100024,2026-06-07,Overdue
+ACT-0041,Rebaseline NRE,Financial,EMP-100002,2026-07-10,Open
+ACT-0042,Rebaseline NRE,Operational,EMP-100029,2026-03-26,Overdue
+ACT-0043,Contain scrap,Operational,EMP-100026,2026-07-20,Closed
+ACT-0044,Contain scrap,Operational,EMP-100000,2026-07-09,Overdue
+ACT-0045,Close audit finding,Financial,EMP-100001,2026-03-14,In Progress
+ACT-0046,Backfill role,Compliance,EMP-100010,2026-03-21,Closed
+ACT-0047,Update forecast,Financial,EMP-100011,2026-07-16,Closed
+ACT-0048,Requalify supplier,Operational,EMP-100023,2026-02-01,Overdue
+ACT-0049,Backfill role,Operational,EMP-100028,2026-04-28,Overdue
+ACT-0050,Rebaseline NRE,Operational,EMP-100027,2026-03-14,Overdue

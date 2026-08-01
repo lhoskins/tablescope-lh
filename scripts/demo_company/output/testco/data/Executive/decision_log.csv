@@ -1,0 +1,25 @@
+DecisionID,Date,Topic,Decision,OwnerDept
+DEC-0001,2026-05-22,Capex approval,Rejected,Legal
+DEC-0002,2026-01-22,Capex approval,Approved,Engineering
+DEC-0003,2026-01-15,Pricing,Deferred,Engineering
+DEC-0004,2026-05-12,Supplier switch,Deferred,Sales
+DEC-0005,2026-02-19,Supplier switch,Approved,Manufacturing
+DEC-0006,2026-03-24,Pricing,Rejected,Quality
+DEC-0007,2026-01-09,Hiring freeze,Rejected,Quality
+DEC-0008,2026-01-21,Capex approval,Deferred,Sales
+DEC-0009,2026-06-15,Program go/no-go,Approved,Engineering
+DEC-0010,2026-02-21,Hiring freeze,Approved,Procurement
+DEC-0011,2026-03-05,Capex approval,Rejected,Engineering
+DEC-0012,2026-03-19,Capex approval,Approved,IT
+DEC-0013,2026-01-27,Capex approval,Rejected,Legal
+DEC-0014,2026-03-01,Hiring freeze,Deferred,Finance
+DEC-0015,2026-06-28,Capex approval,Approved,Manufacturing
+DEC-0016,2026-02-12,Pricing,Approved,Manufacturing
+DEC-0017,2026-02-06,Pricing,Approved,Procurement
+DEC-0018,2026-01-12,Capex approval,Deferred,IT
+DEC-0019,2026-05-15,Capex approval,Deferred,HR
+DEC-0020,2026-05-09,Supplier switch,Deferred,EHS
+DEC-0021,2026-02-21,Pricing,Deferred,IT
+DEC-0022,2026-04-19,Pricing,Rejected,Finance
+DEC-0023,2026-05-16,Program go/no-go,Deferred,Executive
+DEC-0024,2026-03-28,Pricing,Deferred,EHS

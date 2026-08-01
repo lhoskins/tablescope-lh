@@ -1,0 +1,16 @@
+DrillID,SiteID,Type,Date,EvacTimeMin,Result
+DRL-001,SITE-01,Tornado,2026-03-01,2.8,Pass
+DRL-002,SITE-01,Chemical Spill,2026-03-01,4.5,Pass
+DRL-003,SITE-04,Tornado,2026-06-01,3.3,Needs Improvement
+DRL-004,SITE-02,Chemical Spill,2026-02-01,5.7,Pass
+DRL-005,SITE-03,Fire,2026-01-01,9.0,Pass
+DRL-006,SITE-04,Tornado,2026-05-01,6.1,Needs Improvement
+DRL-007,SITE-03,Fire,2026-04-01,7.0,Pass
+DRL-008,SITE-04,Fire,2026-01-01,6.8,Pass
+DRL-009,SITE-04,Chemical Spill,2026-05-01,4.1,Needs Improvement
+DRL-010,SITE-01,Tornado,2026-03-01,3.6,Pass
+DRL-011,SITE-01,Tornado,2026-03-01,6.0,Pass
+DRL-012,SITE-03,Fire,2026-02-01,7.9,Needs Improvement
+DRL-013,SITE-01,Fire,2026-03-01,4.7,Needs Improvement
+DRL-014,SITE-01,Chemical Spill,2026-05-01,6.2,Pass
+DRL-015,SITE-02,Fire,2026-03-01,2.5,Needs Improvement

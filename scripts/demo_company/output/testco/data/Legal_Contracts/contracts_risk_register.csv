@@ -1,0 +1,31 @@
+ContractID,RiskType,Severity,Likelihood,Mitigation
+CTR-0063,Indemnity,Low,Low,Insurance
+CTR-0012,Pricing,Low,Medium,Accept
+CTR-0005,Pricing,Medium,Medium,Insurance
+CTR-0043,IP,High,High,Insurance
+CTR-0055,Pricing,Low,Low,Accept
+CTR-0022,IP,Medium,Medium,Accept
+CTR-0045,IP,Medium,Medium,Escalate
+CTR-0059,Pricing,High,High,Renegotiate
+CTR-0008,Liability Cap,High,High,Escalate
+CTR-0021,Indemnity,Low,Medium,Renegotiate
+CTR-0012,Indemnity,High,Low,Accept
+CTR-0063,Pricing,Low,High,Accept
+CTR-0012,Pricing,High,Low,Insurance
+CTR-0003,IP,Low,High,Escalate
+CTR-0005,IP,High,Low,Renegotiate
+CTR-0032,Indemnity,Low,Medium,Insurance
+CTR-0054,Termination,Low,Low,Escalate
+CTR-0060,Indemnity,Low,Low,Accept
+CTR-0006,Termination,High,Medium,Renegotiate
+CTR-0051,Liability Cap,Medium,High,Escalate
+CTR-0029,Pricing,High,High,Accept
+CTR-0039,Indemnity,Low,High,Accept
+CTR-0060,Pricing,Low,Medium,Accept
+CTR-0059,Pricing,Medium,Low,Renegotiate
+CTR-0040,IP,Medium,Low,Accept
+CTR-0037,Pricing,Low,Low,Accept
+CTR-0064,Termination,High,Low,Accept
+CTR-0037,IP,Medium,Medium,Insurance
+CTR-0060,Indemnity,Low,Medium,Insurance
+CTR-0052,IP,High,High,Renegotiate

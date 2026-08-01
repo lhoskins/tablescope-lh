@@ -1,0 +1,36 @@
+NDAID,CounterParty,SignedDate,ExpiryDate,Status
+NDA-0001,Granite Precision,2026-03-01,2029-02-01,Active
+NDA-0002,Helios Energy,2025-06-01,2027-07-01,Active
+NDA-0003,Atlas Rail,2024-01-01,2028-05-01,Expired
+NDA-0004,Monarch Machining,2024-11-01,2028-03-01,Active
+NDA-0005,Quartz Sensors,2026-02-01,2027-05-01,Expired
+NDA-0006,Northwind Aerospace,2026-05-01,2028-07-01,Active
+NDA-0007,Quartz Sensors,2024-04-01,2029-08-01,Expired
+NDA-0008,Northwind Aerospace,2024-08-01,2028-06-01,Active
+NDA-0009,BlueLark Medical,2026-02-01,2028-11-01,Active
+NDA-0010,Ironclad Industrial,2024-06-01,2029-10-01,Active
+NDA-0011,Helios Energy,2024-03-01,2029-10-01,Active
+NDA-0012,Atlas Rail,2026-11-01,2027-02-01,Active
+NDA-0013,Cardinal Components,2026-07-01,2029-02-01,Active
+NDA-0014,Sterling Marine,2026-02-01,2027-03-01,Active
+NDA-0015,Orchard Plastics,2026-03-01,2029-07-01,Expired
+NDA-0016,Quartz Sensors,2024-07-01,2029-11-01,Active
+NDA-0017,Meridian Motors,2025-04-01,2028-12-01,Active
+NDA-0018,Northwind Aerospace,2025-06-01,2027-03-01,Expired
+NDA-0019,Cardinal Components,2026-09-01,2029-11-01,Active
+NDA-0020,Cascade Defense Systems,2026-07-01,2028-06-01,Active
+NDA-0021,Atlas Rail,2024-09-01,2028-11-01,Expired
+NDA-0022,Orchard Plastics,2025-01-01,2029-01-01,Expired
+NDA-0023,Monarch Machining,2026-05-01,2028-02-01,Active
+NDA-0024,Meridian Motors,2026-02-01,2027-08-01,Expired
+NDA-0025,Evergreen Alloys,2026-12-01,2028-04-01,Expired
+NDA-0026,Orchard Plastics,2026-07-01,2028-06-01,Active
+NDA-0027,Atlas Rail,2025-01-01,2027-04-01,Active
+NDA-0028,Ironclad Industrial,2025-07-01,2029-03-01,Expired
+NDA-0029,Ironwood Composites,2025-06-01,2029-08-01,Active
+NDA-0030,Ironwood Composites,2025-05-01,2027-04-01,Active
+NDA-0031,Quartz Sensors,2024-08-01,2029-06-01,Expired
+NDA-0032,Meridian Motors,2026-11-01,2028-07-01,Expired
+NDA-0033,Vertex Valves,2024-04-01,2028-05-01,Active
+NDA-0034,Sterling Marine,2026-12-01,2027-01-01,Expired
+NDA-0035,Vantage Robotics,2024-07-01,2029-10-01,Expired

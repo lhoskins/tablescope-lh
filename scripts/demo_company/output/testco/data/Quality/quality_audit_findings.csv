@@ -1,0 +1,19 @@
+FindingID,AuditDate,SiteID,Clause,Severity,Status
+QAF-001,2026-02-07,SITE-03,7.5 Documented Info,Major,Closed
+QAF-002,2026-02-17,SITE-04,9.2 Internal Audit,Major,Open
+QAF-003,2026-05-16,SITE-01,8.5 Production,Minor,Closed
+QAF-004,2026-05-25,SITE-01,8.5 Production,Minor,Open
+QAF-005,2026-01-10,SITE-02,8.7 Nonconforming,Minor,Closed
+QAF-006,2026-06-05,SITE-01,8.5 Production,Major,Open
+QAF-007,2026-06-02,SITE-01,7.5 Documented Info,Major,Closed
+QAF-008,2026-01-10,SITE-02,9.2 Internal Audit,Minor,Open
+QAF-009,2026-05-27,SITE-03,9.2 Internal Audit,Minor,Open
+QAF-010,2026-06-15,SITE-02,8.5 Production,Minor,Closed
+QAF-011,2026-01-06,SITE-04,8.7 Nonconforming,Minor,Closed
+QAF-012,2026-04-17,SITE-02,7.5 Documented Info,Major,Closed
+QAF-013,2026-02-02,SITE-01,8.7 Nonconforming,Minor,Closed
+QAF-014,2026-06-10,SITE-01,8.7 Nonconforming,Minor,Open
+QAF-015,2026-05-12,SITE-04,7.5 Documented Info,Minor,Closed
+QAF-016,2026-04-13,SITE-03,7.5 Documented Info,Minor,Closed
+QAF-017,2026-04-08,SITE-02,7.5 Documented Info,Major,Closed
+QAF-018,2026-03-11,SITE-02,8.5 Production,Major,Closed
