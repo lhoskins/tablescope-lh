@@ -7,17 +7,16 @@ API is the simplest supported path and matches this connector framework's
 existing MVP scope (see ``hubspot.py``); an OAuth client-credentials flow can
 be layered in later without changing the connector interface.
 
-MVP object set is fixed to the three ITSM tables most commonly used as data
-sources: Incidents (``incident``), Requests (``sc_request``), and Change
-Requests (``change_request``). Field metadata is discovered per table from
-``sys_dictionary`` (itself just another Table API table, so no separate
-describe endpoint or extra auth is needed). Records are paged through
+Table/object discovery is dynamic: ``list_objects`` queries ``sys_db_object``
+so the user can browse every extendable ServiceNow table. ``list_fields``
+walks the table inheritance chain (``sys_db_object.super_class``) and queries
+``sys_dictionary`` for the table plus each parent so inherited fields such as
+``short_description``/``opened_at`` are available. Records are paged through
 ``/api/now/table/{table}`` with ``sysparm_offset``/``sysparm_limit`` and
 normalised into staging-column-keyed dicts; the full payload is preserved
 under ``raw_json``. ``sysparm_display_value=false`` is used throughout so
 every field (including references) comes back as a plain string/sys_id
-rather than the ``{value, display_value}`` object form — consistent typing
-without a relationship-resolution pass, matching the other MVP connectors.
+rather than the ``{value, display_value}`` object form.
 """
 
 from __future__ import annotations
@@ -41,24 +40,40 @@ logger = logging.getLogger(__name__)
 
 _PAGE_SIZE = 200
 
-# MVP object set. ``name`` is the ServiceNow table name used in the Table API.
-_OBJECTS: list[ObjectInfo] = [
-    ObjectInfo(name="incident", label="Incidents"),
-    ObjectInfo(name="sc_request", label="Requests"),
-    ObjectInfo(name="change_request", label="Change Requests"),
-]
-_OBJECT_NAMES = {o.name for o in _OBJECTS}
-
 # ServiceNow "internal_type" (from sys_dictionary) -> Postgres column type.
 # Restricted to the staging service's allowed set (saas_staging_service._ALLOWED_PG_TYPES).
 _TYPE_MAP: dict[str, str] = {
     "integer": "integer",
     "decimal": "double precision",
     "currency": "double precision",
+    "float": "double precision",
     "boolean": "boolean",
     "glide_date_time": "timestamptz",
     "glide_date": "date",
+    "due_date": "date",
+    "weeks": "integer",
+    "days_of_week": "integer",
+    "day": "integer",
+    "month": "integer",
+    "year": "integer",
+    "quarter": "integer",
+    "minute": "integer",
+    "second": "integer",
+    "user_input": "text",
 }
+
+# Core non-extendable tables that are commonly used as data sources but do not
+# appear in the "is_extendable=true" result set (e.g. sys_user, cmdb_rel_ci).
+_EXTRA_NON_EXTENDABLE_TABLES: set[str] = {
+    "sys_user",
+    "sys_user_group",
+    "sys_user_role",
+    "cmdb_rel_ci",
+    "cmn_location",
+    "sys_attachment",
+}
+
+_SAFE_TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _pg_type_for(internal_type: str) -> str:
@@ -100,11 +115,52 @@ class ServiceNowConnector(SaasConnector):
         return username, password
 
     def _check_object(self, object_type: str) -> None:
-        if object_type not in _OBJECT_NAMES:
+        if not object_type or not _SAFE_TABLE_RE.match(object_type):
             raise SaasConnectorError(
-                f"Unsupported ServiceNow table '{object_type}'. "
-                f"Supported: {', '.join(sorted(_OBJECT_NAMES))}."
+                f"Invalid ServiceNow table name '{object_type}'."
             )
+
+    async def _get_super_class_chain(
+        self,
+        client: httpx.AsyncClient,
+        table_name: str,
+        base_url: str,
+        auth: tuple[str, str],
+    ) -> list[str]:
+        """Return the inheritance chain [table, parent, grandparent, ...] using sys_db_object."""
+        chain: list[str] = [table_name]
+        current = table_name
+        for _ in range(10):
+            resp = await client.get(
+                f"{base_url}/api/now/table/sys_db_object",
+                params={
+                    "sysparm_query": f"name={current}",
+                    "sysparm_fields": "super_class",
+                    "sysparm_display_value": "false",
+                    "sysparm_limit": 1,
+                },
+                auth=auth,
+            )
+            resp.raise_for_status()
+            result = resp.json().get("result", [])
+            if not result:
+                break
+            super_class = result[0].get("super_class")
+            if not super_class or not super_class.get("value"):
+                break
+            parent_sys_id = super_class["value"]
+            parent_resp = await client.get(
+                f"{base_url}/api/now/table/sys_db_object/{parent_sys_id}",
+                params={"sysparm_fields": "name"},
+                auth=auth,
+            )
+            parent_resp.raise_for_status()
+            parent_name = parent_resp.json().get("result", {}).get("name")
+            if not parent_name or parent_name in chain:
+                break
+            chain.append(parent_name)
+            current = parent_name
+        return chain
 
     async def test_connection(self, config: dict) -> dict:
         base_url = self._base_url(config)
@@ -122,9 +178,47 @@ class ServiceNowConnector(SaasConnector):
         return {"instance_url": base_url, "authenticated": True}
 
     async def list_objects(self, config: dict) -> list[ObjectInfo]:
-        # Validate the credentials but return the fixed MVP object set.
-        await self.test_connection(config)
-        return list(_OBJECTS)
+        base_url = self._base_url(config)
+        auth = self._auth(config)
+
+        extra_query = "^".join(f"ORname={t}" for t in sorted(_EXTRA_NON_EXTENDABLE_TABLES))
+        query = "is_extendable=true"
+        if extra_query:
+            query += f"^{extra_query}"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0, auth=auth) as client:
+                resp = await client.get(
+                    f"{base_url}/api/now/table/sys_db_object",
+                    params={
+                        "sysparm_query": query,
+                        "sysparm_fields": "name,label",
+                        "sysparm_display_value": "false",
+                        "sysparm_limit": 5000,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            logger.warning("ServiceNow list_objects failed: %s", exc)
+            raise SaasConnectorError(_safe_error(exc)) from exc
+
+        objects: list[ObjectInfo] = []
+        seen: set[str] = set()
+        for row in data.get("result", []):
+            name = row.get("name")
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            objects.append(ObjectInfo(name=name, label=row.get("label") or name))
+
+        # Ensure the core explicit extras are present even if they were filtered out.
+        for extra in sorted(_EXTRA_NON_EXTENDABLE_TABLES):
+            if extra not in seen:
+                objects.append(ObjectInfo(name=extra, label=extra.replace("_", " ").title()))
+
+        objects.sort(key=lambda o: o.label.lower())
+        return objects
 
     async def list_fields(self, config: dict, object_type: str) -> list[FieldInfo]:
         self._check_object(object_type)
@@ -132,17 +226,24 @@ class ServiceNowConnector(SaasConnector):
         auth = self._auth(config)
         try:
             async with httpx.AsyncClient(timeout=30.0, auth=auth) as client:
+                chain = await self._get_super_class_chain(client, object_type, base_url, auth)
                 resp = await client.get(
                     f"{base_url}/api/now/table/sys_dictionary",
                     params={
-                        "sysparm_query": f"name={object_type}^internal_type!=collection^elementISNOTEMPTY",
+                        "sysparm_query": (
+                            f"nameIN{','.join(chain)}"
+                            "^internal_type!=collection"
+                            "^elementISNOTEMPTY"
+                        ),
                         "sysparm_fields": "element,column_label,internal_type.name",
                         "sysparm_display_value": "false",
-                        "sysparm_limit": 500,
+                        "sysparm_limit": 2000,
                     },
                 )
                 resp.raise_for_status()
                 data = resp.json()
+        except SaasConnectorError:
+            raise
         except Exception as exc:
             logger.warning("ServiceNow list_fields failed: %s", exc)
             raise SaasConnectorError(_safe_error(exc)) from exc

@@ -78,15 +78,19 @@ def test_servicenow_pg_type_mapping():
     assert _servicenow_pg_type_for("reference") == "text"
 
 
-def test_servicenow_rejects_unsupported_table():
+def test_servicenow_accepts_valid_table_names_and_rejects_invalid():
     from app.connectors.base import SaasConnectorError
 
     conn = ServiceNowConnector()
-    with pytest.raises(SaasConnectorError):
-        conn._check_object("sys_user")
     conn._check_object("incident")
     conn._check_object("sc_request")
     conn._check_object("change_request")
+    conn._check_object("sys_user")
+    conn._check_object("cmdb_ci")
+    with pytest.raises(SaasConnectorError):
+        conn._check_object("bad;injection")
+    with pytest.raises(SaasConnectorError):
+        conn._check_object("")
 
 
 def test_servicenow_normalize_carries_raw_json_and_fields():
