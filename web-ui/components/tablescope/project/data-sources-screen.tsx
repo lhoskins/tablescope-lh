@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMemo, useRef, useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconRefresh,
   IconDatabase,
@@ -19,9 +19,16 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { cn } from "@/lib/cn";
-import { apiClient } from "@/lib/api-client";
+import { DataSourceUpdateDialog } from "@/components/tablescope/project/data-source-update-dialog";
+import {
+  activateSourceVersion,
+  listSourceVersions,
+  preflightSourceUpdate,
+  rollbackSourceVersion,
+  type PreflightResponse,
+  type SourceVersion,
+} from "@/lib/api/data-source-versions";
 import {
   useProjectDataSources,
   columnLabel,
@@ -73,44 +80,63 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detailKey, setDetailKey] = useState<string | null>(null);
 
-  // ── Drag-to-replace ────────────────────────────────────────────────
+  // ── Update a source (drag-to-drop or the accessible Update action) ──
+  // Both entry points stage the file and open the same preflight; neither one
+  // touches the live version before the user confirms.
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
-  const [pendingReplace, setPendingReplace] = useState<{
-    source: DataSource;
-    file: File;
-  } | null>(null);
+  const [updateTarget, setUpdateTarget] = useState<DataSource | null>(null);
+  const [preflight, setPreflight] = useState<PreflightResponse | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [activating, setActivating] = useState(false);
   const [replaceMsg, setReplaceMsg] = useState<string | null>(null);
+  const pickerRef = useRef<HTMLInputElement>(null);
+  const pickerSource = useRef<DataSource | null>(null);
 
-  const handleDrop = useCallback(
-    (source: DataSource, files: FileList | null) => {
+  const startUpdate = useCallback(
+    async (source: DataSource, files: FileList | null) => {
       setDragOverKey(null);
       if (!files || files.length === 0) return;
-      setPendingReplace({ source, file: files[0] });
+      setUpdateTarget(source);
+      setPreflight(null);
+      setUpdateError(null);
+      setReplaceMsg(null);
+      try {
+        setPreflight(await preflightSourceUpdate(source.viewName, files[0]));
+      } catch (err) {
+        setUpdateError((err as Error).message);
+      }
     },
     [],
   );
 
-  const confirmReplace = useCallback(async () => {
-    if (!pendingReplace) return;
-    const { source, file } = pendingReplace;
-    setPendingReplace(null);
-    setReplaceMsg(null);
+  const confirmUpdate = useCallback(async () => {
+    if (!updateTarget || !preflight) return;
+    setActivating(true);
+    setUpdateError(null);
     try {
-      const res = await apiClient.upload<{ addedColumns?: string[] }>(
-        `/api/upload/datasources/${encodeURIComponent(source.viewName)}/replace`,
-        file,
-      );
-      const added = res.addedColumns ?? [];
+      await activateSourceVersion(updateTarget.viewName, preflight.version.id);
+      const added = preflight.compatibility.addedColumns;
       setReplaceMsg(
-        `Replaced "${source.fileName}"${added.length ? ` (added column(s): ${added.join(", ")})` : ""}.`,
+        `Updated "${updateTarget.fileName}" to v${preflight.version.versionNumber}` +
+          `${added.length ? ` (added column(s): ${added.join(", ")})` : ""}.`,
       );
+      setUpdateTarget(null);
+      setPreflight(null);
       queryClient.invalidateQueries({
         queryKey: ["project", projectId, "datasources"],
       });
+      queryClient.invalidateQueries({ queryKey: ["source-versions"] });
     } catch (err) {
-      setReplaceMsg(`Error: ${(err as Error).message}`);
+      setUpdateError((err as Error).message);
+    } finally {
+      setActivating(false);
     }
-  }, [pendingReplace, projectId, queryClient]);
+  }, [preflight, projectId, queryClient, updateTarget]);
+
+  const openPicker = useCallback((source: DataSource) => {
+    pickerSource.current = source;
+    pickerRef.current?.click();
+  }, []);
 
   const keyFor = (s: DataSource) => s.viewName || s.fileName;
   const selected =
@@ -195,6 +221,7 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
                     <th className="px-4 py-2 font-medium">Visibility</th>
                     <th className="px-4 py-2 font-medium">Columns</th>
                     <th className="px-4 py-2 font-medium">Size</th>
+                    <th className="px-4 py-2 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -225,7 +252,7 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
                           isFile
                             ? (e) => {
                                 e.preventDefault();
-                                handleDrop(s, e.dataTransfer.files);
+                                void startUpdate(s, e.dataTransfer.files);
                               }
                             : undefined
                         }
@@ -268,6 +295,20 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
                         <td className="px-4 py-2.5 text-ink-tertiary">
                           {humanSize(s.size) || "—"}
                         </td>
+                        <td className="px-4 py-2.5">
+                          {isFile && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPicker(s);
+                              }}
+                              className="rounded-md border border-line-primary px-2 py-1 text-caption font-medium text-ink-primary hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                            >
+                              Update data source
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -281,27 +322,30 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
           <p className="text-[12px] text-ink-secondary">{replaceMsg}</p>
         )}
 
-        <ConfirmDialog
-          open={pendingReplace !== null}
-          title="Overwrite datasource?"
-          message={
-            pendingReplace ? (
-              <>
-                Are you sure you want to overwrite{" "}
-                <span className="font-medium text-ink-primary">
-                  &quot;{pendingReplace.source.fileName}&quot;
-                </span>{" "}
-                with{" "}
-                <span className="font-medium text-ink-primary">
-                  &quot;{pendingReplace.file.name}&quot;
-                </span>
-                ? This replaces the existing data.
-              </>
-            ) : null
-          }
-          confirmLabel="Replace"
-          onConfirm={confirmReplace}
-          onCancel={() => setPendingReplace(null)}
+        <input
+          ref={pickerRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            const source = pickerSource.current;
+            const files = e.target.files;
+            if (source) void startUpdate(source, files);
+            e.target.value = "";
+          }}
+        />
+
+        <DataSourceUpdateDialog
+          open={updateTarget !== null}
+          sourceName={updateTarget?.fileName ?? ""}
+          preflight={preflight}
+          busy={activating}
+          error={updateError}
+          onConfirm={() => void confirmUpdate()}
+          onCancel={() => {
+            setUpdateTarget(null);
+            setPreflight(null);
+            setUpdateError(null);
+          }}
         />
       </div>
       )}
@@ -385,7 +429,70 @@ function SourceDetailPanel({ source }: { source: DataSource | null }) {
           </ul>
         </ContextSection>
       )}
+
+      {!isDatabase(source) && !isSaas(source) && (
+        <VersionHistorySection viewName={source.viewName} />
+      )}
     </ContextPanel>
+  );
+}
+
+/** Version history with rollback for file-backed sources. */
+function VersionHistorySection({ viewName }: { viewName: string }) {
+  const queryClient = useQueryClient();
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { data } = useQuery<SourceVersion[]>({
+    queryKey: ["source-versions", viewName],
+    queryFn: () => listSourceVersions(viewName),
+    enabled: Boolean(viewName),
+  });
+  const versions = data ?? [];
+  if (versions.length === 0) return null;
+
+  const rollback = async (version: SourceVersion) => {
+    setBusyId(version.id);
+    setError(null);
+    try {
+      await rollbackSourceVersion(viewName, version.id);
+      queryClient.invalidateQueries({ queryKey: ["source-versions", viewName] });
+      queryClient.invalidateQueries({ queryKey: ["project"] });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <ContextSection title="Version history">
+      <ul className="space-y-2 text-[13px]">
+        {versions.map((v) => (
+          <li key={v.id} className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-ink-primary">
+                v{v.versionNumber} · {v.originalFilename}
+              </p>
+              <p className="text-caption text-ink-tertiary">
+                {v.status}
+                {v.rowCount != null ? ` · ${v.rowCount} rows` : ""}
+              </p>
+            </div>
+            {v.status === "archived" && (
+              <button
+                type="button"
+                onClick={() => void rollback(v)}
+                disabled={busyId !== null}
+                className="shrink-0 rounded-md border border-line-primary px-2 py-1 text-caption font-medium text-ink-primary hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:opacity-50"
+              >
+                {busyId === v.id ? "Restoring…" : "Restore"}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {error && <p className="mt-2 text-caption text-danger">{error}</p>}
+    </ContextSection>
   );
 }
 

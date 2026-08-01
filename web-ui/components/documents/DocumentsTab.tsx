@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
+import { UnifiedUploadDialog } from "@/components/uploads/unified-upload-dialog";
 
 const KnowledgeGraphScreen = lazy(() =>
   import("@/components/tablescope/project/knowledge-graph-screen").then((m) => ({
@@ -122,15 +123,13 @@ export function DocumentsTab({
 }) {
   const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const [subTab, setSubTab] = useState<"documents" | "graph">("documents");
   const [forceReprocess, setForceReprocess] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(
     initialExpandedId ?? null,
   );
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [openFamilyId, setOpenFamilyId] = useState<number | null>(null);
 
   type FamilyListItem = {
@@ -172,25 +171,10 @@ export function DocumentsTab({
   }, [initialExpandedId, docs]);
 
   // ── Upload ─────────────────────────────────────────────────────
-  const handleUpload = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setUploading(true);
-    setUploadError(null);
-
-    const errors: string[] = [];
-    for (const file of Array.from(files)) {
-      try {
-        await apiClient.upload(`/api/projects/${projectId}/assets/upload`, file, {
-          asset_type: "document",
-          visibility: "shared_project",
-        });
-      } catch (err) {
-        errors.push(`${file.name}: ${err instanceof Error ? err.message : "upload failed"}`);
-      }
-    }
-
-    if (errors.length) setUploadError(errors.join("; "));
-    setUploading(false);
+  // Uploads run through the unified AI-Assisted Upload intake, which
+  // classifies each file and routes spreadsheets to the Data Source pipeline
+  // instead of creating a document from them.
+  const handleUploadsDone = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["project-documents", projectId] });
   }, [projectId, queryClient]);
 
@@ -312,22 +296,13 @@ export function DocumentsTab({
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
+            onClick={() => setUploadOpen(true)}
             className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
           >
-            {uploading ? "Uploading..." : "+ Upload Documents"}
+            + Upload Documents
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            accept=".pdf,.docx,.pptx,.txt,.md"
-            className="hidden"
-            onChange={(e) => handleUpload(e.target.files)}
-          />
           <span className="text-xs text-slate-400">
-            PDF, DOCX, PPTX, TXT, MD
+            Opens AI-Assisted Upload — spreadsheets become data sources
           </span>
           <div className="ml-auto flex items-center gap-3">
             <label className="flex items-center gap-1.5 text-xs text-slate-600">
@@ -349,9 +324,6 @@ export function DocumentsTab({
             </button>
           </div>
         </div>
-      )}
-      {uploadError && (
-        <div className="mb-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{uploadError}</div>
       )}
 
       {/* Documents list */}
@@ -702,6 +674,14 @@ export function DocumentsTab({
           />
         </Suspense>
       )}
+
+      <UnifiedUploadDialog
+        open={uploadOpen}
+        projectId={projectId}
+        preferredAssetFamily="unstructured_document"
+        onClose={() => setUploadOpen(false)}
+        onUploadsDone={handleUploadsDone}
+      />
 
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>

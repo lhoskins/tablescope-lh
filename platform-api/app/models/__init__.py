@@ -57,6 +57,7 @@ from app.models.database_data_source_assignment import (
 )
 from app.models.file_import_job import FileImportJob
 from app.models.file_source_meta import FileSourceMeta
+from app.models.file_source_version import FileSourceVersion
 from app.models.grid_preference import GridPreference
 from app.models.home_pin import HomePin
 from app.models.insight_feedback import InsightFeedback, InsightFeedbackReviewEvent
@@ -168,6 +169,7 @@ __all__ = [
     "DatabaseDataSourceAssignment",
     "FileImportJob",
     "FileSourceMeta",
+    "FileSourceVersion",
     "GridPreference",
     "HomePin",
     "InsightFeedback",

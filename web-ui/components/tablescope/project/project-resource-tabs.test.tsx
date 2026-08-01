@@ -46,4 +46,28 @@ describe("ProjectResourceTabs", () => {
     const overview = screen.getByRole("link", { name: /Overview/ });
     expect(overview).not.toHaveAttribute("aria-current");
   });
+
+  it("renders text-only tabs with no icons", () => {
+    mockedPathname = "/projects/7";
+    const { container } = render(<ProjectResourceTabs projectId="7" />);
+    expect(container.querySelectorAll("svg")).toHaveLength(0);
+  });
+
+  it("uses the darker neutral token for inactive tabs and hover/focus states", () => {
+    mockedPathname = "/projects/7";
+    render(<ProjectResourceTabs projectId="7" />);
+    const documents = screen.getByRole("link", { name: "Documents" });
+    expect(documents.className).toContain("text-ink-secondary");
+    expect(documents.className).toContain("hover:text-ink-primary");
+    expect(documents.className).toContain("focus-visible:ring-brand-500");
+    expect(documents.className).not.toContain("text-ink-tertiary");
+  });
+
+  it("marks the active tab with the strongest neutral plus an underline", () => {
+    mockedPathname = "/projects/7";
+    render(<ProjectResourceTabs projectId="7" />);
+    const overview = screen.getByRole("link", { name: "Overview" });
+    expect(overview.className).toContain("text-ink-primary");
+    expect(overview.querySelector("span.bg-brand-500")).not.toBeNull();
+  });
 });

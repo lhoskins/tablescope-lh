@@ -2,19 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  IconLayoutGrid,
-  IconDatabase,
-  IconCode,
-  IconFileText,
-  IconLayoutDashboard,
-} from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 
 interface Tab {
   label: string;
   href: string;
-  icon: typeof IconLayoutGrid;
 }
 
 export function ProjectResourceTabs({ projectId }: { projectId: string }) {
@@ -22,11 +14,11 @@ export function ProjectResourceTabs({ projectId }: { projectId: string }) {
   const base = `/projects/${projectId}`;
 
   const tabs: Tab[] = [
-    { label: "Overview", href: base, icon: IconLayoutGrid },
-    { label: "Data Sources", href: `${base}/data-sources`, icon: IconDatabase },
-    { label: "Tables", href: `${base}/queries`, icon: IconCode },
-    { label: "Documents", href: `${base}/documents`, icon: IconFileText },
-    { label: "Dashboards", href: `${base}/dashboards`, icon: IconLayoutDashboard },
+    { label: "Overview", href: base },
+    { label: "Data Sources", href: `${base}/data-sources` },
+    { label: "Tables", href: `${base}/queries` },
+    { label: "Documents", href: `${base}/documents` },
+    { label: "Dashboards", href: `${base}/dashboards` },
   ];
 
   const isActive = (tab: Tab) => {
@@ -43,7 +35,6 @@ export function ProjectResourceTabs({ projectId }: { projectId: string }) {
       className="flex items-center gap-1 overflow-x-auto px-5 py-2"
     >
       {tabs.map((tab) => {
-        const Icon = tab.icon;
         const active = isActive(tab);
         return (
           <Link
@@ -51,13 +42,14 @@ export function ProjectResourceTabs({ projectId }: { projectId: string }) {
             href={tab.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
+              // Font weight is identical in both states so switching tabs never
+              // reflows the row; the underline carries the active signal.
+              "relative flex shrink-0 items-center whitespace-nowrap rounded-md px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
               active
-                ? "text-brand-700"
-                : "text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary",
+                ? "text-ink-primary"
+                : "text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
             )}
           >
-            <Icon size={16} stroke={1.8} />
             {tab.label}
             {active && (
               <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-brand-500" />

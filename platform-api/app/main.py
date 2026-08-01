@@ -65,6 +65,7 @@ from app.routes import storage as storage_routes
 from app.routes import tenant_data_planes as tenant_data_planes_routes
 from app.routes import tenants as tenants_routes
 from app.routes import upload as upload_routes
+from app.routes import uploads as uploads_routes
 from app.routes import user_preferences as user_preferences_routes
 from app.routes import users as users_routes
 from app.services.connection_pool import pool_manager
@@ -244,6 +245,7 @@ def create_app() -> FastAPI:
     app.include_router(connectors_routes.router, prefix=api_prefix)
     app.include_router(grid_preferences_routes.router, prefix=api_prefix)
     app.include_router(upload_routes.router, prefix=api_prefix)
+    app.include_router(uploads_routes.router, prefix=api_prefix)
     app.include_router(file_analysis_routes.router, prefix=api_prefix)
     app.include_router(file_imports_routes.router, prefix=api_prefix)
     app.include_router(file_imports_routes.connections_router, prefix=api_prefix)
