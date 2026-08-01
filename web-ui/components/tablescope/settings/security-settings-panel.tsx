@@ -70,6 +70,7 @@ export function SecuritySettingsPanel() {
         ["settings", "tenant"],
         (old) => (old ? { ...old, enforce_2fa: data.enabled } : old),
       );
+      queryClient.invalidateQueries({ queryKey: ["mfa", "status"] });
       push(
         data.enabled
           ? "Two-factor authentication is now required for all members"
@@ -88,7 +89,7 @@ export function SecuritySettingsPanel() {
     onSettled: () => setConfirm2fa(null),
   });
 
-  const enforce2fa = twoFaQuery.data?.enabled ?? false;
+  const enforce2fa = twoFaQuery.data?.enabled;
 
   return (
     <section className="max-w-3xl">
@@ -100,16 +101,30 @@ export function SecuritySettingsPanel() {
       </header>
 
       <div className="rounded-lg border border-line-secondary bg-bg-primary p-5 shadow-sm">
-        <Switch
-          id="tenant-2fa"
-          checked={enforce2fa}
-          pending={twoFaQuery.isLoading || toggle2fa.isPending}
-          label="Require two-factor authentication"
-          description="Require all tenant members to verify sign-in with an SMS code. Privileged roles may still require MFA under platform security policy even when this tenant-wide setting is off."
-          onLabel="On"
-          offLabel="Off"
-          onChange={(next) => setConfirm2fa(next)}
-        />
+        {enforce2fa !== undefined ? (
+          <Switch
+            id="tenant-2fa"
+            checked={enforce2fa}
+            pending={toggle2fa.isPending}
+            label="Require two-factor authentication"
+            description="Require all tenant members to verify sign-in with an SMS code. Privileged roles may still require MFA under platform security policy even when this tenant-wide setting is off."
+            onLabel="On"
+            offLabel="Off"
+            onChange={(next) => setConfirm2fa(next)}
+          />
+        ) : (
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 pr-2">
+              <span className="block text-sm font-medium text-ink-primary">
+                Require two-factor authentication
+              </span>
+              <p className="mt-0.5 text-xs text-ink-tertiary">
+                Require all tenant members to verify sign-in with an SMS code. Privileged roles may still require MFA under platform security policy even when this tenant-wide setting is off.
+              </p>
+            </div>
+            <span className="text-sm text-ink-tertiary">Loading...</span>
+          </div>
+        )}
       </div>
 
       <ConfirmDialog
@@ -120,7 +135,7 @@ export function SecuritySettingsPanel() {
         }
         description={
           confirm2fa === true
-            ? "All members of this tenant will be required to complete SMS MFA at their next sign-in."
+            ? "All members of this tenant — including anyone already signed in — will be required to complete SMS MFA on their next action."
             : "Non-privileged members may no longer be required to use MFA. Admin and privileged-role MFA policy remains in effect."
         }
         confirmText={confirm2fa === true ? "Require 2FA" : "Turn off 2FA"}
