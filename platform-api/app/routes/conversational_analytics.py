@@ -23,9 +23,22 @@ from app.models import AnalyticsConversation, AnalyticsConversationTurn, Project
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
 )
+from app.services.conversation_previews import (
+    question_preview,
+    result_preview,
+    result_type,
+)
 from app.services.conversational_analytics import execute_turn
 
 router = APIRouter(prefix="/conversational-analytics", tags=["Conversational Analytics"])
+
+#: Surfaces whose conversations belong to a project's own AI Assistant history.
+#: Business Insight conversations resolve to a ``project_id`` too, so filtering
+#: on the project alone would leak them into project-scoped history.
+PROJECT_CONVERSATION_SURFACES = ("project_insights", "ai_assistant")
+
+RECENT_CONVERSATIONS_DEFAULT_LIMIT = 4
+RECENT_CONVERSATIONS_MAX_LIMIT = 20
 
 
 class CreateConversationRequest(BaseModel):
@@ -54,6 +67,21 @@ class ConversationSummary(BaseModel):
     title: str
     status: str
     updated_at: datetime
+
+
+class RecentConversationItem(BaseModel):
+    conversation_id: int
+    turn_id: int
+    surface: str
+    question_preview: str
+    result_preview: str
+    result_type: str
+    completed_at: datetime
+
+
+class RecentConversationsResponse(BaseModel):
+    project_id: int
+    items: list[RecentConversationItem]
 
 
 class TurnResponse(BaseModel):
@@ -248,21 +276,33 @@ async def create_conversation(
     return _conversation_to_response(conversation)
 
 
+def _visible_conversations_stmt(context: RequestContext):
+    """Conversations the caller may read.
+
+    Ownership is the only visibility rule: there is no conversation sharing
+    model, so a conversation is never exposed to another user.
+    """
+    return select(AnalyticsConversation).where(
+        AnalyticsConversation.tenant_id == context.tenant_id,
+        AnalyticsConversation.user_id == context.user_id,
+    )
+
+
 @router.get("/conversations", response_model=list[ConversationSummary])
 async def list_conversations(
     project_id: int | None = None,
+    limit: int | None = None,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[ConversationSummary]:
     """List the current user's conversations, optionally filtered by project."""
-    stmt = select(AnalyticsConversation).where(
-        AnalyticsConversation.tenant_id == context.tenant_id,
-        AnalyticsConversation.user_id == context.user_id,
-    )
+    stmt = _visible_conversations_stmt(context)
     if project_id is not None:
         await _check_project_access(session, context, project_id)
         stmt = stmt.where(AnalyticsConversation.project_id == project_id)
     stmt = stmt.order_by(AnalyticsConversation.updated_at.desc())
+    if limit is not None:
+        stmt = stmt.limit(max(1, limit))
     result = await session.execute(stmt)
     conversations = result.scalars().all()
     return [
@@ -276,6 +316,84 @@ async def list_conversations(
         )
         for c in conversations
     ]
+
+
+@router.get(
+    "/projects/{project_id}/recent-conversations",
+    response_model=RecentConversationsResponse,
+)
+async def recent_project_conversations(
+    project_id: int,
+    limit: int = RECENT_CONVERSATIONS_DEFAULT_LIMIT,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> RecentConversationsResponse:
+    """Most recent successfully completed question/result pairs for a project.
+
+    Scoped to the caller's own conversations on project surfaces; system
+    activity, pending/failed turns, and archived conversations never appear.
+    """
+    await _check_project_access(session, context, project_id)
+    bounded_limit = max(1, min(limit, RECENT_CONVERSATIONS_MAX_LIMIT))
+
+    conversation_ids = (
+        _visible_conversations_stmt(context)
+        .with_only_columns(AnalyticsConversation.id)
+        .where(
+            AnalyticsConversation.project_id == project_id,
+            AnalyticsConversation.surface.in_(PROJECT_CONVERSATION_SURFACES),
+            AnalyticsConversation.status == "active",
+        )
+        .subquery()
+    )
+
+    stmt = (
+        select(AnalyticsConversationTurn, AnalyticsConversation.surface)
+        .join(
+            AnalyticsConversation,
+            AnalyticsConversation.id == AnalyticsConversationTurn.conversation_id,
+        )
+        .where(
+            AnalyticsConversationTurn.conversation_id.in_(select(conversation_ids)),
+            AnalyticsConversationTurn.status == "success",
+        )
+        .order_by(
+            AnalyticsConversationTurn.updated_at.desc(),
+            AnalyticsConversationTurn.id.desc(),
+        )
+        # Over-fetch so retry/stream duplicates can be collapsed and still fill
+        # the requested window.
+        .limit(bounded_limit * 4)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    items: list[RecentConversationItem] = []
+    seen: set[tuple[int, str]] = set()
+    for turn, surface in rows:
+        question = question_preview(turn.user_message)
+        if not question:
+            continue
+        dedupe_key = (turn.conversation_id, question.casefold())
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        items.append(
+            RecentConversationItem(
+                conversation_id=turn.conversation_id,
+                turn_id=turn.id,
+                surface=surface,
+                question_preview=question,
+                result_preview=result_preview(
+                    turn.assistant_message, turn.explanation, turn.chart_config
+                ),
+                result_type=result_type(turn.chart_config, turn.result_cache),
+                completed_at=turn.updated_at,
+            )
+        )
+        if len(items) >= bounded_limit:
+            break
+
+    return RecentConversationsResponse(project_id=project_id, items=items)
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)

@@ -72,13 +72,20 @@ function AiAssistantPageInner() {
   const [needsProject, setNeedsProject] = useState(false);
   const [paramsRead, setParamsRead] = useState(false);
   const [autoStarted, setAutoStarted] = useState(false);
+  // Set only from a deep link, so "View all project conversations" lands on a
+  // list already narrowed to that project.
+  const [projectFilter, setProjectFilter] = useState<number | null>(null);
+  const [pendingTurnId, setPendingTurnId] = useState<number | null>(null);
   const { data: active } = useQuery({
     queryKey: ["conversational-analytics", "conversation", activeId],
     queryFn: () => getConversation(activeId as number),
     enabled: activeId != null,
   });
   const turns = active?.turns ?? [];
-  const assistantConversations = conversations ?? [];
+  const assistantConversations = (conversations ?? []).filter(
+    (c) => projectFilter == null || c.project_id === projectFilter,
+  );
+  const turnCount = turns.length;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // A conversation is scoped to one project for grounded answers; reflect it
@@ -101,11 +108,19 @@ function AiAssistantPageInner() {
     if (q) setInput(q);
     if (pid) {
       const n = Number(pid);
-      if (!Number.isNaN(n)) setProjectId(n);
+      if (!Number.isNaN(n)) {
+        setProjectId(n);
+        setProjectFilter(n);
+      }
     }
     if (cid) {
       const n = Number(cid);
       if (!Number.isNaN(n)) setActiveId(n);
+    }
+    const tid = searchParams.get("turn");
+    if (tid) {
+      const n = Number(tid);
+      if (!Number.isNaN(n)) setPendingTurnId(n);
     }
     setParamsRead(true);
   }, [searchParams, paramsRead]);
@@ -167,8 +182,18 @@ function AiAssistantPageInner() {
   const busy = sendMutation.isPending;
 
   useEffect(() => {
+    if (pendingTurnId != null) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [turns.length, busy]);
+  }, [turnCount, busy, pendingTurnId]);
+
+  // Deep links may target one turn inside a long conversation.
+  useEffect(() => {
+    if (pendingTurnId == null || turnCount === 0) return;
+    const target = document.getElementById(`turn-${pendingTurnId}`);
+    if (!target) return;
+    target.scrollIntoView({ block: "start" });
+    setPendingTurnId(null);
+  }, [pendingTurnId, turnCount]);
 
   const send = useCallback(
     (raw: string) => {
@@ -234,6 +259,7 @@ function AiAssistantPageInner() {
                 setActiveId(null);
                 setInput("");
                 setProjectId(null);
+                setProjectFilter(null);
               }}
             >
               <IconPlus size={14} />
@@ -285,7 +311,9 @@ function AiAssistantPageInner() {
             ) : (
               <div className="mx-auto max-w-3xl space-y-5">
                 {turns.map((t) => (
-                  <TurnBubbles key={t.id} turn={t} />
+                  <div key={t.id} id={`turn-${t.id}`}>
+                    <TurnBubbles turn={t} />
+                  </div>
                 ))}
                 {pendingQuestion && (
                   <UserBubble content={pendingQuestion} />

@@ -4,15 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  IconUsers,
-  IconLoader2,
-  IconDatabase,
-  IconCode,
-  IconFileText,
-  IconLayoutDashboard,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconUsers, IconLoader2 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { MembersDialog } from "@/components/tablescope/project/members-dialog";
 import { ShareToggle } from "@/components/tablescope/project/share-toggle";
@@ -22,9 +14,13 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
 import { HomeAiSuggestions } from "@/components/tablescope/home/ai-suggestions";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
+import {
+  AiConversationsCard,
+  recentConversationsKey,
+} from "@/components/tablescope/project/ai-conversations-card";
+import { QuickActionsCard } from "@/components/tablescope/project/quick-actions-card";
 import {
   createConversation,
   getConversation,
@@ -33,7 +29,6 @@ import {
   type ConversationTurn,
 } from "@/lib/api/conversational-analytics";
 import { projectInsightApi, type ProjectInsight, type ProjectInsightCard } from "@/lib/api/project-insight";
-import { cn } from "@/lib/cn";
 import { timeAgo, aiStatusLabel, aiStatusTone } from "@/lib/ui/format";
 import type { AiStatus, ProjectSummary } from "@/lib/ui/types";
 import {
@@ -45,7 +40,6 @@ import {
   useProjectActivity,
   useProjectGraph,
   type DataSource,
-  type ActivityEvent,
 } from "@/lib/ui/use-project-data";
 
 function isDatabase(s: DataSource): boolean {
@@ -116,6 +110,16 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
+  // A saved successful answer belongs in the permanent conversations panel
+  // straight away; the on-page transcript stays as-is.
+  const notePersistedTurns = useCallback(
+    (turns: ConversationTurn[]) => {
+      if (!turns.some((t) => t.status === "success")) return;
+      void queryClient.invalidateQueries({ queryKey: recentConversationsKey(projectId) });
+    },
+    [projectId, queryClient],
+  );
+
   const openInAssistant = useCallback(() => {
     if (chatConversationId == null) return;
     router.push(`/ai?conversation=${chatConversationId}&projectId=${projectId}`);
@@ -136,11 +140,13 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           const polled = await pollConversation(created.id);
           setChatConversationId(created.id);
           setChatTurns(polled.turns);
+          notePersistedTurns(polled.turns);
         } else {
           const res = await submitTurn(chatConversationId, { message });
           setChatTurns((prev) => [...prev, res.turn]);
           const polled = await pollConversation(res.conversation_id);
           setChatTurns(polled.turns);
+          notePersistedTurns(polled.turns);
         }
       } catch (err) {
         setChatError(err instanceof Error ? err.message : "Ask failed");
@@ -148,7 +154,7 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
         setChatBusy(false);
       }
     },
-    [chatConversationId, projectId],
+    [chatConversationId, notePersistedTurns, projectId],
   );
 
   // ── Recent insights from the latest Project Insight snapshot.
@@ -374,14 +380,15 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[33fr_43fr_24fr]">
           <RecentInsightsCard
             projectId={projectId}
             insights={recentInsights}
             generatedAt={projectInsight?.generatedAt}
           />
-          <ProjectActivityCard events={activity?.events ?? []} />
+          <AiConversationsCard projectId={projectId} />
           <QuickActionsCard
+            className="md:col-span-2 xl:col-span-1"
             projectId={projectId}
             canEdit={canEditProject}
             onSourceCreated={handleSourceCreated}
@@ -499,142 +506,6 @@ function RecentInsightsCard({
             ))}
           </ul>
         )}
-      </div>
-    </Card>
-  );
-}
-
-const ACTIVITY_META: Record<
-  string,
-  { icon: typeof IconSparkles; tone: "ai" | "brand" | "neutral" | "success" }
-> = {
-  ai: { icon: IconSparkles, tone: "ai" },
-  query: { icon: IconCode, tone: "brand" },
-  upload: { icon: IconDatabase, tone: "success" },
-  dashboard: { icon: IconLayoutDashboard, tone: "neutral" },
-  sync: { icon: IconDatabase, tone: "neutral" },
-};
-
-function ProjectActivityCard({ events }: { events: ActivityEvent[] }) {
-  const rows = events.slice(0, 6);
-  return (
-    <Card className="flex flex-col">
-      <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-        <span className="text-h3 text-ink-primary">Project activity</span>
-      </div>
-      <div className="flex-1 p-2">
-        {rows.length === 0 ? (
-          <div className="px-2 py-8 text-center text-small text-ink-tertiary">
-            No recent activity.
-          </div>
-        ) : (
-          <ul className="space-y-0.5">
-            {rows.map((e) => {
-              const meta = ACTIVITY_META[e.category] ?? ACTIVITY_META.sync;
-              const Icon = meta.icon;
-              return (
-                <li
-                  key={e.id}
-                  className="flex items-start gap-2.5 rounded-md px-2 py-2 text-[13px]"
-                >
-                  <span
-                    className={cn(
-                      "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                      meta.tone === "ai" && "bg-ai-bg text-ai",
-                      meta.tone === "brand" && "bg-brand-50 text-brand-700",
-                      meta.tone === "success" && "bg-success-bg text-success",
-                      meta.tone === "neutral" && "bg-bg-secondary text-ink-secondary",
-                    )}
-                  >
-                    <Icon size={14} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-ink-primary">{e.title}</p>
-                    <p className="text-small text-ink-tertiary">
-                      {e.actor} · {timeAgo(e.ts)}
-                    </p>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function QuickActionsCard({
-  projectId,
-  canEdit,
-  onSourceCreated,
-}: {
-  projectId: string;
-  canEdit: boolean;
-  onSourceCreated: () => void;
-}) {
-  const router = useRouter();
-  const actions = [
-    {
-      label: "Add data source",
-      icon: IconDatabase,
-      onClick: undefined as (() => void) | undefined,
-      content: (
-        <ConnectorsMenu
-          projectId={Number(projectId)}
-          onCreated={onSourceCreated}
-          label="Add data source"
-        />
-      ),
-    },
-    {
-      label: "Create table",
-      icon: IconCode,
-      onClick: () => router.push(`/projects/${projectId}/queries`),
-    },
-    {
-      label: "Upload document",
-      icon: IconFileText,
-      onClick: () => router.push(`/projects/${projectId}/documents`),
-    },
-    {
-      label: "New dashboard",
-      icon: IconLayoutDashboard,
-      onClick: () => router.push(`/projects/${projectId}/dashboards`),
-    },
-  ];
-
-  return (
-    <Card className="flex flex-col">
-      <div className="border-b border-line-tertiary px-4 py-3">
-        <span className="text-h3 text-ink-primary">Quick actions</span>
-      </div>
-      <div className="grid grid-cols-2 gap-2 p-3">
-        {actions.map((action) => {
-          const Icon = action.icon;
-          const disabled = !canEdit;
-          return (
-            <div key={action.label}>
-              {action.content ? (
-                <div className="[&>div]:w-full [&_button]:w-full [&_button]:justify-center">
-                  {action.content}
-                </div>
-              ) : (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={disabled}
-                  onClick={action.onClick}
-                  title={disabled ? "You do not have permission to create project resources" : action.label}
-                  className="w-full"
-                >
-                  <Icon size={14} />
-                  {action.label}
-                </Button>
-              )}
-            </div>
-          );
-        })}
       </div>
     </Card>
   );
