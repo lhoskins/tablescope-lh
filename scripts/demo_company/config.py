@@ -20,9 +20,11 @@ CURRENT_DATE = dt.date(2026, 7, 6)
 MONTHLY_THROUGH = dt.date(2026, 7, 1)
 WEEKLY_THROUGH = dt.date(2026, 7, 6)
 
-# History windows.
-MONTHLY_START = dt.date(2024, 1, 1)
-WEEKLY_START = dt.date(2025, 1, 6)  # first Monday of 2025
+# History windows: a uniform two years of history ending at CURRENT_DATE
+# (previously 30 months of monthly history vs. only 18 months of weekly,
+# which understated headcount/scrap trend context in the weekly tables).
+MONTHLY_START = dt.date(2024, 8, 1)  # 24 months through MONTHLY_THROUGH
+WEEKLY_START = dt.date(2024, 7, 8)  # first Monday >= 2 years before CURRENT_DATE; 105 weeks through WEEKLY_THROUGH
 # Budget / forecast horizon: FY2026 budget + rolling forecast through FY2027.
 BUDGET_START = dt.date(2026, 1, 1)
 FORECAST_THROUGH = dt.date(2027, 12, 1)
