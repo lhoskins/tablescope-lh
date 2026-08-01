@@ -123,6 +123,22 @@ export const CONNECTOR_SPECS: Record<string, ConnectorSpec> = {
       },
     ],
   },
+  servicenow: {
+    key: "servicenow",
+    name: "ServiceNow",
+    kind: "saas",
+    initials: "SN",
+    chip: "bg-lime-100 text-lime-700",
+    fields: [
+      {
+        key: "instance_url",
+        label: "Instance URL",
+        placeholder: "https://mycompany.service-now.com",
+      },
+      { key: "username", label: "Username" },
+      { key: "password", label: "Password", type: "password" },
+    ],
+  },
 };
 
 export function connectorSpec(key: string): ConnectorSpec | undefined {

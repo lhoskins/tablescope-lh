@@ -6,11 +6,13 @@ from app.connectors.base import SaasConnector, SaasConnectorError
 from app.connectors.saas.hubspot import HubSpotConnector
 from app.connectors.saas.quickbooks import QuickBooksConnector
 from app.connectors.saas.salesforce import SalesforceConnector
+from app.connectors.saas.servicenow import ServiceNowConnector
 
 _REGISTRY: dict[str, SaasConnector] = {
     HubSpotConnector.connector_type: HubSpotConnector(),
     SalesforceConnector.connector_type: SalesforceConnector(),
     QuickBooksConnector.connector_type: QuickBooksConnector(),
+    ServiceNowConnector.connector_type: ServiceNowConnector(),
 }
 
 

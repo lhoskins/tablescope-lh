@@ -29,6 +29,7 @@ _LABELS: dict[str, str] = {
     "salesforce": "Salesforce",
     "hubspot": "HubSpot",
     "quickbooks": "QuickBooks",
+    "servicenow": "ServiceNow",
 }
 
 # Order shown in the UI grid.
@@ -40,6 +41,7 @@ _ORDER = [
     "salesforce",
     "hubspot",
     "quickbooks",
+    "servicenow",
 ]
 
 
