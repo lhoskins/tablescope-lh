@@ -33,6 +33,7 @@ from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.user_vdb import UserVDB
 from app.services import database_introspection_service as intro
 from app.services import saas_staging_service as staging
+from app.services.auto_query import ensure_datasource_query
 from app.services.crypto import decrypt_secret
 from app.services.teiid_registration_service import (
     TeiidRegistrationService,
@@ -263,6 +264,18 @@ async def create_saas_source(
         await reg.aclose()
 
     ds.status = "active"
+
+    # Auto-create a saved query so the new source shows up under project Tables.
+    if project_id is not None:
+        await ensure_datasource_query(
+            session,
+            project_id=project_id,
+            owner_id=user_id,
+            display_name=display_name,
+            view_name=view_name,
+            columns=[c.name for c in columns],
+        )
+
     await session.commit()
     await session.refresh(saas)
     return saas
