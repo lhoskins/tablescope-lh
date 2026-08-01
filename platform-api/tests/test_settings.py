@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.auth.jwt import create_access_token
+from app.config import get_settings
 from app.models.user import User
 from app.schemas.tenant import TenantSettingsRead
 from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
@@ -48,7 +49,10 @@ async def _create_tenant_with_root(client, service_headers, fake_supabase):
     return r.json()
 
 
-def _headers(tenant_id: int, user_id: int, role: str = "admin") -> dict:
+def _headers(
+    tenant_id: int, user_id: int, role: str = "admin", aal: str | None = None
+) -> dict:
+    extra_claims = {"aal": aal} if aal is not None else None
     return {
         "Authorization": "Bearer "
         + create_access_token(
@@ -56,6 +60,7 @@ def _headers(tenant_id: int, user_id: int, role: str = "admin") -> dict:
             tenant_id=tenant_id,
             user_id=user_id,
             role=role,
+            extra_claims=extra_claims,
         )
     }
 
@@ -132,10 +137,16 @@ async def test_tenant_details_restricted_to_root_or_super(
 
 
 async def test_current_2fa_toggle_and_audit(
-    client, service_headers, fake_supabase, db_session
+    client, service_headers, fake_supabase, db_session, monkeypatch
 ) -> None:
     tenant = await _create_tenant_with_root(client, service_headers, fake_supabase)
-    headers = _headers(tenant["id"], 1, "admin")
+    # Enabling tenant-wide 2FA now requires Twilio Verify config and an aal2 session.
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC_test")
+    monkeypatch.setenv("TWILIO_API_KEY_SID", "SK_test")
+    monkeypatch.setenv("TWILIO_API_KEY_SECRET", "secret")
+    monkeypatch.setenv("TWILIO_VERIFY_SERVICE_SID", "VA_test")
+    get_settings.cache_clear()
+    headers = _headers(tenant["id"], 1, "admin", aal="aal2")
 
     r = await client.get("/api/tenants/current/2fa-enforcement", headers=headers)
     assert r.status_code == 200
@@ -148,6 +159,44 @@ async def test_current_2fa_toggle_and_audit(
     )
     assert r.status_code == 200, r.text
     assert r.json()["enabled"] is not initial
+
+
+async def test_enable_2fa_requires_twilio_config(
+    client, service_headers, fake_supabase, monkeypatch
+) -> None:
+    tenant = await _create_tenant_with_root(client, service_headers, fake_supabase)
+    # Ensure Twilio Verify appears unconfigured.
+    monkeypatch.delenv("TWILIO_VERIFY_SERVICE_SID", raising=False)
+    get_settings.cache_clear()
+    headers = _headers(tenant["id"], 1, "admin", aal="aal2")
+
+    r = await client.put(
+        "/api/tenants/current/2fa-enforcement",
+        json={"enabled": True},
+        headers=headers,
+    )
+    assert r.status_code == 503, r.text
+    assert "SMS provider is not configured" in r.json()["detail"]
+
+
+async def test_enable_2fa_requires_aal2(
+    client, service_headers, fake_supabase, monkeypatch
+) -> None:
+    tenant = await _create_tenant_with_root(client, service_headers, fake_supabase)
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC_test")
+    monkeypatch.setenv("TWILIO_API_KEY_SID", "SK_test")
+    monkeypatch.setenv("TWILIO_API_KEY_SECRET", "secret")
+    monkeypatch.setenv("TWILIO_VERIFY_SERVICE_SID", "VA_test")
+    get_settings.cache_clear()
+    headers = _headers(tenant["id"], 1, "admin", aal="aal1")
+
+    r = await client.put(
+        "/api/tenants/current/2fa-enforcement",
+        json={"enabled": True},
+        headers=headers,
+    )
+    assert r.status_code == 409, r.text
+    assert "step-up authentication" in r.json()["detail"]
 
 
 async def test_current_reprocess_documents_scoped(

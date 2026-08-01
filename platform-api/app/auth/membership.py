@@ -18,7 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext, get_request_context
 from app.auth.mfa_errors import MfaRequiredError
-from app.auth.mfa_policy import mfa_required_for_request
+from app.auth.mfa_policy import (
+    role_requires_mfa,
+    session_has_mfa,
+)
 from app.config import get_settings
 from app.database import get_db
 from app.models.tenant import Tenant
@@ -78,12 +81,13 @@ async def require_membership(
     # enforce_2fa, every member is required to complete MFA, not just admins.
     tenant = await session.get(Tenant, context.tenant_id)
     tenant_enforce_2fa = bool(tenant.enforce_2fa if tenant else False)
+    role_requires_effective = (
+        get_settings().mfa_enforcement_enabled and role_requires_mfa(user.role)
+    )
     if (
-        get_settings().mfa_enforcement_enabled
-        and not _is_mfa_exempt(request.url.path)
-        and mfa_required_for_request(
-            user.role, context.aal, tenant_enforce_2fa=tenant_enforce_2fa
-        )
+        not _is_mfa_exempt(request.url.path)
+        and not session_has_mfa(context.aal)
+        and (tenant_enforce_2fa or role_requires_effective)
     ):
         raise MfaRequiredError
 

@@ -173,18 +173,22 @@ async def test_delete_tenant_bound_to_data_plane_rejected(
 # --- Tenant-wide 2FA enforcement toggle -------------------------------------
 
 
-def _admin_token(tenant_id: int, user_id: int) -> str:
+def _admin_token(tenant_id: int, user_id: int, aal: str | None = None) -> str:
     from app.auth.jwt import create_access_token
 
+    extra_claims = {"aal": aal} if aal else None
     return create_access_token(
         sub="admin-test",
         tenant_id=tenant_id,
         user_id=user_id,
         role="admin",
+        extra_claims=extra_claims,
     )
 
 
-async def test_tenant_2fa_enforcement_toggle(client, service_headers) -> None:
+async def test_tenant_2fa_enforcement_toggle(
+    client, service_headers, monkeypatch
+) -> None:
     created = await client.post(
         "/api/tenants",
         json={
@@ -199,7 +203,16 @@ async def test_tenant_2fa_enforcement_toggle(client, service_headers) -> None:
     tenant = created.json()
     assert tenant["enforce_2fa"] is False
 
-    headers = {"Authorization": f"Bearer {_admin_token(tenant['id'], 1)}"}
+    # Enabling tenant-wide 2FA now requires Twilio Verify config and an aal2 session.
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC_test")
+    monkeypatch.setenv("TWILIO_API_KEY_SID", "SK_test")
+    monkeypatch.setenv("TWILIO_API_KEY_SECRET", "secret")
+    monkeypatch.setenv("TWILIO_VERIFY_SERVICE_SID", "VA_test")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    headers = {"Authorization": f"Bearer {_admin_token(tenant['id'], 1, aal='aal2')}"}
     r = await client.put(
         f"/api/tenants/{tenant['id']}/2fa-enforcement",
         json={"enabled": True},

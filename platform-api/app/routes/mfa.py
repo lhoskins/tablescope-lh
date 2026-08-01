@@ -118,11 +118,8 @@ async def mfa_status(
     # switch is on, so the frontend gate doesn't redirect before MFA is live.
     role_requires = settings.mfa_enforcement_enabled and role_requires_mfa(role)
     # tenantRequiresMfa is true when the tenant has mandated 2FA for every member
-    # (including non-admin roles). It is also gated by the platform MFA switch.
-    tenant_requires = (
-        settings.mfa_enforcement_enabled
-        and bool(tenant.enforce_2fa if tenant else False)
-    )
+    # (including non-admin roles). It is independent of the platform MFA switch.
+    tenant_requires = bool(tenant.enforce_2fa if tenant else False)
     satisfied = session_has_mfa(context.aal)
     factor = await get_active_factor(session, context.user_id)
     has_factor = factor is not None
@@ -296,10 +293,14 @@ async def remove_phone(
     settings = get_settings()
     user = await session.get(User, context.user_id)
     role = (user.role if user else context.role) or "viewer"
-    if settings.mfa_enforcement_enabled and role_requires_mfa(role):
+    tenant = await session.get(Tenant, context.tenant_id)
+    tenant_requires = bool(tenant.enforce_2fa if tenant else False)
+    if tenant_requires or (
+        settings.mfa_enforcement_enabled and role_requires_mfa(role)
+    ):
         raise HTTPException(
             status_code=400,
-            detail="SMS verification is required for your role and can't be removed.",
+            detail="SMS verification is required by tenant or role policy and can't be removed.",
         )
     removed = await deactivate_factor(session, context.user_id)
     if removed:

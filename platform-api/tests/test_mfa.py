@@ -568,3 +568,73 @@ async def test_mfa_aal_for_user_expired_window(db_session) -> None:
     )
     await db_session.commit()
     assert await mfa_aal_for_user(db_session, user.id) is None
+
+
+async def test_tenant_enforce_2fa_blocks_member_aal1_with_master_switch_off(
+    client_strict, db_session, monkeypatch
+) -> None:
+    """Tenant enforce_2fa must be authoritative even when MFA_ENFORCEMENT_ENABLED=false."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("MFA_ENFORCEMENT_ENABLED", "false")
+    get_settings.cache_clear()
+    tenant, user = await _seed(db_session, role="member", ext="ext-t2fa-master-off")
+    tenant.enforce_2fa = True
+    await db_session.commit()
+    r = await client_strict.get(
+        "/api/projects",
+        headers=_headers(
+            tenant.id, user.id, role="member", aal="aal1", sub="ext-t2fa-master-off"
+        ),
+    )
+    assert r.status_code == 403
+    assert r.json()["error"] == "MFA_REQUIRED"
+
+
+async def test_mfa_status_tenant_requires_ignores_master_switch_off(
+    client_strict, db_session, monkeypatch
+) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setenv("MFA_ENFORCEMENT_ENABLED", "false")
+    get_settings.cache_clear()
+    tenant, user = await _seed(db_session, role="member", ext="ext-t2fa-st-off")
+    tenant.enforce_2fa = True
+    await db_session.commit()
+    r = await client_strict.get(
+        "/api/mfa/status",
+        headers=_headers(
+            tenant.id, user.id, role="member", aal="aal1", sub="ext-t2fa-st-off"
+        ),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["roleRequiresMfa"] is False
+    assert body["tenantRequiresMfa"] is True
+    assert body["mfaSatisfied"] is False
+    assert body["requiredAction"] == "setup"
+
+
+async def test_remove_phone_blocked_when_tenant_enforces_2fa(
+    client_strict, db_session, fake_verify
+) -> None:
+    tenant, user = await _seed(db_session, role="member", ext="ext-t2fa-del")
+    tenant.enforce_2fa = True
+    db_session.add(
+        MfaPhoneFactor(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            masked_phone="+1******1212",
+            phone_hash="x" * 64,
+            active=True,
+        )
+    )
+    await db_session.commit()
+    r = await client_strict.delete(
+        "/api/mfa/phone",
+        headers=_headers(
+            tenant.id, user.id, role="member", aal="aal2", sub="ext-t2fa-del"
+        ),
+    )
+    assert r.status_code == 400, r.text
+    assert "tenant or role policy" in r.json()["detail"]
