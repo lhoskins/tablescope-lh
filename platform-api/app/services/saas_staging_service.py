@@ -12,6 +12,7 @@ columns.  Upserts key on the connector's id column.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import re
@@ -29,6 +30,10 @@ STAGING_SCHEMA = "saas_staging"
 # safe to embed in DDL.  SaaS field names are alnum/underscore (Salesforce custom
 # fields end in __c); reject anything else rather than risk injection.
 _SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+_INT_RE = re.compile(r"^-?\d+$")
+_FLOAT_RE = re.compile(r"^-?\d+\.\d+$")
 
 # Postgres column types we allow staging columns to use.
 _ALLOWED_PG_TYPES = {
@@ -104,6 +109,81 @@ async def create_staging_table(
     logger.info("Created staging table %s.%s (%d cols)", schema, table, len(columns))
 
 
+def _coerce_pg_value(value: object, pg_type: str) -> object:
+    """Convert a raw SaaS value into a Python type AsyncPG/Postgres expects.
+
+    ServiceNow and several other SaaS APIs return every value as a string;
+    the staging column pg_type drives the target type.
+    """
+    if value is None:
+        return None
+    if pg_type == "text":
+        return value if isinstance(value, str) else str(value)
+    if pg_type == "boolean":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lower = value.strip().lower()
+            if lower in ("true", "t", "yes", "y", "1"):
+                return True
+            if lower in ("false", "f", "no", "n", "0"):
+                return False
+            if lower == "":
+                return None
+        return bool(value)
+    if pg_type == "integer":
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                return None
+            if _INT_RE.match(value):
+                return int(value)
+        return value
+    if pg_type == "double precision":
+        if isinstance(value, float):
+            return value
+        if isinstance(value, int):
+            return float(value)
+        if isinstance(value, str):
+            value = value.strip()
+            if value == "":
+                return None
+            if _FLOAT_RE.match(value) or _INT_RE.match(value):
+                return float(value)
+        return value
+    if pg_type == "date":
+        if isinstance(value, dt.date) and not isinstance(value, dt.datetime):
+            return value
+        if isinstance(value, dt.datetime):
+            return value.date()
+        if isinstance(value, str):
+            s = value.strip()
+            if s == "":
+                return None
+            if _DATE_RE.match(s):
+                return dt.datetime.strptime(s, "%Y-%m-%d").date()
+            if _DATETIME_RE.match(s):
+                return dt.datetime.strptime(s, "%Y-%m-%d %H:%M:%S").date()
+        return value
+    if pg_type == "timestamptz":
+        if isinstance(value, dt.datetime):
+            return value
+        if isinstance(value, dt.date):
+            return dt.datetime.combine(value, dt.time.min)
+        if isinstance(value, str):
+            s = value.strip()
+            if s == "":
+                return None
+            if _DATETIME_RE.match(s):
+                return dt.datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+            if _DATE_RE.match(s):
+                return dt.datetime.strptime(s, "%Y-%m-%d")
+        return value
+    return value
+
+
 async def upsert_records(
     session: AsyncSession,
     *,
@@ -147,7 +227,7 @@ async def upsert_records(
             if col.pg_type == "jsonb":
                 p[col.name] = json.dumps(val) if val is not None else None
             else:
-                p[col.name] = val
+                p[col.name] = _coerce_pg_value(val, col.pg_type)
         params.append(p)
 
     await session.execute(text(sql), params)
