@@ -26,7 +26,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
+_TIMEOUT = httpx.Timeout(900.0, connect=10.0)
 _BUSY_MAX_ATTEMPTS = 3
 _BUSY_DEFAULT_RETRY_SECONDS = 5.0
 _BUSY_MAX_RETRY_SECONDS = 30.0
