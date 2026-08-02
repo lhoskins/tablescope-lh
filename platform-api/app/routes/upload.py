@@ -607,13 +607,21 @@ async def replace_file_source(
 
     content = await file.read()
 
-    # 2) Column compatibility check: incoming must contain all existing columns.
-    try:
+    # ── Replacement cleaning (same as the original upload path) ─────────
+    # Apply header/cell sanitization to both files so the column compatibility
+    # check and the VDB DDL are working with the same safe identifiers.
+    lower_name = existing_name.lower()
+    if lower_name.endswith((".csv", ".tsv", ".txt")):
+        content = sanitize_csv_content(content)
+        existing_content = sanitize_csv_content(existing_path.read_bytes())
+    elif lower_name.endswith((".xlsx", ".xlsm", ".xls")):
+        # The original upload flattens XLSX to CSV; keep that behavior here.
+        content = sanitize_xlsx_content(content)
+        existing_content = sanitize_xlsx_content(existing_path.read_bytes())
+    else:
         existing_content = existing_path.read_bytes()
-    except OSError as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Could not read existing file: {exc}"
-        ) from exc
+
+    # 2) Column compatibility check: incoming must contain all existing columns.
     existing_cols = {
         c["field"] for c in detect_column_types(existing_content, existing_name)
     }
