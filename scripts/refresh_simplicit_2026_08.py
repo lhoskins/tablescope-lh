@@ -126,6 +126,7 @@ def main() -> int:
     p.add_argument("--email", required=True)
     p.add_argument("--password", default=None)
     p.add_argument("--token", default=None)
+    p.add_argument("--force", action="store_true", help="Pass force=true to overwrite even on schema rename.")
     p.add_argument("--insecure", action="store_true")
     args = p.parse_args()
 
@@ -141,9 +142,12 @@ def main() -> int:
             failed.append(f"{filename}: missing at {path}")
             continue
         view = compute_view_name(filename)
+        api_path = f"/api/upload/datasources/{view}/replace"
+        if args.force:
+            api_path += "?force=true"
         try:
             resp = client.post_multipart(
-                f"/api/upload/datasources/{view}/replace",
+                api_path,
                 filename=filename, file_bytes=path.read_bytes(), content_type="text/csv")
             print(f"  ~ replaced {filename} -> {resp}")
             replaced += 1

@@ -629,6 +629,7 @@ async def delete_file_source(
 async def replace_file_source(
     view_name: str,
     file: UploadFile = File(...),
+    force: bool = Query(False, description="Overwrite even if the schema has changed (column renames)."),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict:
@@ -706,20 +707,12 @@ async def replace_file_source(
         raise HTTPException(
             status_code=500, detail=f"Could not read existing file: {exc}"
         ) from exc
-    # Sanitize both files so the VDB DDL uses safe identifiers (e.g. Month -> Month_col).
-    lower_name = existing_name.lower()
-    if lower_name.endswith((".csv", ".tsv", ".txt")):
-        content = sanitize_csv_content(content)
-        existing_content = sanitize_csv_content(existing_content)
-    elif lower_name.endswith((".xlsx", ".xlsm", ".xls")):
-        content = sanitize_xlsx_content(content)
-        existing_content = sanitize_xlsx_content(existing_content)
     existing_types = detect_column_types(existing_content, existing_name)
     existing_cols = {c["field"] for c in existing_types}
     incoming_types = detect_column_types(content, file.filename)
     incoming_cols = {c["field"] for c in incoming_types}
     diff = compare_schemas(existing_types, incoming_types)
-    if diff["blockers"]:
+    if diff["blockers"] and not force:
         raise HTTPException(status_code=409, detail=" ".join(diff["blockers"]))
 
     # 3) Re-import the new file through the Teiid servlet (overwrites the view).
