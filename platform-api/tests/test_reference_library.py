@@ -99,6 +99,101 @@ async def test_industry_create_and_list(client) -> None:
     assert "NIST SP 800-161" in titles  # industry visible to all tenants
 
 
+async def test_document_detail_returns_family_and_usage(client) -> None:
+    res = await client.post(
+        "/api/reference-library/documents",
+        data={
+            "tier": "company",
+            "title": "Detail Probe Policy",
+            "domain_tag": "Legal & Compliance",
+        },
+        headers=_headers("tenant_admin", tenant_id=1),
+    )
+    assert res.status_code in (200, 201), res.text
+    doc_id = res.json()["id"]
+
+    res = await client.get(
+        f"/api/reference-library/documents/{doc_id}/detail",
+        headers=_headers("viewer", tenant_id=1),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["document"]["id"] == doc_id
+    assert body["document"]["title"] == "Detail Probe Policy"
+    # A lone document is its own single-member version family with no usage yet.
+    assert [v["id"] for v in body["versionFamily"]] == [doc_id]
+    assert body["versionFamily"][0]["isCurrent"] is True
+    assert body["usage"] == []
+
+    # Cross-tenant reads are denied at the data-access layer.
+    res = await client.get(
+        f"/api/reference-library/documents/{doc_id}/detail",
+        headers=_headers("tenant_admin", tenant_id=2),
+    )
+    assert res.status_code in (403, 404)
+
+
+async def test_document_detail_exposes_ai_metadata_field(client) -> None:
+    """The detail payload always carries an aiMetadata object (the per-document
+    AI profile the drawer renders), defaulting to {} before profiling runs."""
+    res = await client.post(
+        "/api/reference-library/documents",
+        data={"tier": "company", "title": "Profile Field Probe"},
+        headers=_headers("tenant_admin", tenant_id=1),
+    )
+    assert res.status_code in (200, 201), res.text
+    doc_id = res.json()["id"]
+    assert res.json()["aiMetadata"] == {}
+
+    res = await client.get(
+        f"/api/reference-library/documents/{doc_id}/detail",
+        headers=_headers("viewer", tenant_id=1),
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["document"]["aiMetadata"] == {}
+
+
+# ── delete ───────────────────────────────────────────────────────────────────
+
+
+async def test_delete_document_removes_it(client) -> None:
+    res = await client.post(
+        "/api/reference-library/documents",
+        data={"tier": "company", "title": "Doc To Delete"},
+        headers=_headers("tenant_admin", tenant_id=1),
+    )
+    assert res.status_code in (200, 201), res.text
+    doc_id = res.json()["id"]
+
+    # A viewer cannot delete.
+    res = await client.delete(
+        f"/api/reference-library/documents/{doc_id}",
+        headers=_headers("viewer", tenant_id=1),
+    )
+    assert res.status_code == 403
+
+    # A different tenant's admin cannot delete it.
+    res = await client.delete(
+        f"/api/reference-library/documents/{doc_id}",
+        headers=_headers("tenant_admin", tenant_id=2),
+    )
+    assert res.status_code in (403, 404)
+
+    # The owning tenant admin can.
+    res = await client.delete(
+        f"/api/reference-library/documents/{doc_id}",
+        headers=_headers("tenant_admin", tenant_id=1),
+    )
+    assert res.status_code == 200, res.text
+
+    # It's gone.
+    res = await client.get(
+        f"/api/reference-library/documents/{doc_id}",
+        headers=_headers("tenant_admin", tenant_id=1),
+    )
+    assert res.status_code == 404
+
+
 # ── company tier: tenant isolation ───────────────────────────────────────────
 
 

@@ -1,0 +1,4 @@
+# Generated demo-company artifacts (regenerable via install_demo_company.py)
+output/
+__pycache__/
+*.pyc
