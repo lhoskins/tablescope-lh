@@ -349,46 +349,6 @@ async def call_document_profiler(
     )
 
 
-async def call_document_profiler(
-    *,
-    tenant_id: int,
-    user_id: int,
-    project_id: int,
-    asset_id: int,
-    document_id: int | None,
-    filename: str,
-    asset_type: str,
-    content_type: str,
-    text_preview: str,
-    chunks: list[dict],
-    ref_tags: list[str],
-    ref_kpis: list[str],
-    include_family: bool = True,
-) -> dict[str, Any]:
-    """Scope-agnostic entrypoint to the shared AI document profiler.
-
-    Used by both the project-asset pipeline and the tenant-wide reference
-    libraries. ``include_family`` is the only scope-dependent knob: project
-    documents request the project-scoped family block, tenant-wide libraries
-    disable it so the family-classification step never runs for them.
-    """
-    return await _call_ai_profile(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        project_id=project_id,
-        asset_id=asset_id,
-        document_id=document_id,
-        filename=filename,
-        asset_type=asset_type,
-        content_type=content_type,
-        text_preview=text_preview,
-        chunks=chunks,
-        ref_tags=ref_tags,
-        ref_kpis=ref_kpis,
-        include_family=include_family,
-    )
-
-
 async def _call_ai_profile(
     tenant_id: int,
     user_id: int,
