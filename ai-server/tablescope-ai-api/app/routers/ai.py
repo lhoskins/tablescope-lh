@@ -3649,6 +3649,45 @@ async def profile_document(req: DocumentProfileRequest):
     for c in req.chunks[:5]:
         chunk_text += f"\n--- Chunk {c.get('chunk_index', 0)} ---\n{c.get('text', '')[:1500]}\n"
 
+    # Document families are project-scoped; tenant-wide reference libraries
+    # profile with include_family=False so the family block is never generated.
+    family_json = (
+        """,
+  "document_family": {
+    "family_name": "Human Readable Family Name (e.g. IT Change Management)",
+    "family_key": "normalized_snake_case_key",
+    "family_type": "policy_process|incident_case|supplier_case|audit_package|compliance_package|operational_review|project_package|service_operations|security_response|contract_package|procedure_set|dashboard_context|general_knowledge_group",
+    "confidence": 0.94,
+    "role": "governing_policy|procedure|standard_operating_procedure|evidence|postmortem|audit_report|meeting_notes|review_deck|runbook|source_data|supporting_document|exception|template|contract|requirements|unknown",
+    "reason": "Why this document belongs to this family",
+    "auto_link": true
+  },
+  "family_relationships": [
+    {"relationship_type": "governs|implements|procedure_for|policy_for|references|supersedes|depends_on|evidence_for|postmortem_for|remediation_for|related_to_datasource|measures_process|incident_impact", "target_type": "process|datasource|document|kpi|entity", "target_name": "Target Name", "confidence": 0.88, "evidence": "Brief evidence"}
+  ],
+  "family_members_suggested": [
+    {"member_type": "datasource|document|kpi|query|dashboard", "member_name": "Member Name", "relationship_type": "measures_process|related_family_member|supports", "confidence": 0.85, "reason": "Why this member belongs in the family"}
+  ]"""
+        if req.include_family
+        else ""
+    )
+
+    family_rules = (
+        """
+
+Document family rules:
+- A document family is a group of related documents, data sources, queries, dashboards, KPIs, entities, or processes that together describe a business process, operational process, incident, supplier, audit, policy, procedure, service, contract, or compliance package.
+- Use the document title, summary, type, tags, entities, KPIs, domain, process area, and explicit references to infer a family.
+- Prefer clear family names such as: IT Change Management, Incident Management, Patch Management, Vulnerability Management, CloudAuth Service Operations, Supplier Quality Management, Logistics Carrier Performance, Claims Denial Management, Budget Utilization, Audit & Compliance.
+- family_key must be a normalized snake_case version of family_name (lowercase, words joined with underscores, no punctuation).
+- Set auto_link=true ONLY when document_family.confidence >= 0.90.
+- If confidence is 0.70 to 0.89, still return the family but set auto_link=false.
+- If confidence is below 0.70, set "document_family" to null.
+- Only return family_relationships and family_members_suggested when supported by evidence. Do not invent unsupported relationships. Every relationship must include confidence and evidence."""
+        if req.include_family
+        else ""
+    )
+
     prompt = f"""You are a document analyst. Analyze this document and return a JSON profile.
 
 File: {req.filename}
@@ -3682,23 +3721,8 @@ Return ONLY valid JSON with this exact structure:
   "relationship_hints": [
     {{"from_type": "document", "from_name": "{req.filename}", "relationship_type": "references_supplier|identifies_risk|governs_process|describes_policy", "to_type": "supplier|risk|process|policy", "to_name": "Target Name", "confidence": 0.8, "evidence": "Brief evidence"}}
   ],
-  "document_family": {{
-    "family_name": "Human Readable Family Name (e.g. IT Change Management)",
-    "family_key": "normalized_snake_case_key",
-    "family_type": "policy_process|incident_case|supplier_case|audit_package|compliance_package|operational_review|project_package|service_operations|security_response|contract_package|procedure_set|dashboard_context|general_knowledge_group",
-    "confidence": 0.94,
-    "role": "governing_policy|procedure|standard_operating_procedure|evidence|postmortem|audit_report|meeting_notes|review_deck|runbook|source_data|supporting_document|exception|template|contract|requirements|unknown",
-    "reason": "Why this document belongs to this family",
-    "auto_link": true
-  }},
-  "family_relationships": [
-    {{"relationship_type": "governs|implements|procedure_for|policy_for|references|supersedes|depends_on|evidence_for|postmortem_for|remediation_for|related_to_datasource|measures_process|incident_impact", "target_type": "process|datasource|document|kpi|entity", "target_name": "Target Name", "confidence": 0.88, "evidence": "Brief evidence"}}
-  ],
-  "family_members_suggested": [
-    {{"member_type": "datasource|document|kpi|query|dashboard", "member_name": "Member Name", "relationship_type": "measures_process|related_family_member|supports", "confidence": 0.85, "reason": "Why this member belongs in the family"}}
-  ],
   "data_quality_notes": ["Any data quality observations"],
-  "suggested_questions": ["Question a user might ask about this document"]
+  "suggested_questions": ["Question a user might ask about this document"]{family_json}
 }}
 
 Rules:
@@ -3706,17 +3730,7 @@ Rules:
 - Return confidence scores between 0.0 and 1.0.
 - Return evidence strings for entities and relationships.
 - Only include information supported by the actual document text.
-- Be specific — don't suggest generic tags unrelated to this document's content.
-
-Document family rules:
-- A document family is a group of related documents, data sources, queries, dashboards, KPIs, entities, or processes that together describe a business process, operational process, incident, supplier, audit, policy, procedure, service, contract, or compliance package.
-- Use the document title, summary, type, tags, entities, KPIs, domain, process area, and explicit references to infer a family.
-- Prefer clear family names such as: IT Change Management, Incident Management, Patch Management, Vulnerability Management, CloudAuth Service Operations, Supplier Quality Management, Logistics Carrier Performance, Claims Denial Management, Budget Utilization, Audit & Compliance.
-- family_key must be a normalized snake_case version of family_name (lowercase, words joined with underscores, no punctuation).
-- Set auto_link=true ONLY when document_family.confidence >= 0.90.
-- If confidence is 0.70 to 0.89, still return the family but set auto_link=false.
-- If confidence is below 0.70, set "document_family" to null.
-- Only return family_relationships and family_members_suggested when supported by evidence. Do not invent unsupported relationships. Every relationship must include confidence and evidence."""
+- Be specific — don't suggest generic tags unrelated to this document's content.{family_rules}"""
 
     try:
         raw = await llm_client.generate(
@@ -3731,7 +3745,11 @@ Document family rules:
         if not profile:
             profile = {"summary": raw[:500], "tags": [], "entities": [], "recommended_kpis": [], "relationship_hints": []}
 
-        family = _normalize_document_family(profile.get("document_family"))
+        family = (
+            _normalize_document_family(profile.get("document_family"))
+            if req.include_family
+            else None
+        )
 
         return DocumentProfileResponse(
             summary=profile.get("summary", ""),
@@ -3745,8 +3763,16 @@ Document family rules:
             data_quality_notes=profile.get("data_quality_notes", []),
             suggested_questions=profile.get("suggested_questions", []),
             document_family=family,
-            family_relationships=profile.get("family_relationships", []) or [],
-            family_members_suggested=profile.get("family_members_suggested", []) or [],
+            family_relationships=(
+                profile.get("family_relationships", []) or []
+                if req.include_family
+                else []
+            ),
+            family_members_suggested=(
+                profile.get("family_members_suggested", []) or []
+                if req.include_family
+                else []
+            ),
             request_id=request_id,
             model_used=settings.reasoning_model,
         )
