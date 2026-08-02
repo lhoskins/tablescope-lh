@@ -215,11 +215,12 @@ export interface ReviewedInsightsResponse {
 export const projectInsightApi = {
   get: (projectId: string) =>
     apiClient.get<ProjectInsight>(`/api/projects/${projectId}/insight`),
-  // Force a fresh run (bypasses the saved snapshot); the completed result is
-  // persisted server-side and becomes the new snapshot.
+  // Queue a background rebuild (bypasses the saved snapshot); the completed
+  // result is persisted server-side and becomes the new snapshot.
   refresh: (projectId: string) =>
-    apiClient.get<ProjectInsight>(
-      `/api/projects/${projectId}/insight?refresh=true`,
+    apiClient.post<ProjectInsight>(
+      `/api/projects/${projectId}/insight/refresh`,
+      {},
     ),
   clearCache: (projectId: string) =>
     apiClient.post<{ deleted: { project_intelligence_snapshots: number; business_insight_results: number } }>(

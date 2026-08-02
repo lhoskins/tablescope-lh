@@ -490,6 +490,22 @@ export function getIntelligenceSnapshot(): Promise<{
   return apiClient.get("/api/ai/home-intelligence/snapshot");
 }
 
+export function refreshHomeIntelligence(options: {
+  crossProject?: boolean;
+  granularity?: number;
+} = {}): Promise<{ snapshot: IntelligenceSnapshot | null; run_id: string | null }> {
+  return apiClient.post("/api/ai/home-intelligence/refresh", {
+    cross_project: options.crossProject ?? true,
+    granularity: options.granularity ?? 3,
+  });
+}
+
+export function getHomeIntelligenceRunStatus(
+  runId: string,
+): Promise<{ run_id: string; complete: boolean }> {
+  return apiClient.get(`/api/ai/home-intelligence/run/${runId}`);
+}
+
 export function clearBusinessInsightCache(): Promise<{
   deleted: {
     business_insight_results: number;

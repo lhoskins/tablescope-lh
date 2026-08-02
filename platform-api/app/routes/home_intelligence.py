@@ -342,6 +342,46 @@ async def _has_project_edit(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Shared business-intelligence run orchestration
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _start_home_intelligence_run(
+    context: RequestContext,
+    cross_project: bool,
+    granularity: int,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Register a business-inselligence run and enqueue one arq job per project."""
+    async with SessionLocal() as session:
+        projects = await _accessible_projects(session, context)
+
+    if not projects:
+        return ("", [])
+
+    project_meta = [
+        {"id": str(p.id), "name": p.name, "color": hi.project_color(p.id)}
+        for p in projects
+    ]
+    run_id = uuid.uuid4().hex
+    await q.create_run(
+        run_id=run_id,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        granularity=granularity,
+        cross_project=cross_project,
+        projects=project_meta,
+    )
+    for p in projects:
+        await enqueue_analyze_project_intelligence(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=p.id,
+            granularity=granularity,
+            run_id=run_id,
+        )
+    return run_id, project_meta
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SSE stream — runs all accessible projects, streams as each completes
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -362,42 +402,14 @@ async def home_intelligence_stream(
     """
 
     async def event_stream() -> AsyncIterator[str]:
-        # Resolve accessible projects up front in a short-lived session.
-        async with SessionLocal() as session:
-            projects = await _accessible_projects(session, context)
-
-        if not projects:
+        run_id, project_meta = await _start_home_intelligence_run(
+            context, cross_project, granularity
+        )
+        if not run_id:
             yield _sse({"type": "done", "projectCount": 0})
             return
 
-        project_meta = [
-            {"id": str(p.id), "name": p.name, "color": hi.project_color(p.id)}
-            for p in projects
-        ]
         yield _sse({"type": "start", "projects": project_meta})
-
-        # Move per-project analysis off the request path into the durable
-        # Redis + arq queue: register the run, enqueue one job per project,
-        # then stream results as workers write them to the per-run store. The
-        # workers own synthesis + snapshot persistence, so the run completes
-        # (and the snapshot is written) even if this SSE connection drops.
-        run_id = uuid.uuid4().hex
-        await q.create_run(
-            run_id=run_id,
-            tenant_id=context.tenant_id,
-            user_id=context.user_id,
-            granularity=granularity,
-            cross_project=cross_project,
-            projects=project_meta,
-        )
-        for p in projects:
-            await enqueue_analyze_project_intelligence(
-                tenant_id=context.tenant_id,
-                user_id=context.user_id,
-                project_id=p.id,
-                granularity=granularity,
-                run_id=run_id,
-            )
 
         emitted: set[str] = set()
         deadline = asyncio.get_event_loop().time() + _STREAM_DEADLINE_SECONDS
@@ -427,12 +439,12 @@ async def home_intelligence_stream(
                         run_id,
                         _STREAM_DEADLINE_SECONDS,
                         len(emitted),
-                        len(projects),
+                        len(project_meta),
                     )
                     break
                 await q.wait_for_wakeup(pubsub, timeout=_STREAM_POLL_SECONDS)
 
-        yield _sse({"type": "done", "projectCount": len(projects)})
+        yield _sse({"type": "done", "projectCount": len(project_meta)})
 
     # ``X-Accel-Buffering: no`` tells nginx to stream this response unbuffered.
     return StreamingResponse(
@@ -554,6 +566,54 @@ async def _stale_project_ids(
     return stale
 
 
+async def _snapshot_payload_dict(
+    session: AsyncSession,
+    context: RequestContext,
+    snap: IntelligenceSnapshot,
+) -> dict[str, Any]:
+    """Build the snapshot response, honouring both KG-drift and in-progress runs."""
+    project_ids: set[str] = set()
+    if isinstance(snap.payload, dict):
+        for p in snap.payload.get("projects") or []:
+            try:
+                project_ids.add(str(p["id"]))
+            except (TypeError, KeyError, ValueError):
+                pass
+
+    kg_stale: set[str] = set()
+    try:
+        kg_stale = set(await _stale_project_ids(session, context, snap))
+    except Exception:  # staleness is advisory — never break the snapshot read
+        logger.exception("Failed to compute snapshot staleness")
+
+    payload_stale = False
+    payload_stale_projects: set[str] = set()
+    if isinstance(snap.payload, dict):
+        payload_stale = bool(snap.payload.get("stale"))
+        for pid in snap.payload.get("staleProjects") or []:
+            try:
+                payload_stale_projects.add(str(pid))
+            except (TypeError, ValueError):
+                pass
+
+    if payload_stale:
+        stale_projects = project_ids | kg_stale | payload_stale_projects
+    else:
+        stale_projects = kg_stale | payload_stale_projects
+
+    payload = dict(snap.payload) if isinstance(snap.payload, dict) else {}
+    payload.pop("stale", None)
+    payload.pop("staleProjects", None)
+
+    return {
+        "granularity": snap.granularity,
+        "updatedAt": snap.updated_at.isoformat() if snap.updated_at else None,
+        **payload,
+        "stale": bool(stale_projects),
+        "staleProjects": sorted(stale_projects),
+    }
+
+
 @router.get("/home-intelligence/snapshot")
 async def get_intelligence_snapshot(
     session: AsyncSession = Depends(get_db),
@@ -573,21 +633,62 @@ async def get_intelligence_snapshot(
     if snap is None:
         return {"snapshot": None}
 
-    stale_projects: list[str] = []
-    try:
-        stale_projects = await _stale_project_ids(session, context, snap)
-    except Exception:  # staleness is advisory — never break the snapshot read
-        logger.exception("Failed to compute snapshot staleness")
+    return {"snapshot": await _snapshot_payload_dict(session, context, snap)}
 
-    return {
-        "snapshot": {
-            "granularity": snap.granularity,
-            "updatedAt": snap.updated_at.isoformat() if snap.updated_at else None,
-            **snap.payload,
-            "stale": bool(stale_projects),
-            "staleProjects": stale_projects,
-        }
+
+class RefreshHomeIntelligenceRequest(BaseModel):
+    cross_project: bool = True
+    granularity: int = 3
+
+
+@router.post("/home-intelligence/refresh")
+async def refresh_home_intelligence(
+    req: RefreshHomeIntelligenceRequest | None = None,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Queue a background business-intelligence run and return immediately.
+
+    The caller can poll ``GET /api/ai/home-intelligence/snapshot`` (or
+    ``/run/{run_id}``) to update the cards once the arq workers finish.
+    """
+    cross_project = req.cross_project if req else True
+    granularity = req.granularity if req else 3
+    run_id, project_meta = await _start_home_intelligence_run(
+        context, cross_project, granularity
+    )
+    if not run_id:
+        return {"snapshot": None, "run_id": None}
+
+    payload: dict[str, Any] = {
+        "projects": project_meta,
+        "results": [],
+        "synthesis": None,
+        "generatedAt": datetime.now(UTC).isoformat(),
+        "stale": True,
+        "staleProjects": [p["id"] for p in project_meta],
     }
+    await _save_snapshot(context, granularity, payload)
+
+    snap = await session.scalar(
+        select(IntelligenceSnapshot).where(
+            IntelligenceSnapshot.user_id == context.user_id
+        )
+    )
+    return {
+        "snapshot": await _snapshot_payload_dict(session, context, snap) if snap else None,
+        "run_id": run_id,
+    }
+
+
+@router.get("/home-intelligence/run/{run_id}")
+async def home_intelligence_run_status(
+    run_id: str,
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> dict[str, Any]:
+    """Return whether a queued business-intelligence run has finalized."""
+    stored, _ = await q.get_synthesis(run_id)
+    return {"run_id": run_id, "complete": stored}
 
 
 @router.post("/home-intelligence/clear-cache")

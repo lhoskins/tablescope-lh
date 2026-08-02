@@ -206,6 +206,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const {
     data: rawData,
     isLoading,
+    isFetching,
     isError,
   } = useQuery<ProjectInsight>({
     queryKey: INSIGHT_KEY(projectId),
@@ -436,7 +437,7 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
     );
   }, [insight.questionsToAsk, insight.questionsNeedingData, handleProjectAsk]);
 
-  const running = refresh.isPending || insightsQuery.isFetching;
+  const running = refresh.isPending || isFetching || insightsQuery.isFetching;
 
   const lastUpdated = useMemo(
     () => (insight.lastUpdatedAt ? new Date(insight.lastUpdatedAt) : null),

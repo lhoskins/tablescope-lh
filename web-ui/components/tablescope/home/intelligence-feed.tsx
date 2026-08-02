@@ -4,14 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   clearBusinessInsightCache,
+  getHomeIntelligenceRunStatus,
   getIntelligenceSnapshot,
   getPreferences,
+  refreshHomeIntelligence,
   streamHomeIntelligence,
   updatePreferences,
   type CrossProjectSynthesis,
   type InsightCard,
   type IntelligenceEvent,
   type IntelligenceSettings,
+  type IntelligenceSnapshot,
   type ProjectResult,
   type StreamProject,
 } from "@/lib/api/home-intelligence";
@@ -154,6 +157,7 @@ export function IntelligenceFeed({
   }, []);
 
   const controllerRef = useRef<AbortController | null>(null);
+  const pollTimerRef = useRef<number | null>(null);
   // Background re-run accumulates into these buffers and commits at "done" so
   // the visible (saved-snapshot) cards never flicker mid-refresh.
   const backgroundRef = useRef(false);
@@ -304,6 +308,10 @@ export function IntelligenceFeed({
     return () => {
       cancelled = true;
       controllerRef.current?.abort();
+      if (pollTimerRef.current) {
+        window.clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
     };
   }, [startStream]);
 
@@ -390,18 +398,88 @@ export function IntelligenceFeed({
 
   const granularity = settings?.granularity ?? 3;
 
-  const handleGranularity = (value: number) => {
-    setSettings((prev) => (prev ? { ...prev, granularity: value } : prev));
-    updatePreferences({ granularity: value }).catch(() => {
-      /* keep optimistic value; will reconcile on next load */
-    });
-    // Keep the current cards visible until the new run finishes.
-    startStream(settings?.cross_project ?? true, value, allInsights.length > 0);
-  };
+  const applySnapshot = useCallback((snap: IntelligenceSnapshot) => {
+    setProjects(snap.projects);
+    const map: Record<string, ProjectResult> = {};
+    for (const r of snap.results) map[r.projectId] = r;
+    setResults(map);
+    visibleResultCountRef.current = Object.keys(map).length;
+    setCompleted(new Set(Object.keys(map)));
+    setSynthesis(snap.synthesis);
+    setLastUpdated(snap.updatedAt ? new Date(snap.updatedAt) : new Date());
+    setStale(Boolean(snap.stale));
+    setStaleProjectIds(snap.staleProjects ?? []);
+  }, []);
 
-  const handleRefresh = () => {
-    startStream(settings?.cross_project ?? true, granularity, allInsights.length > 0);
-  };
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      window.clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  const handleRefresh = useCallback(
+    (overrideGranularity?: number) => {
+      controllerRef.current?.abort();
+      stopPolling();
+      setStatus("streaming");
+      refreshHomeIntelligence({
+        crossProject: settings?.cross_project ?? true,
+        granularity: overrideGranularity ?? granularity,
+      })
+      .then((res) => {
+        if (!res.run_id) {
+          setStatus("complete");
+          return;
+        }
+        // First check: the run may already be complete before the interval fires.
+        getHomeIntelligenceRunStatus(res.run_id).then((status) => {
+          if (status.complete) {
+            getIntelligenceSnapshot().then((snapRes) => {
+              const snap = snapRes.snapshot ?? null;
+              if (snap) applySnapshot(snap);
+              setStatus(snap?.stale ? "streaming" : "complete");
+            });
+          }
+        });
+        pollTimerRef.current = window.setInterval(() => {
+          const check = async () => {
+            if (res.run_id) {
+              const status = await getHomeIntelligenceRunStatus(res.run_id).catch(
+                () => null,
+              );
+              if (!status?.complete) return;
+            }
+            const snapRes = await getIntelligenceSnapshot().catch(() => null);
+            const snap = snapRes?.snapshot ?? null;
+            if (snap) {
+              applySnapshot(snap);
+              if (!snap.stale) {
+                stopPolling();
+                setStatus("complete");
+              }
+            }
+          };
+          void check();
+        }, 5000);
+      })
+      .catch(() => {
+        setStatus("error");
+      });
+  },
+  [applySnapshot, granularity, settings?.cross_project, stopPolling]);
+
+  const handleGranularity = useCallback(
+    (value: number) => {
+      setSettings((prev) => (prev ? { ...prev, granularity: value } : prev));
+      updatePreferences({ granularity: value }).catch(() => {
+        /* keep optimistic value; will reconcile on next load */
+      });
+      // Keep the current cards visible until the new run finishes.
+      handleRefresh(value);
+    },
+    [handleRefresh],
+  );
 
   const [clearingCache, setClearingCache] = useState(false);
   const handleClearCache = useCallback(async () => {

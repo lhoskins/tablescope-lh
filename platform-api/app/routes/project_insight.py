@@ -38,6 +38,7 @@ from app.schemas.project_insight import (
     ReviewedInsightsResponse,
 )
 from app.services.project_insight_service import build_project_insight
+from app.tasks.workflows import enqueue_rebuild_project_insight
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["project-insight"])
@@ -157,6 +158,65 @@ async def get_project_insight(
         is_stale=False,
     )
     return report
+
+
+@router.post("/{project_id}/insight/refresh", response_model=ProjectInsightResponse)
+async def refresh_project_insight(
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.VIEWER)),
+) -> ProjectInsightResponse:
+    """Queue a background rebuild of the project insight snapshot.
+
+    Marks the caller's snapshot stale and returns it immediately; the arq
+    worker rebuilds the report and writes the fresh snapshot. The client polls
+    ``GET /api/projects/{project_id}/insight`` — it returns ``stale=true``
+    until the rebuild completes.
+    """
+    project = await _require_project_access(project_id, session, context)
+
+    snap = await _get_snapshot(session, context, project_id)
+    if snap is None:
+        snap = ProjectIntelligenceSnapshot(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            suite="project_insight",
+            payload={
+                "project": {
+                    "id": project.id,
+                    "name": project.name,
+                    "status": project.type or "Active",
+                },
+                "stale": True,
+                "generatedAt": datetime.now(UTC).isoformat(),
+                "lastUpdatedAt": datetime.now(UTC).isoformat(),
+            },
+            is_stale=True,
+        )
+        session.add(snap)
+    else:
+        snap.is_stale = True
+        payload = dict(snap.payload)
+        payload["stale"] = True
+        snap.payload = payload
+    await session.commit()
+
+    await enqueue_rebuild_project_insight(
+        tenant_id=context.tenant_id, project_id=project_id
+    )
+
+    payload = dict(snap.payload)
+    payload["stale"] = True
+    if "project" not in payload:
+        payload["project"] = {
+            "id": project.id,
+            "name": project.name,
+            "status": project.type or "Active",
+        }
+    if snap.updated_at:
+        payload["generatedAt"] = snap.updated_at.isoformat()
+    return ProjectInsightResponse.model_validate(payload)
 
 
 @router.post("/{project_id}/insight/clear-cache")

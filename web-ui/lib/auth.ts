@@ -21,7 +21,7 @@ export type ExchangeResponse = {
 
 const USER_META_KEY = "tablescope.user_meta";
 const TOKEN_KEY = "tablescope.token";
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh if expiring within 5 min
 
 export function storeUserMeta(meta: {

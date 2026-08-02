@@ -216,7 +216,7 @@ class Settings(BaseSettings):
     # When enabled, a successful Knowledge Graph build enqueues a debounced
     # background re-analysis of that project (attributed to the project
     # owner) so the cache is warm before any user opens Home.
-    business_insight_event_refresh_enabled: bool = False
+    business_insight_event_refresh_enabled: bool = True
     # Safety-net freshness bound for cached results, covering data paths no
     # graph fingerprint watches. A cached result older than this is rebuilt
     # even if its KG version still matches.
@@ -230,7 +230,7 @@ class Settings(BaseSettings):
     # When enabled, a successful Knowledge Graph build (or document/reference
     # change) marks the project insight snapshot stale and enqueues a debounced
     # rebuild. The rebuild runs as the snapshot owner and refreshes the cache.
-    project_insight_event_rebuild_enabled: bool = False
+    project_insight_event_rebuild_enabled: bool = True
     # Maximum number of users who already have a Project Insight snapshot that a
     # background rebuild will refresh for one project.
     project_insight_max_rebuild_users: int = 10

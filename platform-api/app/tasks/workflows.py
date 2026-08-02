@@ -29,6 +29,8 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import SessionLocal
+from app.models.business_insight_result import BusinessInsightResult
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.shared_vdb import SharedVDB
 from app.models.user_vdb import UserVDB
 from app.services.vdb_management import VDBManagementService
@@ -1294,6 +1296,59 @@ async def _configure_worker_logging(ctx: dict[str, Any]) -> None:
     configure_logging(get_settings().log_level)
 
 
+async def schedule_stale_insight_refresh(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron entrypoint: enqueue rebuilds/refresh for stale insight snapshots.
+
+    Runs every hour. Project-insight snapshots are rebuilt when they are marked
+    stale. Business-insight cache entries are refreshed when older than their TTL
+    so the shared cache stays warm for active tenants.
+    """
+    settings = get_settings()
+    cutoff = datetime.now(UTC) - timedelta(
+        seconds=settings.business_insight_result_ttl_seconds
+    )
+    enqueued: dict[str, int] = {"project_insight": 0, "business_insight": 0}
+
+    async with SessionLocal() as session:
+        stale_pi_rows = (
+            await session.execute(
+                select(
+                    ProjectIntelligenceSnapshot.tenant_id,
+                    ProjectIntelligenceSnapshot.project_id,
+                )
+                .where(
+                    ProjectIntelligenceSnapshot.is_stale.is_(True),
+                    ProjectIntelligenceSnapshot.suite == "project_insight",
+                )
+                .distinct()
+            )
+        ).all()
+        for tenant_id, project_id in stale_pi_rows:
+            await enqueue_rebuild_project_insight(
+                tenant_id=tenant_id, project_id=project_id
+            )
+            enqueued["project_insight"] += 1
+
+        stale_bi_rows = (
+            await session.execute(
+                select(BusinessInsightResult.tenant_id, BusinessInsightResult.project_id)
+                .where(BusinessInsightResult.updated_at < cutoff)
+                .distinct()
+            )
+        ).all()
+        for tenant_id, project_id in stale_bi_rows:
+            await enqueue_refresh_business_insight_result(
+                tenant_id=tenant_id, project_id=project_id
+            )
+            enqueued["business_insight"] += 1
+
+    return {"status": "ok", "enqueued": enqueued}
+
+
+# Deterministic job id may be reused; don't keep results so re-enqueue works.
+schedule_stale_insight_refresh.keep_result = 0  # type: ignore[attr-defined]
+
+
 class WorkerSettings:
     """arq worker entrypoint."""
 
@@ -1312,6 +1367,7 @@ class WorkerSettings:
         reprocess_project,
         refresh_business_insight_result,
         rebuild_project_insight,
+        schedule_stale_insight_refresh,
         match_kpi_data_source,
         stage_llm_artifact,
         deploy_llm_artifact,
@@ -1326,6 +1382,8 @@ class WorkerSettings:
         cron(evaluate_stale_graphs, minute=45, second=30),
         # Recover builds stuck without a heartbeat.
         cron(recover_stale_graph_builds, minute=5, second=0),
+        # Refresh stale insight snapshots every hour.
+        cron(schedule_stale_insight_refresh, minute=0, second=0),
     ]
     # Must exceed home_intelligence_project_analysis_timeout_seconds: a job
     # killed by arq writes no result and permanently stalls its run, so the
