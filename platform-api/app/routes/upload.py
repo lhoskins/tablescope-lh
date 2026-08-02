@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -629,6 +629,7 @@ async def delete_file_source(
 async def replace_file_source(
     view_name: str,
     file: UploadFile = File(...),
+    force: bool = Query(False, description="Overwrite even if the schema has changed (column renames)."),
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict:
@@ -711,7 +712,7 @@ async def replace_file_source(
     incoming_types = detect_column_types(content, file.filename)
     incoming_cols = {c["field"] for c in incoming_types}
     diff = compare_schemas(existing_types, incoming_types)
-    if diff["blockers"]:
+    if diff["blockers"] and not force:
         raise HTTPException(status_code=409, detail=" ".join(diff["blockers"]))
 
     # 3) Re-import the new file through the Teiid servlet (overwrites the view).

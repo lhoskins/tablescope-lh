@@ -1354,6 +1354,9 @@ class WorkerSettings:
 
     on_startup: ClassVar = _configure_worker_logging
     redis_settings: ClassVar[RedisSettings] = _redis_settings()
+    # The GPU AI server runs one model at a time; running more than one job
+    # concurrently just queues LLM requests and causes avoidable timeouts.
+    max_jobs: ClassVar[int] = 1
     functions: ClassVar[list] = [
         process_upload,
         index_for_search,
