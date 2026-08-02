@@ -28,7 +28,7 @@ _RESERVED_CHARS_RE = re.compile(r'[\$,#@!%\^&\*\(\)\+={}\[\]|\\:;"\'<>\?/~`]')
 _MULTI_UNDERSCORES = re.compile(r"_+")
 _LEADING_TRAILING_US = re.compile(r"^_|_$")
 
-# SQL reserved words that should not be used as identifiers.
+# SQL/Teiid reserved words that should not be used as identifiers.
 _SQL_RESERVED: set[str] = {
     "select", "from", "where", "insert", "update", "delete", "drop", "create",
     "alter", "table", "index", "grant", "revoke", "and", "or", "not", "null",
@@ -39,6 +39,15 @@ _SQL_RESERVED: set[str] = {
     "foreign", "references", "constraint", "check", "unique", "cascade",
     "with", "recursive", "over", "partition", "row", "rows", "range",
     "window", "fetch", "first", "last", "next", "trigger",
+    # Teiid-specific/date/type keywords that the Teiid parser treats as reserved.
+    "year", "month", "day", "hour", "minute", "second", "quarter", "epoch",
+    "date", "time", "timestamp", "timezone", "zone",
+    "user", "role", "schema", "catalog", "domain",
+    "convert", "cast", "extract", "trim", "leading", "trailing", "both",
+    "substring", "position", "overlay", "escape", "matches", "similar",
+    "string", "integer", "boolean", "double", "float", "decimal", "short",
+    "long", "char", "varchar", "clob", "blob", "xml", "biginteger",
+    "bigdecimal", "object", "variant", "json",
 }
 
 
