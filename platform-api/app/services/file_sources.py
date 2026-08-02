@@ -39,6 +39,15 @@ _SQL_RESERVED: set[str] = {
     "foreign", "references", "constraint", "check", "unique", "cascade",
     "with", "recursive", "over", "partition", "row", "rows", "range",
     "window", "fetch", "first", "last", "next", "trigger",
+    # Teiid-specific/date/type keywords that the Teiid parser treats as reserved.
+    "year", "month", "day", "hour", "minute", "second", "quarter", "epoch",
+    "date", "time", "timestamp", "timezone", "zone",
+    "user", "role", "schema", "catalog", "domain",
+    "convert", "cast", "extract", "trim", "leading", "trailing", "both",
+    "substring", "position", "overlay", "escape", "matches", "similar",
+    "string", "integer", "boolean", "double", "float", "decimal", "short",
+    "long", "char", "varchar", "clob", "blob", "xml", "biginteger",
+    "bigdecimal", "object", "variant", "json",
 }
 
 

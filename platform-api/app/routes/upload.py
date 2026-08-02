@@ -706,6 +706,14 @@ async def replace_file_source(
         raise HTTPException(
             status_code=500, detail=f"Could not read existing file: {exc}"
         ) from exc
+    # Sanitize both files so the VDB DDL uses safe identifiers (e.g. Month -> Month_col).
+    lower_name = existing_name.lower()
+    if lower_name.endswith((".csv", ".tsv", ".txt")):
+        content = sanitize_csv_content(content)
+        existing_content = sanitize_csv_content(existing_content)
+    elif lower_name.endswith((".xlsx", ".xlsm", ".xls")):
+        content = sanitize_xlsx_content(content)
+        existing_content = sanitize_xlsx_content(existing_content)
     existing_types = detect_column_types(existing_content, existing_name)
     existing_cols = {c["field"] for c in existing_types}
     incoming_types = detect_column_types(content, file.filename)
