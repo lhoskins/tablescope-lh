@@ -150,17 +150,17 @@ async def _post(
                     continue
                 logger.warning("AI intelligence call to %s timed out: %s", path, exc)
                 raise AIUnavailableError(
-                    "AI server timed out; retry shortly.", retryable=True
+                    "AI server timed out; retry shortly.", retryable=False
                 ) from exc
             except httpx.TimeoutException as exc:
                 logger.warning("AI intelligence call to %s timed out: %s", path, exc)
                 raise AIUnavailableError(
-                    "AI server timed out; retry shortly.", retryable=True
+                    "AI server timed out; retry shortly.", retryable=False
                 ) from exc
             except httpx.TransportError as exc:
                 logger.warning("AI intelligence transport failure for %s: %s", path, exc)
                 raise AIUnavailableError(
-                    "AI server is unavailable; retry shortly.", retryable=True
+                    "AI server is unavailable; retry shortly.", retryable=False
                 ) from exc
 
             if resp.status_code == 503 and attempt < attempts:

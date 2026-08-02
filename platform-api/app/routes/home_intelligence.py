@@ -516,6 +516,11 @@ async def _save_snapshot(
             session.add(snap)
         snap.tenant_id = context.tenant_id
         snap.granularity = granularity
+        # Keep a previous synthesis if this update carries no replacement (e.g.
+        # a refresh that has not yet produced a new synthesis).
+        prior_synthesis = (snap.payload or {}).get("synthesis") if snap else None
+        if payload.get("synthesis") is None and prior_synthesis is not None:
+            payload = {**payload, "synthesis": prior_synthesis}
         snap.payload = payload
         await session.commit()
 
