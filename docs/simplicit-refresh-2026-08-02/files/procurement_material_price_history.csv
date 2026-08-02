@@ -1,0 +1,321 @@
+Month,Commodity,PriceIndex
+2024-01-01,Machined Castings,102.05
+2024-01-01,Sheet Metal,102.74
+2024-01-01,Electronics,98.47
+2024-01-01,Fasteners,102.14
+2024-01-01,Composites,105.33
+2024-01-01,Wire Harness,101.44
+2024-01-01,Bearings,99.19
+2024-01-01,Seals & Gaskets,103.02
+2024-01-01,Forgings,101.08
+2024-01-01,Coatings,105.46
+2024-02-01,Machined Castings,100.0
+2024-02-01,Sheet Metal,98.36
+2024-02-01,Electronics,107.63
+2024-02-01,Fasteners,105.16
+2024-02-01,Composites,104.74
+2024-02-01,Wire Harness,99.59
+2024-02-01,Bearings,105.64
+2024-02-01,Seals & Gaskets,107.59
+2024-02-01,Forgings,106.54
+2024-02-01,Coatings,103.86
+2024-03-01,Machined Castings,107.28
+2024-03-01,Sheet Metal,100.96
+2024-03-01,Electronics,103.01
+2024-03-01,Fasteners,104.76
+2024-03-01,Composites,101.34
+2024-03-01,Wire Harness,107.96
+2024-03-01,Bearings,103.68
+2024-03-01,Seals & Gaskets,106.51
+2024-03-01,Forgings,105.68
+2024-03-01,Coatings,99.21
+2024-04-01,Machined Castings,98.33
+2024-04-01,Sheet Metal,102.8
+2024-04-01,Electronics,98.36
+2024-04-01,Fasteners,100.01
+2024-04-01,Composites,106.9
+2024-04-01,Wire Harness,106.99
+2024-04-01,Bearings,106.78
+2024-04-01,Seals & Gaskets,100.78
+2024-04-01,Forgings,104.53
+2024-04-01,Coatings,98.56
+2024-05-01,Machined Castings,104.26
+2024-05-01,Sheet Metal,103.25
+2024-05-01,Electronics,98.91
+2024-05-01,Fasteners,99.8
+2024-05-01,Composites,98.98
+2024-05-01,Wire Harness,99.95
+2024-05-01,Bearings,107.71
+2024-05-01,Seals & Gaskets,103.27
+2024-05-01,Forgings,108.0
+2024-05-01,Coatings,100.17
+2024-06-01,Machined Castings,103.09
+2024-06-01,Sheet Metal,101.27
+2024-06-01,Electronics,106.04
+2024-06-01,Fasteners,103.5
+2024-06-01,Composites,106.9
+2024-06-01,Wire Harness,107.69
+2024-06-01,Bearings,102.2
+2024-06-01,Seals & Gaskets,101.99
+2024-06-01,Forgings,106.65
+2024-06-01,Coatings,98.91
+2024-07-01,Machined Castings,99.82
+2024-07-01,Sheet Metal,102.37
+2024-07-01,Electronics,103.75
+2024-07-01,Fasteners,106.94
+2024-07-01,Composites,100.99
+2024-07-01,Wire Harness,104.05
+2024-07-01,Bearings,98.76
+2024-07-01,Seals & Gaskets,102.53
+2024-07-01,Forgings,102.06
+2024-07-01,Coatings,106.44
+2024-08-01,Machined Castings,99.75
+2024-08-01,Sheet Metal,104.63
+2024-08-01,Electronics,98.48
+2024-08-01,Fasteners,106.5
+2024-08-01,Composites,100.81
+2024-08-01,Wire Harness,101.55
+2024-08-01,Bearings,103.47
+2024-08-01,Seals & Gaskets,99.5
+2024-08-01,Forgings,103.76
+2024-08-01,Coatings,107.49
+2024-09-01,Machined Castings,107.62
+2024-09-01,Sheet Metal,104.06
+2024-09-01,Electronics,104.05
+2024-09-01,Fasteners,98.57
+2024-09-01,Composites,101.5
+2024-09-01,Wire Harness,106.86
+2024-09-01,Bearings,107.42
+2024-09-01,Seals & Gaskets,101.74
+2024-09-01,Forgings,98.5
+2024-09-01,Coatings,98.51
+2024-10-01,Machined Castings,103.68
+2024-10-01,Sheet Metal,107.01
+2024-10-01,Electronics,102.92
+2024-10-01,Fasteners,105.47
+2024-10-01,Composites,107.5
+2024-10-01,Wire Harness,102.56
+2024-10-01,Bearings,99.99
+2024-10-01,Seals & Gaskets,103.59
+2024-10-01,Forgings,100.31
+2024-10-01,Coatings,102.41
+2024-11-01,Machined Castings,102.85
+2024-11-01,Sheet Metal,98.48
+2024-11-01,Electronics,104.03
+2024-11-01,Fasteners,102.9
+2024-11-01,Composites,100.32
+2024-11-01,Wire Harness,99.5
+2024-11-01,Bearings,100.52
+2024-11-01,Seals & Gaskets,103.83
+2024-11-01,Forgings,101.48
+2024-11-01,Coatings,101.27
+2024-12-01,Machined Castings,101.7
+2024-12-01,Sheet Metal,107.67
+2024-12-01,Electronics,100.38
+2024-12-01,Fasteners,100.42
+2024-12-01,Composites,99.3
+2024-12-01,Wire Harness,98.18
+2024-12-01,Bearings,104.12
+2024-12-01,Seals & Gaskets,102.06
+2024-12-01,Forgings,103.47
+2024-12-01,Coatings,107.83
+2025-01-01,Machined Castings,107.56
+2025-01-01,Sheet Metal,106.81
+2025-01-01,Electronics,105.91
+2025-01-01,Fasteners,107.18
+2025-01-01,Composites,103.76
+2025-01-01,Wire Harness,98.42
+2025-01-01,Bearings,104.68
+2025-01-01,Seals & Gaskets,99.7
+2025-01-01,Forgings,99.94
+2025-01-01,Coatings,107.09
+2025-02-01,Machined Castings,102.56
+2025-02-01,Sheet Metal,99.35
+2025-02-01,Electronics,106.78
+2025-02-01,Fasteners,105.26
+2025-02-01,Composites,100.58
+2025-02-01,Wire Harness,99.28
+2025-02-01,Bearings,102.66
+2025-02-01,Seals & Gaskets,101.85
+2025-02-01,Forgings,103.38
+2025-02-01,Coatings,107.24
+2025-03-01,Machined Castings,106.37
+2025-03-01,Sheet Metal,105.02
+2025-03-01,Electronics,105.77
+2025-03-01,Fasteners,105.13
+2025-03-01,Composites,101.38
+2025-03-01,Wire Harness,106.39
+2025-03-01,Bearings,103.96
+2025-03-01,Seals & Gaskets,98.14
+2025-03-01,Forgings,107.99
+2025-03-01,Coatings,99.1
+2025-04-01,Machined Castings,100.54
+2025-04-01,Sheet Metal,104.11
+2025-04-01,Electronics,105.24
+2025-04-01,Fasteners,107.43
+2025-04-01,Composites,103.06
+2025-04-01,Wire Harness,99.1
+2025-04-01,Bearings,99.0
+2025-04-01,Seals & Gaskets,104.36
+2025-04-01,Forgings,103.06
+2025-04-01,Coatings,99.02
+2025-05-01,Machined Castings,106.35
+2025-05-01,Sheet Metal,102.29
+2025-05-01,Electronics,107.42
+2025-05-01,Fasteners,103.9
+2025-05-01,Composites,107.56
+2025-05-01,Wire Harness,107.35
+2025-05-01,Bearings,102.26
+2025-05-01,Seals & Gaskets,105.88
+2025-05-01,Forgings,106.5
+2025-05-01,Coatings,104.55
+2025-06-01,Machined Castings,102.61
+2025-06-01,Sheet Metal,101.55
+2025-06-01,Electronics,98.22
+2025-06-01,Fasteners,104.39
+2025-06-01,Composites,107.09
+2025-06-01,Wire Harness,106.98
+2025-06-01,Bearings,103.76
+2025-06-01,Seals & Gaskets,101.04
+2025-06-01,Forgings,104.77
+2025-06-01,Coatings,105.44
+2025-07-01,Machined Castings,106.3
+2025-07-01,Sheet Metal,107.02
+2025-07-01,Electronics,107.03
+2025-07-01,Fasteners,106.62
+2025-07-01,Composites,103.64
+2025-07-01,Wire Harness,106.39
+2025-07-01,Bearings,106.03
+2025-07-01,Seals & Gaskets,98.35
+2025-07-01,Forgings,99.66
+2025-07-01,Coatings,104.14
+2025-08-01,Machined Castings,98.55
+2025-08-01,Sheet Metal,99.87
+2025-08-01,Electronics,98.04
+2025-08-01,Fasteners,102.96
+2025-08-01,Composites,102.3
+2025-08-01,Wire Harness,105.74
+2025-08-01,Bearings,100.42
+2025-08-01,Seals & Gaskets,101.55
+2025-08-01,Forgings,102.3
+2025-08-01,Coatings,101.11
+2025-09-01,Machined Castings,107.86
+2025-09-01,Sheet Metal,99.51
+2025-09-01,Electronics,99.34
+2025-09-01,Fasteners,101.98
+2025-09-01,Composites,103.24
+2025-09-01,Wire Harness,107.21
+2025-09-01,Bearings,98.35
+2025-09-01,Seals & Gaskets,101.6
+2025-09-01,Forgings,104.86
+2025-09-01,Coatings,98.17
+2025-10-01,Machined Castings,103.05
+2025-10-01,Sheet Metal,99.94
+2025-10-01,Electronics,101.38
+2025-10-01,Fasteners,102.89
+2025-10-01,Composites,101.09
+2025-10-01,Wire Harness,99.35
+2025-10-01,Bearings,107.36
+2025-10-01,Seals & Gaskets,103.0
+2025-10-01,Forgings,98.66
+2025-10-01,Coatings,100.6
+2025-11-01,Machined Castings,107.75
+2025-11-01,Sheet Metal,106.64
+2025-11-01,Electronics,105.57
+2025-11-01,Fasteners,106.04
+2025-11-01,Composites,106.51
+2025-11-01,Wire Harness,105.82
+2025-11-01,Bearings,106.37
+2025-11-01,Seals & Gaskets,99.9
+2025-11-01,Forgings,107.95
+2025-11-01,Coatings,100.78
+2025-12-01,Machined Castings,103.39
+2025-12-01,Sheet Metal,100.97
+2025-12-01,Electronics,99.33
+2025-12-01,Fasteners,100.59
+2025-12-01,Composites,105.06
+2025-12-01,Wire Harness,103.01
+2025-12-01,Bearings,99.64
+2025-12-01,Seals & Gaskets,103.37
+2025-12-01,Forgings,102.8
+2025-12-01,Coatings,105.36
+2026-01-01,Machined Castings,106.45
+2026-01-01,Sheet Metal,106.55
+2026-01-01,Electronics,103.96
+2026-01-01,Fasteners,99.48
+2026-01-01,Composites,102.63
+2026-01-01,Wire Harness,107.0
+2026-01-01,Bearings,101.52
+2026-01-01,Seals & Gaskets,104.18
+2026-01-01,Forgings,98.08
+2026-01-01,Coatings,100.98
+2026-02-01,Machined Castings,116.41
+2026-02-01,Sheet Metal,106.11
+2026-02-01,Electronics,103.95
+2026-02-01,Fasteners,103.65
+2026-02-01,Composites,103.49
+2026-02-01,Wire Harness,107.98
+2026-02-01,Bearings,103.45
+2026-02-01,Seals & Gaskets,98.49
+2026-02-01,Forgings,99.18
+2026-02-01,Coatings,98.89
+2026-03-01,Machined Castings,116.12
+2026-03-01,Sheet Metal,106.78
+2026-03-01,Electronics,104.54
+2026-03-01,Fasteners,107.79
+2026-03-01,Composites,101.87
+2026-03-01,Wire Harness,103.81
+2026-03-01,Bearings,107.72
+2026-03-01,Seals & Gaskets,107.93
+2026-03-01,Forgings,98.13
+2026-03-01,Coatings,101.12
+2026-04-01,Machined Castings,122.58
+2026-04-01,Sheet Metal,103.89
+2026-04-01,Electronics,100.73
+2026-04-01,Fasteners,99.11
+2026-04-01,Composites,106.77
+2026-04-01,Wire Harness,105.04
+2026-04-01,Bearings,100.81
+2026-04-01,Seals & Gaskets,98.21
+2026-04-01,Forgings,98.18
+2026-04-01,Coatings,106.97
+2026-05-01,Machined Castings,118.77
+2026-05-01,Sheet Metal,101.38
+2026-05-01,Electronics,99.88
+2026-05-01,Fasteners,107.87
+2026-05-01,Composites,104.17
+2026-05-01,Wire Harness,103.55
+2026-05-01,Bearings,103.59
+2026-05-01,Seals & Gaskets,104.09
+2026-05-01,Forgings,105.14
+2026-05-01,Coatings,102.29
+2026-06-01,Machined Castings,123.0
+2026-06-01,Sheet Metal,98.62
+2026-06-01,Electronics,107.35
+2026-06-01,Fasteners,105.11
+2026-06-01,Composites,104.54
+2026-06-01,Wire Harness,107.38
+2026-06-01,Bearings,101.03
+2026-06-01,Seals & Gaskets,106.76
+2026-06-01,Forgings,105.91
+2026-06-01,Coatings,107.42
+2026-07-01,Machined Castings,124.48
+2026-07-01,Sheet Metal,104.11
+2026-07-01,Electronics,107.58
+2026-07-01,Fasteners,103.2
+2026-07-01,Composites,102.37
+2026-07-01,Wire Harness,101.32
+2026-07-01,Bearings,99.45
+2026-07-01,Seals & Gaskets,98.21
+2026-07-01,Forgings,105.07
+2026-07-01,Coatings,99.16
+2026-08-01,Machined Castings,126.28
+2026-08-01,Sheet Metal,99.39
+2026-08-01,Electronics,110.89
+2026-08-01,Fasteners,106.06
+2026-08-01,Composites,105.90
+2026-08-01,Wire Harness,102.25
+2026-08-01,Bearings,100.22
+2026-08-01,Seals & Gaskets,106.34
+2026-08-01,Forgings,109.03
+2026-08-01,Coatings,100.64
