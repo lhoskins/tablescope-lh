@@ -1619,7 +1619,7 @@ async def _risk_upcoming(
         "title": f"Upcoming {date_col} by date",
         "data": {
             "series": [
-                {"label": d.isoformat(), "value": n} for d, n in upcoming[:12]
+                {"label": d.isoformat(), "value": n} for d, n in upcoming[:24]
             ]
         },
     }
@@ -2249,7 +2249,7 @@ def _two_value_chart(
         if not value2_col:
             return None
     series: list[dict[str, Any]] = []
-    for r in rows[:24]:
+    for r in rows[-24:]:
         v = _to_float(r.get(value_col))
         v2 = _to_float(r.get(value2_col))
         if v is None or v2 is None:
@@ -2345,7 +2345,7 @@ def _build_chart(
     if not label_col or not value_col:
         return None
     series: list[dict[str, Any]] = []
-    for r in rows[:12]:
+    for r in rows[-24:]:
         v = _to_float(r.get(value_col))
         if v is None:
             continue
