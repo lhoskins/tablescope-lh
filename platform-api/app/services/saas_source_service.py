@@ -148,16 +148,26 @@ async def create_saas_source(
 
     pg = _app_pg_connection()
     is_servicenow = connector_type == "servicenow"
+    is_salesforce = connector_type == "salesforce"
+    is_live_translator = is_servicenow or is_salesforce
 
-    sn_username = ""
-    sn_password = ""
-    sn_instance_url = ""
+    saas_username = ""
+    saas_password = ""
+    saas_instance_url = ""
     if is_servicenow:
-        sn_username = config.get("username", "")
-        sn_password = config.get("password", "")
-        sn_instance_url = (config.get("instance_url") or "").strip().rstrip("/")
-        if sn_instance_url and not sn_instance_url.startswith("http"):
-            sn_instance_url = f"https://{sn_instance_url}"
+        saas_username = config.get("username", "")
+        saas_password = config.get("password", "")
+        saas_instance_url = (config.get("instance_url") or "").strip().rstrip("/")
+        if saas_instance_url and not saas_instance_url.startswith("http"):
+            saas_instance_url = f"https://{saas_instance_url}"
+    elif is_salesforce:
+        saas_username = config.get("username", "")
+        saas_password = config.get("password", "") + config.get("security_token", "")
+        saas_instance_url = (
+            config.get("login_url") or "https://login.salesforce.com"
+        ).strip().rstrip("/")
+        if saas_instance_url and not saas_instance_url.startswith("http"):
+            saas_instance_url = f"https://{saas_instance_url}"
 
     # 1. DatabaseDataSource (draft) to allocate an id for naming.
     ds = DatabaseDataSource(
@@ -167,16 +177,16 @@ async def create_saas_source(
         display_name=display_name,
         source_type="saas_object",
         connector_type=connector_type,
-        db_type="servicenow" if is_servicenow else "postgresql",
-        host=sn_instance_url if is_servicenow else pg.host,
-        port=0 if is_servicenow else pg.port,
-        database_name="" if is_servicenow else pg.database,
-        schema_name="" if is_servicenow else staging.STAGING_SCHEMA,
+        db_type=connector_type if is_live_translator else "postgresql",
+        host=saas_instance_url if is_live_translator else pg.host,
+        port=0 if is_live_translator else pg.port,
+        database_name="" if is_live_translator else pg.database,
+        schema_name="" if is_live_translator else staging.STAGING_SCHEMA,
         table_name="",  # set after id is known
-        username=sn_username if is_servicenow else pg.user,
+        username=saas_username if is_live_translator else pg.user,
         password_encrypted=(
-            encrypt_secret(sn_password)
-            if is_servicenow and sn_password
+            encrypt_secret(saas_password)
+            if is_live_translator and saas_password
             else (encrypt_secret(pg.password) if pg.password else None)
         ),
         ssl_mode=None,
@@ -192,8 +202,8 @@ async def create_saas_source(
     session.add(ds)
     await session.flush()  # assign ds.id
 
-    if is_servicenow:
-        ds_table_name = object_type.lower()
+    if is_live_translator:
+        ds_table_name = object_type
     else:
         ds_table_name = f"{connector_type}_ds_{ds.id}_{object_type.lower()}"
     ds.table_name = ds_table_name
@@ -231,16 +241,16 @@ async def create_saas_source(
         connector_type=connector_type,
         object_type=object_type,
         selected_properties=selected_fields,
-        staging_schema="" if is_servicenow else staging.STAGING_SCHEMA,
-        staging_table="" if is_servicenow else ds_table_name,
-        sync_mode="live" if is_servicenow else "manual",
-        last_sync_status="live" if is_servicenow else "pending",
+        staging_schema="" if is_live_translator else staging.STAGING_SCHEMA,
+        staging_table="" if is_live_translator else ds_table_name,
+        sync_mode="live" if is_live_translator else "manual",
+        last_sync_status="live" if is_live_translator else "pending",
     )
     session.add(saas)
 
     # 4. Create the physical staging table in the app's Postgres (not needed
-    # for ServiceNow, which is queried live via the custom Teiid translator).
-    if not is_servicenow:
+    # for ServiceNow or Salesforce, which are queried live via Teiid translators).
+    if not is_live_translator:
         await staging.create_staging_table(
             session,
             schema=staging.STAGING_SCHEMA,
@@ -265,10 +275,26 @@ async def create_saas_source(
                 vdb_id=user_vdb.vdb_id,
                 org_id=tenant_id,
                 user_id=user_id,
-                instance_url=sn_instance_url,
-                username=sn_username,
-                password=sn_password,
+                instance_url=saas_instance_url,
+                username=saas_username,
+                password=saas_password,
                 object_type=object_type,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                ds_name=names["ds_name"],
+                jndi_name=names["jndi_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
+        elif is_salesforce:
+            await reg.register_salesforce_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                instance_url=saas_instance_url,
+                username=saas_username,
+                password=saas_password,
+                object_type=ds_table_name,
                 model_name=names["model_name"],
                 teiid_table_name=names["teiid_table_name"],
                 ds_name=names["ds_name"],
@@ -329,10 +355,10 @@ async def run_sync(
     if saas is None:
         raise SaasSourceError("SaaS data source not found.")
 
-    if saas.connector_type == "servicenow":
+    if saas.connector_type in ("servicenow", "salesforce"):
         return {
             "status": "live",
-            "message": "ServiceNow data is queried in real time; sync is not required.",
+            "message": f"{saas.connector_type.title()} data is queried in real time; sync is not required.",
         }
 
     credential = await session.get(ConnectorCredential, saas.credential_id)

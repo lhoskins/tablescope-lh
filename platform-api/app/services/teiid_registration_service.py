@@ -211,6 +211,82 @@ class TeiidRegistrationService:
 
         return body
 
+    async def register_salesforce_source(
+        self,
+        *,
+        vdb_id: str,
+        org_id: int,
+        user_id: int,
+        instance_url: str,
+        username: str,
+        password: str,
+        object_type: str,
+        model_name: str,
+        teiid_table_name: str,
+        ds_name: str,
+        jndi_name: str,
+        view_name: str,
+        columns: list[dict],
+    ) -> dict:
+        """Register a Salesforce object using the native Teiid salesforce translator.
+
+        This creates a JCA connection factory in WildFly pointing at the
+        Salesforce SOAP login endpoint, then adds a physical model + view to the
+        VDB.  No local staging table is used; SOQL is executed live against
+        Salesforce.
+        """
+        payload = {
+            "vdb_id": vdb_id,
+            "org_id": org_id,
+            "user_id": user_id,
+            "teiid_host": "localhost",
+            "teiid_port": 9990,
+            "db_type": "salesforce",
+            "translator": "salesforce-41",
+            "jdbc_url": instance_url,
+            "instance_url": instance_url,
+            "table_name": object_type,
+            "username": username,
+            "password": password,
+            "model_name": model_name,
+            "teiid_table_name": teiid_table_name,
+            "jndi_name": jndi_name,
+            "ds_name": ds_name,
+            "view_name": view_name,
+            "schema_name": "",
+            "columns": columns,
+            "force": True,
+        }
+
+        safe_payload = {k: v for k, v in payload.items() if k != "password"}
+        logger.info("Registering Salesforce source in Teiid: %s", safe_payload)
+
+        try:
+            response = await self._client.post(
+                "/TeiidExcelImporterTest/vdb-management/createDatabaseSource",
+                json=payload,
+            )
+        except httpx.RequestError as exc:
+            raise TeiidRegistrationError(
+                f"Failed to contact Teiid servlet: {exc}"
+            ) from exc
+
+        if response.status_code >= 400:
+            raise TeiidRegistrationError(
+                f"Teiid rejected Salesforce source registration: "
+                f"{response.status_code} {response.text}"
+            )
+
+        try:
+            body = response.json()
+        except Exception:
+            body = {"raw": response.text}
+
+        if isinstance(body, dict) and body.get("error"):
+            raise TeiidRegistrationError(str(body["error"]))
+
+        return body
+
     async def register_database_source(
         self,
         *,
@@ -395,6 +471,22 @@ async def reconcile_database_sources(session, *, only_id: int | None = None) -> 
             try:
                 if ds.db_type == "servicenow":
                     await reg.register_servicenow_source(
+                        vdb_id=user_vdb.vdb_id,
+                        org_id=ds.tenant_id,
+                        user_id=ds.created_by,
+                        instance_url=ds.host,
+                        username=ds.username,
+                        password=password,
+                        object_type=ds.table_name,
+                        model_name=ds.teiid_model_name or names["model_name"],
+                        teiid_table_name=ds.teiid_table_name or names["teiid_table_name"],
+                        ds_name=names["ds_name"],
+                        jndi_name=ds.teiid_jndi_name or names["jndi_name"],
+                        view_name=ds.teiid_view_name,
+                        columns=teiid_columns,
+                    )
+                elif ds.db_type == "salesforce":
+                    await reg.register_salesforce_source(
                         vdb_id=user_vdb.vdb_id,
                         org_id=ds.tenant_id,
                         user_id=ds.created_by,

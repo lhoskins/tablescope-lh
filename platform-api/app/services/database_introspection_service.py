@@ -30,6 +30,16 @@ logger = logging.getLogger(__name__)
 # letters / digits / underscores, all lower-case.
 _SIMPLE_LOWER_IDENT = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# Salesforce connector renames system columns in the local staging schema.
+# When the native Teiid translator is used, these must map back to the API names.
+_SALESFORCE_BASE_COLUMN_MAP = {
+    "salesforce_id": "Id",
+    "is_deleted": "IsDeleted",
+    "created_date": "CreatedDate",
+    "last_modified_date": "LastModifiedDate",
+    "system_modstamp": "SystemModstamp",
+}
+
 
 def source_identifier(db_type: str, name: str | None) -> str | None:
     """Return the identifier *as stored in the source database*.
@@ -39,12 +49,19 @@ def source_identifier(db_type: str, name: str | None) -> str | None:
     NAMEINSOURCE, the case must match exactly or Oracle raises ORA-00904 /
     ORA-00942.  So for Oracle we upper-case simple lower-case identifiers and
     leave anything that genuinely needs quoting (spaces, mixed case, reserved
-    words) untouched.  Other engines preserve the introspected name as-is.
+    words) untouched.
+
+    Salesforce system columns are renamed locally (e.g. ``salesforce_id`` ->
+    ``Id``); map them back so the Teiid native translator resolves the real API
+    field name.  User-selected fields already use their API names and pass
+    through unchanged.
     """
     if name is None:
         return None
     if db_type == "oracle" and _SIMPLE_LOWER_IDENT.match(name):
         return name.upper()
+    if db_type == "salesforce":
+        return _SALESFORCE_BASE_COLUMN_MAP.get(name, name)
     return name
 
 
