@@ -76,7 +76,7 @@ function edgeOpacity(strength: EdgeStrength | undefined): number {
 }
 
 /** Stroke appearance for a relationship connector by its evidence class. */
-function connectorStroke(
+export function connectorStroke(
   style: CanvasEdge["connectorStyle"],
   strength: EdgeStrength | undefined,
   traced: boolean,
@@ -442,9 +442,17 @@ export function KnowledgeGraphCanvas({
       if (!rawP1 || !rawP2) return null;
       const p1 = moveToward(rawP1, tc, 1);
       const p2 = moveToward(rawP2, tc, MARKER_TOUCH_OFFSET);
+      // "traced" means this edge is part of an *active* trace-to-evidence
+      // highlight, not merely that no trace filter is set. Treating "no
+      // trace active" as "every edge is traced" (the previous behavior)
+      // made connectorStroke() always take its flat solid-gray branch,
+      // silently ignoring connectorStyle/relationshipStrength for the
+      // default (non-tracing) view — the dotted/dashed relationship-evidence
+      // styling never rendered unless a trace was actively selected.
       const traced =
-        tracedNodeIds === null ||
-        (tracedNodeIds.has(e.source) && tracedNodeIds.has(e.target));
+        tracingActive &&
+        tracedNodeIds!.has(e.source) &&
+        tracedNodeIds!.has(e.target);
       const isCenterEdge =
         e.source === centerNode.id || e.target === centerNode.id;
       // Reduce clutter: in the default view only label center-connected or

@@ -48,7 +48,7 @@ describe("Project Insights sidebar entry", () => {
       "project-actions",
       "project-business-context",
       "project-scopes",
-      "project-create-knowledge-graph",
+      "project-relationship-map",
     ]);
   });
 

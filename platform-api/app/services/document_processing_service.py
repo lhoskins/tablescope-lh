@@ -10,6 +10,7 @@ import hmac
 import json
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -253,6 +254,9 @@ async def process_document_asset(
         logger.exception("Failed to invalidate project intelligence snapshots")
 
     # ── Step 6: Build graph nodes/edges ──────────────────────────────
+    # Capture a checkpoint right before the staging rows are written so the
+    # rebuild worker can verify the rows are visible before reading them.
+    source_checkpoint = datetime.now(UTC)
     try:
         await _build_graph(session, asset, profile, tenant_id, project_id, user_id)
         await session.commit()
@@ -304,6 +308,7 @@ async def process_document_asset(
             ],
             trigger="document_processed",
             requested_by=user_id,
+            source_checkpoint=source_checkpoint,
         )
 
     return "processed"

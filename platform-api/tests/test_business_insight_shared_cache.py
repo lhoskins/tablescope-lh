@@ -392,12 +392,28 @@ async def test_kg_build_success_enqueues_refresh(db_engine, db_session, monkeypa
 
     enqueued: list[tuple[int, int]] = []
 
-    async def fake_enqueue(*, tenant_id: int, project_id: int) -> str:
+    async def fake_bi_enqueue(*, tenant_id: int, project_id: int) -> str:
         enqueued.append((tenant_id, project_id))
         return "bi-job"
 
     monkeypatch.setattr(
-        workflows, "enqueue_refresh_business_insight_result", fake_enqueue
+        workflows, "enqueue_refresh_business_insight_result", fake_bi_enqueue
+    )
+
+    kg_rebuilt_enqueued: list[tuple[int, int, int]] = []
+
+    async def fake_kg_rebuilt_enqueue(
+        *, tenant_id: int, project_id: int, build_id: int
+    ) -> str:
+        kg_rebuilt_enqueued.append((tenant_id, project_id, build_id))
+        # Run the downstream job synchronously so this test still covers the
+        # BI enqueue path without needing a live Redis worker.
+        return await workflows.knowledge_graph_rebuilt(
+            {}, tenant_id, project_id, build_id
+        )
+
+    monkeypatch.setattr(
+        workflows, "enqueue_knowledge_graph_rebuilt", fake_kg_rebuilt_enqueue
     )
 
     project = await _project(db_session, 1, 1, "kg-chain")
@@ -421,4 +437,5 @@ async def test_kg_build_success_enqueues_refresh(db_engine, db_session, monkeypa
 
     result = await workflows.rebuild_knowledge_graph({}, build.id)
     assert result["status"] == "ok"
+    assert kg_rebuilt_enqueued == [(1, project.id, build.id)]
     assert enqueued == [(1, project.id)]

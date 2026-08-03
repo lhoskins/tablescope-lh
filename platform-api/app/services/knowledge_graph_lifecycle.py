@@ -9,13 +9,17 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from arq.worker import Retry
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, has_role
+from app.config import get_settings
 from app.models import (
+    AIProjectGraphEdge,
+    AIProjectGraphNode,
     AIProjectGraphSnapshot,
     AuditEvent,
     Dashboard,
@@ -436,6 +440,7 @@ class KnowledgeGraphLifecycleManager:
         change_set: list[dict[str, Any]],
         trigger: str = "change_event",
         requested_by: int | None = None,
+        source_checkpoint: datetime | None = None,
     ) -> tuple[KnowledgeGraphBuild, str]:
         """Analyze the change set and create an incremental (or full fallback) build.
 
@@ -461,6 +466,10 @@ class KnowledgeGraphLifecycleManager:
         analysis = await self.impact_analyzer.analyze(change_set, current_graph=graph)
         build_type = "full" if not analysis["safe_incremental"] else "incremental"
 
+        checkpoint_value: dict[str, Any] = {"analysis": analysis}
+        if source_checkpoint is not None:
+            checkpoint_value["timestamp"] = source_checkpoint.isoformat()
+
         build = KnowledgeGraphBuild(
             graph_id=graph.id,
             tenant_id=graph.tenant_id,
@@ -472,7 +481,7 @@ class KnowledgeGraphLifecycleManager:
             queued_at=datetime.now(UTC),
             stage="queued",
             progress=0,
-            source_checkpoint={"analysis": analysis},
+            source_checkpoint=checkpoint_value,
             affected_entity_summary={
                 "affected_types": analysis["affected_entity_types"],
                 "affected_ids": analysis["affected_entity_ids"],
@@ -508,6 +517,61 @@ class KnowledgeGraphLifecycleManager:
     ) -> str:
         return f"kg_v_{project_id}_{version_number}"
 
+    async def _verify_source_checkpoint(self, build: KnowledgeGraphBuild) -> None:
+        """Ensure the triggering source write is visible before reading graph rows.
+
+        Document/relationship writes are committed before the rebuild is enqueued,
+        but replica lag or an early coalesced build can still read a stale view.
+        If the most-recent ``created_at`` on the staging node/edge tables is
+        older than the caller's checkpoint, defer the job so arq retries.
+        """
+        if not build.source_checkpoint:
+            return
+        timestamp = build.source_checkpoint.get("timestamp")
+        if not timestamp:
+            return
+
+        try:
+            checkpoint = datetime.fromisoformat(str(timestamp))
+        except (TypeError, ValueError):
+            return
+
+        if checkpoint.tzinfo is None:
+            checkpoint = checkpoint.replace(tzinfo=UTC)
+
+        node_max = await self.session.scalar(
+            select(func.max(AIProjectGraphNode.created_at)).where(
+                AIProjectGraphNode.tenant_id == build.tenant_id,
+                AIProjectGraphNode.project_id == build.project_id,
+            )
+        )
+        edge_max = await self.session.scalar(
+            select(func.max(AIProjectGraphEdge.created_at)).where(
+                AIProjectGraphEdge.tenant_id == build.tenant_id,
+                AIProjectGraphEdge.project_id == build.project_id,
+            )
+        )
+
+        if node_max is not None and node_max.tzinfo is None:
+            node_max = node_max.replace(tzinfo=UTC)
+        if edge_max is not None and edge_max.tzinfo is None:
+            edge_max = edge_max.replace(tzinfo=UTC)
+
+        max_ts = node_max or edge_max
+        if node_max and edge_max:
+            max_ts = max(node_max, edge_max)
+
+        if max_ts is None or max_ts < checkpoint:
+            logger.info(
+                "KG build %s source checkpoint not yet visible (max=%s checkpoint=%s); deferring",
+                build.id,
+                max_ts,
+                checkpoint,
+            )
+            raise Retry(
+                defer=get_settings().home_intelligence_tenant_slot_retry_seconds
+            )
+
     # ── Build execution (called by the worker) ──────────────────────────────
 
     async def run_full_rebuild(self, build_id: int) -> None:
@@ -525,6 +589,8 @@ class KnowledgeGraphLifecycleManager:
             build, status="building", stage="initializing", progress=5
         )
         graph.lifecycle_status = "building"
+
+        await self._verify_source_checkpoint(build)
 
         try:
             fingerprint = await self.compute_source_fingerprint(build.project_id)
@@ -640,6 +706,8 @@ class KnowledgeGraphLifecycleManager:
                 prompt_type="full",
             )
 
+        except Retry:
+            raise
         except Exception as exc:
             logger.exception("Full rebuild failed for build %s", build_id)
             await self._fail_build(
@@ -673,6 +741,8 @@ class KnowledgeGraphLifecycleManager:
             build, status="building", stage="initializing", progress=5
         )
         graph.lifecycle_status = "building"
+
+        await self._verify_source_checkpoint(build)
 
         try:
             active_version = await self._load_version(graph.active_version_id or 0)
@@ -801,6 +871,8 @@ class KnowledgeGraphLifecycleManager:
                 prompt_type="incremental",
             )
 
+        except Retry:
+            raise
         except Exception as exc:
             logger.exception("Incremental rebuild failed for build %s", build_id)
             # Fall back to a full rebuild once on unexpected errors.
@@ -1197,6 +1269,7 @@ async def request_event_driven_rebuild(
     change_set: list[dict[str, Any]],
     trigger: str,
     requested_by: int | None = None,
+    source_checkpoint: datetime | None = None,
 ) -> KnowledgeGraphBuild | None:
     """Best-effort: request a rebuild for a data-change event and enqueue it.
 
@@ -1221,6 +1294,7 @@ async def request_event_driven_rebuild(
             change_set=change_set,
             trigger=trigger,
             requested_by=requested_by,
+            source_checkpoint=source_checkpoint,
         )
         await session.commit()
     except Exception:

@@ -144,6 +144,105 @@ async def _seed_reference_catalogs() -> None:
         )
 
 
+MAX_KG_PIPELINE_VERSION_CHECK_PROJECTS = 50
+
+
+async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
+    """Proactively rebuild stale KG snapshots for recently-active projects.
+
+    After a deploy that bumps ``SNAPSHOT_PIPELINE_VERSION``, any cached snapshot
+    built under the previous version would only be rebuilt on the next user page
+    load. This startup check finds the N most-recently-active projects and
+    enqueues a full rebuild for any whose active KnowledgeGraphVersion carries
+    an older (or missing) ``pipeline_version``.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.models import IntelligenceSnapshot, KnowledgeGraphVersion
+    from app.services.knowledge_graph.constants import SNAPSHOT_PIPELINE_VERSION
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+    from app.tasks.workflows import enqueue_rebuild_knowledge_graph
+
+    await asyncio.sleep(15)
+    settings = get_settings()
+    days = getattr(settings, "business_insight_refresh_activity_days", 7)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    enqueued = 0
+    skipped = 0
+
+    try:
+        async with SessionLocal() as session:
+            recent_rows = (
+                await session.execute(
+                    select(
+                        IntelligenceSnapshot.project_id,
+                        IntelligenceSnapshot.updated_at,
+                    )
+                    .where(IntelligenceSnapshot.updated_at >= cutoff)
+                    .order_by(IntelligenceSnapshot.updated_at.desc())
+                )
+            ).all()
+            seen: set[int] = set()
+            project_ids: list[int] = []
+            for project_id, _ in recent_rows:
+                if project_id in seen:
+                    continue
+                seen.add(project_id)
+                project_ids.append(project_id)
+                if len(project_ids) >= MAX_KG_PIPELINE_VERSION_CHECK_PROJECTS:
+                    break
+
+            logger.info(
+                "KG snapshot pipeline version check: running=%s active_projects=%s",
+                SNAPSHOT_PIPELINE_VERSION,
+                len(project_ids),
+            )
+
+            for project_id in project_ids:
+                try:
+                    version = await session.scalar(
+                        select(KnowledgeGraphVersion)
+                        .where(
+                            KnowledgeGraphVersion.project_id == project_id,
+                            KnowledgeGraphVersion.status == "active",
+                        )
+                        .order_by(KnowledgeGraphVersion.created_at.desc())
+                        .limit(1)
+                    )
+                    if version is not None and (
+                        version.pipeline_version == SNAPSHOT_PIPELINE_VERSION
+                    ):
+                        skipped += 1
+                        continue
+
+                    manager = KnowledgeGraphLifecycleManager(session)
+                    build, _ = await manager.request_full_rebuild(
+                        project_id,
+                        trigger="pipeline_version_mismatch",
+                        requested_by=None,
+                    )
+                    await session.commit()
+                    await enqueue_rebuild_knowledge_graph(build.id)
+                    enqueued += 1
+                except Exception as exc:
+                    logger.warning(
+                        "KG snapshot pipeline version check failed for project %s: %s",
+                        project_id,
+                        exc,
+                    )
+    except Exception as exc:
+        logger.exception("KG snapshot pipeline version startup check failed: %s", exc)
+
+    logger.info(
+        "KG snapshot pipeline version check complete: enqueued=%s skipped=%s",
+        enqueued,
+        skipped,
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -159,12 +258,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     reconcile_task = asyncio.create_task(_reconcile_db_sources_on_startup())
     llm_target_task = asyncio.create_task(_ensure_primary_llm_runtime_target())
     seed_task = asyncio.create_task(_seed_reference_catalogs())
+    kg_pipeline_check_task = asyncio.create_task(
+        _check_kg_snapshot_pipeline_version_on_startup()
+    )
     try:
         yield
     finally:
         reconcile_task.cancel()
         llm_target_task.cancel()
         seed_task.cancel()
+        kg_pipeline_check_task.cancel()
         await pool_manager.close_all()
         logger.info("Platform API shutdown complete")
 

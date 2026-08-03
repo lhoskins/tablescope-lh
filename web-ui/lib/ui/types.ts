@@ -54,7 +54,6 @@ export type NavKey =
   | "project-data-sources"
   | "project-queries"
   | "project-scopes"
-  | "project-create-knowledge-graph"
   | "project-dashboards"
   | "project-documents"
   | "project-ai-assistant"
