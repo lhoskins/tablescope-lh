@@ -34,7 +34,7 @@ from app.models.user_vdb import UserVDB
 from app.services import database_introspection_service as intro
 from app.services import saas_staging_service as staging
 from app.services.auto_query import ensure_datasource_query
-from app.services.crypto import decrypt_secret
+from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.teiid_registration_service import (
     TeiidRegistrationService,
     generate_teiid_names,
@@ -163,7 +163,7 @@ async def create_saas_source(
         schema_name=staging.STAGING_SCHEMA,
         table_name="",  # set after id is known
         username=pg.user,
-        password_encrypted=None,
+        password_encrypted=encrypt_secret(pg.password) if pg.password else None,
         ssl_mode=None,
         teiid_model_name="",
         teiid_table_name="",
