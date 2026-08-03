@@ -36,16 +36,12 @@ same pattern as Postgres/MySQL/SQL Server/Oracle) — not a custom Java
 translator like ServiceNow, which was only necessary because ServiceNow has
 no JDBC path. This plan follows category 1 exclusively.
 
-**Not in scope for this plan** (flagged for a separate decision, not
-assumed either way): migrating HubSpot/Salesforce/QuickBooks off the
-sync-to-staging pattern onto live Teiid translators. Worth noting for that
-future decision: Teiid already **ships a built-in `salesforce` translator**
-(`wildfly/modules/.../org/jboss/teiid/translator/salesforce/`, already
-deployed, `translator-salesforce-16.0.0.jar`) — migrating Salesforce
-specifically could reuse this out-of-the-box translator rather than
-requiring new custom Java, unlike HubSpot/QuickBooks which have no Teiid
-built-in and would need a ServiceNow-style custom translator each. This is
-worth a dedicated, separate plan once you decide whether to pursue it.
+**Not in scope for this plan:** Salesforce has since been migrated to
+Teiid's built-in `salesforce-41` translator (see PR #125). HubSpot and
+QuickBooks are covered by a separate plan
+(`docs/devin-hubspot-quickbooks-teiid-translators-plan.md`), since
+neither has a Teiid built-in translator and both need a ServiceNow-style
+custom Java translator instead.
 
 ## Translator choice for each new engine
 
