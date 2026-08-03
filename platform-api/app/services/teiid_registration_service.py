@@ -179,6 +179,7 @@ class TeiidRegistrationService:
             "view_name": view_name,
             "schema_name": "",
             "columns": columns,
+            "force": True,
         }
 
         safe_payload = {k: v for k, v in payload.items() if k != "password"}

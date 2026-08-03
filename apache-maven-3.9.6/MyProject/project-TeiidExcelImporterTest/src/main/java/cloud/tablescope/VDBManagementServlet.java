@@ -1380,6 +1380,7 @@ public class VDBManagementServlet extends HttpServlet {
 
         // ServiceNow sources talk to a custom Teiid translator rather than a JDBC datasource.
         boolean isServiceNow = "servicenow".equalsIgnoreCase(translator);
+        boolean force = body.optBoolean("force", false);
         String instanceUrl = body.optString("instance_url", isServiceNow ? jdbcUrl : "");
 
         // Teiid admin endpoint (local to this WildFly node).
@@ -1432,7 +1433,17 @@ public class VDBManagementServlet extends HttpServlet {
                 // 3. Edit the VDB XML: add the physical model + the view.
                 String vdbXml = readFile(vdbFilePath);
 
-                if (vdbXml.contains("<model name=\"" + modelName + "\"")) {
+                boolean modelExists = vdbXml.contains("<model name=\"" + modelName + "\"");
+                if (modelExists && force) {
+                    log("Force mode: removing existing model/translator/view for " + modelName);
+                    vdbXml = removeModelBlock(vdbXml, modelName);
+                    if (isServiceNow) {
+                        vdbXml = removeTranslatorBlock(vdbXml, dsName + "_servicenow");
+                    }
+                    modelExists = false;
+                }
+
+                if (modelExists) {
                     log("Model " + modelName + " already present in VDB; skipping model insert.");
                 } else {
                     String modelBlock;
@@ -1459,7 +1470,13 @@ public class VDBManagementServlet extends HttpServlet {
 
                 String viewStmt = "CREATE VIEW " + viewName + " AS SELECT * FROM "
                         + modelName + "." + teiidTableName + ";";
-                if (vdbXml.contains("CREATE VIEW " + viewName + " ")) {
+                boolean viewExists = vdbXml.contains("CREATE VIEW " + viewName + " ");
+                if (viewExists && force) {
+                    log("Force mode: removing existing view " + viewName);
+                    vdbXml = removeViewStmt(vdbXml, viewName);
+                    viewExists = false;
+                }
+                if (viewExists) {
                     log("View " + viewName + " already present in VDB; skipping view insert.");
                 } else {
                     vdbXml = insertBefore(vdbXml, "-- Place new View above", viewStmt + NEWLINE());
@@ -1714,6 +1731,48 @@ public class VDBManagementServlet extends HttpServlet {
             return content;
         }
         return content.substring(0, idx) + insertion + content.substring(idx);
+    }
+
+    /** Remove a <model name="..."> ... </model> block from VDB XML. */
+    private String removeModelBlock(String content, String modelName) {
+        String start = "  <model name=\"" + modelName + "\"";
+        int s = content.indexOf(start);
+        if (s < 0) {
+            start = "<model name=\"" + modelName + "\"";
+            s = content.indexOf(start);
+        }
+        if (s < 0) return content;
+        int e = content.indexOf("</model>", s);
+        if (e < 0) return content;
+        e += "</model>".length();
+        // consume trailing newline(s)
+        while (e < content.length() && (content.charAt(e) == '\n' || content.charAt(e) == '\r')) e++;
+        return content.substring(0, s) + content.substring(e);
+    }
+
+    /** Remove a <translator name="..."> ... </translator> block from VDB XML. */
+    private String removeTranslatorBlock(String content, String translatorName) {
+        String start = "<translator name=\"" + translatorName + "\"";
+        int s = content.indexOf(start);
+        if (s < 0) return content;
+        int e = content.indexOf("</translator>", s);
+        if (e < 0) return content;
+        e += "</translator>".length();
+        while (e < content.length() && (content.charAt(e) == '\n' || content.charAt(e) == '\r')) e++;
+        return content.substring(0, s) + content.substring(e);
+    }
+
+    /** Remove a CREATE VIEW ... ; statement from the virtual model DDL. */
+    private String removeViewStmt(String content, String viewName) {
+        String prefix = "CREATE VIEW " + viewName + " AS SELECT * FROM ";
+        int s = content.indexOf(prefix);
+        if (s < 0) return content;
+        int e = content.indexOf(";", s);
+        if (e < 0) return content;
+        e++;
+        // consume trailing newline
+        while (e < content.length() && (content.charAt(e) == '\n' || content.charAt(e) == '\r')) e++;
+        return content.substring(0, s) + content.substring(e);
     }
 
     private String NEWLINE() {

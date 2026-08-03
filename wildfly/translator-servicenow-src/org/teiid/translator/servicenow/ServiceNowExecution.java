@@ -49,20 +49,49 @@ public class ServiceNowExecution implements ResultSetExecution {
         }
 
         this.outputColumns = ctx.columns.isEmpty() ? ctx.allColumns : ctx.columns;
-        String fields = String.join(",", this.outputColumns);
+        String sourceTable = ctx.sourceTableName != null ? ctx.sourceTableName : ctx.tableName;
+        String fields = String.join(",", sourceColumnNames(ctx));
         String query = ctx.sysparmQuery;
         int limit = ctx.limit;
         int offset = ctx.offset;
 
         results = new ArrayList<>();
-        for (JsonObject row : connection.query(ctx.tableName, query, fields, limit, offset)) {
+        for (JsonObject row : connection.query(sourceTable, query, fields, limit, offset)) {
             List<Object> record = new ArrayList<>(this.outputColumns.size());
-            for (String col : this.outputColumns) {
+            for (String col : sourceColumnNames(ctx)) {
                 record.add(convertValue(row.get(col)));
             }
             results.add(record);
         }
         iterator = results.iterator();
+    }
+
+    private List<String> sourceColumnNames(QueryContext ctx) throws TranslatorException {
+        List<String> names = new ArrayList<>(this.outputColumns.size());
+        for (String col : this.outputColumns) {
+            String src = col;
+            try {
+                org.teiid.metadata.Column column = null;
+                if (ctx.schemaName != null && ctx.tableName != null) {
+                    column = metadata.getColumn(ctx.schemaName, ctx.tableName, col);
+                }
+                if (column == null && ctx.tableName != null) {
+                    column = metadata.getColumn(ctx.tableName + "." + col);
+                }
+                if (column != null && column.getNameInSource() != null
+                        && !column.getNameInSource().isEmpty()) {
+                    src = column.getNameInSource();
+                }
+            } catch (TranslatorException e) {
+                // fall back to the Teiid column name
+            }
+            // strip surrounding double quotes that some source DDLs embed
+            if (src.startsWith("\"") && src.endsWith("\"")) {
+                src = src.substring(1, src.length() - 1);
+            }
+            names.add(src);
+        }
+        return names;
     }
 
     @Override
@@ -106,7 +135,9 @@ public class ServiceNowExecution implements ResultSetExecution {
      */
     private static class QueryContext extends AbstractLanguageVisitor {
 
+        String schemaName;
         String tableName;
+        String sourceTableName;
         final List<String> columns = new ArrayList<>();
         final List<String> allColumns = new ArrayList<>();
         String sysparmQuery = "";
@@ -118,7 +149,22 @@ public class ServiceNowExecution implements ResultSetExecution {
             if (obj.getFrom() != null && !obj.getFrom().isEmpty()) {
                 TableReference tr = obj.getFrom().get(0);
                 if (tr instanceof NamedTable) {
-                    tableName = ((NamedTable) tr).getName();
+                    NamedTable nt = (NamedTable) tr;
+                    String fullName = nt.getName();
+                    if (fullName != null && fullName.contains(".")) {
+                        int dot = fullName.lastIndexOf('.');
+                        schemaName = fullName.substring(0, dot);
+                        tableName = fullName.substring(dot + 1);
+                    } else {
+                        tableName = fullName;
+                    }
+                    org.teiid.metadata.Table meta = nt.getMetadataObject();
+                    if (meta != null) {
+                        String nis = meta.getNameInSource();
+                        if (nis != null && !nis.isEmpty()) {
+                            sourceTableName = nis;
+                        }
+                    }
                 }
             }
 
