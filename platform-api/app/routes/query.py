@@ -351,6 +351,30 @@ async def _execute_sql_with_repair(
     repair attempt fails, in which case ``final_sql`` is the last attempted
     SQL and the caller should surface the error.
     """
+
+    def _is_source_or_schema_error(err: str) -> bool:
+        # These errors indicate an unavailable source, bad gateway, missing
+        # table/column, or runtime source failure. Asking an LLM to rewrite
+        # the SQL cannot resolve them and only consumes time / queue slots.
+        patterns = [
+            r"TEIID30504",
+            r"TEIID30498",
+            r"TEIID30492",
+            r"TEIID30496",
+            r"Group does not exist",
+            r"is not defined by any relevant group",
+            r"Table .* does not exist",
+            r"HTTP \d+",
+            r"Bad Gateway",
+            r"Connection refused",
+            r"Connection timed out",
+            r"No route to host",
+            r"Capabilities for .* were not available",
+            r"Could not execute generated SQL",
+        ]
+        lowered = err.lower()
+        return any(re.search(p, lowered, re.IGNORECASE) for p in patterns)
+
     final_sql = await _prepare_sql(
         raw_sql,
         table_schema=table_schema,
@@ -369,7 +393,7 @@ async def _execute_sql_with_repair(
             return result, final_sql
         except HTTPException as exc:
             last_error = str(exc.detail)
-            if attempt >= max_attempts - 1:
+            if _is_source_or_schema_error(last_error) or attempt >= max_attempts - 1:
                 break
             fixed = await ai_intelligence_client.fix_sql(
                 tenant_id=tenant_id,
