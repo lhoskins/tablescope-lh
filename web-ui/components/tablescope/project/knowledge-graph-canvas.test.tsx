@@ -104,6 +104,19 @@ describe("connectorStroke", () => {
     expect(s.dash).toBeUndefined();
     expect(s.stroke).toBe("#94a3b8");
   });
+
+  it("maps edge opacity to each relationship strength", () => {
+    expect(connectorStroke("solid", "explicit", false).opacity).toBe(1);
+    expect(connectorStroke("dotted", "inferred", false).opacity).toBe(0.7);
+    expect(connectorStroke("dashed", "recommended", false).opacity).toBe(0.4);
+    expect(connectorStroke("dotted", "weak", false).opacity).toBe(0.25);
+    expect(connectorStroke("hidden", "hidden", false).opacity).toBe(0.18);
+  });
+
+  it("forces full opacity for a traced edge regardless of base strength", () => {
+    expect(connectorStroke("dashed", "recommended", true).opacity).toBe(1);
+    expect(connectorStroke("dotted", "weak", true).opacity).toBe(1);
+  });
 });
 
 describe("KnowledgeGraphCanvas", () => {
