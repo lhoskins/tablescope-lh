@@ -58,7 +58,6 @@ from app.services.file_sources import (
     compute_view_name,
     detect_column_types,
     display_source,
-    physical_file_name,
     prepare_replacement_content,
     prepare_upload_content,
     sanitize_filename,
@@ -331,7 +330,7 @@ async def list_datasources(
     for f in files:
         candidates = candidate_to_metas.get(f.name, [])
         candidates.sort(key=lambda x: x[0])
-        for priority, meta in candidates:
+        for _priority, meta in candidates:
             if meta.id not in assigned_meta:
                 view_name = compute_view_name(f.name)
                 if meta.view_name != view_name:
