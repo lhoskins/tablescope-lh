@@ -54,7 +54,7 @@ describe("projectNavGroups", () => {
       "project-actions",
       "project-business-context",
       "project-scopes",
-      "project-create-knowledge-graph",
+      "project-relationship-map",
     ]);
     expect(keys).not.toContain("project-data-sources");
     expect(keys).not.toContain("project-queries");

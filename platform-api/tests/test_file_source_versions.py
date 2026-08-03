@@ -22,6 +22,20 @@ TYPE_CHANGED_CSV = b"id,amount\n1,ten\n2,twenty\n"
 VIEW_NAME = "sales_CSV"
 
 
+def _xlsx_bytes(rows: list[list[object]]) -> bytes:
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    for row in rows:
+        ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def _headers(tenant_id: int, user_id: int, role: str = "editor") -> dict:
     token = create_access_token(
         sub="u", tenant_id=tenant_id, user_id=user_id, role=role
@@ -171,6 +185,74 @@ async def test_a_different_file_name_is_refused(
     )
     assert resp.status_code == 409
     assert "File name mismatch" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_accepts_original_extension_over_a_stale_stored_name(
+    client, db_session, tmp_path, monkeypatch
+) -> None:
+    """Regression: a source uploaded as XLSX (flattened to CSV on disk) must
+    accept a re-upload of the *original* .xlsx file, even if meta.file_name
+    was stored with the flattened .csv extension (e.g. a row written before
+    the display-name reconstruction existed). The expected name is
+    recomputed from the physical file + source_format, not trusted blindly
+    from the stored column.
+    """
+    tenant = Tenant(slug="v-tenant-xlsx", name="Version Tenant XLSX")
+    db_session.add(tenant)
+    await db_session.flush()
+    user = User(
+        tenant_id=tenant.id, email="x@test.com", display_name="X User", role="editor",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    view_name = "report_XLSX"
+    db_session.add(
+        FileSourceMeta(
+            tenant_id=tenant.id,
+            owner_id=user.id,
+            view_name=view_name,
+            # Stale: written before the display-name reconstruction was
+            # wired up, so it still carries the on-disk (flattened) extension
+            # instead of the original upload's.
+            file_name="report.csv",
+            source_format="xlsx",
+            vdb_type="user",
+            column_types=detect_column_types(BASE_CSV, "report.csv"),
+        )
+    )
+    await db_session.commit()
+
+    uploads = tmp_path / str(tenant.id) / str(user.id) / "uploads"
+    uploads.mkdir(parents=True)
+    (uploads / "report.csv").write_bytes(BASE_CSV)
+
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "customer_base_path", str(tmp_path))
+
+    xlsx_content = _xlsx_bytes([["id", "amount", "region"], [1, 10, "EU"], [2, 20, "US"]])
+    resp = await client.post(
+        f"/api/upload/datasources/{view_name}/versions/preflight",
+        headers=_headers(tenant.id, user.id),
+        files={
+            "file": (
+                "report.xlsx",
+                xlsx_content,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["compatibility"]["currentFileName"] == "report.xlsx"
+
+    from sqlalchemy import select
+
+    meta = await db_session.scalar(
+        select(FileSourceMeta).where(FileSourceMeta.view_name == view_name)
+    )
+    assert meta is not None
+    assert meta.file_name == "report.xlsx"
 
 
 @pytest.mark.asyncio

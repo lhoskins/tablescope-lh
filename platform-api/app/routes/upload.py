@@ -677,6 +677,7 @@ async def replace_file_source(
     # Resolve the existing physical file backing this view.
     existing_path: Path | None = None
     existing_name: str | None = None
+    expected_name: str | None = None
     if uploads_dir.is_dir():
         for f in uploads_dir.iterdir():
             if f.is_file():
@@ -684,35 +685,53 @@ async def replace_file_source(
                 if compute_view_name(physical_display_name) == view_name:
                     existing_path = f
                     existing_name = f.name
+                    expected_name = physical_display_name
                     break
-    if existing_path is None or existing_name is None:
+    if existing_path is None or existing_name is None or expected_name is None:
         raise HTTPException(status_code=404, detail="Data source not found")
 
-    # 1) Same-name check.
-    if sanitize_filename(file.filename) != sanitize_filename(meta.file_name):
+    # 1) Same-name check. Compare against the identity name as reconstructed
+    # from the physical file + source_format (same as above and as the list
+    # endpoint uses to display it) rather than the stored meta.file_name,
+    # which can drift stale for rows written before this reconstruction
+    # existed.
+    if sanitize_filename(file.filename) != sanitize_filename(expected_name):
         raise HTTPException(
             status_code=409,
             detail=(
-                f'File name mismatch: expected "{meta.file_name}", '
+                f'File name mismatch: expected "{expected_name}", '
                 f'got "{file.filename}". Replacement must use the same file name.'
             ),
         )
+    if meta.file_name != expected_name:
+        # Self-heal a stale stored name so future reads/checks agree with it.
+        meta.file_name = expected_name
 
     content = await file.read()
 
     # ── Replacement cleaning (same as the original upload path) ─────────
     # Apply header/cell sanitization to both files so the column compatibility
-    # check and the VDB DDL are working with the same safe identifiers.
-    lower_name = existing_name.lower()
-    if lower_name.endswith((".csv", ".tsv", ".txt")):
-        content = sanitize_csv_content(content)
+    # check and the VDB DDL are working with the same safe identifiers. The
+    # existing (physical, on-disk) file and the incoming upload are
+    # sanitized independently by their *own* extensions — the physical file
+    # is always the flattened CSV for an XLSX/JSON/XML source, but the
+    # incoming upload is the user's real original file (e.g. .xlsx), so
+    # picking one sanitizer for both from a single extension would run the
+    # wrong parser on whichever side doesn't match.
+    lower_existing = existing_name.lower()
+    if lower_existing.endswith((".csv", ".tsv", ".txt")):
         existing_content = sanitize_csv_content(existing_path.read_bytes())
-    elif lower_name.endswith((".xlsx", ".xlsm", ".xls")):
-        # The original upload flattens XLSX to CSV; keep that behavior here.
-        content = sanitize_xlsx_content(content)
+    elif lower_existing.endswith((".xlsx", ".xlsm", ".xls")):
         existing_content = sanitize_xlsx_content(existing_path.read_bytes())
     else:
         existing_content = existing_path.read_bytes()
+
+    lower_incoming = file.filename.lower()
+    if lower_incoming.endswith((".csv", ".tsv", ".txt")):
+        content = sanitize_csv_content(content)
+    elif lower_incoming.endswith((".xlsx", ".xlsm", ".xls")):
+        # The original upload flattens XLSX to CSV; keep that behavior here.
+        content = sanitize_xlsx_content(content)
 
     # 2) Column compatibility check: incoming must contain all existing columns.
     existing_types = detect_column_types(existing_content, existing_name)
@@ -987,19 +1006,31 @@ async def preflight_source_update(
                 f"{file.filename} was classified as a document."
             ),
         )
-    if sanitize_filename(file.filename) != sanitize_filename(meta.file_name):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f'File name mismatch: expected "{meta.file_name}", got "{file.filename}". '
-                "An update must use the same file name so the source keeps its identity."
-            ),
-        )
 
     _, uploads_dir = await _resolve_uploads_dir(
         session, tenant_id=context.tenant_id, user_id=user.id
     )
     existing_path, existing_name = _locate_physical_file(uploads_dir, meta, view_name)
+
+    # 1) Same-name check. Compare against the identity name as reconstructed
+    # from the physical file + source_format (the same computation the list
+    # endpoint uses to display it) rather than the stored meta.file_name —
+    # for XLSX/JSON/XML sources the physical file on disk is a flattened
+    # CSV, and a row whose file_name was written before this reconstruction
+    # existed (or drifted some other way) would otherwise demand the wrong
+    # extension forever, even though the UI already shows the correct one.
+    expected_name, _ = display_source(existing_name, meta.source_format)
+    if sanitize_filename(file.filename) != sanitize_filename(expected_name):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f'File name mismatch: expected "{expected_name}", got "{file.filename}". '
+                "An update must use the same file name so the source keeps its identity."
+            ),
+        )
+    if meta.file_name != expected_name:
+        # Self-heal a stale stored name so future reads/checks agree with it.
+        meta.file_name = expected_name
 
     baseline = await _ensure_baseline_version(
         session, meta=meta, existing_path=existing_path, existing_name=existing_name

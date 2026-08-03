@@ -4,6 +4,7 @@ import type { GraphNode } from "@/lib/ui/use-project-data";
 import {
   KnowledgeGraphCanvas,
   centerLabel,
+  connectorStroke,
   edgePath,
   insetPoint,
   moveToward,
@@ -75,6 +76,33 @@ describe("knowledge graph canvas geometry helpers", () => {
     expect(out).toContain("\u2026");
     expect(out.startsWith("SUP_Supplier_Qua")).toBe(true);
     expect(out.endsWith("_Edition_Final")).toBe(true);
+  });
+});
+
+describe("connectorStroke", () => {
+  // Regression: when no trace-to-evidence is active (the default, normal
+  // browsing state), edges must still render per their own
+  // connectorStyle/relationshipStrength \u2014 not the flat solid "traced" style.
+  it("honors dashed styling (Recommended) when no trace is active", () => {
+    const s = connectorStroke("dashed", "recommended", false);
+    expect(s.dash).toBe("8 6");
+    expect(s.stroke).toBe("#fbbf24");
+  });
+
+  it("honors dotted styling (Inferred) when no trace is active", () => {
+    const s = connectorStroke("dotted", "inferred", false);
+    expect(s.dash).toBe("4 4");
+  });
+
+  it("renders solid, no dash, for Explicit evidence when no trace is active", () => {
+    const s = connectorStroke("solid", "explicit", false);
+    expect(s.dash).toBeUndefined();
+  });
+
+  it("still overrides to flat solid gray for an edge that IS part of an active trace", () => {
+    const s = connectorStroke("dashed", "recommended", true);
+    expect(s.dash).toBeUndefined();
+    expect(s.stroke).toBe("#94a3b8");
   });
 });
 
@@ -164,5 +192,35 @@ describe("KnowledgeGraphCanvas", () => {
     const el = screen.getByTestId("kg-center-node");
     expect(el.getAttribute("title")).toBe("SUP_Supplier_Quality_Manual_2026_Edition.docx");
     expect(el.textContent).toContain("\u2026");
+  });
+
+  it("renders a Recommended edge dashed and an Inferred edge dotted with no trace active", () => {
+    const { container } = render(
+      <KnowledgeGraphCanvas
+        centerNode={center}
+        nodes={[
+          center,
+          node({ id: 2, label: "Recommended Doc" }),
+          node({ id: 3, label: "Inferred Doc" }),
+        ]}
+        edges={[
+          {
+            id: 10, source: 1, target: 2, confidence: 0.4, type: "reference",
+            connectorStyle: "dashed", relationshipStrength: "recommended",
+          },
+          {
+            id: 11, source: 1, target: 3, confidence: 0.75, type: "cites",
+            connectorStyle: "dotted", relationshipStrength: "inferred",
+          },
+        ]}
+        selectedNodeKey={null}
+        tracedNodeIds={null}
+        onNodeClick={() => {}}
+      />,
+    );
+    const paths = Array.from(container.querySelectorAll("svg > path"));
+    const dashArrays = paths.map((p) => p.getAttribute("stroke-dasharray"));
+    expect(dashArrays).toContain("8 6"); // recommended \u2192 dashed
+    expect(dashArrays).toContain("4 4"); // inferred \u2192 dotted
   });
 });

@@ -131,9 +131,9 @@ export function projectNavGroups(projectId: string): NavGroup[] {
           icon: IconBinaryTree,
         },
         {
-          key: "project-create-knowledge-graph",
-          label: "Create Knowledge Graph",
-          href: `${base}/knowledge-graph`,
+          key: "project-relationship-map",
+          label: "Knowledge Graph",
+          href: `${base}/relationship-map`,
           icon: IconTopologyStar3,
         },
       ],
