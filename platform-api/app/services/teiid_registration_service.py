@@ -137,6 +137,79 @@ class TeiidRegistrationService:
         if self._owns_client:
             await self._client.aclose()
 
+    async def register_servicenow_source(
+        self,
+        *,
+        vdb_id: str,
+        org_id: int,
+        user_id: int,
+        instance_url: str,
+        username: str,
+        password: str,
+        object_type: str,
+        model_name: str,
+        teiid_table_name: str,
+        ds_name: str,
+        jndi_name: str,
+        view_name: str,
+        columns: list[dict],
+    ) -> dict:
+        """Register a ServiceNow table using the custom Teiid translator.
+
+        Unlike ``register_database_source``, this does not create a JDBC
+        datasource; the ServiceNow translator opens HTTP connections directly.
+        """
+        payload = {
+            "vdb_id": vdb_id,
+            "org_id": org_id,
+            "user_id": user_id,
+            "teiid_host": "localhost",
+            "teiid_port": 9990,
+            "db_type": "servicenow",
+            "translator": "servicenow",
+            "jdbc_url": instance_url,
+            "instance_url": instance_url,
+            "table_name": object_type,
+            "username": username,
+            "password": password,
+            "model_name": model_name,
+            "teiid_table_name": teiid_table_name,
+            "jndi_name": jndi_name,
+            "ds_name": ds_name,
+            "view_name": view_name,
+            "schema_name": "",
+            "columns": columns,
+        }
+
+        safe_payload = {k: v for k, v in payload.items() if k != "password"}
+        logger.info("Registering ServiceNow source in Teiid: %s", safe_payload)
+
+        try:
+            response = await self._client.post(
+                "/TeiidExcelImporterTest/vdb-management/createDatabaseSource",
+                json=payload,
+            )
+        except httpx.RequestError as exc:
+            raise TeiidRegistrationError(
+                f"Failed to contact Teiid servlet: {exc}"
+            ) from exc
+
+        if response.status_code >= 400:
+            raise TeiidRegistrationError(
+                f"Teiid rejected ServiceNow source registration: "
+                f"{response.status_code} {response.text}"
+            )
+
+        try:
+            body = response.json()
+        except Exception:
+            body = {"raw": response.text}
+
+        if isinstance(body, dict) and body.get("error"):
+            raise TeiidRegistrationError(str(body["error"]))
+
+        return body
+
     async def register_database_source(
         self,
         *,
@@ -319,27 +392,44 @@ async def reconcile_database_sources(session, *, only_id: int | None = None) -> 
                 password = _platform_password_for_source(ds) or ""
 
             try:
-                await reg.register_database_source(
-                    vdb_id=user_vdb.vdb_id,
-                    org_id=ds.tenant_id,
-                    user_id=ds.created_by,
-                    db_type=ds.db_type,
-                    host=ds.host,
-                    port=ds.port,
-                    database_name=ds.database_name,
-                    schema_name=intro.source_identifier(ds.db_type, ds.schema_name),
-                    table_name=intro.source_identifier(ds.db_type, ds.table_name)
-                    or ds.table_name,
-                    username=ds.username,
-                    password=password,
-                    ssl_mode=ds.ssl_mode,
-                    model_name=ds.teiid_model_name or names["model_name"],
-                    teiid_table_name=ds.teiid_table_name or names["teiid_table_name"],
-                    jndi_name=ds.teiid_jndi_name or names["jndi_name"],
-                    ds_name=names["ds_name"],
-                    view_name=ds.teiid_view_name,
-                    columns=teiid_columns,
-                )
+                if ds.db_type == "servicenow":
+                    await reg.register_servicenow_source(
+                        vdb_id=user_vdb.vdb_id,
+                        org_id=ds.tenant_id,
+                        user_id=ds.created_by,
+                        instance_url=ds.host,
+                        username=ds.username,
+                        password=password,
+                        object_type=ds.table_name,
+                        model_name=ds.teiid_model_name or names["model_name"],
+                        teiid_table_name=ds.teiid_table_name or names["teiid_table_name"],
+                        ds_name=names["ds_name"],
+                        jndi_name=ds.teiid_jndi_name or names["jndi_name"],
+                        view_name=ds.teiid_view_name,
+                        columns=teiid_columns,
+                    )
+                else:
+                    await reg.register_database_source(
+                        vdb_id=user_vdb.vdb_id,
+                        org_id=ds.tenant_id,
+                        user_id=ds.created_by,
+                        db_type=ds.db_type,
+                        host=ds.host,
+                        port=ds.port,
+                        database_name=ds.database_name,
+                        schema_name=intro.source_identifier(ds.db_type, ds.schema_name),
+                        table_name=intro.source_identifier(ds.db_type, ds.table_name)
+                        or ds.table_name,
+                        username=ds.username,
+                        password=password,
+                        ssl_mode=ds.ssl_mode,
+                        model_name=ds.teiid_model_name or names["model_name"],
+                        teiid_table_name=ds.teiid_table_name or names["teiid_table_name"],
+                        jndi_name=ds.teiid_jndi_name or names["jndi_name"],
+                        ds_name=names["ds_name"],
+                        view_name=ds.teiid_view_name,
+                        columns=teiid_columns,
+                    )
                 results["ok"] += 1
             except Exception as exc:
                 results["failed"] += 1

@@ -147,6 +147,17 @@ async def create_saas_source(
     id_column = connector.id_column(object_type)
 
     pg = _app_pg_connection()
+    is_servicenow = connector_type == "servicenow"
+
+    sn_username = ""
+    sn_password = ""
+    sn_instance_url = ""
+    if is_servicenow:
+        sn_username = config.get("username", "")
+        sn_password = config.get("password", "")
+        sn_instance_url = (config.get("instance_url") or "").strip().rstrip("/")
+        if sn_instance_url and not sn_instance_url.startswith("http"):
+            sn_instance_url = f"https://{sn_instance_url}"
 
     # 1. DatabaseDataSource (draft) to allocate an id for naming.
     ds = DatabaseDataSource(
@@ -156,14 +167,18 @@ async def create_saas_source(
         display_name=display_name,
         source_type="saas_object",
         connector_type=connector_type,
-        db_type="postgresql",
-        host=pg.host,
-        port=pg.port,
-        database_name=pg.database,
-        schema_name=staging.STAGING_SCHEMA,
+        db_type="servicenow" if is_servicenow else "postgresql",
+        host=sn_instance_url if is_servicenow else pg.host,
+        port=0 if is_servicenow else pg.port,
+        database_name="" if is_servicenow else pg.database,
+        schema_name="" if is_servicenow else staging.STAGING_SCHEMA,
         table_name="",  # set after id is known
-        username=pg.user,
-        password_encrypted=encrypt_secret(pg.password) if pg.password else None,
+        username=sn_username if is_servicenow else pg.user,
+        password_encrypted=(
+            encrypt_secret(sn_password)
+            if is_servicenow and sn_password
+            else (encrypt_secret(pg.password) if pg.password else None)
+        ),
         ssl_mode=None,
         teiid_model_name="",
         teiid_table_name="",
@@ -177,11 +192,14 @@ async def create_saas_source(
     session.add(ds)
     await session.flush()  # assign ds.id
 
-    staging_table = f"{connector_type}_ds_{ds.id}_{object_type.lower()}"
-    ds.table_name = staging_table
+    if is_servicenow:
+        ds_table_name = object_type.lower()
+    else:
+        ds_table_name = f"{connector_type}_ds_{ds.id}_{object_type.lower()}"
+    ds.table_name = ds_table_name
 
     names = generate_teiid_names(
-        data_source_id=ds.id, db_type="postgresql", table_name=staging_table
+        data_source_id=ds.id, db_type=ds.db_type, table_name=ds_table_name
     )
     view_name = generate_view_name(
         display_name=display_name, db_type=connector_type
@@ -191,7 +209,7 @@ async def create_saas_source(
     ds.teiid_jndi_name = names["jndi_name"]
     ds.teiid_view_name = view_name
 
-    # 2. Persist staging column metadata (drives reconcile + sync).
+    # 2. Persist column metadata (drives reconcile and query builder).
     for idx, col in enumerate(columns):
         session.add(
             DataSourceColumn(
@@ -213,53 +231,72 @@ async def create_saas_source(
         connector_type=connector_type,
         object_type=object_type,
         selected_properties=selected_fields,
-        staging_schema=staging.STAGING_SCHEMA,
-        staging_table=staging_table,
-        sync_mode="manual",
-        last_sync_status="pending",
+        staging_schema="" if is_servicenow else staging.STAGING_SCHEMA,
+        staging_table="" if is_servicenow else ds_table_name,
+        sync_mode="live" if is_servicenow else "manual",
+        last_sync_status="live" if is_servicenow else "pending",
     )
     session.add(saas)
 
-    # 4. Create the physical staging table in the app's Postgres.
-    await staging.create_staging_table(
-        session,
-        schema=staging.STAGING_SCHEMA,
-        table=staging_table,
-        columns=columns,
-        id_column=id_column,
-    )
+    # 4. Create the physical staging table in the app's Postgres (not needed
+    # for ServiceNow, which is queried live via the custom Teiid translator).
+    if not is_servicenow:
+        await staging.create_staging_table(
+            session,
+            schema=staging.STAGING_SCHEMA,
+            table=ds_table_name,
+            columns=columns,
+            id_column=id_column,
+        )
 
-    # 5. Register the staging table in Teiid (same pipeline as DB tables).
+    # 5. Register the source in Teiid.
     teiid_columns = [
         {
             "name": col.name,
-            "name_in_source": intro.source_identifier("postgresql", col.name),
+            "name_in_source": intro.source_identifier(ds.db_type, col.name),
             "teiid_type": intro.map_to_teiid_type(col.pg_type),
         }
         for col in columns
     ]
     reg = TeiidRegistrationService()
     try:
-        await reg.register_database_source(
-            vdb_id=user_vdb.vdb_id,
-            org_id=tenant_id,
-            user_id=user_id,
-            db_type="postgresql",
-            host=pg.host,
-            port=pg.port,
-            database_name=pg.database,
-            schema_name=staging.STAGING_SCHEMA,
-            table_name=staging_table,
-            username=pg.user,
-            password=pg.password,
-            ssl_mode=None,
-            model_name=names["model_name"],
-            teiid_table_name=names["teiid_table_name"],
-            jndi_name=names["jndi_name"],
-            ds_name=names["ds_name"],
-            view_name=view_name,
-            columns=teiid_columns,
-        )
+        if is_servicenow:
+            await reg.register_servicenow_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                instance_url=sn_instance_url,
+                username=sn_username,
+                password=sn_password,
+                object_type=object_type,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                ds_name=names["ds_name"],
+                jndi_name=names["jndi_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
+        else:
+            await reg.register_database_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                db_type="postgresql",
+                host=pg.host,
+                port=pg.port,
+                database_name=pg.database,
+                schema_name=staging.STAGING_SCHEMA,
+                table_name=ds_table_name,
+                username=pg.user,
+                password=pg.password,
+                ssl_mode=None,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                jndi_name=names["jndi_name"],
+                ds_name=names["ds_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
     finally:
         await reg.aclose()
 
@@ -291,6 +328,12 @@ async def run_sync(
     saas = await session.get(SaasObjectDataSource, saas_source_id)
     if saas is None:
         raise SaasSourceError("SaaS data source not found.")
+
+    if saas.connector_type == "servicenow":
+        return {
+            "status": "live",
+            "message": "ServiceNow data is queried in real time; sync is not required.",
+        }
 
     credential = await session.get(ConnectorCredential, saas.credential_id)
     if credential is None:

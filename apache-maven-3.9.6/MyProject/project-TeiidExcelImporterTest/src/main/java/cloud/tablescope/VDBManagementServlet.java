@@ -1378,6 +1378,10 @@ public class VDBManagementServlet extends HttpServlet {
         String schemaName = body.optString("schema_name", "");
         JSONArray columns = body.optJSONArray("columns");
 
+        // ServiceNow sources talk to a custom Teiid translator rather than a JDBC datasource.
+        boolean isServiceNow = "servicenow".equalsIgnoreCase(translator);
+        String instanceUrl = body.optString("instance_url", isServiceNow ? jdbcUrl : "");
+
         // Teiid admin endpoint (local to this WildFly node).
         String teiidHost = body.optString("teiid_host", "localhost");
         int teiidPort = body.has("teiid_port") ? body.getInt("teiid_port") : 9990;
@@ -1417,11 +1421,13 @@ public class VDBManagementServlet extends HttpServlet {
         }
 
         try {
-            // 2. Ensure the WildFly JDBC datasource exists.
+            // 2. Ensure the WildFly JDBC datasource exists (skipped for ServiceNow translator sources).
             Admin admin = AdminFactory.getInstance().createAdmin(
                     teiidHost, teiidPort, teiidAdminUser, teiidAdminPassword.toCharArray());
             try {
-                ensureDataSource(dsName, dbType, jdbcUrl, username, password);
+                if (!isServiceNow) {
+                    ensureDataSource(dsName, dbType, jdbcUrl, username, password);
+                }
 
                 // 3. Edit the VDB XML: add the physical model + the view.
                 String vdbXml = readFile(vdbFilePath);
@@ -1429,10 +1435,26 @@ public class VDBManagementServlet extends HttpServlet {
                 if (vdbXml.contains("<model name=\"" + modelName + "\"")) {
                     log("Model " + modelName + " already present in VDB; skipping model insert.");
                 } else {
-                    String modelBlock = buildPhysicalModelBlock(
-                            modelName, dsName, translator, jndiName,
-                            teiidTableName, schemaName, tableName, columns);
+                    String modelBlock;
+                    if (isServiceNow) {
+                        String translatorDefName = dsName + "_servicenow";
+                        modelBlock = buildServiceNowModelBlock(
+                                modelName, dsName, translatorDefName,
+                                teiidTableName, tableName, columns);
+                    } else {
+                        modelBlock = buildPhysicalModelBlock(
+                                modelName, dsName, translator, jndiName,
+                                teiidTableName, schemaName, tableName, columns);
+                    }
                     vdbXml = insertBefore(vdbXml, "</vdb>", modelBlock);
+                    if (isServiceNow) {
+                        String translatorDefName = dsName + "_servicenow";
+                        if (!vdbXml.contains("<translator name=\"" + translatorDefName + "\"")) {
+                            String translatorBlock = buildServiceNowTranslatorBlock(translatorDefName, instanceUrl, username, password);
+                            // VDB schema places translators after all models.
+                            vdbXml = insertBefore(vdbXml, "</vdb>", translatorBlock);
+                        }
+                    }
                 }
 
                 String viewStmt = "CREATE VIEW " + viewName + " AS SELECT * FROM "
@@ -1568,6 +1590,58 @@ public class VDBManagementServlet extends HttpServlet {
     }
 
     /** Build a PHYSICAL model block with an explicit CREATE FOREIGN TABLE. */
+    private String buildServiceNowModelBlock(String modelName, String dsName, String translatorName,
+                                              String teiidTableName, String tableName, JSONArray columns) {
+        StringBuilder cols = new StringBuilder();
+        if (columns != null && columns.length() > 0) {
+            for (int i = 0; i < columns.length(); i++) {
+                JSONObject c = columns.getJSONObject(i);
+                String name = c.getString("name");
+                String type = c.optString("teiid_type", "string");
+                String srcName = c.optString("name_in_source", name);
+                String viewId = "\"" + name.replace("\"", "\"\"") + "\"";
+                String nameInSourceLiteral = srcName.replace("'", "''");
+                cols.append("	").append(viewId).append(" ").append(type)
+                    .append(" OPTIONS (NAMEINSOURCE '").append(nameInSourceLiteral).append("')");
+                if (i < columns.length() - 1) cols.append(",");
+                cols.append("\n");
+            }
+        } else {
+            cols.append("	\"__row__\" string\n");
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n");
+        sb.append("  <model name=\"").append(modelName).append("\" type=\"PHYSICAL\" visible=\"false\">\n");
+        sb.append("    <source name=\"").append(dsName).append("\" translator-name=\"").append(translatorName).append("\"/>\n");
+        sb.append("    <metadata type=\"DDL\">\n");
+        sb.append("      <![CDATA[\n");
+        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
+        sb.append(cols);
+        sb.append(") OPTIONS (NAMEINSOURCE '").append(tableName.replace("'", "''")).append("');\n");
+        sb.append("]]>\n");
+        sb.append("    </metadata>\n");
+        sb.append("  </model>\n");
+        return sb.toString();
+    }
+
+    private String buildServiceNowTranslatorBlock(String translatorName, String instanceUrl,
+                                                 String username, String password) {
+        return "\n  <translator name=\"" + translatorName + "\" type=\"servicenow\">\n" +
+               "    <property name=\"instanceUrl\" value=\"" + xmlEncode(instanceUrl) + "\"/>\n" +
+               "    <property name=\"username\" value=\"" + xmlEncode(username) + "\"/>\n" +
+               "    <property name=\"password\" value=\"" + xmlEncode(password) + "\"/>\n" +
+               "  </translator>\n";
+    }
+
+    private String xmlEncode(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace("\"", "&quot;");
+    }
+
     private String buildPhysicalModelBlock(String modelName, String dsName, String translator,
                                            String jndiName, String teiidTableName, String schemaName,
                                            String tableName, JSONArray columns) {
