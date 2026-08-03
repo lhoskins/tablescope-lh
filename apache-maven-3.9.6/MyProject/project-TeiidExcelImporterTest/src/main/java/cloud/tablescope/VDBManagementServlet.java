@@ -1457,12 +1457,13 @@ public class VDBManagementServlet extends HttpServlet {
                                 modelName, dsName, translator, jndiName,
                                 teiidTableName, schemaName, tableName, columns);
                     }
-                    vdbXml = insertBefore(vdbXml, "</vdb>", modelBlock);
+                    // VDB schema requires all <model> elements before any <translator>.
+                    vdbXml = insertBeforeFirst(vdbXml, modelBlock, "</vdb>", "  <translator name=\"");
                     if (isServiceNow) {
                         String translatorDefName = dsName + "_servicenow";
                         if (!vdbXml.contains("<translator name=\"" + translatorDefName + "\"")) {
                             String translatorBlock = buildServiceNowTranslatorBlock(translatorDefName, instanceUrl, username, password);
-                            // VDB schema places translators after all models.
+                            // Translators must follow all models.
                             vdbXml = insertBefore(vdbXml, "</vdb>", translatorBlock);
                         }
                     }
@@ -1731,6 +1732,24 @@ public class VDBManagementServlet extends HttpServlet {
             return content;
         }
         return content.substring(0, idx) + insertion + content.substring(idx);
+    }
+
+    /** Insert {@code insertion} immediately before the earliest of the given anchors. */
+    private String insertBeforeFirst(String content, String insertion, String... anchors) {
+        int bestIdx = -1;
+        String bestAnchor = null;
+        for (String anchor : anchors) {
+            int idx = content.indexOf(anchor);
+            if (idx >= 0 && (bestIdx < 0 || idx < bestIdx)) {
+                bestIdx = idx;
+                bestAnchor = anchor;
+            }
+        }
+        if (bestIdx < 0) {
+            log("Warning: no anchor found for insertBeforeFirst: " + String.join(", ", anchors));
+            return content;
+        }
+        return content.substring(0, bestIdx) + insertion + content.substring(bestIdx);
     }
 
     /** Remove a <model name="..."> ... </model> block from VDB XML. */
