@@ -1708,7 +1708,7 @@ public class VDBManagementServlet extends HttpServlet {
         String ra = salesforceResourceAdapterName(translator);
         // Make idempotent: remove any existing connection definition first.
         try {
-            runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+            runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
                     + "/connection-definitions=" + dsName + ":remove");
         } catch (Exception e) {
             log("Ignoring Salesforce connection factory removal for " + dsName + ": " + e.getMessage());
@@ -1719,33 +1719,42 @@ public class VDBManagementServlet extends HttpServlet {
                 + "jndi-name=\"java:/" + dsName + "\", "
                 + "class-name=\"org.teiid.resource.adapter.salesforce.SalesForceManagedConnectionFactory\", "
                 + "enabled=true, use-java-context=true)";
-        runCli(addCmd);
+        runCliChecked(addCmd);
 
-        runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
                 + "/connection-definitions=" + dsName + "/config-properties=URL:add(value=\"" + url + "\")");
 
         String escUser = username == null ? "" : username.replace("\\", "\\\\").replace("\"", "\\\"");
-        runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
                 + "/connection-definitions=" + dsName + "/config-properties=username:add(value=\"" + escUser + "\")");
 
         String escPass = password == null ? "" : password.replace("\\", "\\\\").replace("\"", "\\\"");
-        runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
                 + "/connection-definitions=" + dsName + "/config-properties=password:add(value=\"" + escPass + "\")");
 
-        runCli("/subsystem=resource-adapters/resource-adapter=" + ra + ":activate");
+        runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra + ":activate");
         log("Salesforce connection factory created/updated: " + dsName + " via RA " + ra);
     }
 
     private void removeSalesforceConnectionFactory(String dsName, String translator) {
         try {
             String ra = salesforceResourceAdapterName(translator);
-            runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+            runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
                     + "/connection-definitions=" + dsName + ":remove");
-            runCli("/subsystem=resource-adapters/resource-adapter=" + ra + ":activate");
+            runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra + ":activate");
             log("Removed Salesforce connection factory: " + dsName);
         } catch (Exception e) {
             log("Warning: could not remove Salesforce connection factory " + dsName + ": " + e.getMessage());
         }
+    }
+
+    /** Run a jboss-cli command and throw if the response reports failure. */
+    private String runCliChecked(String command) throws Exception {
+        String out = runCli(command);
+        if (out != null && out.contains("\"outcome\" => \"failed\"")) {
+            throw new Exception("CLI command failed: " + command + "\n" + out);
+        }
+        return out;
     }
 
     /** Build a PHYSICAL model block for the native Teiid Salesforce translator. */
