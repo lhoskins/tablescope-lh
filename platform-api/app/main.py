@@ -178,7 +178,7 @@ async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
             recent_rows = (
                 await session.execute(
                     select(
-                        IntelligenceSnapshot.project_id,
+                        IntelligenceSnapshot.project_id,  # type: ignore[attr-defined]
                         IntelligenceSnapshot.updated_at,
                     )
                     .where(IntelligenceSnapshot.updated_at >= cutoff)
@@ -213,7 +213,7 @@ async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
                         .limit(1)
                     )
                     if version is not None and (
-                        version.pipeline_version == SNAPSHOT_PIPELINE_VERSION
+                        version.pipeline_version == SNAPSHOT_PIPELINE_VERSION  # type: ignore[attr-defined]
                     ):
                         skipped += 1
                         continue
