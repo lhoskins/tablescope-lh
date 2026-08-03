@@ -762,6 +762,42 @@ async def delete_database_source(
     return {"status": "deleted", "id": source_id}
 
 
+@router.get("/{source_id}/preflight-delete")
+async def preflight_delete_database_source(
+    source_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Return whether a database data source can be permanently deleted."""
+    ds = await session.get(DatabaseDataSource, source_id)
+    if ds is None or ds.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Data source not found")
+
+    blockers: list[dict[str, str]] = []
+    if not ds.archived:
+        blockers.append({
+            "category": "not_archived",
+            "message": "Archive the data source before deleting it.",
+        })
+
+    deps = await find_query_dependencies(
+        session, tenant_id=context.tenant_id, view_name=ds.teiid_view_name
+    )
+    if deps:
+        blockers.append({
+            "category": "active_dependencies",
+            "message": f"{len(deps)} active saved quer{'y' if len(deps) == 1 else 'ies'} depend on this source.",
+        })
+
+    return {
+        "id": source_id,
+        "safe": len(blockers) == 0 and ds.archived,
+        "archived": ds.archived,
+        "blockers": blockers,
+        "active_query_dependencies": deps,
+    }
+
+
 @router.post("/reconcile")
 async def reconcile_sources(
     session: AsyncSession = Depends(get_db),

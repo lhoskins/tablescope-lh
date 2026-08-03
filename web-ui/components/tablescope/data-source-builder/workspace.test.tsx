@@ -32,7 +32,7 @@ vi.mock("@/components/tablescope/project/new-project-dialog", () => ({
 
 import { DataSourceBuilderWorkspace } from "./workspace";
 
-function renderWorkspace(intent?: "upload") {
+function renderWorkspace(intent?: "upload" | "database") {
   return render(
     <QueryClientProvider client={new QueryClient()}>
       <DataSourceBuilderWorkspace tenantName="Acme" intent={intent} />
@@ -59,6 +59,20 @@ describe("DataSourceBuilderWorkspace", () => {
     renderWorkspace("upload");
     expect(
       screen.getByText(/Upload a file to create a data source/),
+    ).toBeInTheDocument();
+  });
+
+  it("shows only connected databases when intent is database-only", () => {
+    renderWorkspace("database");
+    expect(screen.queryByText("FileAcquisitionPanel")).not.toBeInTheDocument();
+    expect(screen.getByText("ConnectedDatabases")).toBeInTheDocument();
+    expect(screen.queryByText("ConnectedSaaS")).not.toBeInTheDocument();
+  });
+
+  it("uses database-scoped step hint when intent is database-only", () => {
+    renderWorkspace("database");
+    expect(
+      screen.getByText(/Choose a connected database and table/),
     ).toBeInTheDocument();
   });
 });

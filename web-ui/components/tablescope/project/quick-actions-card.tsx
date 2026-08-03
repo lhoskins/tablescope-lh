@@ -7,6 +7,7 @@ import {
   IconDatabase,
   IconFileText,
   IconLayoutDashboard,
+  IconServer,
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -27,9 +28,17 @@ export function QuickActionsCard({
       // Always goes through the Data Source Builder so connector selection,
       // file acquisition, and project assignment stay a single governed flow
       // rather than a second, inline creation path.
-      label: "Add data source",
+      label: "Create datasource",
       icon: IconDatabase,
       onClick: () => router.push(`/data-source-builder?projectId=${projectId}`),
+    },
+    {
+      // Same Data Source Builder, scoped to the connected-databases section
+      // so the intent here is "create a database-backed data source."
+      label: "Create Database connection",
+      icon: IconServer,
+      onClick: () =>
+        router.push(`/data-source-builder?projectId=${projectId}&intent=database`),
     },
     {
       label: "Create table",

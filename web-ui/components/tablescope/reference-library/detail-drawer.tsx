@@ -125,7 +125,7 @@ export function ReferenceDetailDrawer({
     typeof meta.business_domain === "string" ? meta.business_domain : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
+    <div className="absolute inset-0 z-50 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/30" />
       <div
         className="relative h-full w-full max-w-lg overflow-y-auto bg-bg-primary shadow-xl"

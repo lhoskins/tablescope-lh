@@ -77,8 +77,11 @@ export function DataSourceBuilderWorkspace({
   tenantName: string;
   /** Pre-select this project in Step 2 (arrived from a project-scoped entry point). */
   initialProjectId?: string;
-  /** "upload" hides connector selection so the flow is upload-and-scan only. */
-  intent?: "upload";
+  /**
+   * "upload" hides connector selection so the flow is upload-and-scan only.
+   * "database" shows only the connected-databases section.
+   */
+  intent?: "upload" | "database";
 }) {
   const queryClient = useQueryClient();
   const ensureTenant = useBuilderStore((s) => s.ensureTenant);
@@ -130,7 +133,9 @@ export function DataSourceBuilderWorkspace({
     step === 1
       ? intent === "upload"
         ? "Step 1 of 2: Upload a file to create a data source (AI-assisted scan and profiling)."
-        : "Step 1 of 2: Create data sources from files, connected databases, or SaaS connectors."
+        : intent === "database"
+          ? "Step 1 of 2: Choose a connected database and table to create a data source."
+          : "Step 1 of 2: Create data sources from files, connected databases, or SaaS connectors."
       : "Step 2 of 2: Assign selected data sources to project(s).";
 
   // Recompute whenever sources or projects change (toggles/new project).
@@ -162,9 +167,18 @@ export function DataSourceBuilderWorkspace({
       {step === 1 ? (
         <>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-4">
-            <FileAcquisitionPanel />
+            {intent !== "database" && <FileAcquisitionPanel />}
 
-            {intent !== "upload" && (
+            {intent === "database" && (
+              <div>
+                <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
+                  Connected Databases
+                </h3>
+                <ConnectedDatabases />
+              </div>
+            )}
+
+            {intent !== "upload" && intent !== "database" && (
               <>
                 <div>
                   <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">

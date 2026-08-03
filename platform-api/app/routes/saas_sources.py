@@ -15,6 +15,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,7 @@ from app.database import get_db
 from app.models.connector_credential import ConnectorCredential
 from app.models.database_data_source import DatabaseDataSource
 from app.models.saas_object_data_source import SaasObjectDataSource
+from app.routes.database_sources import find_query_dependencies
 from app.schemas.saas_source import (
     CreateCredentialRequest,
     CreateSaasSourceRequest,
@@ -44,6 +46,7 @@ from app.services.saas_source_service import (
     decrypt_config,
     run_sync,
 )
+from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/saas-sources", tags=["saas-sources"])
@@ -356,3 +359,121 @@ async def sync_source(
     except Exception as exc:  # pragma: no cover - redis not reachable
         logger.warning("Could not enqueue SaaS sync: %s", exc)
     return {"status": "enqueued" if enqueued else "failed", "id": saas_source_id}
+
+
+@router.patch("/{saas_source_id}/archive")
+async def archive_saas_source(
+    saas_source_id: int,
+    archived: bool = True,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Archive (hide) or unarchive a SaaS data source without deleting it."""
+    saas = await session.get(SaasObjectDataSource, saas_source_id)
+    if saas is None or saas.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="SaaS data source not found")
+    ds = await session.get(DatabaseDataSource, saas.database_data_source_id)
+    if ds is None or ds.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Data source not found")
+    if ds.created_by != context.user_id and context.role != "admin":
+        raise HTTPException(status_code=403, detail="Not allowed to modify this source")
+    ds.archived = archived
+    ds.archived_at = datetime.now(UTC) if archived else None
+    await session.commit()
+    await session.refresh(ds)
+    return ds.to_dict()
+
+
+@router.get("/{saas_source_id}/preflight-delete")
+async def preflight_delete_saas_source(
+    saas_source_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Return whether a SaaS data source can be permanently deleted."""
+    saas = await session.get(SaasObjectDataSource, saas_source_id)
+    if saas is None or saas.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="SaaS data source not found")
+    ds = await session.get(DatabaseDataSource, saas.database_data_source_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="Data source not found")
+
+    blockers: list[dict[str, str]] = []
+    if not ds.archived:
+        blockers.append({
+            "category": "not_archived",
+            "message": "Archive the data source before deleting it.",
+        })
+
+    deps = await find_query_dependencies(
+        session, tenant_id=context.tenant_id, view_name=ds.teiid_view_name
+    )
+    if deps:
+        blockers.append({
+            "category": "active_dependencies",
+            "message": f"{len(deps)} active saved quer{'y' if len(deps) == 1 else 'ies'} depend on this source.",
+        })
+
+    return {
+        "id": saas_source_id,
+        "safe": len(blockers) == 0 and ds.archived,
+        "archived": ds.archived,
+        "blockers": blockers,
+        "active_query_dependencies": deps,
+    }
+
+
+@router.delete("/{saas_source_id}")
+async def delete_saas_source(
+    saas_source_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict:
+    """Permanently delete a SaaS data source."""
+    saas = await session.get(SaasObjectDataSource, saas_source_id)
+    if saas is None or saas.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="SaaS data source not found")
+    ds = await session.get(DatabaseDataSource, saas.database_data_source_id)
+    if ds is None or ds.tenant_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Data source not found")
+    if ds.created_by != context.user_id and context.role != "admin":
+        raise HTTPException(status_code=403, detail="Not allowed to delete this source")
+    if not ds.archived:
+        raise HTTPException(
+            status_code=409,
+            detail="Archive the data source before deleting it.",
+        )
+    deps = await find_query_dependencies(
+        session, tenant_id=context.tenant_id, view_name=ds.teiid_view_name
+    )
+    if deps:
+        names = ", ".join(d["name"] for d in deps)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete: {len(deps)} active quer{'y' if len(deps) == 1 else 'ies'} depend on this source ({names}).",
+        )
+
+    try:
+        endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0)
+        ) as teiid_client:
+            teiid_resp = await teiid_client.post(
+                f"{endpoint.servlet_url}/TeiidExcelImporterTest/deleteDataSource",
+                data={"dataSourceName": ds.teiid_view_name},
+            )
+            if teiid_resp.status_code == 200:
+                logger.info("Teiid view/foreign-table removed for %s", ds.teiid_view_name)
+            else:
+                logger.warning(
+                    "Teiid deleteDataSource returned %s for %s: %s",
+                    teiid_resp.status_code, ds.teiid_view_name, teiid_resp.text,
+                )
+    except Exception as exc:
+        logger.warning("Failed to clean up Teiid for %s: %s", ds.teiid_view_name, exc)
+
+    # Deleting the DatabaseDataSource row cascades to the SaaS object row and
+    # its columns because of the FK/ondelete configuration.
+    await session.delete(ds)
+    await session.commit()
+    return {"status": "deleted", "id": saas_source_id}

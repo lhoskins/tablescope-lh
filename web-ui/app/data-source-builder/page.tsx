@@ -34,7 +34,9 @@ function DataSourceBuilderPageInner() {
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
   const projectId = searchParams.get("projectId") ?? undefined;
-  const intent = searchParams.get("intent") === "upload" ? "upload" : undefined;
+  const rawIntent = searchParams.get("intent");
+  const intent: "upload" | "database" | undefined =
+    rawIntent === "upload" || rawIntent === "database" ? rawIntent : undefined;
 
   return (
     <AppShell
