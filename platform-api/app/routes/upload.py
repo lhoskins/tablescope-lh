@@ -312,11 +312,11 @@ async def list_datasources(
         )
     ).all()
     candidate_to_metas: dict[str, list[tuple[int, FileSourceMeta]]] = {}
-    for meta in meta_rows:
+    for m in meta_rows:
         for priority, candidate in enumerate(
-            candidate_physical_names(meta.file_name, meta.source_format)
+            candidate_physical_names(m.file_name, m.source_format)
         ):
-            candidate_to_metas.setdefault(candidate, []).append((priority, meta))
+            candidate_to_metas.setdefault(candidate, []).append((priority, m))
 
     files = [
         f
@@ -347,13 +347,13 @@ async def list_datasources(
 
     datasources: list[dict] = []
     for f in files:
-        meta = meta_for_file.get(f)
-        is_archived = bool(meta and meta.archived)
+        file_meta = meta_for_file.get(f)
+        is_archived = bool(file_meta and file_meta.archived)
         if is_archived and not include_archived:
             continue
         view_name = compute_view_name(f.name)
         display_name, source_type = display_source(
-            f.name, meta.source_format if meta else None
+            f.name, file_meta.source_format if file_meta else None
         )
         datasources.append({
             "fileName": display_name,
@@ -361,24 +361,24 @@ async def list_datasources(
             "size": f.stat().st_size,
             "sourceType": source_type,
             "dbType": None,
-            "fileMetaId": meta.id if meta else None,
-            "projectId": meta.project_id if meta else None,
-            "columnTypes": (meta.column_types or []) if meta else [],
+            "fileMetaId": file_meta.id if file_meta else None,
+            "projectId": file_meta.project_id if file_meta else None,
+            "columnTypes": (file_meta.column_types or []) if file_meta else [],
             "archived": is_archived,
         })
-    for meta in unassigned_metas:
-        if meta.archived and not include_archived:
+    for orphan in unassigned_metas:
+        if orphan.archived and not include_archived:
             continue
         datasources.append({
-            "fileName": meta.file_name,
-            "viewName": meta.view_name,
+            "fileName": orphan.file_name,
+            "viewName": orphan.view_name,
             "size": None,
-            "sourceType": meta.source_format or "file",
+            "sourceType": orphan.source_format or "file",
             "dbType": None,
-            "fileMetaId": meta.id,
-            "projectId": meta.project_id,
-            "columnTypes": meta.column_types or [],
-            "archived": meta.archived,
+            "fileMetaId": orphan.id,
+            "projectId": orphan.project_id,
+            "columnTypes": orphan.column_types or [],
+            "archived": orphan.archived,
         })
 
     await session.commit()
