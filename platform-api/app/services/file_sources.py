@@ -189,6 +189,179 @@ def sanitize_xlsx_content(content: bytes) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
+def sanitize_excel_content(content: bytes, extension: str = "xlsx") -> bytes:
+    """Clean an Excel workbook in-place and return sanitized .xlsx bytes.
+
+    Headers are run through ``sanitize_column_name``, string cell values have
+    currency symbols / thousands-separator commas stripped, and duplicate column
+    names are deduplicated. The returned bytes are a valid Excel workbook the
+    Teiid Excel translator can import, keeping the original .xlsx/.xlsm
+    extension instead of flattening to CSV.
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    for ws in wb.worksheets:
+        if ws.max_row == 0:
+            continue
+        header_cells = list(ws[1])
+        seen_h: dict[str, int] = {}
+        for cell in header_cells:
+            if cell.value is None:
+                continue
+            raw = str(cell.value).strip()
+            clean = sanitize_column_name(raw)
+            if clean in seen_h:
+                seen_h[clean] += 1
+                clean = f"{clean}_{seen_h[clean]}"
+            else:
+                seen_h[clean] = 0
+            cell.value = clean
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                if cell.value is None:
+                    continue
+                if isinstance(cell.value, str):
+                    v = cell.value.strip()
+                    v = re.sub(r"^[\$\u20ac\u00a3\u00a5]\s*", "", v)
+                    if re.match(r"^-?[\d,]+\.?\d*$", v):
+                        v = v.replace(",", "")
+                    cell.value = v
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def _csv_bytes_to_xlsx(content: bytes, extension: str = "xlsx") -> bytes:
+    """Convert CSV/TSV bytes to a sanitized Excel workbook."""
+    import openpyxl
+
+    text = content.decode("utf-8-sig", errors="replace")
+    sample = text[:8192]
+    delimiter = ","
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
+        delimiter = dialect.delimiter
+    except csv.Error:
+        delimiter = "\t" if "\t" in text.splitlines()[0] else ","
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for row in csv.reader(io.StringIO(text), delimiter=delimiter):
+        ws.append(row)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+# Formats that the Teiid servlet cannot import natively and must be flattened to CSV.
+_FLATTENED_FORMATS = frozenset({"json", "xml", "xls"})
+
+
+def physical_file_name(file_name: str, source_format: str | None) -> str:
+    """Return the on-disk filename for a source given its display filename.
+
+    Excel (.xlsx, .xlsm), CSV, TSV and TXT keep their extension. JSON, XML and
+    legacy .xls are normalized to .csv for the Teiid import servlet.
+    """
+    ext = (source_format or "").lower()
+    if not ext or ext in _FLATTENED_FORMATS:
+        if "." in file_name:
+            return file_name.rsplit(".", 1)[0] + ".csv"
+        return file_name + ".csv"
+    return file_name
+
+
+def candidate_physical_names(file_name: str, source_format: str | None) -> list[str]:
+    """Possible on-disk filenames for a source, newest/primary first."""
+    base = sanitize_filename(file_name)
+    ext = (source_format or "").lower()
+    candidates = []
+    if ext in {"xlsx", "xlsm"}:
+        candidates.append(base)
+        # Legacy rows may have been flattened to .csv before Excel preservation.
+        if "." in base:
+            candidates.append(f"{base.rsplit('.', 1)[0]}.csv")
+        else:
+            candidates.append(f"{base}.csv")
+    elif ext in _FLATTENED_FORMATS:
+        if "." in base:
+            candidates.append(f"{base.rsplit('.', 1)[0]}.csv")
+        else:
+            candidates.append(f"{base}.csv")
+    else:
+        candidates.append(base)
+    return candidates
+
+
+def prepare_upload_content(file_name: str, content: bytes) -> tuple[str, bytes, str | None]:
+    """Sanitize an upload and return ``(physical_filename, content, source_format)``.
+
+    ``physical_filename`` is the name actually written to disk and sent to the
+    Teiid servlet; ``source_format`` is the original extension for display.
+    """
+    original_format = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else None
+    clean_name = sanitize_filename(file_name)
+    ext = clean_name.rsplit(".", 1)[-1].lower() if "." in clean_name else ""
+
+    if ext == "xls":
+        # Legacy binary Excel is flattened to CSV.
+        content = sanitize_xlsx_content(content)
+        clean_name = clean_name.rsplit(".", 1)[0] + ".csv"
+    elif ext in {"xlsx", "xlsm"}:
+        content = sanitize_excel_content(content, ext)
+    elif ext in {"csv", "tsv", "txt"}:
+        content = sanitize_csv_content(content)
+    elif ext in {"json", "xml"}:
+        clean_name, content = convert_to_csv_if_needed(clean_name, content)
+    # Unknown extension is passed through.
+    return clean_name, content, original_format
+
+
+def prepare_replacement_content(
+    incoming_file_name: str,
+    content: bytes,
+    target_physical_name: str,
+) -> bytes:
+    """Convert/sanitize ``content`` so it can be written as ``target_physical_name``."""
+    target_ext = target_physical_name.rsplit(".", 1)[-1].lower() if "." in target_physical_name else ""
+    incoming_ext = (
+        sanitize_filename(incoming_file_name).rsplit(".", 1)[-1].lower()
+        if "." in incoming_file_name
+        else ""
+    )
+
+    if target_ext == incoming_ext:
+        if target_ext in {"xlsx", "xlsm"}:
+            return sanitize_excel_content(content, target_ext)
+        # CSV/TSV/TXT replacements are staged/activated as-is; the Teiid
+        # servlet sanitizes headers and values on import.
+        return content
+
+    if target_ext in {"xlsx", "xlsm"}:
+        if incoming_ext in {"xlsx", "xlsm", "xls"}:
+            return sanitize_excel_content(content, target_ext)
+        # CSV/TSV/TXT/JSON/XML -> xlsx
+        if incoming_ext in {"json", "xml"}:
+            _, csv_bytes = convert_to_csv_if_needed(f"data.{incoming_ext}", content)
+        elif incoming_ext in {"csv", "tsv", "txt"}:
+            csv_bytes = sanitize_csv_content(content)
+        else:
+            csv_bytes = content
+        return _csv_bytes_to_xlsx(csv_bytes, target_ext)
+
+    if target_ext == "csv":
+        if incoming_ext in {"xlsx", "xlsm", "xls"}:
+            return sanitize_xlsx_content(content)
+        if incoming_ext in {"json", "xml"}:
+            _, csv_bytes = convert_to_csv_if_needed(f"data.{incoming_ext}", content)
+            return csv_bytes
+        if incoming_ext in {"csv", "tsv", "txt"}:
+            return sanitize_csv_content(content)
+        return content
+
+    return content
+
+
 _CURRENCY_NAME_HINTS = (
     "amount",
     "price",
