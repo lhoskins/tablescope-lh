@@ -1,6 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const push = vi.fn();
 
@@ -8,35 +7,23 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn() }),
 }));
 
-vi.mock("@/components/datasource/ConnectorsMenu", () => ({
-  ConnectorsMenu: ({ label }: { label: string }) => <button>{label}</button>,
-}));
-
-vi.mock("@/components/uploads/unified-upload-dialog", () => ({
-  UnifiedUploadDialog: ({ open }: { open: boolean }) =>
-    open ? <div>AI-Assisted Upload</div> : null,
-}));
-
 import { QuickActionsCard } from "./quick-actions-card";
 
 function renderCard(canEdit = true) {
-  return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <QuickActionsCard projectId="7" canEdit={canEdit} onSourceCreated={vi.fn()} />
-    </QueryClientProvider>,
-  );
+  return render(<QuickActionsCard projectId="7" canEdit={canEdit} />);
 }
 
 describe("QuickActionsCard", () => {
   beforeEach(() => push.mockReset());
 
-  it("renders the four actions in order", () => {
+  it("renders the five actions in order", () => {
     renderCard();
     const labels = screen
       .getAllByRole("listitem")
       .map((li) => li.textContent?.trim());
     expect(labels).toEqual([
-      "Add data source",
+      "Create datasource",
+      "Create Database connection",
       "Create table",
       "Upload file",
       "New dashboard",
@@ -59,11 +46,26 @@ describe("QuickActionsCard", () => {
     expect(push).toHaveBeenCalledWith("/projects/7/dashboards");
   });
 
-  it("opens the unified upload intake instead of navigating to Documents", () => {
+  it("routes Create datasource through the Data Source Builder", () => {
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: /Create datasource/ }));
+    expect(push).toHaveBeenCalledWith("/data-source-builder?projectId=7");
+  });
+
+  it("routes Create Database connection through the Data Source Builder's database-only step", () => {
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: /Create Database connection/ }));
+    expect(push).toHaveBeenCalledWith(
+      "/data-source-builder?projectId=7&intent=database",
+    );
+  });
+
+  it("routes Upload file through the Data Source Builder's upload-only step", () => {
     renderCard();
     fireEvent.click(screen.getByRole("button", { name: /Upload file/ }));
-    expect(screen.getByText("AI-Assisted Upload")).toBeInTheDocument();
-    expect(push).not.toHaveBeenCalled();
+    expect(push).toHaveBeenCalledWith(
+      "/data-source-builder?projectId=7&intent=upload",
+    );
   });
 
   it("disables creation actions for viewers", () => {

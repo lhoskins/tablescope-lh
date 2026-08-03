@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconArrowLeft,
@@ -71,8 +71,17 @@ function Stepper({ step }: { step: Step }) {
 
 export function DataSourceBuilderWorkspace({
   tenantName,
+  initialProjectId,
+  intent,
 }: {
   tenantName: string;
+  /** Pre-select this project in Step 2 (arrived from a project-scoped entry point). */
+  initialProjectId?: string;
+  /**
+   * "upload" hides connector selection so the flow is upload-and-scan only.
+   * "database" shows only the connected-databases section.
+   */
+  intent?: "upload" | "database";
 }) {
   const queryClient = useQueryClient();
   const ensureTenant = useBuilderStore((s) => s.ensureTenant);
@@ -83,10 +92,24 @@ export function DataSourceBuilderWorkspace({
   // Subscribe to projects so the summary + Apply button recompute when a
   // project is toggled or a new project is created.
   const projects = useBuilderStore((s) => s.projects);
+  const toggleProject = useBuilderStore((s) => s.toggleProject);
 
   const [step, setStep] = useState<Step>(1);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+
+  // Pre-select the project we arrived from, once, the first time its row
+  // shows up in Step 2 (the project list only populates when ProjectsColumn
+  // mounts, so this can't run until the user reaches step 2).
+  const preselected = useRef(false);
+  useEffect(() => {
+    if (!initialProjectId || preselected.current || step !== 2) return;
+    const row = projects.find((p) => p.projectId === initialProjectId);
+    if (row && !row.isToggled) {
+      preselected.current = true;
+      toggleProject(initialProjectId);
+    }
+  }, [initialProjectId, projects, step, toggleProject]);
 
   // The session persists across refreshes (localStorage); rehydrate after mount
   // (storage is skipped during SSR) then drop it only when the tenant changes.
@@ -108,7 +131,11 @@ export function DataSourceBuilderWorkspace({
 
   const stepHint =
     step === 1
-      ? "Step 1 of 2: Create data sources from files, connected databases, or SaaS connectors."
+      ? intent === "upload"
+        ? "Step 1 of 2: Upload a file to create a data source (AI-assisted scan and profiling)."
+        : intent === "database"
+          ? "Step 1 of 2: Choose a connected database and table to create a data source."
+          : "Step 1 of 2: Create data sources from files, connected databases, or SaaS connectors."
       : "Step 2 of 2: Assign selected data sources to project(s).";
 
   // Recompute whenever sources or projects change (toggles/new project).
@@ -140,21 +167,34 @@ export function DataSourceBuilderWorkspace({
       {step === 1 ? (
         <>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-4">
-            <FileAcquisitionPanel />
+            {intent !== "database" && <FileAcquisitionPanel />}
 
-            <div>
-              <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
-                Connected Databases
-              </h3>
-              <ConnectedDatabases />
-            </div>
+            {intent === "database" && (
+              <div>
+                <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
+                  Connected Databases
+                </h3>
+                <ConnectedDatabases />
+              </div>
+            )}
 
-            <div>
-              <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
-                SaaS Connections
-              </h3>
-              <ConnectedSaaS />
-            </div>
+            {intent !== "upload" && intent !== "database" && (
+              <>
+                <div>
+                  <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
+                    Connected Databases
+                  </h3>
+                  <ConnectedDatabases />
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
+                    SaaS Connections
+                  </h3>
+                  <ConnectedSaaS />
+                </div>
+              </>
+            )}
 
             <ActiveSourcesTable />
           </div>

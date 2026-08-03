@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { DataSourceBuilderWorkspace } from "@/components/tablescope/data-source-builder/workspace";
 import { getUserMeta } from "@/lib/auth";
@@ -21,8 +21,9 @@ const FALLBACK_TENANT: TenantSummary = {
   initials: "TS",
 };
 
-export default function DataSourceBuilderPage() {
+function DataSourceBuilderPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: identity } = useCurrentUser();
   const { data: projects } = useProjectSummaries();
 
@@ -32,6 +33,10 @@ export default function DataSourceBuilderPage() {
 
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
+  const projectId = searchParams.get("projectId") ?? undefined;
+  const rawIntent = searchParams.get("intent");
+  const intent: "upload" | "database" | undefined =
+    rawIntent === "upload" || rawIntent === "database" ? rawIntent : undefined;
 
   return (
     <AppShell
@@ -49,7 +54,19 @@ export default function DataSourceBuilderPage() {
         </div>
       }
     >
-      <DataSourceBuilderWorkspace tenantName={tenant.name} />
+      <DataSourceBuilderWorkspace
+        tenantName={tenant.name}
+        initialProjectId={projectId}
+        intent={intent}
+      />
     </AppShell>
+  );
+}
+
+export default function DataSourceBuilderPage() {
+  return (
+    <Suspense fallback={null}>
+      <DataSourceBuilderPageInner />
+    </Suspense>
   );
 }

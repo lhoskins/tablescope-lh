@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { apiClient } from "@/lib/api-client";
 import { useCurrentUser, useProjectSummaries } from "./use-shell-data";
 import type {
@@ -217,6 +218,7 @@ export interface DataSource {
   columnTypes?: unknown[];
   aiMetadata?: Record<string, unknown> | null;
   archived?: boolean;
+  archivedAt?: string | null;
 }
 
 export function columnLabel(col: unknown): { name: string; type: string } {
@@ -242,13 +244,27 @@ export function columnLabel(col: unknown): { name: string; type: string } {
   return { name: String(col ?? ""), type: "" };
 }
 
-export function useProjectDataSources(projectId: string) {
+export function useProjectDataSources(
+  projectId: string,
+  includeArchived = false,
+) {
   return useQuery({
-    queryKey: ["project", projectId, "datasources"],
+    queryKey: ["project", projectId, "datasources", { includeArchived }],
     queryFn: () =>
-      apiClient.get<DataSource[]>(`/api/projects/${projectId}/datasources`),
+      apiClient.get<DataSource[]>(
+        `/api/projects/${projectId}/datasources?include_archived=${includeArchived}`,
+      ),
     enabled: Boolean(projectId),
   });
+}
+
+/** Archived project data sources only (file, database and SaaS). */
+export function useProjectArchivedDataSources(projectId: string) {
+  const { data, isLoading } = useProjectDataSources(projectId, true);
+  return {
+    data: useMemo(() => (data ?? []).filter((s) => s.archived), [data]),
+    isLoading,
+  };
 }
 
 // ── Members ──────────────────────────────────────────────────────────

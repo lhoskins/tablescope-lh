@@ -39,7 +39,7 @@ describe("Project Insights sidebar entry", () => {
     expect(all.some((i) => i.key === "project-dashboards")).toBe(false);
   });
 
-  it("orders the workflow sidebar as Project Home, Project Insights, Project Actions, Goals, Scopes", () => {
+  it("orders the workflow sidebar as Project Home, Project Insights, Project Actions, Goals, Scopes, Knowledge Graph", () => {
     const all = project?.items ?? [];
     const keys = all.map((i) => i.key);
     expect(keys).toEqual([
@@ -48,6 +48,7 @@ describe("Project Insights sidebar entry", () => {
       "project-actions",
       "project-business-context",
       "project-scopes",
+      "project-create-knowledge-graph",
     ]);
   });
 
