@@ -330,16 +330,16 @@ async def list_datasources(
     for f in files:
         candidates = candidate_to_metas.get(f.name, [])
         candidates.sort(key=lambda x: x[0])
-        for _priority, meta in candidates:
-            if meta.id not in assigned_meta:
+        for _priority, matched in candidates:
+            if matched.id not in assigned_meta:
                 view_name = compute_view_name(f.name)
-                if meta.view_name != view_name:
-                    meta.view_name = view_name
-                display_name, _ = display_source(f.name, meta.source_format)
-                if meta.file_name != display_name:
-                    meta.file_name = display_name
-                assigned_meta[meta.id] = f
-                meta_for_file[f] = meta
+                if matched.view_name != view_name:
+                    matched.view_name = view_name
+                display_name, _ = display_source(f.name, matched.source_format)
+                if matched.file_name != display_name:
+                    matched.file_name = display_name
+                assigned_meta[matched.id] = f
+                meta_for_file[f] = matched
                 break
 
     # Any meta without a matching file still appears (orphaned metadata).
