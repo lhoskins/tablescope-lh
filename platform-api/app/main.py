@@ -153,15 +153,16 @@ async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
     After a deploy that bumps ``SNAPSHOT_PIPELINE_VERSION``, any cached snapshot
     built under the previous version would only be rebuilt on the next user page
     load. This startup check finds the N most-recently-active projects and
-    enqueues a full rebuild for any whose active KnowledgeGraphVersion carries
-    an older (or missing) ``pipeline_version``.
+    enqueues a full rebuild for any whose latest ``AIProjectGraphSnapshot``
+    carries an older (or missing) ``pipeline_version``.
     """
     from datetime import UTC, datetime, timedelta
 
     from sqlalchemy import select
 
     from app.database import SessionLocal
-    from app.models import IntelligenceSnapshot, KnowledgeGraphVersion
+    from app.models import AIProjectGraphSnapshot, IntelligenceSnapshot
+    from app.models.knowledge_graph_snapshot import SNAPSHOT_KEY_FULL
     from app.services.knowledge_graph.constants import SNAPSHOT_PIPELINE_VERSION
     from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
     from app.tasks.workflows import enqueue_rebuild_knowledge_graph
@@ -212,17 +213,17 @@ async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
 
             for project_id in project_ids:
                 try:
-                    version = await session.scalar(
-                        select(KnowledgeGraphVersion)
+                    snapshot = await session.scalar(
+                        select(AIProjectGraphSnapshot)
                         .where(
-                            KnowledgeGraphVersion.project_id == project_id,
-                            KnowledgeGraphVersion.status == "active",
+                            AIProjectGraphSnapshot.project_id == project_id,
+                            AIProjectGraphSnapshot.snapshot_key == SNAPSHOT_KEY_FULL,
                         )
-                        .order_by(KnowledgeGraphVersion.created_at.desc())
+                        .order_by(AIProjectGraphSnapshot.generated_at.desc())
                         .limit(1)
                     )
-                    if version is not None and (
-                        version.pipeline_version == SNAPSHOT_PIPELINE_VERSION  # type: ignore[attr-defined]
+                    if snapshot is not None and (
+                        snapshot.pipeline_version == SNAPSHOT_PIPELINE_VERSION
                     ):
                         skipped += 1
                         continue
