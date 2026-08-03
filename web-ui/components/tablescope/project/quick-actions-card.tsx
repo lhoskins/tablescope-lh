@@ -1,8 +1,6 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   IconChevronRight,
   IconCode,
@@ -12,36 +10,26 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
-import { UnifiedUploadDialog } from "@/components/uploads/unified-upload-dialog";
 import { cn } from "@/lib/cn";
 
 export function QuickActionsCard({
   projectId,
   canEdit,
-  onSourceCreated,
   className,
 }: {
   projectId: string;
   canEdit: boolean;
-  onSourceCreated: () => void;
   className?: string;
 }) {
   const router = useRouter();
-  const queryClient = useQueryClient();
-  const [uploadOpen, setUploadOpen] = useState(false);
   const actions = [
     {
+      // Always goes through the Data Source Builder so connector selection,
+      // file acquisition, and project assignment stay a single governed flow
+      // rather than a second, inline creation path.
       label: "Add data source",
       icon: IconDatabase,
-      onClick: undefined as (() => void) | undefined,
-      content: (
-        <ConnectorsMenu
-          projectId={Number(projectId)}
-          onCreated={onSourceCreated}
-          label="Add data source"
-        />
-      ),
+      onClick: () => router.push(`/data-source-builder?projectId=${projectId}`),
     },
     {
       label: "Create table",
@@ -49,11 +37,13 @@ export function QuickActionsCard({
       onClick: () => router.push(`/projects/${projectId}/queries`),
     },
     {
-      // Opens the governed intake rather than navigating to Documents: a
-      // spreadsheet picked here becomes a Data Source, not a document.
+      // Same Data Source Builder, but scoped to just the upload/AI-scan step
+      // (skips connector selection) since the intent here is always "scan
+      // this file," not "pick a connector type."
       label: "Upload file",
       icon: IconFileText,
-      onClick: () => setUploadOpen(true),
+      onClick: () =>
+        router.push(`/data-source-builder?projectId=${projectId}&intent=upload`),
     },
     {
       label: "New dashboard",
@@ -73,41 +63,22 @@ export function QuickActionsCard({
           const disabled = !canEdit;
           return (
             <li key={action.label}>
-              {action.content ? (
-                <div className="[&>div]:w-full [&_button]:min-h-[44px] [&_button]:w-full [&_button]:justify-start">
-                  {action.content}
-                </div>
-              ) : (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={disabled}
-                  onClick={action.onClick}
-                  title={disabled ? "You do not have permission to create project resources" : action.label}
-                  className="min-h-[44px] w-full justify-start"
-                >
-                  <Icon size={14} />
-                  <span className="flex-1 text-left">{action.label}</span>
-                  <IconChevronRight size={14} className="text-ink-tertiary" aria-hidden />
-                </Button>
-              )}
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={disabled}
+                onClick={action.onClick}
+                title={disabled ? "You do not have permission to create project resources" : action.label}
+                className="min-h-[44px] w-full justify-start"
+              >
+                <Icon size={14} />
+                <span className="flex-1 text-left">{action.label}</span>
+                <IconChevronRight size={14} className="text-ink-tertiary" aria-hidden />
+              </Button>
             </li>
           );
         })}
       </ul>
-      <UnifiedUploadDialog
-        open={uploadOpen}
-        projectId={Number(projectId)}
-        onClose={() => setUploadOpen(false)}
-        onUploadsDone={() => {
-          queryClient.invalidateQueries({
-            queryKey: ["project", projectId, "datasources"],
-          });
-          queryClient.invalidateQueries({
-            queryKey: ["project-documents", Number(projectId)],
-          });
-        }}
-      />
     </Card>
   );
 }

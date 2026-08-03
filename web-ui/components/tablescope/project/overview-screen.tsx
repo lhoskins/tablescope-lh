@@ -209,11 +209,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
   const canEditProject = user.rawRole !== "viewer";
 
-  const handleSourceCreated = () => {
-    void queryClient.invalidateQueries({ queryKey: ["project", projectId, "datasources"] });
-    void queryClient.invalidateQueries({ queryKey: ["project", projectId, "activity"] });
-    push("Data source connected", "success");
-  };
 
   return (
     <ProjectShell
@@ -391,7 +386,6 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
             className="md:col-span-2 xl:col-span-1"
             projectId={projectId}
             canEdit={canEditProject}
-            onSourceCreated={handleSourceCreated}
           />
         </div>
       </div>
