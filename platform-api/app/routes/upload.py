@@ -58,6 +58,7 @@ from app.services.file_sources import (
     compute_view_name,
     detect_column_types,
     display_source,
+    physical_file_name,
     prepare_replacement_content,
     prepare_upload_content,
     sanitize_filename,
@@ -722,18 +723,24 @@ async def replace_file_source(
 
     incoming_content = await file.read()
 
-    # ── Replacement cleaning ───────────────────────────────────────────
-    # Convert/sanitize the incoming file so it matches the existing physical
-    # format on disk. An XLSX source whose legacy physical file is .csv gets
-    # flattened to CSV; a modern XLSX source keeps its .xlsx format.
+    # Decide the on-disk filename for the replacement. It should have the
+    # original upload extension (.xlsx, .csv, etc.) while JSON/XML/legacy .xls
+    # are flattened to .csv for the Teiid servlet.
+    new_original_format = (
+        file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else None
+    )
+    target_name = physical_file_name(expected_name, new_original_format)
+    target_path = uploads_dir / target_name
+
+    # Convert/sanitize incoming content to the target physical format.
     target_content = prepare_replacement_content(
-        file.filename, incoming_content, existing_name
+        file.filename, incoming_content, target_name
     )
 
     existing_raw = existing_path.read_bytes()
     existing_types = detect_column_types(existing_raw, existing_name)
     existing_cols = {c["field"] for c in existing_types}
-    incoming_types = detect_column_types(target_content, existing_name)
+    incoming_types = detect_column_types(target_content, target_name)
     incoming_cols = {c["field"] for c in incoming_types}
     diff = compare_schemas(existing_types, incoming_types)
     if diff["blockers"] and not force:
@@ -756,7 +763,7 @@ async def replace_file_source(
                 },
                 files={
                     "file": (
-                        existing_name,
+                        target_name,
                         target_content,
                         file.content_type or "application/octet-stream",
                     )
@@ -779,11 +786,16 @@ async def replace_file_source(
     if isinstance(teiid_result, dict) and "error" in teiid_result:
         raise HTTPException(status_code=422, detail=teiid_result["error"])
 
-    # 4) Update metadata column types and display name (preserve project association/archive).
-    new_original_format = (
-        file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else None
-    )
-    new_display_name, _ = display_source(existing_name, new_original_format)
+    # 4) Update metadata, migrate the physical file if its extension changed,
+    # and keep the view name in sync with the real on-disk filename.
+    new_display_name, _ = display_source(target_name, new_original_format)
+    new_view_name = compute_view_name(target_name)
+    if existing_path != target_path:
+        try:
+            existing_path.unlink()
+        except OSError as exc:
+            logger.warning("Could not remove legacy physical file %s: %s", existing_path, exc)
+    meta.view_name = new_view_name
     meta.file_name = new_display_name
     meta.source_format = new_original_format
     meta.column_types = incoming_types or None
@@ -792,7 +804,7 @@ async def replace_file_source(
     added = sorted(incoming_cols - existing_cols)
     return {
         "status": "replaced",
-        "view_name": view_name,
+        "view_name": new_view_name,
         "fileName": new_display_name,
         "addedColumns": added,
         "columnTypes": incoming_types,
@@ -840,21 +852,20 @@ def _locate_physical_file(
 ) -> tuple[Path, str]:
     """Find the on-disk file backing ``meta``.
 
-    The physical filename is derived from the stored display name and
-    source_format. This handles JSON/XML (flattened to .csv) as well as legacy
-    XLSX rows that were previously flattened to .csv.
+    The live Teiid view name is derived from the physical filename on disk,
+    but some rows have a stale ``view_name`` based on the display name. Match
+    first by the physical view name, then by the display view name, so both
+    modern and legacy sources resolve correctly.
     """
     if uploads_dir.is_dir():
-        candidates = candidate_physical_names(meta.file_name, meta.source_format)
-        for candidate in candidates:
-            candidate_path = uploads_dir / candidate
-            if not candidate_path.is_file():
+        for candidate in uploads_dir.iterdir():
+            if not candidate.is_file():
                 continue
-            # Match by the display view name (e.g. report.xlsx -> report_XLSX),
-            # which is how the list endpoint and UI identify the source.
-            display_name, _ = display_source(candidate, meta.source_format)
+            if compute_view_name(candidate.name) == view_name:
+                return candidate, candidate.name
+            display_name, _ = display_source(candidate.name, meta.source_format)
             if compute_view_name(display_name) == view_name:
-                return candidate_path, candidate
+                return candidate, candidate.name
     raise HTTPException(status_code=404, detail="Data source file not found")
 
 
@@ -1030,9 +1041,15 @@ async def preflight_source_update(
         # Self-heal a stale stored name so future reads/checks agree with it.
         meta.file_name = expected_name
 
-    # Convert/sanitize incoming content to the existing physical format.
+    # Decide the target physical filename. This migrates legacy .csv files to
+    # their original extension (e.g. .xlsx) while keeping JSON/XML as .csv.
+    new_original_format = (
+        file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else None
+    )
+    target_name = physical_file_name(expected_name, new_original_format)
+
     target_content = prepare_replacement_content(
-        file.filename, incoming_content, existing_name
+        file.filename, incoming_content, target_name
     )
 
     baseline = await _ensure_baseline_version(
@@ -1046,7 +1063,7 @@ async def preflight_source_update(
             status_code=500, detail=f"Could not read existing file: {exc}"
         ) from exc
     existing_types = detect_column_types(existing_raw, existing_name)
-    incoming_types = detect_column_types(target_content, existing_name)
+    incoming_types = detect_column_types(target_content, target_name)
     diff = compare_schemas(existing_types, incoming_types)
 
     dependencies = await find_query_dependencies(
@@ -1082,7 +1099,7 @@ async def preflight_source_update(
         "currentFileName": meta.file_name,
         "proposedFileName": file.filename,
         "currentRowCount": baseline.row_count,
-        "proposedRowCount": count_data_rows(target_content, existing_name),
+        "proposedRowCount": count_data_rows(target_content, target_name),
         "currentChecksum": baseline.checksum,
         "proposedChecksum": incoming_checksum,
         "updateMode": MODE_REPLACE,
@@ -1108,7 +1125,7 @@ async def preflight_source_update(
 
     stage_dir = staging_dir(uploads_dir)
     stage_dir.mkdir(parents=True, exist_ok=True)
-    staged_path = stage_dir / f"{staged.id}_{sanitize_filename(existing_name)}"
+    staged_path = stage_dir / f"{staged.id}_{sanitize_filename(target_name)}"
     staged_path.write_bytes(target_content)
     staged.stored_path = str(staged_path)
 
@@ -1170,7 +1187,7 @@ async def _activate_content(
     endpoint: TeiidEndpoint,
     tenant_id: int,
     user_id: int,
-) -> None:
+) -> str:
     """Archive the live file, publish ``content``, then flip the pointer.
 
     The prior file is copied into the archive directory *before* the servlet
@@ -1183,6 +1200,11 @@ async def _activate_content(
             FileSourceVersion.status == STATUS_ACTIVE,
         )
     )
+    expected_name, _ = display_source(existing_name, meta.source_format)
+    new_original_format = filename.rsplit(".", 1)[-1].lower() if "." in filename else None
+    target_name = physical_file_name(expected_name, new_original_format)
+    target_path = uploads_dir / target_name
+
     if previous_active is not None and previous_active.id != version.id:
         archive_root = archive_dir(uploads_dir) / str(previous_active.id)
         archive_root.mkdir(parents=True, exist_ok=True)
@@ -1196,14 +1218,12 @@ async def _activate_content(
             ) from exc
 
     try:
-        # Always publish to the existing physical filename so the live view is
-        # overwritten in place and the source identity does not change.
         await _reimport_through_teiid(
             endpoint,
             tenant_id=tenant_id,
             user_id=user_id,
             vdb_type=meta.vdb_type or "user",
-            filename=existing_name,
+            filename=target_name,
             content=content,
         )
     except HTTPException as exc:
@@ -1223,8 +1243,14 @@ async def _activate_content(
     if previous_active is not None and previous_active.id != version.id:
         previous_active.status = STATUS_ARCHIVED
 
-    new_original_format = filename.rsplit(".", 1)[-1].lower() if "." in filename else None
-    new_display_name, _ = display_source(existing_name, new_original_format)
+    if existing_path != target_path:
+        try:
+            existing_path.unlink()
+        except OSError as exc:
+            logger.warning("Could not remove legacy physical file %s: %s", existing_path, exc)
+
+    new_display_name, _ = display_source(target_name, new_original_format)
+    meta.view_name = compute_view_name(target_name)
     meta.file_name = new_display_name
     meta.source_format = new_original_format
     meta.column_types = version.column_types or None
@@ -1232,6 +1258,7 @@ async def _activate_content(
     version.status = STATUS_ACTIVE
     version.activated_at = datetime.now(UTC)
     version.error_message = None
+    return target_name
 
 
 @router.post("/datasources/{view_name}/versions/{version_id}/activate")
@@ -1290,7 +1317,7 @@ async def activate_source_version(
             status_code=409, detail=f"Staged file is no longer available: {exc}"
         ) from exc
 
-    await _activate_content(
+    activated_target_name = await _activate_content(
         session,
         context,
         meta=meta,
@@ -1309,7 +1336,7 @@ async def activate_source_version(
     # rollback can restore it.
     archive_root = archive_dir(uploads_dir) / str(version.id)
     archive_root.mkdir(parents=True, exist_ok=True)
-    activated_copy = archive_root / existing_name
+    activated_copy = archive_root / activated_target_name
     activated_copy.write_bytes(content)
     try:
         Path(version.stored_path).unlink()
@@ -1321,14 +1348,14 @@ async def activate_source_version(
         session,
         context,
         event_type="data_source_update_activated",
-        view_name=view_name,
+        view_name=meta.view_name,
         project_id=meta.project_id,
         title=f"Activated version {version.version_number} of {view_name}",
     )
     await session.commit()
     return {
         "status": "active",
-        "viewName": view_name,
+        "viewName": meta.view_name,
         "fileName": meta.file_name,
         "version": version.to_dict(),
         "columnTypes": version.column_types or [],
