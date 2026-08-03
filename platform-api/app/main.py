@@ -178,7 +178,7 @@ async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
             recent_rows = (
                 await session.execute(
                     select(
-                        IntelligenceSnapshot.project_id,  # type: ignore[attr-defined]
+                        IntelligenceSnapshot.payload,
                         IntelligenceSnapshot.updated_at,
                     )
                     .where(IntelligenceSnapshot.updated_at >= cutoff)
@@ -187,11 +187,20 @@ async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
             ).all()
             seen: set[int] = set()
             project_ids: list[int] = []
-            for project_id, _ in recent_rows:
-                if project_id in seen:
+            for payload, _ in recent_rows:
+                if not isinstance(payload, dict):
                     continue
-                seen.add(project_id)
-                project_ids.append(project_id)
+                for p in (payload.get("projects") or []):
+                    try:
+                        project_id = int(p["id"])
+                    except (TypeError, KeyError, ValueError):
+                        continue
+                    if project_id in seen:
+                        continue
+                    seen.add(project_id)
+                    project_ids.append(project_id)
+                    if len(project_ids) >= MAX_KG_PIPELINE_VERSION_CHECK_PROJECTS:
+                        break
                 if len(project_ids) >= MAX_KG_PIPELINE_VERSION_CHECK_PROJECTS:
                     break
 
