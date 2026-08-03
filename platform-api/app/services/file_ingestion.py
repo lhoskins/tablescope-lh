@@ -569,11 +569,9 @@ async def finalize_tabular_import(
     from app.models.user import User
     from app.services.file_sources import (
         compute_view_name,
-        convert_to_csv_if_needed,
         detect_column_types,
         display_source,
-        sanitize_csv_content,
-        sanitize_xlsx_content,
+        prepare_upload_content,
     )
     from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
@@ -608,20 +606,8 @@ async def finalize_tabular_import(
     if tenant is None:
         raise FileImportError("TENANT_NOT_FOUND", "Tenant not found")
 
-    clean_name = file_name
-    lower_name = clean_name.lower()
-    if lower_name.endswith((".csv", ".tsv", ".txt")):
-        content = sanitize_csv_content(content)
-    elif lower_name.endswith((".xlsx", ".xlsm", ".xls")):
-        content = sanitize_xlsx_content(content)
-        clean_name = clean_name.rsplit(".", 1)[0] + ".csv"
-
     original_format = job.detected_extension
-    try:
-        final_filename, content = convert_to_csv_if_needed(clean_name, content)
-    except ValueError as exc:
-        raise FileImportError("CONVERSION_FAILED", str(exc)) from exc
-
+    final_filename, content, _ = prepare_upload_content(file_name, content)
     display_name, _ = display_source(final_filename, original_format)
 
     endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant_id)
@@ -658,7 +644,7 @@ async def finalize_tabular_import(
         raise FileImportError("TEIID_IMPORT_FAILED", str(teiid_result["error"]))
 
     column_types = detect_column_types(content, final_filename)
-    view_name = compute_view_name(display_name)
+    view_name = compute_view_name(final_filename)
 
     resolved_project_id: int | None = None
     if project_id is not None:

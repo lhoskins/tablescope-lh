@@ -54,13 +54,13 @@ from app.services.file_source_versions import (
     staging_dir,
 )
 from app.services.file_sources import (
+    candidate_physical_names,
     compute_view_name,
-    convert_to_csv_if_needed,
     detect_column_types,
     display_source,
-    sanitize_csv_content,
+    prepare_replacement_content,
+    prepare_upload_content,
     sanitize_filename,
-    sanitize_xlsx_content,
 )
 from app.services.tenant_teiid_resolver import TeiidEndpoint, TenantTeiidResolver
 from app.services.upload_intake import (
@@ -100,36 +100,22 @@ async def upload_file(
 
     content = await file.read()
 
-    # ── Comprehensive upload cleaning (no user interaction) ──────────
-    # 1. Sanitize the filename: remove $, commas, whitespace, reserved chars
-    clean_name = sanitize_filename(file.filename)
-    logger.info("Filename sanitized: %r → %r", file.filename, clean_name)
-
-    # 2. Clean column headers + cell values in CSV / XLSX
-    lower_name = clean_name.lower()
-    if lower_name.endswith((".csv", ".tsv", ".txt")):
-        content = sanitize_csv_content(content)
-    elif lower_name.endswith((".xlsx", ".xlsm", ".xls")):
-        content = sanitize_xlsx_content(content)
-        # sanitize_xlsx_content returns CSV bytes
-        clean_name = clean_name.rsplit(".", 1)[0] + ".csv"
-
-    # Remember the original uploaded extension so the UI can show the real type
-    # (e.g. "json"/"xml") even though JSON/XML are flattened to CSV below.
-    original_format = (
-        file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else None
+    # Sanitize content and determine the real on-disk filename. Excel files keep
+    # their .xlsx/.xlsm extension and are imported by the Teiid Excel translator;
+    # JSON/XML/legacy .xls are flattened to .csv. The original extension is
+    # remembered as source_format so the UI still shows e.g. "SalesJournal.xlsx".
+    filename, content, original_format = prepare_upload_content(
+        file.filename or "upload.csv", content
     )
-
-    # JSON/XML uploads are flattened to CSV so they import through the same
-    # Teiid file pipeline as CSV/Excel and behave like every other data source.
-    try:
-        filename, content = convert_to_csv_if_needed(clean_name, content)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    # Preserve the original extension for display/naming while the on-disk file
-    # stays the CSV representation the Teiid pipeline requires.
     display_name, _ = display_source(filename, original_format)
+    view_name = compute_view_name(filename)
+    logger.info(
+        "Upload prepared: incoming=%r physical=%r display=%r view=%r",
+        file.filename,
+        filename,
+        display_name,
+        view_name,
+    )
 
     endpoint = await TenantTeiidResolver(session).resolve_for_org(context.tenant_id)
     servlet_url = (
@@ -191,12 +177,6 @@ async def upload_file(
             detail=teiid_result["error"],
         )
 
-    # Build the datasource name from the original upload name (not the CSV
-    # intermediate filename) so XLSX/JSON/XML sources keep their real extension.
-    base_name = display_name.rsplit(".", 1)[0].replace(" ", "_")
-    extension = display_name.rsplit(".", 1)[-1].upper() if "." in display_name else ""
-    datasource_name = f"{base_name}_{extension}" if extension else base_name
-
     # Sync uploaded file to S3 if enabled
     settings_obj = get_settings()
     s3_location = None
@@ -223,7 +203,6 @@ async def upload_file(
 
     # Upsert the file-source metadata row (project association, archive flag,
     # column types). Keyed by (tenant, owner, view_name).
-    view_name = compute_view_name(display_name)
     existing = await session.scalar(
         select(FileSourceMeta).where(
             FileSourceMeta.tenant_id == context.tenant_id,
@@ -289,7 +268,7 @@ async def upload_file(
     return {
         "path": f"/opt/wildfly/teiidfiles/customers/{tenant.id}/{user.id}/uploads/{filename}",
         "size": len(content),
-        "datasource": datasource_name,
+        "datasource": view_name,
         "fileName": display_name,
         "viewName": view_name,
         "columnTypes": column_types,
@@ -318,7 +297,12 @@ async def list_datasources(
         base_path = settings.customer_base_path
     uploads_dir = Path(base_path) / str(context.tenant_id) / str(user.id) / "uploads"
 
-    # Metadata (archive flag, project association, column types) keyed by view.
+    # Metadata (archive flag, project association, column types). Because the
+    # physical filename on disk may differ from the display name (e.g. a JSON
+    # file is flattened to .csv while the UI shows .json), we match files to
+    # meta rows by the candidate physical names derived from the stored
+    # file_name + source_format. This also self-heals rows whose view_name or
+    # file_name drifted stale from older code.
     meta_rows = (
         await session.scalars(
             select(FileSourceMeta).where(
@@ -327,33 +311,77 @@ async def list_datasources(
             )
         )
     ).all()
-    meta_by_view = {m.view_name: m for m in meta_rows}
+    candidate_to_metas: dict[str, list[tuple[int, FileSourceMeta]]] = {}
+    for m in meta_rows:
+        for priority, candidate in enumerate(
+            candidate_physical_names(m.file_name, m.source_format)
+        ):
+            candidate_to_metas.setdefault(candidate, []).append((priority, m))
+
+    files = [
+        f
+        for f in sorted(uploads_dir.iterdir())
+        if f.is_file() and not f.name.startswith(".") and f.name not in {".staging", ".versions"}
+    ]
+
+    # Assign each file to the best matching meta (exact primary candidate first).
+    assigned_meta: dict[int, Path] = {}
+    meta_for_file: dict[Path, FileSourceMeta] = {}
+    for f in files:
+        candidates = candidate_to_metas.get(f.name, [])
+        candidates.sort(key=lambda x: x[0])
+        for _priority, matched in candidates:
+            if matched.id not in assigned_meta:
+                view_name = compute_view_name(f.name)
+                if matched.view_name != view_name:
+                    matched.view_name = view_name
+                display_name, _ = display_source(f.name, matched.source_format)
+                if matched.file_name != display_name:
+                    matched.file_name = display_name
+                assigned_meta[matched.id] = f
+                meta_for_file[f] = matched
+                break
+
+    # Any meta without a matching file still appears (orphaned metadata).
+    unassigned_metas = [m for m in meta_rows if m.id not in assigned_meta]
 
     datasources: list[dict] = []
-    if uploads_dir.is_dir():
-        for f in sorted(uploads_dir.iterdir()):
-            if f.is_file() and not f.name.startswith("."):
-                base_name = f.stem.replace(" ", "_")
-                extension = f.suffix.lstrip(".").upper()
-                view_name = f"{base_name}_{extension}" if extension else base_name
-                meta = meta_by_view.get(view_name)
-                is_archived = bool(meta and meta.archived)
-                if is_archived and not include_archived:
-                    continue
-                display_name, source_type = display_source(
-                    f.name, meta.source_format if meta else None
-                )
-                datasources.append({
-                    "fileName": display_name,
-                    "viewName": view_name,
-                    "size": f.stat().st_size,
-                    "sourceType": source_type,
-                    "dbType": None,
-                    "fileMetaId": meta.id if meta else None,
-                    "projectId": meta.project_id if meta else None,
-                    "columnTypes": (meta.column_types or []) if meta else [],
-                    "archived": is_archived,
-                })
+    for f in files:
+        file_meta = meta_for_file.get(f)
+        is_archived = bool(file_meta and file_meta.archived)
+        if is_archived and not include_archived:
+            continue
+        view_name = compute_view_name(f.name)
+        display_name, source_type = display_source(
+            f.name, file_meta.source_format if file_meta else None
+        )
+        datasources.append({
+            "fileName": display_name,
+            "viewName": view_name,
+            "size": f.stat().st_size,
+            "sourceType": source_type,
+            "dbType": None,
+            "fileMetaId": file_meta.id if file_meta else None,
+            "projectId": file_meta.project_id if file_meta else None,
+            "columnTypes": (file_meta.column_types or []) if file_meta else [],
+            "archived": is_archived,
+        })
+    for orphan in unassigned_metas:
+        if orphan.archived and not include_archived:
+            continue
+        datasources.append({
+            "fileName": orphan.file_name,
+            "viewName": orphan.view_name,
+            "size": None,
+            "sourceType": orphan.source_format or "file",
+            "dbType": None,
+            "fileMetaId": orphan.id,
+            "projectId": orphan.project_id,
+            "columnTypes": orphan.column_types or [],
+            "archived": orphan.archived,
+        })
+
+    await session.commit()
 
     # Append the user's database-backed data sources (not tied to a project).
     db_sources = (
@@ -675,26 +703,11 @@ async def replace_file_source(
         raise HTTPException(status_code=404, detail="Data source not found")
 
     # Resolve the existing physical file backing this view.
-    existing_path: Path | None = None
-    existing_name: str | None = None
-    expected_name: str | None = None
-    if uploads_dir.is_dir():
-        for f in uploads_dir.iterdir():
-            if f.is_file():
-                physical_display_name, _ = display_source(f.name, meta.source_format)
-                if compute_view_name(physical_display_name) == view_name:
-                    existing_path = f
-                    existing_name = f.name
-                    expected_name = physical_display_name
-                    break
-    if existing_path is None or existing_name is None or expected_name is None:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    existing_path, existing_name = _locate_physical_file(uploads_dir, meta, view_name)
+    expected_name, _ = display_source(existing_name, meta.source_format)
 
-    # 1) Same-name check. Compare against the identity name as reconstructed
-    # from the physical file + source_format (same as above and as the list
-    # endpoint uses to display it) rather than the stored meta.file_name,
-    # which can drift stale for rows written before this reconstruction
-    # existed.
+    # 1) Same-name check. The user must supply the same original display name
+    # (e.g. SalesJournal2025.xlsx) even if the on-disk file is flattened to .csv.
     if sanitize_filename(file.filename) != sanitize_filename(expected_name):
         raise HTTPException(
             status_code=409,
@@ -707,36 +720,20 @@ async def replace_file_source(
         # Self-heal a stale stored name so future reads/checks agree with it.
         meta.file_name = expected_name
 
-    content = await file.read()
+    incoming_content = await file.read()
 
-    # ── Replacement cleaning (same as the original upload path) ─────────
-    # Apply header/cell sanitization to both files so the column compatibility
-    # check and the VDB DDL are working with the same safe identifiers. The
-    # existing (physical, on-disk) file and the incoming upload are
-    # sanitized independently by their *own* extensions — the physical file
-    # is always the flattened CSV for an XLSX/JSON/XML source, but the
-    # incoming upload is the user's real original file (e.g. .xlsx), so
-    # picking one sanitizer for both from a single extension would run the
-    # wrong parser on whichever side doesn't match.
-    lower_existing = existing_name.lower()
-    if lower_existing.endswith((".csv", ".tsv", ".txt")):
-        existing_content = sanitize_csv_content(existing_path.read_bytes())
-    elif lower_existing.endswith((".xlsx", ".xlsm", ".xls")):
-        existing_content = sanitize_xlsx_content(existing_path.read_bytes())
-    else:
-        existing_content = existing_path.read_bytes()
+    # ── Replacement cleaning ───────────────────────────────────────────
+    # Convert/sanitize the incoming file so it matches the existing physical
+    # format on disk. An XLSX source whose legacy physical file is .csv gets
+    # flattened to CSV; a modern XLSX source keeps its .xlsx format.
+    target_content = prepare_replacement_content(
+        file.filename, incoming_content, existing_name
+    )
 
-    lower_incoming = file.filename.lower()
-    if lower_incoming.endswith((".csv", ".tsv", ".txt")):
-        content = sanitize_csv_content(content)
-    elif lower_incoming.endswith((".xlsx", ".xlsm", ".xls")):
-        # The original upload flattens XLSX to CSV; keep that behavior here.
-        content = sanitize_xlsx_content(content)
-
-    # 2) Column compatibility check: incoming must contain all existing columns.
-    existing_types = detect_column_types(existing_content, existing_name)
+    existing_raw = existing_path.read_bytes()
+    existing_types = detect_column_types(existing_raw, existing_name)
     existing_cols = {c["field"] for c in existing_types}
-    incoming_types = detect_column_types(content, file.filename)
+    incoming_types = detect_column_types(target_content, existing_name)
     incoming_cols = {c["field"] for c in incoming_types}
     diff = compare_schemas(existing_types, incoming_types)
     if diff["blockers"] and not force:
@@ -755,15 +752,12 @@ async def replace_file_source(
                     "org_id": str(tenant.id),
                     "user_id": str(user.id),
                     "vdb_type": resolved_vdb_type,
-                    # This is a replace: tell the servlet to overwrite the
-                    # existing view/foreign table instead of returning a 409
-                    # "already exists / requiresConfirmation" conflict.
                     "replace": "true",
                 },
                 files={
                     "file": (
-                        file.filename,
-                        content,
+                        existing_name,
+                        target_content,
                         file.content_type or "application/octet-stream",
                     )
                 },
@@ -844,13 +838,23 @@ async def _load_file_source(
 def _locate_physical_file(
     uploads_dir: Path, meta: FileSourceMeta, view_name: str
 ) -> tuple[Path, str]:
+    """Find the on-disk file backing ``meta``.
+
+    The physical filename is derived from the stored display name and
+    source_format. This handles JSON/XML (flattened to .csv) as well as legacy
+    XLSX rows that were previously flattened to .csv.
+    """
     if uploads_dir.is_dir():
-        for candidate in uploads_dir.iterdir():
-            if not candidate.is_file():
+        candidates = candidate_physical_names(meta.file_name, meta.source_format)
+        for candidate in candidates:
+            candidate_path = uploads_dir / candidate
+            if not candidate_path.is_file():
                 continue
-            physical_display_name, _ = display_source(candidate.name, meta.source_format)
-            if compute_view_name(physical_display_name) == view_name:
-                return candidate, candidate.name
+            # Match by the display view name (e.g. report.xlsx -> report_XLSX),
+            # which is how the list endpoint and UI identify the source.
+            display_name, _ = display_source(candidate, meta.source_format)
+            if compute_view_name(display_name) == view_name:
+                return candidate_path, candidate
     raise HTTPException(status_code=404, detail="Data source file not found")
 
 
@@ -991,9 +995,9 @@ async def preflight_source_update(
         view_name=view_name,
     )
     # Validate the file itself before touching the tenant's storage.
-    content = await file.read()
+    incoming_content = await file.read()
     try:
-        classification = classify_upload(file.filename, content, file.content_type)
+        classification = classify_upload(file.filename, incoming_content, file.content_type)
     except UploadRejected as exc:
         raise HTTPException(
             status_code=422, detail={"code": exc.code, "message": exc.message}
@@ -1012,13 +1016,7 @@ async def preflight_source_update(
     )
     existing_path, existing_name = _locate_physical_file(uploads_dir, meta, view_name)
 
-    # 1) Same-name check. Compare against the identity name as reconstructed
-    # from the physical file + source_format (the same computation the list
-    # endpoint uses to display it) rather than the stored meta.file_name —
-    # for XLSX/JSON/XML sources the physical file on disk is a flattened
-    # CSV, and a row whose file_name was written before this reconstruction
-    # existed (or drifted some other way) would otherwise demand the wrong
-    # extension forever, even though the UI already shows the correct one.
+    # 1) Same-name check. The user must supply the same original display name.
     expected_name, _ = display_source(existing_name, meta.source_format)
     if sanitize_filename(file.filename) != sanitize_filename(expected_name):
         raise HTTPException(
@@ -1032,25 +1030,30 @@ async def preflight_source_update(
         # Self-heal a stale stored name so future reads/checks agree with it.
         meta.file_name = expected_name
 
+    # Convert/sanitize incoming content to the existing physical format.
+    target_content = prepare_replacement_content(
+        file.filename, incoming_content, existing_name
+    )
+
     baseline = await _ensure_baseline_version(
         session, meta=meta, existing_path=existing_path, existing_name=existing_name
     )
 
     try:
-        existing_content = existing_path.read_bytes()
+        existing_raw = existing_path.read_bytes()
     except OSError as exc:
         raise HTTPException(
             status_code=500, detail=f"Could not read existing file: {exc}"
         ) from exc
-    existing_types = detect_column_types(existing_content, existing_name)
-    incoming_types = detect_column_types(content, file.filename)
+    existing_types = detect_column_types(existing_raw, existing_name)
+    incoming_types = detect_column_types(target_content, existing_name)
     diff = compare_schemas(existing_types, incoming_types)
 
     dependencies = await find_query_dependencies(
         session, tenant_id=context.tenant_id, view_name=view_name
     )
 
-    incoming_checksum = checksum(content)
+    incoming_checksum = checksum(target_content)
     warnings: list[str] = []
     if incoming_checksum == baseline.checksum:
         warnings.append("The new file is identical to the active version.")
@@ -1079,7 +1082,7 @@ async def preflight_source_update(
         "currentFileName": meta.file_name,
         "proposedFileName": file.filename,
         "currentRowCount": baseline.row_count,
-        "proposedRowCount": count_data_rows(content, file.filename),
+        "proposedRowCount": count_data_rows(target_content, existing_name),
         "currentChecksum": baseline.checksum,
         "proposedChecksum": incoming_checksum,
         "updateMode": MODE_REPLACE,
@@ -1094,7 +1097,7 @@ async def preflight_source_update(
         update_mode=MODE_REPLACE,
         original_filename=file.filename,
         checksum=incoming_checksum,
-        size_bytes=len(content),
+        size_bytes=len(target_content),
         row_count=compatibility["proposedRowCount"],
         column_types=incoming_types or None,
         compatibility=compatibility,
@@ -1105,8 +1108,8 @@ async def preflight_source_update(
 
     stage_dir = staging_dir(uploads_dir)
     stage_dir.mkdir(parents=True, exist_ok=True)
-    staged_path = stage_dir / f"{staged.id}_{sanitize_filename(file.filename)}"
-    staged_path.write_bytes(content)
+    staged_path = stage_dir / f"{staged.id}_{sanitize_filename(existing_name)}"
+    staged_path.write_bytes(target_content)
     staged.stored_path = str(staged_path)
 
     _audit(
@@ -1193,12 +1196,14 @@ async def _activate_content(
             ) from exc
 
     try:
+        # Always publish to the existing physical filename so the live view is
+        # overwritten in place and the source identity does not change.
         await _reimport_through_teiid(
             endpoint,
             tenant_id=tenant_id,
             user_id=user_id,
             vdb_type=meta.vdb_type or "user",
-            filename=filename,
+            filename=existing_name,
             content=content,
         )
     except HTTPException as exc:

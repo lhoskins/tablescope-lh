@@ -189,7 +189,8 @@ public class TeiidExcelImporterTest extends HttpServlet {
         }
 
         try {
-            if (fileName.toLowerCase().endsWith(".txt") || fileName.toLowerCase().endsWith(".csv")) {
+            String lowerFileName = fileName.toLowerCase();
+            if (lowerFileName.endsWith(".txt") || lowerFileName.endsWith(".csv") || lowerFileName.endsWith(".tsv")) {
                 processTxtFile(filePath, fileName, vdbFilePath, vdbDeploymentName, jsonResponse, shouldReplace, response, orgId, userId, vdbType);
             } else {
                 // If file already exists, read from disk instead of upload stream
