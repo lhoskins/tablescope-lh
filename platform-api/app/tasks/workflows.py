@@ -237,6 +237,28 @@ async def enqueue_run_knowledge_graph_health_check(project_id: int) -> str:
         await pool.close()
 
 
+async def enqueue_knowledge_graph_rebuilt(
+    *, tenant_id: int, project_id: int, build_id: int
+) -> str:
+    """Enqueue downstream insight refresh after a successful KG build.
+
+    Splitting this work into its own job isolates the graph build's own
+    retry/backoff bookkeeping from Project/Business Insight enqueueing.
+    """
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "knowledge_graph_rebuilt",
+            tenant_id,
+            project_id,
+            build_id,
+            _job_id=f"kg-rebuilt:{tenant_id}:{project_id}:{build_id}",
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
 async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[str, Any]:
     """Execute a knowledge graph build (full or incremental) in the worker."""
     from app.models import KnowledgeGraphBuild
@@ -259,51 +281,24 @@ async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[st
                 await lifecycle.run_full_rebuild(build_id)
             await session.commit()
 
-            # Downstream consumers: a successful (activated) build means the
-            # project's data view changed, so warm the shared Business Insight
-            # cache. Best-effort — the graph build result stands regardless.
-            try:
-                await session.refresh(build)
-                if (
-                    build.status == "succeeded"
-                    and get_settings().business_insight_event_refresh_enabled
-                ):
-                    await enqueue_refresh_business_insight_result(
-                        tenant_id=build.tenant_id, project_id=build.project_id
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to enqueue business insight refresh after build %s: %s",
-                    build_id,
-                    exc,
-                )
-
-            # Sibling consumer: Project Insight snapshots become stale whenever
-            # the KG view changes, so mark them and queue a debounced rebuild.
+            # Downstream insight consumers now run in their own arq job so a
+            # slow/failing Project/Business Insight refresh cannot stall the
+            # KG build's own retry/backoff bookkeeping.
             try:
                 await session.refresh(build)
                 if build.status == "succeeded":
-                    from app.services.project_insight_service import (
-                        mark_project_insight_stale,
-                    )
-
-                    await mark_project_insight_stale(
-                        session,
+                    await enqueue_knowledge_graph_rebuilt(
                         tenant_id=build.tenant_id,
                         project_id=build.project_id,
+                        build_id=build_id,
                     )
-                    await session.commit()
-                    if get_settings().project_insight_event_rebuild_enabled:
-                        await enqueue_rebuild_project_insight(
-                            tenant_id=build.tenant_id,
-                            project_id=build.project_id,
-                        )
             except Exception as exc:
                 logger.warning(
-                    "Failed to enqueue project insight rebuild after build %s: %s",
+                    "Failed to enqueue knowledge_graph_rebuilt after build %s: %s",
                     build_id,
                     exc,
                 )
+
             return {"status": "ok", "build_id": build_id}
         except Exception as exc:
             logger.exception("rebuild_knowledge_graph failed for build %s", build_id)
@@ -313,6 +308,63 @@ async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[st
 
 # Deterministic job id may be reused; don't keep results so re-enqueue works.
 rebuild_knowledge_graph.keep_result = 0  # type: ignore[attr-defined]
+
+
+async def knowledge_graph_rebuilt(
+    ctx: dict[str, Any], tenant_id: int, project_id: int, build_id: int
+) -> dict[str, Any]:
+    """React to a successful KG build by refreshing downstream insight consumers.
+
+    This job is intentionally separate from :func:`rebuild_knowledge_graph` so
+    each consumer has its own retry/backoff policy and failures in one cannot
+    fail the KG build itself.
+    """
+    _ = ctx
+
+    async with SessionLocal() as session:
+        from app.services.project_insight_service import mark_project_insight_stale
+
+        try:
+            await mark_project_insight_stale(
+                session, tenant_id=tenant_id, project_id=project_id
+            )
+            await session.commit()
+        except Exception as exc:
+            logger.exception(
+                "knowledge_graph_rebuilt failed to mark project insight stale for build %s",
+                build_id,
+            )
+            await session.rollback()
+            return {"status": "error", "error": str(exc)[:500]}
+
+    if get_settings().business_insight_event_refresh_enabled:
+        try:
+            await enqueue_refresh_business_insight_result(
+                tenant_id=tenant_id, project_id=project_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to enqueue business insight refresh after build %s: %s",
+                build_id,
+                exc,
+            )
+
+    if get_settings().project_insight_event_rebuild_enabled:
+        try:
+            await enqueue_rebuild_project_insight(
+                tenant_id=tenant_id, project_id=project_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to enqueue project insight rebuild after build %s: %s",
+                build_id,
+                exc,
+            )
+
+    return {"status": "ok", "tenant_id": tenant_id, "project_id": project_id}
+
+
+knowledge_graph_rebuilt.keep_result = 0  # type: ignore[attr-defined]
 
 
 async def run_knowledge_graph_health_check(
@@ -1364,6 +1416,7 @@ class WorkerSettings:
         analyze_project_intelligence,
         scan_repository_connection,
         rebuild_knowledge_graph,
+        knowledge_graph_rebuilt,
         run_knowledge_graph_health_check,
         recover_stale_graph_builds,
         evaluate_stale_graphs,
