@@ -305,5 +305,6 @@ async def build_node_centric_graph(
 
     payload["lastUpdated"] = snapshot.get("generatedAt", "")
     payload["snapshotId"] = snapshot.get("id")
+    payload["pipelineVersion"] = snapshot.get("pipelineVersion", "")
     payload["isCached"] = not refresh
     return payload

@@ -300,6 +300,8 @@ async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[st
                 )
 
             return {"status": "ok", "build_id": build_id}
+        except Retry:
+            raise
         except Exception as exc:
             logger.exception("rebuild_knowledge_graph failed for build %s", build_id)
             await session.rollback()
@@ -504,6 +506,7 @@ async def sync_saas_object(
         except Exception:
             data_source = None
         if data_source is not None and data_source.project_id is not None:
+            source_checkpoint = datetime.now(UTC)
             await request_event_driven_rebuild(
                 session,
                 project_id=data_source.project_id,
@@ -516,6 +519,7 @@ async def sync_saas_object(
                     }
                 ],
                 trigger="saas_sync",
+                source_checkpoint=source_checkpoint,
             )
     return {"status": "ok", "saas_source_id": saas_source_id, **result}
 
@@ -619,10 +623,12 @@ async def reprocess_project(
     changed = [aid for aid, s in statuses.items() if s == "processed"]
     build_id: int | None = None
     if changed or force:
+        source_checkpoint = datetime.now(UTC)
         async with SessionLocal() as session:
             build = await request_event_driven_rebuild(
                 session,
                 project_id=project_id,
+                source_checkpoint=source_checkpoint,
                 change_set=[
                     {
                         "entity_type": "document",

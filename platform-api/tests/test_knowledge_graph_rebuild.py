@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
+from arq.worker import Retry
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -285,3 +288,41 @@ async def test_knowledge_graph_rebuilt_marks_stale_and_enqueues_insights(
     assert snap.is_stale is True
     assert bi_enqueued == [(1, project.id)]
     assert pi_enqueued == [(1, project.id)]
+
+
+async def test_source_checkpoint_retries_until_rows_visible(db_session):
+    """A build whose source checkpoint is newer than the visible staging rows must defer."""
+    tenant_id = 1
+    user_id = 1
+    project = await _project(db_session, tenant_id, user_id, "checkpoint")
+
+    manager = _manager(db_session, tenant_id, user_id)
+    build, _ = await manager.request_full_rebuild(project.id, trigger="test")
+    future = datetime.now(UTC) + timedelta(seconds=5)
+    build.source_checkpoint = {"timestamp": future.isoformat()}
+    await db_session.commit()
+
+    with pytest.raises(Retry):
+        await manager.run_full_rebuild(build.id)
+
+    # The write "lands" after the retry. Provide a row whose created_at is
+    # strictly >= the checkpoint so the next attempt proceeds.
+    db_session.add(
+        AIProjectGraphNode(
+            tenant_id=tenant_id,
+            project_id=project.id,
+            node_type="project",
+            source_type="project",
+            source_id=project.id,
+            name=project.name,
+            created_by=user_id,
+            created_at=future + timedelta(seconds=1),
+        )
+    )
+    await db_session.commit()
+
+    await manager.run_full_rebuild(build.id)
+    await db_session.commit()
+
+    graph = await manager.ensure_graph(project.id)
+    assert graph.active_version_id is not None
