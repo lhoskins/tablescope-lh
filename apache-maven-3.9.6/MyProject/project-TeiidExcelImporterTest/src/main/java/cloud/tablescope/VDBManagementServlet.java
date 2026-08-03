@@ -1379,9 +1379,14 @@ public class VDBManagementServlet extends HttpServlet {
         JSONArray columns = body.optJSONArray("columns");
 
         // ServiceNow sources talk to a custom Teiid translator rather than a JDBC datasource.
+        // Salesforce sources talk to the built-in Teiid salesforce translator via a JCA connection factory.
         boolean isServiceNow = "servicenow".equalsIgnoreCase(translator);
+        boolean isSalesforce = isSalesforceTranslator(translator);
         boolean force = body.optBoolean("force", false);
-        String instanceUrl = body.optString("instance_url", isServiceNow ? jdbcUrl : "");
+        String instanceUrl = body.optString("instance_url", isServiceNow || isSalesforce ? jdbcUrl : "");
+        if (isSalesforce) {
+            instanceUrl = normalizeSalesforceSoapUrl(instanceUrl);
+        }
 
         // Teiid admin endpoint (local to this WildFly node).
         String teiidHost = body.optString("teiid_host", "localhost");
@@ -1422,11 +1427,13 @@ public class VDBManagementServlet extends HttpServlet {
         }
 
         try {
-            // 2. Ensure the WildFly JDBC datasource exists (skipped for ServiceNow translator sources).
+            // 2. Ensure the WildFly JDBC datasource or JCA connection factory exists.
             Admin admin = AdminFactory.getInstance().createAdmin(
                     teiidHost, teiidPort, teiidAdminUser, teiidAdminPassword.toCharArray());
             try {
-                if (!isServiceNow) {
+                if (isSalesforce) {
+                    ensureSalesforceConnectionFactory(dsName, translator, instanceUrl, username, password);
+                } else if (!isServiceNow) {
                     ensureDataSource(dsName, dbType, jdbcUrl, username, password);
                 }
 
@@ -1440,6 +1447,9 @@ public class VDBManagementServlet extends HttpServlet {
                     if (isServiceNow) {
                         vdbXml = removeTranslatorBlock(vdbXml, dsName + "_servicenow");
                     }
+                    if (isSalesforce) {
+                        removeSalesforceConnectionFactory(dsName, translator);
+                    }
                     modelExists = false;
                 }
 
@@ -1451,6 +1461,10 @@ public class VDBManagementServlet extends HttpServlet {
                         String translatorDefName = dsName + "_servicenow";
                         modelBlock = buildServiceNowModelBlock(
                                 modelName, dsName, translatorDefName,
+                                teiidTableName, tableName, columns);
+                    } else if (isSalesforce) {
+                        modelBlock = buildSalesforceModelBlock(
+                                modelName, dsName, translator, jndiName,
                                 teiidTableName, tableName, columns);
                     } else {
                         modelBlock = buildPhysicalModelBlock(
@@ -1658,6 +1672,118 @@ public class VDBManagementServlet extends HttpServlet {
                     .replace("<", "&lt;")
                     .replace(">", "&gt;")
                     .replace("\"", "&quot;");
+    }
+
+    private boolean isSalesforceTranslator(String translator) {
+        return translator != null && translator.toLowerCase().startsWith("salesforce");
+    }
+
+    private String salesforceResourceAdapterName(String translator) {
+        if (translator == null) return "salesforce";
+        String t = translator.toLowerCase();
+        if (t.contains("41")) return "salesforce-41";
+        if (t.contains("34")) return "salesforce-34";
+        return "salesforce";
+    }
+
+    private String normalizeSalesforceSoapUrl(String url) {
+        if (url == null || url.trim().isEmpty()) {
+            return "https://login.salesforce.com/services/Soap/u/41.0";
+        }
+        String normalized = url.trim();
+        if (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (normalized.contains("/services/Soap/")) {
+            return normalized;
+        }
+        if (normalized.contains("/services/")) {
+            normalized = normalized.substring(0, normalized.indexOf("/services/"));
+        }
+        return normalized + "/services/Soap/u/41.0";
+    }
+
+    private void ensureSalesforceConnectionFactory(String dsName, String translator,
+                                                    String url, String username, String password) throws Exception {
+        String ra = salesforceResourceAdapterName(translator);
+        // Make idempotent: remove any existing connection definition first.
+        try {
+            runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+                    + "/connection-definitions=" + dsName + ":remove");
+        } catch (Exception e) {
+            log("Ignoring Salesforce connection factory removal for " + dsName + ": " + e.getMessage());
+        }
+
+        String addCmd = "/subsystem=resource-adapters/resource-adapter=" + ra
+                + "/connection-definitions=" + dsName + ":add("
+                + "jndi-name=\"java:/" + dsName + "\", "
+                + "class-name=\"org.teiid.resource.adapter.salesforce.SalesForceManagedConnectionFactory\", "
+                + "enabled=true, use-java-context=true)";
+        runCli(addCmd);
+
+        runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+                + "/connection-definitions=" + dsName + "/config-properties=URL:add(value=\"" + url + "\")");
+
+        String escUser = username == null ? "" : username.replace("\\", "\\\\").replace("\"", "\\\"");
+        runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+                + "/connection-definitions=" + dsName + "/config-properties=username:add(value=\"" + escUser + "\")");
+
+        String escPass = password == null ? "" : password.replace("\\", "\\\\").replace("\"", "\\\"");
+        runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+                + "/connection-definitions=" + dsName + "/config-properties=password:add(value=\"" + escPass + "\")");
+
+        runCli("/subsystem=resource-adapters/resource-adapter=" + ra + ":activate");
+        log("Salesforce connection factory created/updated: " + dsName + " via RA " + ra);
+    }
+
+    private void removeSalesforceConnectionFactory(String dsName, String translator) {
+        try {
+            String ra = salesforceResourceAdapterName(translator);
+            runCli("/subsystem=resource-adapters/resource-adapter=" + ra
+                    + "/connection-definitions=" + dsName + ":remove");
+            runCli("/subsystem=resource-adapters/resource-adapter=" + ra + ":activate");
+            log("Removed Salesforce connection factory: " + dsName);
+        } catch (Exception e) {
+            log("Warning: could not remove Salesforce connection factory " + dsName + ": " + e.getMessage());
+        }
+    }
+
+    /** Build a PHYSICAL model block for the native Teiid Salesforce translator. */
+    private String buildSalesforceModelBlock(String modelName, String dsName, String translatorName,
+                                              String jndiName, String teiidTableName,
+                                              String tableName, JSONArray columns) {
+        StringBuilder cols = new StringBuilder();
+        if (columns != null && columns.length() > 0) {
+            for (int i = 0; i < columns.length(); i++) {
+                JSONObject c = columns.getJSONObject(i);
+                String name = c.getString("name");
+                String type = c.optString("teiid_type", "string");
+                String srcName = c.optString("name_in_source", name);
+                String viewId = "\"" + name.replace("\"", "\"\"") + "\"";
+                String nameInSourceLiteral = srcName.replace("'", "''");
+                cols.append("\t").append(viewId).append(" ").append(type)
+                    .append(" OPTIONS (NAMEINSOURCE '").append(nameInSourceLiteral).append("')");
+                if (i < columns.length() - 1) cols.append(",");
+                cols.append("\n");
+            }
+        } else {
+            cols.append("\t\"__row__\" string\n");
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n");
+        sb.append("  <model name=\"").append(modelName).append("\" type=\"PHYSICAL\" visible=\"false\">\n");
+        sb.append("    <source name=\"").append(dsName).append("\" translator-name=\"").append(translatorName)
+          .append("\" connection-jndi-name=\"").append(jndiName).append("\"/>\n");
+        sb.append("    <metadata type=\"DDL\">\n");
+        sb.append("      <![CDATA[\n");
+        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
+        sb.append(cols);
+        sb.append(") OPTIONS (NAMEINSOURCE '").append(tableName.replace("'", "''")).append("');\n");
+        sb.append("]]>\n");
+        sb.append("    </metadata>\n");
+        sb.append("  </model>\n");
+        return sb.toString();
     }
 
     private String buildPhysicalModelBlock(String modelName, String dsName, String translator,
