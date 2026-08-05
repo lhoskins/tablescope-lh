@@ -15,59 +15,65 @@ import org.teiid.adminapi.jboss.AdminFactory;
 
 /**
  * VDB Management Servlet for Redash Multi-Tenancy
- * 
+ *
  * Provides REST API endpoints for managing VDB lifecycle:
  * - Create VDB from template
  * - Delete VDB
  * - Update VDB credentials
- * 
+ *
  * Security:
  * - API key authentication (X-API-Key header)
  * - Credentials passed via HTTPS POST body
  * - Admin credentials for Teiid management
- * 
+ *
  * Concurrency:
  * - Uses VDB-level locking to prevent race conditions with TeiidExcelImporterTest
  * - Ensures VDB modifications are atomic
  */
 @WebServlet("/vdb-management/*")
 public class VDBManagementServlet extends HttpServlet {
-    
-    
+
+
     // Teiid Admin credentials (for servlet to manage Teiid)
     // Note: Host and port are now passed via API request, not stored as instance variables
     private String teiidAdminUser;
     private String teiidAdminPassword;
-    
+
     // Servlet API key (for Redash to authenticate to servlet)
     private String servletApiKey;
-    
+
     // VDB files base path
     private String vdbBasePath;
-    
+
+    private VDBFileLocator vdbFileLocator;
+    private TeiidDeployHelper teiidDeployHelper;
+
     @Override
     public void init() throws ServletException {
         super.init();
-        
+
         // Load Teiid Admin credentials from environment (sensitive data only)
         teiidAdminUser = getEnvOrDefault("TEIID_ADMIN_USER", "admin");
         teiidAdminPassword = getEnvOrDefault("TEIID_ADMIN_PASSWORD", "admin");
-        
+
         // NOTE: teiidAdminHost and teiidAdminPort are now passed via API request from Redash
         // This allows dynamic configuration through the Redash Teiid Config UI
         // No hardcoded defaults - configuration must come from Redash database
-        
+
         // Load servlet API key
         servletApiKey = getEnvOrDefault("TEIID_SERVLET_API_KEY", "");
-        
+
         // VDB files base path
         vdbBasePath = getEnvOrDefault("VDB_BASE_PATH", "/opt/wildfly/teiidfiles");
-        
+
+        vdbFileLocator = new VDBFileLocator(vdbBasePath);
+        teiidDeployHelper = new TeiidDeployHelper(teiidAdminUser, teiidAdminPassword);
+
         log("VDBManagementServlet initialized");
         log("Teiid connection info will be provided via API requests from Redash");
         log("VDB Base Path: " + vdbBasePath);
     }
-    
+
     /**
      * Handle CORS preflight requests
      */
@@ -77,28 +83,28 @@ public class VDBManagementServlet extends HttpServlet {
         setCorsHeaders(response);
         response.setStatus(HttpServletResponse.SC_OK);
     }
-    
+
     /**
      * Main POST handler - routes to specific actions
      */
     @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
-        
+
         setCorsHeaders(response);
         response.setContentType("application/json");
         PrintWriter out = response.getWriter();
-        
-        // 1. Authenticate the request (Redash → Servlet)
+
+        // 1. Authenticate the request (Redash -> Servlet)
         if (!authenticateRequest(request)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             out.println(createErrorResponse("Invalid or missing API key"));
             return;
         }
-        
+
         // 2. Route to appropriate action based on path
         String pathInfo = request.getPathInfo();
-        
+
         try {
             if (pathInfo == null || pathInfo.equals("/")) {
                 out.println(createErrorResponse("No action specified"));
@@ -125,35 +131,16 @@ public class VDBManagementServlet extends HttpServlet {
             out.println(createErrorResponse("Internal server error: " + e.getMessage()));
         }
     }
-    
+
     /**
      * Create a new VDB from template or redeploy existing VDB
-     * 
-     * Expected JSON body:
-     * {
-     *   "org_id": 1,
-     *   "vdb_id": "1234567",  // 7-digit random number
-     *   "username": "vdb_user_dev",
-     *   "password": "secure_password",
-     *   "teiid_host": "64.52.108.62",
-     *   "teiid_port": 10000,
-     *   "vdb_type": "user",  // "user" or "shared" (optional, defaults to org-level for backward compatibility)
-     *   "user_id": 123       // Required if vdb_type is "user"
-     * }
-     * 
-     * Behavior:
-     * - If vdb_type is "user": creates VDB in /Customer/{org_id}/{user_id}/vdb/
-     * - If vdb_type is "shared": creates VDB in /Customer/{org_id}/shared/vdb/
-     * - If vdb_type is not specified: creates VDB in /Customer/{org_id}/vdb/ (legacy org-level)
-     * - If VDB file exists, redeploy it
-     * - If VDB doesn't exist, create new VDB from template
      */
     private void createVDB(HttpServletRequest request, HttpServletResponse response, PrintWriter out)
             throws IOException {
-        
+
         // Parse request body
         JSONObject requestBody = parseRequestBody(request);
-        
+
         // Validate required fields
         if (!requestBody.has("org_id") || !requestBody.has("vdb_id") ||
             !requestBody.has("username") || !requestBody.has("password") ||
@@ -162,23 +149,23 @@ public class VDBManagementServlet extends HttpServlet {
             out.println(createErrorResponse("Missing required fields: org_id, vdb_id, username, password, teiid_host, teiid_port"));
             return;
         }
-        
+
         int orgId = requestBody.getInt("org_id");
         String vdbId = requestBody.getString("vdb_id");  // 7-digit number
         String vdbUsername = requestBody.getString("username");
         String vdbPassword = requestBody.getString("password");
-        
+
         // Read VDB type (optional, defaults to org-level for backward compatibility)
         String vdbType = requestBody.optString("vdb_type", "org");
         Integer userId = requestBody.has("user_id") ? requestBody.getInt("user_id") : null;
-        
+
         // Validate vdb_type and user_id combination
         if ("user".equals(vdbType) && userId == null) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             out.println(createErrorResponse("user_id is required when vdb_type is 'user'"));
             return;
         }
-        
+
         // Read Teiid connection info from request (from Redash database)
         String teiidHost = requestBody.getString("teiid_host");
         int teiidPort;
@@ -189,19 +176,19 @@ public class VDBManagementServlet extends HttpServlet {
             out.println(createErrorResponse("Invalid teiid_port value. Must be a valid port number."));
             return;
         }
-        
+
         log("Processing VDB request for org_id: " + orgId + ", vdb_id: " + vdbId + ", vdb_type: " + vdbType);
         if (userId != null) {
             log("User ID: " + userId);
         }
         log("Teiid connection: " + teiidHost + ":" + teiidPort);
-        
+
         try {
             // 1. Define paths based on VDB type
             String customerFolder;
             String vdbFolder;
             String uploadsFolder;
-            
+
             if ("user".equals(vdbType)) {
                 // User VDB: /Customer/{org_id}/{user_id}/vdb/
                 customerFolder = vdbBasePath + "/customers/" + orgId + "/" + userId;
@@ -221,15 +208,15 @@ public class VDBManagementServlet extends HttpServlet {
                 uploadsFolder = customerFolder + "/uploads";
                 log("Using organization-level VDB path (legacy mode)");
             }
-            
+
             String vdbFilePath = vdbFolder + "/" + vdbId + "-vdb.xml";
             String templatePath = vdbBasePath + "/vdb_template/vdb_ template.xml";
-            
+
             // 2. Check if VDB already exists
             File vdbFile = new File(vdbFilePath);
             File customerDir = new File(customerFolder);
             File vdbDir = new File(vdbFolder);
-            
+
             // Check for any existing VDB file in VDB folder
             File existingVdb = null;
             if (vdbDir.exists()) {
@@ -243,59 +230,58 @@ public class VDBManagementServlet extends HttpServlet {
                     log("Found existing VDB file: " + existingVdb.getName());
                 }
             }
-            
+
             // 3. If VDB exists, redeploy it
             if (existingVdb != null) {
                 log("Existing VDB found: " + existingVdb.getAbsolutePath());
-                
+
                 // Extract VDB ID from filename
                 String existingVdbId = existingVdb.getName().replace("-vdb.xml", "");
-                
+
                 // Check if the existing VDB ID matches the requested VDB ID
                 if (!existingVdbId.equals(vdbId)) {
                     log("VDB ID mismatch: requested=" + vdbId + ", existing=" + existingVdbId);
                     log("Renaming VDB to match requested ID");
-                    
+
                     // Read existing VDB content
                     String vdbContent;
                     try {
-                        vdbContent = readFile(existingVdb.getAbsolutePath());
+                        vdbContent = vdbFileLocator.readFile(existingVdb.getAbsolutePath());
                     } catch (IOException e) {
                         log("ERROR: Failed to read existing VDB file: " + e.getMessage());
                         response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
                         out.println(createErrorResponse("Failed to read existing VDB file"));
                         return;
                     }
-                    
+
                     // Update VDB name in content to match requested ID
                     vdbContent = vdbContent.replaceAll("name=\"" + existingVdbId + "\"", "name=\"" + vdbId + "\"");
-                    
+
                     // Write to new file with requested VDB ID
                     String newVdbFilePath = vdbFolder + "/" + vdbId + "-vdb.xml";
                     try {
-                        writeFile(newVdbFilePath, vdbContent);
+                        vdbFileLocator.writeFile(newVdbFilePath, vdbContent);
                     } catch (IOException e) {
                         log("ERROR: Failed to write VDB file with new ID: " + e.getMessage());
                         response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
                         out.println(createErrorResponse("Failed to write VDB file with new ID"));
                         return;
                     }
-                    
+
                     // Delete old VDB file
                     if (!existingVdb.delete()) {
                         log("WARNING: Failed to delete old VDB file: " + existingVdb.getAbsolutePath());
                     }
-                    
+
                     // Update references for deployment
                     existingVdbId = vdbId;
                     existingVdb = new File(newVdbFilePath);
                     log("VDB renamed successfully from " + existingVdbId + " to " + vdbId);
                 }
-                
+
                 log("Redeploying existing VDB");
-                
+
                 // Acquire lock for this VDB to prevent race conditions with TeiidExcelImporterTest
-                // This ensures we don't redeploy while file processing is updating the VDB
                 if (!VDBLockManager.acquireLock(existingVdb.getAbsolutePath())) {
                     log("Failed to acquire VDB lock for redeployment: " + existingVdb.getAbsolutePath());
                     response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -303,34 +289,11 @@ public class VDBManagementServlet extends HttpServlet {
                     return;
                 }
                 try {
-                    // Connect to Teiid Admin API
-                    Admin admin = AdminFactory.getInstance().createAdmin(
-                        teiidHost, teiidPort,
-                        teiidAdminUser, teiidAdminPassword.toCharArray()
-                    );
-                    
-                    try {
-                        // Undeploy existing VDB
-                        try {
-                            admin.undeploy(existingVdbId + "-vdb.xml");
-                            log("Existing VDB undeployed: " + existingVdbId);
-                        } catch (Exception e) {
-                            log("Warning: Failed to undeploy VDB (may not be deployed): " + e.getMessage());
-                        }
-                        
-                        // Redeploy with updated configuration
-                        try (InputStream inputStream = new FileInputStream(existingVdb)) {
-                            admin.deploy(existingVdbId + "-vdb.xml", inputStream);
-                        }
-                        log("VDB redeployed successfully: " + existingVdbId);
-                        
-                    } finally {
-                        admin.close();
-                    }
+                    teiidDeployHelper.redeployVDB(existingVdb.getAbsolutePath(), existingVdbId + "-vdb.xml", teiidHost, teiidPort);
                 } finally {
                     VDBLockManager.releaseLock(existingVdb.getAbsolutePath());
                 }
-                
+
                 // Return success response
                 response.setStatus(HttpServletResponse.SC_OK);
                 JSONObject successResponse = new JSONObject();
@@ -343,74 +306,70 @@ public class VDBManagementServlet extends HttpServlet {
                 out.println(successResponse.toString());
                 return;
             }
-            
+
             // 4. No existing VDB - create new one from template
             log("No existing VDB found, creating new VDB from template");
-            
+
             // Create customer folder if it doesn't exist
             if (!customerDir.exists()) {
-                if (!customerDir.mkdirs()) {
+                if (!vdbFileLocator.createFolderIfNotExists(customerFolder)) {
                     response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
                     out.println(createErrorResponse("Failed to create customer folder: " + customerFolder));
                     return;
                 }
                 log("Created customer folder: " + customerFolder);
-                setFolderPermissions(customerFolder);
+                vdbFileLocator.setFolderPermissions(customerFolder);
             }
-            
+
             // Create vdb folder if it doesn't exist
-            // vdbDir already declared above, reuse it
             if (!vdbDir.exists()) {
-                if (!vdbDir.mkdirs()) {
+                if (!vdbFileLocator.createFolderIfNotExists(vdbFolder)) {
                     response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
                     out.println(createErrorResponse("Failed to create vdb folder: " + vdbFolder));
                     return;
                 }
                 log("Created vdb folder: " + vdbFolder);
-                setFolderPermissions(vdbFolder);
+                vdbFileLocator.setFolderPermissions(vdbFolder);
             }
-            
+
             // Create uploads folder if it doesn't exist
             File uploadsDir = new File(uploadsFolder);
             if (!uploadsDir.exists()) {
-                if (!uploadsDir.mkdirs()) {
+                if (!vdbFileLocator.createFolderIfNotExists(uploadsFolder)) {
                     response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
                     out.println(createErrorResponse("Failed to create uploads folder: " + uploadsFolder));
                     return;
                 }
                 log("Created uploads folder: " + uploadsFolder);
-                setFolderPermissions(uploadsFolder);
+                vdbFileLocator.setFolderPermissions(uploadsFolder);
             }
-            
+
             // 5. Read template VDB XML from hardcoded path
             if (!new File(templatePath).exists()) {
                 response.setStatus(HttpServletResponse.SC_NOT_FOUND);
                 out.println(createErrorResponse("Template VDB not found at: " + templatePath));
                 return;
             }
-            
-            String vdbXml = readFile(templatePath);
+
+            String vdbXml = vdbFileLocator.readFile(templatePath);
             log("Template VDB loaded from: " + templatePath);
-            
+
             // 6. Replace VDB name with 7-digit ID (only the <vdb> element, not model names)
-            // Match the vdb element's name attribute specifically
             vdbXml = vdbXml.replaceFirst("<vdb\\s+name=\"[^\"]+\"", "<vdb name=\"" + vdbId + "\"");
             log("VDB name replaced with: " + vdbId);
-            
+
             // Also update any hardcoded VDB name references in the virtual model views
-            // This ensures system_info view and other references use the correct VDB ID
             vdbXml = vdbXml.replaceAll("'MyVDBTest'", "'" + vdbId + "'");
             vdbXml = vdbXml.replaceAll("'vdb_production'", "'" + vdbId + "'");
             log("VDB name references updated in views");
-            
+
             // 7. Update file paths to use customer uploads folder
-            vdbXml = updateFilePaths(vdbXml, uploadsFolder);
-            
+            vdbXml = VDBXmlBuilder.updateFilePaths(vdbXml, uploadsFolder);
+
             // 8. Configure VDB credentials (if needed by your Teiid setup)
-            vdbXml = configureVDBCredentials(vdbXml, vdbUsername, vdbPassword);
-            
+            vdbXml = VDBXmlBuilder.configureVDBCredentials(vdbXml, vdbUsername, vdbPassword);
+
             // 9. Write new VDB file to customer folder
-            // Acquire lock for this VDB to prevent race conditions with TeiidExcelImporterTest
             if (!VDBLockManager.acquireLock(vdbFilePath)) {
                 log("Failed to acquire VDB lock for creation: " + vdbFilePath);
                 response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
@@ -420,12 +379,12 @@ public class VDBManagementServlet extends HttpServlet {
             try {
                 log("ATTEMPTING TO WRITE VDB FILE TO: " + vdbFilePath);
                 log("VDB XML length: " + vdbXml.length() + " characters");
-                
+
                 try {
-                    writeFile(vdbFilePath, vdbXml);
+                    vdbFileLocator.writeFile(vdbFilePath, vdbXml);
                     log("SUCCESS: VDB file written to: " + vdbFilePath);
-                    
-                    // Verify the file was actually created (reuse vdbFile variable from line 180)
+
+                    // Verify the file was actually created
                     vdbFile = new File(vdbFilePath);
                     if (vdbFile.exists()) {
                         log("VERIFIED: File exists at " + vdbFilePath + " with size " + vdbFile.length() + " bytes");
@@ -442,31 +401,19 @@ public class VDBManagementServlet extends HttpServlet {
                     out.println(createErrorResponse("Failed to write VDB file: " + e.getMessage()));
                     return;
                 }
-                
+
                 // DEBUG: Log the VDB XML content to help diagnose duplicate model name issues
                 log("=== VDB XML Content (first 2000 chars) ===");
                 log(vdbXml.substring(0, Math.min(2000, vdbXml.length())));
                 log("=== End VDB XML Content ===");
-                
+
                 // 10. Deploy to Teiid using Admin API
                 log("Deploying VDB to Teiid...");
-                Admin admin = AdminFactory.getInstance().createAdmin(
-                    teiidHost, teiidPort,
-                    teiidAdminUser, teiidAdminPassword.toCharArray()
-                );
-                
-                try {
-                    try (InputStream inputStream = new FileInputStream(vdbFilePath)) {
-                        admin.deploy(vdbId + "-vdb.xml", inputStream);
-                    }
-                    log("VDB deployed to Teiid successfully: " + vdbId);
-                } finally {
-                    admin.close();
-                }
+                teiidDeployHelper.deployVDB(vdbFilePath, vdbId + "-vdb.xml", teiidHost, teiidPort);
             } finally {
                 VDBLockManager.releaseLock(vdbFilePath);
             }
-            
+
             // 11. Return success response
             response.setStatus(HttpServletResponse.SC_OK);
             JSONObject successResponse = new JSONObject();
@@ -477,47 +424,31 @@ public class VDBManagementServlet extends HttpServlet {
             successResponse.put("status", "success");
             successResponse.put("message", "VDB created and deployed successfully");
             out.println(successResponse.toString());
-            
+
             log("VDB created successfully: " + vdbId + " (type: " + vdbType + ")");
-            
+
         } catch (Exception e) {
             log("Failed to create/redeploy VDB: " + e.getMessage(), e);
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
             out.println(createErrorResponse("Failed to create/redeploy VDB: " + e.getMessage()));
         }
     }
-    
+
     /**
      * Delete a VDB (archives the file instead of deleting)
-     * 
-     * Expected JSON body:
-     * {
-     *   "org_id": 1,
-     *   "vdb_id": "1234567",
-     *   "teiid_host": "64.52.108.62",
-     *   "teiid_port": 10000,
-     *   "vdb_type": "user",  // "user" or "shared" (optional, defaults to org-level)
-     *   "user_id": 123       // Required if vdb_type is "user"
-     * }
-     * 
-     * Behavior:
-     * - Undeploys VDB from Teiid server
-     * - Moves VDB file to archive folder instead of deleting
-     * - Creates archive folder if it doesn't exist
-     * - Supports user, shared, and org-level VDB types
      */
     private void deleteVDB(HttpServletRequest request, HttpServletResponse response, PrintWriter out)
             throws IOException {
-        
+
         JSONObject requestBody = parseRequestBody(request);
-        
-        if (!requestBody.has("org_id") || !requestBody.has("vdb_id") || 
+
+        if (!requestBody.has("org_id") || !requestBody.has("vdb_id") ||
             !requestBody.has("teiid_host") || !requestBody.has("teiid_port")) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             out.println(createErrorResponse("Missing required fields: org_id, vdb_id, teiid_host, teiid_port"));
             return;
         }
-        
+
         int orgId = requestBody.getInt("org_id");
         String vdbId = requestBody.getString("vdb_id");
         String teiidHost = requestBody.getString("teiid_host");
@@ -529,50 +460,47 @@ public class VDBManagementServlet extends HttpServlet {
             out.println(createErrorResponse("Invalid teiid_port value"));
             return;
         }
-        
+
         // Read VDB type (optional, defaults to org-level for backward compatibility)
         String vdbType = requestBody.optString("vdb_type", "org");
         Integer userId = requestBody.has("user_id") ? requestBody.getInt("user_id") : null;
-        
+
         // Validate vdb_type and user_id combination
         if ("user".equals(vdbType) && userId == null) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             out.println(createErrorResponse("user_id is required when vdb_type is 'user'"));
             return;
         }
-        
+
         log("Deleting VDB: " + vdbId + " for org_id: " + orgId + ", vdb_type: " + vdbType);
         if (userId != null) {
             log("User ID: " + userId);
         }
         log("Teiid connection: " + teiidHost + ":" + teiidPort);
-        
+
         try {
             // 1. Define paths based on VDB type
             String customerFolder;
             String vdbFolder;
-            
+
             if ("user".equals(vdbType)) {
-                // User VDB: /Customer/{org_id}/{user_id}/vdb/
                 customerFolder = vdbBasePath + "/customers/" + orgId + "/" + userId;
                 vdbFolder = customerFolder + "/vdb";
                 log("Using user VDB path for user " + userId);
             } else if ("shared".equals(vdbType)) {
-                // Shared VDB: /Customer/{org_id}/shared/vdb/
                 customerFolder = vdbBasePath + "/customers/" + orgId + "/shared";
                 vdbFolder = customerFolder + "/vdb";
                 log("Using shared VDB path for organization " + orgId);
             } else {
-                // Legacy org-level VDB: /Customer/{org_id}/vdb/
                 customerFolder = vdbBasePath + "/customers/" + orgId;
                 vdbFolder = customerFolder + "/vdb";
                 log("Using organization-level VDB path (legacy mode)");
             }
-            
+
             String vdbFilePath = vdbFolder + "/" + vdbId + "-vdb.xml";
             String archiveFolder = vdbFolder + "/archive";
             String archivePath = archiveFolder + "/" + vdbId + "-vdb.xml";
-            
+
             // 2. Connect to Teiid Admin API (uses Teiid Admin credentials)
             Admin admin = AdminFactory.getInstance().createAdmin(
                 teiidHost,
@@ -580,7 +508,7 @@ public class VDBManagementServlet extends HttpServlet {
                 teiidAdminUser,
                 teiidAdminPassword.toCharArray()
             );
-            
+
             // 3. Undeploy VDB
             try {
                 admin.undeploy(vdbId + "-vdb.xml");
@@ -590,26 +518,25 @@ public class VDBManagementServlet extends HttpServlet {
             } finally {
                 admin.close();
             }
-            
+
             // 4. Create archive folder if it doesn't exist
             File archiveDir = new File(archiveFolder);
             if (!archiveDir.exists()) {
                 if (!archiveDir.mkdirs()) {
                     log("Warning: Failed to create archive folder: " + archiveFolder);
-                    // Continue anyway - we'll try to archive but may fail
                 } else {
                     log("Created archive folder: " + archiveFolder);
                 }
             }
-            
+
             // 5. Move VDB file to archive (don't delete)
             File vdbFile = new File(vdbFilePath);
             boolean archived = false;
             String archivedTo = null;
-            
+
             if (vdbFile.exists()) {
                 File archiveFile = new File(archivePath);
-                
+
                 // If archive file already exists, add timestamp to make it unique
                 if (archiveFile.exists()) {
                     String timestamp = String.valueOf(System.currentTimeMillis());
@@ -617,7 +544,7 @@ public class VDBManagementServlet extends HttpServlet {
                     archiveFile = new File(archivePath);
                     log("Archive file exists, using timestamped name: " + archivePath);
                 }
-                
+
                 // Move file to archive
                 archived = vdbFile.renameTo(archiveFile);
                 if (archived) {
@@ -629,7 +556,7 @@ public class VDBManagementServlet extends HttpServlet {
             } else {
                 log("Warning: VDB file not found at: " + vdbFilePath);
             }
-            
+
             // 6. Return success response
             response.setStatus(HttpServletResponse.SC_OK);
             JSONObject successResponse = new JSONObject();
@@ -640,44 +567,35 @@ public class VDBManagementServlet extends HttpServlet {
             if (archivedTo != null) {
                 successResponse.put("archived_to", archivedTo);
             }
-            successResponse.put("message", archived ? 
-                "VDB deleted and archived successfully" : 
+            successResponse.put("message", archived ?
+                "VDB deleted and archived successfully" :
                 "VDB undeployed (file not found or could not be archived)");
             out.println(successResponse.toString());
-            
+
             log("VDB deletion completed: " + vdbId + " (type: " + vdbType + ")");
-            
+
         } catch (Exception e) {
             log("Failed to delete VDB: " + e.getMessage(), e);
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
             out.println(createErrorResponse("Failed to delete VDB: " + e.getMessage()));
         }
     }
-    
+
     /**
      * Update VDB credentials (credential rotation)
-     * 
-     * Expected JSON body:
-     * {
-     *   "vdb_id": "vdb_development",
-     *   "username": "new_username",
-     *   "password": "new_password",
-     *   "teiid_host": "64.52.108.62",
-     *   "teiid_port": 10000
-     * }
      */
     private void updateVDBCredentials(HttpServletRequest request, HttpServletResponse response, PrintWriter out)
             throws IOException {
-        
+
         JSONObject requestBody = parseRequestBody(request);
-        
+
         if (!requestBody.has("vdb_id") || !requestBody.has("username") || !requestBody.has("password") ||
             !requestBody.has("teiid_host") || !requestBody.has("teiid_port")) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             out.println(createErrorResponse("Missing required fields: vdb_id, username, password, teiid_host, teiid_port"));
             return;
         }
-        
+
         String vdbId = requestBody.getString("vdb_id");
         String newUsername = requestBody.getString("username");
         String newPassword = requestBody.getString("password");
@@ -690,52 +608,33 @@ public class VDBManagementServlet extends HttpServlet {
             out.println(createErrorResponse("Invalid teiid_port value"));
             return;
         }
-        
+
         log("Updating credentials for VDB: " + vdbId);
         log("Teiid connection: " + teiidHost + ":" + teiidPort);
-        
+
         try {
             // 1. Find existing VDB file
-            String vdbPath = findVDBFile(vdbId);
+            String vdbPath = vdbFileLocator.findVDBFile(vdbId);
             if (vdbPath == null) {
                 response.setStatus(HttpServletResponse.SC_NOT_FOUND);
                 out.println(createErrorResponse("VDB file not found: " + vdbId));
                 return;
             }
-            
+
             // 2. Read existing VDB configuration
-            String vdbXml = readFile(vdbPath);
-            
+            String vdbXml = vdbFileLocator.readFile(vdbPath);
+
             // 3. Update VDB user credentials in VDB XML
-            vdbXml = configureVDBCredentials(vdbXml, newUsername, newPassword);
-            
+            vdbXml = VDBXmlBuilder.configureVDBCredentials(vdbXml, newUsername, newPassword);
+
             // 4. Write updated VDB file
-            writeFile(vdbPath, vdbXml);
-            
+            vdbFileLocator.writeFile(vdbPath, vdbXml);
+
             log("VDB file updated with new credentials: " + vdbPath);
-            
+
             // 5. Redeploy VDB using Teiid Admin credentials
-            Admin admin = AdminFactory.getInstance().createAdmin(
-                teiidHost,
-                teiidPort,
-                teiidAdminUser,
-                teiidAdminPassword.toCharArray()
-            );
-            
-            try {
-                // Undeploy old version
-                admin.undeploy(vdbId + "-vdb.xml");
-                log("VDB undeployed: " + vdbId);
-                
-                // Deploy new version
-                try (InputStream inputStream = new FileInputStream(vdbPath)) {
-                    admin.deploy(vdbId + "-vdb.xml", inputStream);
-                }
-                log("VDB redeployed with new credentials: " + vdbId);
-            } finally {
-                admin.close();
-            }
-            
+            teiidDeployHelper.redeployVDB(vdbPath, vdbId + "-vdb.xml", teiidHost, teiidPort);
+
             // 6. Return success response
             response.setStatus(HttpServletResponse.SC_OK);
             JSONObject successResponse = new JSONObject();
@@ -743,41 +642,30 @@ public class VDBManagementServlet extends HttpServlet {
             successResponse.put("vdb_id", vdbId);
             successResponse.put("message", "VDB credentials updated successfully");
             out.println(successResponse.toString());
-            
+
             log("VDB credentials updated successfully: " + vdbId);
-            
+
         } catch (Exception e) {
             log("Failed to update VDB credentials: " + e.getMessage(), e);
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
             out.println(createErrorResponse("Failed to update VDB credentials: " + e.getMessage()));
         }
     }
-    
+
     /**
      * Redeploy an existing VDB to Teiid
-     * 
-     * This is used after updating the VDB file (e.g., changing file paths)
-     * to make Teiid reload the VDB with the new configuration.
-     * 
-     * Expected JSON body:
-     * {
-     *   "vdb_id": "vdb_production",
-     *   "vdb_file_path": "/opt/wildfly/teiidfiles/customers/1/vdb/vdb_production-vdb.xml",
-     *   "teiid_host": "64.52.108.62",
-     *   "teiid_port": 10000
-     * }
      */
     private void redeployVDB(HttpServletRequest request, HttpServletResponse response, PrintWriter out)
             throws IOException {
-        
+
         JSONObject requestBody = parseRequestBody(request);
-        
+
         if (!requestBody.has("vdb_id") || !requestBody.has("teiid_host") || !requestBody.has("teiid_port")) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             out.println(createErrorResponse("Missing required fields: vdb_id, teiid_host, teiid_port"));
             return;
         }
-        
+
         String vdbId = requestBody.getString("vdb_id");
         String vdbFilePath = requestBody.optString("vdb_file_path", null);
         String teiidHost = requestBody.getString("teiid_host");
@@ -789,58 +677,34 @@ public class VDBManagementServlet extends HttpServlet {
             out.println(createErrorResponse("Invalid teiid_port value"));
             return;
         }
-        
+
         log("Redeploying VDB: " + vdbId);
         log("Teiid connection: " + teiidHost + ":" + teiidPort);
-        
+
         try {
             // 1. Find VDB file if path not provided
             if (vdbFilePath == null || vdbFilePath.isEmpty()) {
-                vdbFilePath = findVDBFile(vdbId);
+                vdbFilePath = vdbFileLocator.findVDBFile(vdbId);
                 if (vdbFilePath == null) {
                     response.setStatus(HttpServletResponse.SC_NOT_FOUND);
                     out.println(createErrorResponse("VDB file not found: " + vdbId));
                     return;
                 }
             }
-            
+
             log("VDB file path: " + vdbFilePath);
-            
+
             // 2. Verify VDB file exists
             if (!new File(vdbFilePath).exists()) {
                 response.setStatus(HttpServletResponse.SC_NOT_FOUND);
                 out.println(createErrorResponse("VDB file not found at: " + vdbFilePath));
                 return;
             }
-            
-            // 3. Connect to Teiid Admin API
-            Admin admin = AdminFactory.getInstance().createAdmin(
-                teiidHost,
-                teiidPort,
-                teiidAdminUser,
-                teiidAdminPassword.toCharArray()
-            );
-            
-            try {
-                // 4. Undeploy existing VDB
-                try {
-                    admin.undeploy(vdbId + "-vdb.xml");
-                    log("VDB undeployed: " + vdbId);
-                } catch (Exception e) {
-                    log("Warning: Failed to undeploy VDB (may not be deployed): " + e.getMessage());
-                }
-                
-                // 5. Redeploy VDB with updated file
-                try (InputStream inputStream = new FileInputStream(vdbFilePath)) {
-                    admin.deploy(vdbId + "-vdb.xml", inputStream);
-                }
-                log("VDB redeployed successfully: " + vdbId);
-                
-            } finally {
-                admin.close();
-            }
-            
-            // 6. Return success response
+
+            // 3. Redeploy VDB
+            teiidDeployHelper.redeployVDB(vdbFilePath, vdbId + "-vdb.xml", teiidHost, teiidPort);
+
+            // 4. Return success response
             response.setStatus(HttpServletResponse.SC_OK);
             JSONObject successResponse = new JSONObject();
             successResponse.put("success", true);
@@ -848,47 +712,30 @@ public class VDBManagementServlet extends HttpServlet {
             successResponse.put("vdb_file_path", vdbFilePath);
             successResponse.put("message", "VDB redeployed successfully");
             out.println(successResponse.toString());
-            
+
             log("VDB redeploy completed: " + vdbId);
-            
+
         } catch (Exception e) {
             log("Failed to redeploy VDB: " + e.getMessage(), e);
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
             out.println(createErrorResponse("Failed to redeploy VDB: " + e.getMessage()));
         }
     }
-    
+
     /**
      * Check VDB deployment status on WildFly/Teiid server
-     * 
-     * Expected JSON body:
-     * {
-     *   "vdb_id": "vdb_development",
-     *   "teiid_host": "64.52.108.62",
-     *   "teiid_port": 10000
-     * }
-     * 
-     * Returns:
-     * {
-     *   "success": true,
-     *   "vdb_id": "vdb_development",
-     *   "status": "ACTIVE|LOADING|FAILED|NOT_FOUND",
-     *   "version": "1",
-     *   "models": [...],
-     *   "response_time": 123
-     * }
      */
     private void checkVDBStatus(HttpServletRequest request, HttpServletResponse response, PrintWriter out)
             throws IOException {
-        
+
         JSONObject requestBody = parseRequestBody(request);
-        
+
         if (!requestBody.has("vdb_id") || !requestBody.has("teiid_host") || !requestBody.has("teiid_port")) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             out.println(createErrorResponse("Missing required fields: vdb_id, teiid_host, teiid_port"));
             return;
         }
-        
+
         String vdbId = requestBody.getString("vdb_id");
         String teiidHost = requestBody.getString("teiid_host");
         int teiidPort;
@@ -899,12 +746,12 @@ public class VDBManagementServlet extends HttpServlet {
             out.println(createErrorResponse("Invalid teiid_port value"));
             return;
         }
-        
+
         log("Checking VDB status: " + vdbId);
         log("Teiid connection: " + teiidHost + ":" + teiidPort);
-        
+
         long startTime = System.currentTimeMillis();
-        
+
         try {
             // Connect to Teiid Admin API
             Admin admin = AdminFactory.getInstance().createAdmin(
@@ -913,15 +760,14 @@ public class VDBManagementServlet extends HttpServlet {
                 teiidAdminUser,
                 teiidAdminPassword.toCharArray()
             );
-            
+
             try {
                 // Get VDB from Teiid
                 org.teiid.adminapi.VDB vdb = admin.getVDB(vdbId, "1");
-                
+
                 long responseTime = System.currentTimeMillis() - startTime;
-                
+
                 if (vdb == null) {
-                    // VDB not found on server
                     response.setStatus(HttpServletResponse.SC_OK);
                     JSONObject statusResponse = new JSONObject();
                     statusResponse.put("success", true);
@@ -932,11 +778,9 @@ public class VDBManagementServlet extends HttpServlet {
                     out.println(statusResponse.toString());
                     return;
                 }
-                
-                // Get VDB status
-                String status = vdb.getStatus().toString(); // ACTIVE, LOADING, FAILED, etc.
-                
-                // Build response
+
+                String status = vdb.getStatus().toString();
+
                 response.setStatus(HttpServletResponse.SC_OK);
                 JSONObject statusResponse = new JSONObject();
                 statusResponse.put("success", true);
@@ -945,26 +789,25 @@ public class VDBManagementServlet extends HttpServlet {
                 statusResponse.put("version", vdb.getVersion());
                 statusResponse.put("response_time", responseTime);
                 statusResponse.put("description", vdb.getDescription());
-                
-                // Add model information
+
                 List<String> models = new ArrayList<>();
                 for (org.teiid.adminapi.Model model : vdb.getModels()) {
                     models.add(model.getName());
                 }
                 statusResponse.put("models", models);
-                
+
                 out.println(statusResponse.toString());
-                
+
                 log("VDB status checked successfully: " + vdbId + " - " + status + " (" + responseTime + "ms)");
-                
+
             } finally {
                 admin.close();
             }
-            
+
         } catch (Exception e) {
             long responseTime = System.currentTimeMillis() - startTime;
             log("Failed to check VDB status: " + e.getMessage(), e);
-            response.setStatus(HttpServletResponse.SC_OK); // Return 200 with error status
+            response.setStatus(HttpServletResponse.SC_OK);
             JSONObject errorResponse = new JSONObject();
             errorResponse.put("success", false);
             errorResponse.put("vdb_id", vdbId);
@@ -974,382 +817,16 @@ public class VDBManagementServlet extends HttpServlet {
             out.println(errorResponse.toString());
         }
     }
-    
-    // ========================================================================
-    // Helper Methods
-    // ========================================================================
-    
-    /**
-     * Authenticate request using API key
-     */
-    private boolean authenticateRequest(HttpServletRequest request) {
-        // If no API key is configured, skip authentication (development mode)
-        if (servletApiKey == null || servletApiKey.isEmpty()) {
-            log("Warning: No API key configured, skipping authentication");
-            return true;
-        }
-        
-        String apiKey = request.getHeader("X-API-Key");
-        return servletApiKey.equals(apiKey);
-    }
-    
-    /**
-     * Parse JSON request body
-     */
-    private JSONObject parseRequestBody(HttpServletRequest request) throws IOException {
-        StringBuilder buffer = new StringBuilder();
-        BufferedReader reader = request.getReader();
-        String line;
-        while ((line = reader.readLine()) != null) {
-            buffer.append(line);
-        }
-        return new JSONObject(buffer.toString());
-    }
-    
-    /**
-     * Read file content as string
-     */
-    private String readFile(String filePath) throws IOException {
-        log("Reading file: " + filePath);
-        byte[] bytes = Files.readAllBytes(Paths.get(filePath));
-        String content = new String(bytes, "UTF-8");
-        log("File read successfully: " + filePath + " (" + bytes.length + " bytes)");
-        return content;
-    }
-    
-    /**
-     * Write string content to file
-     */
-    private void writeFile(String filePath, String content) throws IOException {
-        log("Writing file: " + filePath + " (" + content.length() + " characters)");
-        
-        // Ensure parent directory exists
-        File file = new File(filePath);
-        File parentDir = file.getParentFile();
-        if (parentDir != null && !parentDir.exists()) {
-            log("Creating parent directory: " + parentDir.getAbsolutePath());
-            if (!parentDir.mkdirs()) {
-                throw new IOException("Failed to create parent directory: " + parentDir.getAbsolutePath());
-            }
-        }
-        
-        // Write file
-        Files.write(Paths.get(filePath), content.getBytes("UTF-8"));
-        log("File written successfully: " + filePath);
-        
-        // Verify file was created
-        if (!file.exists()) {
-            throw new IOException("File was not created: " + filePath);
-        }
-        log("File verified: " + filePath + " (" + file.length() + " bytes)");
-    }
-    
-    /**
-     * Validate that a folder exists
-     */
-    private boolean validateFolderExists(String folderPath) {
-        File folder = new File(folderPath);
-        return folder.exists() && folder.isDirectory();
-    }
-    
-    /**
-     * Create folder if it doesn't exist (including parent directories)
-     * 
-     * @param folderPath Path to folder to create
-     * @return true if folder exists or was created successfully, false otherwise
-     */
-    private boolean createFolderIfNotExists(String folderPath) {
-        try {
-            File folder = new File(folderPath);
-            
-            // If folder already exists, return true
-            if (folder.exists() && folder.isDirectory()) {
-                log("Folder already exists: " + folderPath);
-                return true;
-            }
-            
-            // Create folder and all parent directories
-            boolean created = folder.mkdirs();
-            
-            if (created) {
-                log("Created folder: " + folderPath);
-                return true;
-            } else {
-                log("Failed to create folder: " + folderPath);
-                return false;
-            }
-            
-        } catch (Exception e) {
-            log("Error creating folder: " + folderPath + " - " + e.getMessage(), e);
-            return false;
-        }
-    }
-    
-    /**
-     * Update file paths in VDB XML to use relative paths for multi-tenancy.
-     * 
-     * This method converts absolute paths to relative paths that work with
-     * AllowParentPaths=true in standalone.xml. The standalone.xml should have:
-     * - ParentDirectory=/opt/wildfly/teiidfiles/customers
-     * - AllowParentPaths=true
-     * 
-     * Then VDB files use relative paths like:
-     * - '1/uploads/filename.xlsx' for org_id 1
-     * - '2/uploads/filename.xlsx' for org_id 2
-     * 
-     * This method comprehensively updates all file path references in the VDB XML
-     * to use relative paths for complete data isolation.
-     * 
-     * Handles multiple file path patterns:
-     * 1. LOCATION attributes with file:// protocol
-     * 2. LOCATION attributes without protocol (teiid_excel:FILE syntax)
-     * 3. ParentDirectory properties (removed - use standalone.xml config)
-     * 4. Importer properties (removed)
-     * 5. Connection URL properties
-     * 6. General file paths in model definitions
-     * 
-     * @param vdbXml The VDB XML content
-     * @param uploadsFolder The customer's uploads folder path (e.g., /opt/wildfly/teiidfiles/customers/1/uploads)
-     * @return Updated VDB XML with relative paths
-     */
-    private String updateFilePaths(String vdbXml, String uploadsFolder) {
-        try {
-            log("Converting file paths to relative format for: " + uploadsFolder);
-            
-            String updatedXml = vdbXml;
-            
-            // Extract org_id and optional user_id from uploads_folder path
-            // uploads_folder formats:
-            //   - Org-level: /opt/wildfly/teiidfiles/customers/{org_id}/uploads
-            //   - User-level: /opt/wildfly/teiidfiles/customers/{org_id}/{user_id}/uploads
-            //   - Shared: /opt/wildfly/teiidfiles/customers/{org_id}/shared/uploads
-            Pattern userPattern = Pattern.compile("/customers/(\\d+)/(\\d+)/uploads");
-            Pattern sharedPattern = Pattern.compile("/customers/(\\d+)/shared/uploads");
-            Pattern orgPattern = Pattern.compile("/customers/(\\d+)/uploads");
-            
-            Matcher userMatcher = userPattern.matcher(uploadsFolder);
-            Matcher sharedMatcher = sharedPattern.matcher(uploadsFolder);
-            Matcher orgMatcher = orgPattern.matcher(uploadsFolder);
-            
-            String relativePathPrefix;
-            
-            if (userMatcher.find()) {
-                // User-level VDB: {org_id}/{user_id}/uploads
-                String orgId = userMatcher.group(1);
-                String userId = userMatcher.group(2);
-                relativePathPrefix = orgId + "/" + userId + "/uploads";
-                log("Using user-level relative path prefix: " + relativePathPrefix + "/");
-            } else if (sharedMatcher.find()) {
-                // Shared VDB: {org_id}/shared/uploads
-                String orgId = sharedMatcher.group(1);
-                relativePathPrefix = orgId + "/shared/uploads";
-                log("Using shared relative path prefix: " + relativePathPrefix + "/");
-            } else if (orgMatcher.find()) {
-                // Org-level VDB: {org_id}/uploads
-                String orgId = orgMatcher.group(1);
-                relativePathPrefix = orgId + "/uploads";
-                log("Using org-level relative path prefix: " + relativePathPrefix + "/");
-            } else {
-                log("Warning: Could not extract path components from uploads_folder: " + uploadsFolder);
-                log("Falling back to absolute paths");
-                return updateFilePathsAbsolute(vdbXml, uploadsFolder);
-            }
-            
-            // Pattern 1: LOCATION attribute with file:// protocol
-            // Example: LOCATION='file:///opt/wildfly/teiidfiles/.../data.xlsx'
-            // Replace with: LOCATION='file:///{org_id}/uploads/data.xlsx'
-            String pattern1 = "LOCATION='file:///opt/wildfly/teiidfiles/(?:excelFilesTest|CSVFiles|customers/\\d+/uploads)/([^']+)'";
-            String replacement1 = "LOCATION='file:///" + relativePathPrefix + "/$1'";
-            updatedXml = updatedXml.replaceAll(pattern1, replacement1);
-            
-            // Catch-all for other file:// paths
-            String pattern1b = "LOCATION='file:///opt/wildfly/teiidfiles/([^']+)'";
-            String replacement1b = "LOCATION='file:///" + relativePathPrefix + "/$1'";
-            updatedXml = updatedXml.replaceAll(pattern1b, replacement1b);
-            
-            // Pattern 2: LOCATION without protocol (teiid_excel:FILE syntax)
-            // Example: "teiid_excel:FILE" '/opt/wildfly/teiidfiles/.../file.xlsx'
-            // Replace with: "teiid_excel:FILE" '{org_id}/uploads/file.xlsx'
-            String pattern2 = "\"teiid_excel:FILE\"\\s+'/opt/wildfly/teiidfiles/(?:excelFilesTest|CSVFiles|customers/\\d+/uploads)/([^']+)'";
-            String replacement2 = "\"teiid_excel:FILE\" '" + relativePathPrefix + "/$1'";
-            updatedXml = updatedXml.replaceAll(pattern2, replacement2);
-            
-            // Catch-all for other teiid_excel:FILE paths
-            String pattern2b = "\"teiid_excel:FILE\"\\s+'/opt/wildfly/teiidfiles/([^']+)'";
-            String replacement2b = "\"teiid_excel:FILE\" '" + relativePathPrefix + "/$1'";
-            updatedXml = updatedXml.replaceAll(pattern2b, replacement2b);
-            
-            // Pattern 3: Remove ParentDirectory properties from VDB
-            // (ParentDirectory should be configured in standalone.xml, not per-VDB)
-            updatedXml = updatedXml.replaceAll("\\s*<property name=\"ParentDirectory\" value=\"[^\"]*\"/>\\s*\\n?", "");
-            
-            // Pattern 4: Remove Importer ParentDirectory
-            updatedXml = updatedXml.replaceAll("\\s*<property name=\"importer\\.ParentDirectory\" value=\"[^\"]*\"/>\\s*\\n?", "");
-            
-            // Pattern 5: Connection URL with file:// protocol
-            // Example: <property name="connection-url" value="file:///opt/wildfly/teiidfiles/.../data.xlsx"/>
-            String pattern5 = "<property name=\"connection-url\" value=\"file:///opt/wildfly/teiidfiles/(?:excelFilesTest|CSVFiles|customers/\\d+/uploads)/([^\"]+)\"";
-            String replacement5 = "<property name=\"connection-url\" value=\"file:///" + relativePathPrefix + "/$1\"";
-            updatedXml = updatedXml.replaceAll(pattern5, replacement5);
-            
-            // Catch-all for other connection-url paths
-            String pattern5b = "<property name=\"connection-url\" value=\"file:///opt/wildfly/teiidfiles/([^\"]+)\"";
-            String replacement5b = "<property name=\"connection-url\" value=\"file:///" + relativePathPrefix + "/$1\"";
-            updatedXml = updatedXml.replaceAll(pattern5b, replacement5b);
-            
-            // Pattern 6: LOCATION without file:// protocol (plain paths)
-            // Example: LOCATION='/opt/wildfly/teiidfiles/.../file.xlsx'
-            // Replace with: LOCATION='{org_id}/uploads/file.xlsx'
-            String pattern6 = "LOCATION='/opt/wildfly/teiidfiles/(?:excelFilesTest|CSVFiles|customers/\\d+/uploads)/([^']+)'";
-            String replacement6 = "LOCATION='" + relativePathPrefix + "/$1'";
-            updatedXml = updatedXml.replaceAll(pattern6, replacement6);
-            
-            // Catch-all for other LOCATION paths
-            String pattern6b = "LOCATION='/opt/wildfly/teiidfiles/([^']+)'";
-            String replacement6b = "LOCATION='" + relativePathPrefix + "/$1'";
-            updatedXml = updatedXml.replaceAll(pattern6b, replacement6b);
-            
-            log("File paths converted to relative format successfully");
-            
-            return updatedXml;
-            
-        } catch (Exception e) {
-            log("Error updating file paths: " + e.getMessage(), e);
-            // Return original XML if update fails to avoid breaking VDB
-            return vdbXml;
-        }
-    }
-    
-    /**
-     * Fallback method: Update file paths using absolute paths (legacy behavior).
-     * Used when relative path extraction fails.
-     */
-    private String updateFilePathsAbsolute(String vdbXml, String uploadsFolder) {
-        try {
-            log("Using absolute paths for customer folder: " + uploadsFolder);
-            
-            String updatedXml = vdbXml;
-            
-            // Pattern 1: LOCATION attribute with file:// protocol
-            String pattern1 = "LOCATION='file:///opt/wildfly/teiidfiles/([^']+)'";
-            String replacement1 = "LOCATION='file://" + uploadsFolder + "/$1'";
-            updatedXml = updatedXml.replaceAll(pattern1, replacement1);
-            
-            // Pattern 2: LOCATION attribute without protocol
-            String pattern2 = "LOCATION='/opt/wildfly/teiidfiles/([^']+)'";
-            String replacement2 = "LOCATION='" + uploadsFolder + "/$1'";
-            updatedXml = updatedXml.replaceAll(pattern2, replacement2);
-            
-            // Pattern 3: ParentDirectory property
-            String pattern3 = "<property name=\"ParentDirectory\" value=\"/opt/wildfly/teiidfiles\"";
-            String replacement3 = "<property name=\"ParentDirectory\" value=\"" + uploadsFolder + "\"";
-            updatedXml = updatedXml.replace(pattern3, replacement3);
-            
-            // Pattern 4: Importer property for file paths
-            String pattern4 = "<property name=\"importer\\.ParentDirectory\" value=\"/opt/wildfly/teiidfiles\"";
-            String replacement4 = "<property name=\"importer.ParentDirectory\" value=\"" + uploadsFolder + "\"";
-            updatedXml = updatedXml.replace(pattern4, replacement4);
-            
-            // Pattern 5: File data source connection-url
-            String pattern5 = "<property name=\"connection-url\" value=\"file:///opt/wildfly/teiidfiles/([^\"]+)\"";
-            String replacement5 = "<property name=\"connection-url\" value=\"file://" + uploadsFolder + "/$1\"";
-            updatedXml = updatedXml.replaceAll(pattern5, replacement5);
-            
-            // Pattern 6: Excel/CSV file paths in model definitions (without quotes)
-            String pattern6 = "/opt/wildfly/teiidfiles/([^\\s<>\"']+)";
-            String replacement6 = uploadsFolder + "/$1";
-            updatedXml = updatedXml.replaceAll(pattern6, replacement6);
-            
-            log("File paths updated successfully using absolute paths");
-            
-            return updatedXml;
-            
-        } catch (Exception e) {
-            log("Error updating file paths: " + e.getMessage(), e);
-            return vdbXml;
-        }
-    }
-    
-    /**
-     * Configure VDB credentials in VDB XML
-     * 
-     * Note: This implementation depends on your Teiid authentication mechanism.
-     * Some setups use data-role based authentication, others use JAAS.
-     * Adjust this method based on your specific Teiid configuration.
-     */
-    private String configureVDBCredentials(String vdbXml, String username, String password) {
-        // Example implementation for data-role based authentication
-        // This is a placeholder - adjust based on your Teiid setup
-        
-        // If your VDB uses data-roles, you might add something like:
-        // <data-role name="user-role" any-authenticated="true">
-        //     <mapped-role-name>user</mapped-role-name>
-        // </data-role>
-        
-        // For now, return unchanged - credentials are typically managed
-        // at the Teiid server level, not in VDB XML
-        return vdbXml;
-    }
-    
-    /**
-     * Deploy VDB to Teiid server
-     * 
-     * @param vdbId VDB identifier
-     * @param vdbFilePath Path to VDB XML file
-     * @param teiidHost Teiid management host (from Redash config)
-     * @param teiidPort Teiid management port (from Redash config)
-     */
-    private void deployVDBToTeiid(String vdbId, String vdbFilePath, String teiidHost, int teiidPort) throws Exception {
-        log("Connecting to Teiid management at " + teiidHost + ":" + teiidPort);
-        
-        Admin admin = AdminFactory.getInstance().createAdmin(
-            teiidHost,
-            teiidPort,
-            teiidAdminUser,
-            teiidAdminPassword.toCharArray()
-        );
-        
-        try (InputStream inputStream = new FileInputStream(vdbFilePath)) {
-            admin.deploy(vdbId + "-vdb.xml", inputStream);
-            log("VDB deployed to Teiid: " + vdbId);
-        } finally {
-            admin.close();
-        }
-    }
-    
-    /**
-     * Find VDB file (search in customer folders first, then base path).
-     * 
-     * Searches for VDB files in the following order:
-     * 1. Customer folders: /opt/wildfly/teiidfiles/customers/star/vdb/
-     * 2. Base path: /opt/wildfly/teiidfiles/ (for backward compatibility)
-     * 
-     * @param vdbId The VDB identifier
-     * @return Full path to VDB file, or null if not found
-     */
+
     /**
      * Register an external database table as a queryable data source inside an
      * existing user VDB.
-     *
-     * Steps:
-     *  1. Ensure a WildFly JDBC datasource exists (Teiid Admin API), so the
-     *     physical model has a live JNDI connection.
-     *  2. Insert a PHYSICAL model (CREATE FOREIGN TABLE) for the table.
-     *  3. Insert a VIEW over that model into the MyCompany virtual model so it
-     *     joins transparently with file-backed views.
-     *  4. Undeploy + redeploy the VDB.
-     *
-     * The password is used only to create the datasource and is never logged.
      */
     private void createDatabaseSource(HttpServletRequest request, HttpServletResponse response, PrintWriter out)
             throws IOException {
 
         JSONObject body = parseRequestBody(request);
 
-        // password is intentionally NOT required: databases such as MySQL may be
-        // configured with no password, in which case the credential must be
-        // omitted entirely from the WildFly datasource (an empty password is
-        // rejected by the management model).
         String[] required = {"vdb_id", "org_id", "db_type", "translator", "jdbc_url",
                 "username", "model_name", "teiid_table_name",
                 "jndi_name", "ds_name", "view_name", "table_name"};
@@ -1378,17 +855,14 @@ public class VDBManagementServlet extends HttpServlet {
         String schemaName = body.optString("schema_name", "");
         JSONArray columns = body.optJSONArray("columns");
 
-        // ServiceNow sources talk to a custom Teiid translator rather than a JDBC datasource.
-        // Salesforce sources talk to the built-in Teiid salesforce translator via a JCA connection factory.
         boolean isServiceNow = "servicenow".equalsIgnoreCase(translator);
-        boolean isSalesforce = isSalesforceTranslator(translator);
+        boolean isSalesforce = WildFlyCliHelper.isSalesforceTranslator(translator);
         boolean force = body.optBoolean("force", false);
         String instanceUrl = body.optString("instance_url", isServiceNow || isSalesforce ? jdbcUrl : "");
         if (isSalesforce) {
-            instanceUrl = normalizeSalesforceSoapUrl(instanceUrl);
+            instanceUrl = WildFlyCliHelper.normalizeSalesforceSoapUrl(instanceUrl);
         }
 
-        // Teiid admin endpoint (local to this WildFly node).
         String teiidHost = body.optString("teiid_host", "localhost");
         int teiidPort = body.has("teiid_port") ? body.getInt("teiid_port") : 9990;
 
@@ -1396,7 +870,7 @@ public class VDBManagementServlet extends HttpServlet {
                 + ", user_id=" + userId + ", db_type=" + dbType
                 + ", model=" + modelName + ", view=" + viewName + ", table=" + tableName);
 
-        // 1. Locate the VDB XML file. User VDBs live under {org}/{user}/vdb/.
+        // 1. Locate the VDB XML file.
         String vdbFilePath = null;
         if (userId != null) {
             String candidate = vdbBasePath + "/customers/" + orgId + "/" + userId
@@ -1412,7 +886,7 @@ public class VDBManagementServlet extends HttpServlet {
             }
         }
         if (vdbFilePath == null) {
-            vdbFilePath = findVDBFile(vdbId);
+            vdbFilePath = vdbFileLocator.findVDBFile(vdbId);
         }
         if (vdbFilePath == null || !new File(vdbFilePath).exists()) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
@@ -1428,91 +902,76 @@ public class VDBManagementServlet extends HttpServlet {
 
         try {
             // 2. Ensure the WildFly JDBC datasource or JCA connection factory exists.
-            Admin admin = AdminFactory.getInstance().createAdmin(
-                    teiidHost, teiidPort, teiidAdminUser, teiidAdminPassword.toCharArray());
-            try {
-                if (isSalesforce) {
-                    ensureSalesforceConnectionFactory(dsName, translator, instanceUrl, username, password);
-                } else if (!isServiceNow) {
-                    ensureDataSource(dsName, dbType, jdbcUrl, username, password);
-                }
-
-                // 3. Edit the VDB XML: add the physical model + the view.
-                String vdbXml = readFile(vdbFilePath);
-
-                boolean modelExists = vdbXml.contains("<model name=\"" + modelName + "\"");
-                if (modelExists && force) {
-                    log("Force mode: removing existing model/translator/view for " + modelName);
-                    vdbXml = removeModelBlock(vdbXml, modelName);
-                    if (isServiceNow) {
-                        vdbXml = removeTranslatorBlock(vdbXml, dsName + "_servicenow");
-                    }
-                    if (isSalesforce) {
-                        removeSalesforceConnectionFactory(dsName, translator);
-                    }
-                    modelExists = false;
-                }
-
-                if (modelExists) {
-                    log("Model " + modelName + " already present in VDB; skipping model insert.");
-                } else {
-                    String modelBlock;
-                    if (isServiceNow) {
-                        String translatorDefName = dsName + "_servicenow";
-                        modelBlock = buildServiceNowModelBlock(
-                                modelName, dsName, translatorDefName,
-                                teiidTableName, tableName, columns);
-                    } else if (isSalesforce) {
-                        modelBlock = buildSalesforceModelBlock(
-                                modelName, dsName, translator, jndiName,
-                                teiidTableName, tableName, columns);
-                    } else {
-                        modelBlock = buildPhysicalModelBlock(
-                                modelName, dsName, translator, jndiName,
-                                teiidTableName, schemaName, tableName, columns);
-                    }
-                    // VDB schema requires all <model> elements before any <translator>.
-                    vdbXml = insertBeforeFirst(vdbXml, modelBlock, "</vdb>", "  <translator name=\"");
-                    if (isServiceNow) {
-                        String translatorDefName = dsName + "_servicenow";
-                        if (!vdbXml.contains("<translator name=\"" + translatorDefName + "\"")) {
-                            String translatorBlock = buildServiceNowTranslatorBlock(translatorDefName, instanceUrl, username, password);
-                            // Translators must follow all models.
-                            vdbXml = insertBefore(vdbXml, "</vdb>", translatorBlock);
-                        }
-                    }
-                }
-
-                String viewStmt = "CREATE VIEW " + viewName + " AS SELECT * FROM "
-                        + modelName + "." + teiidTableName + ";";
-                boolean viewExists = vdbXml.contains("CREATE VIEW " + viewName + " ");
-                if (viewExists && force) {
-                    log("Force mode: removing existing view " + viewName);
-                    vdbXml = removeViewStmt(vdbXml, viewName);
-                    viewExists = false;
-                }
-                if (viewExists) {
-                    log("View " + viewName + " already present in VDB; skipping view insert.");
-                } else {
-                    vdbXml = insertBefore(vdbXml, "-- Place new View above", viewStmt + NEWLINE());
-                }
-
-                writeFile(vdbFilePath, vdbXml);
-
-                // 4. Redeploy the VDB.
-                try {
-                    admin.undeploy(vdbId + "-vdb.xml");
-                    log("VDB undeployed: " + vdbId);
-                } catch (Exception e) {
-                    log("Warning: undeploy failed (may not be deployed): " + e.getMessage());
-                }
-                try (InputStream inputStream = new FileInputStream(vdbFilePath)) {
-                    admin.deploy(vdbId + "-vdb.xml", inputStream);
-                }
-                log("VDB redeployed with database source: " + vdbId);
-            } finally {
-                admin.close();
+            if (isSalesforce) {
+                WildFlyCliHelper.ensureSalesforceConnectionFactory(dsName, translator, instanceUrl, username, password);
+            } else if (!isServiceNow) {
+                WildFlyCliHelper.ensureDataSource(dsName, dbType, jdbcUrl, username, password);
             }
+
+            // 3. Edit the VDB XML: add the physical model + the view.
+            String vdbXml = vdbFileLocator.readFile(vdbFilePath);
+
+            boolean modelExists = vdbXml.contains("<model name=\"" + modelName + "\"");
+            if (modelExists && force) {
+                log("Force mode: removing existing model/translator/view for " + modelName);
+                vdbXml = VDBXmlBuilder.removeModelBlock(vdbXml, modelName);
+                if (isServiceNow) {
+                    vdbXml = VDBXmlBuilder.removeTranslatorBlock(vdbXml, dsName + "_servicenow");
+                }
+                if (isSalesforce) {
+                    WildFlyCliHelper.removeSalesforceConnectionFactory(dsName, translator);
+                }
+                modelExists = false;
+            }
+
+            if (modelExists) {
+                log("Model " + modelName + " already present in VDB; skipping model insert.");
+            } else {
+                String modelBlock;
+                if (isServiceNow) {
+                    String translatorDefName = dsName + "_servicenow";
+                    modelBlock = VDBXmlBuilder.buildServiceNowModelBlock(
+                            modelName, dsName, translatorDefName,
+                            teiidTableName, tableName, columns);
+                } else if (isSalesforce) {
+                    modelBlock = VDBXmlBuilder.buildSalesforceModelBlock(
+                            modelName, dsName, translator, jndiName,
+                            teiidTableName, tableName, columns);
+                } else {
+                    modelBlock = VDBXmlBuilder.buildPhysicalModelBlock(
+                            modelName, dsName, translator, jndiName,
+                            teiidTableName, schemaName, tableName, columns);
+                }
+                // VDB schema requires all <model> elements before any <translator>.
+                vdbXml = VDBXmlBuilder.insertBeforeFirst(vdbXml, modelBlock, "</vdb>", "  <translator name=\"");
+                if (isServiceNow) {
+                    String translatorDefName = dsName + "_servicenow";
+                    if (!vdbXml.contains("<translator name=\"" + translatorDefName + "\"")) {
+                        String translatorBlock = VDBXmlBuilder.buildServiceNowTranslatorBlock(translatorDefName, instanceUrl, username, password);
+                        // Translators must follow all models.
+                        vdbXml = VDBXmlBuilder.insertBefore(vdbXml, "</vdb>", translatorBlock);
+                    }
+                }
+            }
+
+            String viewStmt = "CREATE VIEW " + viewName + " AS SELECT * FROM "
+                    + modelName + "." + teiidTableName + ";";
+            boolean viewExists = vdbXml.contains("CREATE VIEW " + viewName + " ");
+            if (viewExists && force) {
+                log("Force mode: removing existing view " + viewName);
+                vdbXml = VDBXmlBuilder.removeViewStmt(vdbXml, viewName);
+                viewExists = false;
+            }
+            if (viewExists) {
+                log("View " + viewName + " already present in VDB; skipping view insert.");
+            } else {
+                vdbXml = VDBXmlBuilder.insertBefore(vdbXml, "-- Place new View above", viewStmt + VDBXmlBuilder.newline());
+            }
+
+            vdbFileLocator.writeFile(vdbFilePath, vdbXml);
+
+            // 4. Redeploy the VDB.
+            teiidDeployHelper.redeployVDB(vdbFilePath, vdbId + "-vdb.xml", teiidHost, teiidPort);
 
             response.setStatus(HttpServletResponse.SC_OK);
             JSONObject ok = new JSONObject();
@@ -1531,464 +990,33 @@ public class VDBManagementServlet extends HttpServlet {
         }
     }
 
-    /** Map a db_type to the WildFly JDBC driver (template) name. */
-    private String driverNameFor(String dbType) {
-        if ("postgresql".equalsIgnoreCase(dbType)) return "postgresql";
-        if ("mysql".equalsIgnoreCase(dbType)) return "mysql";
-        if ("sqlserver".equalsIgnoreCase(dbType)) return "sqlserver";
-        if ("oracle".equalsIgnoreCase(dbType)) return "oracle";
-        return dbType;
-    }
-
-    /** Create the WildFly JDBC datasource if it does not already exist. */
-    private void ensureDataSource(String dsName, String dbType,
-                                  String jdbcUrl, String username, String password) throws Exception {
-        if (dataSourceExists(dsName)) {
-            log("Datasource already exists: " + dsName);
-            return;
-        }
-
-        String driver = driverNameFor(dbType);
-        String escUser = username == null ? "" : username.replace("\\", "\\\\").replace("\"", "\\\"");
-        // Quote the connection-url: some JDBC URLs contain ';' and '=' (e.g. SQL
-        // Server's "...;databaseName=db"), which the CLI would otherwise parse as
-        // command separators / object syntax.
-        String escUrl = jdbcUrl == null ? "" : jdbcUrl.replace("\\", "\\\\").replace("\"", "\\\"");
-
-        // WildFly rejects an empty password value ("WFLYCTL0113: '' is an invalid
-        // value for parameter password"). When the source database has no
-        // password (e.g. a MySQL account configured without one), omit the
-        // password parameter entirely rather than sending password="".
-        String passwordParam = "";
-        if (password != null && !password.isEmpty()) {
-            String escPass = password.replace("\\", "\\\\").replace("\"", "\\\"");
-            passwordParam = ", password=\"" + escPass + "\"";
-        }
-
-        // Use the server's own CLI (correct version + local auth) to avoid the
-        // bundled Teiid admin client building a composite incompatible with the
-        // running WildFly management model.
-        String command = "/subsystem=datasources/data-source=" + dsName + ":add("
-                + "jndi-name=java:/" + dsName
-                + ", driver-name=" + driver
-                + ", connection-url=\"" + escUrl + "\""
-                + ", user-name=\"" + escUser + "\""
-                + passwordParam
-                + ", enabled=true)";
-
-        log("Creating datasource " + dsName + " with driver " + driver + " via CLI");
-        String result = runCli(command);
-        if (result == null || result.indexOf("\"outcome\" => \"success\"") < 0) {
-            throw new Exception("CLI datasource creation failed: " + result);
-        }
-        log("Datasource created: " + dsName);
-    }
-
-    /** Return true if a WildFly data-source with this name already exists. */
-    private boolean dataSourceExists(String dsName) {
-        try {
-            String out = runCli("/subsystem=datasources:read-children-names(child-type=data-source)");
-            return out != null && out.contains("\"" + dsName + "\"");
-        } catch (Exception e) {
-            log("Warning: could not list datasources: " + e.getMessage());
-            return false;
-        }
-    }
-
-    /** Run a jboss-cli command against the local management interface (local auth). */
-    private String runCli(String command) throws Exception {
-        String jbossHome = System.getProperty("jboss.home.dir", "/opt/wildfly");
-        ProcessBuilder pb = new ProcessBuilder(
-                jbossHome + "/bin/jboss-cli.sh",
-                "--connect",
-                "--controller=localhost:9990",
-                "--command=" + command);
-        pb.redirectErrorStream(true);
-        Process p = pb.start();
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(p.getInputStream(), "UTF-8"))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append("\n");
-            }
-        }
-        boolean finished = p.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
-        if (!finished) {
-            p.destroyForcibly();
-            throw new Exception("jboss-cli timed out");
-        }
-        return sb.toString();
-    }
-
-    /** Build a PHYSICAL model block with an explicit CREATE FOREIGN TABLE. */
-    private String buildServiceNowModelBlock(String modelName, String dsName, String translatorName,
-                                              String teiidTableName, String tableName, JSONArray columns) {
-        StringBuilder cols = new StringBuilder();
-        if (columns != null && columns.length() > 0) {
-            for (int i = 0; i < columns.length(); i++) {
-                JSONObject c = columns.getJSONObject(i);
-                String name = c.getString("name");
-                String type = c.optString("teiid_type", "string");
-                String srcName = c.optString("name_in_source", name);
-                String viewId = "\"" + name.replace("\"", "\"\"") + "\"";
-                String nameInSourceLiteral = srcName.replace("'", "''");
-                cols.append("	").append(viewId).append(" ").append(type)
-                    .append(" OPTIONS (NAMEINSOURCE '").append(nameInSourceLiteral).append("')");
-                if (i < columns.length() - 1) cols.append(",");
-                cols.append("\n");
-            }
-        } else {
-            cols.append("	\"__row__\" string\n");
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("\n");
-        sb.append("  <model name=\"").append(modelName).append("\" type=\"PHYSICAL\" visible=\"false\">\n");
-        sb.append("    <source name=\"").append(dsName).append("\" translator-name=\"").append(translatorName).append("\"/>\n");
-        sb.append("    <metadata type=\"DDL\">\n");
-        sb.append("      <![CDATA[\n");
-        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
-        sb.append(cols);
-        sb.append(") OPTIONS (NAMEINSOURCE '").append(tableName.replace("'", "''")).append("');\n");
-        sb.append("]]>\n");
-        sb.append("    </metadata>\n");
-        sb.append("  </model>\n");
-        return sb.toString();
-    }
-
-    private String buildServiceNowTranslatorBlock(String translatorName, String instanceUrl,
-                                                 String username, String password) {
-        return "\n  <translator name=\"" + translatorName + "\" type=\"servicenow\">\n" +
-               "    <property name=\"instanceUrl\" value=\"" + xmlEncode(instanceUrl) + "\"/>\n" +
-               "    <property name=\"username\" value=\"" + xmlEncode(username) + "\"/>\n" +
-               "    <property name=\"password\" value=\"" + xmlEncode(password) + "\"/>\n" +
-               "  </translator>\n";
-    }
-
-    private String xmlEncode(String value) {
-        if (value == null) return "";
-        return value.replace("&", "&amp;")
-                    .replace("<", "&lt;")
-                    .replace(">", "&gt;")
-                    .replace("\"", "&quot;");
-    }
-
-    private boolean isSalesforceTranslator(String translator) {
-        return translator != null && translator.toLowerCase().startsWith("salesforce");
-    }
-
-    private String salesforceResourceAdapterName(String translator) {
-        if (translator == null) return "salesforce";
-        String t = translator.toLowerCase();
-        if (t.contains("41")) return "salesforce-41";
-        if (t.contains("34")) return "salesforce-34";
-        return "salesforce";
-    }
-
-    private String normalizeSalesforceSoapUrl(String url) {
-        if (url == null || url.trim().isEmpty()) {
-            return "https://login.salesforce.com/services/Soap/u/41.0";
-        }
-        String normalized = url.trim();
-        if (normalized.endsWith("/")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        if (normalized.contains("/services/Soap/")) {
-            return normalized;
-        }
-        if (normalized.contains("/services/")) {
-            normalized = normalized.substring(0, normalized.indexOf("/services/"));
-        }
-        return normalized + "/services/Soap/u/41.0";
-    }
-
-    private void ensureSalesforceConnectionFactory(String dsName, String translator,
-                                                    String url, String username, String password) throws Exception {
-        String ra = salesforceResourceAdapterName(translator);
-        // Make idempotent: remove any existing connection definition first.
-        try {
-            runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
-                    + "/connection-definitions=" + dsName + ":remove");
-        } catch (Exception e) {
-            log("Ignoring Salesforce connection factory removal for " + dsName + ": " + e.getMessage());
-        }
-
-        String addCmd = "/subsystem=resource-adapters/resource-adapter=" + ra
-                + "/connection-definitions=" + dsName + ":add("
-                + "jndi-name=\"java:/" + dsName + "\", "
-                + "class-name=\"org.teiid.resource.adapter.salesforce.SalesForceManagedConnectionFactory\", "
-                + "enabled=true, use-java-context=true)";
-        runCliChecked(addCmd);
-
-        runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
-                + "/connection-definitions=" + dsName + "/config-properties=URL:add(value=\"" + url + "\")");
-
-        String escUser = username == null ? "" : username.replace("\\", "\\\\").replace("\"", "\\\"");
-        runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
-                + "/connection-definitions=" + dsName + "/config-properties=username:add(value=\"" + escUser + "\")");
-
-        String escPass = password == null ? "" : password.replace("\\", "\\\\").replace("\"", "\\\"");
-        runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
-                + "/connection-definitions=" + dsName + "/config-properties=password:add(value=\"" + escPass + "\")");
-
-        runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra + ":activate");
-        log("Salesforce connection factory created/updated: " + dsName + " via RA " + ra);
-    }
-
-    private void removeSalesforceConnectionFactory(String dsName, String translator) {
-        try {
-            String ra = salesforceResourceAdapterName(translator);
-            runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra
-                    + "/connection-definitions=" + dsName + ":remove");
-            runCliChecked("/subsystem=resource-adapters/resource-adapter=" + ra + ":activate");
-            log("Removed Salesforce connection factory: " + dsName);
-        } catch (Exception e) {
-            log("Warning: could not remove Salesforce connection factory " + dsName + ": " + e.getMessage());
-        }
-    }
-
-    /** Run a jboss-cli command and throw if the response reports failure. */
-    private String runCliChecked(String command) throws Exception {
-        String out = runCli(command);
-        if (out != null && out.contains("\"outcome\" => \"failed\"")) {
-            throw new Exception("CLI command failed: " + command + "\n" + out);
-        }
-        return out;
-    }
-
-    /** Build a PHYSICAL model block for the native Teiid Salesforce translator. */
-    private String buildSalesforceModelBlock(String modelName, String dsName, String translatorName,
-                                              String jndiName, String teiidTableName,
-                                              String tableName, JSONArray columns) {
-        StringBuilder cols = new StringBuilder();
-        if (columns != null && columns.length() > 0) {
-            for (int i = 0; i < columns.length(); i++) {
-                JSONObject c = columns.getJSONObject(i);
-                String name = c.getString("name");
-                String type = c.optString("teiid_type", "string");
-                String srcName = c.optString("name_in_source", name);
-                String viewId = "\"" + name.replace("\"", "\"\"") + "\"";
-                String nameInSourceLiteral = srcName.replace("'", "''");
-                cols.append("\t").append(viewId).append(" ").append(type)
-                    .append(" OPTIONS (NAMEINSOURCE '").append(nameInSourceLiteral).append("')");
-                if (i < columns.length() - 1) cols.append(",");
-                cols.append("\n");
-            }
-        } else {
-            cols.append("\t\"__row__\" string\n");
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("\n");
-        sb.append("  <model name=\"").append(modelName).append("\" type=\"PHYSICAL\" visible=\"false\">\n");
-        sb.append("    <source name=\"").append(dsName).append("\" translator-name=\"").append(translatorName)
-          .append("\" connection-jndi-name=\"").append(jndiName).append("\"/>\n");
-        sb.append("    <metadata type=\"DDL\">\n");
-        sb.append("      <![CDATA[\n");
-        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
-        sb.append(cols);
-        sb.append(") OPTIONS (NAMEINSOURCE '").append(tableName.replace("'", "''")).append("');\n");
-        sb.append("]]>\n");
-        sb.append("    </metadata>\n");
-        sb.append("  </model>\n");
-        return sb.toString();
-    }
-
-    private String buildPhysicalModelBlock(String modelName, String dsName, String translator,
-                                           String jndiName, String teiidTableName, String schemaName,
-                                           String tableName, JSONArray columns) {
-        // NAMEINSOURCE is passed through to the source database verbatim, so the
-        // identifier quote character must match the source dialect: MySQL uses
-        // backticks by default, everything else (PostgreSQL, SQL Server with
-        // QUOTED_IDENTIFIER on, Oracle) uses double quotes.
-        boolean backtick = translator != null && translator.toLowerCase().startsWith("mysql");
-        char q = backtick ? '`' : '"';
-
-        StringBuilder cols = new StringBuilder();
-        if (columns != null && columns.length() > 0) {
-            for (int i = 0; i < columns.length(); i++) {
-                JSONObject c = columns.getJSONObject(i);
-                String name = c.getString("name");
-                String type = c.optString("teiid_type", "string");
-                // The source identifier may differ in case from the Teiid-facing
-                // name (e.g. Oracle stores unquoted identifiers upper-case while
-                // introspection reports them lower-case), so honor an explicit
-                // name_in_source when provided.
-                String srcName = c.optString("name_in_source", name);
-                // Teiid view identifier is always double-quoted (Teiid DDL syntax).
-                String viewId = "\"" + name.replace("\"", "\"\"") + "\"";
-                // Source identifier uses the dialect quote char, with internal
-                // quote chars doubled per SQL identifier rules.
-                String srcId = q + srcName.replace(String.valueOf(q), "" + q + q) + q;
-                // Escape single quotes for the DDL NAMEINSOURCE string literal.
-                String nameInSourceLiteral = srcId.replace("'", "''");
-                // Emit an explicit column NAMEINSOURCE so Teiid quotes names that it
-                // would otherwise leave unquoted (e.g. leading/trailing spaces,
-                // reserved words, mixed case), which the source DB cannot resolve.
-                cols.append("	").append(viewId).append(" ").append(type)
-                    .append(" OPTIONS (NAMEINSOURCE '").append(nameInSourceLiteral).append("')");
-                if (i < columns.length() - 1) cols.append(",");
-                cols.append("\n");
-            }
-        } else {
-            // Fallback: a single passthrough column keeps the model valid.
-            cols.append("	\"__row__\" string\n");
-        }
-
-        String nameInSource;
-        if (schemaName != null && !schemaName.isEmpty()) {
-            nameInSource = q + schemaName + q + "." + q + tableName + q;
-        } else {
-            nameInSource = q + tableName + q;
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("\n");
-        sb.append("  <model name=\"").append(modelName).append("\" type=\"PHYSICAL\" visible=\"false\">\n");
-        sb.append("    <source name=\"").append(dsName).append("\" translator-name=\"").append(translator)
-          .append("\" connection-jndi-name=\"").append(jndiName).append("\"/>\n");
-        sb.append("    <metadata type=\"DDL\">\n");
-        sb.append("      <![CDATA[\n");
-        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
-        sb.append(cols);
-        sb.append(") OPTIONS (NAMEINSOURCE '").append(nameInSource).append("');\n");
-        sb.append("]]>\n");
-        sb.append("    </metadata>\n");
-        sb.append("  </model>\n");
-        return sb.toString();
-    }
-
-    /** Insert {@code insertion} immediately before the first occurrence of {@code anchor}. */
-    private String insertBefore(String content, String anchor, String insertion) {
-        int idx = content.indexOf(anchor);
-        if (idx < 0) {
-            log("Warning: anchor not found for insertBefore: " + anchor);
-            return content;
-        }
-        return content.substring(0, idx) + insertion + content.substring(idx);
-    }
-
-    /** Insert {@code insertion} immediately before the earliest of the given anchors. */
-    private String insertBeforeFirst(String content, String insertion, String... anchors) {
-        int bestIdx = -1;
-        String bestAnchor = null;
-        for (String anchor : anchors) {
-            int idx = content.indexOf(anchor);
-            if (idx >= 0 && (bestIdx < 0 || idx < bestIdx)) {
-                bestIdx = idx;
-                bestAnchor = anchor;
-            }
-        }
-        if (bestIdx < 0) {
-            log("Warning: no anchor found for insertBeforeFirst: " + String.join(", ", anchors));
-            return content;
-        }
-        return content.substring(0, bestIdx) + insertion + content.substring(bestIdx);
-    }
-
-    /** Remove a <model name="..."> ... </model> block from VDB XML. */
-    private String removeModelBlock(String content, String modelName) {
-        String start = "  <model name=\"" + modelName + "\"";
-        int s = content.indexOf(start);
-        if (s < 0) {
-            start = "<model name=\"" + modelName + "\"";
-            s = content.indexOf(start);
-        }
-        if (s < 0) return content;
-        int e = content.indexOf("</model>", s);
-        if (e < 0) return content;
-        e += "</model>".length();
-        // consume trailing newline(s)
-        while (e < content.length() && (content.charAt(e) == '\n' || content.charAt(e) == '\r')) e++;
-        return content.substring(0, s) + content.substring(e);
-    }
-
-    /** Remove a <translator name="..."> ... </translator> block from VDB XML. */
-    private String removeTranslatorBlock(String content, String translatorName) {
-        String start = "<translator name=\"" + translatorName + "\"";
-        int s = content.indexOf(start);
-        if (s < 0) return content;
-        int e = content.indexOf("</translator>", s);
-        if (e < 0) return content;
-        e += "</translator>".length();
-        while (e < content.length() && (content.charAt(e) == '\n' || content.charAt(e) == '\r')) e++;
-        return content.substring(0, s) + content.substring(e);
-    }
-
-    /** Remove a CREATE VIEW ... ; statement from the virtual model DDL. */
-    private String removeViewStmt(String content, String viewName) {
-        String prefix = "CREATE VIEW " + viewName + " AS SELECT * FROM ";
-        int s = content.indexOf(prefix);
-        if (s < 0) return content;
-        int e = content.indexOf(";", s);
-        if (e < 0) return content;
-        e++;
-        // consume trailing newline
-        while (e < content.length() && (content.charAt(e) == '\n' || content.charAt(e) == '\r')) e++;
-        return content.substring(0, s) + content.substring(e);
-    }
-
-    private String NEWLINE() {
-        return "\n";
-    }
-
-    private String findVDBFile(String vdbId) {
-        String fileName = vdbId + "-vdb.xml";
-        
-        log("Searching for VDB file: " + fileName);
-        
-        // First, search in customer folders (preferred location for multi-tenancy)
-        File customersDir = new File(vdbBasePath + "/customers");
-        if (customersDir.exists() && customersDir.isDirectory()) {
-            File[] orgDirs = customersDir.listFiles();
-            if (orgDirs != null) {
-                for (File orgDir : orgDirs) {
-                    if (orgDir.isDirectory()) {
-                        String vdbPath = orgDir.getAbsolutePath() + "/vdb/" + fileName;
-                        if (new File(vdbPath).exists()) {
-                            log("Found VDB file in customer folder: " + vdbPath);
-                            return vdbPath;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Fallback: Check base path (for backward compatibility with non-multi-tenant VDBs)
-        String basePath = vdbBasePath + "/" + fileName;
-        if (new File(basePath).exists()) {
-            log("Found VDB file in base path: " + basePath);
-            return basePath;
-        }
-        
-        log("VDB file not found: " + fileName);
-        return null;
-    }
-    
     /**
-     * Delete VDB file from customer folder or base path.
-     * 
-     * @param vdbId The VDB identifier
-     * @return true if file was deleted, false otherwise
+     * Authenticate request using API key
      */
-    private boolean deleteVDBFile(String vdbId) {
-        String vdbPath = findVDBFile(vdbId);
-        if (vdbPath != null) {
-            File vdbFile = new File(vdbPath);
-            boolean deleted = vdbFile.delete();
-            if (deleted) {
-                log("VDB file deleted successfully: " + vdbPath);
-            } else {
-                log("Failed to delete VDB file: " + vdbPath);
-            }
-            return deleted;
-        } else {
-            log("VDB file not found for deletion: " + vdbId + "-vdb.xml");
-            return false;
+    private boolean authenticateRequest(HttpServletRequest request) {
+        // If no API key is configured, skip authentication (development mode)
+        if (servletApiKey == null || servletApiKey.isEmpty()) {
+            log("Warning: No API key configured, skipping authentication");
+            return true;
         }
+
+        String apiKey = request.getHeader("X-API-Key");
+        return servletApiKey.equals(apiKey);
     }
-    
+
+    /**
+     * Parse JSON request body
+     */
+    private JSONObject parseRequestBody(HttpServletRequest request) throws IOException {
+        StringBuilder buffer = new StringBuilder();
+        BufferedReader reader = request.getReader();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            buffer.append(line);
+        }
+        return new JSONObject(buffer.toString());
+    }
+
     /**
      * Set CORS headers
      */
@@ -1997,7 +1025,7 @@ public class VDBManagementServlet extends HttpServlet {
         response.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS, DELETE");
         response.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization");
     }
-    
+
     /**
      * Create error response JSON
      */
@@ -2007,35 +1035,12 @@ public class VDBManagementServlet extends HttpServlet {
         error.put("error", errorMessage);
         return error.toString();
     }
-    
+
     /**
      * Get environment variable or default value
      */
     private String getEnvOrDefault(String key, String defaultValue) {
         String value = System.getenv(key);
         return (value != null && !value.isEmpty()) ? value : defaultValue;
-    }
-    
-    /**
-     * Set folder permissions to 2777 (rwxrwsrwx) with setgid bit
-     * This ensures new files/folders inherit the group ownership
-     */
-    private void setFolderPermissions(String folderPath) {
-        try {
-            // Use chmod command to set permissions with setgid bit
-            // 2777 = rwxrwsrwx (setgid bit + full permissions)
-            ProcessBuilder pb = new ProcessBuilder("chmod", "2777", folderPath);
-            Process process = pb.start();
-            int exitCode = process.waitFor();
-            
-            if (exitCode == 0) {
-                log("Set folder permissions to 2777 (with setgid): " + folderPath);
-            } else {
-                log("Warning: chmod command failed with exit code " + exitCode + " for: " + folderPath);
-            }
-        } catch (Exception e) {
-            log("Warning: Failed to set folder permissions for " + folderPath + ": " + e.getMessage());
-            // Don't fail the operation, just log the warning
-        }
     }
 }
