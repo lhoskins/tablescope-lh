@@ -1,56 +1,55 @@
-"""Project Insight service — build the project-scoped executive insight report.
-
-Distinct from Home / Business Insight (tenant-wide). This gathers ONLY the
-selected project's authorized context (tables, documents, saved queries,
-dashboards, Knowledge Graph), asks the AI server for the structured Project
-Insight report (grounded in the Project Insight Best Practices prompt), computes
-the "What Changed Since Last Visit" activity deltas deterministically from the
-DB, and merges each user's acknowledgement state into the validation workflow.
-
-If the AI server is unavailable the report degrades gracefully to an empty
-structure (``aiAvailable=False``) rather than fabricating findings.
-"""
-
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dashboard import Dashboard
-from app.models.database_data_source import DatabaseDataSource
-from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
-from app.models.project_asset import ProjectAsset
-from app.models.project_insight_acknowledgement import (
-    ProjectInsightAcknowledgement,
-)
 from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.saved_query import SavedQuery
-from app.models.user import User
 from app.schemas.project_insight import (
     ExecutiveSummary,
     ProjectInsightProject,
     ProjectInsightResponse,
-    WhatChangedSinceLastVisit,
 )
 from app.services import ai_intelligence_client as ai
 from app.services import home_intelligence as hi
 from app.services.ai_governance import ai_governance_service, infer_governance_key
-from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.executive_insight_dependencies import ExecutiveInsightDependencyService
 from app.services.knowledge_graph_ai_context import (
     collect_knowledge_graph_ai_context,
 )
 from app.services.project_ai_context import build_project_ai_context
 
-logger = logging.getLogger(__name__)
+from .activity_deltas import (
+    _ACTIVITY_WINDOW,
+    _acknowledgement_map,
+    _apply_acknowledgements,
+    _count_recent,
+    _what_changed,
+)
+from .card_normalization import (
+    _INVESTIGATION_QUESTIONS,
+    _OPPORTUNITY_SEVERITIES,
+    _RISK_SEVERITIES,
+    _TREND_SEVERITIES,
+    _card_group,
+    _is_relationship_card,
+    _normalize_severity,
+    _to_insight_card,
+)
+from .method_envelopes import (
+    _attach_method_envelope_to_card,
+    _attach_method_envelopes_to_cards,
+    _infer_method_intent,
+    _series_to_result,
+)
 
-# Window used for the deterministic "What Changed Since Last Visit" deltas.
-_ACTIVITY_WINDOW = timedelta(days=7)
+logger = logging.getLogger(__name__)
 
 
 async def mark_project_insight_stale(
@@ -167,246 +166,6 @@ async def _partition_questions(
     return answerable, needs_data
 
 
-# Allowed severity values per card group (Package 3 unified schema).
-_RISK_SEVERITIES = {"critical", "urgent", "warning", "watch"}
-_TREND_SEVERITIES = {"watch", "warning", "informational"}
-_OPPORTUNITY_SEVERITIES = {"opportunity", "recommendation"}
-
-# A concrete, data-grounded question per built-in card type. Clicking a card
-# opens the same AI Answer modal (Package 1) seeded with this question, so the
-# investigation runs real SQL against the project's authorized sources.
-_INVESTIGATION_QUESTIONS = {
-    "risk_sla": (
-        "Which suppliers have the highest average delivery lead times, and "
-        "which exceed the SLA threshold?"
-    ),
-    "risk_threshold": (
-        "Which records breach their target/threshold, or sit in a risk "
-        "status, and how large is that share?"
-    ),
-    "risk_expiry": (
-        "Which contracts or documents are expiring within the next 90 days?"
-    ),
-    "risk_upcoming": (
-        "How many records are approaching an upcoming due/renewal/end date, "
-        "and how soon?"
-    ),
-    "trend_spend": "How has total spend changed across recent periods?",
-    "trend_metric": "How has this metric changed across recent periods?",
-    "opportunity_supplier": (
-        "Which suppliers have the highest performance scores?"
-    ),
-    "opportunity_performance": (
-        "Which entities are the top and bottom performers on this metric, "
-        "and how large is the gap?"
-    ),
-}
-
-
-def _card_group(insight_type: str) -> str:
-    """Map a built-in insight type onto risks / trends / opportunities / analysis.
-
-    Anything that does not fit the three executive buckets lands in analysis
-    (e.g. shape-template cards) so no generated card is silently dropped.
-    """
-    if insight_type.startswith("risk"):
-        return "risks"
-    if insight_type.startswith(("trend", "relationship")):
-        return "trends"
-    if insight_type.startswith("opportunity"):
-        return "opportunities"
-    return "analysis"
-
-
-def _normalize_severity(severity: str, group: str) -> str:
-    """Coerce a card's severity onto the allowed values for its group."""
-    sev = (severity or "").strip().lower()
-    if group == "risks":
-        return sev if sev in _RISK_SEVERITIES else "watch"
-    if group == "trends":
-        if sev in ("urgent", "critical"):
-            return "warning"
-        return sev if sev in _TREND_SEVERITIES else "informational"
-    if group == "analysis":
-        return sev if sev in _TREND_SEVERITIES else "informational"
-    return sev if sev in _OPPORTUNITY_SEVERITIES else "opportunity"
-
-
-def _to_insight_card(card: dict[str, Any], group: str) -> dict[str, Any]:
-    """Map a deterministic Business Insight card onto the unified card schema."""
-    insight_type = str(card.get("insightType", ""))
-    callout = card.get("callout")
-    recommended_action = (
-        str(callout.get("text", "")) if isinstance(callout, dict) else ""
-    )
-    sources = card.get("sources") or {}
-    source_tables = [str(t) for t in (sources.get("tables") or [])]
-    supporting = [
-        *source_tables,
-        *(str(d) for d in (sources.get("documents") or [])),
-    ]
-    ctx = card.get("sourceContext") or {}
-    metric = str(ctx.get("metric") or "")
-    period_column = str(ctx.get("periodColumn") or "")
-    source_columns = [str(c) for c in (ctx.get("sourceColumns") or [])]
-    # Prefer the stable server-generated insightId; legacy ids are a fallback.
-    stable_id = str(card.get("insightId") or card.get("id") or "")
-    return {
-        "id": stable_id,
-        "insightId": stable_id,
-        "insightType": insight_type,
-        "title": str(card.get("title", "")),
-        "summary": str(card.get("summary", "")),
-        "severity": _normalize_severity(str(card.get("severity", "")), group),
-        "recommendedAction": recommended_action,
-        "question": _INVESTIGATION_QUESTIONS.get(
-            insight_type, str(card.get("title", ""))
-        ),
-        "supportingSources": supporting,
-        "sourceTables": source_tables,
-        "sourceColumns": source_columns,
-        "metric": metric,
-        "periodColumn": period_column,
-        "sql": card.get("sql"),
-        "chartType": card.get("chartType"),
-        "labelColumn": card.get("labelColumn"),
-        "valueColumn": card.get("valueColumn"),
-        "valueColumn2": card.get("valueColumn2"),
-        "chart": card.get("chart"),
-        "explanation": card.get("explanation"),
-        "executedAt": card.get("executedAt"),
-        "evidenceFingerprint": card.get("evidenceFingerprint"),
-        "confidenceScore": card.get("confidenceScore"),
-        "confidenceEvaluation": card.get("confidenceEvaluation"),
-        "visualizationDecision": card.get("visualizationDecision"),
-        "chartCandidates": card.get("chartCandidates"),
-        "analyticalMethod": card.get("analyticalMethod"),
-        "insightMethod": card.get("insightMethod"),
-    }
-
-
-def _infer_method_intent(card: dict[str, Any]) -> str | None:
-    """Map a project-insight card's chart type/taxonomy to an analytical intent."""
-    chart_type = str(card.get("chartType") or "").lower()
-    insight_type = str(card.get("insightType") or "").lower()
-    if chart_type in ("line", "area", "combo") or "trend" in insight_type:
-        return "detect_trend"
-    if chart_type in ("dual_line", "scatter") or card.get("valueColumn2"):
-        return "relationship_numeric"
-    # Default to a descriptive profile; the method engine will fall back to
-    # Python if the data is too sparse for the R implementation.
-    return "describe_numeric"
-
-
-def _series_to_result(card: dict[str, Any]) -> dict[str, Any] | None:
-    """Reconstruct a result set from a chart's rendered series for the method engine."""
-    chart = card.get("chart") or {}
-    series = chart.get("data", {}).get("series") if isinstance(chart.get("data"), dict) else None
-    if not series and isinstance(chart.get("series"), list):
-        series = chart["series"]
-    if not isinstance(series, list) or not series:
-        return None
-    label_col = card.get("labelColumn") or "label"
-    value_col = card.get("valueColumn") or "value"
-    # If series items already look like rows, use their keys; otherwise build rows
-    # from (label, value) pairs.
-    if isinstance(series[0], dict):
-        keys = set(series[0].keys())
-        if label_col in keys and value_col in keys:
-            return {"columns": list(keys), "rows": series}
-        return {
-            "columns": [label_col, value_col],
-            "rows": [{label_col: s.get("label"), value_col: s.get("value")} for s in series],
-        }
-    return {
-        "columns": [label_col, value_col],
-        "rows": [{label_col: s[0], value_col: s[1]} for s in series],
-    }
-
-
-def _is_relationship_card(card: dict[str, Any]) -> bool:
-    """A multi-table relationship analysis with two populated series."""
-    if not str(card.get("insightType", "")).startswith("relationship"):
-        return False
-    if card.get("chartType") not in ("dual_line", "scatter"):
-        return False
-    return bool(card.get("valueColumn2"))
-
-
-async def _attach_method_envelope_to_card(
-    session: AsyncSession,
-    tenant_id: int,
-    card: dict[str, Any],
-    runner: Any | None = None,
-) -> None:
-    """Run the Analytical Method Engine over one project-insight card.
-
-    Reuses the same governed ``analyze`` path used by Business Insights so that
-    project cards carry a real execution-engine envelope. When the raw query
-    ``result`` is not already on the card (deterministic prompt functions do not
-    keep it), the card's ``sql`` is re-executed through the project VDB runner.
-    Fail-closed per card so engine issues never drop the insight.
-    """
-    result = card.get("result")
-    if not result and runner and card.get("sql"):
-        try:
-            result = await runner(card["sql"])
-        except Exception as exc:
-            logger.debug(
-                "project insight could not re-execute sql for method engine %s: %s",
-                card.get("insightId"), exc,
-            )
-            result = None
-    if not result and card.get("chart"):
-        # Deterministic prompt functions do not keep the raw SQL/result, but the
-        # rendered chart series is enough for the method engine to profile and
-        # select a method.
-        result = _series_to_result(card)
-    if not result or not result.get("rows"):
-        return
-    columns = result.get("columns", [])
-    rows = result.get("rows", [])
-    if not columns or not rows:
-        return
-    question = " — ".join(
-        str(x)
-        for x in (card.get("title"), card.get("summary"))
-        if x
-    )
-    intent = _infer_method_intent(card)
-    try:
-        envelope = await analyze_methods(
-            session,
-            tenant_id=tenant_id,
-            columns=columns,
-            rows=rows,
-            question=question or str(card.get("insightType", "")),
-            intent=intent,
-        )
-    except Exception as exc:  # pragma: no cover - engine is fail-closed
-        logger.warning(
-            "method engine skipped for project insight card %s: %s",
-            card.get("insightId"), exc,
-        )
-        return
-    if envelope and envelope.get("method") is not None:
-        card["analyticalMethod"] = envelope
-
-
-async def _attach_method_envelopes_to_cards(
-    session: AsyncSession | None,
-    tenant_id: int | None,
-    cards: list[dict[str, Any]],
-    runner: Any | None = None,
-) -> None:
-    """Attach governed method envelopes to any project cards missing them."""
-    if session is None or tenant_id is None:
-        return
-    for card in cards:
-        if isinstance(card, dict) and not card.get("analyticalMethod"):
-            await _attach_method_envelope_to_card(session, tenant_id, card, runner)
-
-
 async def _grouped_intelligence_cards(
     project: Project,
     ctx: hi.ProjectContext,
@@ -491,79 +250,6 @@ async def _grouped_intelligence_cards(
         group = _card_group(str(card.get("insightType", "")))
         grouped[group].append(_to_insight_card(card, group))
     return grouped
-
-
-async def _count_recent(
-    session: AsyncSession, model: Any, project_id: int, since: datetime
-) -> int:
-    stmt = (
-        select(func.count())
-        .select_from(model)
-        .where(model.project_id == project_id, model.created_at >= since)
-    )
-    return int(await session.scalar(stmt) or 0)
-
-
-async def _what_changed(
-    session: AsyncSession, project_id: int, kg_updated: int
-) -> WhatChangedSinceLastVisit:
-    since = datetime.now(UTC) - _ACTIVITY_WINDOW
-    return WhatChangedSinceLastVisit(
-        newFilesAdded=await _count_recent(session, ProjectAsset, project_id, since)
-        + await _count_recent(session, FileSourceMeta, project_id, since),
-        changedDataSources=await _count_recent(
-            session, DatabaseDataSource, project_id, since
-        ),
-        newRisksIdentified=0,
-        newQueries=await _count_recent(session, SavedQuery, project_id, since),
-        newDashboards=await _count_recent(session, Dashboard, project_id, since),
-        updatedKnowledgeGraph=kg_updated,
-        changeLogLink=f"/projects/{project_id}/audit-log",
-    )
-
-
-async def _acknowledgement_map(
-    session: AsyncSession, project_id: int
-) -> dict[str, dict[str, Any]]:
-    """Return {insight_id: {status, acknowledgedBy, acknowledgedAt}} for a project."""
-    rows = (
-        await session.execute(
-            select(ProjectInsightAcknowledgement, User.display_name, User.email)
-            .join(User, User.id == ProjectInsightAcknowledgement.user_id, isouter=True)
-            .where(ProjectInsightAcknowledgement.project_id == project_id)
-        )
-    ).all()
-    out: dict[str, dict[str, Any]] = {}
-    for ack, display_name, email in rows:
-        out[ack.insight_id] = {
-            "status": ack.status or "reviewed",
-            "acknowledgedBy": display_name or email or "",
-            "acknowledgedAt": (
-                ack.updated_at.isoformat() if ack.updated_at else None
-            ),
-        }
-    return out
-
-
-def _apply_acknowledgements(
-    workflow: list[dict[str, Any]], acks: dict[str, dict[str, Any]]
-) -> list[dict[str, Any]]:
-    merged: list[dict[str, Any]] = []
-    for item in workflow:
-        if not isinstance(item, dict):
-            continue
-        item = dict(item)
-        ack = acks.get(str(item.get("id", "")))
-        if ack:
-            item["status"] = ack["status"]
-            item["acknowledgedBy"] = ack["acknowledgedBy"]
-            item["acknowledgedAt"] = ack["acknowledgedAt"]
-        else:
-            item.setdefault("status", "new")
-            item.setdefault("acknowledgedBy", None)
-            item.setdefault("acknowledgedAt", None)
-        merged.append(item)
-    return merged
 
 
 async def build_project_insight(
@@ -757,3 +443,30 @@ async def build_project_insight(
         graphBlockingReasons=graph_blocking_reasons,
         graphDisclosure=graph_disclosure,
     )
+
+
+__all__ = [
+    "_ACTIVITY_WINDOW",
+    "_INVESTIGATION_QUESTIONS",
+    "_OPPORTUNITY_SEVERITIES",
+    "_RISK_SEVERITIES",
+    "_TREND_SEVERITIES",
+    "_acknowledgement_map",
+    "_apply_acknowledgements",
+    "_attach_method_envelope_to_card",
+    "_attach_method_envelopes_to_cards",
+    "_card_group",
+    "_count_recent",
+    "_grouped_intelligence_cards",
+    "_infer_method_intent",
+    "_is_relationship_card",
+    "_missing_data_hint",
+    "_normalize_severity",
+    "_partition_questions",
+    "_series_to_result",
+    "_to_insight_card",
+    "_what_changed",
+    "build_project_insight",
+    "logger",
+    "mark_project_insight_stale",
+]
