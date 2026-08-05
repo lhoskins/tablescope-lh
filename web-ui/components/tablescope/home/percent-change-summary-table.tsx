@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { formatPercentChange } from "@/lib/insights/time-series";
@@ -15,186 +16,23 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconInfoCircle,
-} from "@tabler/icons-react";
+} from "@tabler/icons-react";import { TITLE_WIDTH } from "./percent-change-summary-table/title-width";
+import { PERIOD_WIDTH } from "./percent-change-summary-table/period-width";
+import { STAT_WIDTH } from "./percent-change-summary-table/stat-width";
+import { OVERSCAN } from "./percent-change-summary-table/overscan";
+import { STAT_COUNT } from "./percent-change-summary-table/stat-count";
+import { STAT_FIELDS } from "./percent-change-summary-table/stat-fields";
+import { STAT_LABELS } from "./percent-change-summary-table/stat-labels";
+import { STAT_TOOLTIPS } from "./percent-change-summary-table/stat-tooltips";
+import { ariaSortValue } from "./percent-change-summary-table/aria-sort-value";
+import { signedCellClasses } from "./percent-change-summary-table/signed-cell-classes";
+import { valueAriaLabel } from "./percent-change-summary-table/value-aria-label";
+import { cellTooltip } from "./percent-change-summary-table/cell-tooltip";
+import { FALLBACK_CELL } from "./percent-change-summary-table/fallback-cell";
+import { StatCell } from "./percent-change-summary-table/stat-cell";
+import { PercentChangeSummaryTableProps } from "./percent-change-summary-table/percent-change-summary-table-props";
 
-const TITLE_WIDTH = 224;
-const PERIOD_WIDTH = 88;
-const STAT_WIDTH = 76;
-const OVERSCAN = 5;
-const STAT_COUNT = 8;
 
-const ZERO_TOLERANCE = 1e-9;
-
-const STAT_FIELDS: (keyof PercentChangeSummaryStatistics)[] = [
-  "latest",
-  "min",
-  "max",
-  "median",
-  "average",
-  "standard_deviation",
-  "cumulative_change",
-  "valid_count",
-];
-
-const STAT_LABELS: Record<keyof PercentChangeSummaryStatistics, string> = {
-  latest: "Latest",
-  min: "Min",
-  max: "Max",
-  median: "Median",
-  average: "Avg",
-  standard_deviation: "Std Dev",
-  cumulative_change: "Cumulative",
-  valid_count: "n",
-};
-
-const STAT_TOOLTIPS: Record<keyof PercentChangeSummaryStatistics, string> = {
-  latest: "Last valid period-over-period change in chronological order",
-  min: "Smallest valid period-over-period change",
-  max: "Largest valid period-over-period change",
-  median: "Median of valid period-over-period changes",
-  average: "Arithmetic mean of valid period-over-period changes",
-  standard_deviation: "Population standard deviation of valid period-over-period changes",
-  cumulative_change: "First-to-last change; not a sum of period changes",
-  valid_count: "Number of valid period-over-period comparisons",
-};
-
-const SIGNED_STAT_FIELDS = new Set<keyof PercentChangeSummaryStatistics>([
-  "latest",
-  "min",
-  "max",
-  "median",
-  "average",
-  "cumulative_change",
-]);
-
-function ariaSortValue(
-  direction: "asc" | "desc" | undefined,
-): "none" | "ascending" | "descending" {
-  if (direction === "asc") return "ascending";
-  if (direction === "desc") return "descending";
-  return "none";
-}
-
-function signedCellClasses(ratio: number | null | undefined): string {
-  if (ratio === null || ratio === undefined) return "text-ink-tertiary";
-  if (Math.abs(ratio) <= ZERO_TOLERANCE) return "text-ink-secondary";
-  if (ratio > 0) return "bg-success-bg text-success";
-  return "bg-danger-bg text-danger";
-}
-
-function valueAriaLabel(
-  ratio: number | null | undefined,
-  label?: string,
-): string {
-  if (ratio === null || ratio === undefined) {
-    return label ? `${label}: No data` : "No data";
-  }
-  const formatted = formatPercentChange(ratio);
-  let description: string;
-  if (Math.abs(ratio) <= ZERO_TOLERANCE) {
-    description = `No change, ${formatted}`;
-  } else if (ratio > 0) {
-    description = `Positive ${formatted}`;
-  } else {
-    description = `Negative ${formatted}`;
-  }
-  return label ? `${label}: ${description}` : description;
-}
-
-function cellTooltip(
-  row: PercentChangeSummaryRow,
-  period: PercentChangeSummaryPeriod,
-  cell: PercentChangeSummaryCell,
-): string {
-  const parts = [`${row.title}, ${row.project_name}, ${period.label}`];
-  if (cell.percent_change_ratio !== null && cell.percent_change_ratio !== undefined) {
-    const direction =
-      cell.percent_change_ratio > 0
-        ? "increased"
-        : cell.percent_change_ratio < 0
-          ? "decreased"
-          : "changed";
-    parts.push(
-      `${direction} ${formatPercentChange(cell.percent_change_ratio)} from ${cell.previous_value ?? "No data"} to ${cell.current_value ?? "No data"}`,
-    );
-  } else {
-    parts.push("No data");
-  }
-  if (cell.comparison_status && cell.comparison_status !== "unavailable") {
-    parts.push(`Status: ${cell.comparison_status}`);
-  }
-  if (cell.partial) {
-    parts.push("Partial period");
-  }
-  if (cell.warnings?.length) {
-    parts.push(...cell.warnings);
-  }
-  if (row.data_through) {
-    parts.push(`Data through ${row.data_through}`);
-  }
-  return parts.join("; ");
-}
-
-const FALLBACK_CELL: PercentChangeSummaryCell = {
-  current_value: null,
-  previous_value: null,
-  percent_change_ratio: null,
-  status: "unavailable",
-  comparison_status: "unavailable",
-  partial: false,
-  warnings: [],
-};
-
-function StatCell({
-  field,
-  value,
-}: {
-  field: keyof PercentChangeSummaryStatistics;
-  value: number | null;
-}) {
-  const isSigned = SIGNED_STAT_FIELDS.has(field);
-  const isNeutral = field === "standard_deviation" || field === "valid_count";
-  const displayValue =
-    value === null || value === undefined
-      ? null
-      : field === "valid_count"
-        ? value
-        : value;
-
-  const formatted =
-    displayValue === null || displayValue === undefined
-      ? "-"
-      : field === "valid_count"
-        ? String(displayValue)
-        : formatPercentChange(displayValue);
-
-  const className = cn(
-    "p-2 text-center align-top",
-    isSigned ? signedCellClasses(displayValue) : "text-ink-secondary",
-  );
-
-  const ariaLabel =
-    field === "valid_count"
-      ? `${STAT_LABELS[field]}: ${displayValue ?? "No data"}`
-      : valueAriaLabel(displayValue, STAT_LABELS[field]);
-
-  return (
-    <td
-      className={className}
-      title={STAT_TOOLTIPS[field]}
-      aria-label={ariaLabel}
-    >
-      <span aria-hidden>{formatted}</span>
-    </td>
-  );
-}
-
-interface PercentChangeSummaryTableProps {
-  periods: PercentChangeSummaryPeriod[];
-  rows: PercentChangeSummaryRow[];
-  sort: PercentChangeSummarySort;
-  onSort: (sort: PercentChangeSummarySort) => void;
-}
 
 export function PercentChangeSummaryTable({
   periods,

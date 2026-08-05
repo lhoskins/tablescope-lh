@@ -1,0 +1,62 @@
+"use client";
+
+
+import { useMemo, useRef, useState, useCallback } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  IconRefresh,
+  IconDatabase,
+  IconFileSpreadsheet,
+  IconApi,
+  IconArchive,
+  IconArrowBackUp,
+  IconTrash,
+} from "@tabler/icons-react";
+import { ProjectShell } from "@/components/tablescope/project-shell";
+import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
+
+import {
+  ContextPanel,
+  ContextSection,
+} from "@/components/tablescope/context-panel";
+import { StatTile } from "@/components/ui/stat-tile";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/cn";
+import { DataSourceUpdateDialog } from "@/components/tablescope/project/data-source-update-dialog";
+import {
+  activateSourceVersion,
+  listSourceVersions,
+  preflightSourceUpdate,
+  rollbackSourceVersion,
+  type PreflightResponse,
+  type SourceVersion,
+} from "@/lib/api/data-source-versions";
+import {
+  archiveFileSource,
+  archiveDatabaseSource,
+  archiveSaasSource,
+  preflightDeleteFileSource,
+  preflightDeleteDatabaseSource,
+  preflightDeleteSaasSource,
+  deleteFileSource,
+  deleteDatabaseSource,
+  deleteSaasSource,
+  type PreflightDeleteResponse,
+} from "@/lib/api/data-sources";
+import {
+  useProjectDataSources,
+  columnLabel,
+  type DataSource,
+} from "@/lib/ui/use-project-data";
+import { metaList } from "@/lib/ui/ai-meta";
+import { DataSourceResultView } from "@/components/tablescope/project/detail-views";
+
+
+export function humanSize(bytes: number | null): string {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

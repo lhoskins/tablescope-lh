@@ -25,7 +25,7 @@ from app.services.visualization_engine import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TYPES_TS = _REPO_ROOT / "web-ui" / "components" / "dashboard" / "types.ts"
-_REGISTRY_TS = _REPO_ROOT / "web-ui" / "lib" / "visualizations" / "chartRegistry.ts"
+_REGISTRY_TS = _REPO_ROOT / "web-ui" / "lib" / "visualizations" / "chartRegistry" / "chart-family.ts"
 
 
 def _parse_ts_union(path: Path, type_name: str) -> set[str]:
@@ -48,7 +48,7 @@ def test_chart_vocabulary_matches_frontend_widget_type() -> None:
 
 
 def test_chart_vocabulary_matches_frontend_chart_family() -> None:
-    """ChartType must equal the ChartFamily union in chartRegistry.ts.
+    """ChartType must equal the ChartFamily union in chartRegistry/chart-family.ts.
 
     The frontend names one family ``composed`` while its renderer key
     (``WidgetType``) is ``combo``; the engine emits the renderer key, so we
