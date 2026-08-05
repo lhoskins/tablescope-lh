@@ -25,6 +25,7 @@ from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.project import Project
 from app.models.user_vdb import UserVDB
 from app.routes.database_sources_connection import _resolve_params
+from app.schemas.archive_source import ArchiveSourceRequest
 from app.schemas.database_source import CreateDatabaseSourceRequest
 from app.services import database_introspection_service as intro
 from app.services.crypto import encrypt_secret
@@ -319,7 +320,7 @@ async def find_query_dependencies(
 @router.patch("/{source_id}/archive")
 async def archive_database_source(
     source_id: int,
-    archived: bool = True,
+    body: ArchiveSourceRequest,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict:
@@ -329,8 +330,8 @@ async def archive_database_source(
         raise HTTPException(status_code=404, detail="Data source not found")
     if ds.created_by != context.user_id and context.role != "admin":
         raise HTTPException(status_code=403, detail="Not allowed to modify this source")
-    ds.archived = archived
-    ds.archived_at = datetime.now(UTC) if archived else None
+    ds.archived = body.archived
+    ds.archived_at = datetime.now(UTC) if body.archived else None
     await session.commit()
     await session.refresh(ds)
     return ds.to_dict()

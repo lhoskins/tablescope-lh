@@ -1,21 +1,8 @@
 "use client";
 
-
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import { useCurrentUser, useProjectSummaries } from "../use-shell-data";
-import type {
-  PresentationDescriptor,
-  ResponseEnvelope,
-} from "@/lib/api/ai-actions";
-import type {
-  CurrentUser,
-  ProjectSummary,
-  TenantSummary,
-} from "../types";import { DataSource } from "./data-source";
-
-
+import type { DataSource } from "./data-source";
 
 export function useProjectDataSources(
   projectId: string,

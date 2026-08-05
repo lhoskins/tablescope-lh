@@ -1,24 +1,10 @@
 "use client";
 
-
 import { useMemo, useRef, useState, useCallback } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  IconRefresh,
-  IconDatabase,
-  IconFileSpreadsheet,
-  IconApi,
-  IconArchive,
-  IconArrowBackUp,
-  IconTrash,
-} from "@tabler/icons-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { IconRefresh, IconSearch } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { ConnectorsMenu } from "@/components/datasource/ConnectorsMenu";
-
-import {
-  ContextPanel,
-  ContextSection,
-} from "@/components/tablescope/context-panel";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,45 +13,29 @@ import { cn } from "@/lib/cn";
 import { DataSourceUpdateDialog } from "@/components/tablescope/project/data-source-update-dialog";
 import {
   activateSourceVersion,
-  listSourceVersions,
   preflightSourceUpdate,
-  rollbackSourceVersion,
   type PreflightResponse,
-  type SourceVersion,
 } from "@/lib/api/data-source-versions";
 import {
-  archiveFileSource,
-  archiveDatabaseSource,
-  archiveSaasSource,
-  preflightDeleteFileSource,
-  preflightDeleteDatabaseSource,
-  preflightDeleteSaasSource,
-  deleteFileSource,
-  deleteDatabaseSource,
-  deleteSaasSource,
   type PreflightDeleteResponse,
 } from "@/lib/api/data-sources";
 import {
   useProjectDataSources,
-  columnLabel,
   type DataSource,
 } from "@/lib/ui/use-project-data";
-import { metaList } from "@/lib/ui/ai-meta";
-import { DataSourceResultView } from "@/components/tablescope/project/detail-views";import { isDatabase } from "./data-sources-screen/is-database";
+import { DataSourceResultView } from "@/components/tablescope/project/detail-views";
+import { isDatabase } from "./data-sources-screen/is-database";
 import { isSaas } from "./data-sources-screen/is-saas";
-import { sourceTypeLabel } from "./data-sources-screen/source-type-label";
 import { SourceIcon } from "./data-sources-screen/source-icon";
+import { sourceTypeLabel } from "./data-sources-screen/source-type-label";
 import { humanSize } from "./data-sources-screen/human-size";
 import { archiveSource } from "./data-sources-screen/archive-source";
 import { preflightDelete } from "./data-sources-screen/preflight-delete";
 import { deleteSource } from "./data-sources-screen/delete-source";
-import { Filter } from "./data-sources-screen/filter";
 import { FILTERS } from "./data-sources-screen/filters";
 import { ArchiveCard } from "./data-sources-screen/archive-card";
 import { DeleteSourceDialog } from "./data-sources-screen/delete-source-dialog";
 import { SourceDetailPanel } from "./data-sources-screen/source-detail-panel";
-
-
 
 export function DataSourcesScreen({ projectId }: { projectId: string }) {
   const { data: allData, isLoading } = useProjectDataSources(projectId, true);
@@ -78,7 +48,8 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
     () => (allData ?? []).filter((s) => s.archived),
     [allData],
   );
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<"all" | "archive">("all");
+  const [search, setSearch] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detailKey, setDetailKey] = useState<string | null>(null);
 
@@ -93,6 +64,8 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
   const pickerSource = useRef<DataSource | null>(null);
 
   // ── Archive / delete ──
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
   const [deletePreflight, setDeletePreflight] = useState<PreflightDeleteResponse | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -148,18 +121,24 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
     pickerRef.current?.click();
   }, []);
 
-  const archiveMutation = useMutation({
-    mutationFn: ({ source, archived }: { source: DataSource; archived: boolean }) =>
-      archiveSource(source, archived),
-    onSuccess: () => refresh(),
-    onError: (e: Error) => setReplaceMsg(e.message),
-  });
-
   const handleArchive = useCallback(
-    (source: DataSource, archived: boolean) => {
-      archiveMutation.mutate({ source, archived });
+    async (source: DataSource, archived: boolean) => {
+      setArchiveBusyId(source.lifecycleId);
+      setArchiveError(null);
+      try {
+        await archiveSource(source, archived);
+        if (archived) {
+          setDetailKey(null);
+          setSelectedKey(null);
+        }
+        refresh();
+      } catch (err) {
+        setArchiveError((err as Error).message);
+      } finally {
+        setArchiveBusyId(null);
+      }
     },
-    [archiveMutation],
+    [refresh],
   );
 
   const handleDelete = useCallback(async (source: DataSource) => {
@@ -192,20 +171,33 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
     }
   }, [deletePreflight, deleteTarget, refresh]);
 
-  const keyFor = (s: DataSource) => s.viewName || s.fileName;
+  const keyFor = (s: DataSource) => s.lifecycleId;
   const selected =
     rows.find((s) => keyFor(s) === selectedKey) ?? rows[0] ?? null;
   const detail = rows.find((s) => keyFor(s) === detailKey) ?? null;
 
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const pool = filter === "archive" ? archivedRows : rows;
+    if (!term) return pool;
+    return pool.filter((s) => {
+      const hay = [
+        s.fileName,
+        s.viewName,
+        s.sourceType,
+        s.dbType,
+        s.connectorType,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(term);
+    });
+  }, [rows, archivedRows, filter, search]);
+
   const dbCount = rows.filter(isDatabase).length;
   const fileCount = rows.filter((s) => !isDatabase(s) && !isSaas(s)).length;
-  const totalColumns = rows.reduce(
-    (a, s) => a + (s.columnTypes?.length ?? 0),
-    0,
-  );
-
-  const displayRows = filter === "archive" ? archivedRows : rows;
-  const displayCount = displayRows.length;
+  const saasCount = rows.filter(isSaas).length;
 
   return (
     <ProjectShell
@@ -233,6 +225,9 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
           source={detail}
           backLabel="Data Sources"
           onBack={() => setDetailKey(null)}
+          onArchive={() => void handleArchive(detail, true)}
+          archiveBusy={archiveBusyId === detail.lifecycleId}
+          archiveError={archiveError}
         />
       ) : (
         <div className="space-y-4">
@@ -241,15 +236,23 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
               <StatTile label="Total sources" value={rows.length} />
               <StatTile label="Database sources" value={dbCount} />
               <StatTile label="File sources" value={fileCount} />
-              <StatTile
-                label="Columns mapped"
-                value={totalColumns}
-                hint="across all sources"
-              />
+              <StatTile label="SaaS sources" value={saasCount} />
             </div>
           )}
 
           <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[220px] flex-1">
+              <IconSearch
+                size={15}
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+              />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search data sources…"
+                className="h-8 w-full rounded-md border border-line-secondary bg-bg-primary pl-8 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+              />
+            </div>
             {FILTERS.map((f) => (
               <button
                 key={f.key}
@@ -271,25 +274,26 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
             <div className="py-16 text-center text-small text-ink-tertiary">
               Loading data sources…
             </div>
-          ) : displayCount === 0 ? (
+          ) : filtered.length === 0 ? (
             <Card className="px-4 py-16 text-center text-small text-ink-tertiary">
               {filter === "archive"
-                ? "No archived data sources."
+                ? "No archived data sources. Archive a data source to see it here."
                 : "No data sources yet. Connect a database or upload a file to get started."}
             </Card>
           ) : filter === "archive" ? (
             <ArchiveCard
-              rows={archivedRows}
-              busy={archiveMutation.isPending}
-              onRestore={(s) => handleArchive(s, false)}
+              rows={filtered}
+              busyId={archiveBusyId}
+              error={archiveError}
+              onRestore={(s) => void handleArchive(s, false)}
               onDelete={handleDelete}
             />
           ) : (
             <Card>
               <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-                <span className="text-h3 text-ink-primary">Data Sources</span>
+                <span className="text-h3 text-ink-primary">All Data Sources</span>
                 <span className="text-small text-ink-tertiary">
-                  {rows.length} total
+                  {filtered.length} total {filtered.length === 1 ? "data source" : "data sources"}
                 </span>
               </div>
               <div className="overflow-x-auto">
@@ -306,7 +310,7 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((s) => {
+                    {filtered.map((s) => {
                       const key = keyFor(s);
                       const active = selected && keyFor(selected) === key;
                       const cols = s.columnTypes ?? [];
@@ -377,51 +381,31 @@ export function DataSourcesScreen({ projectId }: { projectId: string }) {
                             {humanSize(s.size) || "—"}
                           </td>
                           <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-2">
-                              {isFile && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openPicker(s);
-                                  }}
-                                  className="rounded-md border border-line-primary px-2 py-1 text-caption font-medium text-ink-primary hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                                >
-                                  Update
-                                </button>
-                              )}
+                            {isFile ? (
                               <button
                                 type="button"
-                                title="Archive"
-                                disabled={archiveMutation.isPending}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleArchive(s, true);
+                                  openPicker(s);
                                 }}
-                                className="inline-flex items-center gap-1 rounded-md border border-line-primary px-2 py-1 text-caption font-medium text-ink-primary hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:opacity-50"
+                                className="rounded-md border border-line-primary px-2 py-1 text-caption font-medium text-ink-primary hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                               >
-                                <IconArchive size={14} />
-                                Archive
+                                Update
                               </button>
-                              <button
-                                type="button"
-                                title="Delete"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void handleDelete(s);
-                                }}
-                                className="inline-flex items-center gap-1 rounded-md border border-danger/30 px-2 py-1 text-caption font-medium text-danger hover:bg-danger/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30"
-                              >
-                                <IconTrash size={14} />
-                                Delete
-                              </button>
-                            </div>
+                            ) : (
+                              <span className="text-ink-tertiary">—</span>
+                            )}
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+                {filtered.length === 0 && !isLoading && (
+                  <div className="px-4 py-12 text-center text-small text-ink-tertiary">
+                    No data sources match your search.
+                  </div>
+                )}
               </div>
             </Card>
           )}
