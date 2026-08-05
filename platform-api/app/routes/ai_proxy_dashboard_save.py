@@ -49,7 +49,7 @@ async def ai_save_dashboard_suggestion(
     # Persist the previewed widgets directly when they carry runnable SQL.
     sql_widgets = [w for w in s.widgets if (w.sql or "").strip()]
     if sql_widgets:
-        from app.routes.home_intelligence import (
+        from app.routes.home_intelligence_dashboard_save import (
             SaveDashboardRequest,
             SaveDashboardWidget,
             home_save_dashboard,

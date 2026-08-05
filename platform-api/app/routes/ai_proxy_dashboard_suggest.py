@@ -96,7 +96,7 @@ async def ai_suggest_dashboards(
     # turned into real, renderable chart series (same as the Home dashboard
     # suggestions). Previews are best-effort: a widget that fails or returns no
     # rows is still returned (status != "valid") so the preview never collapses.
-    from app.routes.home_intelligence import _make_runner
+    from app.routes.home_intelligence_suite import _make_runner
 
     runner = _make_runner(session, context, req.project_id)
 

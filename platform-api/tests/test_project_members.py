@@ -30,7 +30,7 @@ class _FakeEmail:
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
@@ -209,7 +209,7 @@ async def test_add_member_sends_project_membership_email(
     )
 
     fake = _RecordingEmail()
-    monkeypatch.setattr("app.routes.projects.EmailService", lambda: fake)
+    monkeypatch.setattr("app.routes.projects_members.EmailService", lambda: fake)
 
     r = await client.post(
         f"/api/projects/{project['id']}/members",
@@ -240,7 +240,7 @@ async def test_add_member_survives_email_failure(
         client, service_headers
     )
 
-    monkeypatch.setattr("app.routes.projects.EmailService", lambda: _FailingEmail())
+    monkeypatch.setattr("app.routes.projects_members.EmailService", lambda: _FailingEmail())
 
     r = await client.post(
         f"/api/projects/{project['id']}/members",

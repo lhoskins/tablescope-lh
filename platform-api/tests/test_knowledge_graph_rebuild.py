@@ -186,7 +186,7 @@ def _bind_sessions(monkeypatch, db_engine):
     """Point worker-side SessionLocal factories at the test engine."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)

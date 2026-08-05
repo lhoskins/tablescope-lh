@@ -701,7 +701,7 @@ async def refresh_business_insight_result(
     """
     from app.models.intelligence_snapshot import IntelligenceSnapshot
     from app.models.project import Project
-    from app.routes import home_intelligence as hir
+    from app.routes import home_intelligence_suite as hir
     from app.services import business_insight_cache as bi_cache
     from app.services import home_intel_queue as q
     from app.services import home_intelligence as hi
@@ -865,7 +865,7 @@ async def rebuild_project_insight(
     """
     from app.models.project import Project
     from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
-    from app.routes import home_intelligence as hir
+    from app.routes import home_intelligence_suite as hir
     from app.services import home_intel_queue as q
     from app.services import project_insight_service as pi
     from app.services.ai_intelligence_client import AIUnavailableError
@@ -1065,7 +1065,7 @@ async def _finalize_run_if_complete(run_id: str) -> None:
     written even if the client's SSE connection dropped — coverage is bounded
     by drain time, not by the stream staying open.
     """
-    from app.routes import home_intelligence as hir
+    from app.routes import home_intelligence_snapshot as hi_snapshot
     from app.services import home_intel_queue as q
     from app.services import home_intelligence as hi
 
@@ -1103,7 +1103,7 @@ async def _finalize_run_if_complete(run_id: str) -> None:
         "generatedAt": datetime.now(UTC).isoformat(),
     }
     try:
-        await hir._save_snapshot(
+        await hi_snapshot._save_snapshot(
             context,
             meta["granularity"],
             payload,
@@ -1135,7 +1135,7 @@ async def analyze_project_intelligence(
     once so a busy tenant cannot starve others.
     """
     from app.models.project import Project
-    from app.routes import home_intelligence as hir
+    from app.routes import home_intelligence_suite as hir
     from app.services import home_intel_queue as q
     from app.services import home_intelligence as hi
     from app.services.ai_intelligence_client import AIUnavailableError

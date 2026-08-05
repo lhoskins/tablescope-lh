@@ -47,7 +47,7 @@ class _FakeEmail:
 @pytest.fixture()
 def fake_supabase(monkeypatch):
     """Make user creation go through Supabase (mocked) — there is no local fallback."""
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)

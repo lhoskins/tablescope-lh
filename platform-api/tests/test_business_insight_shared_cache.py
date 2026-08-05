@@ -43,7 +43,7 @@ async def _project(session: AsyncSession, tenant_id: int, owner_id: int, slug: s
 
 def _bind_sessions(monkeypatch, db_engine):
     """Point both worker-side SessionLocal factories at the test engine."""
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -178,7 +178,7 @@ async def test_cache_rejects_rows_from_older_analysis_pipeline(db_session):
 async def test_analyze_serves_from_cache_without_running_analysis(
     db_engine, db_session, monkeypatch
 ):
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     _bind_sessions(monkeypatch, db_engine)
@@ -221,7 +221,7 @@ async def test_analyze_serves_from_cache_without_running_analysis(
 async def test_analyze_runs_and_stores_on_cache_miss(
     db_engine, db_session, monkeypatch
 ):
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     _bind_sessions(monkeypatch, db_engine)
@@ -263,7 +263,7 @@ async def test_analyze_runs_and_stores_on_cache_miss(
 async def test_analyze_ignores_cache_when_flag_disabled(
     db_engine, db_session, monkeypatch
 ):
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     _bind_sessions(monkeypatch, db_engine)
@@ -343,7 +343,7 @@ async def test_refresh_activity_gate_skips_idle_tenant(
 
 
 async def test_refresh_runs_as_owner_and_stores(db_engine, db_session, monkeypatch):
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     _bind_sessions(monkeypatch, db_engine)

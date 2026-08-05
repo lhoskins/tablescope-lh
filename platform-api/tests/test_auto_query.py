@@ -73,7 +73,7 @@ async def _project(client, service_headers):
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
     from app.services.supabase_auth_service import (
         SupabaseAuthService,
         SupabaseUser,
