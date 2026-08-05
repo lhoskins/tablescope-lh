@@ -1,8 +1,8 @@
-"""Conversational analytics routes for project-scoped natural-language queries.
+"""Conversation lifecycle routes for project-scoped natural-language analytics.
 
-Endpoints mirror the Sprint-04 contract: create/list/read conversations,
-submit a turn, retry, rename, and archive. Tenant, user, and project
-authorization are enforced on every call.
+Create/resume, list, read, rename and delete conversations, plus the recent
+project conversation feed. Also hosts the schemas, access checks and response
+builders shared with the turn routes.
 """
 
 from __future__ import annotations
@@ -54,12 +54,6 @@ class RenameConversationRequest(BaseModel):
     title: str = Field(..., max_length=255)
 
 
-class SubmitTurnRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=4000)
-    data_source_id: int | None = Field(default=None)
-    client_request_id: str | None = Field(default=None, max_length=64)
-
-
 class ConversationSummary(BaseModel):
     id: int
     project_id: int | None
@@ -107,11 +101,6 @@ class ConversationResponse(BaseModel):
     active_datasource_id: int | None
     turns: list[TurnResponse]
     updated_at: datetime
-
-
-class TurnSubmissionResponse(BaseModel):
-    conversation_id: int
-    turn: TurnResponse
 
 
 async def _check_project_access(session: AsyncSession, context: RequestContext, project_id: int | None) -> None:
@@ -407,97 +396,6 @@ async def get_conversation(
     return _conversation_to_response(conversation)
 
 
-@router.post("/conversations/{conversation_id}/turns", response_model=TurnSubmissionResponse)
-async def submit_turn(
-    conversation_id: int,
-    req: SubmitTurnRequest,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> TurnSubmissionResponse:
-    """Submit a new turn to an existing conversation."""
-    conversation = await _load_conversation(session, context, conversation_id)
-    if conversation.project_id is not None:
-        await _check_project_access(session, context, conversation.project_id)
-    if conversation.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot add turns to an archived conversation",
-        )
-
-    # Idempotency: return existing turn for duplicate client_request_id.
-    if req.client_request_id:
-        existing = await session.scalar(
-            select(AnalyticsConversationTurn).where(
-                AnalyticsConversationTurn.conversation_id == conversation_id,
-                AnalyticsConversationTurn.client_request_id == req.client_request_id,
-            )
-        )
-        if existing:
-            return TurnSubmissionResponse(
-                conversation_id=conversation_id,
-                turn=_turn_to_response(existing),
-            )
-
-    max_sequence = await session.scalar(
-        select(AnalyticsConversationTurn.sequence)
-        .where(AnalyticsConversationTurn.conversation_id == conversation_id)
-        .order_by(AnalyticsConversationTurn.sequence.desc())
-        .limit(1)
-    ) or 0
-
-    turn = AnalyticsConversationTurn(
-        conversation_id=conversation_id,
-        sequence=max_sequence + 1,
-        user_message=req.message,
-        client_request_id=req.client_request_id,
-        parent_turn_id=conversation.last_successful_turn_id,
-        status="pending",
-    )
-    session.add(turn)
-    await session.flush()
-
-    await execute_turn(
-        session, context, conversation, turn, datasource_id=req.data_source_id
-    )
-    if turn.status == "success" and turn.id is not None:
-        conversation.last_successful_turn_id = turn.id
-    conversation.updated_at = datetime.now(UTC)
-    await session.flush()
-    await session.refresh(turn)
-
-    return TurnSubmissionResponse(
-        conversation_id=conversation_id,
-        turn=_turn_to_response(turn),
-    )
-
-
-@router.post("/conversations/{conversation_id}/turns/{turn_id}/retry", response_model=TurnSubmissionResponse)
-async def retry_turn(
-    conversation_id: int,
-    turn_id: int,
-    session: AsyncSession = Depends(get_db),
-    context: RequestContext = Depends(require_role(Role.VIEWER)),
-) -> TurnSubmissionResponse:
-    """Re-run a failed turn and update it in place."""
-    conversation = await _load_conversation(session, context, conversation_id)
-    turn = await session.get(AnalyticsConversationTurn, turn_id)
-    if turn is None or turn.conversation_id != conversation_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turn not found")
-
-    await execute_turn(
-        session, context, conversation, turn, datasource_id=conversation.active_datasource_id
-    )
-    if turn.status == "success" and turn.id is not None:
-        conversation.last_successful_turn_id = turn.id
-    await session.flush()
-    await session.refresh(turn)
-
-    return TurnSubmissionResponse(
-        conversation_id=conversation_id,
-        turn=_turn_to_response(turn),
-    )
-
-
 @router.patch("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def update_conversation(
     conversation_id: int,
@@ -561,4 +459,3 @@ async def delete_conversation(
         ),
         params,
     )
-    await session.commit()

@@ -28,11 +28,17 @@ from app.routes import auth as auth_routes
 from app.routes import billing as billing_routes
 from app.routes import billing_admin as billing_admin_routes
 from app.routes import connectors as connectors_routes
-from app.routes import conversational_analytics as conversational_analytics_routes
-from app.routes import dashboards as dashboards_routes
+from app.routes import (
+    conversational_analytics_conversations as conversational_analytics_conversations_routes,
+)
+from app.routes import conversational_analytics_turns as conversational_analytics_turns_routes
+from app.routes import dashboards_crud as dashboards_crud_routes
+from app.routes import dashboards_widget_query as dashboards_widget_query_routes
 from app.routes import data_source_assignments as data_source_assignments_routes
 from app.routes import database_sources as database_sources_routes
-from app.routes import document_families as document_families_routes
+from app.routes import document_families_curation as document_families_curation_routes
+from app.routes import document_families_reads as document_families_reads_routes
+from app.routes import document_families_summary as document_families_summary_routes
 from app.routes import file_analysis as file_analysis_routes
 from app.routes import file_imports as file_imports_routes
 from app.routes import grid_preferences as grid_preferences_routes
@@ -42,7 +48,10 @@ from app.routes import home_pins as home_pins_routes
 from app.routes import insight_chart_selection as insight_chart_selection_routes
 from app.routes import insight_feedback as insight_feedback_routes
 from app.routes import knowledge_graph as knowledge_graph_routes
-from app.routes import llm_framework as llm_framework_routes
+from app.routes import llm_framework_artifacts as llm_framework_artifacts_routes
+from app.routes import llm_framework_catalog as llm_framework_catalog_routes
+from app.routes import llm_framework_deployments as llm_framework_deployments_routes
+from app.routes import llm_framework_inventory as llm_framework_inventory_routes
 from app.routes import mfa as mfa_routes
 from app.routes import project_actions as project_actions_routes
 from app.routes import project_assets as project_assets_routes
@@ -58,11 +67,13 @@ from app.routes import reference_library_bulk as reference_library_bulk_routes
 from app.routes import reports as reports_routes
 from app.routes import repository_connectors as repository_connectors_routes
 from app.routes import saas_sources as saas_sources_routes
-from app.routes import scope_sets as scope_sets_routes
+from app.routes import scope_sets_builder as scope_sets_builder_routes
+from app.routes import scope_sets_crud as scope_sets_crud_routes
 from app.routes import scopes as scopes_routes
 from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
-from app.routes import tenant_data_planes as tenant_data_planes_routes
+from app.routes import tenant_data_planes_crud as tenant_data_planes_crud_routes
+from app.routes import tenant_data_planes_network as tenant_data_planes_network_routes
 from app.routes import tenants as tenants_routes
 from app.routes import upload as upload_routes
 from app.routes import uploads as uploads_routes
@@ -342,12 +353,16 @@ def create_app() -> FastAPI:
     api_prefix = settings.api_prefix
     app.include_router(auth_routes.router, prefix=api_prefix)
     app.include_router(tenants_routes.router, prefix=api_prefix)
-    app.include_router(tenant_data_planes_routes.router, prefix=api_prefix)
+    # Network router first: its literal /firewall-script path must be matched
+    # before the CRUD router's /{tenant_id}.
+    app.include_router(tenant_data_planes_network_routes.router, prefix=api_prefix)
+    app.include_router(tenant_data_planes_crud_routes.router, prefix=api_prefix)
     app.include_router(projects_routes.router, prefix=api_prefix)
     app.include_router(scopes_routes.router, prefix=api_prefix)
     app.include_router(query_routes.router, prefix=api_prefix)
     app.include_router(query_scopes_routes.router, prefix=api_prefix)
-    app.include_router(scope_sets_routes.router, prefix=api_prefix)
+    app.include_router(scope_sets_crud_routes.router, prefix=api_prefix)
+    app.include_router(scope_sets_builder_routes.router, prefix=api_prefix)
     app.include_router(sharing_routes.router, prefix=api_prefix)
     app.include_router(storage_routes.router, prefix=api_prefix)
     app.include_router(database_sources_routes.router, prefix=api_prefix)
@@ -362,12 +377,16 @@ def create_app() -> FastAPI:
     app.include_router(file_analysis_routes.router, prefix=api_prefix)
     app.include_router(file_imports_routes.router, prefix=api_prefix)
     app.include_router(file_imports_routes.connections_router, prefix=api_prefix)
-    app.include_router(dashboards_routes.router, prefix=api_prefix)
+    app.include_router(dashboards_crud_routes.router, prefix=api_prefix)
+    app.include_router(dashboards_widget_query_routes.router, prefix=api_prefix)
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)
     app.include_router(ai_governance_routes.router, prefix=api_prefix)
     app.include_router(ai_reference_catalog_routes.router, prefix=api_prefix)
     app.include_router(analytical_methods_routes.router, prefix=api_prefix)
-    app.include_router(llm_framework_routes.router, prefix=api_prefix)
+    app.include_router(llm_framework_inventory_routes.router, prefix=api_prefix)
+    app.include_router(llm_framework_catalog_routes.router, prefix=api_prefix)
+    app.include_router(llm_framework_artifacts_routes.router, prefix=api_prefix)
+    app.include_router(llm_framework_deployments_routes.router, prefix=api_prefix)
     app.include_router(ai_asset_metadata_routes.router, prefix=api_prefix)
     app.include_router(project_assets_routes.router, prefix=api_prefix)
     app.include_router(project_context_routes.router, prefix=api_prefix)
@@ -375,14 +394,17 @@ def create_app() -> FastAPI:
     app.include_router(project_actions_routes.router, prefix=api_prefix)
     app.include_router(project_insight_routes.router, prefix=api_prefix)
     app.include_router(knowledge_graph_routes.router, prefix=api_prefix)
-    app.include_router(document_families_routes.router, prefix=api_prefix)
+    app.include_router(document_families_reads_routes.router, prefix=api_prefix)
+    app.include_router(document_families_curation_routes.router, prefix=api_prefix)
+    app.include_router(document_families_summary_routes.router, prefix=api_prefix)
     app.include_router(billing_routes.router, prefix=api_prefix)
     app.include_router(billing_admin_routes.router, prefix=api_prefix)
     app.include_router(provisioning_routes.router, prefix=api_prefix)
     app.include_router(home_intelligence_routes.router, prefix=api_prefix)
     app.include_router(home_pins_routes.router, prefix=api_prefix)
     app.include_router(insight_chart_selection_routes.router, prefix=api_prefix)
-    app.include_router(conversational_analytics_routes.router, prefix=api_prefix)
+    app.include_router(conversational_analytics_conversations_routes.router, prefix=api_prefix)
+    app.include_router(conversational_analytics_turns_routes.router, prefix=api_prefix)
     app.include_router(insight_feedback_routes.router, prefix=api_prefix)
     app.include_router(reference_library_routes.router, prefix=api_prefix)
     app.include_router(reference_library_bulk_routes.router, prefix=api_prefix)

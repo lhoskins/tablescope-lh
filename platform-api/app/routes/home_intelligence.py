@@ -37,7 +37,7 @@ from app.models.intelligence_snapshot import IntelligenceSnapshot
 from app.models.project import Project, ProjectMember
 from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.saved_query import SavedQuery
-from app.routes.query import (
+from app.routes.query_sql_helpers import (
     _auto_cast_aggregates,
     _execute_sql_with_repair,
     _resolve_vdb_database,
