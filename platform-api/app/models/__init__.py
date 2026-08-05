@@ -86,17 +86,15 @@ from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_action import ProjectAction, ProjectActionSubtask
 from app.models.project_asset import ProjectAsset
-from app.models.project_context import (
-    ProjectBusinessContext,
-    ProjectContextAuditEvent,
+from app.models.project_context.audit import ProjectContextAuditEvent
+from app.models.project_context.business_context import ProjectBusinessContext
+from app.models.project_context.goals import (
     ProjectGoal,
     ProjectGoalMetricLink,
     ProjectGoalRiskLink,
-    ProjectMetric,
-    ProjectMetricTarget,
-    ProjectRisk,
-    ProjectRiskMetricLink,
 )
+from app.models.project_context.metrics import ProjectMetric, ProjectMetricTarget
+from app.models.project_context.risks import ProjectRisk, ProjectRiskMetricLink
 from app.models.project_insight_acknowledgement import (
     ProjectInsightAcknowledgement,
 )
