@@ -63,12 +63,19 @@ from app.routes import llm_framework_catalog as llm_framework_catalog_routes
 from app.routes import llm_framework_deployments as llm_framework_deployments_routes
 from app.routes import llm_framework_inventory as llm_framework_inventory_routes
 from app.routes import mfa as mfa_routes
-from app.routes import project_actions as project_actions_routes
+from app.routes import project_actions_comments as project_actions_comments_routes
+from app.routes import project_actions_crud as project_actions_crud_routes
+from app.routes import project_actions_lifecycle as project_actions_lifecycle_routes
 from app.routes import project_assets as project_assets_routes
 from app.routes import project_context as project_context_routes
 from app.routes import project_graph as project_graph_routes
 from app.routes import project_insight as project_insight_routes
-from app.routes import projects as projects_routes
+from app.routes import projects_aggregates as projects_aggregates_routes
+from app.routes import projects_crud as projects_crud_routes
+from app.routes import projects_datasources as projects_datasources_routes
+from app.routes import projects_members as projects_members_routes
+from app.routes import projects_metadata as projects_metadata_routes
+from app.routes import projects_queries as projects_queries_routes
 from app.routes import provisioning as provisioning_routes
 from app.routes import query as query_routes
 from app.routes import query_scopes as query_scopes_routes
@@ -380,7 +387,14 @@ def create_app() -> FastAPI:
     # before the CRUD router's /{tenant_id}.
     app.include_router(tenant_data_planes_network_routes.router, prefix=api_prefix)
     app.include_router(tenant_data_planes_crud_routes.router, prefix=api_prefix)
-    app.include_router(projects_routes.router, prefix=api_prefix)
+    # Aggregate reads first: their literal paths (e.g. ``/summaries``) must be
+    # matched before ``/{project_id}`` in projects_crud.
+    app.include_router(projects_aggregates_routes.router, prefix=api_prefix)
+    app.include_router(projects_crud_routes.router, prefix=api_prefix)
+    app.include_router(projects_datasources_routes.router, prefix=api_prefix)
+    app.include_router(projects_members_routes.router, prefix=api_prefix)
+    app.include_router(projects_queries_routes.router, prefix=api_prefix)
+    app.include_router(projects_metadata_routes.router, prefix=api_prefix)
     app.include_router(scopes_routes.router, prefix=api_prefix)
     app.include_router(query_routes.router, prefix=api_prefix)
     app.include_router(query_scopes_routes.router, prefix=api_prefix)
@@ -421,7 +435,9 @@ def create_app() -> FastAPI:
     app.include_router(project_assets_routes.router, prefix=api_prefix)
     app.include_router(project_context_routes.router, prefix=api_prefix)
     app.include_router(project_graph_routes.router, prefix=api_prefix)
-    app.include_router(project_actions_routes.router, prefix=api_prefix)
+    app.include_router(project_actions_crud_routes.router, prefix=api_prefix)
+    app.include_router(project_actions_lifecycle_routes.router, prefix=api_prefix)
+    app.include_router(project_actions_comments_routes.router, prefix=api_prefix)
     app.include_router(project_insight_routes.router, prefix=api_prefix)
     app.include_router(knowledge_graph_routes.router, prefix=api_prefix)
     app.include_router(document_families_reads_routes.router, prefix=api_prefix)

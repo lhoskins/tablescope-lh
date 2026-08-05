@@ -178,7 +178,7 @@ async def execute_widget_query(
     # Defense-in-depth: the requested view must be one of this project's own
     # datasources. The per-user VDB already isolates tenants, but this rejects
     # any widget (e.g. an AI-hallucinated one) that references a foreign table.
-    from app.routes.projects import list_project_datasources
+    from app.routes.projects_datasources import list_project_datasources
 
     project_sources = await list_project_datasources(
         project_id=project_id,

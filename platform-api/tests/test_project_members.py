@@ -209,7 +209,7 @@ async def test_add_member_sends_project_membership_email(
     )
 
     fake = _RecordingEmail()
-    monkeypatch.setattr("app.routes.projects.EmailService", lambda: fake)
+    monkeypatch.setattr("app.routes.projects_members.EmailService", lambda: fake)
 
     r = await client.post(
         f"/api/projects/{project['id']}/members",
@@ -240,7 +240,7 @@ async def test_add_member_survives_email_failure(
         client, service_headers
     )
 
-    monkeypatch.setattr("app.routes.projects.EmailService", lambda: _FailingEmail())
+    monkeypatch.setattr("app.routes.projects_members.EmailService", lambda: _FailingEmail())
 
     r = await client.post(
         f"/api/projects/{project['id']}/members",
