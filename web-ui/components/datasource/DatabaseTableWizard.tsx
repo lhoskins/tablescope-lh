@@ -1,54 +1,15 @@
 "use client";
 
+
 import { useEffect, useState } from "react";
-import { apiClient } from "@/lib/api-client";
+import { apiClient } from "@/lib/api-client";import { DB_TYPES } from "./DatabaseTableWizard/db-types";
+import { TableInfo } from "./DatabaseTableWizard/table-info";
+import { ColumnInfo } from "./DatabaseTableWizard/column-info";
+import { Connection } from "./DatabaseTableWizard/connection";
+import { Step } from "./DatabaseTableWizard/step";
+import { SavedConnection } from "./DatabaseTableWizard/saved-connection";
 
-// Connect an external database table as an independent Tablescope data source.
-// Mirrors the file-upload flow but walks the user through:
-//   connection -> test -> schema -> table -> column preview -> save.
-// PostgreSQL, MySQL, SQL Server and Oracle are supported via bundled JDBC
-// driver modules + Python DBAPI drivers for introspection.
 
-type DbType = { value: string; label: string; defaultPort: number; enabled: boolean };
-
-export const DB_TYPES: DbType[] = [
-  { value: "postgresql", label: "PostgreSQL", defaultPort: 5432, enabled: true },
-  { value: "mysql", label: "MySQL", defaultPort: 3306, enabled: true },
-  { value: "sqlserver", label: "SQL Server", defaultPort: 1433, enabled: true },
-  { value: "oracle", label: "Oracle", defaultPort: 1521, enabled: true },
-];
-
-type TableInfo = { schema_name: string | null; table_name: string; type: string };
-type ColumnInfo = {
-  name: string;
-  type: string | null;
-  nullable: boolean | null;
-  primary_key: boolean;
-};
-
-type Connection = {
-  db_type: string;
-  host: string;
-  port: number | null;
-  database_name: string;
-  username: string;
-  password: string;
-  ssl_mode: string;
-};
-
-type Step = "connection" | "schema" | "table" | "columns";
-
-type SavedConnection = {
-  id: number;
-  name: string;
-  db_type: string;
-  host: string;
-  port: number;
-  database_name: string;
-  username: string;
-  has_password: boolean;
-  ssl_mode: string | null;
-};
 
 export function DatabaseTableWizard({
   projectId,
@@ -589,3 +550,5 @@ export function DatabaseTableWizard({
     </div>
   );
 }
+
+export { DB_TYPES } from "./DatabaseTableWizard/db-types";

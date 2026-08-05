@@ -1,5 +1,6 @@
 "use client";
 
+
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,28 +33,14 @@ import {
 } from "@/lib/api/conversational-analytics";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
 import type { SuggestedVisualization } from "@/lib/api/ai-actions";
-import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
+import type { CurrentUser, TenantSummary } from "@/lib/ui/types";import { FALLBACK_USER } from "./fallback-user";
+import { FALLBACK_TENANT } from "./fallback-tenant";
+import { CHART_FOLLOW_UPS } from "./chart-follow-ups";
+import { ConversationRow } from "./conversation-row";
+import { UserBubble } from "./user-bubble";
+import { TurnBubbles } from "./turn-bubbles";
 
-const FALLBACK_USER: CurrentUser = {
-  name: "",
-  email: "",
-  role: "",
-  tenantName: "",
-  initials: "··",
-};
-const FALLBACK_TENANT: TenantSummary = {
-  name: "Tablescope",
-  slug: "",
-  initials: "TS",
-};
 
-const CHART_FOLLOW_UPS = [
-  "change it to a line chart",
-  "change it to a horizontal bar chart",
-  "change it to a donut chart",
-  "sort by value descending",
-  "show as a table",
-];
 
 function AiAssistantPageInner() {
   const router = useRouter();
@@ -443,221 +430,6 @@ function AiAssistantPageInner() {
         onCancel={() => setConfirmDeleteId(null)}
       />
     </AppShell>
-  );
-}
-
-function ConversationRow({
-  conversation,
-  active,
-  onSelect,
-  onRename,
-  onDelete,
-}: {
-  conversation: ConversationSummary;
-  active: boolean;
-  onSelect: () => void;
-  onRename: (title: string) => void;
-  onDelete: () => void;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(conversation.title);
-
-  const startRename = () => {
-    setDraft(conversation.title);
-    setEditing(true);
-    setMenuOpen(false);
-  };
-
-  const commitRename = () => {
-    const next = draft.trim();
-    if (next && next !== conversation.title) onRename(next);
-    setEditing(false);
-  };
-
-  return (
-    <div
-      className={cn(
-        "group relative flex items-center rounded-md py-2 pl-2 pr-1 text-[13px]",
-        active
-          ? "bg-brand-50 text-brand-700"
-          : "text-ink-secondary hover:bg-bg-primary",
-      )}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setMenuOpen(true);
-      }}
-    >
-      {editing ? (
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commitRename}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitRename();
-            if (e.key === "Escape") setEditing(false);
-          }}
-          className="min-w-0 flex-1 rounded border border-line-secondary bg-bg-primary px-1.5 py-0.5 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={onSelect}
-          className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap scrollbar-none text-left"
-          title={conversation.title}
-        >
-          {conversation.title}
-        </button>
-      )}
-      {!editing && (
-        <button
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label="Conversation actions"
-          className={cn(
-            "shrink-0 rounded text-ink-tertiary hover:text-ink-secondary",
-            menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-          )}
-        >
-          <IconDots size={15} />
-        </button>
-      )}
-      {menuOpen && (
-        <>
-          <button
-            type="button"
-            aria-hidden
-            tabIndex={-1}
-            className="fixed inset-0 z-40 cursor-default"
-            onClick={() => setMenuOpen(false)}
-          />
-          <div className="absolute right-1 top-8 z-50 w-36 overflow-hidden rounded-md border border-line-tertiary bg-bg-primary py-1 shadow-lg">
-            <MenuItem
-              icon={<IconPencil size={14} />}
-              label="Rename"
-              onClick={startRename}
-            />
-            <MenuItem
-              icon={<IconTrash size={14} />}
-              label="Delete"
-              danger
-              onClick={() => {
-                onDelete();
-                setMenuOpen(false);
-              }}
-            />
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  danger,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-bg-secondary",
-        danger ? "text-danger" : "text-ink-secondary",
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function UserBubble({ content }: { content: string }) {
-  return (
-    <div className="flex flex-col items-end">
-      <div className="max-w-[75%] rounded-xl bg-brand px-4 py-3 text-[13px] leading-relaxed text-brand-fg">
-        <span className="whitespace-pre-wrap">{content}</span>
-      </div>
-    </div>
-  );
-}
-
-/** One conversational-analytics turn: the user's message + the AI answer. */
-function TurnBubbles({ turn }: { turn: ConversationTurn }) {
-  const result = turn.result;
-  const hasData = (result?.rows?.length ?? 0) > 0;
-  return (
-    <>
-      <UserBubble content={turn.user_message} />
-      <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
-          <IconSparkles size={16} />
-        </div>
-        <div className={cn("flex flex-col", hasData ? "w-full" : "max-w-[75%]")}>
-          <div
-            className={cn(
-              "rounded-xl bg-bg-secondary px-4 py-3 text-[13px] leading-relaxed",
-              turn.status === "error" ? "text-danger" : "text-ink-primary",
-            )}
-          >
-            <span className="whitespace-pre-wrap">
-              {turn.assistant_message ??
-                (turn.status === "pending" ? "Working on it…" : "")}
-            </span>
-          </div>
-          {hasData && result && <TurnResult turn={turn} />}
-        </div>
-      </div>
-    </>
-  );
-}
-
-function TurnResult({ turn }: { turn: ConversationTurn }) {
-  const [showSql, setShowSql] = useState(false);
-  const result = turn.result;
-  if (!result) return null;
-  const chart = turn.chart_config;
-  // Map the persisted chart config onto the shared renderer contract; the
-  // subtype (horizontal_bar, donut, …) rides through as chartStyle.
-  const viz: SuggestedVisualization = chart
-    ? {
-        type: chart.type as SuggestedVisualization["type"],
-        xField: chart.labelColumn,
-        yField: chart.valueColumns?.[0],
-        chartStyle: chart.subtype,
-      }
-    : { type: "table" };
-  return (
-    <div className="mt-2 rounded-xl border border-line-tertiary bg-bg-primary p-3">
-      {chart && chart.type !== "table" && (
-        <ResultChart columns={result.columns} rows={result.rows} viz={viz} />
-      )}
-      <ResultTable columns={result.columns} rows={result.rows} />
-      {turn.sql && (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setShowSql((v) => !v)}
-            className="text-[11px] text-ink-tertiary hover:text-ink-secondary"
-          >
-            {showSql ? "Hide SQL" : "Show SQL"}
-          </button>
-          {showSql && (
-            <pre className="mt-1 overflow-auto rounded-md bg-bg-secondary p-2 text-[11px] text-ink-secondary">
-              {turn.sql}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 

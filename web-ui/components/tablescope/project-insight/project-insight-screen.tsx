@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,100 +35,15 @@ import {
 import {
   CreateActionFromInsightDialog,
   type ActionableInsight,
-} from "@/components/tablescope/project-actions/create-action-from-insight-dialog";
-const INSIGHT_KEY = (projectId: string) => ["project", projectId, "insight"];
-const PROJECT_INSIGHTS_TITLE = "Project Insights";
+} from "@/components/tablescope/project-actions/create-action-from-insight-dialog";import { INSIGHT_KEY } from "./project-insight-screen/insight-key";
+import { PROJECT_INSIGHTS_TITLE } from "./project-insight-screen/project-insights-title";
+import { EMPTY_PROJECT_INSIGHT } from "./project-insight-screen/empty-project-insight";
+import { cardToActionableInsight } from "./project-insight-screen/card-to-actionable-insight";
+import { LoadingState } from "./project-insight-screen/loading-state";
+import { EmptyState } from "./project-insight-screen/empty-state";
+import { pollConversation } from "./project-insight-screen/poll-conversation";
 
-const EMPTY_PROJECT_INSIGHT: ProjectInsight = {
-  project: { id: 0, name: "", status: "" },
-  generatedAt: "",
-  lastUpdatedAt: "",
-  executiveSummary: {
-    summary: "",
-    critical: [],
-    warnings: [],
-    opportunities: [],
-    recommendations: [],
-  },
-  questionsToAsk: [],
-  questionsNeedingData: [],
-  trendDetection: [],
-  recommendedDashboards: [],
-  recommendedQueries: [],
-  recommendedKpis: [],
-  risks: [],
-  trends: [],
-  opportunities: [],
-  analysis: [],
-  whatChangedSinceLastVisit: {
-    newFilesAdded: 0,
-    changedDataSources: 0,
-    newRisksIdentified: 0,
-    newQueries: 0,
-    newDashboards: 0,
-    updatedKnowledgeGraph: 0,
-    changeLogLink: "",
-  },
-  insightValidationWorkflow: [],
-  aiAvailable: false,
-  graphStatus: "",
-  graphMode: "limited",
-  graphBlockingReasons: [],
-  graphDisclosure: "",
-};
 
-function cardToActionableInsight(card: InsightCard): ActionableInsight {
-  return {
-    insightId: card.insightId || card.id,
-    insightType: card.insightType,
-    title: card.title,
-    summary: card.summary,
-    severity: card.severity,
-    projectId: String(card.projectId),
-    projectName: card.projectName,
-    recommendedAction: card.callout?.text || null,
-    sources: card.sources,
-    supportingSources: [
-      ...(card.sources?.tables ?? []),
-      ...(card.sources?.documents ?? []),
-    ],
-    explanation: card.explanation as Record<string, unknown> | undefined,
-  };
-}
-
-function LoadingState() {
-  return (
-    <div className="space-y-4">
-      <div className="h-40 animate-pulse rounded-lg bg-bg-secondary" />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="h-48 animate-pulse rounded-lg bg-bg-secondary" />
-        <div className="h-48 animate-pulse rounded-lg bg-bg-secondary" />
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-lg border border-line-tertiary bg-bg-primary py-16 text-center">
-      <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-brand-50 text-brand-500">
-        <IconSparkles size={22} />
-      </div>
-      <div className="text-h2 text-ink-primary">{title}</div>
-      <p className="mx-auto mt-1 max-w-md text-small text-ink-tertiary">{body}</p>
-    </div>
-  );
-}
-
-async function pollConversation(id: number): Promise<Conversation> {
-  for (let i = 0; i < 60; i++) {
-    const data = await getConversation(id);
-    const last = data.turns[data.turns.length - 1];
-    if (!last || last.status !== "pending") return data;
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-  return getConversation(id);
-}
 
 export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   const router = useRouter();
