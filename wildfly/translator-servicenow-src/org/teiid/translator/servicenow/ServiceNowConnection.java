@@ -134,6 +134,7 @@ public class ServiceNowConnection {
                 url.append("&sysparm_offset=").append(offset);
                 url.append("&sysparm_display_value=false");
                 url.append("&sysparm_exclude_reference_link=true");
+                url.append("&sysparm_suppress_pagination_header=true");
 
                 HttpURLConnection conn = (HttpURLConnection) new URL(url.toString()).openConnection();
                 conn.setRequestMethod("GET");
