@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -40,55 +41,14 @@ import {
   useProjectActivity,
   useProjectGraph,
   type DataSource,
-} from "@/lib/ui/use-project-data";
+} from "@/lib/ui/use-project-data";import { isSaas } from "./overview-screen/is-saas";
+import { PROJECT_INSIGHTS_TITLE } from "./overview-screen/project-insights-title";
+import { PROJECT_INSIGHTS_SURFACE } from "./overview-screen/project-insights-surface";
+import { pollConversation } from "./overview-screen/poll-conversation";
+import { ProjectHeader } from "./overview-screen/project-header";
+import { RecentInsightsCard } from "./overview-screen/recent-insights-card";
 
-function isDatabase(s: DataSource): boolean {
-  return s.sourceType === "database_table";
-}
-function isSaas(s: DataSource): boolean {
-  return s.sourceType === "saas_object";
-}
 
-function severityTone(severity: string) {
-  switch (severity) {
-    case "critical":
-    case "urgent":
-      return "danger" as const;
-    case "warning":
-    case "watch":
-      return "warning" as const;
-    case "opportunity":
-    case "recommendation":
-      return "success" as const;
-    case "trend":
-    case "informational":
-    default:
-      return "neutral" as const;
-  }
-}
-
-function insightCategory(insightType: string) {
-  const map: Record<string, string> = {
-    risk: "Risk",
-    trend: "Trend",
-    opportunity: "Opportunity",
-    analysis: "Analysis",
-  };
-  return map[insightType] || insightType;
-}
-
-const PROJECT_INSIGHTS_TITLE = "Project Insights";
-const PROJECT_INSIGHTS_SURFACE = "project_insights";
-
-async function pollConversation(id: number): Promise<Conversation> {
-  for (let i = 0; i < 60; i++) {
-    const data = await getConversation(id);
-    const last = data.turns[data.turns.length - 1];
-    if (!last || last.status !== "pending") return data;
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-  return getConversation(id);
-}
 
 export function OverviewScreen({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -397,110 +357,5 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
       />
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </ProjectShell>
-  );
-}
-
-function ProjectHeader({
-  project,
-  memberCount,
-  aiStatus,
-  onMembers,
-  onToast,
-}: {
-  project: ProjectSummary | null;
-  memberCount: number;
-  aiStatus: AiStatus;
-  onMembers: () => void;
-  onToast: (message: string, tone?: "success" | "error" | "info") => void;
-}) {
-  const statusLabel = aiStatusLabel(aiStatus);
-  const statusTone = aiStatusTone(aiStatus);
-  return (
-    <header className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-line-tertiary bg-bg-primary p-4">
-      <div className="flex items-start gap-3">
-        <span
-          className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-lg font-semibold text-white"
-          style={{ backgroundColor: project?.accent ?? "var(--brand-500)" }}
-        >
-          {(project?.name ?? "P").slice(0, 1).toUpperCase()}
-        </span>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-h1 text-ink-primary">{project?.name ?? "Project"}</h1>
-            <Badge tone={statusTone} title={`Project status: ${statusLabel}`}>
-              {statusLabel}
-            </Badge>
-          </div>
-          <p className="mt-0.5 text-small text-ink-tertiary">
-            {project?.visibility === "shared" ? "Shared" : "Private"} project
-            {memberCount > 0 && ` · ${memberCount} member${memberCount === 1 ? "" : "s"}`}
-            {project?.updatedLabel && ` · Updated ${project.updatedLabel}`}
-          </p>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <ShareToggle
-          projectId={String(project?.id ?? "")}
-          shared={project?.visibility === "shared"}
-          onToast={onToast}
-        />
-        <Button variant="secondary" onClick={onMembers}>
-          <IconUsers size={14} />
-          Members
-        </Button>
-      </div>
-    </header>
-  );
-}
-
-function RecentInsightsCard({
-  projectId,
-  insights,
-  generatedAt,
-}: {
-  projectId: string;
-  insights: Array<ProjectInsightCard & { category: string }>;
-  generatedAt?: string;
-}) {
-  return (
-    <Card className="flex flex-col">
-      <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-        <span className="text-h3 text-ink-primary">Recent insights</span>
-        <Link
-          href={`/projects/${projectId}/insight`}
-          className="text-[12px] font-medium text-brand-700 hover:underline"
-        >
-          View all
-        </Link>
-      </div>
-      <div className="flex-1 p-2">
-        {insights.length === 0 ? (
-          <div className="px-2 py-8 text-center text-small text-ink-tertiary">
-            No insights yet. Ask anything or generate insights to see findings here.
-          </div>
-        ) : (
-          <ul className="space-y-1">
-            {insights.map((insight) => (
-              <li key={insight.id}>
-                <a
-                  href={`/projects/${projectId}/insight`}
-                  className="group flex items-start gap-2 rounded-md px-2 py-2 hover:bg-bg-secondary"
-                >
-                  <Badge tone={severityTone(insight.severity)} size="sm">
-                    {insightCategory(insight.category)}
-                  </Badge>
-                  <span className="min-w-0 flex-1 text-[13px] font-medium text-ink-primary group-hover:text-brand-700">
-                    {insight.title}
-                  </span>
-                  <span className="shrink-0 text-small text-ink-tertiary">
-                    {timeAgo(insight.executedAt ?? generatedAt ?? new Date().toISOString())}
-                  </span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </Card>
   );
 }

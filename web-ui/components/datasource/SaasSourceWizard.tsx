@@ -1,39 +1,16 @@
 "use client";
 
+
 import { useEffect, useState } from "react";
-import { apiClient } from "@/lib/api-client";
+import { apiClient } from "@/lib/api-client";import { ConnectorType } from "./SaasSourceWizard/connector-type";
+import { CONNECTORS } from "./SaasSourceWizard/connectors";
+import { ObjectInfo } from "./SaasSourceWizard/object-info";
+import { FieldInfo } from "./SaasSourceWizard/field-info";
+import { PreviewResult } from "./SaasSourceWizard/preview-result";
+import { Step } from "./SaasSourceWizard/step";
+import { SavedCredential } from "./SaasSourceWizard/saved-credential";
 
-// Connect a SaaS app (HubSpot, Salesforce) object as an independent Tablescope
-// data source.  Mirrors the database-table flow:
-//   connector + credentials -> object -> fields -> preview -> save.
-// The selected object is synced into a local Postgres staging table which is
-// registered in Teiid exactly like a database table, so it lists, queries and
-// joins like any other data source.
 
-type ConnectorType = "hubspot" | "salesforce" | "quickbooks";
-
-const CONNECTORS: { value: ConnectorType; label: string }[] = [
-  { value: "hubspot", label: "HubSpot" },
-  { value: "salesforce", label: "Salesforce" },
-  { value: "quickbooks", label: "QuickBooks" },
-];
-
-type ObjectInfo = { name: string; label: string };
-type FieldInfo = {
-  name: string;
-  label: string;
-  saas_type: string;
-  pg_type: string;
-};
-type PreviewResult = { columns: string[]; rows: Record<string, unknown>[] };
-
-type Step = "connect" | "object" | "fields" | "preview";
-
-type SavedCredential = {
-  id: number;
-  connector_type: string;
-  display_name: string;
-};
 
 export function SaasSourceWizard({
   projectId,

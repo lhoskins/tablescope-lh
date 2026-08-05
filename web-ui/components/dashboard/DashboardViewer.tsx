@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import {
@@ -39,23 +40,10 @@ import { WidgetConfigPanel } from "./WidgetConfigPanel";
 import { FilterBar } from "./FilterBar";
 import { DateRangeControl } from "./DateRangeControl";
 import { DrilldownPanel, type DrilldownState } from "./DrilldownPanel";
-import { buildRuntimeWidgetFilters } from "@/lib/dashboard/runtimeFilters";
+import { buildRuntimeWidgetFilters } from "@/lib/dashboard/runtimeFilters";import { SavedQuery } from "./DashboardViewer/saved-query";
+import { Props } from "./DashboardViewer/props";
 
-type SavedQuery = { id: number; name: string; sql_text: string | null };
-type Datasource = { viewName: string; fileName: string };
 
-type Props = {
-  dashboard: Dashboard;
-  projectId: number;
-  savedQueries: SavedQuery[];
-  datasources: Datasource[];
-  onBack: () => void;
-  /** Called after any change is persisted (widget/filter/status save). Used to
-   *  mark a freshly-created draft dashboard as kept (no longer ephemeral). */
-  onPersisted?: () => void;
-  /** Called when the user pins a widget to their Home grid. */
-  onPinWidget?: (widget: WidgetConfig, data: unknown[], dashboardId: number) => void;
-};
 
 export function DashboardViewer({ dashboard, projectId, savedQueries, datasources, onBack, onPersisted, onPinWidget }: Props) {
   const queryClient = useQueryClient();

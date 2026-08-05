@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   useReactTable,
@@ -36,106 +37,13 @@ import {
   SCOPES_CHANGED_EVENT,
   useNotifyScopesChanged,
 } from "@/lib/ui/scope-refresh";
-import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";
+import type { QueryScope, QueryScopeFilterResponse } from "@/types/query-scope";import { Level } from "./TanStackDataGrid/level";
+import { TanStackDataGridProps } from "./TanStackDataGrid/tan-stack-data-grid-props";
+import { normalizeField } from "./TanStackDataGrid/normalize-field";
+import { formatTypedValue } from "./TanStackDataGrid/format-typed-value";
+import { SortableHeader } from "./TanStackDataGrid/sortable-header";
 
-type QueryRef = {
-  id: number;
-  name: string;
-  sql?: string | null;
-  leftDatasource?: string | null;
-};
 
-type Level = {
-  queryId: number | null;
-  name: string;
-  columns: string[];
-  rows: Record<string, unknown>[];
-};
-
-type TanStackDataGridProps = {
-  columns: string[];
-  rows: Record<string, unknown>[];
-  loading?: boolean;
-  height?: number;
-  queryId?: number;
-  queryName?: string;
-  availableQueries?: QueryRef[];
-  canEditScopes?: boolean;
-  projectId?: number;
-  columnTypes?: { field: string; name?: string; type: string }[];
-};
-
-/**
- * Normalize a field name for scope matching: lower-case and strip surrounding
- * quotes. AI-generated scopes carry source_field values from
- * extract_select_columns(), whose casing/quoting can differ from the grid's
- * column labels, so match them the same case-insensitive way widget X/Y
- * detection does (commit eae03e0d).
- */
-function normalizeField(field: string): string {
-  return field.trim().replace(/^"+|"+$/g, "").toLowerCase();
-}
-
-const _currencyFmt = new Intl.NumberFormat(undefined, {
-  style: "currency",
-  currency: "USD",
-});
-
-function formatTypedValue(value: unknown, type: string | undefined): string {
-  if (value == null || value === "") return "";
-  const text = String(value);
-  if (type === "currency") {
-    const n = Number(text.replace(/[^0-9.\-]/g, ""));
-    return Number.isFinite(n) ? _currencyFmt.format(n) : text;
-  }
-  if (type === "number") {
-    const n = Number(text.replace(/,/g, ""));
-    if (!Number.isFinite(n)) return text;
-    // Format with 2 decimal places if the number has a fractional part
-    if (!Number.isInteger(n)) {
-      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    return n.toLocaleString();
-  }
-  if (type === "date") {
-    const d = new Date(text);
-    return Number.isNaN(d.getTime()) ? text : d.toLocaleDateString();
-  }
-  // Auto-detect numeric values with decimals even without explicit type
-  if (type === undefined || type === "string") {
-    const n = Number(text);
-    if (Number.isFinite(n) && text.includes(".") && !Number.isInteger(n)) {
-      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-  }
-  return text;
-}
-
-/* ── Sortable header cell ──────────────────────────────────────────── */
-
-function SortableHeader({
-  id,
-  children,
-  isResizing,
-}: {
-  id: string;
-  children: React.ReactNode;
-  isResizing: boolean;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style: React.CSSProperties = {
-    transform: CSS.Translate.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    cursor: isResizing ? "col-resize" : "grab",
-    position: "relative" as const,
-  };
-  return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      {children}
-    </div>
-  );
-}
 
 /* ── Main component ──────────────────────────────────────────────── */
 
