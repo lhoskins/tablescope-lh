@@ -95,7 +95,7 @@ def _editor_headers(tenant_id: int, user_id: int) -> dict:
 
 def _bind_sessions(monkeypatch, db_engine):
     """Point worker-side SessionLocal factories at the test engine."""
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
