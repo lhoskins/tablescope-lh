@@ -28,7 +28,7 @@ from app.database import get_db
 from app.models.connector_credential import ConnectorCredential
 from app.models.database_data_source import DatabaseDataSource
 from app.models.saas_object_data_source import SaasObjectDataSource
-from app.routes.database_sources import find_query_dependencies
+from app.routes.database_sources_lifecycle import find_query_dependencies
 from app.schemas.saas_source import (
     CreateCredentialRequest,
     CreateSaasSourceRequest,

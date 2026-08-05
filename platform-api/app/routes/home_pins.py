@@ -23,13 +23,13 @@ from app.database import get_db
 from app.models.home_pin import HomePin
 from app.models.project import Project, ProjectMember
 from app.models.saved_query import SavedQuery
-from app.routes.dashboards import _build_widget_sql
-from app.routes.query import (
+from app.routes.dashboards_widget_query import _build_widget_sql
+from app.routes.query_sql_helpers import (
     _auto_cast_aggregates,
     _resolve_vdb_database,
     _run_sql,
-    normalize_teiid_timestamps,
 )
+from app.services.teiid_sql import normalize_teiid_timestamps
 from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 router = APIRouter(prefix="/home-pins", tags=["Home Pins"])

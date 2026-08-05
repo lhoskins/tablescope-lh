@@ -16,7 +16,7 @@ from app.models.project import Project, ProjectMember
 from app.models.tenant import Tenant
 from app.models.tenant_data_plane import TenantDataPlane
 from app.models.user import User
-from app.routes.projects import (
+from app.routes.projects_datasources import (
     list_available_datasources,
     list_project_datasources,
 )

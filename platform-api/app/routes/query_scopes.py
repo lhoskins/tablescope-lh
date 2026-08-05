@@ -19,7 +19,11 @@ from app.database import get_db
 from app.models.project import Project
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
-from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
+from app.routes.query_sql_helpers import (
+    _auto_cast_aggregates,
+    _resolve_vdb_database,
+    _run_sql,
+)
 from app.schemas.query_scope import (
     QueryScopeCreate,
     QueryScopeFilterRequest,

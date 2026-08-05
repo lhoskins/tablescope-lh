@@ -28,7 +28,7 @@ class _FakeSupabase(SupabaseAuthService):
 
 @pytest.fixture()
 def fake_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
     yield
