@@ -35,7 +35,11 @@ from app.routes import conversational_analytics_turns as conversational_analytic
 from app.routes import dashboards_crud as dashboards_crud_routes
 from app.routes import dashboards_widget_query as dashboards_widget_query_routes
 from app.routes import data_source_assignments as data_source_assignments_routes
-from app.routes import database_sources as database_sources_routes
+from app.routes import database_sources_connection as database_sources_connection_routes
+from app.routes import database_sources_lifecycle as database_sources_lifecycle_routes
+from app.routes import (
+    database_sources_saved_connections as database_sources_saved_connections_routes,
+)
 from app.routes import document_families_curation as document_families_curation_routes
 from app.routes import document_families_reads as document_families_reads_routes
 from app.routes import document_families_summary as document_families_summary_routes
@@ -43,10 +47,16 @@ from app.routes import file_analysis as file_analysis_routes
 from app.routes import file_imports as file_imports_routes
 from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
-from app.routes import home_intelligence as home_intelligence_routes
+from app.routes import (
+    home_intelligence_dashboard_save as home_intelligence_dashboard_save_routes,
+)
+from app.routes import home_intelligence_snapshot as home_intelligence_snapshot_routes
+from app.routes import home_intelligence_suggestions as home_intelligence_suggestions_routes
+from app.routes import home_intelligence_suite as home_intelligence_suite_routes
 from app.routes import home_pins as home_pins_routes
 from app.routes import insight_chart_selection as insight_chart_selection_routes
-from app.routes import insight_feedback as insight_feedback_routes
+from app.routes import insight_feedback_crud as insight_feedback_crud_routes
+from app.routes import insight_feedback_review as insight_feedback_review_routes
 from app.routes import knowledge_graph as knowledge_graph_routes
 from app.routes import llm_framework_artifacts as llm_framework_artifacts_routes
 from app.routes import llm_framework_catalog as llm_framework_catalog_routes
@@ -62,8 +72,12 @@ from app.routes import projects as projects_routes
 from app.routes import provisioning as provisioning_routes
 from app.routes import query as query_routes
 from app.routes import query_scopes as query_scopes_routes
-from app.routes import reference_library as reference_library_routes
 from app.routes import reference_library_bulk as reference_library_bulk_routes
+from app.routes import reference_library_documents as reference_library_documents_routes
+from app.routes import (
+    reference_library_project_views as reference_library_project_views_routes,
+)
+from app.routes import reference_library_suggestions as reference_library_suggestions_routes
 from app.routes import reports as reports_routes
 from app.routes import repository_connectors as repository_connectors_routes
 from app.routes import saas_sources as saas_sources_routes
@@ -74,8 +88,14 @@ from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
 from app.routes import tenant_data_planes_crud as tenant_data_planes_crud_routes
 from app.routes import tenant_data_planes_network as tenant_data_planes_network_routes
-from app.routes import tenants as tenants_routes
-from app.routes import upload as upload_routes
+from app.routes import tenants_crud as tenants_crud_routes
+from app.routes import tenants_security_policy as tenants_security_policy_routes
+from app.routes import tenants_settings as tenants_settings_routes
+from app.routes import tenants_users as tenants_users_routes
+from app.routes import upload_core as upload_core_routes
+from app.routes import upload_datasources as upload_datasources_routes
+from app.routes import upload_replace as upload_replace_routes
+from app.routes import upload_versions as upload_versions_routes
 from app.routes import uploads as uploads_routes
 from app.routes import user_preferences as user_preferences_routes
 from app.routes import users as users_routes
@@ -352,7 +372,10 @@ def create_app() -> FastAPI:
 
     api_prefix = settings.api_prefix
     app.include_router(auth_routes.router, prefix=api_prefix)
-    app.include_router(tenants_routes.router, prefix=api_prefix)
+    app.include_router(tenants_crud_routes.router, prefix=api_prefix)
+    app.include_router(tenants_settings_routes.router, prefix=api_prefix)
+    app.include_router(tenants_security_policy_routes.router, prefix=api_prefix)
+    app.include_router(tenants_users_routes.router, prefix=api_prefix)
     # Network router first: its literal /firewall-script path must be matched
     # before the CRUD router's /{tenant_id}.
     app.include_router(tenant_data_planes_network_routes.router, prefix=api_prefix)
@@ -365,14 +388,21 @@ def create_app() -> FastAPI:
     app.include_router(scope_sets_builder_routes.router, prefix=api_prefix)
     app.include_router(sharing_routes.router, prefix=api_prefix)
     app.include_router(storage_routes.router, prefix=api_prefix)
-    app.include_router(database_sources_routes.router, prefix=api_prefix)
+    app.include_router(database_sources_connection_routes.router, prefix=api_prefix)
+    app.include_router(
+        database_sources_saved_connections_routes.router, prefix=api_prefix
+    )
+    app.include_router(database_sources_lifecycle_routes.router, prefix=api_prefix)
     app.include_router(
         data_source_assignments_routes.router, prefix=api_prefix
     )
     app.include_router(saas_sources_routes.router, prefix=api_prefix)
     app.include_router(connectors_routes.router, prefix=api_prefix)
     app.include_router(grid_preferences_routes.router, prefix=api_prefix)
-    app.include_router(upload_routes.router, prefix=api_prefix)
+    app.include_router(upload_core_routes.router, prefix=api_prefix)
+    app.include_router(upload_datasources_routes.router, prefix=api_prefix)
+    app.include_router(upload_replace_routes.router, prefix=api_prefix)
+    app.include_router(upload_versions_routes.router, prefix=api_prefix)
     app.include_router(uploads_routes.router, prefix=api_prefix)
     app.include_router(file_analysis_routes.router, prefix=api_prefix)
     app.include_router(file_imports_routes.router, prefix=api_prefix)
@@ -400,13 +430,21 @@ def create_app() -> FastAPI:
     app.include_router(billing_routes.router, prefix=api_prefix)
     app.include_router(billing_admin_routes.router, prefix=api_prefix)
     app.include_router(provisioning_routes.router, prefix=api_prefix)
-    app.include_router(home_intelligence_routes.router, prefix=api_prefix)
+    app.include_router(home_intelligence_suite_routes.router, prefix=api_prefix)
+    app.include_router(home_intelligence_snapshot_routes.router, prefix=api_prefix)
+    app.include_router(home_intelligence_suggestions_routes.router, prefix=api_prefix)
+    app.include_router(home_intelligence_dashboard_save_routes.router, prefix=api_prefix)
     app.include_router(home_pins_routes.router, prefix=api_prefix)
     app.include_router(insight_chart_selection_routes.router, prefix=api_prefix)
     app.include_router(conversational_analytics_conversations_routes.router, prefix=api_prefix)
     app.include_router(conversational_analytics_turns_routes.router, prefix=api_prefix)
-    app.include_router(insight_feedback_routes.router, prefix=api_prefix)
-    app.include_router(reference_library_routes.router, prefix=api_prefix)
+    # Review router first: its literal /review paths must be matched before the
+    # CRUD router's /{insight_id}.
+    app.include_router(insight_feedback_review_routes.router, prefix=api_prefix)
+    app.include_router(insight_feedback_crud_routes.router, prefix=api_prefix)
+    app.include_router(reference_library_documents_routes.router, prefix=api_prefix)
+    app.include_router(reference_library_project_views_routes.router, prefix=api_prefix)
+    app.include_router(reference_library_suggestions_routes.router, prefix=api_prefix)
     app.include_router(reference_library_bulk_routes.router, prefix=api_prefix)
     app.include_router(repository_connectors_routes.router, prefix=api_prefix)
     app.include_router(reports_routes.router, prefix=api_prefix)

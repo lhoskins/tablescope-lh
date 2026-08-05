@@ -122,7 +122,7 @@ async def get_project_insight(
     then re-runs with ``refresh=true`` in the background and commits the fresh
     result only once the run completes. A completed run overwrites the snapshot.
     """
-    from app.routes.home_intelligence import _make_runner
+    from app.routes.home_intelligence_suite import _make_runner
 
     project = await _require_project_access(project_id, session, context)
 
