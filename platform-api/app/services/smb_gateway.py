@@ -10,6 +10,11 @@ pure and does all of the traversal/allowlist enforcement, which is what the
 security tests exercise. :func:`read_network_file` then performs the SMB2/SMB3
 read (``smbprotocol`` speaks no SMB1 and no NTLMv1) with signing and, where
 the server supports it, encryption required.
+
+To satisfy tenant-bound egress (Gate C) the socket used for SMB is bound to the
+worker's IP inside the tenant's Docker network.  The host's ``DOCKER-USER``
+per-tenant firewall chain can then classify the traffic by source subnet and
+only allow the on-prem CIDRs approved for that tenant.
 """
 
 from __future__ import annotations
@@ -17,6 +22,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import socket as _socket
+import threading
 from dataclasses import dataclass
 
 from app.config import get_settings
@@ -24,6 +31,24 @@ from app.models.network_file_connection import NetworkFileConnection
 from app.services.crypto import decrypt_secret
 
 logger = logging.getLogger(__name__)
+
+#: Thread-local source address used to bind SMB sockets to a tenant network.
+_thread_source = threading.local()
+_orig_create_connection = _socket.create_connection
+
+
+def _create_connection_bound(address, timeout=None, source_address=None):
+    """Wrap ``socket.create_connection`` to inject a per-thread source IP."""
+    if source_address is None:
+        bound = getattr(_thread_source, "source_address", None)
+        if bound:
+            source_address = bound
+    return _orig_create_connection(address, timeout, source_address)
+
+
+# Install once. Only calls that set the thread-local source address are
+# affected; all other callers fall through to the original function.
+_socket.create_connection = _create_connection_bound  # type: ignore[assignment]
 
 #: Shares that are never importable — they expose the whole host filesystem.
 ADMINISTRATIVE_SHARES = frozenset({"c$", "d$", "admin$", "ipc$", "print$"})
@@ -168,9 +193,22 @@ def resolve_network_path(
     )
 
 
-def _register_session(connection: NetworkFileConnection) -> None:
+def _set_thread_source_address(source_ip: str | None) -> None:
+    """Bind any socket created in this thread to ``(source_ip, 0)``."""
+    if source_ip:
+        _thread_source.source_address = (source_ip, 0)
+    else:
+        _thread_source.source_address = None
+
+
+def _clear_thread_source_address() -> None:
+    _thread_source.source_address = None
+
+
+def _register_session(connection: NetworkFileConnection, source_ip: str | None) -> None:
     import smbclient
 
+    _set_thread_source_address(source_ip)
     password = (
         decrypt_secret(connection.secret_encrypted)
         if connection.secret_encrypted
@@ -180,27 +218,31 @@ def _register_session(connection: NetworkFileConnection) -> None:
     if username and connection.domain:
         username = f"{connection.domain}\\{username}"
     # smbprotocol negotiates SMB 2.0.2+ only; SMB1/NTLMv1 are not implemented.
-    smbclient.register_session(
-        connection.host,
-        username=username,
-        password=password,
-        port=connection.port,
-        encrypt=connection.require_encryption,
-        require_signing=connection.require_signing,
-        auth_protocol="negotiate",
-    )
+    try:
+        smbclient.register_session(
+            connection.host,
+            username=username,
+            password=password,
+            port=connection.port,
+            encrypt=connection.require_encryption,
+            require_signing=connection.require_signing,
+            auth_protocol="negotiate",
+        )
+    finally:
+        _clear_thread_source_address()
 
 
 def _read_blocking(
     resolved: ResolvedNetworkPath,
     connection: NetworkFileConnection,
     max_bytes: int,
+    source_ip: str | None,
 ) -> bytes:
     import smbclient
     from smbprotocol.exceptions import SMBOSError, SMBResponseException
 
     try:
-        _register_session(connection)
+        _register_session(connection, source_ip)
         chunks: list[bytes] = []
         total = 0
         with smbclient.open_file(resolved.unc_path, mode="rb") as handle:
@@ -232,7 +274,7 @@ def _read_blocking(
         raise NetworkPathError(
             "ACCESS_DENIED", "That file could not be read from the network location."
         ) from exc
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         logger.info("SMB connection failed for host %s", resolved.host)
         raise NetworkPathError(
             "HOST_UNREACHABLE", "The network location could not be reached."
@@ -249,21 +291,30 @@ async def read_network_file(
     connection: NetworkFileConnection,
     *,
     max_bytes: int | None = None,
+    source_ip: str | None = None,
 ) -> bytes:
-    """Read an approved network file into memory, off the event loop."""
+    """Read an approved network file into memory, off the event loop.
+
+    When ``source_ip`` is provided, the SMB socket is bound to that address so
+    the host firewall can classify the traffic as belonging to the correct
+    tenant Docker network.
+    """
     limit = max_bytes or get_settings().file_import_max_bytes
-    return await asyncio.to_thread(_read_blocking, resolved, connection, limit)
+    return await asyncio.to_thread(_read_blocking, resolved, connection, limit, source_ip)
 
 
-async def test_network_access(
-    connection: NetworkFileConnection, raw_path: str | None = None
+async def check_network_access(
+    connection: NetworkFileConnection,
+    raw_path: str | None = None,
+    *,
+    source_ip: str | None = None,
 ) -> dict[str, object]:
     """Verify a connection (and optionally one path) without importing bytes."""
 
     def _probe() -> dict[str, object]:
         import smbclient
 
-        _register_session(connection)
+        _register_session(connection, source_ip)
         try:
             if raw_path:
                 resolved = resolve_network_path(raw_path, connection)

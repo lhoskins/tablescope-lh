@@ -1,0 +1,51 @@
+services:
+  samba:
+    build:
+      context: ./samba
+      dockerfile: Dockerfile
+    image: tablescope/vpn-smb-e2e-samba:latest
+    container_name: tablescope-vpn-smb-e2e-samba
+    restart: unless-stopped
+    # No public ports; reachable only from the gateway host / VPN tunnel.
+    networks:
+      smb-internal:
+        ipv4_address: 10.250.20.20
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    environment:
+      TZ: UTC
+      SAMBA_PASSWORD: ${SAMBA_PASSWORD:?SAMBA_PASSWORD is required}
+    volumes:
+      - type: bind
+        source: ${TABLESCOPE_REPO_ROOT:-/srv/repository}
+        target: /srv/repository
+        read_only: true
+
+  strongswan:
+    image: ${STRONGSWAN_IMAGE:-ghcr.io/akafeng/strongswan:5.9}
+    container_name: tablescope-vpn-smb-e2e-strongswan
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    read_only: true
+    environment:
+      TZ: UTC
+    volumes:
+      - type: bind
+        source: ${STRONGSWAN_CONFIG_DIR:-./strongswan}
+        target: /etc/swanctl
+        read_only: true
+
+networks:
+  smb-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.250.20.0/24

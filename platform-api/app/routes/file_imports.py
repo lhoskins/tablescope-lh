@@ -24,7 +24,8 @@ from app.models.network_file_connection import NetworkFileConnection
 from app.services import file_ingestion
 from app.services.crypto import encrypt_secret
 from app.services.file_ingestion import FileImportError
-from app.services.smb_gateway import NetworkPathError, test_network_access
+from app.services.smb_gateway import NetworkPathError, check_network_access
+from app.services.tenant_network_source_ip import get_tenant_source_ip
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/data-sources/imports", tags=["file-imports"])
@@ -205,8 +206,9 @@ async def test_network_path(
     connection = await _load_connection(
         session, req.connection_id, context.tenant_id
     )
+    source_ip = await get_tenant_source_ip(session, context.tenant_id)
     try:
-        return await test_network_access(connection, req.path)
+        return await check_network_access(connection, req.path, source_ip=source_ip)
     except NetworkPathError as exc:
         raise _http_error(exc.code, exc.message) from exc
 
@@ -392,7 +394,7 @@ async def test_connection(
 
     connection = await _load_connection(session, connection_id, context.tenant_id)
     try:
-        result = await test_network_access(connection)
+        result = await check_network_access(connection)
     except NetworkPathError as exc:
         connection.last_test_status = "failed"
         connection.last_test_message_safe = exc.message

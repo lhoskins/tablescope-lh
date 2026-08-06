@@ -8,6 +8,7 @@ from app.models.file_import_job import FileImportJob
 from app.models.network_file_connection import NetworkFileConnection
 from app.services.safe_remote_fetch import RemoteFetchError
 from app.services.smb_gateway import NetworkPathError, resolve_network_path
+from app.services.tenant_network_source_ip import get_tenant_source_ip
 
 from .staging import FileImportError, SafeProvenance, StagedFile, _new_job, _stage
 
@@ -119,9 +120,12 @@ async def acquire_network_path(
     try:
         resolved = resolve_network_path(path, connection)
         job.status = "fetching"
+        source_ip = await get_tenant_source_ip(session, tenant_id)
         import app.services.file_ingestion as _fi
 
-        data = await _fi.read_network_file(resolved, connection)
+        data = await _fi.read_network_file(
+            resolved, connection, source_ip=source_ip
+        )
     except NetworkPathError as exc:
         raise FileImportError(exc.code, exc.message) from exc
 

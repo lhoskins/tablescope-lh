@@ -1,0 +1,112 @@
+"""Determine the local IP address the shared worker should use for a tenant.
+
+When the `platform-api-worker` container is connected to a tenant's Docker
+network, it gets an interface inside that tenant's subnet. Binding outbound
+SMB sockets to that IP lets the host's `DOCKER-USER` tenant firewall chain
+classify the traffic by source subnet and enforce that the process can only
+reach that tenant's approved on-prem CIDRs.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import json
+import logging
+import subprocess
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.tenant_data_plane import TenantDataPlane
+
+logger = logging.getLogger(__name__)
+
+
+def _ipv4_in_cidr(ip_str: str, network_str: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip_str) in ipaddress.ip_network(network_str)
+    except ValueError:
+        return False
+
+
+def _parse_ip_json(output: str) -> list[dict[str, Any]]:
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(parsed, dict):
+        return [parsed]
+    return parsed if isinstance(parsed, list) else []
+
+
+def _parse_ip_text(output: str) -> list[str]:
+    """Fallback text parser for ``ip -4 addr show`` output."""
+    ips: list[str] = []
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("inet "):
+            # Format: inet 172.30.10.2/24 brd ...
+            parts = line.split()
+            if len(parts) >= 2:
+                ips.append(parts[1].split("/")[0])
+    return ips
+
+
+def _list_local_ipv4() -> list[str]:
+    """Return all local IPv4 addresses visible to the current namespace."""
+    # Prefer JSON output for robustness; fall back to text parsing.
+    for cmd in (
+        ["ip", "-4", "-json", "addr", "show"],
+        ["ip", "-4", "addr", "show"],
+    ):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                if cmd[2] == "-json":
+                    ips: list[str] = []
+                    for iface in _parse_ip_json(result.stdout):
+                        for addr in iface.get("addr_info", []):
+                            if addr.get("family") == "inet" and "local" in addr:
+                                ips.append(addr["local"])
+                    return ips
+                return _parse_ip_text(result.stdout)
+        except FileNotFoundError:
+            continue
+        except subprocess.TimeoutExpired:
+            logger.warning("Timeout listing local IP addresses")
+    return []
+
+
+def find_source_ip_for_cidr(docker_subnet_cidr: str) -> str | None:
+    """Return a local IPv4 address that belongs to ``docker_subnet_cidr``.
+
+    Returns ``None`` when the worker is not connected to the tenant network.
+    """
+    if not docker_subnet_cidr:
+        return None
+    for ip in _list_local_ipv4():
+        if _ipv4_in_cidr(ip, docker_subnet_cidr):
+            return ip
+    return None
+
+
+async def get_tenant_source_ip(session: AsyncSession, tenant_id: int) -> str | None:
+    """Find the worker's IP in the tenant Docker network.
+
+    ``tenant_id`` is the application-level integer tenant id (the ``tenants.id``
+    column). It is mapped through ``TenantDataPlane.org_tenant_id``.
+    """
+    plane = await session.scalar(
+        select(TenantDataPlane).where(TenantDataPlane.org_tenant_id == tenant_id)
+    )
+    if plane is None:
+        logger.debug("No TenantDataPlane for tenant %s", tenant_id)
+        return None
+    return find_source_ip_for_cidr(plane.docker_subnet_cidr)
