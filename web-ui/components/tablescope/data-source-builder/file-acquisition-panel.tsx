@@ -5,15 +5,13 @@ import { useQuery } from "@tanstack/react-query";
 import {
   IconCloudUpload,
   IconLink,
-  IconServer,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import { getImportCapabilities } from "@/lib/api/data-source-builder";
 import { AiUploadDropzone } from "./ai-upload-dropzone";
-import { NetworkImportForm } from "./network-import-form";
 import { UrlImportForm } from "./url-import-form";
 
-type Method = "local" | "url" | "network";
+type Method = "local" | "url";
 
 export function FileAcquisitionPanel({
   onUploadsDone,
@@ -42,12 +40,6 @@ export function FileAcquisitionPanel({
           hint: "Secure https link",
           icon: IconLink,
         },
-        {
-          key: "network" as const,
-          label: "Network path",
-          hint: "Approved location",
-          icon: IconServer,
-        },
       ] as { key: Method; label: string; hint: string; icon: typeof IconCloudUpload }[],
     [],
   );
@@ -55,7 +47,6 @@ export function FileAcquisitionPanel({
   const enabled: Record<Method, boolean> = {
     local: true,
     url: capabilities?.url_import_enabled ?? false,
-    network: capabilities?.network_import_enabled ?? false,
   };
 
   return (
@@ -124,13 +115,6 @@ export function FileAcquisitionPanel({
           <AiUploadDropzone onUploadsDone={onUploadsDone} />
         )}
         {method === "url" && <UrlImportForm onImported={onUploadsDone} />}
-        {method === "network" && (
-          <NetworkImportForm
-            connections={capabilities?.network_connections ?? []}
-            hosts={capabilities?.network_hosts ?? []}
-            onImported={onUploadsDone}
-          />
-        )}
       </div>
     </section>
   );
