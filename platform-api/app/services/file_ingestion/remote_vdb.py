@@ -62,8 +62,12 @@ def _view_marker() -> str:
 
 def remove_remote_view(vdb_xml: str, view_name: str) -> str:
     """Remove an existing remote view with the same name from the MyCompany model."""
+    # Match from CREATE VIEW through the terminating semicolon.  The DDL column
+    # list contains parentheses inside OPTIONS(...) so a balanced-paren regex is
+    # not safe; a non-greedy match to the next semicolon works because Teiid DDL
+    # emitted here never contains an embedded semicolon.
     pattern = re.compile(
-        rf'CREATE VIEW\s+"{re.escape(view_name)}"\s*\([^)]*\)\s*AS\s*SELECT.*?;',
+        rf'CREATE VIEW\s+"{re.escape(view_name)}"\s+.*?;',
         re.DOTALL,
     )
     return pattern.sub("", vdb_xml)
