@@ -25,6 +25,11 @@ public class RemoteFileConnectionImpl extends JavaVirtualFileConnection implemen
     public VirtualFile[] getFiles(String pattern) throws TranslatorException {
         if (pattern != null && pattern.startsWith(REMOTE_PREFIX)) {
             String token = pattern.substring(REMOTE_PREFIX.length());
+            // Allow a "ds:" namespace prefix so the VDB pattern remote://ds:{id}
+            // is resolved to the platform FileSourceMeta primary key.
+            if (token.startsWith("ds:")) {
+                token = token.substring(3);
+            }
             return new VirtualFile[] { new RemoteVirtualFile(pattern, token, proxyBaseUrl, proxyApiKey) };
         }
         // Remote file connections are read-only and only understand remote:// patterns.

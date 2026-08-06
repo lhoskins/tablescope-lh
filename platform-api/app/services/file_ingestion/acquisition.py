@@ -156,7 +156,9 @@ async def acquire_network_path(
     job.live_source_params = {
         "type": "network_path",
         "connection_id": connection.id,
-        "path": resolved.relative_path,
+        # Store a fully-qualified locator so the remote-file proxy can re-resolve
+        # it against the saved connection without needing extra context.
+        "path": f"//{connection.host}/{connection.share_name}/{resolved.relative_path}",
     }
     await session.flush()
     return job, staged
