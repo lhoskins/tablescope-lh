@@ -88,6 +88,38 @@ export interface NetworkHost {
   enabled: boolean;
 }
 
+export interface NetworkFileConnection {
+  id: number;
+  name: string;
+  label: string;
+  host: string;
+  port: number;
+  share_name: string;
+  approved_root_path: string;
+  domain: string | null;
+  username: string | null;
+  has_secret: boolean;
+  require_signing: boolean;
+  require_encryption: boolean;
+  enabled: boolean;
+  last_test_status: string | null;
+  last_test_message: string | null;
+}
+
+export interface NetworkFileConnectionCreate {
+  name: string;
+  host: string;
+  share_name: string;
+  approved_root_path?: string;
+  port?: number;
+  domain?: string;
+  username?: string;
+  password?: string;
+  require_signing?: boolean;
+  require_encryption?: boolean;
+  enabled?: boolean;
+}
+
 export interface NetworkFileEntry {
   name: string;
   path: string;

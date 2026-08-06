@@ -6,30 +6,20 @@ import {
   IconCloudUpload,
   IconLink,
   IconServer,
-  IconShield,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
-import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { getImportCapabilities } from "@/lib/api/data-source-builder";
 import { AiUploadDropzone } from "./ai-upload-dropzone";
 import { NetworkImportForm } from "./network-import-form";
-import { NetworkSecurityPanel } from "./network-security-panel";
 import { UrlImportForm } from "./url-import-form";
 
-type Method = "local" | "url" | "network" | "security";
+type Method = "local" | "url" | "network";
 
 export function FileAcquisitionPanel({
   onUploadsDone,
 }: {
   onUploadsDone?: () => void;
 }) {
-  const { data: identity } = useCurrentUser();
-  const isAdmin =
-    identity?.user.isSuperAdmin ||
-    ["admin", "tenant_admin", "root_admin"].includes(
-      identity?.user.rawRole ?? "",
-    );
-
   const [method, setMethod] = useState<Method>("local");
   const { data: capabilities } = useQuery({
     queryKey: ["builder", "import-capabilities"],
@@ -58,36 +48,21 @@ export function FileAcquisitionPanel({
           hint: "Approved location",
           icon: IconServer,
         },
-        ...(isAdmin
-          ? [
-              {
-                key: "security" as const,
-                label: "Security",
-                hint: "Allowed SMB hosts",
-                icon: IconShield,
-              },
-            ]
-          : []),
       ] as { key: Method; label: string; hint: string; icon: typeof IconCloudUpload }[],
-    [isAdmin],
+    [],
   );
 
   const enabled: Record<Method, boolean> = {
     local: true,
     url: capabilities?.url_import_enabled ?? false,
     network: capabilities?.network_import_enabled ?? false,
-    security: true,
   };
 
   return (
     <section className="rounded-xl border border-line-tertiary p-4">
-      <h3 className="text-h3 text-ink-primary">
-        {method === "security" ? "Security" : "Add files"}
-      </h3>
+      <h3 className="text-h3 text-ink-primary">Add files</h3>
       <p className="mt-0.5 text-small text-ink-tertiary">
-        {method === "security"
-          ? "Manage the SMB hosts that are approved for network file imports."
-          : "Upload from this computer, import from a secure file URL, or pull from an approved network location."}
+        Upload from this computer, import from a secure file URL, or pull from an approved network location.
       </p>
 
       <div
@@ -156,7 +131,6 @@ export function FileAcquisitionPanel({
             onImported={onUploadsDone}
           />
         )}
-        {method === "security" && <NetworkSecurityPanel />}
       </div>
     </section>
   );
