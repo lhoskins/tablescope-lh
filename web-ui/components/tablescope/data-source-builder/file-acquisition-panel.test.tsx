@@ -8,15 +8,10 @@ import { sessionSourceFromPreview } from "./import-source";
 
 const capabilities = vi.hoisted(() => vi.fn());
 const importFromUrl = vi.hoisted(() => vi.fn());
-const importFromNetwork = vi.hoisted(() => vi.fn());
-const testNetworkPath = vi.hoisted(() => vi.fn());
-
 vi.mock("@/lib/api/data-source-builder", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/data-source-builder")>()),
   getImportCapabilities: capabilities,
   importFromUrl,
-  importFromNetwork,
-  testNetworkPath,
   analyzeFile: vi.fn(),
 }));
 
@@ -58,19 +53,13 @@ function renderPanel() {
 const ALL_ENABLED = {
   local_upload_enabled: true,
   url_import_enabled: true,
-  network_import_enabled: true,
   max_file_size_bytes: 104857600,
   malware_scanning_enabled: true,
-  network_connections: [
-    { id: 4, name: "Finance", label: "\\\\fileserver\\data" },
-  ],
 };
 
 beforeEach(() => {
   capabilities.mockResolvedValue(ALL_ENABLED);
   importFromUrl.mockReset();
-  importFromNetwork.mockReset();
-  testNetworkPath.mockReset();
   useBuilderStore.setState({ sources: [], createdKeys: [] });
   window.localStorage.clear();
 });
@@ -80,13 +69,12 @@ afterEach(() => {
 });
 
 describe("FileAcquisitionPanel", () => {
-  it("offers all three acquisition methods with upload selected first", async () => {
+  it("offers upload and URL acquisition methods with upload selected first", async () => {
     renderPanel();
     const tabs = await screen.findAllByRole("tab");
     expect(tabs.map((t) => t.textContent)).toEqual([
       expect.stringContaining("Upload file"),
       expect.stringContaining("File URL"),
-      expect.stringContaining("Network path"),
     ]);
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
@@ -96,22 +84,18 @@ describe("FileAcquisitionPanel", () => {
     expect(screen.queryByLabelText(/File URL \(https only\)/)).toBeNull();
     await openTab(/File URL/);
     expect(screen.getByLabelText(/File URL \(https only\)/)).toBeTruthy();
-    expect(screen.queryByLabelText(/Network path/)).toBeNull();
   });
 
   it("disables methods the deployment has not enabled", async () => {
     capabilities.mockResolvedValue({
       ...ALL_ENABLED,
       url_import_enabled: false,
-      network_import_enabled: false,
-      network_connections: [],
     });
     renderPanel();
     await waitFor(() =>
       expect(screen.getByRole("tab", { name: /File URL/ })).toBeDisabled(),
     );
-    expect(screen.getByRole("tab", { name: /Network path/ })).toBeDisabled();
-    expect(screen.getAllByText("Not enabled")).toHaveLength(2);
+    expect(screen.getByText("Not enabled")).toBeTruthy();
   });
 });
 
@@ -177,58 +161,16 @@ describe("URL import form", () => {
 });
 
 describe("Network import form", () => {
-  async function openNetworkForm() {
+  // Network file import was moved out of FileAcquisitionPanel into a dedicated
+  // "Network Repositories" connector card in the builder workspace.  The URL
+  // import tests above cover the remaining in-panel path.
+  it("is no longer rendered inside the acquisition panel", async () => {
     renderPanel();
-    await openTab(/Network path/);
-    return screen.getByLabelText("Network path");
-  }
-
-  it("offers saved credentials by name only, with no password field", async () => {
-    await openNetworkForm();
-    expect(screen.getByLabelText("Saved credential")).toBeTruthy();
-    expect(
-      screen.getByRole("option", { name: /Finance/ }),
-    ).toBeTruthy();
-    expect(document.querySelector('input[type="password"]')).toBeNull();
-  });
-
-  it("requires a UNC or smb:// path", async () => {
-    const input = await openNetworkForm();
-    fireEvent.change(input, { target: { value: "/home/me/sales.csv" } });
-    expect(screen.getByText(/Use a UNC path/)).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /Import & analyze/ }),
-    ).toBeDisabled();
-  });
-
-  it("imports an approved path and records the network origin", async () => {
-    importFromNetwork.mockResolvedValue({
-      ...PREVIEW,
-      acquisition_method: "network_path",
-      source_host: "fileserver",
-    });
-    const input = await openNetworkForm();
-    fireEvent.change(input, {
-      target: { value: "\\\\fileserver\\data\\finance\\sales.csv" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /Import & analyze/ }));
-
-    await waitFor(() =>
-      expect(importFromNetwork).toHaveBeenCalledWith(
-        4,
-        "\\\\fileserver\\data\\finance\\sales.csv",
-      ),
+    const tabs = await screen.findAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).not.toContain(
+      expect.stringMatching(/Network path/),
     );
-    const source = useBuilderStore.getState().sources[0];
-    expect(source.fileMetadata?.acquisitionMethod).toBe("network_path");
-    expect(source.fileMetadata?.sourceHost).toBe("fileserver");
-  });
-
-  it("explains that no approved locations exist yet", async () => {
-    capabilities.mockResolvedValue({ ...ALL_ENABLED, network_connections: [] });
-    renderPanel();
-    await openTab(/Network path/);
-    expect(screen.getByText(/No approved network locations yet/)).toBeTruthy();
+    expect(screen.queryByLabelText("Network path")).toBeNull();
   });
 });
 
