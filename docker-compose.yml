@@ -170,6 +170,7 @@ services:
     networks:
       - default
       - tenant_acme_net
+      - tenant_vpn-smb-e2e_net
 
   platform-api-worker:
     build:
@@ -194,6 +195,9 @@ services:
     depends_on:
       - redis
       - platform-api
+    networks:
+      - default
+      - tenant_vpn-smb-e2e_net
 
   platform-api-migrate:
     build:
@@ -356,4 +360,6 @@ volumes:
 networks:
   default:
   tenant_acme_net:
+    external: true
+  tenant_vpn-smb-e2e_net:
     external: true
