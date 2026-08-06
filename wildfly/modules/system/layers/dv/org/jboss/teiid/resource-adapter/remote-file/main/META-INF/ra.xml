@@ -51,6 +51,11 @@
 
          <transaction-support>NoTransaction</transaction-support>
 
+         <authentication-mechanism>
+            <authentication-mechanism-type>BasicPassword</authentication-mechanism-type>
+            <credential-interface>javax.resource.spi.security.PasswordCredential</credential-interface>
+         </authentication-mechanism>
+
          <reauthentication-support>false</reauthentication-support>
       </outbound-resourceadapter>
    </resourceadapter>
