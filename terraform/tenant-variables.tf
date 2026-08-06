@@ -1,3 +1,15 @@
+variable "enable_network_hub" {
+  description = <<-EOT
+    Explicitly control the shared Transit Gateway / network hub lifecycle.
+    When null (default), the hub is enabled automatically whenever at least one
+    tenant is configured. Set to true to keep the hub even with zero tenants,
+    or false to disable it entirely. Decommissioning the last tenant must set
+    this to true to avoid unintentionally destroying the shared hub.
+  EOT
+  type    = bool
+  default = null
+}
+
 variable "tenants" {
   description = <<-EOT
     Map of tenant data planes to provision, keyed by tenant_id. Empty by

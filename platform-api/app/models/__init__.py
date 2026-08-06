@@ -127,6 +127,10 @@ from app.models.tenant_ai_governance import (
     TenantAIMethodPolicy,
 )
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
+from app.models.tenant_decommission import (
+    TenantDecommissionEvent,
+    TenantDecommissionJob,
+)
 from app.models.tenant_membership import TenantAuthBinding, TenantMembership
 from app.models.user import User
 from app.models.user_vdb import UserVDB
@@ -234,6 +238,8 @@ __all__ = [
     "TenantCustomKPI",
     "TenantCustomTag",
     "TenantDataPlane",
+    "TenantDecommissionEvent",
+    "TenantDecommissionJob",
     "TenantMembership",
     "TenantProvisioningRequest",
     "TenantReferenceCatalog",

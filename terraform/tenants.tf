@@ -10,12 +10,13 @@
 # Route table associated with the shared EC2 subnet (used to add on-prem routes
 # pointing at the Transit Gateway).
 data "aws_route_table" "shared" {
-  count     = length(var.tenants) > 0 ? 1 : 0
+  count     = local.tenants_enabled ? 1 : 0
   subnet_id = local.subnet_id
 }
 
 locals {
-  tenants_enabled = length(var.tenants) > 0
+  tenants_enabled    = length(var.tenants) > 0
+  network_hub_enabled = var.enable_network_hub != null ? var.enable_network_hub : local.tenants_enabled
 
   # Flatten every tenant's on-prem CIDRs into route entries for the shared
   # subnet route table: { "<tenant>-<idx>" = { route_table_id, cidr } }.
@@ -32,7 +33,7 @@ locals {
 
 module "network_hub" {
   source = "./modules/network-hub"
-  count  = local.tenants_enabled ? 1 : 0
+  count  = local.network_hub_enabled ? 1 : 0
 
   shared_vpc_id                   = data.aws_vpc.selected.id
   shared_subnet_ids               = [local.subnet_id]

@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.auth.mfa_errors import MfaRequiredError, mfa_required_handler
 from app.auth.middleware import SESSION_TOKEN_HEADER, AuthMiddleware
+from app.auth.tenant_lifecycle import TenantLifecycleMiddleware
 from app.config import get_settings
 from app.logging_config import configure_logging
 from app.observability import mount_metrics, setup_sentry
@@ -95,6 +96,7 @@ from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
 from app.routes import tenant_data_planes_crud as tenant_data_planes_crud_routes
 from app.routes import tenant_data_planes_network as tenant_data_planes_network_routes
+from app.routes import tenant_decommission as tenant_decommission_routes
 from app.routes import tenants_crud as tenants_crud_routes
 from app.routes import tenants_security_policy as tenants_security_policy_routes
 from app.routes import tenants_settings as tenants_settings_routes
@@ -339,6 +341,7 @@ def create_app() -> FastAPI:
         # session dies at the TTL regardless of activity.
         expose_headers=[SESSION_TOKEN_HEADER],
     )
+    app.add_middleware(TenantLifecycleMiddleware)
     app.add_middleware(AuthMiddleware)
 
     app.add_exception_handler(MfaRequiredError, mfa_required_handler)
@@ -387,6 +390,7 @@ def create_app() -> FastAPI:
     # before the CRUD router's /{tenant_id}.
     app.include_router(tenant_data_planes_network_routes.router, prefix=api_prefix)
     app.include_router(tenant_data_planes_crud_routes.router, prefix=api_prefix)
+    app.include_router(tenant_decommission_routes.router, prefix=api_prefix)
     # Aggregate reads first: their literal paths (e.g. ``/summaries``) must be
     # matched before ``/{project_id}`` in projects_crud.
     app.include_router(projects_aggregates_routes.router, prefix=api_prefix)
