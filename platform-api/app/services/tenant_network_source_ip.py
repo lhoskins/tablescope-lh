@@ -71,12 +71,12 @@ def _list_local_ipv4() -> list[str]:
             )
             if result.returncode == 0:
                 if cmd[2] == "-json":
-                    ips: list[str] = []
+                    ip_list: list[str] = []
                     for iface in _parse_ip_json(result.stdout):
                         for addr in iface.get("addr_info", []):
                             if addr.get("family") == "inet" and "local" in addr:
-                                ips.append(addr["local"])
-                    return ips
+                                ip_list.append(addr["local"])
+                    return ip_list
                 return _parse_ip_text(result.stdout)
         except FileNotFoundError:
             continue
