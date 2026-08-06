@@ -160,7 +160,10 @@ async def _deploy_remote_view(
         pg_port=getattr(endpoint, "pg_port", None) or None,
     )
     try:
-        await vdb_svc.redeploy_vdb(str(vdb_id), vdb_file_path=vdb_file_path)
+        # Let the servlet locate the VDB file inside the Teiid container; passing
+        # the platform-api host path would fail because the container filesystem
+        # is mounted at a different absolute path.
+        await vdb_svc.redeploy_vdb(str(vdb_id))
     except VDBProvisioningError as exc:
         raise FileImportError("TEIID_IMPORT_FAILED", str(exc)) from exc
     finally:
