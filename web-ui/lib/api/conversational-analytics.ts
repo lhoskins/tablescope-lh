@@ -49,6 +49,8 @@ export interface Conversation {
   title: string;
   status: string;
   active_datasource_id: number | null;
+  canonical_key: string | null;
+  merged_into_conversation_id: number | null;
   turns: ConversationTurn[];
   updated_at: string;
 }
@@ -59,6 +61,8 @@ export interface ConversationSummary {
   surface: string;
   title: string;
   status: string;
+  canonical_key: string | null;
+  merged_into_conversation_id: number | null;
   updated_at: string;
 }
 
@@ -75,6 +79,22 @@ export interface SubmitTurnRequest {
   message: string;
   data_source_id?: number;
   client_request_id?: string;
+}
+
+export interface SubmitCanonicalTurnRequest {
+  surface: "business_insights" | "project_insights";
+  project_id?: number;
+  message: string;
+  data_source_id?: number;
+  client_request_id: string;
+}
+
+export interface SubmitCanonicalTurnResponse {
+  conversation_id: number;
+  conversation_created: boolean;
+  surface: string;
+  project_id: number | null;
+  turn: ConversationTurn;
 }
 
 export interface RenameConversationRequest {
@@ -135,6 +155,15 @@ export function retryTurn(
   return apiClient.post<{ conversation_id: number; turn: ConversationTurn }>(
     `/api/conversational-analytics/conversations/${conversationId}/turns/${turnId}/retry`,
     {}
+  );
+}
+
+export function submitCanonicalTurn(
+  data: SubmitCanonicalTurnRequest
+): Promise<SubmitCanonicalTurnResponse> {
+  return apiClient.post<SubmitCanonicalTurnResponse>(
+    "/api/conversational-analytics/canonical-turns",
+    data
   );
 }
 

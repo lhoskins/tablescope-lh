@@ -26,17 +26,15 @@ import { suggestInsights, type InsightCard } from "@/lib/api/home-intelligence";
 
 import { projectInsightApi, type ProjectInsight } from "@/lib/api/project-insight";
 import {
-  createConversation,
   getConversation,
-  submitTurn,
-  type Conversation,
+  submitCanonicalTurn,
   type ConversationTurn,
 } from "@/lib/api/conversational-analytics";
+import { buildAiAssistantHref } from "@/lib/navigation/ai-assistant";
 import {
   CreateActionFromInsightDialog,
   type ActionableInsight,
 } from "@/components/tablescope/project-actions/create-action-from-insight-dialog";import { INSIGHT_KEY } from "./project-insight-screen/insight-key";
-import { PROJECT_INSIGHTS_TITLE } from "./project-insight-screen/project-insights-title";
 import { EMPTY_PROJECT_INSIGHT } from "./project-insight-screen/empty-project-insight";
 import { cardToActionableInsight } from "./project-insight-screen/card-to-actionable-insight";
 import { LoadingState } from "./project-insight-screen/loading-state";
@@ -238,7 +236,8 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
   );
 
   // Project-scoped Ask Anything conversation, persisted under "Project Insights".
-  const [chatConversation, setChatConversation] = useState<Conversation | null>(null);
+  const [chatConversationId, setChatConversationId] = useState<number | null>(null);
+  const [chatTurns, setChatTurns] = useState<ConversationTurn[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [chatPending, setChatPending] = useState<string | null>(null);
@@ -248,25 +247,26 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
       setChatBusy(true);
       setChatError(null);
       setChatPending(message);
+      const requestId = crypto.randomUUID();
       try {
-        if (!chatConversation) {
-          const created = await createConversation({
-            project_id: projectIdNum,
-            title: PROJECT_INSIGHTS_TITLE,
-            surface: "project_insights",
-            initial_message: message,
-          });
-          const polled = await pollConversation(created.id);
-          setChatConversation(polled);
-        } else {
-          const res = await submitTurn(chatConversation.id, { message });
-          setChatConversation((prev) => {
-            if (!prev) return prev;
-            const turns: ConversationTurn[] = [...prev.turns, res.turn];
-            return { ...prev, turns, updated_at: new Date().toISOString() };
-          });
+        const res = await submitCanonicalTurn({
+          surface: "project_insights",
+          project_id: projectIdNum,
+          message,
+          client_request_id: requestId,
+        });
+        setChatConversationId(res.conversation_id);
+        setChatTurns((prev) => {
+          const exists = prev.some((t) => t.id === res.turn.id);
+          return exists ? prev : [...prev, res.turn];
+        });
+        if (res.turn.status === "pending") {
           const polled = await pollConversation(res.conversation_id);
-          setChatConversation(polled);
+          const updated = polled.turns.find((t) => t.id === res.turn.id) ??
+            polled.turns[polled.turns.length - 1];
+          setChatTurns((prev) =>
+            prev.map((t) => (t.id === updated.id ? updated : t))
+          );
         }
       } catch (err) {
         setChatError(err instanceof Error ? err.message : "Ask failed");
@@ -275,16 +275,17 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
         setChatPending(null);
       }
     },
-    [chatConversation, projectIdNum],
+    [projectIdNum],
   );
 
   const openInAssistant = () => {
-    if (!chatConversation) return;
-    const params = new URLSearchParams({ conversation: String(chatConversation.id) });
-    if (chatConversation.project_id != null) {
-      params.set("projectId", String(chatConversation.project_id));
-    }
-    router.push(`/ai?${params.toString()}`);
+    if (chatConversationId == null) return;
+    router.push(
+      buildAiAssistantHref({
+        conversationId: chatConversationId,
+        projectId: projectIdNum,
+      })
+    );
   };
 
   const analysisChildren = useMemo(() => {
@@ -423,22 +424,22 @@ export function ProjectInsightScreen({ projectId }: { projectId: string }) {
               cardActions={cardActions}
             />
 
-            {((chatConversation?.turns?.length ?? 0) > 0 || chatBusy || chatError || chatPending) && (
+            {((chatTurns.length > 0) || chatBusy || chatError || chatPending) && (
               <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-h3 text-ink-primary">Ask Anything</h3>
-                  {chatConversation && (
+                  {chatConversationId && (
                     <Button variant="ghost" size="sm" onClick={openInAssistant}>
                       Open in AI Assistant
                     </Button>
                   )}
                 </div>
                 <div className="max-h-[30rem] space-y-4 overflow-y-auto">
-                  {chatConversation?.turns.map((t, i) => (
+                  {chatTurns.map((t, i) => (
                     <TurnBubble
                       key={t.id}
                       turn={t}
-                      isLast={i === chatConversation.turns.length - 1}
+                      isLast={i === chatTurns.length - 1}
                       onFollowUp={handleProjectAsk}
                     />
                   ))}

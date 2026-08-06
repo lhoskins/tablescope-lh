@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
@@ -22,6 +21,13 @@ from app.database import get_db
 from app.models import AnalyticsConversation, AnalyticsConversationTurn, Project, ProjectMember
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
+)
+from app.services.canonical_conversations import (
+    CanonicalConversationSurface,
+    CanonicalProjectError,
+    CanonicalSurfaceError,
+    append_canonical_turn,
+    load_canonical_conversation,
 )
 from app.services.conversation_previews import (
     question_preview,
@@ -60,6 +66,8 @@ class ConversationSummary(BaseModel):
     surface: str
     title: str
     status: str
+    canonical_key: str | None
+    merged_into_conversation_id: int | None
     updated_at: datetime
 
 
@@ -99,6 +107,8 @@ class ConversationResponse(BaseModel):
     title: str
     status: str
     active_datasource_id: int | None
+    canonical_key: str | None
+    merged_into_conversation_id: int | None
     turns: list[TurnResponse]
     updated_at: datetime
 
@@ -134,23 +144,11 @@ async def _load_conversation(
     *,
     with_turns: bool = False,
 ) -> AnalyticsConversation:
-    if with_turns:
-        result = await session.execute(
-            select(AnalyticsConversation)
-            .options(selectinload(AnalyticsConversation.turns))
-            .where(AnalyticsConversation.id == conversation_id)
-        )
-        conversation = result.scalar_one_or_none()
-    else:
-        conversation = await session.get(AnalyticsConversation, conversation_id)
-    if conversation is None or conversation.tenant_id != context.tenant_id:
+    conversation = await load_canonical_conversation(
+        session, context, conversation_id, with_turns=with_turns
+    )
+    if conversation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-    if conversation.user_id != context.user_id and context.role not in (
-        Role.ROOT_ADMIN.value,
-        Role.TENANT_ADMIN.value,
-        Role.ADMIN.value,
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return conversation
 
 
@@ -178,6 +176,8 @@ def _conversation_to_response(conversation: AnalyticsConversation) -> Conversati
         title=conversation.title,
         status=conversation.status,
         active_datasource_id=conversation.active_datasource_id,
+        canonical_key=conversation.canonical_key,
+        merged_into_conversation_id=conversation.merged_into_conversation_id,
         turns=[_turn_to_response(t) for t in conversation.turns],
         updated_at=conversation.updated_at,
     )
@@ -189,55 +189,84 @@ async def create_conversation(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> ConversationResponse:
-    """Create or resume a canonical conversation by (surface, project_id).
+    """Create a new manual AI Assistant conversation.
 
-    Business/Project Insights use a dedicated surface so repeated asks stay in
-    one thread instead of creating a new conversation per question.
+    Insight surfaces with an ``initial_message`` delegate to the canonical
+    append service during the compatibility window. This lets older clients
+    continue to post to the conversation-create route without creating
+    duplicate Insight threads.
     """
-    if req.project_id is not None:
-        await _check_project_access(session, context, req.project_id)
-
     surface = req.surface or "ai_assistant"
-    # Only auto-resolve a project for the generic AI assistant surface.
+
+    # Compatibility delegation for Insight surfaces.
+    if surface in (
+        CanonicalConversationSurface.BUSINESS_INSIGHTS.value,
+        CanonicalConversationSurface.PROJECT_INSIGHTS.value,
+    ):
+        if not req.initial_message:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{surface} conversations require an initial message; use /canonical-turns instead",
+            )
+        # Business Insights are tenant/user scoped; any supplied project_id is ignored.
+        canonical_project_id = (
+            None
+            if surface == CanonicalConversationSurface.BUSINESS_INSIGHTS.value
+            else req.project_id
+        )
+        if canonical_project_id is not None:
+            await _check_project_access(session, context, canonical_project_id)
+        try:
+            canonical = await append_canonical_turn(
+                session,
+                context,
+                surface=CanonicalConversationSurface(surface),
+                project_id=canonical_project_id,
+                message=req.initial_message,
+                client_request_id=req.client_request_id or "",
+                data_source_id=req.data_source_id,
+            )
+        except CanonicalProjectError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        except CanonicalSurfaceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+        conversation = await _load_conversation(
+            session, context, canonical.conversation_id, with_turns=True
+        )
+        return _conversation_to_response(conversation)
+
+    # Manual AI Assistant chat: always create a fresh conversation.
     resolved_project_id = req.project_id
+    if resolved_project_id is not None:
+        await _check_project_access(session, context, resolved_project_id)
     if surface == "ai_assistant" and resolved_project_id is None and req.initial_message:
         resolved = await resolve_business_insight_project(
             session, context, req.initial_message
         )
         if resolved.status == "resolved":
             resolved_project_id = resolved.project_id
+            await _check_project_access(session, context, resolved_project_id)
 
-    if resolved_project_id is not None:
-        await _check_project_access(session, context, resolved_project_id)
+    title = req.title or "New conversation"
+    if req.initial_message and not req.title:
+        title = req.initial_message[:80] + ("…" if len(req.initial_message) > 80 else "")
 
-    # Canonical lookup by (user, surface, project).
-    existing = await session.scalar(
-        select(AnalyticsConversation).where(
-            AnalyticsConversation.tenant_id == context.tenant_id,
-            AnalyticsConversation.user_id == context.user_id,
-            AnalyticsConversation.surface == surface,
-            AnalyticsConversation.project_id == resolved_project_id,
-            AnalyticsConversation.status == "active",
-        )
+    conversation = AnalyticsConversation(
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=resolved_project_id,
+        surface=surface,
+        active_datasource_id=req.data_source_id,
+        title=title,
+        status="active",
     )
-    if existing is not None:
-        conversation = existing
-    else:
-        title = req.title or "New conversation"
-        if req.initial_message and not req.title:
-            title = req.initial_message[:80] + ("…" if len(req.initial_message) > 80 else "")
-
-        conversation = AnalyticsConversation(
-            tenant_id=context.tenant_id,
-            user_id=context.user_id,
-            project_id=resolved_project_id,
-            surface=surface,
-            active_datasource_id=req.data_source_id,
-            title=title,
-            status="active",
-        )
-        session.add(conversation)
-        await session.flush()
+    session.add(conversation)
+    await session.flush()
 
     if req.initial_message:
         turn = AnalyticsConversationTurn(
@@ -256,12 +285,9 @@ async def create_conversation(
             conversation.last_successful_turn_id = turn.id
         await session.flush()
 
-    result = await session.execute(
-        select(AnalyticsConversation)
-        .options(selectinload(AnalyticsConversation.turns))
-        .where(AnalyticsConversation.id == conversation.id)
+    conversation = await _load_conversation(
+        session, context, conversation.id, with_turns=True
     )
-    conversation = result.scalar_one()
     return _conversation_to_response(conversation)
 
 
@@ -284,8 +310,10 @@ async def list_conversations(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.VIEWER)),
 ) -> list[ConversationSummary]:
-    """List the current user's conversations, optionally filtered by project."""
-    stmt = _visible_conversations_stmt(context)
+    """List the current user's active conversations, optionally filtered by project."""
+    stmt = _visible_conversations_stmt(context).where(
+        AnalyticsConversation.status != "merged"
+    )
     if project_id is not None:
         await _check_project_access(session, context, project_id)
         stmt = stmt.where(AnalyticsConversation.project_id == project_id)
@@ -301,6 +329,8 @@ async def list_conversations(
             surface=c.surface,
             title=c.title,
             status=c.status,
+            canonical_key=c.canonical_key,
+            merged_into_conversation_id=c.merged_into_conversation_id,
             updated_at=c.updated_at,
         )
         for c in conversations

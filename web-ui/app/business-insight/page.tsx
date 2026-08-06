@@ -21,12 +21,12 @@ import type { InsightCard } from "@/lib/api/home-intelligence";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
 import {
-  createConversation,
+  submitCanonicalTurn,
   getConversation,
-  submitTurn,
   type Conversation,
   type ConversationTurn,
 } from "@/lib/api/conversational-analytics";
+import { buildAiAssistantHref } from "@/lib/navigation/ai-assistant";
 import { IconLoader2 } from "@tabler/icons-react";
 import {
   CreateActionFromInsightDialog,
@@ -160,15 +160,16 @@ export default function BusinessInsightPage() {
     [handlePinInsight, handleCreateAction, pinnedByFingerprint],
   );
 
-  const pollConversation = useCallback(
-    async (id: number): Promise<Conversation> => {
+  const pollTurn = useCallback(
+    async (conversationId: number, turnId: number): Promise<ConversationTurn> => {
       for (let i = 0; i < 60; i++) {
-        const data = await getConversation(id);
-        const last = data.turns[data.turns.length - 1];
-        if (!last || last.status !== "pending") return data;
+        const data = await getConversation(conversationId);
+        const turn = data.turns.find((t) => t.id === turnId);
+        if (turn && turn.status !== "pending") return turn;
         await new Promise((r) => setTimeout(r, 1000));
       }
-      return getConversation(id);
+      const data = await getConversation(conversationId);
+      return data.turns.find((t) => t.id === turnId) ?? data.turns[data.turns.length - 1];
     },
     [],
   );
@@ -177,28 +178,23 @@ export default function BusinessInsightPage() {
     async (message: string) => {
       setChatBusy(true);
       setChatError(null);
-      // One idempotency key per turn, sent both when creating a conversation and
-      // when submitting a follow-up turn.
       const requestId = crypto.randomUUID();
       try {
-        if (chatConversationId == null) {
-          const created = await createConversation({
-            title: "Business Insights",
-            surface: "business_insights",
-            initial_message: message,
-            client_request_id: requestId,
-          });
-          const polled = await pollConversation(created.id);
-          setChatConversationId(created.id);
-          setChatTurns(polled.turns);
-        } else {
-          const res = await submitTurn(chatConversationId, {
-            message,
-            client_request_id: requestId,
-          });
-          setChatTurns((prev) => [...prev, res.turn]);
-          const polled = await pollConversation(res.conversation_id);
-          setChatTurns(polled.turns);
+        const res = await submitCanonicalTurn({
+          surface: "business_insights",
+          message,
+          client_request_id: requestId,
+        });
+        setChatConversationId(res.conversation_id);
+        setChatTurns((prev) => {
+          const exists = prev.some((t) => t.id === res.turn.id);
+          return exists ? prev : [...prev, res.turn];
+        });
+        if (res.turn.status === "pending") {
+          const polled = await pollTurn(res.conversation_id, res.turn.id);
+          setChatTurns((prev) =>
+            prev.map((t) => (t.id === polled.id ? polled : t))
+          );
         }
       } catch (err) {
         setChatError(err instanceof Error ? err.message : "Ask failed");
@@ -206,12 +202,12 @@ export default function BusinessInsightPage() {
         setChatBusy(false);
       }
     },
-    [chatConversationId, pollConversation],
+    [pollTurn],
   );
 
   const openInAssistant = useCallback(() => {
     if (chatConversationId == null) return;
-    router.push(`/ai?conversation=${chatConversationId}`);
+    router.push(buildAiAssistantHref({ conversationId: chatConversationId }));
   }, [chatConversationId, router]);
 
   const user = identity?.user ?? FALLBACK_USER;

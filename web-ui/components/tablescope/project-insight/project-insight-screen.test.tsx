@@ -16,9 +16,9 @@ const {
   reviewed,
   reopen,
   suggestInsights,
-  createConversation,
+  submitCanonicalTurn,
   listConversations,
-  submitTurn,
+  getConversation,
   createHomePin,
 } = vi.hoisted(() => ({
   push: vi.fn(),
@@ -33,9 +33,9 @@ const {
   reviewed: vi.fn().mockResolvedValue({ items: [] }),
   reopen: vi.fn().mockResolvedValue({ insightId: "i1", status: "reopened" }),
   suggestInsights: vi.fn(),
-  createConversation: vi.fn(),
+  submitCanonicalTurn: vi.fn(),
   listConversations: vi.fn().mockResolvedValue([]),
-  submitTurn: vi.fn(),
+  getConversation: vi.fn().mockResolvedValue({ id: 1, turns: [] }),
   createHomePin: vi.fn().mockResolvedValue({ id: 1 }),
 }));
 
@@ -85,11 +85,9 @@ vi.mock("@/lib/api/home-pins", () => ({
 }));
 
 vi.mock("@/lib/api/conversational-analytics", () => ({
-  createConversation: (payload: unknown) => createConversation(payload),
+  submitCanonicalTurn: (payload: unknown) => submitCanonicalTurn(payload),
   listConversations: (projectId?: number) => listConversations(projectId),
-  submitTurn: (conversationId: number, payload: unknown) =>
-    submitTurn(conversationId, payload),
-  getConversation: vi.fn().mockResolvedValue({ id: 1, turns: [] }),
+  getConversation: (conversationId: number) => getConversation(conversationId),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -299,19 +297,19 @@ describe("ProjectInsightScreen", () => {
     ).toBeNull();
   });
 
-  it("creates a project-scoped Ask Anything conversation with the right title", async () => {
-    createConversation.mockResolvedValue({
-      id: 7,
+  it("submits a project-scoped canonical Insight turn", async () => {
+    submitCanonicalTurn.mockResolvedValue({
+      conversation_id: 7,
+      conversation_created: true,
+      surface: "project_insights",
       project_id: 42,
-      title: "Project Insights",
-      turns: [
-        {
-          id: 1,
-          user_message: "Why did Supplier A slip?",
-          assistant_message: "Because of a lead-time issue.",
-          status: "success",
-        },
-      ],
+      turn: {
+        id: 1,
+        sequence: 1,
+        user_message: "Why did Supplier A slip?",
+        assistant_message: "Because of a lead-time issue.",
+        status: "success",
+      },
     });
     renderScreen();
     await screen.findByRole("heading", { name: "Executive Project Summary" });
@@ -321,11 +319,11 @@ describe("ProjectInsightScreen", () => {
     fireEvent.change(input, { target: { value: "Why did Supplier A slip?" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
     await waitFor(() =>
-      expect(createConversation).toHaveBeenCalledWith(
+      expect(submitCanonicalTurn).toHaveBeenCalledWith(
         expect.objectContaining({
+          surface: "project_insights",
           project_id: 42,
-          title: "Project Insights",
-          initial_message: "Why did Supplier A slip?",
+          message: "Why did Supplier A slip?",
         }),
       ),
     );
