@@ -275,8 +275,8 @@ class AwsVpnProvisioningService:
             raise VpnProvisioningError(f"Multiple tenant VPCs for {tenant_id}: {ids}")
         if tenant_vpcs:
             vpc_cidr = tenant_vpcs[0]["CidrBlock"]
-            third = int(ipaddress.ip_network(vpc_cidr).network_address.packed[-2])
-            private = f"10.{third}.1.0/24"
+            second = int(ipaddress.ip_network(vpc_cidr).network_address.packed[1])
+            private = f"10.{second}.1.0/24"
             return vpc_cidr, private
 
         existing = self._existing_vpc_cidrs()

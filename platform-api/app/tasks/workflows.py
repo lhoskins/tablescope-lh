@@ -1456,6 +1456,7 @@ async def provision_tenant_vpn(
                 req.vpn_status = "configured"
                 req.error_message = None
                 await session.flush()
+            await session.commit()
             return {
                 "status": "configured",
                 "vpn_connection_id": meta.vpn_connection_id,
@@ -1468,6 +1469,7 @@ async def provision_tenant_vpn(
                 req.vpn_status = "failed"
                 req.error_message = str(exc)[:500]
                 await session.flush()
+            await session.rollback()
             raise
 
 
