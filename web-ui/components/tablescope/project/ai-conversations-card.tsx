@@ -13,6 +13,7 @@ import {
   type RecentConversationItem,
 } from "@/lib/api/conversational-analytics";
 import { timeAgo } from "@/lib/ui/format";
+import { buildAiAssistantHref } from "@/lib/navigation/ai-assistant";
 
 export const RECENT_CONVERSATIONS_LIMIT = 4;
 
@@ -26,7 +27,12 @@ export function conversationHref(
   projectId: string,
   item: RecentConversationItem,
 ) {
-  return `/ai?conversation=${item.conversation_id}&projectId=${projectId}&turn=${item.turn_id}`;
+  return buildAiAssistantHref({
+    projectId,
+    conversationId: item.conversation_id,
+    turnId: item.turn_id,
+    origin: "project-overview",
+  });
 }
 
 export function AiConversationsCard({ projectId }: { projectId: string }) {
@@ -131,7 +137,10 @@ export function AiConversationsCard({ projectId }: { projectId: string }) {
       </div>
       <div className="border-t border-line-tertiary px-4 py-2.5">
         <Link
-          href={`/ai?projectId=${projectId}`}
+          href={buildAiAssistantHref({
+            projectId,
+            origin: "project-overview",
+          })}
           className="text-[12px] font-medium text-brand-700 hover:underline"
         >
           View all project conversations →

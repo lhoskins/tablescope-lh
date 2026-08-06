@@ -56,7 +56,7 @@ describe("AiConversationsCard", () => {
     expect(rows).toHaveLength(4);
     expect(rows[0]).toHaveAttribute(
       "href",
-      "/ai?conversation=11&projectId=7&turn=1",
+      "/ai?conversation=11&projectId=7&turn=1&from=project-overview",
     );
     expect(screen.getByText("Result 1")).toBeInTheDocument();
   });
@@ -93,6 +93,6 @@ describe("AiConversationsCard", () => {
     const viewAll = screen.getByRole("link", {
       name: /View all project conversations/,
     });
-    expect(viewAll).toHaveAttribute("href", "/ai?projectId=7");
+    expect(viewAll).toHaveAttribute("href", "/ai?projectId=7&from=project-overview");
   });
 });

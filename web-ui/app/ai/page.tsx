@@ -1,7 +1,14 @@
 "use client";
 
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -33,7 +40,9 @@ import {
 } from "@/lib/api/conversational-analytics";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
 import type { SuggestedVisualization } from "@/lib/api/ai-actions";
-import type { CurrentUser, TenantSummary } from "@/lib/ui/types";import { FALLBACK_USER } from "./fallback-user";
+import type { CurrentUser, ProjectSummary, TenantSummary } from "@/lib/ui/types";
+import { AssistantHeader } from "./assistant-header";
+import { FALLBACK_USER } from "./fallback-user";
 import { FALLBACK_TENANT } from "./fallback-tenant";
 import { CHART_FOLLOW_UPS } from "./chart-follow-ups";
 import { ConversationRow } from "./conversation-row";
@@ -72,6 +81,19 @@ function AiAssistantPageInner() {
   const assistantConversations = (conversations ?? []).filter(
     (c) => projectFilter == null || c.project_id === projectFilter,
   );
+
+  // Deterministic Project Overview back navigation based on the URL and the
+  // authorized project list. Never derive it from browser history or referrer.
+  const returnProject = useMemo<ProjectSummary | null>(() => {
+    if (searchParams.get("from") !== "project-overview") return null;
+    const rawProjectId = searchParams.get("projectId");
+    if (!rawProjectId || !/^\d+$/.test(rawProjectId)) return null;
+    const projectId = Number(rawProjectId);
+    if (projectId <= 0) return null;
+    return (
+      projects?.find((p) => Number(p.id) === projectId) ?? null
+    );
+  }, [searchParams, projects]);
   const turnCount = turns.length;
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -231,9 +253,7 @@ function AiAssistantPageInner() {
       tenant={tenant}
       user={user}
       counts={{ projects: projects?.length }}
-      topBarLeft={
-        <span className="text-h2 text-ink-primary">AI Assistant</span>
-      }
+      topBarLeft={<AssistantHeader returnProject={returnProject} />}
     >
       <div className="flex h-[calc(100vh-9rem)] gap-0 overflow-hidden rounded-lg border border-line-tertiary">
         {/* Left sidebar — conversations */}
