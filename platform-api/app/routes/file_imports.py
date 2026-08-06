@@ -21,10 +21,16 @@ from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
 from app.models.network_file_connection import NetworkFileConnection
+from app.models.network_file_host import NetworkFileHost
 from app.services import file_ingestion
 from app.services.crypto import encrypt_secret
 from app.services.file_ingestion import FileImportError
-from app.services.smb_gateway import NetworkPathError, check_network_access
+from app.services.smb_gateway import (
+    NetworkPathError,
+    check_network_access,
+    get_approved_smb_hosts,
+    list_network_path,
+)
 from app.services.tenant_network_source_ip import get_tenant_source_ip
 
 logger = logging.getLogger(__name__)
@@ -89,6 +95,14 @@ async def get_capabilities(
             )
         )
     ).all()
+    hosts = (
+        await session.scalars(
+            select(NetworkFileHost).where(
+                NetworkFileHost.tenant_id == context.tenant_id,
+                NetworkFileHost.archived.is_(False),
+            ).order_by(NetworkFileHost.name)
+        )
+    ).all()
     return {
         "local_upload_enabled": True,
         "url_import_enabled": settings.file_import_url_enabled,
@@ -98,6 +112,7 @@ async def get_capabilities(
         "network_connections": [
             {"id": c.id, "name": c.name, "label": c.label} for c in connections
         ],
+        "network_hosts": [h.to_dict() for h in hosts],
     }
 
 
@@ -207,8 +222,11 @@ async def test_network_path(
         session, req.connection_id, context.tenant_id
     )
     source_ip = await get_tenant_source_ip(session, context.tenant_id)
+    approved_hosts = await get_approved_smb_hosts(session, context.tenant_id)
     try:
-        return await check_network_access(connection, req.path, source_ip=source_ip)
+        return await check_network_access(
+            connection, req.path, source_ip=source_ip, approved_hosts=approved_hosts
+        )
     except NetworkPathError as exc:
         raise _http_error(exc.code, exc.message) from exc
 
@@ -393,8 +411,9 @@ async def test_connection(
     from datetime import UTC, datetime
 
     connection = await _load_connection(session, connection_id, context.tenant_id)
+    approved_hosts = await get_approved_smb_hosts(session, context.tenant_id)
     try:
-        result = await check_network_access(connection)
+        result = await check_network_access(connection, approved_hosts=approved_hosts)
     except NetworkPathError as exc:
         connection.last_test_status = "failed"
         connection.last_test_message_safe = exc.message
@@ -408,6 +427,46 @@ async def test_connection(
     return result
 
 
+@connections_router.get("/{connection_id}/browse")
+async def browse_connection(
+    connection_id: int,
+    path: str | None = None,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.EDITOR)),
+) -> dict[str, Any]:
+    """List files and folders in an approved network location.
+
+    ``path`` is the share-relative directory to open; when omitted the share
+    root (or ``approved_root_path`` if configured) is listed.
+    """
+    if not get_settings().file_import_network_enabled:
+        raise HTTPException(status_code=403, detail="Network import is disabled.")
+    connection = await _load_connection(
+        session, connection_id, context.tenant_id
+    )
+    source_ip = await get_tenant_source_ip(session, context.tenant_id)
+    approved_hosts = await get_approved_smb_hosts(session, context.tenant_id)
+    if path:
+        browse_path = path
+    else:
+        root = connection.approved_root_path.strip().strip("\\/")
+        browse_path = (
+            f"\\\\{connection.host}\\{connection.share_name}"
+            if not root
+            else f"\\\\{connection.host}\\{connection.share_name}\\{root}"
+        )
+    try:
+        entries = await list_network_path(
+            connection,
+            browse_path,
+            source_ip=source_ip,
+            approved_hosts=approved_hosts,
+        )
+    except NetworkPathError as exc:
+        raise _http_error(exc.code, exc.message) from exc
+    return {"entries": entries, "path": browse_path}
+
+
 @connections_router.delete("/{connection_id}")
 async def delete_connection(
     connection_id: int,
@@ -417,5 +476,84 @@ async def delete_connection(
     connection = await _load_connection(session, connection_id, context.tenant_id)
     connection.archived = True
     connection.enabled = False
+    await session.commit()
+    return {"status": "archived"}
+
+
+# ── Approved SMB host administration ─────────────────────────────────────
+
+hosts_router = APIRouter(prefix="/network-file-hosts", tags=["file-imports"])
+
+
+class HostUpsertRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    host: str = Field(min_length=1, max_length=255)
+    enabled: bool = True
+
+
+@hosts_router.get("")
+async def list_hosts(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> list[dict[str, Any]]:
+    rows = (
+        await session.scalars(
+            select(NetworkFileHost)
+            .where(
+                NetworkFileHost.tenant_id == context.tenant_id,
+                NetworkFileHost.archived.is_(False),
+            )
+            .order_by(NetworkFileHost.name)
+        )
+    ).all()
+    return [h.to_dict() for h in rows]
+
+
+@hosts_router.post("")
+async def create_host(
+    req: HostUpsertRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> dict[str, Any]:
+    host = NetworkFileHost(
+        tenant_id=context.tenant_id,
+        created_by=context.user_id,
+        name=req.name,
+        host=req.host.strip().lower(),
+        enabled=req.enabled,
+    )
+    session.add(host)
+    await session.commit()
+    return host.to_dict()
+
+
+@hosts_router.patch("/{host_id}")
+async def update_host(
+    host_id: int,
+    req: HostUpsertRequest,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> dict[str, Any]:
+    row = await session.get(NetworkFileHost, host_id)
+    if row is None or row.tenant_id != context.tenant_id or row.archived:
+        raise HTTPException(status_code=404, detail="Host not found")
+    row.name = req.name
+    row.host = req.host.strip().lower()
+    row.enabled = req.enabled
+    await session.commit()
+    return row.to_dict()
+
+
+@hosts_router.delete("/{host_id}")
+async def delete_host(
+    host_id: int,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> dict[str, str]:
+    row = await session.get(NetworkFileHost, host_id)
+    if row is None or row.tenant_id != context.tenant_id or row.archived:
+        raise HTTPException(status_code=404, detail="Host not found")
+    row.archived = True
+    row.enabled = False
     await session.commit()
     return {"status": "archived"}

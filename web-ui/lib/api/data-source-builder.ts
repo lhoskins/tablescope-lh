@@ -81,6 +81,21 @@ export interface FilePreviewResult {
   fields: FilePreviewField[];
 }
 
+export interface NetworkHost {
+  id: number;
+  name: string;
+  host: string;
+  enabled: boolean;
+}
+
+export interface NetworkFileEntry {
+  name: string;
+  path: string;
+  kind: "directory" | "file";
+  size_bytes: number;
+  modified_at: number | null;
+}
+
 export interface ImportCapabilities {
   local_upload_enabled: boolean;
   url_import_enabled: boolean;
@@ -88,6 +103,7 @@ export interface ImportCapabilities {
   max_file_size_bytes: number;
   malware_scanning_enabled: boolean;
   network_connections: { id: number; name: string; label: string }[];
+  network_hosts: NetworkHost[];
 }
 
 export interface NetworkTestResult {
@@ -379,6 +395,38 @@ export function testNetworkPath(
 
 export function cancelImport(importJobId: string): Promise<void> {
   return apiClient.delete(`/api/data-sources/imports/${importJobId}`);
+}
+
+export function listNetworkHosts(): Promise<NetworkHost[]> {
+  return apiClient.get<NetworkHost[]>("/api/network-file-hosts");
+}
+
+export function createNetworkHost(
+  host: { name: string; host: string; enabled?: boolean },
+): Promise<NetworkHost> {
+  return apiClient.post<NetworkHost>("/api/network-file-hosts", host);
+}
+
+export function updateNetworkHost(
+  id: number,
+  host: { name: string; host: string; enabled?: boolean },
+): Promise<NetworkHost> {
+  return apiClient.patch<NetworkHost>(`/api/network-file-hosts/${id}`, host);
+}
+
+export function deleteNetworkHost(id: number): Promise<{ status: string }> {
+  return apiClient.delete(`/api/network-file-hosts/${id}`);
+}
+
+export function browseNetworkConnection(
+  connectionId: number,
+  path?: string,
+): Promise<{ entries: NetworkFileEntry[]; path: string }> {
+  const params = new URLSearchParams();
+  if (path) params.set("path", path);
+  return apiClient.get<{ entries: NetworkFileEntry[]; path: string }>(
+    `/api/network-file-connections/${connectionId}/browse?${params.toString()}`,
+  );
 }
 
 // ── Project assignment calls ─────────────────────────────────────────

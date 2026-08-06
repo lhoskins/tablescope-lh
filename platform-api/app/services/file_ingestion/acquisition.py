@@ -7,7 +7,11 @@ from app.config import get_settings
 from app.models.file_import_job import FileImportJob
 from app.models.network_file_connection import NetworkFileConnection
 from app.services.safe_remote_fetch import RemoteFetchError
-from app.services.smb_gateway import NetworkPathError, resolve_network_path
+from app.services.smb_gateway import (
+    NetworkPathError,
+    get_approved_smb_hosts,
+    resolve_network_path,
+)
 from app.services.tenant_network_source_ip import get_tenant_source_ip
 
 from .staging import FileImportError, SafeProvenance, StagedFile, _new_job, _stage
@@ -118,7 +122,8 @@ async def acquire_network_path(
     session.add(job)
     await session.flush()
     try:
-        resolved = resolve_network_path(path, connection)
+        approved_hosts = await get_approved_smb_hosts(session, tenant_id)
+        resolved = resolve_network_path(path, connection, approved_hosts)
         job.status = "fetching"
         source_ip = await get_tenant_source_ip(session, tenant_id)
         import app.services.file_ingestion as _fi

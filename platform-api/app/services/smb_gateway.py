@@ -26,6 +26,9 @@ import socket as _socket
 import threading
 from dataclasses import dataclass
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import get_settings
 from app.models.network_file_connection import NetworkFileConnection
 from app.services.crypto import decrypt_secret
@@ -64,6 +67,29 @@ class NetworkPathError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+async def get_approved_smb_hosts(
+    session: AsyncSession, tenant_id: int
+) -> list[str]:
+    """Return the merged SMB host allowlist for a tenant.
+
+    The ``FILE_IMPORT_ALLOWED_SMB_HOSTS`` environment variable is always
+    included as a deployment-level fallback; tenant-managed entries in
+    ``network_file_hosts`` are merged on top and de-duplicated.
+    """
+    from app.models.network_file_host import NetworkFileHost
+
+    env_hosts = get_settings().file_import_smb_host_allowlist
+    rows = await session.scalars(
+        select(NetworkFileHost.host).where(
+            NetworkFileHost.tenant_id == tenant_id,
+            NetworkFileHost.archived.is_(False),
+            NetworkFileHost.enabled.is_(True),
+        )
+    )
+    db_hosts = [h.strip().lower() for h in rows.all() if h and h.strip()]
+    return list(dict.fromkeys(env_hosts + db_hosts))
 
 
 @dataclass(slots=True)
@@ -120,14 +146,16 @@ def _split_locator(raw: str) -> tuple[str, list[str]]:
     return parts[0].lower(), parts[1:]
 
 
-def resolve_network_path(
-    raw_path: str, connection: NetworkFileConnection
-) -> ResolvedNetworkPath:
-    """Validate ``raw_path`` against ``connection`` and normalise it.
+def _resolve_locator(
+    raw_path: str,
+    connection: NetworkFileConnection,
+    approved_hosts: list[str] | None,
+    *,
+    require_filename: bool,
+) -> tuple[str, str, list[str]]:
+    """Validate a UNC/SMB locator and return (host, share, tail_segments).
 
-    Enforces: matching host/share, the connection's ``approved_root_path``, no
-    traversal or wildcards, no administrative shares, and the deployment-level
-    SMB host allowlist.
+    Shared validation used by both file imports and directory browsing.
     """
     if not connection.enabled or connection.archived:
         raise NetworkPathError(
@@ -141,7 +169,11 @@ def resolve_network_path(
             "That server does not match the selected network location.",
         )
 
-    allowlist = get_settings().file_import_smb_host_allowlist
+    allowlist = (
+        approved_hosts
+        if approved_hosts is not None
+        else get_settings().file_import_smb_host_allowlist
+    )
     if host not in allowlist:
         raise NetworkPathError(
             "HOST_NOT_APPROVED",
@@ -171,10 +203,10 @@ def resolve_network_path(
             raise NetworkPathError(
                 "INVALID_PATH", "That path contains invalid characters."
             )
-    if not tail:
+
+    if require_filename and not tail:
         raise NetworkPathError("INVALID_PATH", "That path has no file name.")
 
-    relative = "/".join(tail)
     root = connection.approved_root_path.strip().strip("\\/").replace("\\", "/")
     if root:
         root_segments = [s for s in root.split("/") if s]
@@ -185,11 +217,51 @@ def resolve_network_path(
                 "OUTSIDE_APPROVED_ROOT",
                 "That path is outside the approved folder for this location.",
             )
-        if len(tail) <= len(root_segments):
+        if require_filename and len(tail) <= len(root_segments):
             raise NetworkPathError("INVALID_PATH", "That path has no file name.")
 
+    return host, share, tail
+
+
+def resolve_network_path(
+    raw_path: str,
+    connection: NetworkFileConnection,
+    approved_hosts: list[str] | None = None,
+) -> ResolvedNetworkPath:
+    """Validate ``raw_path`` against ``connection`` and normalise it.
+
+    Enforces: matching host/share, the connection's ``approved_root_path``, no
+    traversal or wildcards, no administrative shares, and the SMB host
+    allowlist.  When ``approved_hosts`` is supplied it is used directly;
+    otherwise the deployment-level environment allowlist is consulted.
+    """
+    host, share, tail = _resolve_locator(
+        raw_path, connection, approved_hosts, require_filename=True
+    )
+    relative = "/".join(tail)
     return ResolvedNetworkPath(
         host=host, share=share, relative_path=relative, filename=tail[-1]
+    )
+
+
+def resolve_network_directory(
+    raw_path: str,
+    connection: NetworkFileConnection,
+    approved_hosts: list[str] | None = None,
+) -> ResolvedNetworkPath:
+    """Validate a directory locator and normalise it for browsing.
+
+    The path may be the share root or a folder inside ``approved_root_path``.
+    """
+    host, share, tail = _resolve_locator(
+        raw_path, connection, approved_hosts, require_filename=False
+    )
+    relative = "/".join(tail)
+    return ResolvedNetworkPath(
+        host=host,
+        share=share,
+        relative_path=relative,
+        filename=tail[-1] if tail else "",
     )
 
 
@@ -303,11 +375,71 @@ async def read_network_file(
     return await asyncio.to_thread(_read_blocking, resolved, connection, limit, source_ip)
 
 
+async def list_network_path(
+    connection: NetworkFileConnection,
+    raw_path: str,
+    *,
+    source_ip: str | None = None,
+    approved_hosts: list[str] | None = None,
+) -> list[dict[str, object]]:
+    """List files and folders in an approved SMB directory."""
+
+    def _list() -> list[dict[str, object]]:
+        import smbclient
+        from smbprotocol.exceptions import SMBOSError, SMBResponseException
+
+        resolved = resolve_network_directory(raw_path, connection, approved_hosts)
+        _register_session(connection, source_ip)
+        try:
+            target = resolved.unc_path
+            if not resolved.relative_path:
+                target = f"\\\\{resolved.host}\\{resolved.share}"
+            entries = []
+            for entry in smbclient.scandir(target):
+                name = entry.name
+                if name in (".", ".."):
+                    continue
+                stat = entry.stat()
+                entries.append(
+                    {
+                        "name": name,
+                        "path": (
+                            f"{resolved.relative_path}/{name}"
+                            if resolved.relative_path
+                            else name
+                        ),
+                        "kind": "directory" if entry.is_dir() else "file",
+                        "size_bytes": stat.st_size if not entry.is_dir() else 0,
+                        "modified_at": stat.st_mtime if hasattr(stat, "st_mtime") else None,
+                    }
+                )
+            return sorted(entries, key=lambda e: (e["kind"] != "directory", e["name"]))
+        except (SMBOSError, SMBResponseException) as exc:
+            logger.info("SMB list failed for %s", resolved.redacted_locator)
+            raise NetworkPathError(
+                "ACCESS_DENIED",
+                "That folder could not be read from the network location.",
+            ) from exc
+        except (OSError, ValueError) as exc:
+            logger.info("SMB connection failed for host %s", resolved.host)
+            raise NetworkPathError(
+                "HOST_UNREACHABLE", "The network location could not be reached."
+            ) from exc
+        finally:
+            try:
+                smbclient.delete_session(connection.host, port=connection.port)
+            except Exception:  # pragma: no cover - best-effort teardown
+                logger.debug("SMB session teardown failed", exc_info=True)
+
+    return await asyncio.to_thread(_list)
+
+
 async def check_network_access(
     connection: NetworkFileConnection,
     raw_path: str | None = None,
     *,
     source_ip: str | None = None,
+    approved_hosts: list[str] | None = None,
 ) -> dict[str, object]:
     """Verify a connection (and optionally one path) without importing bytes."""
 
@@ -317,7 +449,7 @@ async def check_network_access(
         _register_session(connection, source_ip)
         try:
             if raw_path:
-                resolved = resolve_network_path(raw_path, connection)
+                resolved = resolve_network_path(raw_path, connection, approved_hosts)
                 info = smbclient.stat(resolved.unc_path)
                 return {
                     "ok": True,

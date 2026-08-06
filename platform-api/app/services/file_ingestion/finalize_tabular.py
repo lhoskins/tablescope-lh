@@ -1,12 +1,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import glob
+import os
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models.file_import_job import FileImportJob
 from app.models.file_source_meta import FileSourceMeta
 
@@ -26,6 +30,85 @@ class FinalizeOptions:
     recommendation_decisions: list[dict[str, Any]] | None = None
     user_notes: str | None = None
     user_nuances: str | None = None
+
+
+async def _ensure_user_vdb(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    user_id: int,
+    endpoint: Any,
+) -> Any:
+    """Return the user's VDB registry row, creating it against the tenant Teiid if missing.
+
+    The VDB file can already exist on disk (e.g. a previous upload auto-provisioned
+    it) or be created on demand. Either way, a matching ``UserVDB`` row is inserted
+    so the rest of the platform can route queries to it.
+    """
+    from app.models.user_vdb import UserVDB
+    from app.services.vdb_management import VDBManagementService, VDBProvisioningError
+
+    existing = await session.scalar(
+        select(UserVDB).where(
+            UserVDB.tenant_id == tenant_id, UserVDB.user_id == user_id
+        )
+    )
+    if existing is not None:
+        return existing
+
+    vdb_path = os.path.join(
+        endpoint.vdb_host_path or get_settings().customer_base_path,
+        str(tenant_id),
+        str(user_id),
+        "vdb",
+    )
+
+    def _pick_vdb_id() -> str | None:
+        if not os.path.isdir(vdb_path):
+            return None
+        files = glob.glob(os.path.join(vdb_path, "*-vdb.xml"))
+        if not files:
+            return None
+        if len(files) == 1:
+            return os.path.basename(files[0]).replace("-vdb.xml", "")
+        newest = max(files, key=os.path.getmtime)
+        return os.path.basename(newest).replace("-vdb.xml", "")
+
+    vdb_id = await asyncio.to_thread(_pick_vdb_id)
+
+    if vdb_id is None:
+        vdb_svc = VDBManagementService(
+            servlet_url=getattr(endpoint, "servlet_url", None) or None,
+            pg_host=getattr(endpoint, "pg_host", None) or None,
+            pg_port=getattr(endpoint, "pg_port", None) or None,
+        )
+        try:
+            result = await vdb_svc.create_user_vdb(
+                org_id=tenant_id, user_id=user_id
+            )
+            vdb_id = result.vdb_id
+        except VDBProvisioningError as exc:
+            raise FileImportError(
+                "VDB_PROVISIONING_FAILED",
+                "Failed to auto-provision user VDB. Please contact administrator.",
+            ) from exc
+        finally:
+            await vdb_svc.aclose()
+
+    user_vdb = UserVDB(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        vdb_id=vdb_id,
+        vdb_username="test",
+        encrypted_password="test",
+        vdb_host=getattr(endpoint, "pg_host", get_settings().teiid_pg_host),
+        vdb_port=getattr(endpoint, "pg_port", get_settings().teiid_pg_port),
+        is_active=True,
+        health_status="deployed",
+    )
+    session.add(user_vdb)
+    await session.flush()
+    return user_vdb
 
 
 async def finalize_tabular_import(
@@ -93,6 +176,9 @@ async def finalize_tabular_import(
     display_name, _ = display_source(final_filename, original_format)
 
     endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant_id)
+    await _ensure_user_vdb(
+        session, tenant_id=tenant_id, user_id=user.id, endpoint=endpoint
+    )
     servlet_url = f"{endpoint.servlet_url}/TeiidExcelImporterTest/upload"
     try:
         async with httpx.AsyncClient(
