@@ -7,7 +7,6 @@ import {
   IconFileText,
   IconSparkles,
 } from "@tabler/icons-react";
-import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -25,7 +24,7 @@ type Selection =
   | { kind: "document"; id: number }
   | null;
 
-export function MetadataCatalogScreen({ projectId }: { projectId: string }) {
+export function MetadataCatalogPanel({ projectId }: { projectId: string }) {
   const { data, isLoading } = useProjectMetadataCatalog(projectId);
   const tables = useMemo(() => data?.tables ?? [], [data]);
   const documents = useMemo(() => data?.documents ?? [], [data]);
@@ -64,19 +63,14 @@ export function MetadataCatalogScreen({ projectId }: { projectId: string }) {
   );
 
   return (
-    <ProjectShell
-      projectId={projectId}
-      activeNav="project-metadata-catalog"
-      breadcrumbLabel="Metadata Catalog"
-      actions={
+    <div className="space-y-4">
+      <div className="flex justify-end">
         <Button variant="primary">
           <IconSparkles size={14} />
           Re-profile with AI
         </Button>
-      }
-    >
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Tables profiled" value={String(tables.length)} />
           <StatTile label="Fields catalogued" value={String(fieldsProfiled)} />
           <StatTile label="AI-described fields" value={String(aiDescribed)} />
@@ -161,9 +155,10 @@ export function MetadataCatalogScreen({ projectId }: { projectId: string }) {
           )}
         </div>
       </div>
-    </ProjectShell>
   );
 }
+
+export const MetadataCatalogScreen = MetadataCatalogPanel;
 
 function GroupLabel({
   icon: Icon,

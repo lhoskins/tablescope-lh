@@ -29,6 +29,7 @@ import type {
 import {
   homeNavGroups,
   projectNavGroups,
+  canViewSettings,
   type NavGroup,
   type NavItem,
 } from "./nav";import { COLLAPSE_STORAGE_KEY } from "./sidebar/collapse-storage-key";
@@ -73,16 +74,13 @@ export function Sidebar({
 
   const groups =
     mode === "project" && project
-      ? projectNavGroups(project.id)
+      ? projectNavGroups(project.id, user)
       : homeNavGroups(user);
 
-  const canManageUsers =
-    Boolean(user.isSuperAdmin) ||
-    ["tenant_admin", "admin", "root_admin"].includes(user.rawRole ?? "");
   const isPlatformAdmin =
     Boolean(user.isSuperAdmin) || user.rawRole === "root_admin";
 
-  const adminManagementItems: NavItem[] = canManageUsers
+  const adminManagementItems: NavItem[] = canViewSettings(user)
     ? [
         {
           key: "admin-settings",
@@ -90,14 +88,17 @@ export function Sidebar({
           href: "/admin/settings",
           icon: IconSettings,
         },
-        {
-          key: "admin-users",
-          label: "Users",
-          href: "/admin/users",
-          icon: IconUsers,
-        },
       ]
     : [];
+
+  if (isPlatformAdmin) {
+    adminManagementItems.push({
+      key: "admin-users",
+      label: "Users",
+      href: "/admin/users",
+      icon: IconUsers,
+    });
+  }
 
   return (
     <aside

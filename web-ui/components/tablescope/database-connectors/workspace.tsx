@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconLoader2, IconPlus } from "@tabler/icons-react";
 import { Badge } from "@/components/ui/badge";
@@ -67,7 +68,12 @@ function ConnectorTile({
   );
 }
 
-export function DatabaseConnectorsWorkspace() {
+export function DatabaseConnectorsWorkspace({
+  projectId,
+}: {
+  projectId?: string;
+}) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { data: installed, isLoading: loadingInstalled } = useQuery({
     queryKey: INSTALLED_QK,
@@ -143,8 +149,19 @@ export function DatabaseConnectorsWorkspace() {
       <section>
         <h2 className="mb-1 text-h2 text-ink-primary">Installed connectors</h2>
         <p className="mb-4 text-small text-ink-tertiary">
-          Create reusable database/SaaS connections with a friendly name. These
-          connections are later used by the Data Source Builder.
+          Create reusable database/SaaS connections with a friendly name.
+          {projectId ? (
+            <>
+              {" "}
+              Connections are managed for your tenant and can be used to create
+              data sources for this project.
+            </>
+          ) : (
+            <>
+              {" "}
+              These connections are later used by the Data Source Builder.
+            </>
+          )}
         </p>
         {loadingInstalled ? (
           <div className="flex items-center gap-2 py-8 text-ink-tertiary">
@@ -168,8 +185,9 @@ export function DatabaseConnectorsWorkspace() {
         <div className="mb-4 flex items-baseline gap-3">
           <h2 className="text-h2 text-ink-primary">Created connections</h2>
           <span className="text-small text-ink-tertiary">
-            Friendly names shown here appear under Connected Databases in the Data
-            Source Builder.
+            {projectId
+              ? "Connections are managed for your tenant and can be used to create data sources for this project."
+              : "Friendly names shown here appear under Connected Databases in the Data Source Builder."}
           </span>
         </div>
 
@@ -242,6 +260,19 @@ export function DatabaseConnectorsWorkspace() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1.5">
+                        {projectId && (
+                          <Button
+                            variant="brandSoft"
+                            size="sm"
+                            onClick={() =>
+                              router.push(
+                                `/projects/${projectId}/data-source-builder?intent=database`,
+                              )
+                            }
+                          >
+                            Use in Data Source Builder
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"

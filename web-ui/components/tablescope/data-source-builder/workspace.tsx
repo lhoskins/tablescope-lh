@@ -174,7 +174,7 @@ export function DataSourceBuilderWorkspace({
                 <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
                   Connected Databases
                 </h3>
-                <ConnectedDatabases />
+                <ConnectedDatabases projectId={initialProjectId} />
               </div>
             )}
 
@@ -184,14 +184,14 @@ export function DataSourceBuilderWorkspace({
                   <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
                     Connected Databases
                   </h3>
-                  <ConnectedDatabases />
+                  <ConnectedDatabases projectId={initialProjectId} />
                 </div>
 
                 <div>
                   <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
                     SaaS Connections
                   </h3>
-                  <ConnectedSaaS />
+                  <ConnectedSaaS projectId={initialProjectId} />
                 </div>
               </>
             )}

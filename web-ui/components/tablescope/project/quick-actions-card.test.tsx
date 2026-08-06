@@ -49,14 +49,14 @@ describe("QuickActionsCard", () => {
   it("routes Create datasource through the Data Source Builder", () => {
     renderCard();
     fireEvent.click(screen.getByRole("button", { name: /Create datasource/ }));
-    expect(push).toHaveBeenCalledWith("/data-source-builder?projectId=7");
+    expect(push).toHaveBeenCalledWith("/projects/7/data-source-builder");
   });
 
   it("routes Create Database connection through the Data Source Builder's database-only step", () => {
     renderCard();
     fireEvent.click(screen.getByRole("button", { name: /Create Database connection/ }));
     expect(push).toHaveBeenCalledWith(
-      "/data-source-builder?projectId=7&intent=database",
+      "/projects/7/data-source-builder?intent=database",
     );
   });
 
@@ -64,7 +64,7 @@ describe("QuickActionsCard", () => {
     renderCard();
     fireEvent.click(screen.getByRole("button", { name: /Upload file/ }));
     expect(push).toHaveBeenCalledWith(
-      "/data-source-builder?projectId=7&intent=upload",
+      "/projects/7/data-source-builder?intent=upload",
     );
   });
 
