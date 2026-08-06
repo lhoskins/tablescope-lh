@@ -12,6 +12,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+import socket
 import subprocess
 from typing import Any
 
@@ -81,7 +82,20 @@ def _list_local_ipv4() -> list[str]:
             continue
         except subprocess.TimeoutExpired:
             logger.warning("Timeout listing local IP addresses")
-    return []
+
+    # Minimal fallback when `ip` is not installed: getaddrinfo on the container's
+    # hostname returns the IPv4 addresses assigned to all attached interfaces.
+    ips: list[str] = []
+    for host in (socket.gethostname(), socket.getfqdn()):
+        try:
+            for family, _, _, _, sockaddr in socket.getaddrinfo(
+                host, None, socket.AF_INET
+            ):
+                if family == socket.AF_INET:
+                    ips.append(sockaddr[0])
+        except socket.gaierror:
+            continue
+    return list(dict.fromkeys(ips))
 
 
 def find_source_ip_for_cidr(docker_subnet_cidr: str) -> str | None:
