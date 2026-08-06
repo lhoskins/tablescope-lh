@@ -93,6 +93,11 @@ async def acquire_url(
         provenance=provenance,
         allowed_families=allowed_families,
     )
+    job.live_source_params = {
+        "type": "url",
+        "url": url,
+    }
+    await session.flush()
     return job, staged
 
 
@@ -148,4 +153,10 @@ async def acquire_network_path(
         provenance=provenance,
         allowed_families=allowed_families,
     )
+    job.live_source_params = {
+        "type": "network_path",
+        "connection_id": connection.id,
+        "path": resolved.relative_path,
+    }
+    await session.flush()
     return job, staged
