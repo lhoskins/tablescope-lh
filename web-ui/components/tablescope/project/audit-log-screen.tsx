@@ -10,7 +10,6 @@ import {
   IconShieldCheck,
   IconDownload,
 } from "@tabler/icons-react";
-import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -52,7 +51,7 @@ function fmt(ts: string): string {
       });
 }
 
-export function AuditLogScreen({ projectId }: { projectId: string }) {
+export function ProjectAuditLogPanel({ projectId }: { projectId: string }) {
   const { data, isLoading } = useProjectActivity(projectId);
   const events = useMemo(() => data?.events ?? [], [data]);
   const stats = data?.stats;
@@ -63,19 +62,14 @@ export function AuditLogScreen({ projectId }: { projectId: string }) {
   );
 
   return (
-    <ProjectShell
-      projectId={projectId}
-      activeNav="project-audit-log"
-      breadcrumbLabel="Audit Log"
-      actions={
+    <div className="space-y-4">
+      <div className="flex justify-end">
         <Button variant="secondary">
           <IconDownload size={14} />
           Export log
         </Button>
-      }
-    >
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile
             label="Total events"
             value={stats?.total_events ?? events.length}
@@ -133,9 +127,10 @@ export function AuditLogScreen({ projectId }: { projectId: string }) {
           )}
         </Card>
       </div>
-    </ProjectShell>
   );
 }
+
+export const AuditLogScreen = ProjectAuditLogPanel;
 
 function EventRow({ event }: { event: ActivityEvent }) {
   const meta = CATEGORY_META[event.category] ?? CATEGORY_META.sync;

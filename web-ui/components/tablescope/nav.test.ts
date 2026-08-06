@@ -16,35 +16,34 @@ function makeUser(rawRole: string, isSuperAdmin = false): CurrentUser {
   };
 }
 
-describe("homeNavGroups", () => {
-  it("places Data Source Assignments after Database Connectors for admin users", () => {
-    const groups = homeNavGroups(makeUser("admin"));
-    const tools = groups.find((g) => g.heading === "Tools")?.items ?? [];
-    const keys = tools.map((i) => i.key);
-    expect(keys).toEqual([
-      "data-source-builder",
-      "database-connectors",
-      "admin-data-source-assignments",
-    ]);
-  });
+function allItemKeys(groups: ReturnType<typeof homeNavGroups>): string[] {
+  return groups.flatMap((g) => g.items.map((i) => i.key));
+}
 
-  it("does not include Data Source Assignments for regular members", () => {
-    const groups = homeNavGroups(makeUser("member"));
-    const tools = groups.find((g) => g.heading === "Tools")?.items ?? [];
-    const keys = tools.map((i) => i.key);
+describe("homeNavGroups", () => {
+  it("has no Tools group for admin users", () => {
+    const groups = homeNavGroups(makeUser("admin"));
+    expect(groups.find((g) => g.heading === "Tools")).toBeUndefined();
+    const keys = allItemKeys(groups);
+    expect(keys).not.toContain("data-source-builder");
+    expect(keys).not.toContain("database-connectors");
     expect(keys).not.toContain("admin-data-source-assignments");
   });
 
-  it("includes Data Source Assignments for super admins", () => {
-    const groups = homeNavGroups(makeUser("member", true));
-    const tools = groups.find((g) => g.heading === "Tools")?.items ?? [];
-    const keys = tools.map((i) => i.key);
-    expect(keys).toContain("admin-data-source-assignments");
+  it("keeps the primary cross-project links", () => {
+    const groups = homeNavGroups(makeUser("member"));
+    const keys = allItemKeys(groups);
+    expect(keys).toEqual([
+      "home",
+      "business-insight",
+      "projects",
+      "ai-assistant",
+    ]);
   });
 });
 
 describe("projectNavGroups", () => {
-  it("orders workflow items and removes resource links from the sidebar", () => {
+  it("orders workflow items under the Project group", () => {
     const groups = projectNavGroups("7");
     const project = groups.find((g) => g.heading === "Project")?.items ?? [];
     const keys = project.map((i) => i.key);
@@ -70,14 +69,26 @@ describe("projectNavGroups", () => {
     expect(home?.href).toBe("/projects/7");
   });
 
-  it("keeps the Intelligence section unchanged", () => {
+  it("replaces Intelligence with a Tools group containing the builder and connectors", () => {
     const groups = projectNavGroups("7");
-    const intelligence = groups.find((g) => g.heading === "Intelligence")?.items ?? [];
-    expect(intelligence.map((i) => i.key)).toEqual([
-      "project-knowledge-graph",
-      "project-metadata-catalog",
-      "project-reference-library",
-      "project-audit-log",
+    expect(groups.find((g) => g.heading === "Intelligence")).toBeUndefined();
+    const tools = groups.find((g) => g.heading === "Tools")?.items ?? [];
+    expect(tools.map((i) => i.key)).toEqual([
+      "project-data-source-builder",
+      "project-database-connectors",
     ]);
+    expect(tools.map((i) => i.href)).toEqual([
+      "/projects/7/data-source-builder",
+      "/projects/7/database-connectors",
+    ]);
+  });
+
+  it("does not include Intelligence items in project navigation", () => {
+    const groups = projectNavGroups("7");
+    const keys = allItemKeys(groups);
+    expect(keys).not.toContain("project-knowledge-graph");
+    expect(keys).not.toContain("project-metadata-catalog");
+    expect(keys).not.toContain("project-reference-library");
+    expect(keys).not.toContain("project-audit-log");
   });
 });

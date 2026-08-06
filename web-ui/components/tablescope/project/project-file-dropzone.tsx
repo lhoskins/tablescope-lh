@@ -65,9 +65,8 @@ export function ProjectFileDropzone({
     }
 
     // "Replace the current window" with the Data Source Builder, where the
-    // uploaded file is already staged and the current project is selected when
-    // one was provided.
-    router.push("/data-source-builder");
+    // uploaded file is already staged and the current project is selected.
+    router.push(`/projects/${project?.id}/data-source-builder`);
   };
 
   return <AiUploadDropzone onUploadsDone={handleDone} />;

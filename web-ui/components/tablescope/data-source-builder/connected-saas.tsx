@@ -10,7 +10,7 @@ import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { BrandLogo, connectorChip } from "../database-connectors/brand-logo";
 import { SaaSSourceModal } from "./saas-source-modal";
 
-export function ConnectedSaaS() {
+export function ConnectedSaaS({ projectId }: { projectId?: string }) {
   const { data: credentials, isLoading } = useQuery({
     queryKey: ["builder", "saas-credentials"],
     queryFn: listSaasCredentials,
@@ -32,7 +32,7 @@ export function ConnectedSaaS() {
       <div className="rounded-lg border border-dashed border-line-secondary px-4 py-6 text-center text-small text-ink-tertiary">
         No SaaS connectors yet. Create one on the{" "}
         <Link
-          href="/database-connectors"
+          href={projectId ? `/projects/${projectId}/database-connectors` : "/database-connectors"}
           className="font-medium text-brand-700 hover:underline"
         >
           Database Connectors
