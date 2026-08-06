@@ -20,6 +20,13 @@ function fileNameOf(path: string): string {
   return parts.length > 1 ? parts[parts.length - 1] : "";
 }
 
+/** Build a full UNC from a connection label and a share-relative entry path. */
+function uncPath(label: string, relativePath: string): string {
+  const root = label.replace(/\\+$/, "");
+  const tail = relativePath.replace(/\//g, "\\");
+  return `${root}\\${tail}`;
+}
+
 export function NetworkImportForm({
   connections,
   hosts,
@@ -119,11 +126,12 @@ export function NetworkImportForm({
   };
 
   const openFolder = async (entry: NetworkFileEntry) => {
-    if (!connectionId) return;
+    if (!connectionId || !connection) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await browseNetworkConnection(connectionId, entry.path);
+      const fullPath = uncPath(connection.label, entry.path);
+      const res = await browseNetworkConnection(connectionId, fullPath);
       setEntries(res.entries);
       setBrowsePath(res.path);
     } catch (err) {
@@ -134,7 +142,8 @@ export function NetworkImportForm({
   };
 
   const pickFile = (entry: NetworkFileEntry) => {
-    setPath(entry.path);
+    if (!connection) return;
+    setPath(uncPath(connection.label, entry.path));
     setView("manual");
   };
 
