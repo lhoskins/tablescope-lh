@@ -136,20 +136,25 @@ async def _deploy_remote_view(
     headers = [c["name"] for c in column_types if isinstance(c, dict) and c.get("name")]
     delimiter = "\t" if (original_format or "").lower() in {"tsv", "txt"} else ","
 
-    settings = get_settings()
     vdb_id = user_vdb.vdb_id
-    base_path = getattr(endpoint, "vdb_host_path", None) or settings.customer_base_path
-    vdb_file_path = os.path.join(
-        base_path, str(tenant_id), str(user_id), "vdb", f"{vdb_id}-vdb.xml"
+    host_base_path = getattr(endpoint, "vdb_host_path", None) or get_settings().customer_base_path
+    container_base_path = getattr(
+        endpoint, "vdb_container_path", None
+    ) or host_base_path
+    host_vdb_file_path = os.path.join(
+        host_base_path, str(tenant_id), str(user_id), "vdb", f"{vdb_id}-vdb.xml"
+    )
+    container_vdb_file_path = os.path.join(
+        container_base_path, str(tenant_id), str(user_id), "vdb", f"{vdb_id}-vdb.xml"
     )
 
     def _edit_and_write() -> None:
-        if not os.path.isfile(vdb_file_path):
-            raise FileImportError("VDB_NOT_FOUND", f"Tenant VDB file not found: {vdb_file_path}")
-        with open(vdb_file_path, encoding="utf-8") as fh:
+        if not os.path.isfile(host_vdb_file_path):
+            raise FileImportError("VDB_NOT_FOUND", f"Tenant VDB file not found: {host_vdb_file_path}")
+        with open(host_vdb_file_path, encoding="utf-8") as fh:
             xml = fh.read()
         xml = add_remote_csv_view(xml, view_name, headers, data_source_id, delimiter)
-        with open(vdb_file_path, "w", encoding="utf-8") as fh:
+        with open(host_vdb_file_path, "w", encoding="utf-8") as fh:
             fh.write(xml)
 
     await asyncio.to_thread(_edit_and_write)
@@ -160,10 +165,10 @@ async def _deploy_remote_view(
         pg_port=getattr(endpoint, "pg_port", None) or None,
     )
     try:
-        # Let the servlet locate the VDB file inside the Teiid container; passing
-        # the platform-api host path would fail because the container filesystem
-        # is mounted at a different absolute path.
-        await vdb_svc.redeploy_vdb(str(vdb_id))
+        # Pass the path as the Teiid servlet sees it. For dedicated tenant
+        # containers the VDB volume is mounted at a different host path than
+        # the platform-api writes to, so the container-internal path is required.
+        await vdb_svc.redeploy_vdb(str(vdb_id), vdb_file_path=container_vdb_file_path)
     except VDBProvisioningError as exc:
         raise FileImportError("TEIID_IMPORT_FAILED", str(exc)) from exc
     finally:
