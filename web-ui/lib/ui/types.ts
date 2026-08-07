@@ -31,7 +31,6 @@ export type NavKey =
   | "database-connectors"
   | "data-source-builder"
   | "project-data-source-builder"
-  | "project-database-connectors"
   | "documents"
   | "dashboards"
   | "relationship-map"

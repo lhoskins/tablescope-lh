@@ -4,6 +4,8 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 /** Connector categories supported by the Data Source Builder. */
+export type DataSourceView = "session" | "all";
+
 export type SourceType =
   | "postgresql"
   | "mysql"
@@ -145,6 +147,15 @@ interface BuilderState {
   sources: SessionSource[];
   activeSourceId: string | null;
   projects: ProjectAssignment[];
+  /** Active view in the Data Sources selector. */
+  activeView: DataSourceView;
+  /**
+   * Existing data sources selected from the "All Data Sources" view, keyed by
+   * their catalog id (`file:<id>` or `db:<id>`). The SessionSource value holds
+   * the metadata needed for Step 2 assignment; it is not re-created on the
+   * server when the user clicks Apply.
+   */
+  allDataSourceSelection: Record<string, SessionSource>;
   /**
    * Identifier of the tenant the persisted session belongs to. Used to drop a
    * stale session when the user switches tenants (localStorage is shared
@@ -175,6 +186,13 @@ interface BuilderState {
    * marked as created so they appear in the Active list.
    */
   syncExisting: (incoming: SessionSource[]) => void;
+
+  // ── All Data Sources selection ──
+  setActiveView: (view: DataSourceView) => void;
+  selectAllDataSource: (id: string, source: SessionSource) => void;
+  deselectAllDataSource: (id: string) => void;
+  isAllDataSourceSelected: (id: string) => boolean;
+  clearAllDataSourceSelection: () => void;
 
   // ── table actions ──
   updateTableState: (
@@ -236,6 +254,8 @@ export const useBuilderStore = create<BuilderState>()(
       sources: [],
       activeSourceId: null,
       projects: [],
+      activeView: "session",
+      allDataSourceSelection: {},
       createdKeys: [],
       tenantKey: null,
 
@@ -248,6 +268,8 @@ export const useBuilderStore = create<BuilderState>()(
             sources: [],
             activeSourceId: null,
             projects: [],
+            activeView: "session",
+            allDataSourceSelection: {},
             createdKeys: [],
           },
     ),
@@ -289,6 +311,59 @@ export const useBuilderStore = create<BuilderState>()(
         new Set([...keptKeys, ...merged.map(createdKeyOf)]),
       );
       return { sources, createdKeys };
+    }),
+
+  // ── All Data Sources selection ──
+  setActiveView: (view) => set({ activeView: view }),
+
+  selectAllDataSource: (id, source) =>
+    set((state) => {
+      const allDataSourceSelection = {
+        ...state.allDataSourceSelection,
+        [id]: source,
+      };
+      // Ensure the selected item is also represented in sources for Step 2.
+      const sources = state.sources.some((s) => s.id === source.id)
+        ? state.sources
+        : [...state.sources, source];
+      const createdKeys = Array.from(
+        new Set([...state.createdKeys, createdKeyOf(source)]),
+      );
+      return { allDataSourceSelection, sources, createdKeys };
+    }),
+
+  deselectAllDataSource: (id) =>
+    set((state) => {
+      const source = state.allDataSourceSelection[id];
+      const { [id]: _, ...allDataSourceSelection } =
+        state.allDataSourceSelection;
+      if (!source) return { allDataSourceSelection };
+      const key = createdKeyOf(source);
+      const sources = state.sources.filter((s) => s.id !== source.id);
+      const createdKeys = state.createdKeys.filter((k) => k !== key);
+      return { allDataSourceSelection, sources, createdKeys };
+    }),
+
+  isAllDataSourceSelected: (id) => id in get().allDataSourceSelection,
+
+  clearAllDataSourceSelection: () =>
+    set((state) => {
+      const selectedIds = Object.keys(state.allDataSourceSelection);
+      const selectedSourceIds = new Set(
+        selectedIds.map((id) => state.allDataSourceSelection[id].id),
+      );
+      const sources = state.sources.filter(
+        (s) => !selectedSourceIds.has(s.id) || !s.existing,
+      );
+      const selectedKeys = new Set(
+        Object.values(state.allDataSourceSelection).map(createdKeyOf),
+      );
+      const createdKeys = state.createdKeys.filter((k) => !selectedKeys.has(k));
+      return {
+        allDataSourceSelection: {},
+        sources,
+        createdKeys,
+      };
     }),
 
   removeSource: (sourceId) =>
@@ -465,7 +540,14 @@ export const useBuilderStore = create<BuilderState>()(
   },
 
   reset: () =>
-    set({ sources: [], activeSourceId: null, projects: [], createdKeys: [] }),
+    set({
+      sources: [],
+      activeSourceId: null,
+      projects: [],
+      activeView: "session",
+      allDataSourceSelection: {},
+      createdKeys: [],
+    }),
     }),
     {
       name: "tablescope-data-source-builder",
@@ -480,6 +562,8 @@ export const useBuilderStore = create<BuilderState>()(
         sources: state.sources,
         activeSourceId: state.activeSourceId,
         projects: state.projects,
+        activeView: state.activeView,
+        allDataSourceSelection: state.allDataSourceSelection,
         createdKeys: state.createdKeys,
         tenantKey: state.tenantKey,
       }),

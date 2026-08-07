@@ -27,6 +27,7 @@ from app.routes import analytical_methods as analytical_methods_routes
 from app.routes import auth as auth_routes
 from app.routes import billing as billing_routes
 from app.routes import billing_admin as billing_admin_routes
+from app.routes import connected_sources as connected_sources_routes
 from app.routes import connectors as connectors_routes
 from app.routes import (
     conversational_analytics_conversations as conversational_analytics_conversations_routes,
@@ -35,6 +36,7 @@ from app.routes import conversational_analytics_turns as conversational_analytic
 from app.routes import dashboards_crud as dashboards_crud_routes
 from app.routes import dashboards_widget_query as dashboards_widget_query_routes
 from app.routes import data_source_assignments as data_source_assignments_routes
+from app.routes import data_source_catalog as data_source_catalog_routes
 from app.routes import database_sources_connection as database_sources_connection_routes
 from app.routes import database_sources_lifecycle as database_sources_lifecycle_routes
 from app.routes import (
@@ -413,7 +415,9 @@ def create_app() -> FastAPI:
         data_source_assignments_routes.router, prefix=api_prefix
     )
     app.include_router(saas_sources_routes.router, prefix=api_prefix)
+    app.include_router(connected_sources_routes.router, prefix=api_prefix)
     app.include_router(connectors_routes.router, prefix=api_prefix)
+    app.include_router(data_source_catalog_routes.router, prefix=api_prefix)
     app.include_router(grid_preferences_routes.router, prefix=api_prefix)
     app.include_router(upload_core_routes.router, prefix=api_prefix)
     app.include_router(upload_datasources_routes.router, prefix=api_prefix)

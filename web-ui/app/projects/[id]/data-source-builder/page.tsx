@@ -10,12 +10,19 @@ function ProjectDataSourceBuilderInner() {
   const { id: projectId } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const { data: identity } = useCurrentUser();
-  const intent =
-    searchParams.get("intent") === "database"
-      ? "database"
-      : searchParams.get("intent") === "upload"
-        ? "upload"
-        : undefined;
+  const sourceTab =
+    searchParams.get("sourceTab") === "upload" ||
+    searchParams.get("intent") === "upload"
+      ? "upload"
+      : searchParams.get("sourceTab") === "url" ||
+          searchParams.get("intent") === "url"
+        ? "url"
+        : searchParams.get("sourceTab") === "database" ||
+            searchParams.get("intent") === "database"
+          ? "database"
+          : searchParams.get("sourceTab") === "network"
+            ? "network"
+            : undefined;
 
   return (
     <ProjectToolScreen
@@ -26,7 +33,7 @@ function ProjectDataSourceBuilderInner() {
       <DataSourceBuilderWorkspace
         tenantName={identity?.tenant.name ?? ""}
         initialProjectId={projectId}
-        intent={intent}
+        initialSourceTab={sourceTab}
       />
     </ProjectToolScreen>
   );
