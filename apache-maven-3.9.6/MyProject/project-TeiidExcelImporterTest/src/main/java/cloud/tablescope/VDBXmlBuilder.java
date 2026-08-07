@@ -1,5 +1,6 @@
 package cloud.tablescope;
 
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.logging.Level;
@@ -202,6 +203,54 @@ public class VDBXmlBuilder {
                     .replace("<", "&lt;")
                     .replace(">", "&gt;")
                     .replace("\"", "&quot;");
+    }
+
+    /** Build a PHYSICAL model block for a custom HTTP translator (HubSpot, QuickBooks). */
+    public static String buildCustomHttpModelBlock(String modelName, String dsName, String translatorName,
+                                                    String teiidTableName, String tableName, JSONArray columns) {
+        StringBuilder cols = new StringBuilder();
+        if (columns != null && columns.length() > 0) {
+            for (int i = 0; i < columns.length(); i++) {
+                JSONObject c = columns.getJSONObject(i);
+                String name = c.getString("name");
+                String type = c.optString("teiid_type", "string");
+                String srcName = c.optString("name_in_source", name);
+                String viewId = "\"" + name.replace("\"", "\"\"") + "\"";
+                String nameInSourceLiteral = srcName.replace("'", "''");
+                cols.append("\t").append(viewId).append(" ").append(type)
+                    .append(" OPTIONS (NAMEINSOURCE '").append(nameInSourceLiteral).append("')");
+                if (i < columns.length() - 1) cols.append(",");
+                cols.append("\n");
+            }
+        } else {
+            cols.append("\t\"__row__\" string\n");
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n");
+        sb.append("  <model name=\"").append(modelName).append("\" type=\"PHYSICAL\" visible=\"false\">\n");
+        sb.append("    <source name=\"").append(dsName).append("\" translator-name=\"").append(translatorName).append("\"/>\n");
+        sb.append("    <metadata type=\"DDL\">\n");
+        sb.append("      <![CDATA[\n");
+        sb.append("CREATE FOREIGN TABLE ").append(teiidTableName).append(" (\n");
+        sb.append(cols);
+        sb.append(") OPTIONS (NAMEINSOURCE '").append(tableName.replace("'", "''")).append("');\n");
+        sb.append("]]>\n");
+        sb.append("    </metadata>\n");
+        sb.append("  </model>\n");
+        return sb.toString();
+    }
+
+    public static String buildCustomHttpTranslatorBlock(String translatorName, String translatorType,
+                                                        Map<String, String> properties) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n  <translator name=\"").append(translatorName).append("\" type=\"").append(translatorType).append("\">\n");
+        for (Map.Entry<String, String> e : properties.entrySet()) {
+            sb.append("    <property name=\"").append(xmlEncode(e.getKey())).append("\" value=\"")
+              .append(xmlEncode(e.getValue() != null ? e.getValue() : "")).append("\"/>\n");
+        }
+        sb.append("  </translator>\n");
+        return sb.toString();
     }
 
     /** Build a PHYSICAL model block for the native Teiid Salesforce translator. */
