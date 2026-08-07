@@ -45,6 +45,12 @@ variable "allowed_vpn_cidrs" {
   default     = []
 }
 
+variable "allowed_smb_cidrs" {
+  description = "CIDR blocks allowed to reach the SMB repository (TCP/445). Should include the TableScope shared VPC CIDR and tenant Docker CIDRs."
+  type        = list(string)
+  default     = []
+}
+
 variable "key_pair_name" {
   description = "Optional EC2 key pair name for debugging"
   type        = string

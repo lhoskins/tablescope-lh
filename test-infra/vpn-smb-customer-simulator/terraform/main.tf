@@ -126,23 +126,26 @@ resource "aws_security_group" "gateway" {
 
 resource "aws_security_group" "smb_internal" {
   name_prefix = "${local.name_prefix}-smb-"
-  description = "SMB3 only from the customer LAN"
+  description = "SMB3 from the VPN tunnel source CIDRs"
   vpc_id      = aws_vpc.customer.id
 
-  ingress {
-    description = "SMB3 TCP"
-    from_port   = 445
-    to_port     = 445
-    protocol    = "tcp"
-    cidr_blocks = [var.public_subnet_cidr]
+  dynamic "ingress" {
+    for_each = var.allowed_smb_cidrs
+    content {
+      description = "SMB3 TCP from TableScope VPC / tenant Docker subnets"
+      from_port   = 445
+      to_port     = 445
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
   }
 
   egress {
-    description = "No outbound"
+    description = "All outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = []
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags = {
@@ -170,6 +173,11 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+resource "aws_iam_role_policy_attachment" "vpc_read" {
+  role       = aws_iam_role.gateway.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonVPCReadOnlyAccess"
+}
+
 resource "aws_iam_instance_profile" "gateway" {
   name = "${local.name_prefix}-gateway-profile"
   role = aws_iam_role.gateway.name
@@ -191,7 +199,7 @@ resource "aws_instance" "gateway" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.gateway.id]
+  vpc_security_group_ids = [aws_security_group.gateway.id, aws_security_group.smb_internal.id]
   iam_instance_profile   = aws_iam_instance_profile.gateway.name
   source_dest_check      = false
   key_name               = var.key_pair_name != "" ? var.key_pair_name : null

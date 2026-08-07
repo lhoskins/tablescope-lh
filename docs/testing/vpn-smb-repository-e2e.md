@@ -4,6 +4,10 @@ This document describes the repeatable staging environment and test workflow for
 validating TableScope's **Isolated Data Plane + Customer VPN** tier against a
 simulated on-premises SMB repository.
 
+For the operator-facing setup guide (AWS VPN, customer gateway, SMB share, and the
+non-UI configuration required beyond the TableScope Settings UI), see
+[`docs/operations/aws-vpn-network-repository-setup.md`](../operations/aws-vpn-network-repository-setup.md).
+
 ## Base reference
 
 - Repository: `lhoskins/tablescope-lh`

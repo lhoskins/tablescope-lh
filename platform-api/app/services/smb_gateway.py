@@ -223,6 +223,29 @@ def _resolve_locator(
     return host, share, tail
 
 
+def _normalize_raw_path(raw_path: str, connection: NetworkFileConnection) -> str:
+    """If ``raw_path`` is share-relative, prepend ``//host/share/``.
+
+    This lets the browse API and older import records supply just a filename
+    like ``sample.csv`` while still validating it against the selected
+    ``connection``.
+    """
+    raw = raw_path.strip()
+    lower = raw.lower()
+    if lower.startswith(("smb://", "//", "\\\\")):
+        return raw
+    # Strip a leading share name if the caller included it.
+    share = connection.share_name.strip("\\/")
+    prefix = share + "/"
+    prefix_back = share + "\\"
+    if lower.startswith(prefix.lower()):
+        raw = raw[len(share) + 1 :]
+    elif lower.startswith(prefix_back.lower()):
+        raw = raw[len(share) + 1 :]
+    relative = raw.lstrip("\\/")
+    return f"//{connection.host}/{share}/{relative}"
+
+
 def resolve_network_path(
     raw_path: str,
     connection: NetworkFileConnection,
@@ -236,7 +259,7 @@ def resolve_network_path(
     otherwise the deployment-level environment allowlist is consulted.
     """
     host, share, tail = _resolve_locator(
-        raw_path, connection, approved_hosts, require_filename=True
+        _normalize_raw_path(raw_path, connection), connection, approved_hosts, require_filename=True
     )
     relative = "/".join(tail)
     return ResolvedNetworkPath(
@@ -254,7 +277,7 @@ def resolve_network_directory(
     The path may be the share root or a folder inside ``approved_root_path``.
     """
     host, share, tail = _resolve_locator(
-        raw_path, connection, approved_hosts, require_filename=False
+        _normalize_raw_path(raw_path, connection), connection, approved_hosts, require_filename=False
     )
     relative = "/".join(tail)
     return ResolvedNetworkPath(

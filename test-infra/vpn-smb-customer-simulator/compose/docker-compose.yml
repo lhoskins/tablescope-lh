@@ -1,32 +1,21 @@
 services:
   samba:
-    build:
-      context: ./samba
-      dockerfile: Dockerfile
-    image: tablescope/vpn-smb-e2e-samba:latest
+    image: dperson/samba:4.18
     container_name: tablescope-vpn-smb-e2e-samba
     restart: unless-stopped
-    # No public ports; reachable only from the gateway host / VPN tunnel.
-    networks:
-      smb-internal:
-        ipv4_address: 10.250.20.20
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
-    environment:
-      TZ: UTC
-      SAMBA_PASSWORD: ${SAMBA_PASSWORD:?SAMBA_PASSWORD is required}
+    network_mode: host
     volumes:
       - type: bind
         source: ${TABLESCOPE_REPO_ROOT:-/srv/repository}
-        target: /srv/repository
+        target: /share
         read_only: true
+    command: >
+      -u "tablescope;${SAMBA_PASSWORD:?SAMBA_PASSWORD is required}"
+      -s "repository;/share;yes;no;yes;tablescope;tablescope;tablescope"
+      -p
 
   strongswan:
-    image: ${STRONGSWAN_IMAGE:-ghcr.io/akafeng/strongswan:5.9}
+    image: alpine:3.18
     container_name: tablescope-vpn-smb-e2e-strongswan
     restart: unless-stopped
     network_mode: host
@@ -34,18 +23,14 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-    read_only: true
-    environment:
-      TZ: UTC
     volumes:
       - type: bind
-        source: ${STRONGSWAN_CONFIG_DIR:-./strongswan}
-        target: /etc/swanctl
+        source: ${STRONGSWAN_CONFIG_DIR:-./strongswan}/ipsec.conf
+        target: /etc/ipsec.conf
         read_only: true
-
-networks:
-  smb-internal:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 10.250.20.0/24
+      - type: bind
+        source: ${STRONGSWAN_CONFIG_DIR:-./strongswan}/ipsec.secrets
+        target: /etc/ipsec.secrets
+        read_only: true
+    command: >
+      sh -c "apk add --no-cache strongswan && mkdir -p /var/run && ipsec start --nofork"
