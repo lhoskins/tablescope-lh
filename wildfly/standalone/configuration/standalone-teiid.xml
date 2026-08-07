@@ -202,7 +202,6 @@
                     </driver>
                     <driver name="databricks" module="com.databricks">
                         <driver-class>com.databricks.client.jdbc.Driver</driver-class>
-                        <xa-datasource-class>com.databricks.client.jdbc.DataSource</xa-datasource-class>
                     </driver>
                 </drivers>
             </datasources>
