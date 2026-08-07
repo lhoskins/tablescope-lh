@@ -148,6 +148,14 @@ export function useSettingsNavItems(user?: CurrentUser): {
       visible: () => isAdmin(user),
     },
     {
+      key: "enterprise-authentication",
+      label: "Enterprise Authentication",
+      href: "/admin/settings/enterprise-authentication",
+      icon: IconShieldCheck,
+      section: "Security",
+      visible: () => isAdmin(user),
+    },
+    {
       key: "repositories",
       label: "Repositories",
       href: "/admin/settings/repositories",

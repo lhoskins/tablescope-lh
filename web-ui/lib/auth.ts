@@ -94,6 +94,29 @@ export async function exchangeWithClerk(
   });
 }
 
+export type TenantAuthPolicy = {
+  tenant_slug: string;
+  tenant_display_name: string;
+  local_login_allowed: boolean;
+  sso_enabled: boolean;
+  sso_required: boolean;
+  sso_button_label: string | null;
+};
+
+export async function getTenantAuthPolicy(slug: string): Promise<TenantAuthPolicy> {
+  return apiClient.get<TenantAuthPolicy>(`/api/auth/tenant-policy/${encodeURIComponent(slug)}`);
+}
+
+export async function startSso(
+  slug: string,
+  returnPath?: string,
+): Promise<{ redirect_url: string }> {
+  return apiClient.post<{ redirect_url: string }>("/api/auth/sso/start", {
+    tenant_slug: slug,
+    return_path: returnPath,
+  });
+}
+
 /**
  * Sign in with email + password via Supabase (the primary authenticator), then
  * exchange the resulting Supabase access token for a Tablescope session scoped

@@ -26,6 +26,7 @@ from app.routes import ai_proxy as ai_proxy_routes
 from app.routes import ai_reference_catalog as ai_reference_catalog_routes
 from app.routes import analytical_methods as analytical_methods_routes
 from app.routes import auth as auth_routes
+from app.routes import auth_sso as auth_sso_routes
 from app.routes import billing as billing_routes
 from app.routes import billing_admin as billing_admin_routes
 from app.routes import connected_sources as connected_sources_routes
@@ -46,6 +47,9 @@ from app.routes import (
 from app.routes import document_families_curation as document_families_curation_routes
 from app.routes import document_families_reads as document_families_reads_routes
 from app.routes import document_families_summary as document_families_summary_routes
+from app.routes import enterprise_auth_ldap as enterprise_auth_ldap_routes
+from app.routes import enterprise_auth_settings as enterprise_auth_settings_routes
+from app.routes import enterprise_auth_sso as enterprise_auth_sso_routes
 from app.routes import file_analysis as file_analysis_routes
 from app.routes import file_imports as file_imports_routes
 from app.routes import grid_preferences as grid_preferences_routes
@@ -386,9 +390,13 @@ def create_app() -> FastAPI:
 
     api_prefix = settings.api_prefix
     app.include_router(auth_routes.router, prefix=api_prefix)
+    app.include_router(auth_sso_routes.router, prefix=api_prefix)
     app.include_router(tenants_crud_routes.router, prefix=api_prefix)
     app.include_router(tenants_settings_routes.router, prefix=api_prefix)
     app.include_router(tenants_security_policy_routes.router, prefix=api_prefix)
+    app.include_router(enterprise_auth_settings_routes.router, prefix=api_prefix)
+    app.include_router(enterprise_auth_ldap_routes.router, prefix=api_prefix)
+    app.include_router(enterprise_auth_sso_routes.router, prefix=api_prefix)
     app.include_router(tenants_users_routes.router, prefix=api_prefix)
     # Network router first: its literal /firewall-script path must be matched
     # before the CRUD router's /{tenant_id}.

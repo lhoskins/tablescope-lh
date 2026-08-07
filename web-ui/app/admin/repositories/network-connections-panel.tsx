@@ -19,7 +19,7 @@ function statusBadge(status: string | null) {
   return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">—</span>;
 }
 
-export function NetworkConnectionsPanel() {
+export function NetworkConnectionsPanel({ onSaved }: { onSaved?: () => void } = {}) {
   const queryClient = useQueryClient();
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -33,6 +33,7 @@ export function NetworkConnectionsPanel() {
     mutationFn: deleteNetworkFileConnection,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["network-file-connections"] });
+      onSaved?.();
     },
   });
 
@@ -71,6 +72,7 @@ export function NetworkConnectionsPanel() {
             setIsCreating(false);
             setEditingId(null);
             queryClient.invalidateQueries({ queryKey: ["network-file-connections"] });
+            onSaved?.();
           }}
         />
       )}

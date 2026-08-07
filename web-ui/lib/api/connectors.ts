@@ -149,6 +149,10 @@ export interface CreatedConnection {
   connectorName: string;
   hostOrAccount: string;
   lastTested: string | null;
+  /** Database-only fields used to start a table-selection flow. */
+  databaseName?: string | null;
+  port?: number | null;
+  username?: string | null;
 }
 
 const CONNECTOR_NAMES: Record<string, string> = {
@@ -180,6 +184,9 @@ export async function listCreatedConnections(): Promise<CreatedConnection[]> {
     connectorName: connectorDisplayName(c.db_type),
     hostOrAccount: c.host,
     lastTested: c.last_tested_at ?? c.created_at,
+    databaseName: c.database_name,
+    port: c.port,
+    username: c.username,
   }));
 
   const saasRows: CreatedConnection[] = saas.map((c) => ({
