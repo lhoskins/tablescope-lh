@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { IconPlus, IconSparkles } from "@tabler/icons-react";
-import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -18,7 +17,7 @@ import {
 
 type Tab = "inherited" | "suggested" | "projectUnique";
 
-export function ReferenceLibraryScreen({ projectId }: { projectId: string }) {
+export function ProjectReferenceLibraryPanel({ projectId }: { projectId: string }) {
   const pid = Number(projectId);
   const [meta, setMeta] = useState<ReferenceMeta | null>(null);
   const [data, setData] = useState<ProjectLibrary | null>(null);
@@ -93,24 +92,18 @@ export function ReferenceLibraryScreen({ projectId }: { projectId: string }) {
         : data?.projectUnique ?? [];
 
   return (
-    <ProjectShell
-      projectId={projectId}
-      activeNav="project-reference-library"
-      breadcrumbLabel="Reference Library"
-      actions={
-        <div className="flex gap-2">
-          <Button variant="brandSoft" onClick={generate} disabled={generating}>
-            <IconSparkles size={14} />
-            {generating ? "Analyzing…" : "Suggest references"}
-          </Button>
-          <Button variant="primary" onClick={() => setShowUpload(true)}>
-            <IconPlus size={14} /> Add Reference
-          </Button>
-        </div>
-      }
-    >
+    <>
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="flex justify-end gap-2">
+        <Button variant="brandSoft" onClick={generate} disabled={generating}>
+          <IconSparkles size={14} />
+          {generating ? "Analyzing…" : "Suggest references"}
+        </Button>
+        <Button variant="primary" onClick={() => setShowUpload(true)}>
+          <IconPlus size={14} /> Add Reference
+        </Button>
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile label="Active in AI scope" value={data?.summary.totalActive ?? 0} />
           <StatTile label="Inherited" value={data?.summary.inherited ?? 0} />
           <StatTile label="Suggested (pending)" value={data?.summary.suggestedPending ?? 0} />
@@ -198,6 +191,8 @@ export function ReferenceLibraryScreen({ projectId }: { projectId: string }) {
           onCreated={load}
         />
       )}
-    </ProjectShell>
+    </>
   );
 }
+
+export const ReferenceLibraryScreen = ProjectReferenceLibraryPanel;

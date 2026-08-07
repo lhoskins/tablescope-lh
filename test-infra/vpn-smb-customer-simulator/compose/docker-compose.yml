@@ -1,0 +1,36 @@
+services:
+  samba:
+    image: dperson/samba:4.18
+    container_name: tablescope-vpn-smb-e2e-samba
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - type: bind
+        source: ${TABLESCOPE_REPO_ROOT:-/srv/repository}
+        target: /share
+        read_only: true
+    command: >
+      -u "tablescope;${SAMBA_PASSWORD:?SAMBA_PASSWORD is required}"
+      -s "repository;/share;yes;no;yes;tablescope;tablescope;tablescope"
+      -p
+
+  strongswan:
+    image: alpine:3.18
+    container_name: tablescope-vpn-smb-e2e-strongswan
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - type: bind
+        source: ${STRONGSWAN_CONFIG_DIR:-./strongswan}/ipsec.conf
+        target: /etc/ipsec.conf
+        read_only: true
+      - type: bind
+        source: ${STRONGSWAN_CONFIG_DIR:-./strongswan}/ipsec.secrets
+        target: /etc/ipsec.secrets
+        read_only: true
+    command: >
+      sh -c "apk add --no-cache strongswan && mkdir -p /var/run && ipsec start --nofork"

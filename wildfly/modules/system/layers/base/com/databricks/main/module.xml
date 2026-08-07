@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module name="com.databricks" xmlns="urn:jboss:module:1.5">
+    <resources>
+        <resource-root path="databricks-jdbc-3.4.2.jar"/>
+    </resources>
+    <dependencies>
+        <module name="javax.api"/>
+        <module name="javax.transaction.api"/>
+    </dependencies>
+</module>

@@ -110,6 +110,13 @@ class FileSourceMeta(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    #: Durable live-source parameters used at query time (URL/UNC path,
+    #: network connection id, etc.). Kept separate from the redacted provenance
+    #: so Teiid can re-fetch the remote file on every query.
+    live_source_params: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON, nullable=True
+    )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,

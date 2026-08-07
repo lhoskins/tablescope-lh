@@ -30,7 +30,7 @@ export function QuickActionsCard({
       // rather than a second, inline creation path.
       label: "Create datasource",
       icon: IconDatabase,
-      onClick: () => router.push(`/data-source-builder?projectId=${projectId}`),
+      onClick: () => router.push(`/projects/${projectId}/data-source-builder`),
     },
     {
       // Same Data Source Builder, scoped to the connected-databases section
@@ -38,7 +38,7 @@ export function QuickActionsCard({
       label: "Create Database connection",
       icon: IconServer,
       onClick: () =>
-        router.push(`/data-source-builder?projectId=${projectId}&intent=database`),
+        router.push(`/projects/${projectId}/data-source-builder?intent=database`),
     },
     {
       label: "Create table",
@@ -52,7 +52,7 @@ export function QuickActionsCard({
       label: "Upload file",
       icon: IconFileText,
       onClick: () =>
-        router.push(`/data-source-builder?projectId=${projectId}&intent=upload`),
+        router.push(`/projects/${projectId}/data-source-builder?intent=upload`),
     },
     {
       label: "New dashboard",

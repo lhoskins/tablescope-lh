@@ -7,7 +7,12 @@ from app.config import get_settings
 from app.models.file_import_job import FileImportJob
 from app.models.network_file_connection import NetworkFileConnection
 from app.services.safe_remote_fetch import RemoteFetchError
-from app.services.smb_gateway import NetworkPathError, resolve_network_path
+from app.services.smb_gateway import (
+    NetworkPathError,
+    get_approved_smb_hosts,
+    resolve_network_path,
+)
+from app.services.tenant_network_source_ip import get_tenant_source_ip
 
 from .staging import FileImportError, SafeProvenance, StagedFile, _new_job, _stage
 
@@ -88,6 +93,11 @@ async def acquire_url(
         provenance=provenance,
         allowed_families=allowed_families,
     )
+    job.live_source_params = {
+        "type": "url",
+        "url": url,
+    }
+    await session.flush()
     return job, staged
 
 
@@ -117,11 +127,15 @@ async def acquire_network_path(
     session.add(job)
     await session.flush()
     try:
-        resolved = resolve_network_path(path, connection)
+        approved_hosts = await get_approved_smb_hosts(session, tenant_id)
+        resolved = resolve_network_path(path, connection, approved_hosts)
         job.status = "fetching"
+        source_ip = await get_tenant_source_ip(session, tenant_id)
         import app.services.file_ingestion as _fi
 
-        data = await _fi.read_network_file(resolved, connection)
+        data = await _fi.read_network_file(
+            resolved, connection, source_ip=source_ip
+        )
     except NetworkPathError as exc:
         raise FileImportError(exc.code, exc.message) from exc
 
@@ -139,4 +153,12 @@ async def acquire_network_path(
         provenance=provenance,
         allowed_families=allowed_families,
     )
+    job.live_source_params = {
+        "type": "network_path",
+        "connection_id": connection.id,
+        # Store a fully-qualified locator so the remote-file proxy can re-resolve
+        # it against the saved connection without needing extra context.
+        "path": f"//{connection.host}/{connection.share_name}/{resolved.relative_path}",
+    }
+    await session.flush()
     return job, staged

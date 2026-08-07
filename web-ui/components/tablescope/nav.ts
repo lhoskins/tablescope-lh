@@ -3,20 +3,22 @@ import {
   IconFolders,
   IconSparkles,
   IconBulb,
-  IconDatabaseShare,
-
-  IconTopologyStar3,
-  IconHistory,
   IconDatabase,
   IconDatabasePlus,
-  IconBinaryTree,
+  IconTopologyStar3,
+  IconHistory,
   IconBook2,
   IconLibrary,
   IconBuildingBank,
   IconClipboardList,
+  IconBinaryTree,
   type Icon,
 } from "@tabler/icons-react";
 import type { CurrentUser, NavKey } from "@/lib/ui/types";
+import {
+  canManageDataSourceAssignments,
+  canViewSettings,
+} from "@/lib/ui/permissions";
 
 export interface NavItem {
   key: NavKey;
@@ -30,12 +32,6 @@ export interface NavItem {
 export interface NavGroup {
   heading?: string;
   items: NavItem[];
-}
-
-function canManageAdminTools(user?: CurrentUser): boolean {
-  if (!user) return false;
-  const adminRoles = ["admin", "tenant_admin", "root_admin"];
-  return adminRoles.includes(user.rawRole ?? "") || Boolean(user.isSuperAdmin);
 }
 
 export function homeNavGroups(user?: CurrentUser): NavGroup[] {
@@ -64,37 +60,13 @@ export function homeNavGroups(user?: CurrentUser): NavGroup[] {
         },
       ],
     },
-    {
-      heading: "Tools",
-      items: [
-        {
-          key: "data-source-builder",
-          label: "Data Source Builder",
-          href: "/data-source-builder",
-          icon: IconDatabasePlus,
-        },
-        {
-          key: "database-connectors",
-          label: "Database Connectors",
-          href: "/database-connectors",
-          icon: IconDatabase,
-        },
-        ...(canManageAdminTools(user)
-          ? [
-              {
-                key: "admin-data-source-assignments" as NavKey,
-                label: "Data Source Assignments",
-                href: "/admin/data-source-assignments",
-                icon: IconDatabaseShare,
-              },
-            ]
-          : []),
-      ],
-    },
   ];
 }
 
-export function projectNavGroups(projectId: string): NavGroup[] {
+export function projectNavGroups(
+  projectId: string,
+  user?: CurrentUser,
+): NavGroup[] {
   const base = `/projects/${projectId}`;
   return [
     {
@@ -139,33 +111,52 @@ export function projectNavGroups(projectId: string): NavGroup[] {
       ],
     },
     {
-      heading: "Intelligence",
+      heading: "Tools",
       items: [
         {
-          key: "project-knowledge-graph",
-          label: "Graph Lifecycle",
-          href: `${base}/knowledge-graph`,
-          icon: IconHistory,
+          key: "project-data-source-builder",
+          label: "Data Source Builder",
+          href: `${base}/data-source-builder`,
+          icon: IconDatabasePlus,
         },
         {
-          key: "project-metadata-catalog",
-          label: "Metadata Catalog",
-          href: `${base}/metadata-catalog`,
-          icon: IconBook2,
-        },
-        {
-          key: "project-reference-library",
-          label: "Reference Library",
-          href: `${base}/reference-library`,
-          icon: IconLibrary,
-        },
-        {
-          key: "project-audit-log",
-          label: "Audit Log",
-          href: `${base}/audit-log`,
-          icon: IconHistory,
+          key: "project-database-connectors",
+          label: "Database Connectors",
+          href: `${base}/database-connectors`,
+          icon: IconDatabase,
         },
       ],
     },
   ];
 }
+
+export const projectIntelligenceNavItems = (
+  projectId: string,
+): NavItem[] => [
+  {
+    key: "project-knowledge-graph",
+    label: "Graph Lifecycle",
+    href: `/admin/settings/project-intelligence/${projectId}/graph-lifecycle`,
+    icon: IconHistory,
+  },
+  {
+    key: "project-metadata-catalog",
+    label: "Metadata Catalog",
+    href: `/admin/settings/project-intelligence/${projectId}/metadata-catalog`,
+    icon: IconBook2,
+  },
+  {
+    key: "project-reference-library",
+    label: "Project Reference Library",
+    href: `/admin/settings/project-intelligence/${projectId}/reference-library`,
+    icon: IconLibrary,
+  },
+  {
+    key: "project-audit-log",
+    label: "Audit Log",
+    href: `/admin/settings/project-intelligence/${projectId}/audit-log`,
+    icon: IconHistory,
+  },
+];
+
+export { canViewSettings, canManageDataSourceAssignments };

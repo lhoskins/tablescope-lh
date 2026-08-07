@@ -50,6 +50,7 @@ _ANONYMOUS_PATH_PREFIXES = (
     "/api/billing/checkout/session",
     "/api/billing/stripe/webhook",
     "/api/provisioning/status",
+    "/internal/file-proxy",
 )
 
 # Avatars are served by opaque URL for <img> tags (which cannot send a bearer

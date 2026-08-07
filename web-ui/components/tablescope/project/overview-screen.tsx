@@ -30,6 +30,7 @@ import {
   type ConversationTurn,
 } from "@/lib/api/conversational-analytics";
 import { projectInsightApi, type ProjectInsight, type ProjectInsightCard } from "@/lib/api/project-insight";
+import { buildAiAssistantHref } from "@/lib/navigation/ai-assistant";
 import { timeAgo, aiStatusLabel, aiStatusTone } from "@/lib/ui/format";
 import type { AiStatus, ProjectSummary } from "@/lib/ui/types";
 import {
@@ -82,7 +83,13 @@ export function OverviewScreen({ projectId }: { projectId: string }) {
 
   const openInAssistant = useCallback(() => {
     if (chatConversationId == null) return;
-    router.push(`/ai?conversation=${chatConversationId}&projectId=${projectId}`);
+    router.push(
+      buildAiAssistantHref({
+        conversationId: chatConversationId,
+        projectId,
+        origin: "project-overview",
+      }),
+    );
   }, [chatConversationId, projectId, router]);
 
   const handleAsk = useCallback(

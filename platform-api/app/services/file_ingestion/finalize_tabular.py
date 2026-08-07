@@ -1,16 +1,22 @@
 
 from __future__ import annotations
 
+import asyncio
+import glob
+import os
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models.file_import_job import FileImportJob
 from app.models.file_source_meta import FileSourceMeta
+from app.services.vdb_management import VDBManagementService, VDBProvisioningError
 
 from .jobs import apply_provenance
+from .remote_vdb import add_remote_csv_view
 from .staging import FileImportError, discard_quarantine, logger, read_staged_bytes
 
 
@@ -26,6 +32,149 @@ class FinalizeOptions:
     recommendation_decisions: list[dict[str, Any]] | None = None
     user_notes: str | None = None
     user_nuances: str | None = None
+
+
+async def _ensure_user_vdb(
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    user_id: int,
+    endpoint: Any,
+) -> Any:
+    """Return the user's VDB registry row, creating it against the tenant Teiid if missing.
+
+    The VDB file can already exist on disk (e.g. a previous upload auto-provisioned
+    it) or be created on demand. Either way, a matching ``UserVDB`` row is inserted
+    so the rest of the platform can route queries to it.
+    """
+    from app.models.user_vdb import UserVDB
+    from app.services.vdb_management import VDBManagementService, VDBProvisioningError
+
+    existing = await session.scalar(
+        select(UserVDB).where(
+            UserVDB.tenant_id == tenant_id, UserVDB.user_id == user_id
+        )
+    )
+    if existing is not None:
+        return existing
+
+    vdb_path = os.path.join(
+        endpoint.vdb_host_path or get_settings().customer_base_path,
+        str(tenant_id),
+        str(user_id),
+        "vdb",
+    )
+
+    def _pick_vdb_id() -> str | None:
+        if not os.path.isdir(vdb_path):
+            return None
+        files = glob.glob(os.path.join(vdb_path, "*-vdb.xml"))
+        if not files:
+            return None
+        if len(files) == 1:
+            return os.path.basename(files[0]).replace("-vdb.xml", "")
+        newest = max(files, key=os.path.getmtime)
+        return os.path.basename(newest).replace("-vdb.xml", "")
+
+    vdb_id = await asyncio.to_thread(_pick_vdb_id)
+
+    if vdb_id is None:
+        vdb_svc = VDBManagementService(
+            servlet_url=getattr(endpoint, "servlet_url", None) or None,
+            pg_host=getattr(endpoint, "pg_host", None) or None,
+            pg_port=getattr(endpoint, "pg_port", None) or None,
+        )
+        try:
+            result = await vdb_svc.create_user_vdb(
+                org_id=tenant_id, user_id=user_id
+            )
+            vdb_id = result.vdb_id
+        except VDBProvisioningError as exc:
+            raise FileImportError(
+                "VDB_PROVISIONING_FAILED",
+                "Failed to auto-provision user VDB. Please contact administrator.",
+            ) from exc
+        finally:
+            await vdb_svc.aclose()
+
+    user_vdb = UserVDB(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        vdb_id=vdb_id,
+        vdb_username="test",
+        encrypted_password="test",
+        vdb_host=getattr(endpoint, "pg_host", get_settings().teiid_pg_host),
+        vdb_port=getattr(endpoint, "pg_port", get_settings().teiid_pg_port),
+        is_active=True,
+        health_status="deployed",
+    )
+    session.add(user_vdb)
+    await session.flush()
+    return user_vdb
+
+
+async def _deploy_remote_view(
+    endpoint: Any,
+    user_vdb: Any,
+    *,
+    data_source_id: int,
+    tenant_id: int,
+    user_id: int,
+    view_name: str,
+    column_types: list[dict[str, Any]] | None,
+    original_format: str | None,
+) -> dict[str, Any]:
+    """Edit the tenant VDB to add a live remote-file view and redeploy it."""
+    from app.services.file_sources.sanitize import sanitize_column_name
+
+    if not column_types:
+        raise FileImportError("UNPROFILED", "Could not determine columns for live source")
+
+    for col in column_types:
+        col["field"] = sanitize_column_name(col.get("name") or "col")
+
+    headers = [c["name"] for c in column_types if isinstance(c, dict) and c.get("name")]
+    delimiter = "\t" if (original_format or "").lower() in {"tsv", "txt"} else ","
+
+    vdb_id = user_vdb.vdb_id
+    host_base_path = getattr(endpoint, "vdb_host_path", None) or get_settings().customer_base_path
+    container_base_path = getattr(
+        endpoint, "vdb_container_path", None
+    ) or host_base_path
+    host_vdb_file_path = os.path.join(
+        host_base_path, str(tenant_id), str(user_id), "vdb", f"{vdb_id}-vdb.xml"
+    )
+    container_vdb_file_path = os.path.join(
+        container_base_path, str(tenant_id), str(user_id), "vdb", f"{vdb_id}-vdb.xml"
+    )
+
+    def _edit_and_write() -> None:
+        if not os.path.isfile(host_vdb_file_path):
+            raise FileImportError("VDB_NOT_FOUND", f"Tenant VDB file not found: {host_vdb_file_path}")
+        with open(host_vdb_file_path, encoding="utf-8") as fh:
+            xml = fh.read()
+        xml = add_remote_csv_view(xml, view_name, headers, data_source_id, delimiter)
+        with open(host_vdb_file_path, "w", encoding="utf-8") as fh:
+            fh.write(xml)
+
+    await asyncio.to_thread(_edit_and_write)
+
+    vdb_svc = VDBManagementService(
+        servlet_url=getattr(endpoint, "servlet_url", None) or None,
+        pg_host=getattr(endpoint, "pg_host", None) or None,
+        pg_port=getattr(endpoint, "pg_port", None) or None,
+    )
+    try:
+        # Pass the path as the Teiid servlet sees it. For dedicated tenant
+        # containers the VDB volume is mounted at a different host path than
+        # the platform-api writes to, so the container-internal path is required.
+        await vdb_svc.redeploy_vdb(str(vdb_id), vdb_file_path=container_vdb_file_path)
+    except VDBProvisioningError as exc:
+        raise FileImportError("TEIID_IMPORT_FAILED", str(exc)) from exc
+    finally:
+        await vdb_svc.aclose()
+
+    return {"redeployed": True, "vdb_id": vdb_id, "data_source_id": data_source_id}
 
 
 async def finalize_tabular_import(
@@ -92,41 +241,13 @@ async def finalize_tabular_import(
     final_filename, content, _ = prepare_upload_content(file_name, content)
     display_name, _ = display_source(final_filename, original_format)
 
-    endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant_id)
-    servlet_url = f"{endpoint.servlet_url}/TeiidExcelImporterTest/upload"
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(120.0, connect=10.0)
-        ) as client:
-            resp = await client.post(
-                servlet_url,
-                data={
-                    "org_id": str(tenant.id),
-                    "user_id": str(user.id),
-                    "vdb_type": "user",
-                    "replace": "true",
-                },
-                files={
-                    "file": (final_filename, content, "application/octet-stream")
-                },
-            )
-    except httpx.RequestError as exc:
-        raise FileImportError("TEIID_UNREACHABLE", f"Teiid unreachable: {exc}") from exc
-
-    if resp.status_code >= 400:
-        raise FileImportError(
-            "TEIID_IMPORT_FAILED", f"Teiid import failed: {resp.text}"
-        )
-    teiid_result = (
-        resp.json()
-        if resp.headers.get("content-type", "").startswith("application/json")
-        else {"raw": resp.text}
-    )
-    if "error" in teiid_result:
-        raise FileImportError("TEIID_IMPORT_FAILED", str(teiid_result["error"]))
-
     column_types = detect_column_types(content, final_filename)
     view_name = compute_view_name(final_filename)
+
+    endpoint = await TenantTeiidResolver(session).resolve_for_org(tenant_id)
+    user_vdb = await _ensure_user_vdb(
+        session, tenant_id=tenant_id, user_id=user.id, endpoint=endpoint
+    )
 
     resolved_project_id: int | None = None
     if project_id is not None:
@@ -163,6 +284,52 @@ async def finalize_tabular_import(
             meta.project_id = resolved_project_id
         meta.archived = False
         meta.archived_at = None
+    await session.flush()
+
+    if job.live_source_params is not None:
+        teiid_result = await _deploy_remote_view(
+            endpoint,
+            user_vdb,
+            data_source_id=meta.id,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            view_name=view_name,
+            column_types=column_types,
+            original_format=original_format,
+        )
+    else:
+        servlet_url = f"{endpoint.servlet_url}/TeiidExcelImporterTest/upload"
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(120.0, connect=10.0)
+            ) as client:
+                resp = await client.post(
+                    servlet_url,
+                    data={
+                        "org_id": str(tenant.id),
+                        "user_id": str(user.id),
+                        "vdb_type": "user",
+                        "replace": "true",
+                    },
+                    files={
+                        "file": (final_filename, content, "application/octet-stream")
+                    },
+                )
+        except httpx.RequestError as exc:
+            raise FileImportError("TEIID_UNREACHABLE", f"Teiid unreachable: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise FileImportError(
+                "TEIID_IMPORT_FAILED", f"Teiid import failed: {resp.text}"
+            )
+        teiid_result = (
+            resp.json()
+            if resp.headers.get("content-type", "").startswith("application/json")
+            else {"raw": resp.text}
+        )
+        if "error" in teiid_result:
+            raise FileImportError("TEIID_IMPORT_FAILED", str(teiid_result["error"]))
+
     apply_provenance(meta, job)
     await session.flush()
 

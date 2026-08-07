@@ -82,6 +82,7 @@ from app.models.llm_framework import (
 from app.models.mfa_phone_factor import MfaPhoneFactor
 from app.models.mfa_sms_event import MfaSmsEvent
 from app.models.network_file_connection import NetworkFileConnection
+from app.models.network_file_host import NetworkFileHost
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_action import ProjectAction, ProjectActionSubtask
@@ -192,6 +193,7 @@ __all__ = [
     "MfaPhoneFactor",
     "MfaSmsEvent",
     "NetworkFileConnection",
+    "NetworkFileHost",
     "OrganizationVDB",
     "Project",
     "ProjectAction",

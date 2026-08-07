@@ -57,6 +57,7 @@ from app.routes import home_pins as home_pins_routes
 from app.routes import insight_chart_selection as insight_chart_selection_routes
 from app.routes import insight_feedback_crud as insight_feedback_crud_routes
 from app.routes import insight_feedback_review as insight_feedback_review_routes
+from app.routes import internal_file_proxy as internal_file_proxy_routes
 from app.routes import knowledge_graph as knowledge_graph_routes
 from app.routes import llm_framework_artifacts as llm_framework_artifacts_routes
 from app.routes import llm_framework_catalog as llm_framework_catalog_routes
@@ -376,6 +377,7 @@ def create_app() -> FastAPI:
     mount_metrics(app)
 
     app.include_router(health_routes.router)
+    app.include_router(internal_file_proxy_routes.router)
 
     api_prefix = settings.api_prefix
     app.include_router(auth_routes.router, prefix=api_prefix)
@@ -421,6 +423,7 @@ def create_app() -> FastAPI:
     app.include_router(file_analysis_routes.router, prefix=api_prefix)
     app.include_router(file_imports_routes.router, prefix=api_prefix)
     app.include_router(file_imports_routes.connections_router, prefix=api_prefix)
+    app.include_router(file_imports_routes.hosts_router, prefix=api_prefix)
     app.include_router(dashboards_crud_routes.router, prefix=api_prefix)
     app.include_router(dashboards_widget_query_routes.router, prefix=api_prefix)
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)

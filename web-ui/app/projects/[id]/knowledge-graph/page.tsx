@@ -1,9 +1,10 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useParams } from "next/navigation";
-import { KnowledgeGraphLifecycleScreen } from "@/components/tablescope/project/knowledge-graph-lifecycle-screen";
-
-export default function KnowledgeGraphLifecyclePage() {
-  const params = useParams<{ id: string }>();
-  return <KnowledgeGraphLifecycleScreen projectId={params.id} />;
+export default async function KnowledgeGraphLifecycleRedirectPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  redirect(`/admin/settings/project-intelligence/${id}/graph-lifecycle`);
 }

@@ -149,11 +149,15 @@ async def create_saas_source(
     pg = _app_pg_connection()
     is_servicenow = connector_type == "servicenow"
     is_salesforce = connector_type == "salesforce"
-    is_live_translator = is_servicenow or is_salesforce
+    is_hubspot = connector_type == "hubspot"
+    is_quickbooks = connector_type == "quickbooks"
+    is_live_translator = is_servicenow or is_salesforce or is_hubspot or is_quickbooks
 
     saas_username = ""
     saas_password = ""
     saas_instance_url = ""
+    saas_realm_id = ""
+    saas_environment = "production"
     if is_servicenow:
         saas_username = config.get("username", "")
         saas_password = config.get("password", "")
@@ -168,6 +172,18 @@ async def create_saas_source(
         ).strip().rstrip("/")
         if saas_instance_url and not saas_instance_url.startswith("http"):
             saas_instance_url = f"https://{saas_instance_url}"
+    elif is_hubspot:
+        saas_password = config.get("access_token", "")
+        saas_instance_url = "https://api.hubapi.com"
+    elif is_quickbooks:
+        saas_password = config.get("access_token", "")
+        saas_realm_id = str(config.get("realm_id") or "").strip()
+        saas_environment = str(config.get("environment") or "production").lower()
+        saas_instance_url = (
+            "https://sandbox-quickbooks.api.intuit.com"
+            if saas_environment == "sandbox"
+            else "https://quickbooks.api.intuit.com"
+        )
 
     # 1. DatabaseDataSource (draft) to allocate an id for naming.
     ds = DatabaseDataSource(
@@ -302,6 +318,36 @@ async def create_saas_source(
                 view_name=view_name,
                 columns=teiid_columns,
             )
+        elif is_hubspot:
+            await reg.register_hubspot_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                access_token=saas_password,
+                object_type=ds_table_name,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                ds_name=names["ds_name"],
+                jndi_name=names["jndi_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
+        elif is_quickbooks:
+            await reg.register_quickbooks_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                access_token=saas_password,
+                realm_id=saas_realm_id,
+                environment=saas_environment,
+                object_type=ds_table_name,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                ds_name=names["ds_name"],
+                jndi_name=names["jndi_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
         else:
             await reg.register_database_source(
                 vdb_id=user_vdb.vdb_id,
@@ -355,7 +401,7 @@ async def run_sync(
     if saas is None:
         raise SaasSourceError("SaaS data source not found.")
 
-    if saas.connector_type in ("servicenow", "salesforce"):
+    if saas.connector_type in ("servicenow", "salesforce", "hubspot", "quickbooks"):
         return {
             "status": "live",
             "message": f"{saas.connector_type.title()} data is queried in real time; sync is not required.",
