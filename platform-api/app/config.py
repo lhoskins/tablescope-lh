@@ -356,6 +356,9 @@ class Settings(BaseSettings):
     # Comma-separated SMB host allowlist. Empty blocks every SMB host, so
     # network import fails closed until operations approves specific hosts.
     file_import_allowed_smb_hosts: str = ""
+    # Comma-separated CIDR allowlist for internal callers of /internal/file-proxy.
+    # The tenant Docker subnet is checked first; this is an extra operator bypass.
+    file_import_network_source_cidrs: str = ""
     # Plain http:// fetches. Off by default; HTTPS-only is the contract.
     file_import_allow_http: bool = False
     # Malware scanning is real infrastructure (a private ClamAV service with

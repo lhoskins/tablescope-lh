@@ -105,6 +105,13 @@ class FileImportJob(TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    #: Durable live-source parameters used at query time (URL/UNC path,
+    #: network connection id, etc.). Kept separate from the redacted provenance
+    #: so Teiid can re-fetch the remote file on every query.
+    live_source_params: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON, nullable=True
+    )
+
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message_safe: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 

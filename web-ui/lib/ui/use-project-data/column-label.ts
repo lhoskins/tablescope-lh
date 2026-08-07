@@ -1,21 +1,5 @@
 "use client";
 
-
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
-import { apiClient } from "@/lib/api-client";
-import { useCurrentUser, useProjectSummaries } from "../use-shell-data";
-import type {
-  PresentationDescriptor,
-  ResponseEnvelope,
-} from "@/lib/api/ai-actions";
-import type {
-  CurrentUser,
-  ProjectSummary,
-  TenantSummary,
-} from "../types";
-
-
 export function columnLabel(col: unknown): { name: string; type: string } {
   if (col && typeof col === "object") {
     const rec = col as Record<string, unknown>;

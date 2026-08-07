@@ -1,5 +1,13 @@
 package org.teiid.translator.servicenow;
 
+import java.math.BigDecimal;
+import java.sql.Date;
+import java.sql.Time;
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -23,6 +31,13 @@ import org.teiid.translator.TranslatorException;
  * in memory, so correctness is preserved even for expressions we cannot push.
  */
 public class ServiceNowExecution implements ResultSetExecution {
+
+    private static final DateTimeFormatter SN_DATETIME_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter SN_DATE_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter SN_TIME_FMT =
+            DateTimeFormatter.ofPattern("HH:mm:ss");
 
     private final Select command;
     private final ServiceNowConnection connection;
@@ -50,26 +65,44 @@ public class ServiceNowExecution implements ResultSetExecution {
 
         this.outputColumns = ctx.columns.isEmpty() ? ctx.allColumns : ctx.columns;
         String sourceTable = ctx.sourceTableName != null ? ctx.sourceTableName : ctx.tableName;
-        String fields = String.join(",", sourceColumnNames(ctx));
+        List<ColumnMapping> mappings = columnMappings(ctx);
+
+        StringBuilder fieldList = new StringBuilder();
+        for (int i = 0; i < mappings.size(); i++) {
+            if (i > 0) {
+                fieldList.append(",");
+            }
+            fieldList.append(mappings.get(i).sourceName);
+        }
+        String fields = fieldList.toString();
         String query = ctx.sysparmQuery;
         int limit = ctx.limit;
         int offset = ctx.offset;
 
         results = new ArrayList<>();
         for (JsonObject row : connection.query(sourceTable, query, fields, limit, offset)) {
-            List<Object> record = new ArrayList<>(this.outputColumns.size());
-            for (String col : sourceColumnNames(ctx)) {
-                record.add(convertValue(row.get(col)));
+            List<Object> record = new ArrayList<>(mappings.size());
+            for (ColumnMapping mapping : mappings) {
+                record.add(convertValue(row.get(mapping.sourceName), mapping.teiidType));
             }
             results.add(record);
         }
         iterator = results.iterator();
     }
 
-    private List<String> sourceColumnNames(QueryContext ctx) throws TranslatorException {
-        List<String> names = new ArrayList<>(this.outputColumns.size());
+    /**
+     * Resolves each output column's ServiceNow field name (NAMEINSOURCE, when
+     * declared) and its Teiid runtime type, so returned JSON values can be
+     * coerced to match the type the VDB declared for that column instead of
+     * relying on Teiid's implicit String conversion -- which throws (and
+     * fails the whole query) on values like the empty-string ServiceNow
+     * sends for any unset field, regardless of the field's real type.
+     */
+    private List<ColumnMapping> columnMappings(QueryContext ctx) {
+        List<ColumnMapping> mappings = new ArrayList<>(this.outputColumns.size());
         for (String col : this.outputColumns) {
             String src = col;
+            String teiidType = "string";
             try {
                 org.teiid.metadata.Column column = null;
                 if (ctx.schemaName != null && ctx.tableName != null) {
@@ -78,20 +111,24 @@ public class ServiceNowExecution implements ResultSetExecution {
                 if (column == null && ctx.tableName != null) {
                     column = metadata.getColumn(ctx.tableName + "." + col);
                 }
-                if (column != null && column.getNameInSource() != null
-                        && !column.getNameInSource().isEmpty()) {
-                    src = column.getNameInSource();
+                if (column != null) {
+                    if (column.getNameInSource() != null && !column.getNameInSource().isEmpty()) {
+                        src = column.getNameInSource();
+                    }
+                    if (column.getRuntimeType() != null && !column.getRuntimeType().isEmpty()) {
+                        teiidType = column.getRuntimeType();
+                    }
                 }
             } catch (TranslatorException e) {
-                // fall back to the Teiid column name
+                // fall back to the Teiid column name / string type
             }
             // strip surrounding double quotes that some source DDLs embed
             if (src.startsWith("\"") && src.endsWith("\"")) {
                 src = src.substring(1, src.length() - 1);
             }
-            names.add(src);
+            mappings.add(new ColumnMapping(src, teiidType));
         }
-        return names;
+        return mappings;
     }
 
     @Override
@@ -112,7 +149,62 @@ public class ServiceNowExecution implements ResultSetExecution {
         // no-op
     }
 
-    private Object convertValue(JsonValue v) {
+    /**
+     * Converts a raw ServiceNow JSON value to the Java type Teiid expects for
+     * the target column, based on the column's declared Teiid runtime type.
+     *
+     * ServiceNow's Table API (queried here with sysparm_display_value=false)
+     * returns every field -- dates, numbers, booleans included -- as a JSON
+     * string, and represents "no value" as an empty string rather than JSON
+     * null. Handing that empty string to Teiid's implicit conversion for a
+     * non-string column (e.g. String -> Timestamp) throws and fails the
+     * entire result set. Converting explicitly here, with blank or
+     * unparseable values mapped to null instead of propagating an exception,
+     * means one unset field on one row can never take down the whole query.
+     */
+    private Object convertValue(JsonValue v, String teiidType) {
+        String raw = rawStringValue(v);
+        if (raw == null) {
+            return null;
+        }
+        raw = raw.trim();
+        if (raw.isEmpty()) {
+            return null;
+        }
+        String type = teiidType == null ? "string" : teiidType.toLowerCase();
+        try {
+            switch (type) {
+                case "timestamp":
+                    return Timestamp.valueOf(parseDateTime(raw));
+                case "date":
+                    return Date.valueOf(parseDate(raw));
+                case "time":
+                    return Time.valueOf(LocalTime.parse(raw, SN_TIME_FMT));
+                case "integer":
+                    return (int) Double.parseDouble(raw);
+                case "long":
+                    return (long) Double.parseDouble(raw);
+                case "short":
+                    return (short) Double.parseDouble(raw);
+                case "double":
+                case "float":
+                    return Double.parseDouble(raw);
+                case "bigdecimal":
+                    return new BigDecimal(raw);
+                case "boolean":
+                    return Boolean.valueOf("true".equalsIgnoreCase(raw) || "1".equals(raw));
+                default:
+                    return raw;
+            }
+        } catch (Exception e) {
+            // ServiceNow sent a value that doesn't match the column's
+            // declared type (e.g. a non-standard placeholder) -- surface it
+            // as null rather than aborting the query.
+            return null;
+        }
+    }
+
+    private String rawStringValue(JsonValue v) {
         if (v == null || v == JsonValue.NULL) {
             return null;
         }
@@ -120,13 +212,39 @@ public class ServiceNowExecution implements ResultSetExecution {
             case STRING:
                 return ((javax.json.JsonString) v).getString();
             case NUMBER:
-                return ((javax.json.JsonNumber) v).numberValue();
+                return v.toString();
             case TRUE:
-                return Boolean.TRUE;
+                return "true";
             case FALSE:
-                return Boolean.FALSE;
+                return "false";
             default:
                 return v.toString();
+        }
+    }
+
+    private LocalDateTime parseDateTime(String raw) {
+        if (raw.length() <= 10) {
+            // a date-only value supplied for a timestamp column
+            return LocalDate.parse(raw, SN_DATE_FMT).atStartOfDay();
+        }
+        return LocalDateTime.parse(raw, SN_DATETIME_FMT);
+    }
+
+    private LocalDate parseDate(String raw) {
+        if (raw.length() > 10) {
+            // a datetime value supplied for a date-only column
+            return LocalDateTime.parse(raw, SN_DATETIME_FMT).toLocalDate();
+        }
+        return LocalDate.parse(raw, SN_DATE_FMT);
+    }
+
+    private static class ColumnMapping {
+        final String sourceName;
+        final String teiidType;
+
+        ColumnMapping(String sourceName, String teiidType) {
+            this.sourceName = sourceName;
+            this.teiidType = teiidType;
         }
     }
 

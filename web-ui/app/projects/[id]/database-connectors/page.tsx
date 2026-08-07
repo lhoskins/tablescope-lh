@@ -1,19 +1,15 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { ProjectToolScreen } from "@/components/tablescope/project/project-tool-screen";
-import { DatabaseConnectorsWorkspace } from "@/components/tablescope/database-connectors/workspace";
+import { useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
 
 export default function ProjectDatabaseConnectorsPage() {
   const { id: projectId } = useParams<{ id: string }>();
+  const router = useRouter();
 
-  return (
-    <ProjectToolScreen
-      projectId={projectId}
-      activeNav="project-database-connectors"
-      breadcrumbLabel="Database Connectors"
-    >
-      <DatabaseConnectorsWorkspace projectId={projectId} />
-    </ProjectToolScreen>
-  );
+  useEffect(() => {
+    router.replace(`/projects/${projectId}/data-source-builder?sourceTab=database`);
+  }, [projectId, router]);
+
+  return null;
 }

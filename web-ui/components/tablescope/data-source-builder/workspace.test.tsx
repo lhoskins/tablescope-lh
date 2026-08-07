@@ -1,15 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { SourceTab } from "./source-method-tabs";
 
 vi.mock("@/lib/api/data-source-builder", () => ({
   listMyDataSources: vi.fn().mockResolvedValue([]),
 }));
-vi.mock("./file-acquisition-panel", () => ({
-  FileAcquisitionPanel: () => <div>FileAcquisitionPanel</div>,
+vi.mock("./ai-upload-dropzone", () => ({
+  AiUploadDropzone: () => <div>UploadFilePanel</div>,
 }));
-vi.mock("./active-sources-table", () => ({
-  ActiveSourcesTable: () => <div>ActiveSourcesTable</div>,
+vi.mock("./url-import-form", () => ({
+  UrlImportForm: () => <div>FileUrlPanel</div>,
 }));
 vi.mock("./available-sources", () => ({
   AvailableSources: () => <div>AvailableSources</div>,
@@ -19,6 +20,12 @@ vi.mock("./connected-databases", () => ({
 }));
 vi.mock("./connected-saas", () => ({
   ConnectedSaaS: () => <div>ConnectedSaaS</div>,
+}));
+vi.mock("./connected-network-repositories", () => ({
+  ConnectedNetworkRepositories: () => <div>ConnectedNetworkRepositories</div>,
+}));
+vi.mock("./data-source-selection-section", () => ({
+  DataSourceSelectionSection: () => <div>DataSourceSelectionSection</div>,
 }));
 vi.mock("./projects-column", () => ({
   ProjectsColumn: () => <div>ProjectsColumn</div>,
@@ -32,47 +39,34 @@ vi.mock("@/components/tablescope/project/new-project-dialog", () => ({
 
 import { DataSourceBuilderWorkspace } from "./workspace";
 
-function renderWorkspace(intent?: "upload" | "database") {
+function renderWorkspace(initialSourceTab?: SourceTab) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <DataSourceBuilderWorkspace tenantName="Acme" intent={intent} />
+      <DataSourceBuilderWorkspace
+        tenantName="Acme"
+        initialSourceTab={initialSourceTab}
+      />
     </QueryClientProvider>,
   );
 }
 
 describe("DataSourceBuilderWorkspace", () => {
-  it("shows connector sections alongside file acquisition by default", () => {
+  it("shows the upload tab by default", () => {
     renderWorkspace();
-    expect(screen.getByText("FileAcquisitionPanel")).toBeInTheDocument();
+    expect(screen.getByText("UploadFilePanel")).toBeInTheDocument();
+    expect(screen.getByText("DataSourceSelectionSection")).toBeInTheDocument();
+  });
+
+  it("renders database tab content when initialSourceTab is database", () => {
+    renderWorkspace("database");
     expect(screen.getByText("ConnectedDatabases")).toBeInTheDocument();
     expect(screen.getByText("ConnectedSaaS")).toBeInTheDocument();
+    expect(screen.queryByText("UploadFilePanel")).not.toBeInTheDocument();
   });
 
-  it("hides connector sections when intent is upload-only", () => {
-    renderWorkspace("upload");
-    expect(screen.getByText("FileAcquisitionPanel")).toBeInTheDocument();
-    expect(screen.queryByText("ConnectedDatabases")).not.toBeInTheDocument();
-    expect(screen.queryByText("ConnectedSaaS")).not.toBeInTheDocument();
+  it("renders network tab content when initialSourceTab is network", () => {
+    renderWorkspace("network");
+    expect(screen.getByText("ConnectedNetworkRepositories")).toBeInTheDocument();
   });
 
-  it("uses upload-scoped step hint when intent is upload-only", () => {
-    renderWorkspace("upload");
-    expect(
-      screen.getByText(/Upload a file to create a data source/),
-    ).toBeInTheDocument();
-  });
-
-  it("shows only connected databases when intent is database-only", () => {
-    renderWorkspace("database");
-    expect(screen.queryByText("FileAcquisitionPanel")).not.toBeInTheDocument();
-    expect(screen.getByText("ConnectedDatabases")).toBeInTheDocument();
-    expect(screen.queryByText("ConnectedSaaS")).not.toBeInTheDocument();
-  });
-
-  it("uses database-scoped step hint when intent is database-only", () => {
-    renderWorkspace("database");
-    expect(
-      screen.getByText(/Choose a connected database and table/),
-    ).toBeInTheDocument();
-  });
 });

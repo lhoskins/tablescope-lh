@@ -33,6 +33,7 @@ from app.models.business_insight_result import BusinessInsightResult
 from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.shared_vdb import SharedVDB
 from app.models.user_vdb import UserVDB
+from app.services.aws_vpn_provisioning_service import AwsVpnProvisioningService
 from app.services.vdb_management import VDBManagementService
 from app.tasks.kpi_source_matching import match_kpi_data_source
 from app.tasks.llm_framework import (
@@ -41,6 +42,7 @@ from app.tasks.llm_framework import (
     reindex_embedding_model,
     stage_llm_artifact,
 )
+from app.tasks.quickbooks_token_refresh import refresh_quickbooks_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -1403,6 +1405,75 @@ async def schedule_stale_insight_refresh(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"status": "ok", "enqueued": enqueued}
 
 
+async def enqueue_provision_tenant_vpn(
+    *,
+    tenant_id: str,
+    customer_gateway_ip: str,
+    customer_onprem_cidrs: list[str],
+    routing_type: str = "static",
+) -> str:
+    """Enqueue AWS-side VPN provisioning for a tenant."""
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "provision_tenant_vpn",
+            tenant_id=tenant_id,
+            customer_gateway_ip=customer_gateway_ip,
+            customer_onprem_cidrs=customer_onprem_cidrs,
+            routing_type=routing_type,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def provision_tenant_vpn(
+    ctx: dict[str, Any],
+    *,
+    tenant_id: str,
+    customer_gateway_ip: str,
+    customer_onprem_cidrs: list[str],
+    routing_type: str = "static",
+) -> dict[str, Any]:
+    """Background worker that creates the AWS tenant VPC/VPN resources."""
+    from app.models.billing import TenantProvisioningRequest
+
+    async with SessionLocal() as session:
+        service = AwsVpnProvisioningService(session)
+        req = await session.scalar(
+            select(TenantProvisioningRequest)
+            .where(TenantProvisioningRequest.tenant_slug == tenant_id)
+            .where(TenantProvisioningRequest.requires_vpn.is_(True))
+            .order_by(TenantProvisioningRequest.id.desc())
+        )
+        try:
+            meta = await service.provision(
+                tenant_id=tenant_id,
+                customer_gateway_ip=customer_gateway_ip,
+                customer_onprem_cidrs=customer_onprem_cidrs,
+                routing_type=routing_type,
+            )
+            if req is not None:
+                req.vpn_status = "configured"
+                req.error_message = None
+                await session.flush()
+            await session.commit()
+            return {
+                "status": "configured",
+                "vpn_connection_id": meta.vpn_connection_id,
+                "tunnel1": meta.vpn_tunnel1_address,
+                "tunnel2": meta.vpn_tunnel2_address,
+            }
+        except Exception as exc:
+            logger.exception("provision_tenant_vpn failed for %s", tenant_id)
+            if req is not None:
+                req.vpn_status = "failed"
+                req.error_message = str(exc)[:500]
+                await session.flush()
+            await session.rollback()
+            raise
+
+
 # Deterministic job id may be reused; don't keep results so re-enqueue works.
 schedule_stale_insight_refresh.keep_result = 0  # type: ignore[attr-defined]
 
@@ -1430,11 +1501,13 @@ class WorkerSettings:
         refresh_business_insight_result,
         rebuild_project_insight,
         schedule_stale_insight_refresh,
+        refresh_quickbooks_tokens,
         match_kpi_data_source,
         stage_llm_artifact,
         deploy_llm_artifact,
         reindex_embedding_model,
         convert_fp16_to_gguf,
+        provision_tenant_vpn,
     ]
     cron_jobs: ClassVar[list] = [
         # Detect source drift every 15 minutes and mark affected graphs stale.
@@ -1446,6 +1519,11 @@ class WorkerSettings:
         cron(recover_stale_graph_builds, minute=5, second=0),
         # Refresh stale insight snapshots every hour.
         cron(schedule_stale_insight_refresh, minute=0, second=0),
+        # Refresh QuickBooks OAuth2 tokens every 15 minutes.
+        cron(refresh_quickbooks_tokens, minute=0, second=15),
+        cron(refresh_quickbooks_tokens, minute=15, second=15),
+        cron(refresh_quickbooks_tokens, minute=30, second=15),
+        cron(refresh_quickbooks_tokens, minute=45, second=15),
     ]
     # Must exceed home_intelligence_project_analysis_timeout_seconds: a job
     # killed by arq writes no result and permanently stalls its run, so the

@@ -140,14 +140,14 @@ export function listRepositoryConnectorTypes(): Promise<
 }
 
 export function listRepositoryConnections(): Promise<RepositoryConnection[]> {
-  return apiClient.get<RepositoryConnection[]>("/api/repository-connectors");
+  return apiClient.get<RepositoryConnection[]>("/api/repository-connectors/");
 }
 
 export function createRepositoryConnection(
   body: RepositoryConnectionCreate,
 ): Promise<RepositoryConnection> {
   return apiClient.post<RepositoryConnection>(
-    "/api/repository-connectors",
+    "/api/repository-connectors/",
     body,
   );
 }

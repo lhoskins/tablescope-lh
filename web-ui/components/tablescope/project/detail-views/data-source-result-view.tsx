@@ -1,53 +1,39 @@
 "use client";
 
-
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  IconArrowLeft,
-  IconFileText,
-  IconDatabase,
-  IconPencil,
-  IconX,
-} from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
+import { IconDatabase, IconPencil, IconArchive } from "@tabler/icons-react";
 import { DataGrid } from "@/components/data-grid/DataGrid";
-import { TanStackDataGrid } from "@/components/data-grid/TanStackDataGrid";
-import { DashboardViewer } from "@/components/dashboard/DashboardViewer";
-import { QueryBuilder } from "@/components/query-builder/QueryBuilder";
-import type { Dashboard as ViewerDashboard, WidgetConfig } from "@/components/dashboard/types";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiClient } from "@/lib/api-client";
-import { timeAgo } from "@/lib/ui/format";
-import {
-  columnLabel,
-  useProjectQueries,
-  type SavedQuery,
-  type DataSource,
-  type Dashboard,
-  type ProjectAsset,
-} from "@/lib/ui/use-project-data";import { QueryResult } from "./query-result";
+import { useCurrentUser } from "@/lib/ui/use-shell-data";
+import { DataSource } from "@/lib/ui/use-project-data";
+import { QueryResult } from "./query-result";
 import { safeTableName } from "./safe-table-name";
 import { DetailBackBar } from "./detail-back-bar";
 import { ColumnTypeEditorModal } from "./column-type-editor-modal";
-
-
-
-// ── Data source rows ─────────────────────────────────────────────────
 
 export function DataSourceResultView({
   projectId,
   source,
   backLabel,
   onBack,
+  onArchive,
+  archiveBusy = false,
+  archiveError,
 }: {
   projectId: string;
   source: DataSource;
   backLabel: string;
   onBack: () => void;
+  onArchive?: () => void;
+  archiveBusy?: boolean;
+  archiveError?: string | null;
 }) {
   const [editing, setEditing] = useState(false);
+  const { data: auth } = useCurrentUser();
+  const user = auth?.user;
   const tableName = source.viewName || source.fileName;
   const { data, isLoading, error } = useQuery({
     queryKey: ["datasource-rows", projectId, tableName],
@@ -60,6 +46,13 @@ export function DataSourceResultView({
     enabled: Boolean(projectId && tableName),
     retry: false,
   });
+
+  const canArchive =
+    onArchive != null &&
+    user != null &&
+    (user.id === source.ownerId ||
+      user.rawRole?.includes("admin") ||
+      user.isSuperAdmin);
 
   return (
     <div className="space-y-4">
@@ -76,11 +69,30 @@ export function DataSourceResultView({
             </p>
           </div>
         </div>
-        <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
-          <IconPencil size={14} />
-          Edit
-        </Button>
+        <div className="flex items-center gap-2">
+          {canArchive && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={archiveBusy}
+              onClick={onArchive}
+            >
+              <IconArchive size={14} />
+              Archive
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+            <IconPencil size={14} />
+            Edit
+          </Button>
+        </div>
       </header>
+
+      {archiveError && (
+        <div className="rounded-md border border-danger/30 bg-danger/5 px-4 py-2.5 text-small text-danger">
+          {archiveError}
+        </div>
+      )}
 
       {editing && (
         <ColumnTypeEditorModal

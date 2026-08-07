@@ -20,19 +20,21 @@ function DatabaseConnectorsCompatibility() {
     if (isLoading) return;
 
     if (requestedProjectId && accessibleIds.has(requestedProjectId)) {
-      router.replace(`/projects/${requestedProjectId}/database-connectors`);
+      router.replace(
+        `/projects/${requestedProjectId}/data-source-builder?sourceTab=database`,
+      );
       return;
     }
 
     const list = projects ?? [];
     if (list.length === 1) {
-      router.replace(`/projects/${list[0].id}/database-connectors`);
+      router.replace(`/projects/${list[0].id}/data-source-builder?sourceTab=database`);
       return;
     }
 
     router.replace(
       `/projects${
-        list.length === 0 ? "" : "?notice=Select a project to open Database Connectors."
+        list.length === 0 ? "" : "?notice=Select a project to open the Data Source Builder."
       }`,
     );
   }, [isLoading, projects, accessibleIds, requestedProjectId, router]);

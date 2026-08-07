@@ -1,0 +1,91 @@
+name: VPN/SMB Repository E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - create
+          - test
+          - destroy
+          - full
+      run_id:
+        description: 'Unique run id (default: timestamp)'
+        required: false
+        type: string
+      target_ref:
+        description: 'Git ref to test (default: devin/r-echarts-e2e-validation)'
+        required: false
+        default: 'devin/r-echarts-e2e-validation'
+        type: string
+
+concurrency:
+  group: vpn-smb-e2e
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  vpn-smb-e2e:
+    runs-on: ubuntu-latest
+    environment: staging-vpn-smb-e2e
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_VPN_SMB_E2E_ROLE_ARN }}
+          aws-region: us-west-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install simulator script dependencies
+        run: |
+          pip install -r test-infra/vpn-smb-customer-simulator/scripts/requirements.txt
+
+      - name: Run VPN/SMB E2E orchestrator
+        env:
+          AWS_REGION: us-west-1
+          TABLESCOPE_API: ${{ secrets.TABLESCOPE_STAGING_API }}
+          TABLESCOPE_API_KEY: ${{ secrets.TABLESCOPE_STAGING_API_KEY }}
+          TERRAFORM_STATE_BUCKET: ${{ secrets.VPN_SMB_E2E_STATE_BUCKET }}
+        run: |
+          ./scripts/vpn-smb-e2e/run.sh \
+            "${{ inputs.mode }}" \
+            "${{ inputs.run_id || github.run_id }}"
+
+      - name: Upload evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vpn-smb-e2e-evidence-${{ inputs.run_id || github.run_id }}
+          path: artifacts/vpn-smb-e2e/${{ inputs.run_id || github.run_id }}/
+          if-no-files-found: ignore
+
+      - name: Teardown on failure
+        if: failure() && inputs.mode != 'destroy'
+        env:
+          AWS_REGION: us-west-1
+          TERRAFORM_STATE_BUCKET: ${{ secrets.VPN_SMB_E2E_STATE_BUCKET }}
+        run: |
+          ./scripts/vpn-smb-e2e/run.sh destroy \
+            "${{ inputs.run_id || github.run_id }}"

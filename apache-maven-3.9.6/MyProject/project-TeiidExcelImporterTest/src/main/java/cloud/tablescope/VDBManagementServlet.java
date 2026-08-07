@@ -857,11 +857,14 @@ public class VDBManagementServlet extends HttpServlet {
 
         boolean isServiceNow = "servicenow".equalsIgnoreCase(translator);
         boolean isSalesforce = WildFlyCliHelper.isSalesforceTranslator(translator);
+        boolean isCustomTranslator = "hubspot".equalsIgnoreCase(translator) || "quickbooks".equalsIgnoreCase(translator);
         boolean force = body.optBoolean("force", false);
-        String instanceUrl = body.optString("instance_url", isServiceNow || isSalesforce ? jdbcUrl : "");
+        String instanceUrl = body.optString("instance_url", isServiceNow || isSalesforce || isCustomTranslator ? jdbcUrl : "");
         if (isSalesforce) {
             instanceUrl = WildFlyCliHelper.normalizeSalesforceSoapUrl(instanceUrl);
         }
+        String realmId = body.optString("realm_id", "");
+        String environment = body.optString("environment", "production");
 
         String teiidHost = body.optString("teiid_host", "localhost");
         int teiidPort = body.has("teiid_port") ? body.getInt("teiid_port") : 9990;
@@ -904,7 +907,7 @@ public class VDBManagementServlet extends HttpServlet {
             // 2. Ensure the WildFly JDBC datasource or JCA connection factory exists.
             if (isSalesforce) {
                 WildFlyCliHelper.ensureSalesforceConnectionFactory(dsName, translator, instanceUrl, username, password);
-            } else if (!isServiceNow) {
+            } else if (!isServiceNow && !isCustomTranslator) {
                 WildFlyCliHelper.ensureDataSource(dsName, dbType, jdbcUrl, username, password);
             }
 
@@ -915,8 +918,8 @@ public class VDBManagementServlet extends HttpServlet {
             if (modelExists && force) {
                 log("Force mode: removing existing model/translator/view for " + modelName);
                 vdbXml = VDBXmlBuilder.removeModelBlock(vdbXml, modelName);
-                if (isServiceNow) {
-                    vdbXml = VDBXmlBuilder.removeTranslatorBlock(vdbXml, dsName + "_servicenow");
+                if (isServiceNow || isCustomTranslator) {
+                    vdbXml = VDBXmlBuilder.removeTranslatorBlock(vdbXml, dsName + "_" + translator);
                 }
                 if (isSalesforce) {
                     WildFlyCliHelper.removeSalesforceConnectionFactory(dsName, translator);
@@ -931,6 +934,11 @@ public class VDBManagementServlet extends HttpServlet {
                 if (isServiceNow) {
                     String translatorDefName = dsName + "_servicenow";
                     modelBlock = VDBXmlBuilder.buildServiceNowModelBlock(
+                            modelName, dsName, translatorDefName,
+                            teiidTableName, tableName, columns);
+                } else if (isCustomTranslator) {
+                    String translatorDefName = dsName + "_" + translator;
+                    modelBlock = VDBXmlBuilder.buildCustomHttpModelBlock(
                             modelName, dsName, translatorDefName,
                             teiidTableName, tableName, columns);
                 } else if (isSalesforce) {
@@ -949,6 +957,25 @@ public class VDBManagementServlet extends HttpServlet {
                     if (!vdbXml.contains("<translator name=\"" + translatorDefName + "\"")) {
                         String translatorBlock = VDBXmlBuilder.buildServiceNowTranslatorBlock(translatorDefName, instanceUrl, username, password);
                         // Translators must follow all models.
+                        vdbXml = VDBXmlBuilder.insertBefore(vdbXml, "</vdb>", translatorBlock);
+                    }
+                } else if (isCustomTranslator) {
+                    String translatorDefName = dsName + "_" + translator;
+                    if (!vdbXml.contains("<translator name=\"" + translatorDefName + "\"")) {
+                        Map<String, String> props = new HashMap<>();
+                        if (instanceUrl != null && !instanceUrl.isEmpty()) {
+                            props.put("instanceUrl", instanceUrl);
+                        }
+                        if ("quickbooks".equalsIgnoreCase(translator) && realmId != null && !realmId.isEmpty()) {
+                            props.put("realmId", realmId);
+                        }
+                        if (username != null && !username.isEmpty()) {
+                            props.put("username", username);
+                        }
+                        if (password != null && !password.isEmpty()) {
+                            props.put("password", password);
+                        }
+                        String translatorBlock = VDBXmlBuilder.buildCustomHttpTranslatorBlock(translatorDefName, translator, props);
                         vdbXml = VDBXmlBuilder.insertBefore(vdbXml, "</vdb>", translatorBlock);
                     }
                 }

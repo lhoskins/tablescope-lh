@@ -139,6 +139,7 @@ services:
       FILE_IMPORT_QUARANTINE_PATH: ${FILE_IMPORT_QUARANTINE_PATH:-/opt/tablescope/quarantine}
       FILE_IMPORT_ALLOWED_URL_DOMAINS: ${FILE_IMPORT_ALLOWED_URL_DOMAINS:-}
       FILE_IMPORT_ALLOWED_SMB_HOSTS: ${FILE_IMPORT_ALLOWED_SMB_HOSTS:-}
+      FILE_IMPORT_NETWORK_SOURCE_CIDRS: ${FILE_IMPORT_NETWORK_SOURCE_CIDRS:-}
       FILE_IMPORT_ALLOW_HTTP: ${FILE_IMPORT_ALLOW_HTTP:-false}
       FILE_IMPORT_JOB_TTL_SECONDS: ${FILE_IMPORT_JOB_TTL_SECONDS:-86400}
       # Malware scanning infrastructure. Enable together with the clamav
@@ -169,6 +170,7 @@ services:
     networks:
       - default
       - tenant_acme_net
+      - tenant_vpn-smb-e2e_net
 
   platform-api-worker:
     build:
@@ -193,6 +195,9 @@ services:
     depends_on:
       - redis
       - platform-api
+    networks:
+      - default
+      - tenant_vpn-smb-e2e_net
 
   platform-api-migrate:
     build:
@@ -355,4 +360,6 @@ volumes:
 networks:
   default:
   tenant_acme_net:
+    external: true
+  tenant_vpn-smb-e2e_net:
     external: true

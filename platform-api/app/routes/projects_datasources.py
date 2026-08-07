@@ -6,6 +6,7 @@ Split from ``projects.py``; see ``projects_shared.py`` for the helper cluster.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,7 +20,9 @@ from app.database import get_db
 from app.models.database_data_source import DatabaseDataSource
 from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
+from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.tenant import Tenant
+from app.models.user import User
 from app.routes.projects_shared import _is_project_admin
 from app.services.database_introspection_service import (
     map_to_teiid_type as _map_teiid_type,
@@ -29,6 +32,16 @@ from app.services.tenant_teiid_resolver import TenantTeiidResolver
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _format_dt(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _owner_name(user: User | None) -> str:
+    if user is None:
+        return "—"
+    return user.display_name or f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email.split("@")[0]
 
 
 @router.get("/{project_id}/datasources")
@@ -79,6 +92,46 @@ async def list_project_datasources(
     ).all()
     meta_by_view = {m.view_name: m for m in meta_rows}
 
+    # Resolve owners and SaaS identities once for all returned sources.
+    user_ids = {owner_id}
+    for m in meta_rows:
+        user_ids.add(m.owner_id)
+
+    db_stmt = (
+        select(DatabaseDataSource)
+        .where(
+            DatabaseDataSource.tenant_id == context.tenant_id,
+            DatabaseDataSource.project_id == project_id,
+            DatabaseDataSource.status == "active",
+        )
+        .options(selectinload(DatabaseDataSource.columns))
+    )
+    if not include_archived:
+        db_stmt = db_stmt.where(DatabaseDataSource.archived.is_(False))
+    db_sources = (await session.scalars(db_stmt)).all()
+    for ds in db_sources:
+        if ds.created_by is not None:
+            user_ids.add(ds.created_by)
+
+    users = {
+        u.id: u
+        for u in (
+            await session.scalars(select(User).where(User.id.in_(user_ids)))
+        ).all()
+    }
+
+    db_ids = [ds.id for ds in db_sources]
+    saas_rows = (
+        await session.scalars(
+            select(SaasObjectDataSource).where(
+                SaasObjectDataSource.database_data_source_id.in_(db_ids)
+            )
+        )
+    ).all()
+    saas_by_db: dict[int, SaasObjectDataSource] = {
+        s.database_data_source_id: s for s in saas_rows
+    }
+
     datasources: list[dict] = []
     if uploads_dir.is_dir():
         for f in sorted(uploads_dir.iterdir()):
@@ -96,6 +149,7 @@ async def list_project_datasources(
                 display_name, source_type = display_source(
                     f.name, meta.source_format if meta else None
                 )
+                owner = users.get(meta.owner_id if meta else owner_id)
                 datasources.append({
                     "fileName": display_name,
                     "viewName": view_name,
@@ -104,30 +158,27 @@ async def list_project_datasources(
                     "dbType": None,
                     "fileMetaId": meta.id if meta else None,
                     "projectId": meta.project_id if meta else None,
-                    "ownerId": owner_id,
+                    "id": meta.id if meta else None,
+                    "ownerId": meta.owner_id if meta else owner_id,
+                    "ownerName": _owner_name(owner),
                     "columnTypes": (meta.column_types or []) if meta else [],
                     "aiMetadata": (meta.ai_metadata or {}) if meta else {},
                     "archived": is_archived,
+                    "archivedAt": _format_dt(meta.archived_at if meta else None),
+                    "lifecycleKind": "file",
+                    "lifecycleId": view_name,
                 })
 
     # Append database-backed data sources registered against this project.
-    db_stmt = (
-        select(DatabaseDataSource)
-        .where(
-            DatabaseDataSource.tenant_id == context.tenant_id,
-            DatabaseDataSource.project_id == project_id,
-            DatabaseDataSource.status == "active",
-        )
-        .options(selectinload(DatabaseDataSource.columns))
-    )
-    if not include_archived:
-        db_stmt = db_stmt.where(DatabaseDataSource.archived.is_(False))
-    db_sources = (await session.scalars(db_stmt)).all()
     for ds in db_sources:
         is_saas = ds.source_type == "saas_object"
+        saas = saas_by_db.get(ds.id)
+        lifecycle_kind = "saas" if is_saas and saas else "database"
+        lifecycle_id = str(saas.id) if is_saas and saas else str(ds.id)
         cols = sorted(
             ds.columns, key=lambda c: (c.ordinal_position or 0, c.column_name)
         )
+        owner = users.get(ds.created_by) if ds.created_by is not None else None
         datasources.append({
             "fileName": ds.display_name,
             "viewName": ds.teiid_view_name,
@@ -137,6 +188,7 @@ async def list_project_datasources(
             "connectorType": ds.connector_type,
             "id": ds.id,
             "ownerId": ds.created_by,
+            "ownerName": _owner_name(owner),
             "columnTypes": [
                 {
                     "name": c.column_name,
@@ -146,6 +198,9 @@ async def list_project_datasources(
                 for c in cols
             ],
             "archived": ds.archived,
+            "archivedAt": _format_dt(ds.archived_at),
+            "lifecycleKind": lifecycle_kind,
+            "lifecycleId": lifecycle_id,
         })
 
     return datasources
