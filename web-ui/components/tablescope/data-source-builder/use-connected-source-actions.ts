@@ -50,7 +50,7 @@ export function useConnectedSourceActions() {
   const [error, setError] = useState<string | null>(null);
 
   const invalidateConnectedSources = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["builder", "connected-sources"] });
+    queryClient.invalidateQueries({ queryKey: ["connected-sources"] });
   }, [queryClient]);
 
   const createDbSessionSource = useCallback(

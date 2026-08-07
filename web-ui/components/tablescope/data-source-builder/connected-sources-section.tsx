@@ -124,7 +124,7 @@ function ConnectedSourceCard({
 
 export function ConnectedSourcesSection() {
   const { data, isLoading } = useQuery({
-    queryKey: ["builder", "connected-sources"],
+    queryKey: ["connected-sources"],
     queryFn: listConnectedSources,
   });
 
