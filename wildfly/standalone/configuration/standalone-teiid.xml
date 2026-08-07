@@ -666,8 +666,8 @@
             <translator name="hubspot" module="org.jboss.teiid.translator.hubspot"/>
             <translator name="quickbooks" module="org.jboss.teiid.translator.quickbooks"/>
             <translator name="hive" module="org.jboss.teiid.translator.hive"/>
-            <translator name="snowflake" module="org.jboss.teiid.translator.jdbc"/>
-            <translator name="databricks" module="org.jboss.teiid.translator.hive"/>
+            <translator name="snowflake" module="org.jboss.teiid.translator.snowflake"/>
+            <translator name="databricks" module="org.jboss.teiid.translator.databricks"/>
             <translator name="jpa2" module="org.jboss.teiid.translator.jpa"/>
             <translator name="odata" module="org.jboss.teiid.translator.odata"/>
             <translator name="sap-gateway" module="org.jboss.teiid.translator.odata"/>
