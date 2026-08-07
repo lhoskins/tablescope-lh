@@ -12,11 +12,6 @@ import {
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { sessionSourceFromPreview } from "./import-source";
 
-function fileNameOf(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts.length > 1 ? parts[parts.length - 1] : "";
-}
-
 function uncPath(label: string, relativePath: string): string {
   const root = label.replace(/\\+$/, "");
   const tail = relativePath.replace(/\//g, "\\");
@@ -126,7 +121,7 @@ export function NetworkRepositoryModal({
                     />
                     <span className="truncate">{entry.name}</span>
                   </button>
-                  {entry.kind === "file" && fileNameOf(entry.path) && (
+                  {entry.kind === "file" && (
                     <Button
                       variant="primary"
                       size="sm"

@@ -166,6 +166,7 @@ export function DataSourceBuilderWorkspace({
   }, [initialProjectId, projects, step, toggleProject]);
 
   useEffect(() => {
+    if (!tenantName) return;
     void useBuilderStore.persist.rehydrate();
     ensureTenant(tenantName);
   }, [ensureTenant, tenantName]);

@@ -18,9 +18,8 @@ import { ScanHistory } from "./scan-history";
 import { RepositoryProfile } from "./repository-profile";
 import { RepositoryItemsBrowser } from "./repository-items-browser";
 import { NetworkConnectionsPanel } from "./network-connections-panel";
-import { NetworkHostsPanel } from "./network-hosts-panel";
 
-type Tab = "connectors" | "network-connections" | "allowed-hosts";
+type Tab = "connectors" | "network-connections";
 
 export default function RepositoriesPage() {
   const queryClient = useQueryClient();
@@ -53,7 +52,6 @@ export default function RepositoriesPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: "connectors", label: "Repository connectors" },
     { key: "network-connections", label: "Network file connections" },
-    { key: "allowed-hosts", label: "Allowed SMB hosts" },
   ];
 
   return (
@@ -194,7 +192,6 @@ export default function RepositoriesPage() {
       )}
 
       {tab === "network-connections" && <NetworkConnectionsPanel />}
-      {tab === "allowed-hosts" && <NetworkHostsPanel />}
     </section>
   );
 }

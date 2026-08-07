@@ -16,6 +16,7 @@ from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.audit_event import AuditEvent
 from app.models.project import Project, ProjectMember
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -219,7 +220,32 @@ async def update_member_role(
     if new_role not in ("viewer", "editor", "admin"):
         raise HTTPException(status_code=400, detail="Invalid role. Must be viewer, editor, or admin")
 
+    old_role = member.role
+    if old_role == new_role:
+        target_user = await session.get(User, user_id)
+        return ProjectMemberRead(
+            project_id=project_id,
+            user_id=user_id,
+            role=member.role,
+            is_active=member.is_active,
+            email=target_user.email if target_user else "",
+            display_name=target_user.display_name if target_user else None,
+        )
+
     member.role = new_role
+    session.add(
+        AuditEvent(
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            user_id=context.user_id,
+            event_type="project_member_role_change",
+            scope=f"{old_role} -> {new_role}",
+            title=f"Project member role changed{' (self)' if user_id == context.user_id else ''}",
+            prompt_type="project_member_role_change",
+            tables_queried=[],
+            documents_read=[],
+        )
+    )
     await session.commit()
 
     target_user = await session.get(User, user_id)

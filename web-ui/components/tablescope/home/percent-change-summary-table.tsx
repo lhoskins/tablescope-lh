@@ -39,6 +39,7 @@ export function PercentChangeSummaryTable({
   rows,
   sort,
   onSort,
+  showStatistics = true,
 }: PercentChangeSummaryTableProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -113,7 +114,7 @@ export function PercentChangeSummaryTable({
     el?.focus({ preventScroll: true });
   };
 
-  const totalColumns = 1 + totalPeriods + STAT_COUNT;
+  const totalColumns = 1 + totalPeriods + (showStatistics ? STAT_COUNT : 0);
 
   return (
     <div className="space-y-2">
@@ -162,10 +163,12 @@ export function PercentChangeSummaryTable({
               span={Math.max(totalPeriods, 1)}
               style={{ width: PERIOD_WIDTH, minWidth: PERIOD_WIDTH }}
             />
-            <col
-              span={STAT_COUNT}
-              style={{ width: STAT_WIDTH, minWidth: STAT_WIDTH }}
-            />
+            {showStatistics && (
+              <col
+                span={STAT_COUNT}
+                style={{ width: STAT_WIDTH, minWidth: STAT_WIDTH }}
+              />
+            )}
           </colgroup>
           <thead>
             <tr>
@@ -194,13 +197,15 @@ export function PercentChangeSummaryTable({
                 aria-hidden
                 className="border-b border-line-tertiary p-0"
               />
-              <th
-                colSpan={STAT_COUNT}
-                scope="colgroup"
-                className="border-b border-line-tertiary border-l-2 border-line-secondary p-2 text-center text-[12px] font-medium text-ink-secondary"
-              >
-                Period Statistics
-              </th>
+              {showStatistics && (
+                <th
+                  colSpan={STAT_COUNT}
+                  scope="colgroup"
+                  className="border-b border-line-tertiary border-l-2 border-line-secondary p-2 text-center text-[12px] font-medium text-ink-secondary"
+                >
+                  Period Statistics
+                </th>
+              )}
             </tr>
             <tr>
               {hiddenBefore > 0 && (
@@ -253,7 +258,7 @@ export function PercentChangeSummaryTable({
                   className="border-b border-line-tertiary p-0"
                 />
               )}
-              {STAT_FIELDS.map((field) => (
+              {showStatistics && STAT_FIELDS.map((field) => (
                 <th
                   key={field}
                   scope="col"
@@ -353,7 +358,7 @@ export function PercentChangeSummaryTable({
                     className="border-t border-line-tertiary p-0"
                   />
                 )}
-                {STAT_FIELDS.map((field) => (
+                {showStatistics && STAT_FIELDS.map((field) => (
                   <StatCell
                     key={field}
                     field={field}

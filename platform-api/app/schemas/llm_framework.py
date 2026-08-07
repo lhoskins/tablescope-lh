@@ -158,6 +158,7 @@ class CatalogDetail(CatalogSearchResult):
     commit_sha: str | None
     siblings: list[CatalogFileResult]
     license_url: str | None
+    readme: str | None
 
 
 class StageArtifactRequest(BaseModel):

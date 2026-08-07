@@ -44,6 +44,17 @@ def _validate_url(url: str) -> None:
         raise ValueError(f"URL host not in Hugging Face allowlist: {parsed.netloc}")
 
 
+def _strip_frontmatter(readme: str) -> str:
+    """Remove YAML front-matter delimiters from a model card README."""
+    if not readme.startswith("---"):
+        return readme
+    match = re.search(r"^---\s*\n(.*?)\n---\s*\n", readme, re.DOTALL)
+    if not match:
+        return readme
+    body = readme[match.end():]
+    return body.strip("\n")
+
+
 @dataclass(frozen=True)
 class CatalogFile:
     filename: str
@@ -66,6 +77,7 @@ class CatalogModel:
     likes: int | None
     last_modified: str | None
     siblings: list[CatalogFile]
+    readme: str | None = None
 
     @property
     def gguf_files(self) -> list[CatalogFile]:
@@ -100,7 +112,7 @@ def _parse_model_info(payload: dict[str, Any]) -> CatalogModel:
         tags=payload.get("tags", []),
         license=license_str,
         license_url=f"https://huggingface.co/{repo_id}/raw/main/README.md",
-        description=card.get("language") or payload.get("description"),
+        description=payload.get("description") or card.get("description"),
         downloads=payload.get("downloads"),
         likes=payload.get("likes"),
         last_modified=payload.get("lastModified"),
@@ -209,6 +221,20 @@ class HuggingFaceCatalogClient:
             params={"expand[]": ["cardData", "siblings", "sha"]},
         )
         return _parse_model_info(response.json())
+
+    async def get_model_detail(self, repo_id: str) -> CatalogModel:
+        """Fetch model info plus the rendered README body for ``repo_id``."""
+        model = await self.get_model_info(repo_id)
+        try:
+            response = await self._request(
+                "GET", f"https://huggingface.co/{repo_id}/raw/main/README.md"
+            )
+            readme = _strip_frontmatter(response.text)
+        except (HTTPException, httpx.HTTPError):
+            readme = None
+        return model.__class__(
+            **{**model.__dict__, "readme": readme},
+        )
 
     def resolve_download_url(self, repo_id: str, revision: str, filename: str) -> str:
         """Build the canonical ``/resolve`` URL for a file.

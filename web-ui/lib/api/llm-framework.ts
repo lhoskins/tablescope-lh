@@ -153,6 +153,7 @@ export interface CatalogSearchResult {
 export interface CatalogDetail extends CatalogSearchResult {
   commit_sha: string | null;
   license_url: string | null;
+  readme: string | null;
   siblings: CatalogFile[];
 }
 

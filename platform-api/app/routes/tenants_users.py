@@ -17,6 +17,7 @@ from app.auth.context import RequestContext
 from app.auth.tenant_roles import to_tenant_role, validate_tenant_role
 from app.config import get_settings
 from app.database import get_db
+from app.models.audit_event import AuditEvent
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user_vdb import UserVDB
@@ -215,7 +216,22 @@ async def update_user(
     if payload.display_name is not None:
         user.display_name = payload.display_name
     if payload.role is not None:
-        user.role = validate_tenant_role(payload.role)
+        new_role = validate_tenant_role(payload.role)
+        if new_role != user.role:
+            old_role = user.role
+            user.role = new_role
+            session.add(
+                AuditEvent(
+                    tenant_id=tenant_id,
+                    user_id=context.user_id,
+                    event_type="tenant_user_role_change",
+                    scope=f"{old_role} -> {new_role}",
+                    title=f"Tenant user role changed{' (self)' if user_id == context.user_id else ''}",
+                    prompt_type="tenant_user_role_change",
+                    tables_queried=[],
+                    documents_read=[],
+                )
+            )
     if payload.is_active is not None:
         user.is_active = payload.is_active
     if payload.password is not None:

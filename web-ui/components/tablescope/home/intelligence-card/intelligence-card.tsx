@@ -41,6 +41,7 @@ import {
   exportInsightCardCsv,
   insightCsvFilename,
 } from "@/lib/insights/export-csv";
+import { exportInsightCardSql, insightSqlFilename } from "@/lib/insights/export-sql";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { CARD_SEVERITY } from "@/lib/ui/insight-tones";import { renderBold } from "./render-bold";
 import { calloutLabel } from "./callout-label";
@@ -78,6 +79,7 @@ export function IntelligenceCard({
   );
   const [pngExporting, setPngExporting] = useState(false);
   const [csvExporting, setCsvExporting] = useState(false);
+  const [sqlExporting, setSqlExporting] = useState(false);
   const { toasts, push: pushToast, dismiss } = useToasts();
   const { data: identity } = useCurrentUser();
 
@@ -132,6 +134,18 @@ export function IntelligenceCard({
       pushToast(err instanceof Error ? err.message : "Failed to export CSV", "error");
     } finally {
       setCsvExporting(false);
+    }
+  };
+
+  const handleExportSql = async () => {
+    setSqlExporting(true);
+    try {
+      exportInsightCardSql(displayCard);
+      pushToast(`SQL downloaded: ${insightSqlFilename(displayCard)}`, "success");
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : "Failed to export SQL", "error");
+    } finally {
+      setSqlExporting(false);
     }
   };
 
@@ -263,6 +277,8 @@ export function IntelligenceCard({
           }
           onDownloadPng={handleDownloadPng}
           isPngExporting={pngExporting}
+          onExportSql={displayCard.sql?.trim() ? handleExportSql : undefined}
+          isSqlExporting={sqlExporting}
           onExportCsv={canExportCsv ? handleExportCsv : undefined}
           isCsvExporting={csvExporting}
           feedback={feedback}

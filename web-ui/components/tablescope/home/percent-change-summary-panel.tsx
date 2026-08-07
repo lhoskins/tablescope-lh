@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { InsightPanel, PanelEmpty } from "@/components/tablescope/insight-panel";
 import { TimeSeriesIntervalRangeControls } from "@/components/tablescope/insights/time-series-interval-range-controls";
 import { IconChartBar } from "@tabler/icons-react";
+import { Switch } from "@/components/ui/switch";
 import { usePercentChangeSummary } from "@/lib/hooks/use-percent-change-summary";
 import type {
   PercentChangeSummarySort,
@@ -13,6 +14,8 @@ import type {
   TimeSeriesRange,
 } from "@/lib/api/home-intelligence";
 import { PercentChangeSummaryTable } from "./percent-change-summary-table";
+
+const SHOW_STATISTICS_STORAGE_KEY = "tablescope-pcs-show-statistics";
 
 interface PercentChangeSummaryPanelProps {
   projectIds: number[];
@@ -42,6 +45,24 @@ export function PercentChangeSummaryPanel({
   });
   const [cursor, setCursor] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(25);
+  const [showStatistics, setShowStatistics] = useState(false);
+
+  useEffect(() => {
+    try {
+      setShowStatistics(window.localStorage.getItem(SHOW_STATISTICS_STORAGE_KEY) === "true");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const handleShowStatisticsChange = (next: boolean) => {
+    setShowStatistics(next);
+    try {
+      window.localStorage.setItem(SHOW_STATISTICS_STORAGE_KEY, String(next));
+    } catch {
+      /* ignore */
+    }
+  };
 
   const requestSearch = debouncedSearch.trim();
 
@@ -128,6 +149,7 @@ export function PercentChangeSummaryPanel({
           rows={data.rows}
           sort={sort}
           onSort={setSort}
+          showStatistics={showStatistics}
         />
         {data.page.next_cursor && (
           <div className="flex items-center justify-between text-[13px]">
@@ -177,27 +199,35 @@ export function PercentChangeSummaryPanel({
               setCursor(null);
             }}
           />
-          <div className="flex items-center gap-2">
-            <label htmlFor="pcs-search" className="sr-only">
-              Search insights
-            </label>
-            <input
-              id="pcs-search"
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search title or project"
-              className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-1.5 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label htmlFor="pcs-search" className="sr-only">
+                Search insights
+              </label>
+              <input
+                id="pcs-search"
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search title or project"
+                className="rounded-md border border-line-tertiary bg-bg-primary px-3 py-1.5 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+              />
+              <select
+                aria-label="Rows per page"
+                value={pageSize}
+                onChange={(e) => handlePageSize(Number(e.target.value))}
+                className="rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+            <Switch
+              id="pcs-show-statistics"
+              checked={showStatistics}
+              onChange={handleShowStatisticsChange}
+              label="Show period statistics"
             />
-            <select
-              aria-label="Rows per page"
-              value={pageSize}
-              onChange={(e) => handlePageSize(Number(e.target.value))}
-              className="rounded-md border border-line-tertiary bg-bg-primary px-2 py-1.5 text-[13px] text-ink-primary"
-            >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
           </div>
         </div>
 

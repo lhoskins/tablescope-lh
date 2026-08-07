@@ -75,6 +75,7 @@ async def get_llm_catalog_detail(
         likes=m.likes,
         last_modified=m.last_modified,
         license_url=m.license_url,
+        readme=m.readme,
         gguf_files=[
             {"filename": f.filename, "size": f.size, "lfs": f.lfs}
             for f in m.gguf_files

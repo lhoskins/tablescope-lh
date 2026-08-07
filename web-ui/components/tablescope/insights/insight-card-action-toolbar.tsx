@@ -7,6 +7,7 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconClipboardPlus,
+  IconCode,
   IconDownload,
   IconFileSpreadsheet,
   IconFileText,
@@ -44,6 +45,8 @@ export interface InsightCardActionToolbarProps {
   onAddToDashboard?: () => void;
   onDownloadPng?: () => void;
   isPngExporting?: boolean;
+  onExportSql?: () => void;
+  isSqlExporting?: boolean;
   onExportCsv?: () => void;
   isCsvExporting?: boolean;
   feedback?: InsightFeedbackRecord | null;
@@ -178,6 +181,8 @@ export function InsightCardActionToolbar({
   onAddToDashboard,
   onDownloadPng,
   isPngExporting,
+  onExportSql,
+  isSqlExporting,
   onExportCsv,
   isCsvExporting,
   feedback,
@@ -234,6 +239,11 @@ export function InsightCardActionToolbar({
       : !card.valueColumn?.trim()
         ? "This insight does not have a value column and cannot be added to a dashboard"
         : undefined;
+
+  const canExportSql = Boolean(onExportSql);
+  const sqlDisabledReason = !onExportSql
+    ? "This insight does not have a SQL query to export"
+    : undefined;
 
   const canExportCsv = Boolean(onExportCsv);
   const csvDisabledReason = !onExportCsv
@@ -374,6 +384,24 @@ export function InsightCardActionToolbar({
                   label="Add to dashboard"
                   tooltip={dashboardDisabledReason}
                   icon={<IconLayoutDashboard size={18} />}
+                  disabled
+                />
+              )}
+
+              {canExportSql ? (
+                <IconButton
+                  label={isSqlExporting ? "Exporting SQL" : "Export SQL"}
+                  tooltip="Export SQL"
+                  icon={<IconCode size={18} />}
+                  onClick={onExportSql}
+                  busy={isSqlExporting}
+                  disabled={isSqlExporting}
+                />
+              ) : (
+                <IconButton
+                  label="Export SQL"
+                  tooltip={sqlDisabledReason}
+                  icon={<IconCode size={18} />}
                   disabled
                 />
               )}

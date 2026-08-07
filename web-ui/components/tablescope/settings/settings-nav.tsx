@@ -148,6 +148,14 @@ export function useSettingsNavItems(user?: CurrentUser): {
       visible: () => isAdmin(user),
     },
     {
+      key: "allowed-hosts",
+      label: "Allowed Hosts",
+      href: "/admin/settings/allowed-hosts",
+      icon: IconLock,
+      section: "Security",
+      visible: () => isAdmin(user),
+    },
+    {
       key: "enterprise-authentication",
       label: "Enterprise Authentication",
       href: "/admin/settings/enterprise-authentication",

@@ -24,4 +24,5 @@ export interface PercentChangeSummaryTableProps {
   rows: PercentChangeSummaryRow[];
   sort: PercentChangeSummarySort;
   onSort: (sort: PercentChangeSummarySort) => void;
+  showStatistics?: boolean;
 }

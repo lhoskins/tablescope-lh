@@ -302,7 +302,7 @@ async def get_catalog_detail(repo_url: str) -> CatalogModel:
     """Fetch detailed catalog metadata for a single repository."""
     client = HuggingFaceCatalogClient()
     repo_id = _repo_id_from_url(repo_url)
-    return await client.get_model_info(repo_id)
+    return await client.get_model_detail(repo_id)
 
 
 async def create_artifact_and_stage(
