@@ -31,6 +31,7 @@ export function NetworkRepositoryModal({
   onClose: () => void;
 }) {
   const addSource = useBuilderStore((s) => s.addSource);
+  const markCreated = useBuilderStore((s) => s.markCreated);
 
   const [entries, setEntries] = useState<NetworkFileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState<string | null>(null);
@@ -73,6 +74,7 @@ export function NetworkRepositoryModal({
       const preview = await importFromNetwork(connection.id, fullPath);
       const source = sessionSourceFromPreview(preview);
       addSource(source);
+      markCreated([source.id]);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed.");

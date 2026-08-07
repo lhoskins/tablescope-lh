@@ -16,10 +16,22 @@ export function DataSourceSelectionSection({
 
   const createdCount = sources.length;
 
+  const heading =
+    activeView === "session"
+      ? `Active Data Sources in this Session`
+      : "All Data Sources";
+
   return (
-    <div className="mt-8 space-y-4 rounded-lg border border-line-tertiary bg-bg-primary p-4">
+    <div className="space-y-4 rounded-lg border border-line-tertiary bg-bg-primary p-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-h4 text-ink-primary">Data Sources</h2>
+        <h2 className="text-h4 text-ink-primary">
+          {heading}
+          {activeView === "session" && (
+            <span className="ml-2 text-small text-ink-tertiary">
+              {createdCount} {createdCount === 1 ? "source" : "sources"}
+            </span>
+          )}
+        </h2>
         <div className="inline-flex rounded-md border border-line-tertiary p-0.5">
           {(["session", "all"] as const).map((view) => (
             <button
@@ -33,7 +45,9 @@ export function DataSourceSelectionSection({
                   : "text-ink-secondary hover:bg-bg-secondary",
               )}
             >
-              {view === "session" ? `This Session (${createdCount})` : "All Data Sources"}
+              {view === "session"
+                ? `This Session (${createdCount})`
+                : "All Data Sources"}
             </button>
           ))}
         </div>

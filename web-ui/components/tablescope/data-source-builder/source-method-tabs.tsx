@@ -10,11 +10,18 @@ import {
 
 export type SourceTab = "upload" | "url" | "database" | "network";
 
-const TABS: { key: SourceTab; label: string; icon: typeof IconCloudUpload }[] = [
-  { key: "upload", label: "Upload File", icon: IconCloudUpload },
-  { key: "url", label: "File URL", icon: IconLink },
-  { key: "database", label: "Database Connectors", icon: IconDatabase },
-  { key: "network", label: "Network File Connections", icon: IconFolderShare },
+type TabDef = {
+  key: SourceTab;
+  label: string;
+  subtitle: string;
+  icon: typeof IconCloudUpload;
+};
+
+const TABS: TabDef[] = [
+  { key: "upload", label: "Upload File", subtitle: "From this computer", icon: IconCloudUpload },
+  { key: "url", label: "File URL", subtitle: "Secure https link", icon: IconLink },
+  { key: "database", label: "Database Connectors", subtitle: "Database or SaaS", icon: IconDatabase },
+  { key: "network", label: "Network File Connections", subtitle: "UNC/SMB share", icon: IconFolderShare },
 ];
 
 export function SourceMethodTabs({
@@ -28,7 +35,7 @@ export function SourceMethodTabs({
     <div
       role="tablist"
       aria-label="Data source method"
-      className="flex items-center gap-1 overflow-x-auto border-b border-line-tertiary"
+      className="flex gap-3 overflow-x-auto pb-1"
     >
       {TABS.map((tab) => {
         const Icon = tab.icon;
@@ -41,14 +48,28 @@ export function SourceMethodTabs({
             type="button"
             onClick={() => onChange(tab.key)}
             className={cn(
-              "flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2.5 text-[13px] font-medium transition-colors",
+              "flex min-w-[10rem] shrink-0 items-start gap-3 rounded-xl border p-3.5 text-left transition",
               active
-                ? "border-b-2 border-brand text-brand-700"
-                : "text-ink-secondary hover:text-ink-primary",
+                ? "border-brand bg-brand-50/50 text-brand-700"
+                : "border-line-tertiary bg-bg-primary text-ink-secondary hover:bg-bg-secondary",
             )}
           >
-            <Icon size={16} />
-            {tab.label}
+            <span
+              className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+                active ? "bg-brand text-white" : "bg-bg-tertiary text-ink-tertiary",
+              )}
+            >
+              <Icon size={18} />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[13px] font-semibold text-current">
+                {tab.label}
+              </span>
+              <span className="block text-caption text-current/70">
+                {tab.subtitle}
+              </span>
+            </span>
           </button>
         );
       })}

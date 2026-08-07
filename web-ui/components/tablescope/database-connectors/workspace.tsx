@@ -70,8 +70,12 @@ function ConnectorTile({
 
 export function DatabaseConnectorsWorkspace({
   projectId,
+  onUseInBuilder,
+  onConnectionSaved,
 }: {
   projectId?: string;
+  onUseInBuilder?: (conn: CreatedConnection) => void;
+  onConnectionSaved?: () => void;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -92,8 +96,10 @@ export function DatabaseConnectorsWorkspace({
   );
   const [deleteTarget, setDeleteTarget] = useState<CreatedConnection | null>(null);
 
-  const refreshCreated = () =>
+  const refreshCreated = () => {
     queryClient.invalidateQueries({ queryKey: CREATED_QK });
+    onConnectionSaved?.();
+  };
 
   const openCreate = (key: string) => {
     setEditTarget(null);
@@ -260,19 +266,27 @@ export function DatabaseConnectorsWorkspace({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1.5">
-                        {projectId && (
+                        {projectId && onUseInBuilder ? (
+                          <Button
+                            variant="brandSoft"
+                            size="sm"
+                            onClick={() => onUseInBuilder(c)}
+                          >
+                            Use in Data Source Builder
+                          </Button>
+                        ) : projectId ? (
                           <Button
                             variant="brandSoft"
                             size="sm"
                             onClick={() =>
                               router.push(
-                                `/projects/${projectId}/data-source-builder?intent=database`,
+                                `/projects/${projectId}/data-source-builder?sourceTab=database`,
                               )
                             }
                           >
                             Use in Data Source Builder
                           </Button>
-                        )}
+                        ) : null}
                         <Button
                           variant="ghost"
                           size="sm"

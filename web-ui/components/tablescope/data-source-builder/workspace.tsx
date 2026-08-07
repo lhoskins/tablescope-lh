@@ -17,14 +17,14 @@ import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
 import { buildExistingSources } from "./existing-sources";
 import { AvailableSources } from "./available-sources";
 import { ConfirmationModal } from "./confirmation-modal";
-import { ConnectedDatabases } from "./connected-databases";
-import { ConnectedNetworkRepositories } from "./connected-network-repositories";
-import { ConnectedSaaS } from "./connected-saas";
 import { ProjectsColumn } from "./projects-column";
 import { AiUploadDropzone } from "./ai-upload-dropzone";
 import { UrlImportForm } from "./url-import-form";
 import { SourceMethodTabs, type SourceTab } from "./source-method-tabs";
 import { DataSourceSelectionSection } from "./data-source-selection-section";
+import { ConnectedSourcesSection } from "./connected-sources-section";
+import { DatabaseConnectionsPanel } from "./database-connections-panel";
+import { NetworkFileConnectionsPanel } from "./network-file-connections-panel";
 
 type Step = 1 | 2;
 
@@ -102,43 +102,7 @@ function FileUrlPanel() {
   );
 }
 
-function DatabaseConnectionsPanel({
-  projectId,
-}: {
-  projectId?: string;
-}) {
-  return (
-    <div className="space-y-5">
-      <div>
-        <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
-          Connected Databases
-        </h3>
-        <ConnectedDatabases projectId={projectId} />
-      </div>
-      <div>
-        <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
-          SaaS Connections
-        </h3>
-        <ConnectedSaaS projectId={projectId} />
-      </div>
-    </div>
-  );
-}
 
-function NetworkFileConnectionsPanel({
-  projectId,
-}: {
-  projectId?: string;
-}) {
-  return (
-    <div>
-      <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
-        Network Repositories
-      </h3>
-      <ConnectedNetworkRepositories projectId={projectId} />
-    </div>
-  );
-}
 
 export function DataSourceBuilderWorkspace({
   tenantName,
@@ -258,9 +222,9 @@ export function DataSourceBuilderWorkspace({
             {sourceTab === "database" && (
               <DatabaseConnectionsPanel projectId={initialProjectId} />
             )}
-            {sourceTab === "network" && (
-              <NetworkFileConnectionsPanel projectId={initialProjectId} />
-            )}
+            {sourceTab === "network" && <NetworkFileConnectionsPanel />}
+
+            <ConnectedSourcesSection />
 
             <DataSourceSelectionSection projectId={initialProjectId} />
           </div>
