@@ -40,6 +40,22 @@ _SALESFORCE_BASE_COLUMN_MAP = {
     "system_modstamp": "SystemModstamp",
 }
 
+# HubSpot and QuickBooks live translators rename API columns locally.
+# source_identifier() maps the local column names back to the source names.
+_HUBSPOT_BASE_COLUMN_MAP = {
+    "hubspot_id": "id",
+    "archived": "archived",
+    "created_at": "createdAt",
+    "updated_at": "updatedAt",
+}
+
+_QUICKBOOKS_BASE_COLUMN_MAP = {
+    "quickbooks_id": "Id",
+    "sync_token": "SyncToken",
+    "created_time": "MetaData.CreateTime",
+    "updated_time": "MetaData.LastUpdatedTime",
+}
+
 
 def source_identifier(db_type: str, name: str | None) -> str | None:
     """Return the identifier *as stored in the source database*.
@@ -66,6 +82,10 @@ def source_identifier(db_type: str, name: str | None) -> str | None:
         return name.lower()
     if db_type == "salesforce":
         return _SALESFORCE_BASE_COLUMN_MAP.get(name, name)
+    if db_type == "hubspot":
+        return _HUBSPOT_BASE_COLUMN_MAP.get(name, name)
+    if db_type == "quickbooks":
+        return _QUICKBOOKS_BASE_COLUMN_MAP.get(name, name)
     return name
 
 

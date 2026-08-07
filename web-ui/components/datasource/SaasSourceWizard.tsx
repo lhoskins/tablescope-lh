@@ -45,6 +45,9 @@ export function SaasSourceWizard({
   // QuickBooks
   const [qb, setQb] = useState({
     access_token: "",
+    client_id: "",
+    client_secret: "",
+    refresh_token: "",
     realm_id: "",
     environment: "production",
   });
@@ -72,7 +75,13 @@ export function SaasSourceWizard({
   function credValid(): boolean {
     if (connector === "hubspot") return !!hsToken.trim();
     if (connector === "quickbooks")
-      return !!qb.access_token.trim() && !!qb.realm_id.trim();
+      return (
+        !!qb.access_token.trim() &&
+        !!qb.realm_id.trim() &&
+        !!qb.client_id.trim() &&
+        !!qb.client_secret.trim() &&
+        !!qb.refresh_token.trim()
+      );
     return (
       !!sf.instance_url &&
       !!sf.client_id &&
@@ -453,6 +462,37 @@ export function SaasSourceWizard({
                     Generate from the Intuit Developer portal (OAuth2 Playground) with the
                     Accounting scope. Tokens expire ~1h.
                   </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={label}>Client ID</label>
+                    <input
+                      className={input}
+                      value={qb.client_id}
+                      onChange={(e) => setQb((s) => ({ ...s, client_id: e.target.value }))}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <label className={label}>Client Secret</label>
+                    <input
+                      className={input}
+                      type="password"
+                      value={qb.client_secret}
+                      onChange={(e) => setQb((s) => ({ ...s, client_secret: e.target.value }))}
+                      autoComplete="new-password"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>Refresh Token</label>
+                  <input
+                    className={input}
+                    type="password"
+                    value={qb.refresh_token}
+                    onChange={(e) => setQb((s) => ({ ...s, refresh_token: e.target.value }))}
+                    autoComplete="new-password"
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
