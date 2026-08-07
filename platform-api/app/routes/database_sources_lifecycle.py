@@ -127,7 +127,7 @@ async def create_database_source(
                     host=params.host,
                     port=params.resolved_port,
                     database_name=params.database_name,
-                    username=params.username,
+                    username=params.resolved_username,
                     password_encrypted=encrypt_secret(params.password)
                     if params.password
                     else None,
@@ -148,7 +148,7 @@ async def create_database_source(
         database_name=params.database_name,
         schema_name=body.schema_name,
         table_name=body.table_name,
-        username=params.username,
+        username=params.resolved_username,
         password_encrypted=encrypt_secret(params.password) if params.password else None,
         ssl_mode=params.ssl_mode,
         teiid_model_name="",
@@ -210,7 +210,7 @@ async def create_database_source(
             schema_name=intro.source_identifier(params.db_type, body.schema_name),
             table_name=intro.source_identifier(params.db_type, body.table_name)
             or body.table_name,
-            username=params.username,
+            username=params.resolved_username,
             password=params.password,
             ssl_mode=params.ssl_mode,
             model_name=names["model_name"],

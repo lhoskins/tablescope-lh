@@ -246,7 +246,10 @@ public class VDBXmlBuilder {
     public static String buildPhysicalModelBlock(String modelName, String dsName, String translator,
                                                   String jndiName, String teiidTableName, String schemaName,
                                                   String tableName, JSONArray columns) {
-        boolean backtick = translator != null && translator.toLowerCase().startsWith("mysql");
+        boolean backtick = translator != null && (
+                translator.toLowerCase().startsWith("mysql")
+                        || "hive".equalsIgnoreCase(translator)
+                        || "databricks".equalsIgnoreCase(translator));
         char q = backtick ? '`' : '"';
 
         StringBuilder cols = new StringBuilder();
