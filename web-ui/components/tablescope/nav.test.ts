@@ -69,18 +69,15 @@ describe("projectNavGroups", () => {
     expect(home?.href).toBe("/projects/7");
   });
 
-  it("replaces Intelligence with a Tools group containing the builder and connectors", () => {
+  it("replaces Intelligence with a Tools group containing only the builder", () => {
     const groups = projectNavGroups("7");
     expect(groups.find((g) => g.heading === "Intelligence")).toBeUndefined();
     const tools = groups.find((g) => g.heading === "Tools")?.items ?? [];
-    expect(tools.map((i) => i.key)).toEqual([
-      "project-data-source-builder",
-      "project-database-connectors",
-    ]);
+    expect(tools.map((i) => i.key)).toEqual(["project-data-source-builder"]);
     expect(tools.map((i) => i.href)).toEqual([
       "/projects/7/data-source-builder",
-      "/projects/7/database-connectors",
     ]);
+    expect(tools.map((i) => i.label)).toEqual(["Data Source Builder"]);
   });
 
   it("does not include Intelligence items in project navigation", () => {

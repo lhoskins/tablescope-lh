@@ -224,26 +224,32 @@ def _resolve_locator(
 
 
 def _normalize_raw_path(raw_path: str, connection: NetworkFileConnection) -> str:
-    """If ``raw_path`` is share-relative, prepend ``//host/share/``.
+    """If ``raw_path`` is a bare filename or starts with the share name, prepend ``//host/share/``.
 
     This lets the browse API and older import records supply just a filename
     like ``sample.csv`` while still validating it against the selected
-    ``connection``.
+    ``connection``.  Paths that still look like local/relative paths (e.g.
+    ``finance/sales.xlsx`` without a host or share) are left as-is so the
+    resolver can reject them.
     """
     raw = raw_path.strip()
     lower = raw.lower()
     if lower.startswith(("smb://", "//", "\\\\")):
         return raw
-    # Strip a leading share name if the caller included it.
+
     share = connection.share_name.strip("\\/")
     prefix = share + "/"
     prefix_back = share + "\\"
-    if lower.startswith(prefix.lower()):
-        raw = raw[len(share) + 1 :]
-    elif lower.startswith(prefix_back.lower()):
-        raw = raw[len(share) + 1 :]
-    relative = raw.lstrip("\\/")
-    return f"//{connection.host}/{share}/{relative}"
+
+    if lower.startswith(prefix.lower()) or lower.startswith(prefix_back.lower()):
+        relative = raw[len(share) + 1 :].lstrip("\\/")
+        return f"//{connection.host}/{share}/{relative}"
+
+    # Allow only bare filenames (no path separators) to be treated as share-relative.
+    if "/" not in raw and "\\" not in raw:
+        return f"//{connection.host}/{share}/{raw.lstrip('\\/')}"
+
+    return raw
 
 
 def resolve_network_path(

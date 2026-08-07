@@ -119,12 +119,6 @@ export function projectNavGroups(
           href: `${base}/data-source-builder`,
           icon: IconDatabasePlus,
         },
-        {
-          key: "project-database-connectors",
-          label: "Database Connectors",
-          href: `${base}/database-connectors`,
-          icon: IconDatabase,
-        },
       ],
     },
   ];
