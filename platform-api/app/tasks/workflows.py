@@ -42,6 +42,7 @@ from app.tasks.llm_framework import (
     reindex_embedding_model,
     stage_llm_artifact,
 )
+from app.tasks.quickbooks_token_refresh import refresh_quickbooks_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -1500,6 +1501,7 @@ class WorkerSettings:
         refresh_business_insight_result,
         rebuild_project_insight,
         schedule_stale_insight_refresh,
+        refresh_quickbooks_tokens,
         match_kpi_data_source,
         stage_llm_artifact,
         deploy_llm_artifact,
@@ -1517,6 +1519,11 @@ class WorkerSettings:
         cron(recover_stale_graph_builds, minute=5, second=0),
         # Refresh stale insight snapshots every hour.
         cron(schedule_stale_insight_refresh, minute=0, second=0),
+        # Refresh QuickBooks OAuth2 tokens every 15 minutes.
+        cron(refresh_quickbooks_tokens, minute=0, second=15),
+        cron(refresh_quickbooks_tokens, minute=15, second=15),
+        cron(refresh_quickbooks_tokens, minute=30, second=15),
+        cron(refresh_quickbooks_tokens, minute=45, second=15),
     ]
     # Must exceed home_intelligence_project_analysis_timeout_seconds: a job
     # killed by arq writes no result and permanently stalls its run, so the
