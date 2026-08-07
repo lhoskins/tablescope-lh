@@ -55,6 +55,9 @@ from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.database_data_source_assignment import (
     DatabaseDataSourceAssignment,
 )
+from app.models.directory_derived_grant import DirectoryDerivedGrant
+from app.models.directory_group_role_mapping import DirectoryGroupRoleMapping
+from app.models.directory_sync_run import DirectorySyncRun
 from app.models.file_import_job import FileImportJob
 from app.models.file_source_meta import FileSourceMeta
 from app.models.file_source_version import FileSourceVersion
@@ -69,6 +72,7 @@ from app.models.knowledge_graph_lifecycle import (
     KnowledgeGraphVersion,
 )
 from app.models.knowledge_graph_snapshot import AIProjectGraphSnapshot
+from app.models.ldap_connection import LdapConnection
 from app.models.llm_framework import (
     LLMArtifactFile,
     LLMAuditEvent,
@@ -128,8 +132,10 @@ from app.models.tenant_ai_governance import (
     TenantAIMethodPolicy,
 )
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
+from app.models.tenant_enterprise_auth_settings import TenantEnterpriseAuthSettings
 from app.models.tenant_membership import TenantAuthBinding, TenantMembership
 from app.models.user import User
+from app.models.user_auth_identity import UserAuthIdentity
 from app.models.user_vdb import UserVDB
 
 __all__ = [
@@ -165,6 +171,9 @@ __all__ = [
     "DataSourceTag",
     "DatabaseConnection",
     "DatabaseDataSource",
+    "DirectoryDerivedGrant",
+    "DirectoryGroupRoleMapping",
+    "DirectorySyncRun",
     "DatabaseDataSourceAssignment",
     "FileImportJob",
     "FileSourceMeta",
@@ -178,6 +187,7 @@ __all__ = [
     "KnowledgeGraphBuild",
     "KnowledgeGraphHealthCheck",
     "KnowledgeGraphVersion",
+    "LdapConnection",
     "LLMArtifactFile",
     "LLMAuditEvent",
     "LLMDeployment",
@@ -230,6 +240,7 @@ __all__ = [
     "SubscriptionTierCatalog",
     "Tenant",
     "TenantAIGovernancePolicy",
+    "TenantEnterpriseAuthSettings",
     "TenantAIMethodPolicy",
     "TenantAllowedDomain",
     "TenantAuthBinding",
@@ -241,5 +252,6 @@ __all__ = [
     "TenantReferenceCatalog",
     "TenantSecretRef",
     "User",
+    "UserAuthIdentity",
     "UserVDB",
 ]
