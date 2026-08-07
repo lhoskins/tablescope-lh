@@ -45,6 +45,42 @@ CREATE FOREIGN PROCEDURE getTextFiles (
     </metadata>
   </model>
 
+  <!-- Hidden model for live remote CSV/Text files -->
+  <model name="RemoteCSVSourceModel" type="PHYSICAL" visible="false">
+    <source name="remote-text-connector" translator-name="file" connection-jndi-name="java:/remote-file-ds"/>
+    
+    <metadata type="DDL">
+      <![CDATA[
+CREATE FOREIGN PROCEDURE getTextFiles (
+  IN pathAndExt string(4000) NOT NULL
+) RETURNS
+  TABLE (
+    file clob,
+    filePath string(4000),
+    lastModified timestamp,
+    created timestamp,
+    size integer
+  ) OPTIONS(UPDATECOUNT '1');
+]]>
+    </metadata>
+  </model>
+
+  <!-- Hidden model for live remote Excel files -->
+  <model name="RemoteExcelSourceModel" type="PHYSICAL" visible="false">
+    <source name="remote-excel-connector" translator-name="excel" connection-jndi-name="java:/remote-file-ds"/>
+    
+    <metadata type="DDL">
+      <![CDATA[
+-- Placeholder table to ensure model is valid (Teiid requires at least one object per model)
+CREATE FOREIGN TABLE _placeholder_remote_excel_(
+	ROW_ID integer OPTIONS (SEARCHABLE 'All_Except_Like', "teiid_excel:CELL_NUMBER" 'ROW_ID'),
+	CONSTRAINT PK0 PRIMARY KEY(ROW_ID)
+) OPTIONS ("NAMEINSOURCE" 'Sheet1', "teiid_excel:FILE" '_placeholder_.xlsx', "teiid_excel:FIRST_DATA_ROW_NUMBER" '2');
+-- Place remote Excel foreign tables below
+]]>
+    </metadata>
+  </model>
+
   <!-- Visible model for Views -->
   <model name="MyCompany" type="VIRTUAL" visible="true">
     <metadata type="DDL">

@@ -38,6 +38,7 @@ def apply_provenance(meta: FileSourceMeta, job: FileImportJob) -> None:
     meta.remote_etag = job.remote_etag
     meta.remote_last_modified = job.remote_last_modified
     meta.retrieved_at = job.retrieved_at
+    meta.live_source_params = job.live_source_params
 
 
 async def cleanup_expired_jobs(session: AsyncSession, *, limit: int = 200) -> int:

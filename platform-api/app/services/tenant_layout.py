@@ -16,6 +16,7 @@ Port/subnet allocation mirrors the plan's worked example:
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 
@@ -96,7 +97,19 @@ class TenantLayout:
 
     @property
     def firewall_chain(self) -> str:
-        return f"TABLESCOPE-TENANT-{self.tenant_id.upper().replace('-', '_')}"
+        """Return a short, iptables-safe chain name for this tenant.
+
+        iptables/nftables chain names must be 28 characters or shorter. The
+        generated name is deterministic and unique for the tenant id lengths
+        supported by :func:`validate_tenant_id`.
+        """
+        tid = self.tenant_id.upper().replace("-", "_")
+        base = f"TS-TENANT-{tid}"
+        if len(base) <= 28:
+            return base
+        short = tid[:18]
+        digest = hashlib.md5(tid.encode()).hexdigest()[:6].upper()
+        return f"TS-{short}-{digest}"
 
 
 def compute_layout(tenant_id: str, index: int) -> TenantLayout:

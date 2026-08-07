@@ -1,45 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { IconCloudUpload, IconLink, IconServer } from "@tabler/icons-react";
+import {
+  IconCloudUpload,
+  IconLink,
+} from "@tabler/icons-react";
 import { cn } from "@/lib/cn";
 import { getImportCapabilities } from "@/lib/api/data-source-builder";
 import { AiUploadDropzone } from "./ai-upload-dropzone";
-import { NetworkImportForm } from "./network-import-form";
 import { UrlImportForm } from "./url-import-form";
 
-type Method = "local" | "url" | "network";
+type Method = "local" | "url";
 
-const METHODS: {
-  key: Method;
-  label: string;
-  hint: string;
-  icon: typeof IconCloudUpload;
-}[] = [
-  {
-    key: "local",
-    label: "Upload file",
-    hint: "From this computer",
-    icon: IconCloudUpload,
-  },
-  { key: "url", label: "File URL", hint: "Secure https link", icon: IconLink },
-  {
-    key: "network",
-    label: "Network path",
-    hint: "Approved location",
-    icon: IconServer,
-  },
-];
-
-/**
- * The single "Add files" entry point of the Data Source Builder.
- *
- * All three methods produce the same session source and follow the same
- * analysis pipeline; only the acquisition step differs. Methods the
- * deployment has not enabled are shown disabled rather than hidden, so the
- * user can see the capability exists and who to ask for it.
- */
 export function FileAcquisitionPanel({
   onUploadsDone,
 }: {
@@ -52,25 +25,41 @@ export function FileAcquisitionPanel({
     staleTime: 5 * 60 * 1000,
   });
 
+  const METHODS = useMemo(
+    () =>
+      [
+        {
+          key: "local" as const,
+          label: "Upload file",
+          hint: "From this computer",
+          icon: IconCloudUpload,
+        },
+        {
+          key: "url" as const,
+          label: "File URL",
+          hint: "Secure https link",
+          icon: IconLink,
+        },
+      ] as { key: Method; label: string; hint: string; icon: typeof IconCloudUpload }[],
+    [],
+  );
+
   const enabled: Record<Method, boolean> = {
     local: true,
     url: capabilities?.url_import_enabled ?? false,
-    network: capabilities?.network_import_enabled ?? false,
   };
 
   return (
     <section className="rounded-xl border border-line-tertiary p-4">
       <h3 className="text-h3 text-ink-primary">Add files</h3>
       <p className="mt-0.5 text-small text-ink-tertiary">
-        Upload from this computer, import from a secure file URL, or pull from
-        an approved network location. Every file is profiled and analysed the
-        same way.
+        Upload from this computer, import from a secure file URL, or pull from an approved network location.
       </p>
 
       <div
         role="tablist"
         aria-label="File acquisition method"
-        className="mt-3 grid gap-2 sm:grid-cols-3"
+        className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-4"
       >
         {METHODS.map((m) => {
           const Icon = m.icon;
@@ -83,13 +72,14 @@ export function FileAcquisitionPanel({
               type="button"
               aria-selected={active}
               disabled={!isEnabled}
-              onClick={() => setMethod(m.key)}
+              onClick={() => setMethod(m.key as Method)}
               className={cn(
                 "flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
                 active
                   ? "border-brand-500 bg-brand-50/50"
                   : "border-line-tertiary hover:bg-bg-secondary/50",
-                !isEnabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
+                !isEnabled &&
+                  "cursor-not-allowed opacity-50 hover:bg-transparent",
               )}
             >
               <span
@@ -125,12 +115,6 @@ export function FileAcquisitionPanel({
           <AiUploadDropzone onUploadsDone={onUploadsDone} />
         )}
         {method === "url" && <UrlImportForm onImported={onUploadsDone} />}
-        {method === "network" && (
-          <NetworkImportForm
-            connections={capabilities?.network_connections ?? []}
-            onImported={onUploadsDone}
-          />
-        )}
       </div>
     </section>
   );

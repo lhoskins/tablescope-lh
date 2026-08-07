@@ -20,6 +20,7 @@ import { FileAcquisitionPanel } from "./file-acquisition-panel";
 import { AvailableSources } from "./available-sources";
 import { ConfirmationModal } from "./confirmation-modal";
 import { ConnectedDatabases } from "./connected-databases";
+import { ConnectedNetworkRepositories } from "./connected-network-repositories";
 import { ConnectedSaaS } from "./connected-saas";
 import { ProjectsColumn } from "./projects-column";
 
@@ -192,6 +193,13 @@ export function DataSourceBuilderWorkspace({
                     SaaS Connections
                   </h3>
                   <ConnectedSaaS projectId={initialProjectId} />
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
+                    Network Repositories
+                  </h3>
+                  <ConnectedNetworkRepositories projectId={initialProjectId} />
                 </div>
               </>
             )}

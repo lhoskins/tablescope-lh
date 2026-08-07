@@ -18,11 +18,13 @@ from app.schemas.billing import (
     VpnIntakeResponse,
 )
 from app.services import billing_audit as audit
+from app.services.aws_vpn_provisioning_service import VpnProvisioningError
 from app.services.tenant_provisioning_service import (
     TenantNotFound,
     TenantProvisioningService,
     VpnMetadata,
 )
+from app.tasks.workflows import enqueue_provision_tenant_vpn
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["provisioning"])
@@ -60,6 +62,7 @@ async def vpn_intake(
     if req is None:
         raise HTTPException(status_code=404, detail="No VPN provisioning request for tenant")
 
+    # Persist the intake metadata and routing choice immediately.
     provisioner = TenantProvisioningService(session)
     try:
         await provisioner.attach_vpn_metadata(
@@ -79,7 +82,24 @@ async def vpn_intake(
         ike_version=payload.ike_version,
         cidr_count=len(payload.customer_cidr_ranges),
     )
-    return VpnIntakeResponse(
-        vpn_status="configuring",
-        message="VPN details received. Our team will finalize the connection.",
-    )
+
+    # Enqueue AWS-side VPC, Customer Gateway and Site-to-Site VPN provisioning.
+    try:
+        await enqueue_provision_tenant_vpn(
+            tenant_id=req.tenant_slug,
+            customer_gateway_ip=payload.public_endpoint,
+            customer_onprem_cidrs=payload.customer_cidr_ranges,
+            routing_type=payload.routing,
+        )
+        req.vpn_status = "configuring"
+        await session.flush()
+        return VpnIntakeResponse(
+            vpn_status="configuring",
+            message="AWS VPN provisioning started. The workspace status page will update when the connection is ready.",
+        )
+    except VpnProvisioningError as exc:
+        logger.error("VPN provisioning failed for tenant %s: %s", req.tenant_slug, exc)
+        req.vpn_status = "failed"
+        req.error_message = str(exc)[:500]
+        await session.flush()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

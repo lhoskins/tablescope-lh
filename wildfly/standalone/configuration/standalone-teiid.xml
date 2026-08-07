@@ -123,6 +123,15 @@
             <logger category="org.teiid.COMMAND_LOG">
                 <level name="WARN"/>
             </logger>
+            <logger category="org.jboss.as.connector">
+                <level name="TRACE"/>
+            </logger>
+            <logger category="org.jboss.modules">
+                <level name="TRACE"/>
+            </logger>
+            <logger category="org.jboss.ironjacamar">
+                <level name="TRACE"/>
+            </logger>
             <root-logger>
                 <level name="INFO"/>
                 <handlers>
@@ -473,6 +482,27 @@
                         </connection-definition>
                         <connection-definition class-name="org.teiid.resource.adapter.file.FileManagedConnectionFactory" jndi-name="java:/excelDS" enabled="true" use-java-context="true" pool-name="excelDS">
                             <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                        </connection-definition>
+                    </connection-definitions>
+                </resource-adapter>
+                <resource-adapter id="remote-file">
+                    <module slot="main" id="org.jboss.teiid.resource-adapter.remote-file"/>
+                    <transaction-support>NoTransaction</transaction-support>
+                    <connection-definitions>
+                        <connection-definition class-name="org.teiid.resource.adapter.remote.file.RemoteFileManagedConnectionFactory" jndi-name="java:/remote-file-ds" enabled="true" use-java-context="true" pool-name="remote-file-ds">
+                            <config-property name="AllowParentPaths">false</config-property>
+                            <config-property name="ParentDirectory">/opt/wildfly/teiidfiles/customers</config-property>
+                            <config-property name="ProxyBaseUrl">http://platform-api:8000/internal/file-proxy</config-property>
+                            <pool>
+                                <min-pool-size>0</min-pool-size>
+                                <max-pool-size>50</max-pool-size>
+                                <prefill>false</prefill>
+                                <flush-strategy>IdleConnections</flush-strategy>
+                            </pool>
+                            <timeout>
+                                <blocking-timeout-millis>10000</blocking-timeout-millis>
+                                <idle-timeout-minutes>3</idle-timeout-minutes>
+                            </timeout>
                         </connection-definition>
                     </connection-definitions>
                 </resource-adapter>
