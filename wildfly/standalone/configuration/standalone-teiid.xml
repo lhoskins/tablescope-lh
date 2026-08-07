@@ -197,6 +197,13 @@
                         <driver-class>oracle.jdbc.OracleDriver</driver-class>
                         <xa-datasource-class>oracle.jdbc.xa.client.OracleXADataSource</xa-datasource-class>
                     </driver>
+                    <driver name="snowflake" module="com.snowflake">
+                        <driver-class>net.snowflake.client.jdbc.SnowflakeDriver</driver-class>
+                    </driver>
+                    <driver name="databricks" module="com.databricks">
+                        <driver-class>com.databricks.client.jdbc.Driver</driver-class>
+                        <xa-datasource-class>com.databricks.client.jdbc.DataSource</xa-datasource-class>
+                    </driver>
                 </drivers>
             </datasources>
         </subsystem>
@@ -658,6 +665,8 @@
             <translator name="salesforce-41" module="org.jboss.teiid.translator.salesforce-41"/>
             <translator name="servicenow" module="org.jboss.teiid.translator.servicenow"/>
             <translator name="hive" module="org.jboss.teiid.translator.hive"/>
+            <translator name="snowflake" module="org.jboss.teiid.translator.jdbc"/>
+            <translator name="databricks" module="org.jboss.teiid.translator.hive"/>
             <translator name="jpa2" module="org.jboss.teiid.translator.jpa"/>
             <translator name="odata" module="org.jboss.teiid.translator.odata"/>
             <translator name="sap-gateway" module="org.jboss.teiid.translator.odata"/>

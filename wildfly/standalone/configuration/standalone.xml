@@ -187,6 +187,13 @@
                         <driver-class>org.teiid.jdbc.TeiidDriver</driver-class>
                         <xa-datasource-class>org.teiid.jdbc.TeiidDataSource</xa-datasource-class>
                     </driver>
+                    <driver name="snowflake" module="com.snowflake">
+                        <driver-class>net.snowflake.client.jdbc.SnowflakeDriver</driver-class>
+                    </driver>
+                    <driver name="databricks" module="com.databricks">
+                        <driver-class>com.databricks.client.jdbc.Driver</driver-class>
+                        <xa-datasource-class>com.databricks.client.jdbc.DataSource</xa-datasource-class>
+                    </driver>
                 </drivers>
             </datasources>
         </subsystem>
