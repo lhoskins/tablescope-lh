@@ -54,15 +54,6 @@ export function ActiveSourcesTable() {
 
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2">
-        <h3 className="text-h3 text-ink-primary">
-          Active Data Sources in this Session
-        </h3>
-        <span className="text-small text-ink-tertiary">
-          {items.length} {items.length === 1 ? "source" : "sources"}
-        </span>
-      </div>
-
       {items.length === 0 ? (
         <div className="rounded-lg border border-line-tertiary px-4 py-10 text-center text-small text-ink-tertiary">
           No data sources created yet.
