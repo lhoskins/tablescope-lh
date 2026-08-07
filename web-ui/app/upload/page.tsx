@@ -99,8 +99,8 @@ export default function UploadPage() {
     setActionError(null);
     try {
       await apiClient.patch(
-        `/api/upload/datasources/${encodeURIComponent(viewName)}/archive?archived=${archivedFlag}`,
-        {},
+        `/api/upload/datasources/${encodeURIComponent(viewName)}/archive`,
+        { archived: archivedFlag },
       );
       queryClient.invalidateQueries({ queryKey: ["datasources"] });
     } catch (err) {
@@ -167,8 +167,8 @@ export default function UploadPage() {
     setActionError(null);
     try {
       await apiClient.patch(
-        `/api/database-sources/${ds.id}/archive?archived=${archived}`,
-        {},
+        `/api/database-sources/${ds.id}/archive`,
+        { archived },
       );
       queryClient.invalidateQueries({ queryKey: ["datasources"] });
     } catch (err) {
@@ -180,8 +180,8 @@ export default function UploadPage() {
     setActionError(null);
     try {
       await apiClient.patch(
-        `/api/database-sources/${id}/archive?archived=${archived}`,
-        {},
+        `/api/database-sources/${id}/archive`,
+        { archived },
       );
       queryClient.invalidateQueries({ queryKey: ["datasources"] });
     } catch (err) {

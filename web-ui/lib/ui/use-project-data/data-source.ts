@@ -1,21 +1,5 @@
 "use client";
 
-
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
-import { apiClient } from "@/lib/api-client";
-import { useCurrentUser, useProjectSummaries } from "../use-shell-data";
-import type {
-  PresentationDescriptor,
-  ResponseEnvelope,
-} from "@/lib/api/ai-actions";
-import type {
-  CurrentUser,
-  ProjectSummary,
-  TenantSummary,
-} from "../types";
-
-
 // ── Data sources ─────────────────────────────────────────────────────
 
 export interface DataSource {
@@ -28,8 +12,11 @@ export interface DataSource {
   id?: number;
   fileMetaId?: number | null;
   ownerId?: number | null;
+  ownerName?: string | null;
   columnTypes?: unknown[];
   aiMetadata?: Record<string, unknown> | null;
   archived?: boolean;
   archivedAt?: string | null;
+  lifecycleKind: "file" | "database" | "saas";
+  lifecycleId: string;
 }

@@ -29,6 +29,7 @@ from app.models.connector_credential import ConnectorCredential
 from app.models.database_data_source import DatabaseDataSource
 from app.models.saas_object_data_source import SaasObjectDataSource
 from app.routes.database_sources_lifecycle import find_query_dependencies
+from app.schemas.archive_source import ArchiveSourceRequest
 from app.schemas.saas_source import (
     CreateCredentialRequest,
     CreateSaasSourceRequest,
@@ -364,7 +365,7 @@ async def sync_source(
 @router.patch("/{saas_source_id}/archive")
 async def archive_saas_source(
     saas_source_id: int,
-    archived: bool = True,
+    body: ArchiveSourceRequest,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict:
@@ -377,8 +378,8 @@ async def archive_saas_source(
         raise HTTPException(status_code=404, detail="Data source not found")
     if ds.created_by != context.user_id and context.role != "admin":
         raise HTTPException(status_code=403, detail="Not allowed to modify this source")
-    ds.archived = archived
-    ds.archived_at = datetime.now(UTC) if archived else None
+    ds.archived = body.archived
+    ds.archived_at = datetime.now(UTC) if body.archived else None
     await session.commit()
     await session.refresh(ds)
     return ds.to_dict()
@@ -472,8 +473,10 @@ async def delete_saas_source(
     except Exception as exc:
         logger.warning("Failed to clean up Teiid for %s: %s", ds.teiid_view_name, exc)
 
-    # Deleting the DatabaseDataSource row cascades to the SaaS object row and
-    # its columns because of the FK/ondelete configuration.
+    # Delete the SaaS object row explicitly, then its backing database source.
+    # The FK has ON DELETE CASCADE, but being explicit also works when the
+    # database's FK enforcement is disabled (e.g. SQLite test mode).
+    await session.delete(saas)
     await session.delete(ds)
     await session.commit()
     return {"status": "deleted", "id": saas_source_id}

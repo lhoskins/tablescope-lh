@@ -24,6 +24,7 @@ from app.models.file_source_meta import FileSourceMeta
 from app.models.project import Project
 from app.models.user import User
 from app.routes.database_sources_lifecycle import find_query_dependencies
+from app.schemas.archive_source import ArchiveSourceRequest
 from app.services.file_sources import (
     candidate_physical_names,
     compute_view_name,
@@ -192,7 +193,7 @@ async def _get_or_create_file_meta(
 @router.patch("/datasources/{view_name}/archive")
 async def archive_file_source(
     view_name: str,
-    archived: bool = True,
+    body: ArchiveSourceRequest,
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> dict:
@@ -204,8 +205,8 @@ async def archive_file_source(
         owner_id=context.user_id,
         view_name=view_name,
     )
-    meta.archived = archived
-    meta.archived_at = datetime.now(UTC) if archived else None
+    meta.archived = body.archived
+    meta.archived_at = datetime.now(UTC) if body.archived else None
     await session.commit()
     await session.refresh(meta)
     return meta.to_dict()
