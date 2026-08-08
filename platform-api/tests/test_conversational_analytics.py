@@ -124,6 +124,71 @@ async def test_create_conversation_with_initial_message(client, service_headers,
     assert body["turns"][0]["chart_config"]["type"] == "bar"
 
 
+async def test_generation_error_surfaces_matching_insight_card_over_prose(
+    client, db_session, service_headers, monkeypatch
+):
+    """A question the fresh SQL path can't answer, but that an existing
+    Insight Card already answered, must point back to that card — chart and
+    breadcrumb id included — instead of degrading to unattributed KG prose."""
+    from app.models.business_insight_result import BusinessInsightResult
+
+    tenant, _, project, headers = await _setup(client, service_headers, "conv-insight-match")
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    {
+                        "insightId": "mat-cost-001",
+                        "projectName": "Conv Project",
+                        "title": "Material cost on the rise",
+                        "summary": "Weekly material cost has increased steadily since January 2026.",
+                        "chart": {"type": "line", "data": {"rows": []}},
+                        "severity": "warning",
+                    }
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_generation_error(*args, **kwargs):
+        return {"status": "generation_error", "sql": "", "error": "no source matched"}
+
+    async def _fail_if_called(*args, **kwargs):
+        raise AssertionError("prose fallback must not run when a card matches")
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_generation_error,
+    )
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._forward_prose_answer",
+        _fail_if_called,
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Why is material cost increasing?",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert turn["matched_insight"]["insightId"] == "mat-cost-001"
+    assert turn["matched_insight"]["title"] == "Material cost on the rise"
+    assert turn["matched_insight"]["chart"] == {"type": "line", "data": {"rows": []}}
+    assert "Material cost on the rise" in turn["assistant_message"]
+    assert turn["sql"] is None
+    assert turn["chart_config"] is None
+
+
 async def test_list_and_get_conversations(client, service_headers, monkeypatch):
     _, _, project, headers = await _setup(client, service_headers, "conv-list")
 

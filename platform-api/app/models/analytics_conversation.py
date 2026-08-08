@@ -115,6 +115,12 @@ class AnalyticsConversationTurn(Base, TimestampMixin):
     result_cache: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     chart_config: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     explanation: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    # Set when the question couldn't be answered with a fresh SQL query but
+    # matched an existing precomputed Business/Project Insight card closely
+    # enough to point back to it instead of falling back to unattributed
+    # prose. Shape: {insightId, projectId, projectName, title, summary,
+    # chart, severity} — see app.services.insight_card_match.
+    matched_insight: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     assistant_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     parent_turn_id: Mapped[int | None] = mapped_column(
         ForeignKey("analytics_conversation_turns.id", ondelete="SET NULL"),
