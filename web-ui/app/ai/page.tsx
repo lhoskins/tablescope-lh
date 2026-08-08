@@ -22,7 +22,6 @@ import {
 import { AppShell } from "@/components/tablescope/app-shell";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
-import { cn } from "@/lib/cn";
 import { getUserMeta } from "@/lib/auth";
 import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
 import {
@@ -64,8 +63,10 @@ function AiAssistantPageInner() {
 
   const [activeId, setActiveId] = useState<number | null>(null);
   const [input, setInput] = useState("");
+  // An explicit pick narrows which project a new conversation is scoped to.
+  // It is never required — when unset, the backend resolves the most
+  // relevant authorized project from the question itself.
   const [projectId, setProjectId] = useState<number | null>(null);
-  const [needsProject, setNeedsProject] = useState(false);
   const [paramsRead, setParamsRead] = useState(false);
   const [autoStarted, setAutoStarted] = useState(false);
   // Set only from a deep link, so "View all project conversations" lands on a
@@ -110,7 +111,6 @@ function AiAssistantPageInner() {
   // in the picker (and lock the picker) while that thread is open.
   useEffect(() => {
     if (active?.project_id != null) setProjectId(active.project_id);
-    setNeedsProject(false);
   }, [active?.id, active?.project_id]);
 
   useEffect(() => {
@@ -162,7 +162,10 @@ function AiAssistantPageInner() {
       pid,
     }: {
       question: string;
-      pid: number;
+      // Omitted when the user hasn't narrowed to a project — the backend
+      // (resolve_business_insight_project) picks the best authorized project
+      // from the question itself, the same resolver Business Insights uses.
+      pid: number | undefined;
     }): Promise<Conversation | { conversation_id: number }> => {
       if (activeId == null) {
         const convo = await createConversation({
@@ -217,28 +220,22 @@ function AiAssistantPageInner() {
     (raw: string) => {
       const question = raw.trim();
       if (!question || busy) return;
-      if (activeId == null && projectId == null) {
-        // Prompt for the project only when creating a brand-new conversation.
-        setNeedsProject(true);
-        return;
-      }
-      setNeedsProject(false);
       setInput("");
-      const pid = active?.project_id ?? projectId ?? 0;
+      // A picked project narrows the request; otherwise leave it unset so
+      // the backend resolves the project from the question.
+      const pid = active?.project_id ?? projectId ?? undefined;
       sendMutation.mutate({ question, pid });
     },
-    [active, activeId, projectId, busy, sendMutation],
+    [active, projectId, busy, sendMutation],
   );
 
   // Auto-start a conversation seeded from the deep-link parameters once.
   useEffect(() => {
     if (!paramsRead || autoStarted || !input.trim()) return;
-    // Need either an existing conversation (submit) or a project to create one.
-    if (activeId == null && projectId == null) return;
     setAutoStarted(true);
     const question = input.trim();
     send(question);
-  }, [paramsRead, autoStarted, input, projectId, activeId, send]);
+  }, [paramsRead, autoStarted, input, send]);
 
   const retryLast = () => {
     if (busy || !sendMutation.variables) return;
@@ -404,16 +401,11 @@ function AiAssistantPageInner() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setProjectId(v === "" ? null : Number(v));
-                  if (v !== "") setNeedsProject(false);
                 }}
-                className={cn(
-                  "min-w-0 flex-1 rounded-md border bg-bg-primary px-2 py-1.5 text-[12px] text-ink-primary focus:outline-none disabled:opacity-60",
-                  needsProject
-                    ? "border-danger focus:border-danger"
-                    : "border-line-secondary focus:border-brand-500",
-                )}
+                title="Optional — narrows the question to one project. Leave unset and I'll find the right project from what you ask."
+                className="min-w-0 flex-1 rounded-md border border-line-secondary bg-bg-primary px-2 py-1.5 text-[12px] text-ink-primary focus:border-brand-500 focus:outline-none disabled:opacity-60"
               >
-                <option value="">Select a project…</option>
+                <option value="">Auto-detect from question</option>
                 {(projects ?? []).map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -421,11 +413,6 @@ function AiAssistantPageInner() {
                 ))}
               </select>
             </div>
-            {needsProject && (
-              <p className="mx-auto mb-2 max-w-3xl text-[12px] text-danger">
-                Please choose a project so I know which data to use.
-              </p>
-            )}
             <AskAnythingComposer
               value={input}
               onChange={setInput}
