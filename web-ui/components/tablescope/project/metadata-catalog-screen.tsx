@@ -326,7 +326,7 @@ function DocumentProfile({ document }: { document: CatalogDocument }) {
           <Badge tone="neutral">{document.type}</Badge>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4 px-4 py-4">
+      <div className="grid grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-3">
         <Stat label="Status" value={document.status} />
         <Stat label="Extractions" value={String(document.clauses)} />
         <Stat label="Relationships" value={String(document.relationships)} />

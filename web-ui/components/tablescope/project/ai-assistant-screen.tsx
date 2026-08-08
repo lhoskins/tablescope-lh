@@ -9,6 +9,7 @@ import {
 } from "@tabler/icons-react";
 import { ProjectShell } from "@/components/tablescope/project-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
+import { ContextPanel } from "@/components/tablescope/context-panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
@@ -195,12 +196,8 @@ function ChatBubble({ message }: { message: ChatMessage }) {
 function AiContextRail({ projectId }: { projectId: string }) {
   const { project, tenant } = useProjectShell(projectId);
   return (
-    <aside className="flex w-rail shrink-0 flex-col border-l border-line-tertiary bg-bg-tertiary">
-      <div className="flex items-center justify-between px-4 py-3.5">
-        <span className="text-h2 text-ink-primary">Conversation</span>
-        <StatusDot tone="online" />
-      </div>
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 pb-4">
+    <ContextPanel title="Conversation" aiOnline collapsible>
+      <div className="space-y-3">
         <Section title="Active Context">
           <dl className="space-y-1 text-[13px]">
             <RailRow label="Tenant" value={tenant.name} />
@@ -223,7 +220,7 @@ function AiContextRail({ projectId }: { projectId: string }) {
           </div>
         </Section>
       </div>
-    </aside>
+    </ContextPanel>
   );
 }
 

@@ -13,14 +13,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconSparkles,
-  IconPlus,
   IconTrash,
   IconRefresh,
   IconDots,
   IconPencil,
+  IconMenu2,
 } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
-import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { cn } from "@/lib/cn";
@@ -44,7 +43,8 @@ import { AssistantHeader } from "./assistant-header";
 import { FALLBACK_USER } from "./fallback-user";
 import { FALLBACK_TENANT } from "./fallback-tenant";
 import { CHART_FOLLOW_UPS } from "./chart-follow-ups";
-import { ConversationRow } from "./conversation-row";
+import { ConversationListPanel } from "./conversation-list-panel";
+import { MobileConversationDrawer } from "./mobile-conversation-drawer";
 import { UserBubble } from "./user-bubble";
 import { TurnBubbles } from "./turn-bubbles";
 import { groupConversationSummaries } from "@/lib/conversations/group-canonical";
@@ -72,6 +72,7 @@ function AiAssistantPageInner() {
   // list already narrowed to that project.
   const [projectFilter, setProjectFilter] = useState<number | null>(null);
   const [pendingTurnId, setPendingTurnId] = useState<number | null>(null);
+  const [mobileConversationsOpen, setMobileConversationsOpen] = useState(false);
   const { data: active } = useQuery({
     queryKey: ["conversational-analytics", "conversation", activeId],
     queryFn: () => getConversation(activeId as number),
@@ -263,47 +264,58 @@ function AiAssistantPageInner() {
       counts={{ projects: projects?.length }}
       topBarLeft={<AssistantHeader returnProject={returnProject} />}
     >
-      <div className="flex h-[calc(100vh-9rem)] gap-0 overflow-hidden rounded-lg border border-line-tertiary">
-        {/* Left sidebar — conversations */}
-        <aside className="flex w-[260px] shrink-0 flex-col border-r border-line-tertiary bg-bg-secondary">
-          <div className="border-b border-line-tertiary p-2.5">
-            <Button
-              variant="secondary"
-              className="w-full justify-start gap-2"
-              onClick={() => {
-                setActiveId(null);
-                setInput("");
-                setProjectId(null);
-                setProjectFilter(null);
-              }}
-            >
-              <IconPlus size={14} />
-              New chat
-            </Button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2">
-            {groupedConversations.length === 0 && (
-              <p className="px-2 py-4 text-small text-ink-tertiary">
-                No conversations yet.
-              </p>
-            )}
-            {groupedConversations.map((c) => (
-              <ConversationRow
-                key={c.canonical_key ?? c.id}
-                conversation={c}
-                active={activeId === c.id}
-                onSelect={() => setActiveId(c.id)}
-                onRename={(title) =>
-                  renameMutation.mutate({ id: c.id, title })
-                }
-                onDelete={() => setConfirmDeleteId(c.id)}
-              />
-            ))}
-          </div>
+      <div className="relative flex h-[calc(100vh-9rem)] flex-col gap-0 overflow-hidden rounded-lg border border-line-tertiary lg:flex-row">
+        {/* Left sidebar — conversations (desktop) */}
+        <aside className="hidden w-[260px] shrink-0 flex-col border-r border-line-tertiary bg-bg-secondary lg:flex">
+          <ConversationListPanel
+            conversations={groupedConversations}
+            activeId={activeId}
+            onNew={() => {
+              setActiveId(null);
+              setInput("");
+              setProjectId(null);
+              setProjectFilter(null);
+            }}
+            onSelect={setActiveId}
+            onRename={(id, title) => renameMutation.mutate({ id, title })}
+            onDelete={(id) => setConfirmDeleteId(id)}
+          />
         </aside>
+
+        <MobileConversationDrawer
+          open={mobileConversationsOpen}
+          onClose={() => setMobileConversationsOpen(false)}
+          conversations={groupedConversations}
+          activeId={activeId}
+          onNew={() => {
+            setActiveId(null);
+            setInput("");
+            setProjectId(null);
+            setProjectFilter(null);
+            setMobileConversationsOpen(false);
+          }}
+          onSelect={(id) => {
+            setActiveId(id);
+            setMobileConversationsOpen(false);
+          }}
+          onRename={(id, title) => renameMutation.mutate({ id, title })}
+          onDelete={(id) => setConfirmDeleteId(id)}
+        />
 
         {/* Right — chat area */}
         <div className="flex min-w-0 flex-1 flex-col bg-bg-primary">
+          {/* Mobile conversation toggle */}
+          <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-2 lg:hidden">
+            <span className="text-h3 text-ink-primary">AI Assistant</span>
+            <button
+              type="button"
+              onClick={() => setMobileConversationsOpen(true)}
+              aria-label="Open conversations"
+              className="flex h-10 w-10 items-center justify-center rounded-md text-ink-secondary hover:bg-bg-secondary"
+            >
+              <IconMenu2 size={20} />
+            </button>
+          </div>
           {/* Messages */}
           <div
             ref={scrollRef}

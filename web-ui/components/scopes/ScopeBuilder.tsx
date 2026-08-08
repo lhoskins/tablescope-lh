@@ -1094,9 +1094,9 @@ export function ScopeBuilder({
         )}
       </div>
 
-      <div className="mt-3 flex min-h-0 flex-1 gap-3">
+      <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
         {/* Left sidebar — query list */}
-        <aside className="flex w-[320px] shrink-0 flex-col overflow-hidden rounded-lg border border-line-tertiary bg-bg-secondary/30">
+        <aside className="flex max-h-[40vh] w-full shrink-0 flex-col overflow-hidden rounded-lg border border-line-tertiary bg-bg-secondary/30 lg:h-auto lg:max-h-none lg:w-[320px]">
           <div className="border-b border-line-tertiary p-3">
             <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-ink-tertiary">
               Drag Queries to Canvas

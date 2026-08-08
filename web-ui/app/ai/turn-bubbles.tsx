@@ -56,7 +56,7 @@ export function TurnBubbles({ turn }: { turn: ConversationTurn }) {
               turn.status === "error" ? "text-danger" : "text-ink-primary",
             )}
           >
-            <span className="whitespace-pre-wrap">
+            <span className="whitespace-pre-wrap break-words">
               {turn.assistant_message ??
                 (turn.status === "pending" ? "Working on it…" : "")}
             </span>

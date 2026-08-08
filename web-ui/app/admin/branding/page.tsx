@@ -73,7 +73,7 @@ export default function BrandingPage() {
             Company logo
           </h2>
 
-          <div className="mb-4 flex items-center gap-4">
+          <div className="mb-4 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
             <div className="flex h-16 w-40 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50">
               {logoQuery.isLoading ? (
                 <span className="text-xs text-slate-400">Loading…</span>
