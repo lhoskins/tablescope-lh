@@ -34,14 +34,19 @@ def _load_model() -> Any:
     _model_lock = True
     try:
         from faster_whisper import WhisperModel
+        from faster_whisper.utils import download_model
 
-        model_path = settings.voice_transcription_model_path or settings.voice_transcription_model
-        local_files_only = bool(settings.voice_transcription_model_path)
+        model_size = settings.voice_transcription_model
+        model_path = download_model(
+            model_size,
+            cache_dir=settings.voice_transcription_model_path or None,
+            local_files_only=bool(settings.voice_transcription_model_path),
+        )
         _model = WhisperModel(
             model_path,
             device=settings.voice_transcription_device,
             compute_type=settings.voice_transcription_compute_type,
-            local_files_only=local_files_only,
+            local_files_only=True,
         )
         logger.info("Loaded faster-whisper model from %s", model_path)
     except Exception as exc:  # pragma: no cover - model/dependency may be absent
