@@ -122,6 +122,18 @@ from app.services.vdb_warming import warm_vdb
 logger = logging.getLogger(__name__)
 
 
+def _reconcile_errors_are_permanent(result: dict) -> bool:
+    """Return True if every reconcile failure is a non-retryable VDB state."""
+    errors = result.get("errors", [])
+    if not errors:
+        return False
+    permanent_markers = ("VDB file not found", "Invalid null Session")
+    return all(
+        any(marker in e.get("error", "") for marker in permanent_markers)
+        for e in errors
+    )
+
+
 async def _reconcile_db_sources_on_startup() -> None:
     """Re-register DB-table sources in Teiid after a (re)start.
 
@@ -140,6 +152,14 @@ async def _reconcile_db_sources_on_startup() -> None:
                 result = await reconcile_database_sources(session)
             logger.info("Startup DB-source reconcile: %s", result)
             if result.get("failed", 0) == 0:
+                return
+            # A missing VDB file is not fixed by retrying; don't keep redeploying
+            # the healthy VDBs just to fail on the same broken source.
+            if _reconcile_errors_are_permanent(result):
+                logger.warning(
+                    "Startup DB-source reconcile has permanent failures; stopping retries: %s",
+                    result,
+                )
                 return
         except Exception as exc:  # pragma: no cover - best effort
             logger.warning(
