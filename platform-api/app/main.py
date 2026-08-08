@@ -22,8 +22,8 @@ from app.observability import mount_metrics, setup_sentry
 from app.routes import ai_asset_metadata as ai_asset_metadata_routes
 from app.routes import ai_governance as ai_governance_routes
 from app.routes import ai_proxy as ai_proxy_routes
-from app.routes import ai_speech as ai_speech_routes
 from app.routes import ai_reference_catalog as ai_reference_catalog_routes
+from app.routes import ai_speech as ai_speech_routes
 from app.routes import analytical_methods as analytical_methods_routes
 from app.routes import auth as auth_routes
 from app.routes import auth_sso as auth_sso_routes
