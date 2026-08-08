@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.config import get_settings
+from app.services.connection_pool import pool_manager
 from app.services.vdb_warming import warm_vdb
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,9 @@ class VDBManagementService:
 
         logger.info("User VDB created and deployed: vdb_id=%s", vdb_id)
 
+        # Any existing cached pool for this VDB is stale after a (re)deploy.
+        await pool_manager.evict_by_vdb_id(vdb_id)
+
         # Warm the asyncpg pool/connection for this VDB so the first user query
         # does not pay pool creation + pg_catalog materialization costs.
         await warm_vdb(
@@ -185,6 +189,8 @@ class VDBManagementService:
             )
 
         logger.info("Shared VDB created and deployed: vdb_id=%s", vdb_id)
+
+        await pool_manager.evict_by_vdb_id(vdb_id)
 
         await warm_vdb(
             vdb_id,
@@ -249,6 +255,8 @@ class VDBManagementService:
                 f"Teiid redeploy failed for {vdb_id}: {response.status_code} {response.text}"
             )
         logger.info("VDB redeployed: vdb_id=%s", vdb_id)
+
+        await pool_manager.evict_by_vdb_id(vdb_id)
 
         await warm_vdb(vdb_id, timeout=10.0)
 

@@ -92,6 +92,16 @@ class TeiidConnectionPoolManager:
                 logger.info("Evicting stale Teiid pool %s", key)
                 await pool.close()
 
+    async def evict_by_vdb_id(self, vdb_id: str) -> None:
+        """Close all cached pools for a VDB (e.g. after a VDB redeploy)."""
+        database = f"{vdb_id}.1"
+        async with self._lock:
+            for key in list(self._pools.keys()):
+                if key.database == database:
+                    pool = self._pools.pop(key)
+                    logger.info("Evicting stale Teiid pool %s", key)
+                    await pool.close()
+
     async def close_all(self) -> None:
         async with self._lock:
             for key, pool in list(self._pools.items()):

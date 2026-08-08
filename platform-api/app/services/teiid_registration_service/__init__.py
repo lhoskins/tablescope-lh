@@ -4,6 +4,7 @@ from __future__ import annotations
 import httpx
 
 from app.config import get_settings
+from app.services.connection_pool import pool_manager
 from app.services.database_introspection_service import (
     build_jdbc_url,
     get_db_type_config,
@@ -144,6 +145,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await pool_manager.evict_by_vdb_id(vdb_id)
         return body
 
     async def register_salesforce_source(
@@ -220,6 +222,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await pool_manager.evict_by_vdb_id(vdb_id)
         return body
 
     async def register_hubspot_source(
@@ -288,6 +291,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await pool_manager.evict_by_vdb_id(vdb_id)
         return body
 
     async def register_quickbooks_source(
@@ -365,6 +369,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await pool_manager.evict_by_vdb_id(vdb_id)
         return body
 
     async def register_database_source(
@@ -453,6 +458,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await pool_manager.evict_by_vdb_id(vdb_id)
         return body
 
 
