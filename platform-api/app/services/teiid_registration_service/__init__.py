@@ -9,6 +9,7 @@ from app.services.database_introspection_service import (
     get_db_type_config,
     normalize_db_password,
 )
+from app.services.vdb_warming import warm_vdb
 
 from .naming import _RESERVED as _RESERVED
 from .naming import generate_teiid_names as generate_teiid_names
@@ -62,6 +63,14 @@ class TeiidRegistrationService:
     async def aclose(self) -> None:
         if self._owns_client:
             await self._client.aclose()
+
+    async def _warm_vdb(self, vdb_id: str) -> None:
+        """Best-effort pool warm after a source is registered."""
+        await warm_vdb(
+            vdb_id,
+            vdb_host=self._settings.teiid_pg_host,
+            vdb_port=self._settings.teiid_pg_port,
+        )
 
     async def register_servicenow_source(
         self,
@@ -135,6 +144,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await self._warm_vdb(vdb_id)
         return body
 
     async def register_salesforce_source(
@@ -211,6 +221,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await self._warm_vdb(vdb_id)
         return body
 
     async def register_hubspot_source(
@@ -279,6 +290,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await self._warm_vdb(vdb_id)
         return body
 
     async def register_quickbooks_source(
@@ -356,6 +368,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await self._warm_vdb(vdb_id)
         return body
 
     async def register_database_source(
@@ -444,6 +457,7 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
+        await self._warm_vdb(vdb_id)
         return body
 
 
