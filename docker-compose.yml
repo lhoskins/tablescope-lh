@@ -10,11 +10,12 @@ services:
     image: tablescope-teiid:latest
     restart: unless-stopped
     ports:
-      - "8095:8080"
-      - "35442:35432"
-      - "9990:9990"
+      - "127.0.0.1:8095:8080"
+      - "127.0.0.1:35442:35432"
+      - "127.0.0.1:9990:9990"
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
+      - teiid_logs:/opt/wildfly/standalone/log
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9990/health"]
       interval: 30s
@@ -75,10 +76,19 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
       PROMETHEUS_ENABLED: "true"
-      ANALYTICAL_METHOD_ENGINE_MODE: ${ANALYTICAL_METHOD_ENGINE_MODE:-off}
+      ANALYTICAL_METHOD_ENGINE_MODE: ${ANALYTICAL_METHOD_ENGINE_MODE:-hybrid}
+      # Cards dissected per insight run. Each one executes several governed
+      # methods plus cross-reference correlations, so this trades drill-down
+      # coverage against run time. Lower it if a refresh times out.
+      INSIGHT_DIAGNOSTIC_CARD_BUDGET: ${INSIGHT_DIAGNOSTIC_CARD_BUDGET:-24}
+      # Ceiling on how long activity may keep extending one session before real
+      # re-authentication. Sessions slide while active; idle ones still expire
+      # at JWT_ACCESS_TOKEN_TTL_MINUTES.
+      JWT_SESSION_ABSOLUTE_TTL_MINUTES: ${JWT_SESSION_ABSOLUTE_TTL_MINUTES:-720}
       TABLESCOPE_AI_ENABLED: ${TABLESCOPE_AI_ENABLED:-false}
       TABLESCOPE_AI_API_URL: ${TABLESCOPE_AI_API_URL:-}
-      R_ANALYTICS_ENABLED: ${R_ANALYTICS_ENABLED:-false}
+      R_ANALYTICS_ENABLED: ${R_ANALYTICS_ENABLED:-true}
+      R_ANALYTICS_FAILURE_MODE: ${R_ANALYTICS_FAILURE_MODE:-python_fallback}
       R_ANALYTICS_URL: ${R_ANALYTICS_URL:-http://r-analytics:8000}
       R_ANALYTICS_TIMEOUT_SECONDS: ${R_ANALYTICS_TIMEOUT_SECONDS:-30}
       TABLESCOPE_AI_SIGNING_SECRET: ${TABLESCOPE_AI_SIGNING_SECRET:-}
@@ -93,6 +103,51 @@ services:
       BUSINESS_INSIGHT_SHARED_CACHE_ENABLED: ${BUSINESS_INSIGHT_SHARED_CACHE_ENABLED:-false}
       BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED: ${BUSINESS_INSIGHT_EVENT_REFRESH_ENABLED:-false}
       PROJECT_INSIGHT_EVENT_REBUILD_ENABLED: ${PROJECT_INSIGHT_EVENT_REBUILD_ENABLED:-false}
+      # --- LLM Framework (offline Ollama model deployment) ---
+      # Phase 1: read-only runtime/installation/routing inventory. No downloads,
+      # no activation. The worker inherits these via the shared env anchor.
+      LLM_FRAMEWORK_ENABLED: ${LLM_FRAMEWORK_ENABLED:-true}
+      LLM_FRAMEWORK_HF_CATALOG_ENABLED: ${LLM_FRAMEWORK_HF_CATALOG_ENABLED:-true}
+      LLM_MODEL_CATALOG_GGUF_ONLY: ${LLM_MODEL_CATALOG_GGUF_ONLY:-true}
+      LLM_DEPLOYMENT_ENABLED: ${LLM_DEPLOYMENT_ENABLED:-false}
+      LLM_TWO_PERSON_APPROVAL_REQUIRED: ${LLM_TWO_PERSON_APPROVAL_REQUIRED:-true}
+      LLM_AUTO_ROLLBACK_ENABLED: ${LLM_AUTO_ROLLBACK_ENABLED:-true}
+      LLM_MODEL_VAULT_MAX_BYTES: ${LLM_MODEL_VAULT_MAX_BYTES:-107374182400}
+      LLM_MODEL_VAULT_PATH: ${LLM_MODEL_VAULT_PATH:-/opt/tablescope/model-vault}
+      LLM_MANIFEST_SIGNING_KEY_PATH: ${LLM_MANIFEST_SIGNING_KEY_PATH:-/opt/tablescope/model-vault/signing.pem}
+      LLM_MANIFEST_SIGNING_KEY_FINGERPRINT: ${LLM_MANIFEST_SIGNING_KEY_FINGERPRINT:-}
+      LLM_HUGGINGFACE_TOKEN: ${LLM_HUGGINGFACE_TOKEN:-}
+      LLM_DYNAMIC_ROUTING_ENABLED: ${LLM_DYNAMIC_ROUTING_ENABLED:-false}
+      LLM_EMBEDDING_MIGRATION_ENABLED: ${LLM_EMBEDDING_MIGRATION_ENABLED:-false}
+      LLM_FP16_CONVERSION_ENABLED: ${LLM_FP16_CONVERSION_ENABLED:-false}
+      LLM_FP16_CONVERTER_COMMAND: ${LLM_FP16_CONVERTER_COMMAND:-}
+      LLM_EMBEDDING_RECALL_THRESHOLD: ${LLM_EMBEDDING_RECALL_THRESHOLD:-0.95}
+      LLM_DEPLOYMENT_AGENT_URL: ${LLM_DEPLOYMENT_AGENT_URL:-}
+      LLM_OLLAMA_URL: ${LLM_OLLAMA_URL:-http://ollama:11434}
+      LLM_MODEL_INSTALL_PATH: ${LLM_MODEL_INSTALL_PATH:-/mnt/tablescope-ai/ollama/models/imported}
+      LLM_OLLAMA_ROLLBACK_SLOTS: ${LLM_OLLAMA_ROLLBACK_SLOTS:-1}
+      # Business Context (Goal Setting) workspace
+      BUSINESS_CONTEXT_V2_ENABLED: ${BUSINESS_CONTEXT_V2_ENABLED:-true}
+      BUSINESS_CONTEXT_KPI_MATCHING_ENABLED: ${BUSINESS_CONTEXT_KPI_MATCHING_ENABLED:-true}
+      # --- Data Source Builder file acquisition (URL / UNC-SMB imports) ---
+      # See docs/data-source-builder-file-imports.md. Network import stays off
+      # until an admin registers approved SMB hosts, and the SMB allowlist is
+      # empty by default so it fails closed.
+      FILE_IMPORT_URL_ENABLED: ${FILE_IMPORT_URL_ENABLED:-true}
+      FILE_IMPORT_NETWORK_ENABLED: ${FILE_IMPORT_NETWORK_ENABLED:-false}
+      FILE_IMPORT_MAX_BYTES: ${FILE_IMPORT_MAX_BYTES:-104857600}
+      FILE_IMPORT_QUARANTINE_PATH: ${FILE_IMPORT_QUARANTINE_PATH:-/opt/tablescope/quarantine}
+      FILE_IMPORT_ALLOWED_URL_DOMAINS: ${FILE_IMPORT_ALLOWED_URL_DOMAINS:-}
+      FILE_IMPORT_ALLOWED_SMB_HOSTS: ${FILE_IMPORT_ALLOWED_SMB_HOSTS:-}
+      FILE_IMPORT_NETWORK_SOURCE_CIDRS: ${FILE_IMPORT_NETWORK_SOURCE_CIDRS:-}
+      FILE_IMPORT_ALLOW_HTTP: ${FILE_IMPORT_ALLOW_HTTP:-false}
+      FILE_IMPORT_JOB_TTL_SECONDS: ${FILE_IMPORT_JOB_TTL_SECONDS:-86400}
+      # Malware scanning infrastructure. Enable together with the clamav
+      # service profile; fail-open must stay false in production.
+      FILE_IMPORT_MALWARE_SCAN_ENABLED: ${FILE_IMPORT_MALWARE_SCAN_ENABLED:-false}
+      FILE_IMPORT_MALWARE_SCAN_HOST: ${FILE_IMPORT_MALWARE_SCAN_HOST:-clamav}
+      FILE_IMPORT_MALWARE_SCAN_PORT: ${FILE_IMPORT_MALWARE_SCAN_PORT:-3310}
+      FILE_IMPORT_MALWARE_SCAN_FAIL_OPEN: ${FILE_IMPORT_MALWARE_SCAN_FAIL_OPEN:-false}
     volumes:
       - teiid_data:/opt/wildfly/teiidfiles/customers
       # Read-write access to per-tenant root so the platform API can manage
@@ -115,6 +170,7 @@ services:
     networks:
       - default
       - tenant_acme_net
+      - tenant_vpn-smb-e2e_net
 
   platform-api-worker:
     build:
@@ -139,6 +195,9 @@ services:
     depends_on:
       - redis
       - platform-api
+    networks:
+      - default
+      - tenant_vpn-smb-e2e_net
 
   platform-api-migrate:
     build:
@@ -197,7 +256,6 @@ services:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
-      NEXT_PUBLIC_ECHARTS_RENDERER_MODE: ${NEXT_PUBLIC_ECHARTS_RENDERER_MODE:-off}
     depends_on:
       - platform-api
 
@@ -257,18 +315,51 @@ services:
       DEFAULT_POOL_SIZE: "20"
       AUTH_TYPE: scram-sha-256
     ports:
-      - "35443:5432"
+      - "127.0.0.1:35443:5432"
     depends_on:
       - teiid
+
+  # Malware scanner for file imports. Runs under the "clamav" profile so it
+  # only starts where FILE_IMPORT_MALWARE_SCAN_ENABLED is turned on. It has no
+  # published ports: only the API and worker reach it over the internal
+  # network. Signature updates are freshclam's job inside the image; in fully
+  # air-gapped installs mount an operator-managed signature volume over
+  # /var/lib/clamav instead.
+  clamav:
+    image: clamav/clamav:1.3
+    restart: unless-stopped
+    profiles: ["clamav"]
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+    volumes:
+      - clamav_signatures:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
+  teiid-logrotate:
+    build:
+      context: ./wildfly/logrotate
+    image: tablescope-teiid-logrotate:latest
+    restart: unless-stopped
+    volumes:
+      - teiid_logs:/logs
 
 volumes:
   postgres_data:
   redis_data:
   teiid_data:
+  teiid_logs:
   certbot_conf:
   certbot_www:
+  clamav_signatures:
 
 networks:
   default:
   tenant_acme_net:
+    external: true
+  tenant_vpn-smb-e2e_net:
     external: true

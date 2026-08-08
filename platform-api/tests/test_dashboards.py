@@ -30,7 +30,7 @@ class _FakeEmail:
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
@@ -77,7 +77,7 @@ async def _setup_tenant_and_project(client, service_headers):
 
 
 async def test_dashboard_crud_lifecycle(client, service_headers) -> None:
-    tenant, user, project, headers = await _setup_tenant_and_project(
+    _tenant, _user, project, headers = await _setup_tenant_and_project(
         client, service_headers
     )
     pid = project["id"]

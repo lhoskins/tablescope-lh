@@ -37,7 +37,7 @@ export default function SetupPhoneMfaPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
+    <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-6">
       <h1 className="mb-2 text-2xl font-semibold text-ink-primary">
         Set up SMS verification
       </h1>

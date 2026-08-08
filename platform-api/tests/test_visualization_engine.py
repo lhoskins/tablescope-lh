@@ -19,12 +19,13 @@ from app.services.visualization_engine import (
     ChartType,
     detect_value_format,
     normalize_chart_hint,
+    rank_visualizations,
     select_visualization,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TYPES_TS = _REPO_ROOT / "web-ui" / "components" / "dashboard" / "types.ts"
-_REGISTRY_TS = _REPO_ROOT / "web-ui" / "lib" / "visualizations" / "chartRegistry.ts"
+_REGISTRY_TS = _REPO_ROOT / "web-ui" / "lib" / "visualizations" / "chartRegistry" / "chart-family.ts"
 
 
 def _parse_ts_union(path: Path, type_name: str) -> set[str]:
@@ -47,7 +48,7 @@ def test_chart_vocabulary_matches_frontend_widget_type() -> None:
 
 
 def test_chart_vocabulary_matches_frontend_chart_family() -> None:
-    """ChartType must equal the ChartFamily union in chartRegistry.ts.
+    """ChartType must equal the ChartFamily union in chartRegistry/chart-family.ts.
 
     The frontend names one family ``composed`` while its renderer key
     (``WidgetType``) is ``combo``; the engine emits the renderer key, so we
@@ -158,8 +159,8 @@ def test_value_format_detection(name, values, expected) -> None:
 def test_legacy_hints_normalize_to_real_families() -> None:
     # Types the LLM prompt used to name that nothing could render.
     assert normalize_chart_hint("waterfall") == "bar"
-    assert normalize_chart_hint("gauge") == "radial_bar"
-    assert normalize_chart_hint("bullet") == "radial_bar"
+    assert normalize_chart_hint("gauge") == "gauge"
+    assert normalize_chart_hint("bullet") == "gauge"
     assert normalize_chart_hint("sparkline_table") == "line"
     assert normalize_chart_hint("narrative_insight") == "table"
     assert normalize_chart_hint("donut") == "pie"
@@ -211,3 +212,144 @@ def test_home_call_site_agrees_with_engine() -> None:
         ["segment", "revenue"], result["rows"], intent_hint="auto"
     )
     assert chart["type"] == engine.chart_type.value == "pie"
+
+
+# ── rank_visualizations: top-6 diverse suggestions ───────────────────────────────
+
+def test_rank_visualizations_returns_six_diverse_candidates() -> None:
+    rows = [
+        {"month": f"2026-{m:02d}", "sales": m * 10, "target": 50}
+        for m in range(1, 8)
+    ]
+    ranked = rank_visualizations(["month", "sales", "target"], rows, limit=6)
+    assert len(ranked) <= 6
+    families = [c.decision.chart_type.value for c in ranked]
+    assert len(families) == len(set(families)), "Top-6 must contain distinct families"
+    assert families[0] == "combo", "Two measures over time -> combo first"
+    assert all(c.score > 0 for c in ranked)
+    assert all(c.decision.reason for c in ranked)
+
+
+def test_rank_visualizations_includes_gauge_and_effect_scatter() -> None:
+    rows = [{"x": float(i), "y": float(2 * i + 1)} for i in range(20)]
+    ranked = rank_visualizations(["x", "y"], rows, limit=6)
+    families = [c.decision.chart_type.value for c in ranked]
+    assert "scatter" in families
+    assert "effect_scatter" in families
+
+
+def test_rank_visualizations_gauge_for_single_row() -> None:
+    ranked = rank_visualizations(["revenue"], [{"revenue": 1200}], limit=6)
+    assert ranked[0].decision.chart_type is ChartType.KPI
+    assert any(c.decision.chart_type is ChartType.GAUGE for c in ranked)
+
+
+def test_rank_visualizations_single_row_with_label_is_kpi() -> None:
+    ranked = rank_visualizations(
+        ["metric", "value"], [{"metric": "Total Revenue", "value": 1200}], limit=6
+    )
+    assert ranked[0].decision.chart_type is ChartType.KPI
+    assert any(c.decision.chart_type is ChartType.GAUGE for c in ranked)
+
+
+def test_rank_visualizations_time_series_excludes_gauge() -> None:
+    rows = [{"month": f"2026-{m:02d}", "sales": m * 10} for m in range(1, 8)]
+    ranked = rank_visualizations(["month", "sales"], rows, limit=6)
+    families = {c.decision.chart_type for c in ranked}
+    assert ChartType.GAUGE not in families
+    assert ranked[0].decision.chart_type in (ChartType.LINE, ChartType.COMBO, ChartType.AREA)
+
+
+def test_rank_visualizations_time_series_excludes_category_families() -> None:
+    """A 24-month, single-measure, 0-100 rate shape must not be misclassified as categories."""
+    rows = [
+        {"month": f"2026-{m:02d}", "on_time_rate": 0.75 + (m % 10) / 100}
+        for m in range(1, 25)
+    ]
+    ranked = rank_visualizations(["month", "on_time_rate"], rows, limit=6)
+    families = {c.decision.chart_type for c in ranked}
+    assert ChartType.GAUGE not in families
+    assert ChartType.RADIAL_BAR not in families
+    assert ChartType.FUNNEL not in families
+    assert ChartType.TREEMAP not in families
+    assert ChartType.RADAR not in families
+    assert ChartType.PIE not in families
+    # Allowed families are time-series families + table + a simple time bar.
+    allowed = {ChartType.LINE, ChartType.AREA, ChartType.COMBO, ChartType.BAR, ChartType.TABLE}
+    assert families.issubset(allowed)
+    assert ranked[0].decision.chart_type in (ChartType.LINE, ChartType.AREA)
+
+
+def test_explicit_category_hints_ignored_for_time_series() -> None:
+    rows = [{"month": f"2026-{m:02d}", "sales": m * 10} for m in range(1, 8)]
+    for bad_hint in ("radar", "radial_bar", "funnel", "treemap"):
+        ranked = rank_visualizations(
+            ["month", "sales"], rows, intent_hint=bad_hint, limit=6
+        )
+        assert all(c.decision.chart_type.value != bad_hint for c in ranked), bad_hint
+
+
+def test_explicit_gauge_hint_ignored_for_time_series() -> None:
+    rows = [{"month": f"2026-{m:02d}", "sales": m * 10} for m in range(1, 8)]
+    ranked = rank_visualizations(
+        ["month", "sales"], rows, intent_hint="gauge", limit=6
+    )
+    assert ranked[0].decision.chart_type is not ChartType.GAUGE
+    assert all(c.decision.chart_type is not ChartType.GAUGE for c in ranked)
+
+
+def test_identifier_columns_are_not_chart_dimensions() -> None:
+    """A key column must never become a chart axis — grouping by it aggregates nothing."""
+    from app.services.visualization_engine import (
+        business_dimensions,
+        derive_shape,
+        is_identifier_column,
+    )
+
+    rows = [
+        {"order_id": f"O{i}", "status": ["open", "closed", "held", "void"][i % 4], "amount": i % 37 + 1}
+        for i in range(300)
+    ]
+    shape = derive_shape(["order_id", "status", "amount"], rows)
+    assert is_identifier_column(shape, "order_id", rows) is True
+    assert is_identifier_column(shape, "status", rows) is False
+    assert business_dimensions(shape, rows) == ["status"]
+
+
+def test_near_unique_column_is_an_identifier_only_beside_a_real_category() -> None:
+    """Uniqueness alone is not a key: an aggregate has one row per category.
+
+    ``supplier`` unique across 40 aggregated rows is a legitimate bar chart;
+    a near-unique column sitting next to a low-cardinality dimension is a key.
+    """
+    from app.services.visualization_engine import derive_shape, is_identifier_column
+
+    aggregated = [{"supplier": f"S{i}", "defects": i} for i in range(40)]
+    shape = derive_shape(["supplier", "defects"], aggregated)
+    assert is_identifier_column(shape, "supplier", aggregated) is False
+
+    raw = [
+        {"record": f"free-text-{i}", "status": ["a", "b"][i % 2], "n": i}
+        for i in range(50)
+    ]
+    shape2 = derive_shape(["record", "status", "n"], raw)
+    assert is_identifier_column(shape2, "record", raw) is True
+
+
+def test_period_column_is_never_treated_as_an_identifier() -> None:
+    """Every date in a daily series is distinct, but a date axis is legitimate."""
+    from app.services.visualization_engine import derive_shape, is_identifier_column
+
+    rows = [{"day": f"2026-01-{d:02d}", "units": d} for d in range(1, 29)]
+    shape = derive_shape(["day", "units"], rows)
+    assert is_identifier_column(shape, "day", rows) is False
+
+
+def test_id_dimension_does_not_unlock_two_dimension_families() -> None:
+    """order_id + status must rank as a one-dimension shape, so no heatmap."""
+    rows = [
+        {"order_id": f"O{i}", "status": ["a", "b", "c", "d"][i % 4], "amount": i % 37 + 1}
+        for i in range(300)
+    ]
+    families = [c.decision.chart_type.value for c in rank_visualizations(["order_id", "status", "amount"], rows, limit=8)]
+    assert "heatmap" not in families

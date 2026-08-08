@@ -5,6 +5,7 @@ const push = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn() }),
+  usePathname: () => "/projects/7",
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -22,9 +23,18 @@ vi.mock("@/lib/ui/use-project-data", () => ({
 }));
 
 vi.mock("./app-shell", () => ({
-  AppShell: ({ topBarLeft, children }: { topBarLeft: React.ReactNode; children: React.ReactNode }) => (
+  AppShell: ({
+    topBarLeft,
+    subHeader,
+    children,
+  }: {
+    topBarLeft: React.ReactNode;
+    subHeader?: React.ReactNode;
+    children: React.ReactNode;
+  }) => (
     <div>
       <div>{topBarLeft}</div>
+      <div data-testid="sub-header">{subHeader}</div>
       {children}
     </div>
   ),
@@ -32,7 +42,7 @@ vi.mock("./app-shell", () => ({
 
 import { ProjectShell } from "./project-shell";
 
-describe("ProjectShell back navigation", () => {
+describe("ProjectShell", () => {
   beforeEach(() => push.mockClear());
 
   it("renders a back-to-projects button that routes to /projects", () => {
@@ -44,5 +54,19 @@ describe("ProjectShell back navigation", () => {
     const back = screen.getByRole("button", { name: "Back to projects" });
     fireEvent.click(back);
     expect(push).toHaveBeenCalledWith("/projects");
+  });
+
+  it("renders project resource tabs in the sub-header", () => {
+    render(
+      <ProjectShell projectId="7" activeNav="overview" breadcrumbLabel="Overview">
+        <div>body</div>
+      </ProjectShell>,
+    );
+    const subHeader = screen.getByTestId("sub-header");
+    expect(subHeader).toHaveTextContent("Overview");
+    expect(subHeader).toHaveTextContent("Data Sources");
+    expect(subHeader).toHaveTextContent("Tables");
+    expect(subHeader).toHaveTextContent("Documents");
+    expect(subHeader).toHaveTextContent("Dashboards");
   });
 });

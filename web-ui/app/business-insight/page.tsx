@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconHelpCircle } from "@tabler/icons-react";
 import { AppShell } from "@/components/tablescope/app-shell";
 import { StatusDot } from "@/components/tablescope/status-dot";
@@ -16,17 +16,17 @@ import {
   useProjectSummaries,
 } from "@/lib/ui/use-shell-data";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
-import { createHomePin } from "@/lib/api/home-pins";
+import { createHomePin, getHomePins } from "@/lib/api/home-pins";
 import type { InsightCard } from "@/lib/api/home-intelligence";
 import { useToasts, ToastViewport } from "@/components/ui/toast";
 import { TurnBubble } from "@/components/tablescope/conversation/conversation-turn";
 import {
-  createConversation,
+  submitCanonicalTurn,
   getConversation,
-  submitTurn,
   type Conversation,
   type ConversationTurn,
 } from "@/lib/api/conversational-analytics";
+import { buildAiAssistantHref } from "@/lib/navigation/ai-assistant";
 import { IconLoader2 } from "@tabler/icons-react";
 import {
   CreateActionFromInsightDialog,
@@ -65,6 +65,24 @@ export default function BusinessInsightPage() {
     if (!getUserMeta()) router.replace("/login");
   }, [router]);
 
+  const { data: homePins = [] } = useQuery({
+    queryKey: ["home-pins"],
+    queryFn: getHomePins,
+  });
+
+  const pinnedByFingerprint = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const pin of homePins) {
+      const payload = (pin.frozen_payload ?? pin.config ?? {}) as { evidenceFingerprint?: { resultFingerprint?: string }; insightId?: string };
+      const key =
+        payload.evidenceFingerprint?.resultFingerprint ??
+        payload.insightId ??
+        pin.pin_key;
+      if (key) map.set(String(key), pin.id);
+    }
+    return map;
+  }, [homePins]);
+
   const pinMutation = useMutation({
     mutationFn: createHomePin,
     onSuccess: () => {
@@ -76,16 +94,29 @@ export default function BusinessInsightPage() {
 
   const handlePinInsight = useCallback(
     (card: InsightCard) => {
+      const key =
+        card.evidenceFingerprint?.resultFingerprint ??
+        card.insightId ??
+        card.id;
+      if (!key) {
+        pushToast("Unable to pin this insight", "error");
+        return;
+      }
+      if (pinnedByFingerprint.has(key)) {
+        pushToast("This insight is already pinned to Home", "info");
+        return;
+      }
       pinMutation.mutate({
         pin_type: "insight_card",
-        pin_key: `insight:${card.projectId}:${card.insightType}:${slugify(card.title)}`,
+        pin_key: `insight:${card.projectId}:${card.insightType}:${key}`,
+        destination: "home",
         title: card.title,
         project_id: Number(card.projectId),
         frozen_payload: card as unknown as Record<string, unknown>,
         layout: { x: 0, y: 0, w: 6, h: 5 },
       });
     },
-    [pinMutation],
+    [pinMutation, pinnedByFingerprint, pushToast],
   );
 
   const [chatTurns, setChatTurns] = useState<ConversationTurn[]>([]);
@@ -93,7 +124,10 @@ export default function BusinessInsightPage() {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [createActionOpen, setCreateActionOpen] = useState(false);
+
   const [selectedInsight, setSelectedInsight] = useState<ActionableInsight | null>(null);
+
+
 
   const handleCreateAction = useCallback((card: InsightCard) => {
     const insight: ActionableInsight = {
@@ -116,15 +150,26 @@ export default function BusinessInsightPage() {
     setCreateActionOpen(true);
   }, []);
 
-  const pollConversation = useCallback(
-    async (id: number): Promise<Conversation> => {
+  const cardActions = useMemo(
+    () => ({
+      onPin: handlePinInsight,
+      onCreateAction: handleCreateAction,
+      pinnedByFingerprint,
+      actionsDisclosure: "collapsible" as const,
+    }),
+    [handlePinInsight, handleCreateAction, pinnedByFingerprint],
+  );
+
+  const pollTurn = useCallback(
+    async (conversationId: number, turnId: number): Promise<ConversationTurn> => {
       for (let i = 0; i < 60; i++) {
-        const data = await getConversation(id);
-        const last = data.turns[data.turns.length - 1];
-        if (!last || last.status !== "pending") return data;
+        const data = await getConversation(conversationId);
+        const turn = data.turns.find((t) => t.id === turnId);
+        if (turn && turn.status !== "pending") return turn;
         await new Promise((r) => setTimeout(r, 1000));
       }
-      return getConversation(id);
+      const data = await getConversation(conversationId);
+      return data.turns.find((t) => t.id === turnId) ?? data.turns[data.turns.length - 1];
     },
     [],
   );
@@ -133,19 +178,23 @@ export default function BusinessInsightPage() {
     async (message: string) => {
       setChatBusy(true);
       setChatError(null);
+      const requestId = crypto.randomUUID();
       try {
-        if (chatConversationId == null) {
-          const created = await createConversation({
-            initial_message: message,
-          });
-          const polled = await pollConversation(created.id);
-          setChatConversationId(created.id);
-          setChatTurns(polled.turns);
-        } else {
-          const res = await submitTurn(chatConversationId, { message });
-          setChatTurns((prev) => [...prev, res.turn]);
-          const polled = await pollConversation(res.conversation_id);
-          setChatTurns(polled.turns);
+        const res = await submitCanonicalTurn({
+          surface: "business_insights",
+          message,
+          client_request_id: requestId,
+        });
+        setChatConversationId(res.conversation_id);
+        setChatTurns((prev) => {
+          const exists = prev.some((t) => t.id === res.turn.id);
+          return exists ? prev : [...prev, res.turn];
+        });
+        if (res.turn.status === "pending") {
+          const polled = await pollTurn(res.conversation_id, res.turn.id);
+          setChatTurns((prev) =>
+            prev.map((t) => (t.id === polled.id ? polled : t))
+          );
         }
       } catch (err) {
         setChatError(err instanceof Error ? err.message : "Ask failed");
@@ -153,8 +202,13 @@ export default function BusinessInsightPage() {
         setChatBusy(false);
       }
     },
-    [chatConversationId, pollConversation],
+    [pollTurn],
   );
+
+  const openInAssistant = useCallback(() => {
+    if (chatConversationId == null) return;
+    router.push(buildAiAssistantHref({ conversationId: chatConversationId }));
+  }, [chatConversationId, router]);
 
   const user = identity?.user ?? FALLBACK_USER;
   const tenant = identity?.tenant ?? FALLBACK_TENANT;
@@ -165,6 +219,7 @@ export default function BusinessInsightPage() {
       activeNav="business-insight"
       tenant={tenant}
       user={user}
+      scrollable={true}
       counts={{ projects: allProjects?.length }}
       topBarLeft={
         <span className="text-[15px] text-ink-secondary">
@@ -185,11 +240,19 @@ export default function BusinessInsightPage() {
         </>
       }
     >
-      <div className="space-y-10 py-6">
+      <div className="space-y-6 pb-24">
         <div className="mx-auto w-full max-w-content space-y-6">
-          <HomeAiSuggestions onAsk={handleAsk} />
+          <HomeAiSuggestions onAsk={handleAsk} cardActions={cardActions} />
           {(chatTurns.length > 0 || chatBusy || chatError) && (
             <div className="space-y-4 rounded-xl border border-line-tertiary bg-bg-primary p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-h3 text-ink-primary">Ask Anything</h3>
+                {chatConversationId && (
+                  <Button variant="ghost" size="sm" onClick={openInAssistant}>
+                    Open in AI Assistant
+                  </Button>
+                )}
+              </div>
               {chatTurns.map((t, i) => (
                 <TurnBubble
                   key={t.id}
@@ -212,8 +275,10 @@ export default function BusinessInsightPage() {
         </div>
         <IntelligenceFeed
           onPin={handlePinInsight}
+          pinnedByFingerprint={pinnedByFingerprint}
           onCreateAction={handleCreateAction}
           availableProjects={allProjects ?? []}
+          actionsDisclosure="collapsible"
         />
       </div>
 

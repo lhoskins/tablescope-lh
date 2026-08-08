@@ -17,6 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.context import RequestContext
 from app.auth.rbac import Role, require_role
 from app.database import get_db
+from app.services.analytical_method_engine.catalog_admin import (
+    activate_method,
+    deactivate_method,
+)
 from app.services.analytical_method_engine.catalog_browser import (
     get_catalog_overview,
     get_method_detail,
@@ -72,3 +76,27 @@ async def analytical_method_detail(
     if detail is None:
         raise HTTPException(status_code=404, detail="Method not found")
     return detail
+
+
+@router.post("/{method_id}/activate")
+async def analytical_method_activate(
+    method_id: str,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> dict[str, Any]:
+    try:
+        return await activate_method(session, method_id, actor_user_id=context.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.post("/{method_id}/deactivate")
+async def analytical_method_deactivate(
+    method_id: str,
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_role(Role.ADMIN)),
+) -> dict[str, Any]:
+    try:
+        return await deactivate_method(session, method_id, actor_user_id=context.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None

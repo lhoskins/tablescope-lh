@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
+from arq.worker import Retry
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
@@ -13,6 +16,7 @@ from app.models import (
     Project,
     ProjectGoal,
 )
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
 
 pytestmark = pytest.mark.anyio
@@ -172,4 +176,153 @@ async def test_incremental_falls_back_to_full_without_active_version(db_session)
 
     graph = await manager.ensure_graph(project.id)
     assert graph.lifecycle_status == "active"
+    assert graph.active_version_id is not None
+
+
+# ── Phase 2: KG rebuild decouples from insight rebuild ─────────────────
+
+
+def _bind_sessions(monkeypatch, db_engine):
+    """Point worker-side SessionLocal factories at the test engine."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import app.routes.home_intelligence_suite as hir
+    import app.tasks.workflows as workflows
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    monkeypatch.setattr(workflows, "SessionLocal", factory)
+    monkeypatch.setattr(hir, "SessionLocal", factory)
+
+
+async def test_rebuild_knowledge_graph_enqueues_rebuilt_job(
+    db_engine, db_session, monkeypatch
+):
+    import app.tasks.workflows as workflows
+
+    _bind_sessions(monkeypatch, db_engine)
+
+    project = await _project(db_session, 1, 1, "kg-rebuilt")
+    db_session.add(
+        AIProjectGraphNode(
+            tenant_id=1,
+            project_id=project.id,
+            node_type="project",
+            source_type="project",
+            source_id=project.id,
+            name=project.name,
+            created_by=1,
+        )
+    )
+    await db_session.flush()
+
+    enqueued: list[tuple[int, int, int]] = []
+
+    async def fake_kg_rebuilt_enqueue(
+        *, tenant_id: int, project_id: int, build_id: int
+    ) -> str:
+        enqueued.append((tenant_id, project_id, build_id))
+        return "kg-rebuilt-job"
+
+    monkeypatch.setattr(
+        workflows, "enqueue_knowledge_graph_rebuilt", fake_kg_rebuilt_enqueue
+    )
+
+    manager = _manager(db_session, 1, 1)
+    build, _ = await manager.request_full_rebuild(project.id)
+    await db_session.commit()
+
+    result = await workflows.rebuild_knowledge_graph({}, build.id)
+    assert result["status"] == "ok"
+    assert enqueued == [(1, project.id, build.id)]
+
+
+async def test_knowledge_graph_rebuilt_marks_stale_and_enqueues_insights(
+    db_engine, db_session, monkeypatch
+):
+    import app.tasks.workflows as workflows
+    from app.config import get_settings
+
+    _bind_sessions(monkeypatch, db_engine)
+
+    project = await _project(db_session, 1, 1, "kg-rebuilt2")
+    snap = ProjectIntelligenceSnapshot(
+        tenant_id=1,
+        user_id=1,
+        project_id=project.id,
+        suite="project_insight",
+        payload={},
+        is_stale=False,
+    )
+    db_session.add(snap)
+    await db_session.commit()
+
+    monkeypatch.setattr(
+        get_settings(), "business_insight_event_refresh_enabled", True
+    )
+    monkeypatch.setattr(
+        get_settings(), "project_insight_event_rebuild_enabled", True
+    )
+
+    bi_enqueued: list[tuple[int, int]] = []
+
+    async def fake_bi_enqueue(*, tenant_id: int, project_id: int) -> str:
+        bi_enqueued.append((tenant_id, project_id))
+        return "bi-job"
+
+    monkeypatch.setattr(
+        workflows, "enqueue_refresh_business_insight_result", fake_bi_enqueue
+    )
+
+    pi_enqueued: list[tuple[int, int]] = []
+
+    async def fake_pi_enqueue(*, tenant_id: int, project_id: int) -> str:
+        pi_enqueued.append((tenant_id, project_id))
+        return "pi-job"
+
+    monkeypatch.setattr(workflows, "enqueue_rebuild_project_insight", fake_pi_enqueue)
+
+    result = await workflows.knowledge_graph_rebuilt({}, 1, project.id, build_id=999)
+    assert result["status"] == "ok"
+
+    await db_session.refresh(snap)
+    assert snap.is_stale is True
+    assert bi_enqueued == [(1, project.id)]
+    assert pi_enqueued == [(1, project.id)]
+
+
+async def test_source_checkpoint_retries_until_rows_visible(db_session):
+    """A build whose source checkpoint is newer than the visible staging rows must defer."""
+    tenant_id = 1
+    user_id = 1
+    project = await _project(db_session, tenant_id, user_id, "checkpoint")
+
+    manager = _manager(db_session, tenant_id, user_id)
+    build, _ = await manager.request_full_rebuild(project.id, trigger="test")
+    future = datetime.now(UTC) + timedelta(seconds=5)
+    build.source_checkpoint = {"timestamp": future.isoformat()}
+    await db_session.commit()
+
+    with pytest.raises(Retry):
+        await manager.run_full_rebuild(build.id)
+
+    # The write "lands" after the retry. Provide a row whose created_at is
+    # strictly >= the checkpoint so the next attempt proceeds.
+    db_session.add(
+        AIProjectGraphNode(
+            tenant_id=tenant_id,
+            project_id=project.id,
+            node_type="project",
+            source_type="project",
+            source_id=project.id,
+            name=project.name,
+            created_by=user_id,
+            created_at=future + timedelta(seconds=1),
+        )
+    )
+    await db_session.commit()
+
+    await manager.run_full_rebuild(build.id)
+    await db_session.commit()
+
+    graph = await manager.ensure_graph(project.id)
     assert graph.active_version_id is not None

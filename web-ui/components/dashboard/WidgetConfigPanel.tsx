@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
@@ -7,117 +8,15 @@ import type { WidgetConfig, WidgetType, ChartSubtype, WidgetFilter, ColumnInfo, 
 import type { QueryScope } from "@/types/query-scope";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { ChartOptionsPanel } from "./ChartOptionsPanel";
-import { getDefaultOptions, getChartDefinition } from "@/lib/visualizations/chartRegistry";
+import { getDefaultOptions, getChartDefinition } from "@/lib/visualizations/chartRegistry";import { CLICK_ACTIONS } from "./WidgetConfigPanel/click-actions";
+import { CHART_TYPES } from "./WidgetConfigPanel/chart-types";
+import { AGGREGATIONS } from "./WidgetConfigPanel/aggregations";
+import { GRANULARITIES } from "./WidgetConfigPanel/granularities";
+import { SORT_OPTIONS } from "./WidgetConfigPanel/sort-options";
+import { FILTER_OPERATORS } from "./WidgetConfigPanel/filter-operators";
+import { Props } from "./WidgetConfigPanel/props";
 
-const CLICK_ACTIONS: { value: WidgetClickAction; label: string }[] = [
-  { value: "none", label: "None" },
-  { value: "cross_filter", label: "Filter dashboard" },
-  { value: "drilldown", label: "Drill down to details" },
-  { value: "drilldown_and_filter", label: "Filter + show details" },
-];
 
-// ── Chart type / subtype definitions ────────────────────────────────
-type SubtypeDef = { value: ChartSubtype | ""; label: string };
-type ChartTypeDef = { type: WidgetType; label: string; icon: string; subtypes: SubtypeDef[] };
-
-const CHART_TYPES: ChartTypeDef[] = [
-  {
-    type: "bar", label: "Bar", icon: "\u{1F4CA}",
-    subtypes: [
-      { value: "column", label: "Column" },
-      { value: "stacked_bar", label: "Stacked" },
-      { value: "grouped_bar", label: "Grouped" },
-      { value: "horizontal_bar", label: "Horizontal" },
-      { value: "stacked_horizontal", label: "Stacked Horiz." },
-    ],
-  },
-  {
-    type: "line", label: "Line", icon: "\u{1F4C8}",
-    subtypes: [
-      { value: "", label: "Straight" },
-      { value: "smooth_line", label: "Smooth" },
-      { value: "step_line", label: "Step" },
-    ],
-  },
-  {
-    type: "area", label: "Area", icon: "\u{1F4C9}",
-    subtypes: [
-      { value: "", label: "Area" },
-      { value: "stacked_area", label: "Stacked" },
-    ],
-  },
-  {
-    type: "pie", label: "Pie", icon: "\u{1F369}",
-    subtypes: [
-      { value: "", label: "Pie" },
-      { value: "donut", label: "Donut" },
-    ],
-  },
-  {
-    type: "combo", label: "Combo", icon: "\u{1F4CA}\u{1F4C8}",
-    subtypes: [{ value: "bar_line", label: "Bar + Line" }],
-  },
-  {
-    type: "scatter", label: "Scatter", icon: "\u{1F4A0}",
-    subtypes: [
-      { value: "", label: "Scatter" },
-      { value: "bubble", label: "Bubble" },
-    ],
-  },
-  {
-    type: "radar", label: "Radar", icon: "\u{1F578}\u{FE0F}",
-    subtypes: [
-      { value: "", label: "Radar" },
-      { value: "scorecard", label: "Scorecard" },
-    ],
-  },
-  {
-    type: "radial_bar", label: "Radial", icon: "\u{1F3AF}",
-    subtypes: [
-      { value: "", label: "Radial Bar" },
-      { value: "multi_ring", label: "Multi-ring" },
-    ],
-  },
-  { type: "treemap", label: "Treemap", icon: "\u{1F9E9}", subtypes: [] },
-  { type: "funnel", label: "Funnel", icon: "\u{1FA9D}", subtypes: [] },
-  { type: "sankey", label: "Sankey", icon: "\u{1F500}", subtypes: [] },
-  { type: "kpi", label: "KPI", icon: "\u{1F522}", subtypes: [] },
-  { type: "table", label: "Table", icon: "\u{1F4CB}", subtypes: [] },
-];
-
-const AGGREGATIONS = ["sum", "avg", "count", "min", "max"] as const;
-const GRANULARITIES = ["day", "week", "month", "quarter", "year"] as const;
-const SORT_OPTIONS = [
-  { value: "x_asc", label: "X ascending" },
-  { value: "x_desc", label: "X descending" },
-  { value: "y_desc", label: "Y descending" },
-  { value: "y_asc", label: "Y ascending" },
-];
-const FILTER_OPERATORS = [
-  { value: "eq", label: "=" },
-  { value: "neq", label: "!=" },
-  { value: "gt", label: ">" },
-  { value: "lt", label: "<" },
-  { value: "gte", label: ">=" },
-  { value: "lte", label: "<=" },
-  { value: "in", label: "in" },
-  { value: "contains", label: "contains" },
-  { value: "begins_with", label: "begins with" },
-  { value: "ends_with", label: "ends with" },
-  { value: "like", label: "LIKE" },
-];
-
-type SavedQuery = { id: number; name: string; sql_text?: string | null };
-type Datasource = { viewName: string; fileName: string };
-
-type Props = {
-  projectId: number;
-  savedQueries: SavedQuery[];
-  datasources: Datasource[];
-  editingWidget?: WidgetConfig | null;
-  onSave: (widget: WidgetConfig) => void;
-  onCancel: () => void;
-};
 
 export function WidgetConfigPanel({
   projectId,

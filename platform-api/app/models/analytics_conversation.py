@@ -40,11 +40,21 @@ class AnalyticsConversation(Base, TimestampMixin):
         index=True,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="New conversation")
+    surface: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="ai_assistant", server_default="ai_assistant"
+    )
     active_datasource_id: Mapped[int | None] = mapped_column(
         ForeignKey("file_source_meta.id", ondelete="SET NULL"),
         nullable=True,
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    canonical_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    merged_into_conversation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("analytics_conversations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     last_successful_turn_id: Mapped[int | None] = mapped_column(
         ForeignKey("analytics_conversation_turns.id", ondelete="SET NULL"),
         nullable=True,
@@ -59,9 +69,25 @@ class AnalyticsConversation(Base, TimestampMixin):
     last_successful_turn: Mapped[AnalyticsConversationTurn | None] = relationship(
         foreign_keys=[last_successful_turn_id],
     )
+    merged_into: Mapped[AnalyticsConversation | None] = relationship(
+        "AnalyticsConversation",
+        remote_side="AnalyticsConversation.id",
+        foreign_keys=[merged_into_conversation_id],
+    )
 
     __table_args__ = (
         sa.Index("ix_analytics_conversations_tenant_user", "tenant_id", "user_id"),
+        sa.Index(
+            "ix_analytics_conversations_surface_project",
+            "tenant_id",
+            "user_id",
+            "surface",
+            "project_id",
+        ),
+        UniqueConstraint(
+            "tenant_id", "user_id", "canonical_key",
+            name="uq_analytics_conversations_canonical_key",
+        ),
     )
 
 

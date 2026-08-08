@@ -1,51 +1,51 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/tablescope/app-shell";
-import { DatabaseConnectorsWorkspace } from "@/components/tablescope/database-connectors/workspace";
-import { getUserMeta } from "@/lib/auth";
-import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
-import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
+import { Suspense, useEffect, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useProjectSummaries } from "@/lib/ui/use-shell-data";
 
-const FALLBACK_USER: CurrentUser = {
-  name: "",
-  email: "",
-  role: "",
-  tenantName: "",
-  initials: "··",
-};
-const FALLBACK_TENANT: TenantSummary = {
-  name: "Tablescope",
-  slug: "",
-  initials: "TS",
-};
-
-export default function DatabaseConnectorsPage() {
+function DatabaseConnectorsCompatibility() {
   const router = useRouter();
-  const { data: identity } = useCurrentUser();
-  const { data: projects } = useProjectSummaries();
+  const searchParams = useSearchParams();
+  const { data: projects, isLoading } = useProjectSummaries();
+
+  const requestedProjectId = searchParams.get("projectId");
+
+  const accessibleIds = useMemo(
+    () => new Set((projects ?? []).map((p) => p.id)),
+    [projects],
+  );
 
   useEffect(() => {
-    if (!getUserMeta()) router.replace("/login");
-  }, [router]);
+    if (isLoading) return;
 
-  const user = identity?.user ?? FALLBACK_USER;
-  const tenant = identity?.tenant ?? FALLBACK_TENANT;
+    if (requestedProjectId && accessibleIds.has(requestedProjectId)) {
+      router.replace(
+        `/projects/${requestedProjectId}/data-source-builder?sourceTab=database`,
+      );
+      return;
+    }
 
+    const list = projects ?? [];
+    if (list.length === 1) {
+      router.replace(`/projects/${list[0].id}/data-source-builder?sourceTab=database`);
+      return;
+    }
+
+    router.replace(
+      `/projects${
+        list.length === 0 ? "" : "?notice=Select a project to open the Data Source Builder."
+      }`,
+    );
+  }, [isLoading, projects, accessibleIds, requestedProjectId, router]);
+
+  return null;
+}
+
+export default function DatabaseConnectorsCompatibilityPage() {
   return (
-    <AppShell
-      mode="home"
-      activeNav="database-connectors"
-      tenant={tenant}
-      user={user}
-      counts={{ projects: projects?.length }}
-      centered
-      topBarLeft={
-        <span className="text-h2 text-ink-primary">Database Connectors</span>
-      }
-    >
-      <DatabaseConnectorsWorkspace />
-    </AppShell>
+    <Suspense fallback={null}>
+      <DatabaseConnectorsCompatibility />
+    </Suspense>
   );
 }

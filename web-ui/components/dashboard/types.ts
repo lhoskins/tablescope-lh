@@ -7,11 +7,24 @@ export type WidgetType =
   | "table"
   | "combo"
   | "scatter"
+  | "effect_scatter"
   | "radar"
   | "radial_bar"
   | "treemap"
+  | "sunburst"
+  | "tree"
   | "funnel"
-  | "sankey";
+  | "sankey"
+  | "graph"
+  | "parallel"
+  | "lines"
+  | "heatmap"
+  | "candlestick"
+  | "boxplot"
+  | "pictorial_bar"
+  | "theme_river"
+  | "gauge"
+  | "map";
 
 /**
  * Reference line drawn on a cartesian chart (line/area/bar/combo).
@@ -30,11 +43,17 @@ export type ReferenceLineConfig = {
  */
 export type VisualizationOptions = {
   // Shared
-  renderer?: "echarts" | "recharts";
   showLegend?: boolean;
   showLabels?: boolean;
   showGrid?: boolean;
   tinyMode?: boolean;
+  colorScheme?: "tablescope" | "ocean" | "forest" | "warm" | "monochrome";
+  legendPosition?: "top" | "bottom" | "left" | "right" | "none";
+  showTooltip?: boolean;
+  // Axis & formatting
+  xAxisLabelRotate?: number;
+  yAxisFormat?: "number" | "currency" | "percent" | "compact";
+  dataZoom?: boolean;
   // Line / Area
   lineStyle?: "solid" | "dashed";
   curveType?: "linear" | "monotone" | "step";
@@ -72,11 +91,29 @@ export type VisualizationOptions = {
   // Bar coloring / cumulative behaviours
   colorBySign?: boolean;
   cumulative?: boolean;
+  // Percent-change time series
+  signedPercentAxis?: boolean;
+  percentChangeTooltip?: boolean;
+  comparisonLabel?: string;
   // Radar / Radial bar
   domainMin?: number;
   domainMax?: number;
+  // Analytical layers
+  showRegressionLine?: boolean;
+  showControlLimits?: boolean;
+  showAnomalies?: boolean;
+  showChangePoint?: boolean;
+  confidenceBand?: boolean;
+  /**
+   * Explicit 0-based point positions to mark, supplied by whatever analysed the
+   * data. When present these win over `showAnomalies`, which re-derives outliers
+   * with a 2-sigma rule and would otherwise mark different points than the
+   * method reported.
+   */
+  markedIndices?: number[];
+  /** Explicit change-point position; wins over `showChangePoint`'s largest-jump guess. */
+  markedChangePointIndex?: number;
   // Treemap / Funnel
-  showTooltip?: boolean;
   // Sankey
   sourceColumn?: string;
   targetColumn?: string;
@@ -109,6 +146,7 @@ export type ChartSubtype =
   | "gauge"            // semi-circle gauge
   // Combo
   | "bar_line"         // bars + overlay line
+  | "dual_line"        // two line series, often dual-axis
   // Scatter variants
   | "bubble"
   | "best_fit"         // scatter + linear trend line
@@ -117,7 +155,9 @@ export type ChartSubtype =
   // Radial bar variants
   | "multi_ring"
   // Treemap variants
-  | "nested";
+  | "nested"
+  // Gauge variants
+  | "semi";
 
 export type WidgetDataSource = {
   kind: "query" | "datasource" | "custom_sql";

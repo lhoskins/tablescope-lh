@@ -33,7 +33,8 @@ from app.models.saas_object_data_source import SaasObjectDataSource
 from app.models.user_vdb import UserVDB
 from app.services import database_introspection_service as intro
 from app.services import saas_staging_service as staging
-from app.services.crypto import decrypt_secret
+from app.services.auto_query import ensure_datasource_query
+from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.teiid_registration_service import (
     TeiidRegistrationService,
     generate_teiid_names,
@@ -146,6 +147,43 @@ async def create_saas_source(
     id_column = connector.id_column(object_type)
 
     pg = _app_pg_connection()
+    is_servicenow = connector_type == "servicenow"
+    is_salesforce = connector_type == "salesforce"
+    is_hubspot = connector_type == "hubspot"
+    is_quickbooks = connector_type == "quickbooks"
+    is_live_translator = is_servicenow or is_salesforce or is_hubspot or is_quickbooks
+
+    saas_username = ""
+    saas_password = ""
+    saas_instance_url = ""
+    saas_realm_id = ""
+    saas_environment = "production"
+    if is_servicenow:
+        saas_username = config.get("username", "")
+        saas_password = config.get("password", "")
+        saas_instance_url = (config.get("instance_url") or "").strip().rstrip("/")
+        if saas_instance_url and not saas_instance_url.startswith("http"):
+            saas_instance_url = f"https://{saas_instance_url}"
+    elif is_salesforce:
+        saas_username = config.get("username", "")
+        saas_password = config.get("password", "") + config.get("security_token", "")
+        saas_instance_url = (
+            config.get("login_url") or "https://login.salesforce.com"
+        ).strip().rstrip("/")
+        if saas_instance_url and not saas_instance_url.startswith("http"):
+            saas_instance_url = f"https://{saas_instance_url}"
+    elif is_hubspot:
+        saas_password = config.get("access_token", "")
+        saas_instance_url = "https://api.hubapi.com"
+    elif is_quickbooks:
+        saas_password = config.get("access_token", "")
+        saas_realm_id = str(config.get("realm_id") or "").strip()
+        saas_environment = str(config.get("environment") or "production").lower()
+        saas_instance_url = (
+            "https://sandbox-quickbooks.api.intuit.com"
+            if saas_environment == "sandbox"
+            else "https://quickbooks.api.intuit.com"
+        )
 
     # 1. DatabaseDataSource (draft) to allocate an id for naming.
     ds = DatabaseDataSource(
@@ -155,14 +193,18 @@ async def create_saas_source(
         display_name=display_name,
         source_type="saas_object",
         connector_type=connector_type,
-        db_type="postgresql",
-        host=pg.host,
-        port=pg.port,
-        database_name=pg.database,
-        schema_name=staging.STAGING_SCHEMA,
+        db_type=connector_type if is_live_translator else "postgresql",
+        host=saas_instance_url if is_live_translator else pg.host,
+        port=0 if is_live_translator else pg.port,
+        database_name="" if is_live_translator else pg.database,
+        schema_name="" if is_live_translator else staging.STAGING_SCHEMA,
         table_name="",  # set after id is known
-        username=pg.user,
-        password_encrypted=None,
+        username=saas_username if is_live_translator else pg.user,
+        password_encrypted=(
+            encrypt_secret(saas_password)
+            if is_live_translator and saas_password
+            else (encrypt_secret(pg.password) if pg.password else None)
+        ),
         ssl_mode=None,
         teiid_model_name="",
         teiid_table_name="",
@@ -176,11 +218,14 @@ async def create_saas_source(
     session.add(ds)
     await session.flush()  # assign ds.id
 
-    staging_table = f"{connector_type}_ds_{ds.id}_{object_type.lower()}"
-    ds.table_name = staging_table
+    if is_live_translator:
+        ds_table_name = object_type
+    else:
+        ds_table_name = f"{connector_type}_ds_{ds.id}_{object_type.lower()}"
+    ds.table_name = ds_table_name
 
     names = generate_teiid_names(
-        data_source_id=ds.id, db_type="postgresql", table_name=staging_table
+        data_source_id=ds.id, db_type=ds.db_type, table_name=ds_table_name
     )
     view_name = generate_view_name(
         display_name=display_name, db_type=connector_type
@@ -190,7 +235,7 @@ async def create_saas_source(
     ds.teiid_jndi_name = names["jndi_name"]
     ds.teiid_view_name = view_name
 
-    # 2. Persist staging column metadata (drives reconcile + sync).
+    # 2. Persist column metadata (drives reconcile and query builder).
     for idx, col in enumerate(columns):
         session.add(
             DataSourceColumn(
@@ -212,57 +257,134 @@ async def create_saas_source(
         connector_type=connector_type,
         object_type=object_type,
         selected_properties=selected_fields,
-        staging_schema=staging.STAGING_SCHEMA,
-        staging_table=staging_table,
-        sync_mode="manual",
-        last_sync_status="pending",
+        staging_schema="" if is_live_translator else staging.STAGING_SCHEMA,
+        staging_table="" if is_live_translator else ds_table_name,
+        sync_mode="live" if is_live_translator else "manual",
+        last_sync_status="live" if is_live_translator else "pending",
     )
     session.add(saas)
 
-    # 4. Create the physical staging table in the app's Postgres.
-    await staging.create_staging_table(
-        session,
-        schema=staging.STAGING_SCHEMA,
-        table=staging_table,
-        columns=columns,
-        id_column=id_column,
-    )
+    # 4. Create the physical staging table in the app's Postgres (not needed
+    # for ServiceNow or Salesforce, which are queried live via Teiid translators).
+    if not is_live_translator:
+        await staging.create_staging_table(
+            session,
+            schema=staging.STAGING_SCHEMA,
+            table=ds_table_name,
+            columns=columns,
+            id_column=id_column,
+        )
 
-    # 5. Register the staging table in Teiid (same pipeline as DB tables).
+    # 5. Register the source in Teiid.
     teiid_columns = [
         {
             "name": col.name,
-            "name_in_source": intro.source_identifier("postgresql", col.name),
+            "name_in_source": intro.source_identifier(ds.db_type, col.name),
             "teiid_type": intro.map_to_teiid_type(col.pg_type),
         }
         for col in columns
     ]
     reg = TeiidRegistrationService()
     try:
-        await reg.register_database_source(
-            vdb_id=user_vdb.vdb_id,
-            org_id=tenant_id,
-            user_id=user_id,
-            db_type="postgresql",
-            host=pg.host,
-            port=pg.port,
-            database_name=pg.database,
-            schema_name=staging.STAGING_SCHEMA,
-            table_name=staging_table,
-            username=pg.user,
-            password=pg.password,
-            ssl_mode=None,
-            model_name=names["model_name"],
-            teiid_table_name=names["teiid_table_name"],
-            jndi_name=names["jndi_name"],
-            ds_name=names["ds_name"],
-            view_name=view_name,
-            columns=teiid_columns,
-        )
+        if is_servicenow:
+            await reg.register_servicenow_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                instance_url=saas_instance_url,
+                username=saas_username,
+                password=saas_password,
+                object_type=object_type,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                ds_name=names["ds_name"],
+                jndi_name=names["jndi_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
+        elif is_salesforce:
+            await reg.register_salesforce_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                instance_url=saas_instance_url,
+                username=saas_username,
+                password=saas_password,
+                object_type=ds_table_name,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                ds_name=names["ds_name"],
+                jndi_name=names["jndi_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
+        elif is_hubspot:
+            await reg.register_hubspot_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                access_token=saas_password,
+                object_type=ds_table_name,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                ds_name=names["ds_name"],
+                jndi_name=names["jndi_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
+        elif is_quickbooks:
+            await reg.register_quickbooks_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                access_token=saas_password,
+                realm_id=saas_realm_id,
+                environment=saas_environment,
+                object_type=ds_table_name,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                ds_name=names["ds_name"],
+                jndi_name=names["jndi_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
+        else:
+            await reg.register_database_source(
+                vdb_id=user_vdb.vdb_id,
+                org_id=tenant_id,
+                user_id=user_id,
+                db_type="postgresql",
+                host=pg.host,
+                port=pg.port,
+                database_name=pg.database,
+                schema_name=staging.STAGING_SCHEMA,
+                table_name=ds_table_name,
+                username=pg.user,
+                password=pg.password,
+                ssl_mode=None,
+                model_name=names["model_name"],
+                teiid_table_name=names["teiid_table_name"],
+                jndi_name=names["jndi_name"],
+                ds_name=names["ds_name"],
+                view_name=view_name,
+                columns=teiid_columns,
+            )
     finally:
         await reg.aclose()
 
     ds.status = "active"
+
+    # Auto-create a saved query so the new source shows up under project Tables.
+    if project_id is not None:
+        await ensure_datasource_query(
+            session,
+            project_id=project_id,
+            owner_id=user_id,
+            display_name=display_name,
+            view_name=view_name,
+            columns=[c.name for c in columns],
+        )
+
     await session.commit()
     await session.refresh(saas)
     return saas
@@ -278,6 +400,12 @@ async def run_sync(
     saas = await session.get(SaasObjectDataSource, saas_source_id)
     if saas is None:
         raise SaasSourceError("SaaS data source not found.")
+
+    if saas.connector_type in ("servicenow", "salesforce", "hubspot", "quickbooks"):
+        return {
+            "status": "live",
+            "message": f"{saas.connector_type.title()} data is queried in real time; sync is not required.",
+        }
 
     credential = await session.get(ConnectorCredential, saas.credential_id)
     if credential is None:

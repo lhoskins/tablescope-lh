@@ -32,7 +32,7 @@ class _FakeEmail:
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
@@ -225,7 +225,7 @@ async def test_update_layout(client, service_headers) -> None:
 
 
 async def test_pins_are_isolated_by_user(client, service_headers) -> None:
-    tenant, user1, project, headers1 = await _setup_tenant_user(
+    tenant, _user1, project, headers1 = await _setup_tenant_user(
         client, service_headers, "home-iso"
     )
 

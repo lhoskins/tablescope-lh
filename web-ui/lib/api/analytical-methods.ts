@@ -26,6 +26,9 @@ export interface MethodSummary {
   summary: string | null;
   supported_intents: string[];
   is_executable: boolean;
+  execution_engine: string;
+  executor_key: string | null;
+  implementation_available: boolean;
 }
 
 export interface MethodDetail extends MethodSummary {
@@ -79,4 +82,12 @@ export function listAnalyticalMethods(
 
 export function getAnalyticalMethod(methodId: string): Promise<MethodDetail> {
   return apiClient.get<MethodDetail>(`/api/ai/methods/${encodeURIComponent(methodId)}`);
+}
+
+export function activateAnalyticalMethod(methodId: string): Promise<MethodDetail> {
+  return apiClient.post<MethodDetail>(`/api/ai/methods/${encodeURIComponent(methodId)}/activate`, {});
+}
+
+export function deactivateAnalyticalMethod(methodId: string): Promise<MethodDetail> {
+  return apiClient.post<MethodDetail>(`/api/ai/methods/${encodeURIComponent(methodId)}/deactivate`, {});
 }

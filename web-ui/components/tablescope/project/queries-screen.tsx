@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -34,40 +35,13 @@ import {
   QueryResultView,
   QueryBuilderEdit,
   QueryBuilderCreate,
-} from "@/components/tablescope/project/detail-views";
+} from "@/components/tablescope/project/detail-views";import { Filter } from "./queries-screen/filter";
+import { FILTERS } from "./queries-screen/filters";
+import { avgRuntime } from "./queries-screen/avg-runtime";
+import { ArchiveCard } from "./queries-screen/archive-card";
+import { QueryPreviewPanel } from "./queries-screen/query-preview-panel";
 
 
-type Filter = "all" | "ai" | "manual" | "shared" | "private" | "archive";
-
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "ai", label: "AI-generated" },
-  { key: "manual", label: "Manual" },
-  { key: "shared", label: "Shared" },
-  { key: "private", label: "Private" },
-  { key: "archive", label: "Archive" },
-];
-
-function archivedDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString();
-}
-
-function runtimeLabel(ms: number | null): string {
-  if (ms == null) return "—";
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function avgRuntime(rows: SavedQuery[]): string {
-  const vals = rows.map((r) => r.avg_runtime_ms).filter((v): v is number => v != null);
-  if (vals.length === 0) return "—";
-  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-  return `${(mean / 1000).toFixed(1)}s`;
-}
-
-function tablesFor(q: SavedQuery): string {
-  return [q.left_datasource, q.right_datasource].filter(Boolean).join(", ") || "—";
-}
 
 export function QueriesScreen({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
@@ -477,165 +451,5 @@ export function QueriesScreen({ projectId }: { projectId: string }) {
       </div>
       )}
     </ProjectShell>
-  );
-}
-
-function ArchiveCard({
-  rows,
-  error,
-  busyId,
-  onRestore,
-  onDelete,
-}: {
-  rows: SavedQuery[];
-  error: string | null;
-  busyId: number | null;
-  onRestore: (id: number) => void;
-  onDelete: (q: SavedQuery) => void;
-}) {
-  return (
-    <Card>
-      <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-3">
-        <span className="flex items-center gap-1.5 text-h3 text-ink-primary">
-          <IconArchive size={16} className="text-ink-tertiary" />
-          Archive
-        </span>
-        <span className="text-small text-ink-tertiary">
-          {rows.length} archived {rows.length === 1 ? "table" : "tables"}
-        </span>
-      </div>
-      {error && (
-        <div className="border-b border-danger/30 bg-danger/5 px-4 py-2.5 text-small text-danger">
-          {error}
-        </div>
-      )}
-      <div className="overflow-x-auto">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="border-b border-line-tertiary text-left text-caption uppercase tracking-wide text-ink-tertiary">
-              <th className="px-4 py-2 font-medium">Name</th>
-              <th className="px-4 py-2 font-medium">Description</th>
-              <th className="px-4 py-2 font-medium">Archived</th>
-              <th className="px-4 py-2 font-medium">Owner</th>
-              <th className="px-4 py-2 text-right font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((q) => {
-              const busy = busyId === q.id;
-              return (
-                <tr
-                  key={q.id}
-                  className="border-b border-line-tertiary last:border-0"
-                >
-                  <td className="px-4 py-2.5 font-medium text-ink-primary">
-                    {q.name}
-                  </td>
-                  <td className="px-4 py-2.5 text-ink-secondary">
-                    {q.description || "—"}
-                  </td>
-                  <td className="px-4 py-2.5 text-ink-tertiary">
-                    {archivedDate(q.archived_at)}
-                  </td>
-                  <td className="px-4 py-2.5 text-ink-secondary">
-                    {q.owner_name ?? "—"}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => onRestore(q.id)}
-                      >
-                        <IconArrowBackUp size={14} />
-                        Restore
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => onDelete(q)}
-                      >
-                        <IconTrash size={14} />
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {rows.length === 0 && (
-          <div className="px-4 py-12 text-center text-small text-ink-tertiary">
-            No archived tables. Archive a table to see it here.
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function QueryPreviewPanel({
-  query,
-}: {
-  query: SavedQuery | null;
-}) {
-  if (!query) {
-    return (
-      <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…">
-        <div className="px-1 py-8 text-center text-small text-ink-tertiary">
-          Select a query to preview its SQL and metadata.
-        </div>
-      </ContextPanel>
-    );
-  }
-  return (
-    <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…">
-      <div className="space-y-1">
-        <div className="min-w-0 truncate text-caption uppercase tracking-wide text-ink-tertiary">
-          {query.name}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {query.ai_generated && <Badge tone="ai">AI generated</Badge>}
-          {query.is_shared && <Badge tone="success">Shared</Badge>}
-          <span className="text-small text-ink-tertiary">
-            {query.left_datasource ?? "—"} · {query.run_count} runs
-          </span>
-        </div>
-      </div>
-
-      {query.sql_text && (
-        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-[#1e1b2e] p-3 font-code text-[12px] leading-relaxed text-[#d6d3e8]">
-          {query.sql_text}
-        </pre>
-      )}
-
-      <ContextSection title="Query Metadata">
-        <dl className="space-y-1 text-[13px]">
-          <Row label="Source" value={query.left_datasource ?? "—"} />
-          <Row label="Tables" value={tablesFor(query)} />
-          <Row label="Avg runtime" value={runtimeLabel(query.avg_runtime_ms)} />
-          <Row
-            label="Last run"
-            value={query.last_run_at ? timeAgo(query.last_run_at) : "—"}
-          />
-          <Row
-            label="Created"
-            value={`${query.ai_generated ? "AI · " : ""}${timeAgo(query.created_at)}`}
-          />
-        </dl>
-      </ContextSection>
-    </ContextPanel>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between gap-2">
-      <dt className="text-ink-tertiary">{label}</dt>
-      <dd className="truncate text-ink-primary">{value}</dd>
-    </div>
   );
 }

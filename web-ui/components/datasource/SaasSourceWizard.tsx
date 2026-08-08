@@ -1,39 +1,16 @@
 "use client";
 
+
 import { useEffect, useState } from "react";
-import { apiClient } from "@/lib/api-client";
+import { apiClient } from "@/lib/api-client";import { ConnectorType } from "./SaasSourceWizard/connector-type";
+import { CONNECTORS } from "./SaasSourceWizard/connectors";
+import { ObjectInfo } from "./SaasSourceWizard/object-info";
+import { FieldInfo } from "./SaasSourceWizard/field-info";
+import { PreviewResult } from "./SaasSourceWizard/preview-result";
+import { Step } from "./SaasSourceWizard/step";
+import { SavedCredential } from "./SaasSourceWizard/saved-credential";
 
-// Connect a SaaS app (HubSpot, Salesforce) object as an independent Tablescope
-// data source.  Mirrors the database-table flow:
-//   connector + credentials -> object -> fields -> preview -> save.
-// The selected object is synced into a local Postgres staging table which is
-// registered in Teiid exactly like a database table, so it lists, queries and
-// joins like any other data source.
 
-type ConnectorType = "hubspot" | "salesforce" | "quickbooks";
-
-const CONNECTORS: { value: ConnectorType; label: string }[] = [
-  { value: "hubspot", label: "HubSpot" },
-  { value: "salesforce", label: "Salesforce" },
-  { value: "quickbooks", label: "QuickBooks" },
-];
-
-type ObjectInfo = { name: string; label: string };
-type FieldInfo = {
-  name: string;
-  label: string;
-  saas_type: string;
-  pg_type: string;
-};
-type PreviewResult = { columns: string[]; rows: Record<string, unknown>[] };
-
-type Step = "connect" | "object" | "fields" | "preview";
-
-type SavedCredential = {
-  id: number;
-  connector_type: string;
-  display_name: string;
-};
 
 export function SaasSourceWizard({
   projectId,
@@ -68,6 +45,9 @@ export function SaasSourceWizard({
   // QuickBooks
   const [qb, setQb] = useState({
     access_token: "",
+    client_id: "",
+    client_secret: "",
+    refresh_token: "",
     realm_id: "",
     environment: "production",
   });
@@ -95,7 +75,13 @@ export function SaasSourceWizard({
   function credValid(): boolean {
     if (connector === "hubspot") return !!hsToken.trim();
     if (connector === "quickbooks")
-      return !!qb.access_token.trim() && !!qb.realm_id.trim();
+      return (
+        !!qb.access_token.trim() &&
+        !!qb.realm_id.trim() &&
+        !!qb.client_id.trim() &&
+        !!qb.client_secret.trim() &&
+        !!qb.refresh_token.trim()
+      );
     return (
       !!sf.instance_url &&
       !!sf.client_id &&
@@ -476,6 +462,37 @@ export function SaasSourceWizard({
                     Generate from the Intuit Developer portal (OAuth2 Playground) with the
                     Accounting scope. Tokens expire ~1h.
                   </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={label}>Client ID</label>
+                    <input
+                      className={input}
+                      value={qb.client_id}
+                      onChange={(e) => setQb((s) => ({ ...s, client_id: e.target.value }))}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <label className={label}>Client Secret</label>
+                    <input
+                      className={input}
+                      type="password"
+                      value={qb.client_secret}
+                      onChange={(e) => setQb((s) => ({ ...s, client_secret: e.target.value }))}
+                      autoComplete="new-password"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>Refresh Token</label>
+                  <input
+                    className={input}
+                    type="password"
+                    value={qb.refresh_token}
+                    onChange={(e) => setQb((s) => ({ ...s, refresh_token: e.target.value }))}
+                    autoComplete="new-password"
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>

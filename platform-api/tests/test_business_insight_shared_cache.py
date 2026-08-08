@@ -43,7 +43,7 @@ async def _project(session: AsyncSession, tenant_id: int, owner_id: int, slug: s
 
 def _bind_sessions(monkeypatch, db_engine):
     """Point both worker-side SessionLocal factories at the test engine."""
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -178,7 +178,7 @@ async def test_cache_rejects_rows_from_older_analysis_pipeline(db_session):
 async def test_analyze_serves_from_cache_without_running_analysis(
     db_engine, db_session, monkeypatch
 ):
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     _bind_sessions(monkeypatch, db_engine)
@@ -221,7 +221,7 @@ async def test_analyze_serves_from_cache_without_running_analysis(
 async def test_analyze_runs_and_stores_on_cache_miss(
     db_engine, db_session, monkeypatch
 ):
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     _bind_sessions(monkeypatch, db_engine)
@@ -263,7 +263,7 @@ async def test_analyze_runs_and_stores_on_cache_miss(
 async def test_analyze_ignores_cache_when_flag_disabled(
     db_engine, db_session, monkeypatch
 ):
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     _bind_sessions(monkeypatch, db_engine)
@@ -343,7 +343,7 @@ async def test_refresh_activity_gate_skips_idle_tenant(
 
 
 async def test_refresh_runs_as_owner_and_stores(db_engine, db_session, monkeypatch):
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     _bind_sessions(monkeypatch, db_engine)
@@ -392,12 +392,28 @@ async def test_kg_build_success_enqueues_refresh(db_engine, db_session, monkeypa
 
     enqueued: list[tuple[int, int]] = []
 
-    async def fake_enqueue(*, tenant_id: int, project_id: int) -> str:
+    async def fake_bi_enqueue(*, tenant_id: int, project_id: int) -> str:
         enqueued.append((tenant_id, project_id))
         return "bi-job"
 
     monkeypatch.setattr(
-        workflows, "enqueue_refresh_business_insight_result", fake_enqueue
+        workflows, "enqueue_refresh_business_insight_result", fake_bi_enqueue
+    )
+
+    kg_rebuilt_enqueued: list[tuple[int, int, int]] = []
+
+    async def fake_kg_rebuilt_enqueue(
+        *, tenant_id: int, project_id: int, build_id: int
+    ) -> str:
+        kg_rebuilt_enqueued.append((tenant_id, project_id, build_id))
+        # Run the downstream job synchronously so this test still covers the
+        # BI enqueue path without needing a live Redis worker.
+        return await workflows.knowledge_graph_rebuilt(
+            {}, tenant_id, project_id, build_id
+        )
+
+    monkeypatch.setattr(
+        workflows, "enqueue_knowledge_graph_rebuilt", fake_kg_rebuilt_enqueue
     )
 
     project = await _project(db_session, 1, 1, "kg-chain")
@@ -421,4 +437,5 @@ async def test_kg_build_success_enqueues_refresh(db_engine, db_session, monkeypa
 
     result = await workflows.rebuild_knowledge_graph({}, build.id)
     assert result["status"] == "ok"
+    assert kg_rebuilt_enqueued == [(1, project.id, build.id)]
     assert enqueued == [(1, project.id)]

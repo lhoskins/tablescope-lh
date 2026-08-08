@@ -29,9 +29,20 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import SessionLocal
+from app.models.business_insight_result import BusinessInsightResult
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.models.shared_vdb import SharedVDB
 from app.models.user_vdb import UserVDB
+from app.services.aws_vpn_provisioning_service import AwsVpnProvisioningService
 from app.services.vdb_management import VDBManagementService
+from app.tasks.kpi_source_matching import match_kpi_data_source
+from app.tasks.llm_framework import (
+    convert_fp16_to_gguf,
+    deploy_llm_artifact,
+    reindex_embedding_model,
+    stage_llm_artifact,
+)
+from app.tasks.quickbooks_token_refresh import refresh_quickbooks_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +239,28 @@ async def enqueue_run_knowledge_graph_health_check(project_id: int) -> str:
         await pool.close()
 
 
+async def enqueue_knowledge_graph_rebuilt(
+    *, tenant_id: int, project_id: int, build_id: int
+) -> str:
+    """Enqueue downstream insight refresh after a successful KG build.
+
+    Splitting this work into its own job isolates the graph build's own
+    retry/backoff bookkeeping from Project/Business Insight enqueueing.
+    """
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "knowledge_graph_rebuilt",
+            tenant_id,
+            project_id,
+            build_id,
+            _job_id=f"kg-rebuilt:{tenant_id}:{project_id}:{build_id}",
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
 async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[str, Any]:
     """Execute a knowledge graph build (full or incremental) in the worker."""
     from app.models import KnowledgeGraphBuild
@@ -250,52 +283,27 @@ async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[st
                 await lifecycle.run_full_rebuild(build_id)
             await session.commit()
 
-            # Downstream consumers: a successful (activated) build means the
-            # project's data view changed, so warm the shared Business Insight
-            # cache. Best-effort — the graph build result stands regardless.
-            try:
-                await session.refresh(build)
-                if (
-                    build.status == "succeeded"
-                    and get_settings().business_insight_event_refresh_enabled
-                ):
-                    await enqueue_refresh_business_insight_result(
-                        tenant_id=build.tenant_id, project_id=build.project_id
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to enqueue business insight refresh after build %s: %s",
-                    build_id,
-                    exc,
-                )
-
-            # Sibling consumer: Project Insight snapshots become stale whenever
-            # the KG view changes, so mark them and queue a debounced rebuild.
+            # Downstream insight consumers now run in their own arq job so a
+            # slow/failing Project/Business Insight refresh cannot stall the
+            # KG build's own retry/backoff bookkeeping.
             try:
                 await session.refresh(build)
                 if build.status == "succeeded":
-                    from app.services.project_insight_service import (
-                        mark_project_insight_stale,
-                    )
-
-                    await mark_project_insight_stale(
-                        session,
+                    await enqueue_knowledge_graph_rebuilt(
                         tenant_id=build.tenant_id,
                         project_id=build.project_id,
+                        build_id=build_id,
                     )
-                    await session.commit()
-                    if get_settings().project_insight_event_rebuild_enabled:
-                        await enqueue_rebuild_project_insight(
-                            tenant_id=build.tenant_id,
-                            project_id=build.project_id,
-                        )
             except Exception as exc:
                 logger.warning(
-                    "Failed to enqueue project insight rebuild after build %s: %s",
+                    "Failed to enqueue knowledge_graph_rebuilt after build %s: %s",
                     build_id,
                     exc,
                 )
+
             return {"status": "ok", "build_id": build_id}
+        except Retry:
+            raise
         except Exception as exc:
             logger.exception("rebuild_knowledge_graph failed for build %s", build_id)
             await session.rollback()
@@ -304,6 +312,63 @@ async def rebuild_knowledge_graph(ctx: dict[str, Any], build_id: int) -> dict[st
 
 # Deterministic job id may be reused; don't keep results so re-enqueue works.
 rebuild_knowledge_graph.keep_result = 0  # type: ignore[attr-defined]
+
+
+async def knowledge_graph_rebuilt(
+    ctx: dict[str, Any], tenant_id: int, project_id: int, build_id: int
+) -> dict[str, Any]:
+    """React to a successful KG build by refreshing downstream insight consumers.
+
+    This job is intentionally separate from :func:`rebuild_knowledge_graph` so
+    each consumer has its own retry/backoff policy and failures in one cannot
+    fail the KG build itself.
+    """
+    _ = ctx
+
+    async with SessionLocal() as session:
+        from app.services.project_insight_service import mark_project_insight_stale
+
+        try:
+            await mark_project_insight_stale(
+                session, tenant_id=tenant_id, project_id=project_id
+            )
+            await session.commit()
+        except Exception as exc:
+            logger.exception(
+                "knowledge_graph_rebuilt failed to mark project insight stale for build %s",
+                build_id,
+            )
+            await session.rollback()
+            return {"status": "error", "error": str(exc)[:500]}
+
+    if get_settings().business_insight_event_refresh_enabled:
+        try:
+            await enqueue_refresh_business_insight_result(
+                tenant_id=tenant_id, project_id=project_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to enqueue business insight refresh after build %s: %s",
+                build_id,
+                exc,
+            )
+
+    if get_settings().project_insight_event_rebuild_enabled:
+        try:
+            await enqueue_rebuild_project_insight(
+                tenant_id=tenant_id, project_id=project_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to enqueue project insight rebuild after build %s: %s",
+                build_id,
+                exc,
+            )
+
+    return {"status": "ok", "tenant_id": tenant_id, "project_id": project_id}
+
+
+knowledge_graph_rebuilt.keep_result = 0  # type: ignore[attr-defined]
 
 
 async def run_knowledge_graph_health_check(
@@ -443,6 +508,7 @@ async def sync_saas_object(
         except Exception:
             data_source = None
         if data_source is not None and data_source.project_id is not None:
+            source_checkpoint = datetime.now(UTC)
             await request_event_driven_rebuild(
                 session,
                 project_id=data_source.project_id,
@@ -455,6 +521,7 @@ async def sync_saas_object(
                     }
                 ],
                 trigger="saas_sync",
+                source_checkpoint=source_checkpoint,
             )
     return {"status": "ok", "saas_source_id": saas_source_id, **result}
 
@@ -558,10 +625,12 @@ async def reprocess_project(
     changed = [aid for aid, s in statuses.items() if s == "processed"]
     build_id: int | None = None
     if changed or force:
+        source_checkpoint = datetime.now(UTC)
         async with SessionLocal() as session:
             build = await request_event_driven_rebuild(
                 session,
                 project_id=project_id,
+                source_checkpoint=source_checkpoint,
                 change_set=[
                     {
                         "entity_type": "document",
@@ -634,7 +703,7 @@ async def refresh_business_insight_result(
     """
     from app.models.intelligence_snapshot import IntelligenceSnapshot
     from app.models.project import Project
-    from app.routes import home_intelligence as hir
+    from app.routes import home_intelligence_suite as hir
     from app.services import business_insight_cache as bi_cache
     from app.services import home_intel_queue as q
     from app.services import home_intelligence as hi
@@ -798,7 +867,7 @@ async def rebuild_project_insight(
     """
     from app.models.project import Project
     from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
-    from app.routes import home_intelligence as hir
+    from app.routes import home_intelligence_suite as hir
     from app.services import home_intel_queue as q
     from app.services import project_insight_service as pi
     from app.services.ai_intelligence_client import AIUnavailableError
@@ -998,7 +1067,7 @@ async def _finalize_run_if_complete(run_id: str) -> None:
     written even if the client's SSE connection dropped — coverage is bounded
     by drain time, not by the stream staying open.
     """
-    from app.routes import home_intelligence as hir
+    from app.routes import home_intelligence_snapshot as hi_snapshot
     from app.services import home_intel_queue as q
     from app.services import home_intelligence as hi
 
@@ -1036,7 +1105,7 @@ async def _finalize_run_if_complete(run_id: str) -> None:
         "generatedAt": datetime.now(UTC).isoformat(),
     }
     try:
-        await hir._save_snapshot(
+        await hi_snapshot._save_snapshot(
             context,
             meta["granularity"],
             payload,
@@ -1068,7 +1137,7 @@ async def analyze_project_intelligence(
     once so a busy tenant cannot starve others.
     """
     from app.models.project import Project
-    from app.routes import home_intelligence as hir
+    from app.routes import home_intelligence_suite as hir
     from app.services import home_intel_queue as q
     from app.services import home_intelligence as hi
     from app.services.ai_intelligence_client import AIUnavailableError
@@ -1250,6 +1319,36 @@ async def analyze_project_intelligence(
         await q.release_tenant_slot(tenant_id)
 
 
+async def enqueue_reindex_embedding_model(migration_id: int, requested_by_user_id: int) -> str:
+    """Enqueue an embedding re-index migration."""
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    pool = await create_pool(redis_settings)
+    try:
+        job = await pool.enqueue_job(
+            "reindex_embedding_model",
+            migration_id=migration_id,
+            requested_by_user_id=requested_by_user_id,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def enqueue_convert_fp16_to_gguf(conversion_id: int, requested_by_user_id: int) -> str:
+    """Enqueue an FP16 -> GGUF conversion."""
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    pool = await create_pool(redis_settings)
+    try:
+        job = await pool.enqueue_job(
+            "convert_fp16_to_gguf",
+            conversion_id=conversion_id,
+            requested_by_user_id=requested_by_user_id,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
 async def _configure_worker_logging(ctx: dict[str, Any]) -> None:
     """Configure structured logging for the arq worker."""
     from app.logging_config import configure_logging
@@ -1257,11 +1356,136 @@ async def _configure_worker_logging(ctx: dict[str, Any]) -> None:
     configure_logging(get_settings().log_level)
 
 
+async def schedule_stale_insight_refresh(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Cron entrypoint: enqueue rebuilds/refresh for stale insight snapshots.
+
+    Runs every hour. Project-insight snapshots are rebuilt when they are marked
+    stale. Business-insight cache entries are refreshed when older than their TTL
+    so the shared cache stays warm for active tenants.
+    """
+    settings = get_settings()
+    cutoff = datetime.now(UTC) - timedelta(
+        seconds=settings.business_insight_result_ttl_seconds
+    )
+    enqueued: dict[str, int] = {"project_insight": 0, "business_insight": 0}
+
+    async with SessionLocal() as session:
+        stale_pi_rows = (
+            await session.execute(
+                select(
+                    ProjectIntelligenceSnapshot.tenant_id,
+                    ProjectIntelligenceSnapshot.project_id,
+                )
+                .where(
+                    ProjectIntelligenceSnapshot.is_stale.is_(True),
+                    ProjectIntelligenceSnapshot.suite == "project_insight",
+                )
+                .distinct()
+            )
+        ).all()
+        for tenant_id, project_id in stale_pi_rows:
+            await enqueue_rebuild_project_insight(
+                tenant_id=tenant_id, project_id=project_id
+            )
+            enqueued["project_insight"] += 1
+
+        stale_bi_rows = (
+            await session.execute(
+                select(BusinessInsightResult.tenant_id, BusinessInsightResult.project_id)
+                .where(BusinessInsightResult.updated_at < cutoff)
+                .distinct()
+            )
+        ).all()
+        for tenant_id, project_id in stale_bi_rows:
+            await enqueue_refresh_business_insight_result(
+                tenant_id=tenant_id, project_id=project_id
+            )
+            enqueued["business_insight"] += 1
+
+    return {"status": "ok", "enqueued": enqueued}
+
+
+async def enqueue_provision_tenant_vpn(
+    *,
+    tenant_id: str,
+    customer_gateway_ip: str,
+    customer_onprem_cidrs: list[str],
+    routing_type: str = "static",
+) -> str:
+    """Enqueue AWS-side VPN provisioning for a tenant."""
+    pool = await create_pool(_redis_settings())
+    try:
+        job = await pool.enqueue_job(
+            "provision_tenant_vpn",
+            tenant_id=tenant_id,
+            customer_gateway_ip=customer_gateway_ip,
+            customer_onprem_cidrs=customer_onprem_cidrs,
+            routing_type=routing_type,
+        )
+        return job.job_id if job else ""
+    finally:
+        await pool.close()
+
+
+async def provision_tenant_vpn(
+    ctx: dict[str, Any],
+    *,
+    tenant_id: str,
+    customer_gateway_ip: str,
+    customer_onprem_cidrs: list[str],
+    routing_type: str = "static",
+) -> dict[str, Any]:
+    """Background worker that creates the AWS tenant VPC/VPN resources."""
+    from app.models.billing import TenantProvisioningRequest
+
+    async with SessionLocal() as session:
+        service = AwsVpnProvisioningService(session)
+        req = await session.scalar(
+            select(TenantProvisioningRequest)
+            .where(TenantProvisioningRequest.tenant_slug == tenant_id)
+            .where(TenantProvisioningRequest.requires_vpn.is_(True))
+            .order_by(TenantProvisioningRequest.id.desc())
+        )
+        try:
+            meta = await service.provision(
+                tenant_id=tenant_id,
+                customer_gateway_ip=customer_gateway_ip,
+                customer_onprem_cidrs=customer_onprem_cidrs,
+                routing_type=routing_type,
+            )
+            if req is not None:
+                req.vpn_status = "configured"
+                req.error_message = None
+                await session.flush()
+            await session.commit()
+            return {
+                "status": "configured",
+                "vpn_connection_id": meta.vpn_connection_id,
+                "tunnel1": meta.vpn_tunnel1_address,
+                "tunnel2": meta.vpn_tunnel2_address,
+            }
+        except Exception as exc:
+            logger.exception("provision_tenant_vpn failed for %s", tenant_id)
+            if req is not None:
+                req.vpn_status = "failed"
+                req.error_message = str(exc)[:500]
+                await session.flush()
+            await session.rollback()
+            raise
+
+
+# Deterministic job id may be reused; don't keep results so re-enqueue works.
+schedule_stale_insight_refresh.keep_result = 0  # type: ignore[attr-defined]
+
+
 class WorkerSettings:
     """arq worker entrypoint."""
 
     on_startup: ClassVar = _configure_worker_logging
     redis_settings: ClassVar[RedisSettings] = _redis_settings()
+    # The GPU AI server runs one model at a time; running more than one job
+    # concurrently just queues LLM requests and causes avoidable timeouts.
+    max_jobs: ClassVar[int] = 1
     functions: ClassVar[list] = [
         process_upload,
         index_for_search,
@@ -1269,12 +1493,21 @@ class WorkerSettings:
         analyze_project_intelligence,
         scan_repository_connection,
         rebuild_knowledge_graph,
+        knowledge_graph_rebuilt,
         run_knowledge_graph_health_check,
         recover_stale_graph_builds,
         evaluate_stale_graphs,
         reprocess_project,
         refresh_business_insight_result,
         rebuild_project_insight,
+        schedule_stale_insight_refresh,
+        refresh_quickbooks_tokens,
+        match_kpi_data_source,
+        stage_llm_artifact,
+        deploy_llm_artifact,
+        reindex_embedding_model,
+        convert_fp16_to_gguf,
+        provision_tenant_vpn,
     ]
     cron_jobs: ClassVar[list] = [
         # Detect source drift every 15 minutes and mark affected graphs stale.
@@ -1284,6 +1517,13 @@ class WorkerSettings:
         cron(evaluate_stale_graphs, minute=45, second=30),
         # Recover builds stuck without a heartbeat.
         cron(recover_stale_graph_builds, minute=5, second=0),
+        # Refresh stale insight snapshots every hour.
+        cron(schedule_stale_insight_refresh, minute=0, second=0),
+        # Refresh QuickBooks OAuth2 tokens every 15 minutes.
+        cron(refresh_quickbooks_tokens, minute=0, second=15),
+        cron(refresh_quickbooks_tokens, minute=15, second=15),
+        cron(refresh_quickbooks_tokens, minute=30, second=15),
+        cron(refresh_quickbooks_tokens, minute=45, second=15),
     ]
     # Must exceed home_intelligence_project_analysis_timeout_seconds: a job
     # killed by arq writes no result and permanently stalls its run, so the

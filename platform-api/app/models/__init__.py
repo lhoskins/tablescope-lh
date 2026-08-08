@@ -55,7 +55,12 @@ from app.models.database_data_source import DatabaseDataSource, DataSourceColumn
 from app.models.database_data_source_assignment import (
     DatabaseDataSourceAssignment,
 )
+from app.models.directory_derived_grant import DirectoryDerivedGrant
+from app.models.directory_group_role_mapping import DirectoryGroupRoleMapping
+from app.models.directory_sync_run import DirectorySyncRun
+from app.models.file_import_job import FileImportJob
 from app.models.file_source_meta import FileSourceMeta
+from app.models.file_source_version import FileSourceVersion
 from app.models.grid_preference import GridPreference
 from app.models.home_pin import HomePin
 from app.models.insight_feedback import InsightFeedback, InsightFeedbackReviewEvent
@@ -67,23 +72,34 @@ from app.models.knowledge_graph_lifecycle import (
     KnowledgeGraphVersion,
 )
 from app.models.knowledge_graph_snapshot import AIProjectGraphSnapshot
+from app.models.ldap_connection import LdapConnection
+from app.models.llm_framework import (
+    LLMArtifactFile,
+    LLMAuditEvent,
+    LLMDeployment,
+    LLMDeploymentAttempt,
+    LLMInstallation,
+    LLMModelArtifact,
+    LLMRoutingProfile,
+    LLMRuntimeTarget,
+)
 from app.models.mfa_phone_factor import MfaPhoneFactor
 from app.models.mfa_sms_event import MfaSmsEvent
+from app.models.network_file_connection import NetworkFileConnection
+from app.models.network_file_host import NetworkFileHost
 from app.models.organization_vdb import OrganizationVDB
 from app.models.project import Project, ProjectMember
 from app.models.project_action import ProjectAction, ProjectActionSubtask
 from app.models.project_asset import ProjectAsset
-from app.models.project_context import (
-    ProjectBusinessContext,
-    ProjectContextAuditEvent,
+from app.models.project_context.audit import ProjectContextAuditEvent
+from app.models.project_context.business_context import ProjectBusinessContext
+from app.models.project_context.goals import (
     ProjectGoal,
     ProjectGoalMetricLink,
     ProjectGoalRiskLink,
-    ProjectMetric,
-    ProjectMetricTarget,
-    ProjectRisk,
-    ProjectRiskMetricLink,
 )
+from app.models.project_context.metrics import ProjectMetric, ProjectMetricTarget
+from app.models.project_context.risks import ProjectRisk, ProjectRiskMetricLink
 from app.models.project_insight_acknowledgement import (
     ProjectInsightAcknowledgement,
 )
@@ -116,56 +132,52 @@ from app.models.tenant_ai_governance import (
     TenantAIMethodPolicy,
 )
 from app.models.tenant_data_plane import TenantDataPlane, TenantSecretRef
+from app.models.tenant_enterprise_auth_settings import TenantEnterpriseAuthSettings
 from app.models.tenant_membership import TenantAuthBinding, TenantMembership
 from app.models.user import User
+from app.models.user_auth_identity import UserAuthIdentity
 from app.models.user_vdb import UserVDB
 
 __all__ = [
-    "AIProjectGraphEdge",
-    "AIProjectGraphNode",
-    "AIGovernanceAuditEvent",
-    "AnalyticsConversation",
-    "AnalyticsConversationTurn",
-    "AiConversation",
-    "AiConversationMessage",
-    "AuditEvent",
-    "Report",
-    "ScopeCanvasLayout",
-    "ScopeSet",
     "AIAssetKPI",
     "AIAssetKPISuggestion",
     "AIAssetTag",
     "AIAssetTagSuggestion",
+    "AIGovernanceAuditEvent",
+    "AIProjectGraphEdge",
+    "AIProjectGraphNode",
+    "AIProjectGraphSnapshot",
     "AIReferenceCatalog",
     "AIReferenceKPI",
     "AIReferenceTag",
-    "TenantCustomKPI",
-    "TenantCustomTag",
-    "TenantReferenceCatalog",
+    "AiConversation",
+    "AiConversationMessage",
     "AnalyticalMethod",
     "AnalyticalSharedPolicy",
-    "MethodCatalog",
-    "MethodCatalogAuditLog",
-    "MethodCatalogVersion",
-    "MethodSelectionMatrix",
+    "AnalyticsConversation",
+    "AnalyticsConversationTurn",
+    "AuditEvent",
     "Base",
     "BillingCustomer",
     "BillingEvent",
     "BillingSubscription",
-    "SubscriptionTierCatalog",
-    "TenantProvisioningRequest",
+    "BusinessInsightResult",
     "ConnectorCredential",
     "Dashboard",
     "DataSourceAIProfile",
     "DataSourceAIRecommendation",
+    "DataSourceColumn",
     "DataSourceFieldProfile",
     "DataSourceTag",
     "DatabaseConnection",
-    "DataSourceColumn",
     "DatabaseDataSource",
+    "DirectoryDerivedGrant",
+    "DirectoryGroupRoleMapping",
+    "DirectorySyncRun",
     "DatabaseDataSourceAssignment",
-    "BusinessInsightResult",
+    "FileImportJob",
     "FileSourceMeta",
+    "FileSourceVersion",
     "GridPreference",
     "HomePin",
     "InsightFeedback",
@@ -175,11 +187,27 @@ __all__ = [
     "KnowledgeGraphBuild",
     "KnowledgeGraphHealthCheck",
     "KnowledgeGraphVersion",
-    "AIProjectGraphSnapshot",
+    "LdapConnection",
+    "LLMArtifactFile",
+    "LLMAuditEvent",
+    "LLMDeployment",
+    "LLMDeploymentAttempt",
+    "LLMInstallation",
+    "LLMModelArtifact",
+    "LLMRoutingProfile",
+    "LLMRuntimeTarget",
+    "MethodCatalog",
+    "MethodCatalogAuditLog",
+    "MethodCatalogVersion",
+    "MethodSelectionMatrix",
     "MfaPhoneFactor",
     "MfaSmsEvent",
+    "NetworkFileConnection",
+    "NetworkFileHost",
     "OrganizationVDB",
     "Project",
+    "ProjectAction",
+    "ProjectActionSubtask",
     "ProjectAsset",
     "ProjectBusinessContext",
     "ProjectContextAuditEvent",
@@ -188,8 +216,6 @@ __all__ = [
     "ProjectGoalRiskLink",
     "ProjectInsightAcknowledgement",
     "ProjectIntelligenceSnapshot",
-    "ProjectAction",
-    "ProjectActionSubtask",
     "ProjectMember",
     "ProjectMetric",
     "ProjectMetricTarget",
@@ -201,21 +227,31 @@ __all__ = [
     "ReferenceDocumentAssignment",
     "ReferenceLibraryImportBatch",
     "ReferenceLibraryImportRow",
+    "Report",
     "RepositoryConnection",
     "RepositoryItem",
     "RepositoryProfile",
     "RepositoryScan",
     "SaasObjectDataSource",
     "SavedQuery",
+    "ScopeCanvasLayout",
+    "ScopeSet",
     "SharedVDB",
+    "SubscriptionTierCatalog",
     "Tenant",
-    "TenantAllowedDomain",
     "TenantAIGovernancePolicy",
+    "TenantEnterpriseAuthSettings",
     "TenantAIMethodPolicy",
-    "TenantDataPlane",
-    "TenantSecretRef",
+    "TenantAllowedDomain",
     "TenantAuthBinding",
+    "TenantCustomKPI",
+    "TenantCustomTag",
+    "TenantDataPlane",
     "TenantMembership",
+    "TenantProvisioningRequest",
+    "TenantReferenceCatalog",
+    "TenantSecretRef",
     "User",
+    "UserAuthIdentity",
     "UserVDB",
 ]

@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from urllib.parse import quote_plus
+from urllib.parse import quote, quote_plus
 
 from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
 from sqlalchemy.engine import Engine
@@ -30,6 +30,32 @@ logger = logging.getLogger(__name__)
 # letters / digits / underscores, all lower-case.
 _SIMPLE_LOWER_IDENT = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# Salesforce connector renames system columns in the local staging schema.
+# When the native Teiid translator is used, these must map back to the API names.
+_SALESFORCE_BASE_COLUMN_MAP = {
+    "salesforce_id": "Id",
+    "is_deleted": "IsDeleted",
+    "created_date": "CreatedDate",
+    "last_modified_date": "LastModifiedDate",
+    "system_modstamp": "SystemModstamp",
+}
+
+# HubSpot and QuickBooks live translators rename API columns locally.
+# source_identifier() maps the local column names back to the source names.
+_HUBSPOT_BASE_COLUMN_MAP = {
+    "hubspot_id": "id",
+    "archived": "archived",
+    "created_at": "createdAt",
+    "updated_at": "updatedAt",
+}
+
+_QUICKBOOKS_BASE_COLUMN_MAP = {
+    "quickbooks_id": "Id",
+    "sync_token": "SyncToken",
+    "created_time": "MetaData.CreateTime",
+    "updated_time": "MetaData.LastUpdatedTime",
+}
+
 
 def source_identifier(db_type: str, name: str | None) -> str | None:
     """Return the identifier *as stored in the source database*.
@@ -39,12 +65,27 @@ def source_identifier(db_type: str, name: str | None) -> str | None:
     NAMEINSOURCE, the case must match exactly or Oracle raises ORA-00904 /
     ORA-00942.  So for Oracle we upper-case simple lower-case identifiers and
     leave anything that genuinely needs quoting (spaces, mixed case, reserved
-    words) untouched.  Other engines preserve the introspected name as-is.
+    words) untouched.
+
+    Salesforce system columns are renamed locally (e.g. ``salesforce_id`` ->
+    ``Id``); map them back so the Teiid native translator resolves the real API
+    field name.  User-selected fields already use their API names and pass
+    through unchanged.
     """
     if name is None:
         return None
     if db_type == "oracle" and _SIMPLE_LOWER_IDENT.match(name):
         return name.upper()
+    if db_type == "snowflake" and _SIMPLE_LOWER_IDENT.match(name):
+        return name.upper()
+    if db_type == "databricks" and _SIMPLE_LOWER_IDENT.match(name):
+        return name.lower()
+    if db_type == "salesforce":
+        return _SALESFORCE_BASE_COLUMN_MAP.get(name, name)
+    if db_type == "hubspot":
+        return _HUBSPOT_BASE_COLUMN_MAP.get(name, name)
+    if db_type == "quickbooks":
+        return _QUICKBOOKS_BASE_COLUMN_MAP.get(name, name)
     return name
 
 
@@ -144,6 +185,30 @@ DB_TYPES: dict[str, DbTypeConfig] = {
             }
         ),
     ),
+    "snowflake": DbTypeConfig(
+        db_type="snowflake",
+        default_port=443,
+        sa_dialect="snowflake",
+        teiid_translator="snowflake",
+        # Host should be the account identifier; the full JDBC URL appends the
+        # Snowflake domain if the user supplied a bare account name.
+        jdbc_template="jdbc:snowflake://{host}:{port}/?db={database}",
+        system_schemas=frozenset({"INFORMATION_SCHEMA"}),
+    ),
+    "databricks": DbTypeConfig(
+        db_type="databricks",
+        default_port=443,
+        sa_dialect="databricks",
+        teiid_translator="databricks",
+        # database_name carries the SQL warehouse HTTP path (e.g.
+        # /sql/1.0/endpoints/...).  AuthMech=3 selects personal-access-token auth
+        # combined with the datasource user-name "token".
+        jdbc_template=(
+            "jdbc:databricks://{host}:{port}/default;"
+            "transportMode=http;ssl=1;AuthMech=3;httpPath={database}"
+        ),
+        system_schemas=frozenset({"information_schema"}),
+    ),
 }
 
 # No deferred engines remain; kept for the "unsupported yet" branch below.
@@ -166,6 +231,12 @@ def build_jdbc_url(
     *, db_type: str, host: str, port: int, database_name: str
 ) -> str:
     cfg = get_db_type_config(db_type)
+    if db_type == "snowflake":
+        if "." not in host:
+            host = f"{host}.snowflakecomputing.com"
+        database_name = quote(database_name, safe="")
+    elif db_type == "databricks":
+        database_name = quote(database_name, safe="/")
     return cfg.jdbc_template.format(host=host, port=port, database=database_name)
 
 
@@ -185,11 +256,59 @@ class ConnectionParams:
             return self.port
         return get_db_type_config(self.db_type).default_port
 
+    @property
+    def resolved_username(self) -> str:
+        if self.db_type == "databricks" and not self.username:
+            return "token"
+        return self.username
+
+
+def _build_snowflake_engine(params: ConnectionParams, raw_pwd: str | None, connect_args: dict) -> Engine:
+    """Snowflake's dialect accepts the account identifier as the URL host."""
+    user = quote_plus(params.username)
+    auth = f"{user}:{quote_plus(raw_pwd)}" if raw_pwd is not None else user
+    # account or full account-locator are both acceptable to snowflake-sqlalchemy.
+    host = params.host
+    db = quote_plus(params.database_name)
+    url = f"snowflake://{auth}@{host}/{db}"
+    return create_engine(
+        url,
+        connect_args=connect_args,
+        pool_pre_ping=True,
+        pool_size=1,
+        max_overflow=0,
+    )
+
+
+def _build_databricks_engine(params: ConnectionParams, raw_pwd: str | None, connect_args: dict) -> Engine:
+    """Databricks warehouse: password is a personal access token; user is 'token'."""
+    user = quote_plus(params.resolved_username)
+    auth = f"{user}:{quote_plus(raw_pwd)}" if raw_pwd is not None else user
+    host = params.host
+    # database_name is the warehouse HTTP path.
+    http_path = quote(params.database_name, safe="")
+    url = f"databricks://{auth}@{host}?http_path={http_path}"
+    return create_engine(
+        url,
+        connect_args=connect_args,
+        pool_pre_ping=True,
+        pool_size=1,
+        max_overflow=0,
+    )
+
 
 def _build_engine(params: ConnectionParams) -> Engine:
     cfg = get_db_type_config(params.db_type)
-    user = quote_plus(params.username)
     raw_pwd = normalize_db_password(params.password)
+
+    if params.db_type == "snowflake":
+        connect_args: dict = {"login_timeout": 10}
+        return _build_snowflake_engine(params, raw_pwd, connect_args)
+    if params.db_type == "databricks":
+        connect_args = {"_socket_timeout": 30, "_http_timeout": 30}
+        return _build_databricks_engine(params, raw_pwd, connect_args)
+
+    user = quote_plus(params.username)
     # No-password connections must not produce ``user:@host`` — omit the
     # credential separator entirely so drivers connect without a password.
     auth = f"{user}:{quote_plus(raw_pwd)}" if raw_pwd is not None else user
@@ -204,7 +323,7 @@ def _build_engine(params: ConnectionParams) -> Engine:
         url = f"{cfg.sa_dialect}://{auth}@{host}:{port}/{db}"
 
     # Connection-timeout argument names differ across DBAPI drivers.
-    connect_args: dict = {}
+    connect_args = {}
     if params.db_type == "postgresql":
         connect_args["connect_timeout"] = 10
         if params.ssl_mode:
@@ -402,7 +521,7 @@ def map_to_teiid_type(sa_type: str) -> str:
     integer_types = {"INTEGER", "INT", "INT4", "SERIAL", "MEDIUMINT"}
     long_types = {"BIGINT", "INT8", "BIGSERIAL"}
     short_types = {
-        "SMALLINT", "INT2", "SMALLSERIAL", "TINYINT", "YEAR",
+        "SMALLINT", "INT2", "SMALLSERIAL", "TINYINT", "YEAR", "BYTEINT",
     }
     bool_types = {"BOOLEAN", "BOOL", "BIT"}
     decimal_types = {
@@ -423,6 +542,8 @@ def map_to_teiid_type(sa_type: str) -> str:
         "NVARCHAR", "NCHAR", "NTEXT", "UNIQUEIDENTIFIER", "SYSNAME",
         # Oracle
         "VARCHAR2", "NVARCHAR2", "CLOB", "NCLOB", "ROWID", "UROWID", "LONG",
+        # Snowflake / Databricks
+        "STRING", "VARIANT", "OBJECT", "ARRAY", "MAP", "STRUCT",
     }
     binary_types = {
         "BYTEA",

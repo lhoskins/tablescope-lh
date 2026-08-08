@@ -775,7 +775,7 @@ async def _setup(client, service_headers):
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
     from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
     class _FakeSupabase(SupabaseAuthService):
@@ -878,7 +878,7 @@ async def test_home_insights_project_id_scopes_to_one_project(
         assert r.status_code == 201
         ids.append(r.json()["id"])
 
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suggestions as hir
 
     # The endpoint opens its own SessionLocal; bind it to the test engine.
     monkeypatch.setattr(
@@ -922,7 +922,7 @@ async def test_query_suggestions_project_id_scopes_to_one_project(
         assert r.status_code == 201
         ids.append(r.json()["id"])
 
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suggestions as hir
 
     monkeypatch.setattr(
         hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
@@ -969,7 +969,7 @@ async def test_dashboard_suggestions_project_id_scopes_to_one_project(
         assert r.status_code == 201
         ids.append(r.json()["id"])
 
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suggestions as hir
 
     monkeypatch.setattr(
         hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
@@ -1012,7 +1012,7 @@ async def test_home_insights_without_project_id_runs_all(
         assert r.status_code == 201
         ids.append(r.json()["id"])
 
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suggestions as hir
 
     monkeypatch.setattr(
         hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
@@ -1044,7 +1044,7 @@ async def test_home_insights_inaccessible_project_id_returns_empty(
     )
     assert r.status_code == 201
 
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suggestions as hir
 
     monkeypatch.setattr(
         hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)

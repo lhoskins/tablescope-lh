@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useNotifyScopesChanged } from "@/lib/ui/scope-refresh";
@@ -29,69 +30,23 @@ import {
   type ScopeBuilderTable,
   type ScopeDirection,
   type ScopeMap,
-} from "@/lib/api/scopes";
+} from "@/lib/api/scopes";import { CARD_WIDTH } from "./ScopeBuilder/card-width";
+import { ROW_H } from "./ScopeBuilder/row-h";
+import { DOT } from "./ScopeBuilder/dot";
+import { MIN_ZOOM } from "./ScopeBuilder/min-zoom";
+import { MAX_ZOOM } from "./ScopeBuilder/max-zoom";
+import { CardRole } from "./ScopeBuilder/card-role";
+import { PlacedTable } from "./ScopeBuilder/placed-table";
+import { Link } from "./ScopeBuilder/link";
+import { uid } from "./ScopeBuilder/uid";
+import { cardHeight } from "./ScopeBuilder/card-height";
+import { fieldY } from "./ScopeBuilder/field-y";
+import { confidenceLabel } from "./ScopeBuilder/confidence-label";
+import { suggestionKey } from "./ScopeBuilder/suggestion-key";
+import { Field } from "./ScopeBuilder/field";
+import { LegendItem } from "./ScopeBuilder/legend-item";
 
-// Canvas layout geometry (deterministic so we can draw lines without DOM reads).
-const CARD_WIDTH = 320;
-const HEADER_H = 52;
-const ROW_H = 30;
-const DOT = 12;
-const MIN_ZOOM = 0.4;
-const MAX_ZOOM = 1.4;
 
-type CardRole = "source" | "target" | "added";
-
-interface PlacedTable {
-  tableKey: string;
-  queryId: number;
-  name: string;
-  fields: string[];
-  x: number;
-  y: number;
-}
-
-interface Link {
-  localId: string;
-  sourceQueryId: number;
-  sourceField: string;
-  sourceTable: string | null;
-  targetQueryId: number;
-  targetField: string;
-  targetTable: string | null;
-  matchGroupId: string;
-  matchMode: MatchMode;
-  direction: ScopeDirection;
-  enabled: boolean;
-  createdByAi: boolean;
-  confidence: number | null;
-}
-
-function uid(): string {
-  return Math.random().toString(36).slice(2, 12);
-}
-
-function cardHeight(t: PlacedTable): number {
-  return HEADER_H + Math.max(1, t.fields.length) * ROW_H + 10;
-}
-
-function fieldY(t: PlacedTable, field: string): number {
-  const idx = Math.max(0, t.fields.indexOf(field));
-  return t.y + HEADER_H + idx * ROW_H + ROW_H / 2;
-}
-
-function confidenceLabel(c: number | null): {
-  text: string;
-  tone: "success" | "warning" | "neutral";
-} {
-  if (c == null) return { text: "Medium", tone: "warning" };
-  if (c >= 0.8) return { text: "High", tone: "success" };
-  if (c >= 0.5) return { text: "Medium", tone: "warning" };
-  return { text: "Low", tone: "neutral" };
-}
-
-function suggestionKey(s: ScopeAISuggestion): string {
-  return `${s.query_id}.${s.source_field}>${s.target_query_id}.${s.target_field}`;
-}
 
 export function ScopeBuilder({
   projectId,
@@ -1949,51 +1904,5 @@ export function ScopeBuilder({
         <div className="mt-2 text-[12px] text-ink-tertiary">Loading map…</div>
       )}
     </div>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-ink-tertiary">
-        {label}
-      </div>
-      <div className="whitespace-normal break-words text-ink-primary [overflow-wrap:anywhere]">
-        {children ?? "—"}
-      </div>
-    </div>
-  );
-}
-
-function LegendItem({
-  label,
-  dashed,
-  faded,
-}: {
-  label: string;
-  dashed?: boolean;
-  faded?: boolean;
-}) {
-  return (
-    <span className="flex items-center gap-1">
-      <svg width="20" height="6" className={cn(faded && "opacity-40")}>
-        <line
-          x1="0"
-          y1="3"
-          x2="20"
-          y2="3"
-          stroke={dashed ? "#9ca3af" : "var(--color-brand-500, #2563eb)"}
-          strokeWidth="2"
-          strokeDasharray={dashed ? "4 3" : undefined}
-        />
-      </svg>
-      {label}
-    </span>
   );
 }

@@ -43,6 +43,18 @@ export function ConfirmationModal({
       setResult(res);
       void queryClient.invalidateQueries({ queryKey: ["builder"] });
       void queryClient.invalidateQueries({ queryKey: ["home"] });
+      const touchedProjectIds = new Set([
+        ...pending.adding.map((a) => a.projectId),
+        ...pending.removing.map((r) => r.projectId),
+      ]);
+      for (const pid of touchedProjectIds) {
+        void queryClient.invalidateQueries({
+          queryKey: ["project", pid, "datasources"],
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ["project", pid, "queries"],
+        });
+      }
     } finally {
       setApplying(false);
     }

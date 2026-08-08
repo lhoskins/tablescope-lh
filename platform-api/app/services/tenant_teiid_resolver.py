@@ -33,6 +33,8 @@ class TeiidEndpoint:
     pg_port: int
     api_key_secret_ref: str | None
     vdb_host_path: str
+    # Path as seen from inside the Teiid container, used for redeploy commands.
+    vdb_container_path: str
     tenant_id: str | None
     is_dedicated: bool
 
@@ -59,6 +61,7 @@ class TenantTeiidResolver:
             pg_port=settings.teiid_pg_port,
             api_key_secret_ref=None,
             vdb_host_path=settings.customer_base_path,
+            vdb_container_path=settings.customer_base_path,
             tenant_id=None,
             is_dedicated=False,
         )
@@ -83,12 +86,16 @@ class TenantTeiidResolver:
             pg_host = plane.teiid_pg_host
             pg_port = plane.teiid_pg_port
 
+        # The per-tenant Teiid container always mounts the customer VDB volume
+        # at /opt/wildfly/teiidfiles/customers regardless of the host path.
+        vdb_container_path = "/opt/wildfly/teiidfiles/customers"
         return TeiidEndpoint(
             servlet_url=servlet_url,
             pg_host=pg_host,
             pg_port=pg_port,
             api_key_secret_ref=api_key_ref,
             vdb_host_path=plane.vdb_host_path,
+            vdb_container_path=vdb_container_path,
             tenant_id=plane.tenant_id,
             is_dedicated=True,
         )

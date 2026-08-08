@@ -1,6 +1,40 @@
 import { apiClient } from "@/lib/api-client";
 
-export type VizType = "table" | "bar" | "line" | "pie" | "kpi";
+/**
+ * Chart families a conversational answer can request.
+ *
+ * This mirrors the backend `ChartType` vocabulary (and therefore the ECharts
+ * renderer registry) rather than a hand-picked subset: the shared ask pipeline
+ * now ranks every family for chat, so narrowing here would silently turn a
+ * scatter or heatmap answer back into a bar.
+ */
+export type VizType =
+  | "table"
+  | "kpi"
+  | "line"
+  | "area"
+  | "bar"
+  | "combo"
+  | "pie"
+  | "scatter"
+  | "effect_scatter"
+  | "radar"
+  | "radial_bar"
+  | "treemap"
+  | "sunburst"
+  | "tree"
+  | "funnel"
+  | "sankey"
+  | "graph"
+  | "parallel"
+  | "lines"
+  | "heatmap"
+  | "candlestick"
+  | "boxplot"
+  | "pictorial_bar"
+  | "theme_river"
+  | "gauge"
+  | "map";
 
 export interface SuggestedVisualization {
   type: VizType;
@@ -11,6 +45,12 @@ export interface SuggestedVisualization {
   chartStyle?: string;
   /** Rank by the measure and keep only the top N categories when set. */
   topN?: number;
+  /** Second measure for dual-axis families (combo, dual line). */
+  y2Field?: string;
+  /** Axis/label formatting class chosen by the engine. */
+  valueFormat?: string;
+  /** Ranked alternatives for the in-chat chart picker. */
+  candidates?: unknown[];
 }
 
 export type AiActionStatus =
@@ -33,6 +73,16 @@ export interface AiCardContext {
   source_columns?: string[];
   metric?: string;
   period_column?: string;
+  /** The card's own text, so a follow-up is answered about this finding. */
+  title?: string;
+  summary?: string;
+  /**
+   * The query the finding was computed from. Sent so a follow-up extends the
+   * rows behind the card instead of the generator writing an unrelated query.
+   */
+  base_sql?: string;
+  /** Provenance when the question is about one diagnostic step. */
+  analytical_method?: MethodEnvelope;
 }
 
 /** A source the resolver offers when a request is ambiguous. */
@@ -45,6 +95,8 @@ export interface SuggestedSource {
 export interface MethodEnvelope {
   method?: string | null;
   methodName?: string | null;
+  /** Optional version of the primary method. */
+  methodVersion?: string | null;
   tier?: number | null;
   analysisIntent?: string | null;
   status?: string | null;
@@ -56,8 +108,12 @@ export interface MethodEnvelope {
   caveats?: unknown[];
   warnings?: unknown[];
   executionEngine?: string | null;
+  /** When the runtime fell back from one engine to another (e.g. "r" -> "python"). */
+  fallbackFrom?: string | null;
   resultSchemaVersion?: number | null;
   chartContract?: Record<string, unknown> | null;
+  /** Supporting analytical methods or sub-analyses that informed the result. */
+  supportingMethods?: string[] | null;
 }
 
 /**

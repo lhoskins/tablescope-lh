@@ -12,7 +12,8 @@ describe("chartRegistry", () => {
   it("includes every supported widget type", () => {
     for (const type of [
       "kpi", "table", "line", "area", "bar", "combo", "pie",
-      "scatter", "radar", "radial_bar", "treemap", "funnel", "sankey",
+      "scatter", "effect_scatter", "radar", "radial_bar", "treemap",
+      "funnel", "sankey", "gauge",
     ]) {
       expect(CHART_REGISTRY[type as keyof typeof CHART_REGISTRY]).toBeDefined();
     }
@@ -27,12 +28,12 @@ describe("chartRegistry", () => {
   });
 
   it("getChartDefinition returns undefined for unknown types", () => {
-    expect(getChartDefinition("sunburst")).toBeUndefined();
+    expect(getChartDefinition("not_a_chart")).toBeUndefined();
     expect(getChartDefinition("line")?.family).toBe("line");
   });
 
   it("resolveRendererType falls back to table for unknown types", () => {
-    expect(resolveRendererType("sunburst")).toBe("table");
+    expect(resolveRendererType("not_a_chart")).toBe("table");
     expect(resolveRendererType("treemap")).toBe("treemap");
     expect(resolveRendererType("bar")).toBe("bar");
   });

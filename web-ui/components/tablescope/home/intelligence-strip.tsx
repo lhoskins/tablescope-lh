@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { IconFilter, IconRefresh, IconSparkles } from "@tabler/icons-react";
+import { IconFilter, IconRefresh, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { DepthControl } from "@/components/tablescope/insights/depth-control";
 
 export interface FilterableProject {
   id: string;
@@ -10,25 +11,18 @@ export interface FilterableProject {
   accent?: string;
 }
 
-const GRANULARITY_LABELS: Record<number, string> = {
-  1: "Executive",
-  2: "Strategic",
-  3: "Balanced",
-  4: "Detailed",
-  5: "Granular",
-};
-
 export interface IntelligenceStripProps {
-  projectCount: number;
+  scope?: "business" | "project";
+  projectCount?: number;
   /** Total accessible projects; when provided, a subset is rendered as "Showing X of Y". */
   totalProjectCount?: number;
   running: boolean;
   lastUpdatedLabel: string | null;
   onRefresh: () => void;
+  onClearCache?: () => void;
+  isClearingCache?: boolean;
   granularity: number;
   onGranularityChange: (value: number) => void;
-  /** Cross-project synthesis headline, shown inside the blue banner. */
-  synthesisHeadline: string | null;
   availableProjects: FilterableProject[];
   selectedProjectIds: Set<string>;
   onToggleProject: (id: string) => void;
@@ -139,100 +133,112 @@ function ProjectFilter({
 }
 
 export function IntelligenceStrip({
-  projectCount,
+  scope = "business",
+  projectCount = 0,
   totalProjectCount,
   running,
   lastUpdatedLabel,
   onRefresh,
+  onClearCache,
+  isClearingCache,
   granularity,
   onGranularityChange,
-  synthesisHeadline,
   availableProjects,
   selectedProjectIds,
   onToggleProject,
   onSelectAll,
   onClear,
 }: IntelligenceStripProps) {
+  const isProject = scope === "project";
   const isFiltered =
-    totalProjectCount != null && totalProjectCount > 0 && projectCount < totalProjectCount;
+    !isProject &&
+    totalProjectCount != null &&
+    totalProjectCount > 0 &&
+    projectCount < totalProjectCount;
+
+  const toolbarLabel = isProject ? "Project Insights toolbar" : "Business Insights toolbar";
+  const clearCacheLabel = isProject
+    ? "Clear Project Insight cache"
+    : "Clear Business Insight cache";
+  const refreshLabel = isProject ? "Refresh project insights" : "Refresh intelligence";
+
+  const runningText = isProject
+    ? "Analyzing this project…"
+    : `Analyzing ${projectCount} project${projectCount === 1 ? "" : "s"}…`;
 
   return (
-    <div className="space-y-2">
-      {/* Blue AI-analysis banner with synthesis headline, depth, and refresh */}
-      <div className="flex items-center gap-4 rounded-lg bg-brand px-4 py-2.5 text-brand-fg">
-        <div className="flex shrink-0 items-center gap-2 text-small font-medium">
-          <IconSparkles
-            size={16}
-            className={running ? "animate-pulse" : undefined}
+    <div
+      className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
+      aria-label={toolbarLabel}
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        {!isProject && (
+          <ProjectFilter
+            availableProjects={availableProjects}
+            selectedProjectIds={selectedProjectIds}
+            onToggleProject={onToggleProject}
+            onSelectAll={onSelectAll}
+            onClear={onClear}
           />
-          <span>
-            {running ? "AI running across" : "AI analyzed"} {projectCount} project
-            {projectCount === 1 ? "" : "s"}
-          </span>
-        </div>
-
-        <div className="min-w-0 flex-1">
-          {synthesisHeadline ? (
-            <span className="block truncate text-small font-medium text-brand-fg">
-              {synthesisHeadline}
-            </span>
-          ) : running ? (
-            <span className="text-small text-brand-fg/70">Gathering insights…</span>
-          ) : null}
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2 text-small text-brand-fg/90">
-          <label
-            className="flex items-center gap-2"
-            title="Slide from high-level executive insights to fine-grained, detailed analyses"
-          >
-            <span className="hidden sm:inline text-brand-fg/70">Depth</span>
-            <input
-              type="range"
-              min={1}
-              max={5}
-              step={1}
-              value={granularity}
-              onChange={(e) => onGranularityChange(Number(e.target.value))}
-              aria-label="Insight granularity"
-              className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/30 accent-white"
-            />
-            <span className="w-16 text-brand-fg">
-              {GRANULARITY_LABELS[granularity] ?? "Balanced"}
-            </span>
-          </label>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-3 text-small text-brand-fg/80">
-          {lastUpdatedLabel && <span>{lastUpdatedLabel}</span>}
-          <button
-            type="button"
-            onClick={onRefresh}
-            aria-label="Refresh intelligence"
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors hover:bg-white/15"
-          >
-            <IconRefresh
-              size={15}
-              className={running ? "animate-spin" : undefined}
-            />
-          </button>
-        </div>
-      </div>
-
-      {/* Project filter below the blue banner, left-aligned */}
-      <div className="flex items-center gap-3">
-        <ProjectFilter
-          availableProjects={availableProjects}
-          selectedProjectIds={selectedProjectIds}
-          onToggleProject={onToggleProject}
-          onSelectAll={onSelectAll}
-          onClear={onClear}
-        />
+        )}
         {isFiltered && (
           <span className="text-small text-ink-tertiary">
             {projectCount} of {totalProjectCount} projects
           </span>
         )}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-start gap-3 sm:justify-end">
+        {running && (
+          <span
+            className="inline-flex items-center gap-1.5 text-small text-ink-tertiary"
+            aria-live="polite"
+          >
+            <IconSparkles size={16} className="animate-pulse" aria-hidden />
+            {runningText}
+          </span>
+        )}
+
+        <label
+          className="flex items-center gap-2 text-small text-ink-secondary"
+          title="Slide from high-level executive insights to fine-grained, detailed analyses"
+        >
+          <span className="hidden sm:inline">Depth</span>
+          <DepthControl
+            value={granularity}
+            onChange={onGranularityChange}
+          />
+        </label>
+
+        {lastUpdatedLabel && (
+          <span className="text-small text-ink-tertiary">{lastUpdatedLabel}</span>
+        )}
+
+        {onClearCache && (
+          <button
+            type="button"
+            onClick={onClearCache}
+            disabled={isClearingCache}
+            title={clearCacheLabel}
+            aria-label={clearCacheLabel}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-ink-secondary transition-colors hover:bg-bg-tertiary disabled:opacity-50"
+          >
+            <IconTrash size={15} />
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={onRefresh}
+          aria-label={refreshLabel}
+          title={refreshLabel}
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-ink-secondary transition-colors hover:bg-bg-tertiary"
+        >
+          <IconRefresh
+            size={15}
+            className={running ? "animate-spin" : undefined}
+          />
+        </button>
       </div>
     </div>
   );

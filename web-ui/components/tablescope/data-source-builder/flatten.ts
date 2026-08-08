@@ -2,6 +2,7 @@ import type {
   SessionSource,
   SourceType,
 } from "@/lib/stores/data-source-builder-store";
+import { CONNECTOR_LABELS } from "./util";
 
 /** One row in the Active / Available Data Sources list. */
 export interface FlatItem {
@@ -22,6 +23,12 @@ export interface FlatItem {
   /** Whether the item is currently selected for assignment (table "adding"). */
   selected: boolean;
   isFile: boolean;
+  /** Immutable creation timestamp (ISO 8601); used for the "New" badge. */
+  createdAt?: string | null;
+  /** For files: how the bytes were acquired. Drives the origin badge. */
+  origin?: "local_upload" | "url" | "network_path";
+  /** Host the file came from, when it was not a local upload. */
+  originHost?: string;
 }
 
 function formatBytes(bytes?: number): string {
@@ -58,6 +65,9 @@ export function flattenCreated(
         sizeOrStatus: formatBytes(source.fileMetadata?.sizeBytes),
         selected: (table?.state ?? "unselected") === "adding",
         isFile: true,
+        createdAt: source.createdAt,
+        origin: source.fileMetadata?.acquisitionMethod ?? "local_upload",
+        originHost: source.fileMetadata?.sourceHost,
       });
       continue;
     }
@@ -70,12 +80,13 @@ export function flattenCreated(
         sourceType: source.sourceType,
         name: table.tableName,
         sourceLabel: source.displayName,
-        typeLabel: `${source.connectionConfig.db_type ?? source.sourceType} table`,
+        typeLabel: `${source.isSaaS ? "SaaS" : "table"} · ${CONNECTOR_LABELS[source.sourceType] ?? source.sourceType}`,
         visibility: "Connected",
         columns: table.cols || 0,
         sizeOrStatus: "—",
         selected: table.state === "adding",
         isFile: false,
+        createdAt: source.createdAt,
       });
     }
   }

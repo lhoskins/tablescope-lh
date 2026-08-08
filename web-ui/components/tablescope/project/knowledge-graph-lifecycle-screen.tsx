@@ -13,7 +13,6 @@ import {
   IconHistory,
   IconLoader2,
 } from "@tabler/icons-react";
-import { ProjectShell } from "@/components/tablescope/project-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
@@ -40,7 +39,12 @@ const STATUS_TONE: Record<string, string> = {
   validating: "brand",
 };
 
-export function KnowledgeGraphLifecycleScreen({ projectId }: Props) {
+export function KnowledgeGraphLifecyclePanel({ projectId }: Props) {
+  // Backward-compatible alias for callers still using the old screen name.
+  return <KnowledgeGraphLifecycleContent projectId={projectId} />;
+}
+
+function KnowledgeGraphLifecycleContent({ projectId }: Props) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<"builds" | "versions" | "health">("builds");
 
@@ -68,12 +72,7 @@ export function KnowledgeGraphLifecycleScreen({ projectId }: Props) {
   const data = statusQuery.data;
 
   return (
-    <ProjectShell
-      projectId={projectId}
-      activeNav="project-knowledge-graph"
-      breadcrumbLabel="Graph Lifecycle"
-    >
-      <div className="mx-auto w-full max-w-content space-y-4 py-4">
+    <div className="mx-auto w-full max-w-content space-y-4 py-4">
         <section className="rounded-lg border border-line-tertiary bg-bg-primary p-5">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -190,7 +189,6 @@ export function KnowledgeGraphLifecycleScreen({ projectId }: Props) {
           )}
         </section>
       </div>
-    </ProjectShell>
   );
 }
 
@@ -335,6 +333,8 @@ function HealthPanel({ status }: { status: KnowledgeGraphStatus | undefined }) {
     </div>
   );
 }
+
+export const KnowledgeGraphLifecycleScreen = KnowledgeGraphLifecyclePanel;
 
 function Empty({ text }: { text: string }) {
   return (

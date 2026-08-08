@@ -47,7 +47,7 @@ class _FakeEmail:
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
@@ -293,8 +293,8 @@ async def test_non_admin_cannot_update_policy(client, service_headers):
 
 
 async def test_tenant_isolation_in_routes(client, service_headers):
-    t1, u1, h1 = await _setup(client, service_headers, "gov-tenant-1")
-    t2, u2, h2 = await _setup(client, service_headers, "gov-tenant-2")
+    _t1, _u1, h1 = await _setup(client, service_headers, "gov-tenant-1")
+    _t2, _u2, h2 = await _setup(client, service_headers, "gov-tenant-2")
 
     await client.patch(
         "/api/ai-governance/methods/forecast",

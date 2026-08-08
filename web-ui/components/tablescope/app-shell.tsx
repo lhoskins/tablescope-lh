@@ -21,10 +21,14 @@ export interface AppShellProps {
   /** Top bar content (left/right). Falls back to a bare bar when omitted. */
   topBarLeft?: ReactNode;
   topBarRight?: ReactNode;
+  /** Optional sub-header rendered below the top bar (e.g. project resource tabs). */
+  subHeader?: ReactNode;
   /** Optional right-side context panel (project-context pages). */
   contextPanel?: ReactNode;
   /** When true, main content is centered with a max width (Home only). */
   centered?: boolean;
+  /** When false, the main content area does not scroll (use for full-screen pages). */
+  scrollable?: boolean;
   children: ReactNode;
 }
 
@@ -38,12 +42,14 @@ export function AppShell({
   counts,
   topBarLeft,
   topBarRight,
+  subHeader,
   contextPanel,
   centered = false,
+  scrollable = true,
   children,
 }: AppShellProps) {
   return (
-    <div className="flex h-screen bg-bg-secondary">
+    <div className="flex h-dvh overflow-hidden bg-bg-secondary">
       <MfaGate />
       <Sidebar
         mode={mode}
@@ -62,8 +68,15 @@ export function AppShell({
           left={topBarLeft}
           right={<CompanyLogo url={tenant.logoUrl} name={tenant.name} />}
         />
+        {subHeader && (
+          <div className="shrink-0 border-b border-line-tertiary bg-bg-primary">
+            {subHeader}
+          </div>
+        )}
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <main className="flex-1 overflow-y-auto">
+          <main
+            className={`relative min-h-0 flex-1 ${scrollable ? "overflow-y-auto" : "overflow-hidden"}`}
+          >
             <div
               className={
                 centered

@@ -30,6 +30,7 @@ export type NavKey =
   | "data-sources"
   | "database-connectors"
   | "data-source-builder"
+  | "project-data-source-builder"
   | "documents"
   | "dashboards"
   | "relationship-map"
@@ -48,6 +49,7 @@ export type NavKey =
   | "admin-ai-governance"
   | "admin-repositories"
   | "admin-insight-feedback"
+  | "admin-settings"
   // Project-mode nav
   | "overview"
   | "project-data-sources"
@@ -58,12 +60,13 @@ export type NavKey =
   | "project-ai-assistant"
   | "project-insights"
   | "project-actions"
+  | "project-business-context"
   | "project-relationship-map"
+  // Deprecated project Intelligence nav keys — kept for redirect compatibility.
   | "project-knowledge-graph"
   | "project-metadata-catalog"
   | "project-reference-library"
-  | "project-audit-log"
-  | "project-business-context";
+  | "project-audit-log";
 
 export interface TenantSummary {
   name: string;

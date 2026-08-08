@@ -57,8 +57,19 @@ export interface FilePreviewField {
   sample_values?: unknown[];
 }
 
+/** How a file's bytes reached the server. */
+export type AcquisitionMethod = "local_upload" | "url" | "network_path";
+
 export interface FilePreviewResult {
+  import_job_id: string;
+  /** Legacy alias for import_job_id, kept for older callers. */
   upload_session_id: string;
+  acquisition_method?: AcquisitionMethod;
+  content_family?: string;
+  /** Host only — never a query string or full network path. */
+  source_host?: string | null;
+  source_locator_redacted?: string | null;
+  sha256?: string | null;
   file: {
     file_name: string;
     file_type: string;
@@ -68,6 +79,70 @@ export interface FilePreviewResult {
     sheet_name: string | null;
   };
   fields: FilePreviewField[];
+}
+
+export interface NetworkHost {
+  id: number;
+  name: string;
+  host: string;
+  enabled: boolean;
+}
+
+export interface NetworkFileConnection {
+  id: number;
+  name: string;
+  label: string;
+  host: string;
+  port: number;
+  share_name: string;
+  approved_root_path: string;
+  domain: string | null;
+  username: string | null;
+  has_secret: boolean;
+  require_signing: boolean;
+  require_encryption: boolean;
+  enabled: boolean;
+  last_test_status: string | null;
+  last_test_message: string | null;
+}
+
+export interface NetworkFileConnectionCreate {
+  name: string;
+  host: string;
+  share_name: string;
+  approved_root_path?: string;
+  port?: number;
+  domain?: string;
+  username?: string;
+  password?: string;
+  require_signing?: boolean;
+  require_encryption?: boolean;
+  enabled?: boolean;
+}
+
+export interface NetworkFileEntry {
+  name: string;
+  path: string;
+  kind: "directory" | "file";
+  size_bytes: number;
+  modified_at: number | null;
+}
+
+export interface ImportCapabilities {
+  local_upload_enabled: boolean;
+  url_import_enabled: boolean;
+  network_import_enabled: boolean;
+  max_file_size_bytes: number;
+  malware_scanning_enabled: boolean;
+  network_connections: { id: number; name: string; label: string }[];
+  network_hosts: NetworkHost[];
+}
+
+export interface NetworkTestResult {
+  ok: boolean;
+  locator?: string;
+  file_name?: string;
+  file_size_bytes?: number;
 }
 
 // ── Project / existing-source types ──────────────────────────────────
@@ -135,6 +210,10 @@ export interface MyDataSource {
   dbType?: string | null;
   schemaName?: string | null;
   tableName?: string | null;
+  /** Backend source_type (e.g. "database_table", "saas_object"). */
+  sourceType?: string | null;
+  /** For SaaS-backed sources the connector key (e.g. "servicenow"). */
+  connectorType?: string | null;
   createdAt: string | null;
 }
 
@@ -233,6 +312,58 @@ export function createDbSource(body: {
   return apiClient.post<CreatedDbSource>("/api/database-sources", body);
 }
 
+// ── SaaS calls ────────────────────────────────────────────────────────
+
+export interface SaasObject {
+  name: string;
+  label: string;
+}
+
+export interface SaasField {
+  name: string;
+  label: string;
+  saas_type: string;
+  pg_type: string;
+}
+
+export function listSaaSObjects(credentialId: number): Promise<SaasObject[]> {
+  return apiClient
+    .post<{ objects: SaasObject[] }>("/api/saas-sources/objects", {
+      credential_id: credentialId,
+    })
+    .then((res) => res.objects);
+}
+
+export function listSaaSFields(
+  credentialId: number,
+  objectType: string,
+): Promise<SaasField[]> {
+  return apiClient
+    .post<{ fields: SaasField[] }>("/api/saas-sources/fields", {
+      credential_id: credentialId,
+      object_type: objectType,
+    })
+    .then((res) => res.fields);
+}
+
+export interface CreatedSaasSource {
+  id: number;
+  display_name: string;
+  teiid_view_name?: string;
+  database_data_source_id: number;
+}
+
+export function createSaasSource(body: {
+  credential_id: number;
+  connector_type: string;
+  object_type: string;
+  selected_fields: string[];
+  display_name: string;
+  project_id?: number;
+}): Promise<CreatedSaasSource> {
+  return apiClient.post<CreatedSaasSource>("/api/saas-sources", body);
+}
+
 // ── File calls ───────────────────────────────────────────────────────
 
 export function analyzeFile(
@@ -247,11 +378,87 @@ export function analyzeFile(
 }
 
 export function finalizeFile(body: {
-  upload_session_id: string;
+  import_job_id: string;
   project_id?: number;
   display_name?: string;
 }): Promise<{ view_name?: string; data_source_id?: number }> {
   return apiClient.post("/api/data-sources/upload/finalize", body);
+}
+
+// ── Import calls (URL / network acquisition) ─────────────────────────
+
+export function getImportCapabilities(): Promise<ImportCapabilities> {
+  return apiClient.get<ImportCapabilities>(
+    "/api/data-sources/imports/capabilities",
+  );
+}
+
+export function importFromUrl(
+  url: string,
+  projectId?: number,
+): Promise<FilePreviewResult> {
+  return apiClient.post<FilePreviewResult>("/api/data-sources/imports/url", {
+    url,
+    project_id: projectId,
+  });
+}
+
+export function importFromNetwork(
+  connectionId: number,
+  path: string,
+  projectId?: number,
+): Promise<FilePreviewResult> {
+  return apiClient.post<FilePreviewResult>("/api/data-sources/imports/network", {
+    connection_id: connectionId,
+    path,
+    project_id: projectId,
+  });
+}
+
+export function testNetworkPath(
+  connectionId: number,
+  path?: string,
+): Promise<NetworkTestResult> {
+  return apiClient.post<NetworkTestResult>(
+    "/api/data-sources/imports/network/test",
+    { connection_id: connectionId, path },
+  );
+}
+
+export function cancelImport(importJobId: string): Promise<void> {
+  return apiClient.delete(`/api/data-sources/imports/${importJobId}`);
+}
+
+export function listNetworkHosts(): Promise<NetworkHost[]> {
+  return apiClient.get<NetworkHost[]>("/api/network-file-hosts");
+}
+
+export function createNetworkHost(
+  host: { name: string; host: string; enabled?: boolean },
+): Promise<NetworkHost> {
+  return apiClient.post<NetworkHost>("/api/network-file-hosts", host);
+}
+
+export function updateNetworkHost(
+  id: number,
+  host: { name: string; host: string; enabled?: boolean },
+): Promise<NetworkHost> {
+  return apiClient.patch<NetworkHost>(`/api/network-file-hosts/${id}`, host);
+}
+
+export function deleteNetworkHost(id: number): Promise<{ status: string }> {
+  return apiClient.delete(`/api/network-file-hosts/${id}`);
+}
+
+export function browseNetworkConnection(
+  connectionId: number,
+  path?: string,
+): Promise<{ entries: NetworkFileEntry[]; path: string }> {
+  const params = new URLSearchParams();
+  if (path) params.set("path", path);
+  return apiClient.get<{ entries: NetworkFileEntry[]; path: string }>(
+    `/api/network-file-connections/${connectionId}/browse?${params.toString()}`,
+  );
 }
 
 // ── Project assignment calls ─────────────────────────────────────────
@@ -361,6 +568,15 @@ export async function applyChanges(
     for (const add of pending.adding) {
       if (add.source.isFileUpload) {
         await applyFileAddition(add.source, add.projectId, add.projectName, finalizedFileViewName, results);
+      } else if (add.source.isSaaS) {
+        await applySaaSAddition(
+          add.source,
+          add.projectId,
+          add.projectName,
+          add.tableNames,
+          (projectCountBySource.get(add.source.id) ?? 1) > 1,
+          results,
+        );
       } else {
         await applyDbAddition(
           add.source,
@@ -398,12 +614,12 @@ async function applyFileAddition(
     }
     const already = finalized.get(source.id);
     if (!already) {
-      const sessionId = source.fileMetadata?.uploadSessionId;
-      if (!sessionId) {
-        throw new Error("Missing upload session — re-add the file.");
+      const jobId = source.fileMetadata?.importJobId;
+      if (!jobId) {
+        throw new Error("Missing import job — re-add the file.");
       }
       const res = await finalizeFile({
-        upload_session_id: sessionId,
+        import_job_id: jobId,
         project_id: Number(projectId),
         display_name: source.displayName,
       });
@@ -470,6 +686,64 @@ async function applyDbAddition(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Treat "already exists" as a soft success (idempotent re-apply).
+      if (/already exists/i.test(message)) {
+        results.push({ label, kind: "add", ok: true });
+      } else {
+        results.push({ label, kind: "add", ok: false, error: message });
+      }
+    }
+  }
+}
+
+async function applySaaSAddition(
+  source: SessionSource,
+  projectId: string,
+  projectName: string,
+  tableNames: string[],
+  multiProject: boolean,
+  results: ApplyOpResult[],
+): Promise<void> {
+  // Already-created SaaS source: associate the existing record with the project.
+  if (source.existing && source.backendId != null) {
+    const label = `Add ${source.displayName} to ${projectName}`;
+    try {
+      await addDataSourcesToProject(projectId, [
+        { kind: "db", id: source.backendId },
+      ]);
+      results.push({ label, kind: "add", ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/already exists|already in/i.test(message)) {
+        results.push({ label, kind: "add", ok: true });
+      } else {
+        results.push({ label, kind: "add", ok: false, error: message });
+      }
+    }
+    return;
+  }
+  const credentialId = source.connectionConfig.credential_id
+    ? Number(source.connectionConfig.credential_id)
+    : null;
+  const connectorType = source.sourceType;
+  const selectedFields = source.selectedFields ?? [];
+  for (const objectType of tableNames) {
+    const displayName = multiProject
+      ? `${objectType} · ${projectName}`
+      : objectType;
+    const label = `Add ${objectType} to ${projectName}`;
+    try {
+      if (!credentialId) throw new Error("Missing SaaS credential.");
+      await createSaasSource({
+        credential_id: credentialId,
+        connector_type: connectorType,
+        object_type: objectType,
+        selected_fields: selectedFields,
+        display_name: displayName,
+        project_id: Number(projectId),
+      });
+      results.push({ label, kind: "add", ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       if (/already exists/i.test(message)) {
         results.push({ label, kind: "add", ok: true });
       } else {

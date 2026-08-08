@@ -10,6 +10,7 @@ import uuid
 from typing import Any
 
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -20,6 +21,10 @@ from qdrant_client.models import (
 )
 
 from app.core.config import settings
+
+
+class VectorStoreError(Exception):
+    """A vector-store operation could not be completed safely."""
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +166,153 @@ async def delete_project_vectors(tenant_id: int, project_id: int) -> None:
         ),
     )
     logger.info("Deleted project %d vectors from %s", project_id, name)
+
+
+async def reindex_collection(
+    *,
+    source: str,
+    target: str,
+    embedding_model: str,
+    embedding_dim: int,
+    recall_query_limit: int = 10,
+) -> dict[str, Any]:
+    """Create a new collection, re-embed every source vector, and compute recall.
+
+    The source collection is read but never modified. The target collection is
+    created with the requested dimension, then source payloads are re-embedded
+    using the requested Ollama model and upserted. Recall is estimated by using
+    a sample of chunk_texts from the source as queries and comparing the top-K
+    overlap between source and target search results.
+
+    Returns a dict with points_total, points_indexed, recall_score, and status.
+    """
+    client = get_client()
+
+    try:
+        collections = {c.name for c in client.get_collections().collections}
+    except Exception as exc:
+        raise VectorStoreError(f"Could not list Qdrant collections: {exc}") from exc
+
+    if source not in collections:
+        raise VectorStoreError(f"Source collection {source} does not exist")
+
+    if target in collections:
+        raise VectorStoreError(f"Target collection {target} already exists")
+
+    try:
+        client.create_collection(
+            collection_name=target,
+            vectors_config=VectorParams(size=embedding_dim, distance=Distance.COSINE),
+        )
+    except UnexpectedResponse as exc:
+        raise VectorStoreError(f"Could not create target collection {target}: {exc}") from exc
+
+    batch_size = 64
+    offset = None
+    points_total = 0
+    points_indexed = 0
+    query_texts: list[str] = []
+
+    while True:
+        try:
+            batch, offset = client.scroll(
+                collection_name=source,
+                limit=batch_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as exc:
+            raise VectorStoreError(f"Failed to scroll source collection {source}: {exc}") from exc
+
+        if not batch:
+            break
+
+        texts = []
+        payloads = []
+        for point in batch:
+            chunk_text = point.payload.get("chunk_text", "") if point.payload else ""
+            if not isinstance(chunk_text, str):
+                chunk_text = ""
+            texts.append(chunk_text)
+            payloads.append(point.payload or {})
+            if len(query_texts) < recall_query_limit and chunk_text:
+                query_texts.append(chunk_text)
+
+        if texts:
+            try:
+                embeddings = await llm_client.generate_embeddings_with_model(
+                    texts, model=embedding_model
+                )
+            except Exception as exc:
+                raise VectorStoreError(f"Ollama embedding failed for {embedding_model}: {exc}") from exc
+
+            new_points = []
+            for vec, payload in zip(embeddings, payloads):
+                if not vec or len(vec) != embedding_dim:
+                    vec = [0.0] * embedding_dim
+                payload = dict(payload)
+                payload["embedding_model"] = embedding_model
+                payload["reindexed_from"] = source
+                new_points.append(
+                    PointStruct(id=str(uuid.uuid4()), vector=vec, payload=payload)
+                )
+
+            for start in range(0, len(new_points), batch_size):
+                client.upsert(
+                    collection_name=target,
+                    points=new_points[start : start + batch_size],
+                )
+            points_indexed += len(new_points)
+
+        if offset is None:
+            break
+
+    recall_score = None
+    if query_texts:
+        try:
+            source_embeddings = await llm_client.generate_embeddings_with_model(
+                query_texts, model=settings.embedding_model
+            )
+            target_embeddings = await llm_client.generate_embeddings_with_model(
+                query_texts, model=embedding_model
+            )
+        except Exception:
+            source_embeddings = target_embeddings = []
+
+        overlaps = []
+        for src_vec, tgt_vec in zip(source_embeddings, target_embeddings):
+            if not src_vec or not tgt_vec:
+                continue
+            try:
+                src_result = client.query_points(
+                    collection_name=source,
+                    query=src_vec,
+                    limit=recall_query_limit,
+                    with_payload=False,
+                ).points
+                tgt_result = client.query_points(
+                    collection_name=target,
+                    query=tgt_vec,
+                    limit=recall_query_limit,
+                    with_payload=False,
+                ).points
+            except Exception:
+                continue
+            src_ids = {str(p.id) for p in src_result}
+            tgt_ids = {str(p.id) for p in tgt_result}
+            if src_ids:
+                overlaps.append(len(src_ids & tgt_ids) / len(src_ids))
+
+        if overlaps:
+            recall_score = sum(overlaps) / len(overlaps)
+
+    return {
+        "status": "completed",
+        "points_total": points_total,
+        "points_indexed": points_indexed,
+        "recall_score": recall_score,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

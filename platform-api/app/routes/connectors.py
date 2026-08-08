@@ -26,9 +26,12 @@ _LABELS: dict[str, str] = {
     "mysql": "MySQL",
     "sqlserver": "SQL Server",
     "oracle": "Oracle",
+    "snowflake": "Snowflake",
+    "databricks": "Databricks",
     "salesforce": "Salesforce",
     "hubspot": "HubSpot",
     "quickbooks": "QuickBooks",
+    "servicenow": "ServiceNow",
 }
 
 # Order shown in the UI grid.
@@ -37,9 +40,12 @@ _ORDER = [
     "sqlserver",
     "oracle",
     "mysql",
+    "snowflake",
+    "databricks",
     "salesforce",
     "hubspot",
     "quickbooks",
+    "servicenow",
 ]
 
 

@@ -26,7 +26,7 @@ def test_layout_matches_plan_worked_example() -> None:
     assert a.host_pg_port == 15442
     assert a.host_mgmt_port == 19990
     assert a.teiid_servlet_url == "http://127.0.0.1:18095"
-    assert a.firewall_chain == "TABLESCOPE-TENANT-ACME"
+    assert a.firewall_chain == "TS-TENANT-ACME"
 
     b = compute_layout("globex", 2)
     assert b.docker_subnet_cidr == "172.30.20.0/24"
@@ -73,13 +73,13 @@ def test_firewall_blocks_cross_tenant_and_allows_own_onprem() -> None:
     acme = TenantFirewallSpec(
         tenant_id="acme",
         docker_subnet_cidr="172.30.10.0/24",
-        chain="TABLESCOPE-TENANT-ACME",
+        chain="TS-TENANT-ACME",
         allowed_onprem_cidrs=["10.10.0.0/16"],
     )
     globex = TenantFirewallSpec(
         tenant_id="globex",
         docker_subnet_cidr="172.30.20.0/24",
-        chain="TABLESCOPE-TENANT-GLOBEX",
+        chain="TS-TENANT-GLOBEX",
         allowed_onprem_cidrs=["10.20.0.0/16"],
     )
     svc = TenantFirewallService()
@@ -87,17 +87,17 @@ def test_firewall_blocks_cross_tenant_and_allows_own_onprem() -> None:
 
     # Jump is hooked into DOCKER-USER (before Docker's own ACCEPT rules), not
     # appended to FORWARD where it would be preempted.
-    assert "iptables -I DOCKER-USER -s 172.30.10.0/24 -j TABLESCOPE-TENANT-ACME" in script
-    assert "-A FORWARD -s 172.30.10.0/24 -j TABLESCOPE-TENANT-ACME" not in script
+    assert "iptables -I DOCKER-USER -s 172.30.10.0/24 -j TS-TENANT-ACME" in script
+    assert "-A FORWARD -s 172.30.10.0/24 -j TS-TENANT-ACME" not in script
     # Acme can reach its own on-prem.
-    assert "iptables -A TABLESCOPE-TENANT-ACME -d 10.10.0.0/16 -j ACCEPT" in script
+    assert "iptables -A TS-TENANT-ACME -d 10.10.0.0/16 -j ACCEPT" in script
     # Acme blocked from Globex's Docker subnet and on-prem.
-    assert "iptables -A TABLESCOPE-TENANT-ACME -d 172.30.20.0/24 -j DROP" in script
-    assert "iptables -A TABLESCOPE-TENANT-ACME -d 10.20.0.0/16 -j DROP" in script
+    assert "iptables -A TS-TENANT-ACME -d 172.30.20.0/24 -j DROP" in script
+    assert "iptables -A TS-TENANT-ACME -d 10.20.0.0/16 -j DROP" in script
     # Metadata endpoint blocked.
-    assert "iptables -A TABLESCOPE-TENANT-ACME -d 169.254.169.254/32 -j DROP" in script
+    assert "iptables -A TS-TENANT-ACME -d 169.254.169.254/32 -j DROP" in script
     # Default deny at end of chain.
-    assert "iptables -A TABLESCOPE-TENANT-ACME -j DROP" in script
+    assert "iptables -A TS-TENANT-ACME -j DROP" in script
     # Applied-marker so the containerized control plane can confirm application.
     assert "/etc/tablescope/tenant-firewall.d/acme.applied" in script
     # systemd unit references the apply script.
@@ -170,7 +170,7 @@ async def test_create_list_get_and_artifacts(client, service_headers) -> None:
     fw = await client.get("/api/tenant-data-planes/firewall-script", headers=service_headers)
     assert fw.status_code == 200
     script = fw.json()["script"]
-    assert "TABLESCOPE-TENANT-ACME -d 172.30.20.0/24 -j DROP" in script
+    assert "TS-TENANT-ACME -d 172.30.20.0/24 -j DROP" in script
 
 
 async def test_vpn_mode_selection(client, service_headers) -> None:

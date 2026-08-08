@@ -3,7 +3,7 @@
   "name": "Tablescope Analytical Method Reference Catalog",
   "description": "Governed catalog of statistical/ML methods. The LLM explains results; Tablescope selects and executes the method.",
   "source_document": "Tablescope Analytical Method Reference Catalog.rtf",
-  "version": "1.0",
+  "version": "1.1",
   "shared_policies": [
     {
       "policy_key": "missing_data",
@@ -231,6 +231,62 @@
         "dagostino_pearson_normality_test"
       ],
       "priority": 86
+    },
+    {
+      "analysis_intent": "compare_periods",
+      "data_profile": "Time + numeric with periods",
+      "primary_method_id": "period_change",
+      "alternative_method_ids": [],
+      "priority": 85
+    },
+    {
+      "analysis_intent": "compare_year_over_year",
+      "data_profile": "Time + numeric with years",
+      "primary_method_id": "period_change",
+      "alternative_method_ids": [],
+      "priority": 84
+    },
+    {
+      "analysis_intent": "compare_to_baseline",
+      "data_profile": "Time + numeric with baseline",
+      "primary_method_id": "period_change",
+      "alternative_method_ids": [],
+      "priority": 83
+    },
+    {
+      "analysis_intent": "measure_rate_of_change",
+      "data_profile": "Time + numeric",
+      "primary_method_id": "period_change",
+      "alternative_method_ids": [],
+      "priority": 82
+    },
+    {
+      "analysis_intent": "detect_change_point",
+      "data_profile": "Ordered time with break",
+      "primary_method_id": "detect_change_point",
+      "alternative_method_ids": [],
+      "priority": 81
+    },
+    {
+      "analysis_intent": "detect_anomalies",
+      "data_profile": "Ordered time",
+      "primary_method_id": "detect_anomalies",
+      "alternative_method_ids": [],
+      "priority": 80
+    },
+    {
+      "analysis_intent": "forecast_time_series",
+      "data_profile": "Ordered time",
+      "primary_method_id": "forecast_time_series",
+      "alternative_method_ids": [],
+      "priority": 79
+    },
+    {
+      "analysis_intent": "contribution_to_change",
+      "data_profile": "Numeric + grouping + time",
+      "primary_method_id": "contribution_to_change",
+      "alternative_method_ids": [],
+      "priority": 78
     }
   ],
   "methods": [
@@ -424,6 +480,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "logistic_regression",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy",
         "statsmodels"
@@ -690,6 +751,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "chi_square_independence",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -921,6 +987,77 @@
       "is_executable": false
     },
     {
+      "method_id": "contribution_to_change",
+      "display_name": "Contribution to change",
+      "category": "Time-Series Analysis and Forecasting",
+      "subcategory": "Business time-series comparison",
+      "tier": 1,
+      "summary": "Contribution to change",
+      "applicability_condition": "Numeric measure; Categorical grouping; Two periods or ordered time",
+      "supported_intents": [
+        "contribution_to_change"
+      ],
+      "selection_rules": [
+        "Numeric measure",
+        "Categorical grouping",
+        "Two periods or ordered time"
+      ],
+      "rejection_rules": [
+        "No grouping",
+        "No numeric measure"
+      ],
+      "required_checks": [
+        "n count",
+        "group cardinality"
+      ],
+      "fallback_methods": [],
+      "output_contract": {
+        "fields": [
+          "group",
+          "contribution",
+          "contributionPercent",
+          "rank"
+        ]
+      },
+      "method_card": {
+        "use_when": [
+          "Numeric measure",
+          "Categorical grouping",
+          "Two periods or ordered time"
+        ],
+        "do_not_use_when": [
+          "No grouping",
+          "No numeric measure"
+        ],
+        "required_checks": [
+          "n count",
+          "group cardinality"
+        ],
+        "fallback": [],
+        "output": [
+          "per-group contribution",
+          "percentage of total change",
+          "rank"
+        ]
+      },
+      "llm_guardrails": [
+        "Do not choose the statistical method; explain the method Tablescope selected.",
+        "Never invent statistical outputs; report only values present in the envelope.",
+        "Do not use causal wording unless the method's causal gates pass.",
+        "Always report effect size and confidence interval alongside any p-value."
+      ],
+      "executor_key": "contribution_to_change",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
+      "dependencies": [
+        "base R"
+      ],
+      "is_executable": true
+    },
+    {
       "method_id": "cost_sensitive_learning",
       "display_name": "Cost-sensitive learning",
       "category": "Classification Methods",
@@ -1063,8 +1200,159 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "describe_numeric",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
+      ],
+      "is_executable": true
+    },
+    {
+      "method_id": "detect_anomalies",
+      "display_name": "Anomaly detection",
+      "category": "Time-Series Analysis and Forecasting",
+      "subcategory": "Business time-series comparison",
+      "tier": 1,
+      "summary": "Anomaly detection",
+      "applicability_condition": "Ordered time index; Numeric measure; Expected band + outliers",
+      "supported_intents": [
+        "detect_anomalies"
+      ],
+      "selection_rules": [
+        "Ordered time index",
+        "Numeric measure",
+        "Expected band + outliers"
+      ],
+      "rejection_rules": [
+        "No time column",
+        "No numeric measure"
+      ],
+      "required_checks": [
+        "n count",
+        "regular spacing"
+      ],
+      "fallback_methods": [],
+      "output_contract": {
+        "fields": [
+          "expected",
+          "lower",
+          "upper",
+          "anomalies",
+          "anomalyCount"
+        ]
+      },
+      "method_card": {
+        "use_when": [
+          "Ordered time index",
+          "Numeric measure",
+          "Need expected band and outliers"
+        ],
+        "do_not_use_when": [
+          "No time column",
+          "No numeric measure"
+        ],
+        "required_checks": [
+          "n count",
+          "regular spacing"
+        ],
+        "fallback": [],
+        "output": [
+          "expected value",
+          "prediction interval",
+          "flagged anomalies"
+        ]
+      },
+      "llm_guardrails": [
+        "Do not choose the statistical method; explain the method Tablescope selected.",
+        "Never invent statistical outputs; report only values present in the envelope.",
+        "Do not use causal wording unless the method's causal gates pass.",
+        "Always report effect size and confidence interval alongside any p-value."
+      ],
+      "executor_key": "detect_anomalies",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
+      "dependencies": [
+        "forecast"
+      ],
+      "is_executable": true
+    },
+    {
+      "method_id": "detect_change_point",
+      "display_name": "Change-point detection",
+      "category": "Time-Series Analysis and Forecasting",
+      "subcategory": "Business time-series comparison",
+      "tier": 1,
+      "summary": "Change-point detection",
+      "applicability_condition": "Ordered time index; Numeric measure; Suspected structural break",
+      "supported_intents": [
+        "detect_change_point"
+      ],
+      "selection_rules": [
+        "Ordered time index",
+        "Numeric measure",
+        "Suspected structural break"
+      ],
+      "rejection_rules": [
+        "No time column",
+        "No numeric measure",
+        "Too few points"
+      ],
+      "required_checks": [
+        "n count",
+        "regular spacing"
+      ],
+      "fallback_methods": [],
+      "output_contract": {
+        "fields": [
+          "changePointIndex",
+          "changePointDate",
+          "segmentMeanBefore",
+          "segmentMeanAfter",
+          "confidence"
+        ]
+      },
+      "method_card": {
+        "use_when": [
+          "Ordered time index",
+          "Numeric measure",
+          "Suspected structural break"
+        ],
+        "do_not_use_when": [
+          "No time column",
+          "No numeric measure",
+          "Too few ordered points"
+        ],
+        "required_checks": [
+          "n count",
+          "regular spacing"
+        ],
+        "fallback": [],
+        "output": [
+          "change-point index/date",
+          "segment means before/after",
+          "confidence"
+        ]
+      },
+      "llm_guardrails": [
+        "Do not choose the statistical method; explain the method Tablescope selected.",
+        "Never invent statistical outputs; report only values present in the envelope.",
+        "Do not use causal wording unless the method's causal gates pass.",
+        "Always report effect size and confidence interval alongside any p-value."
+      ],
+      "executor_key": "detect_change_point",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
+      "dependencies": [
+        "changepoint"
       ],
       "is_executable": true
     },
@@ -1224,8 +1512,87 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "fisher_exact",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
+      ],
+      "is_executable": true
+    },
+    {
+      "method_id": "forecast_time_series",
+      "display_name": "Time-series forecast",
+      "category": "Time-Series Analysis and Forecasting",
+      "subcategory": "Business time-series comparison",
+      "tier": 1,
+      "summary": "Time-series forecast",
+      "applicability_condition": "Ordered time index; Numeric measure; Sufficient history for forecast",
+      "supported_intents": [
+        "forecast_time_series"
+      ],
+      "selection_rules": [
+        "Ordered time index",
+        "Numeric measure",
+        "Sufficient history for forecast"
+      ],
+      "rejection_rules": [
+        "No time column",
+        "No numeric measure",
+        "Too few periods"
+      ],
+      "required_checks": [
+        "n count",
+        "regular spacing"
+      ],
+      "fallback_methods": [],
+      "output_contract": {
+        "fields": [
+          "pointForecast",
+          "lower",
+          "upper",
+          "horizon",
+          "method"
+        ]
+      },
+      "method_card": {
+        "use_when": [
+          "Ordered time index",
+          "Numeric measure",
+          "Sufficient history"
+        ],
+        "do_not_use_when": [
+          "No time column",
+          "No numeric measure",
+          "Too few periods"
+        ],
+        "required_checks": [
+          "n count",
+          "regular spacing"
+        ],
+        "fallback": [],
+        "output": [
+          "point forecast",
+          "prediction interval",
+          "forecast horizon"
+        ]
+      },
+      "llm_guardrails": [
+        "Do not choose the statistical method; explain the method Tablescope selected.",
+        "Never invent statistical outputs; report only values present in the envelope.",
+        "Do not use causal wording unless the method's causal gates pass.",
+        "Always report effect size and confidence interval alongside any p-value."
+      ],
+      "executor_key": "forecast_time_series",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
+      "dependencies": [
+        "forecast"
       ],
       "is_executable": true
     },
@@ -1616,6 +1983,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "kendall_correlation",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -1702,6 +2074,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "kruskal_wallis",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -1840,6 +2217,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "mann_kendall_trend",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -1904,6 +2286,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "mann_whitney_u",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -2183,6 +2570,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "linear_regression",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy",
         "statsmodels"
@@ -2274,6 +2666,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "negative_binomial_regression",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy",
         "statsmodels"
@@ -2368,6 +2765,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "trend_slope",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy",
         "statsmodels"
@@ -2442,6 +2844,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "one_sample_t_test",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -2541,6 +2948,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "one_way_anova",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -2633,6 +3045,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "paired_t_test",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -2726,6 +3143,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "pearson_correlation",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy",
         "statsmodels"
@@ -2756,6 +3178,91 @@
       "executor_key": null,
       "dependencies": [],
       "is_executable": false
+    },
+    {
+      "method_id": "period_change",
+      "display_name": "Period-over-period change",
+      "category": "Time-Series Analysis and Forecasting",
+      "subcategory": "Business time-series comparison",
+      "tier": 1,
+      "summary": "Period-over-period change",
+      "applicability_condition": "Ordered time index; Numeric measure; Two or more distinct periods",
+      "supported_intents": [
+        "compare_periods",
+        "compare_year_over_year",
+        "compare_to_baseline",
+        "measure_rate_of_change"
+      ],
+      "selection_rules": [
+        "Ordered time index",
+        "Numeric measure",
+        "Two or more distinct periods"
+      ],
+      "rejection_rules": [
+        "No time column",
+        "No numeric measure",
+        "Only one period"
+      ],
+      "required_checks": [
+        "n count",
+        "period detection",
+        "zero/negative baseline guard"
+      ],
+      "fallback_methods": [],
+      "output_contract": {
+        "fields": [
+          "currentPeriod",
+          "comparisonPeriod",
+          "absoluteChange",
+          "relativeChange",
+          "percentagePointChange",
+          "partialPeriod",
+          "zeroBaselineGuard",
+          "negativeBaselineWarning"
+        ]
+      },
+      "method_card": {
+        "use_when": [
+          "Ordered time index",
+          "Numeric measure",
+          "Two or more periods to compare"
+        ],
+        "do_not_use_when": [
+          "No time column",
+          "No numeric measure",
+          "Only one period"
+        ],
+        "required_checks": [
+          "n count",
+          "period detection",
+          "zero/negative baseline guard"
+        ],
+        "fallback": [],
+        "output": [
+          "current period",
+          "comparison period",
+          "absolute change",
+          "relative change",
+          "percentage-point change",
+          "partial-period flag"
+        ]
+      },
+      "llm_guardrails": [
+        "Do not choose the statistical method; explain the method Tablescope selected.",
+        "Never invent statistical outputs; report only values present in the envelope.",
+        "Do not use causal wording unless the method's causal gates pass.",
+        "Always report effect size and confidence interval alongside any p-value."
+      ],
+      "executor_key": "period_change",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
+      "dependencies": [
+        "base R"
+      ],
+      "is_executable": true
     },
     {
       "method_id": "permutation_anova",
@@ -2918,6 +3425,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "poisson_regression",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy",
         "statsmodels"
@@ -3304,6 +3816,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "sens_slope",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -3445,6 +3962,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "normality_test",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -3566,6 +4088,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "spearman_correlation",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -3684,6 +4211,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "stl_decomposition",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy",
         "statsmodels"
@@ -3805,6 +4337,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "students_t_test",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -4019,6 +4556,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "welch_anova",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy",
         "statsmodels"
@@ -4095,6 +4637,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "welch_t_test",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],
@@ -4181,6 +4728,11 @@
         "Always report effect size and confidence interval alongside any p-value."
       ],
       "executor_key": "wilcoxon_signed_rank",
+      "execution_engine": "r",
+      "result_schema_version": 1,
+      "chart_contract": {},
+      "max_rows": 10000,
+      "timeout_seconds": 30,
       "dependencies": [
         "scipy"
       ],

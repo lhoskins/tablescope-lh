@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
 
@@ -41,6 +45,7 @@ type TenantDetails = {
     slug: string;
     name: string;
     is_active: boolean;
+    enforce_2fa: boolean;
     created_at: string;
   };
   users: TenantUser[];
@@ -75,6 +80,7 @@ function HealthBadge({ status }: { status: string }) {
 export default function TenantDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
   const [forceReprocess, setForceReprocess] = useState(true);
   const tenantId = Number(params.id);
@@ -93,6 +99,40 @@ export default function TenantDetailPage() {
     },
     onError: (err: unknown) => {
       push(err instanceof Error ? err.message : "Failed to queue tenant reprocess", "error");
+    },
+  });
+
+  const toggle2faMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiClient.put<{ enabled: boolean }>(
+        `/api/tenants/${tenantId}/2fa-enforcement`,
+        { enabled },
+      ),
+    onSuccess: (data) => {
+      queryClient.setQueryData<TenantDetails | undefined>(
+        ["tenant-details", tenantId],
+        (old) =>
+          old
+            ? {
+                ...old,
+                tenant: { ...old.tenant, enforce_2fa: data.enabled },
+              }
+            : old,
+      );
+      push(
+        data.enabled
+          ? "Two-factor authentication is now required for all members"
+          : "Two-factor authentication requirement turned off",
+        "success",
+      );
+    },
+    onError: (err: unknown) => {
+      push(
+        err instanceof Error
+          ? err.message
+          : "Failed to update two-factor authentication setting",
+        "error",
+      );
     },
   });
 
@@ -150,6 +190,27 @@ export default function TenantDetailPage() {
             {reprocessMutation.isPending ? "Queueing..." : "Reprocess all tenant documents"}
           </button>
         </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300 text-brand focus:ring-brand"
+              checked={tenant.enforce_2fa}
+              onChange={(e) => toggle2faMutation.mutate(e.target.checked)}
+              disabled={toggle2faMutation.isPending}
+            />
+            Require two-factor authentication for all members
+          </label>
+          {toggle2faMutation.isPending ? (
+            <span className="text-xs text-slate-500">Saving…</span>
+          ) : null}
+        </div>
+        <p className="mt-1 max-w-prose text-xs text-slate-500">
+          When enabled, every member must complete SMS MFA. Admin and privileged
+          roles are still required to complete MFA whenever it is enforced by
+          the workspace.
+        </p>
       </header>
 
       {/* Users with VDB info */}

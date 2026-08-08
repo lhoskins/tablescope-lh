@@ -73,7 +73,7 @@ async def _project(client, service_headers):
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
     from app.services.supabase_auth_service import (
         SupabaseAuthService,
         SupabaseUser,
@@ -104,7 +104,7 @@ def _mock_supabase(monkeypatch):
 async def test_ensure_datasource_query_creates_and_dedupes(
     client, db_session, service_headers
 ) -> None:
-    project, user, headers = await _project(client, service_headers)
+    project, user, _headers = await _project(client, service_headers)
     pid = project["id"]
 
     created = await ensure_datasource_query(

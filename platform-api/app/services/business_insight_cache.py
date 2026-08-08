@@ -40,7 +40,9 @@ logger = logging.getLogger(__name__)
 #      evidence, per-pair join budgets with a join-protecting parse slice,
 #      truncated-JSON salvage, join-preserving SQL repair, and uncapped
 #      multi-table ranking.
-ANALYSIS_VERSION = 4
+#   5: expanded trend chart window from 12 to 24 data points so 24-month
+#      demos render the full intended lookback.
+ANALYSIS_VERSION = 5
 
 
 async def _active_kg_version_id(

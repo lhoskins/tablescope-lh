@@ -9,6 +9,8 @@ platform-api token, so they perform their own credential verification.
 from __future__ import annotations
 
 import logging
+import re
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -23,17 +25,46 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.models.user_auth_identity import UserAuthIdentity
 from app.schemas.auth import (
     AuthExchangeRequest,
     AuthTokenResponse,
     CurrentUserResponse,
     DirectLoginRequest,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
 )
 from app.services.allowed_domains import enforce_allowed_domain
+from app.services.email import send_transactional_email
+from app.services.enterprise_auth import (
+    record_identity_link,
+    resolve_user_for_external_identity,
+)
 from app.services.mfa_phone_service import mfa_aal_for_user
+from app.services.supabase_auth_service import SupabaseAuthService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _is_sso_claim(claims: dict[str, Any]) -> bool:
+    """Detect whether a Supabase token represents an SSO/SAML session."""
+    amr = claims.get("amr")
+    if isinstance(amr, list):
+        for entry in amr:
+            if isinstance(entry, dict) and entry.get("method") == "sso":
+                return True
+            if entry == "sso":
+                return True
+    return False
+
+
+def _provider_type_for_claims(provider: str, claims: dict[str, Any]) -> str:
+    if provider == "supabase" and _is_sso_claim(claims):
+        return "supabase_saml"
+    if provider == "supabase":
+        return "supabase_local"
+    return provider
 
 
 def _permissions_for_user(role: str, is_super_admin: bool = False) -> list[str]:
@@ -91,10 +122,16 @@ async def exchange_token(
     if not external_user_id:
         raise HTTPException(status_code=400, detail="External token missing `sub`")
 
+    provider_type = _provider_type_for_claims(payload.provider, external_claims)
+    # SSO/SAML identities must be explicitly linked; do not fall back to email.
+    allow_email_match = provider_type not in ("supabase_saml", "ldap_directory")
+    fallback_to_user_external_id = provider_type != "supabase_saml"
+
     # Identity is unique per tenant, so when a tenant slug is supplied (every
     # /{slug}/login does) resolve the user within that tenant. This lets one
     # Supabase email belong to several tenants (e.g. root_admin in `root` and
     # tenant_admin in a customer tenant).
+    tenant_id: int | None = None
     if payload.tenant_slug:
         tenant = await session.scalar(select(Tenant).where(Tenant.slug == payload.tenant_slug))
         if tenant is None:
@@ -102,26 +139,54 @@ async def exchange_token(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Tenant {payload.tenant_slug!r} not found",
             )
-        user = await session.scalar(
-            select(User).where(
-                User.external_id == external_user_id,
-                User.tenant_id == tenant.id,
-            )
+        tenant_id = tenant.id
+
+    if tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant slug is required to exchange an external token",
         )
-        if user is None:
+
+    email = external_claims.get("email")
+    user = await resolve_user_for_external_identity(
+        session,
+        tenant_id=tenant_id,
+        external_subject=external_user_id,
+        provider_type=provider_type,
+        email=email,
+        fallback_to_user_external_id=fallback_to_user_external_id,
+        allow_email_match=allow_email_match,
+    )
+
+    if user is None:
+        if provider_type == "supabase_saml":
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User does not belong to requested tenant",
+                status_code=status.HTTP_409_CONFLICT,
+                detail="SSO identity not linked to a TableScope user. Contact your administrator to map this identity.",
             )
-    else:
-        user = await session.scalar(
-            select(User).where(User.external_id == external_user_id)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User does not belong to requested tenant",
         )
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No platform-api user linked to external id {external_user_id}",
-            )
+
+    # Backfill a legacy identity record when the user was resolved by external_id
+    # but no UserAuthIdentity row exists yet.
+    identity = await session.scalar(
+        select(UserAuthIdentity).where(
+            UserAuthIdentity.tenant_id == user.tenant_id,
+            UserAuthIdentity.provider_type == provider_type,
+            UserAuthIdentity.external_subject == external_user_id,
+        )
+    )
+    if identity is None:
+        await record_identity_link(
+            session,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            provider_type=provider_type,
+            external_subject=external_user_id,
+            verification_state="confirmed",
+        )
 
     # A deactivated/blocked membership must not be able to obtain a token.
     if not user.is_active or (user.status or "active") != "active":
@@ -210,3 +275,103 @@ async def direct_login(
         tenant_slug=login_tenant.slug if login_tenant else None,
         permissions=permissions,
     )
+
+
+@router.post("/refresh", response_model=AuthTokenResponse)
+async def refresh_token(
+    session: AsyncSession = Depends(get_db),
+    context: RequestContext = Depends(require_membership),
+) -> AuthTokenResponse:
+    """Return a new access token for an already-authenticated session.
+
+    This lets the web client extend a session while the user is active,
+    without waiting for the JWT to expire and trigger a full re-login.
+    """
+    settings = get_settings()
+    user = await session.get(User, context.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session no longer valid",
+        )
+
+    permissions = _permissions_for_user(user.role, user.is_super_admin)
+    access_token = create_access_token(
+        sub=context.claims.sub,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        role=user.role,
+        permissions=permissions,
+        extra_claims={"aal": context.claims.aal},
+    )
+    tenant = await session.get(Tenant, user.tenant_id)
+    return AuthTokenResponse(
+        access_token=access_token,
+        expires_in=settings.jwt_access_token_ttl_minutes * 60,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        role=user.role,
+        is_super_admin=user.is_super_admin,
+        tenant_slug=tenant.slug if tenant else None,
+        permissions=permissions,
+    )
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    session: AsyncSession = Depends(get_db),
+) -> ForgotPasswordResponse:
+    """Send a password-reset email through Tablescope's transactional email.
+
+    Supabase Auth does not have a custom SMTP provider configured in this
+    project, so the reset link is generated via the GoTrue admin API and
+    delivered through the application's own email channel. The link carries a
+    one-time token_hash that the set-password page exchanges for a Supabase
+    session with verifyOtp.
+    """
+    settings = get_settings()
+    generic = ForgotPasswordResponse()
+    tenant = await session.scalar(
+        select(Tenant).where(Tenant.slug == payload.tenant_slug)
+    )
+    if tenant is None:
+        return generic
+    user = await session.scalar(
+        select(User).where(
+            User.email.ilike(payload.email),
+            User.tenant_id == tenant.id,
+            User.is_active.is_(True),
+        )
+    )
+    if user is None or not user.external_id:
+        return generic
+    try:
+        svc = SupabaseAuthService()
+        action_link = await svc.generate_recovery_link(
+            user.email,
+            redirect_to=settings.app_base_url.rstrip("/"),
+        )
+        match = re.search(r"[?&]token=([0-9a-f]+)", action_link)
+        token_hash = match.group(1) if match else None
+        if not token_hash:
+            logger.warning(
+                "generate_recovery_link returned no token: %s", action_link
+            )
+            return generic
+        reset_link = (
+            f"{settings.app_base_url.rstrip('/')}/{payload.tenant_slug}/set-password"
+            f"?token_hash={token_hash}&type=recovery"
+        )
+        await send_transactional_email(
+            to=user.email,
+            template="password_reset",
+            variables={
+                "first_name": user.first_name or "",
+                "reset_link": reset_link,
+                "expiration_time": "15 minutes",
+            },
+        )
+    except Exception:
+        logger.exception("Forgot-password flow failed for %s", payload.email)
+    return generic

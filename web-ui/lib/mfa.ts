@@ -12,6 +12,7 @@ import { apiClient, storeToken } from "./api-client";
 export type MfaStatus = {
   role: string;
   roleRequiresMfa: boolean;
+  tenantRequiresMfa: boolean;
   aal: string | null;
   mfaSatisfied: boolean;
   hasVerifiedFactor: boolean;

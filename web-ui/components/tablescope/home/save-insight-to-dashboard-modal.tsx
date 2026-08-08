@@ -17,6 +17,7 @@ import {
   type InsightCard,
   type SaveCardToDashboardPayload,
 } from "@/lib/api/home-intelligence";
+import { getDefaultOptions } from "@/lib/visualizations/chartRegistry";
 
 interface DashboardListItem {
   id: number;
@@ -103,6 +104,10 @@ export function SaveInsightToDashboardModal({
       labelColumn: card.labelColumn,
       valueColumn: card.valueColumn,
       valueColumn2: card.valueColumn2,
+      visualizationOptions: {
+        ...getDefaultOptions(card.chartType || "bar"),
+        ...(card.timeSeriesView ? { timeSeriesView: card.timeSeriesView } : {}),
+      },
     };
     if (mode === "existing" && selectedDashboardId !== null) {
       payload.dashboard_id = selectedDashboardId;

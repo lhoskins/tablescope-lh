@@ -9,21 +9,35 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-const { push, getInsight, acknowledge, reviewed, reopen, suggestInsights } =
-  vi.hoisted(() => ({
-    push: vi.fn(),
-    getInsight: vi.fn(),
-    suggestInsights: vi.fn(),
-    acknowledge: vi.fn().mockResolvedValue({
-      insightId: "i1",
-      status: "reviewed",
-      acknowledgedByUserId: 1,
-      acknowledgedByName: "Leonard",
-      acknowledgedAt: "2026-06-25T00:00:00Z",
-    }),
-    reviewed: vi.fn().mockResolvedValue({ items: [] }),
-    reopen: vi.fn().mockResolvedValue({ insightId: "i1", status: "reopened" }),
-  }));
+const {
+  push,
+  getInsight,
+  acknowledge,
+  reviewed,
+  reopen,
+  suggestInsights,
+  submitCanonicalTurn,
+  listConversations,
+  getConversation,
+  createHomePin,
+} = vi.hoisted(() => ({
+  push: vi.fn(),
+  getInsight: vi.fn(),
+  acknowledge: vi.fn().mockResolvedValue({
+    insightId: "i1",
+    status: "reviewed",
+    acknowledgedByUserId: 1,
+    acknowledgedByName: "Leonard",
+    acknowledgedAt: "2026-06-25T00:00:00Z",
+  }),
+  reviewed: vi.fn().mockResolvedValue({ items: [] }),
+  reopen: vi.fn().mockResolvedValue({ insightId: "i1", status: "reopened" }),
+  suggestInsights: vi.fn(),
+  submitCanonicalTurn: vi.fn(),
+  listConversations: vi.fn().mockResolvedValue([]),
+  getConversation: vi.fn().mockResolvedValue({ id: 1, turns: [] }),
+  createHomePin: vi.fn().mockResolvedValue({ id: 1 }),
+}));
 
 const INSIGHT = {
   project: { id: 42, name: "Boeing", status: "Active" },
@@ -39,35 +53,7 @@ const INSIGHT = {
   questionsToAsk: [
     { id: "q1", question: "Why did Supplier A slip?", reason: "risk" },
   ],
-  trendDetection: [
-    {
-      id: "t1",
-      label: "Spend up",
-      description: "MoM +12%",
-      possibleCause: "New supplier onboarding",
-    },
-  ],
-  recommendedDashboards: [
-    { id: "d1", title: "Supplier SLA", status: "suggested" },
-  ],
-  recommendedQueries: [
-    { id: "rq1", title: "Late shipments", status: "suggested" },
-  ],
-  recommendedKpis: [
-    { id: "k1", name: "On-time %", status: "recommended", currentValue: null },
-  ],
-  whatChangedSinceLastVisit: {
-    newFilesAdded: 2,
-    changedDataSources: 1,
-    newRisksIdentified: 0,
-    newQueries: 3,
-    newDashboards: 1,
-    updatedKnowledgeGraph: 4,
-    changeLogLink: "/projects/42/audit-log",
-  },
-  insightValidationWorkflow: [
-    { id: "i1", title: "Supplier A risk", priority: "high", status: "new" },
-  ],
+  questionsNeedingData: [],
   aiAvailable: true,
 };
 
@@ -80,6 +66,10 @@ vi.mock("@/lib/api/project-insight", () => ({
     reviewed: (projectId: string) => reviewed(projectId),
     reopen: (projectId: string, insightId: string) =>
       reopen(projectId, insightId),
+    clearCache: () =>
+      Promise.resolve({
+        deleted: { project_intelligence_snapshots: 1, business_insight_results: 0 },
+      }),
   },
 }));
 
@@ -89,68 +79,28 @@ vi.mock("@/lib/api/home-intelligence", async (importActual) => ({
     suggestInsights(granularity, projectId),
 }));
 
+vi.mock("@/lib/api/home-pins", () => ({
+  getHomePins: vi.fn().mockResolvedValue([]),
+  createHomePin: (payload: unknown) => createHomePin(payload),
+}));
+
+vi.mock("@/lib/api/conversational-analytics", () => ({
+  submitCanonicalTurn: (payload: unknown) => submitCanonicalTurn(payload),
+  listConversations: (projectId?: number) => listConversations(projectId),
+  getConversation: (conversationId: number) => getConversation(conversationId),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
 }));
 
-vi.mock("@/components/ai/AIQuestionResultModal", () => ({
-  AIQuestionResultModal: ({
-    open,
-    question,
-  }: {
-    open: boolean;
-    question: string;
-  }) =>
-    open ? (
-      <div role="dialog" aria-label="AI Answer">
-        {question}
-      </div>
-    ) : null,
-}));
-
-vi.mock("@/components/ai/GenerateQueryPreviewModal", () => ({
-  GenerateQueryPreviewModal: ({
-    open,
-    question,
-    title,
-  }: {
-    open: boolean;
-    question: string;
-    title?: string;
-  }) =>
-    open ? (
-      <div role="dialog" aria-label="Generate Query">
-        {title || question}
-      </div>
-    ) : null,
-}));
-
-vi.mock("@/components/tablescope/project-insight/generate-dashboard-modal", () => ({
-  GenerateDashboardModal: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog" aria-label="Generate Dashboard" /> : null,
-}));
-
 vi.mock("@/components/tablescope/project-shell", () => ({
-  ProjectShell: ({
-    children,
-    actions,
-  }: {
-    children: ReactNode;
-    actions?: ReactNode;
-  }) => (
-    <div>
-      <div data-testid="actions">{actions}</div>
-      {children}
-    </div>
-  ),
+  ProjectShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock("@/lib/ui/use-shell-data", () => ({
   useCurrentUser: () => ({
-    data: {
-      user: { rawRole: "admin" },
-      tenant: {},
-    },
+    data: { user: { rawRole: "admin" }, tenant: {} },
   }),
   useProjectSummaries: () => ({ data: [] }),
 }));
@@ -161,8 +111,46 @@ vi.mock("@/lib/hooks/use-insight-feedback", () => ({
     isLoading: false,
     saveFeedback: vi.fn(),
     removeFeedback: vi.fn(),
+    respondToReview: vi.fn(),
     saving: false,
+    governanceById: {},
   }),
+}));
+
+vi.mock("@/components/tablescope/home/percent-change-summary-panel", () => ({
+  PercentChangeSummaryPanel: ({ projectIds }: { projectIds: number[] }) => (
+    <div data-testid="percent-change" data-project-ids={projectIds.join(",")} />
+  ),
+}));
+
+vi.mock("@/components/tablescope/project-actions/create-action-from-insight-dialog", () => ({
+  CreateActionFromInsightDialog: ({
+    open,
+    insight,
+  }: {
+    open: boolean;
+    insight: { title?: string } | null;
+  }) =>
+    open ? (
+      <div role="dialog" aria-label="Create action">
+        {insight?.title}
+      </div>
+    ) : null,
+}));
+
+vi.mock("@/components/tablescope/home/save-insight-to-dashboard-modal", () => ({
+  SaveInsightToDashboardModal: ({
+    open,
+    card,
+  }: {
+    open: boolean;
+    card: { title?: string } | null;
+  }) =>
+    open ? (
+      <div role="dialog" aria-label="Save to dashboard">
+        {card?.title}
+      </div>
+    ) : null,
 }));
 
 import { ProjectInsightScreen } from "./project-insight-screen";
@@ -178,17 +166,15 @@ function renderScreen() {
   );
 }
 
-/** Expand a collapsible Panel by clicking its section header (the click
- * bubbles from the heading up to the header's role="button" handler). */
-function expandSection(name: string | RegExp) {
-  fireEvent.click(screen.getByRole("heading", { name }));
+function expandSection(name: string) {
+  fireEvent.click(
+    screen.getByRole("button", { name: new RegExp(`^${name}(?: \\d+)?$`) }),
+  );
 }
 
 describe("ProjectInsightScreen", () => {
   beforeEach(() => {
-    push.mockClear();
-    acknowledge.mockClear();
-    reopen.mockClear();
+    vi.clearAllMocks();
     reviewed.mockReset();
     reviewed.mockResolvedValue({ items: [] });
     getInsight.mockReset();
@@ -197,76 +183,56 @@ describe("ProjectInsightScreen", () => {
     suggestInsights.mockResolvedValue({ projects: [] });
   });
 
-  it("renders the restyled layout sections", async () => {
+  it("renders the Business-Insight-style layout sections", async () => {
     renderScreen();
     expect(
-      await screen.findByText("Executive Project Summary"),
+      await screen.findByRole("heading", { name: "Executive Project Summary" }),
     ).toBeTruthy();
-    expect(
-      screen.getByRole("heading", { name: "Risks" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("heading", { name: "Trends" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("heading", { name: "Insights & Opportunities" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("heading", { name: "AI-Generated Questions to Ask" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByText("Recommendations"),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Risks" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Trends" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Opportunities" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Deeper analysis" })).toBeTruthy();
   });
 
-  it("removes the panels that are not part of the restyle", async () => {
+  it("does not render legacy panels", async () => {
     renderScreen();
-    await screen.findByText("Executive Project Summary");
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
     expect(screen.queryByText("Trend Detection")).toBeNull();
     expect(screen.queryByText("What Changed Since Last Visit")).toBeNull();
     expect(screen.queryByText("Insight Validation Workflow")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Insights & Opportunities \d*$/ })).toBeNull();
   });
 
   it("renders executive summary as tinted, colored cards", async () => {
     const { container } = renderScreen();
-    expect(await screen.findByText("Critical")).toBeTruthy();
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    expect(screen.getByText("Critical")).toBeTruthy();
     expect(screen.getByText("Warnings")).toBeTruthy();
-    expect(screen.getAllByText("Opportunities").length).toBeGreaterThan(0);
     expect(screen.getByText("Supplier A SLA breach")).toBeTruthy();
-    // The Critical card is a tinted danger box.
     expect(container.querySelector('[class*="bg-danger/5"]')).toBeTruthy();
   });
 
-  it("expands Insights & Opportunities and collapses Questions by default", async () => {
+  it("keeps all sections collapsed by default", async () => {
     renderScreen();
-    await screen.findByText("Executive Project Summary");
-
-    const insights = screen.getByRole("heading", {
-      name: /Insights & Opportunities/,
-    });
-    expect(insights.closest("section")?.firstElementChild?.getAttribute("aria-expanded")).toBe("true");
-
-    const questions = screen.getByRole("heading", {
-      name: /AI-Generated Questions to Ask/,
-    });
-    expect(questions.closest("section")?.firstElementChild?.getAttribute("aria-expanded")).toBe("false");
-    // Count badge (1 question) is shown while collapsed.
-    expect(within(questions.closest("section") as HTMLElement).getByText("1")).toBeTruthy();
-    // Collapsed content is absent.
-    expect(screen.queryByText("Why did Supplier A slip?")).toBeNull();
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    for (const name of ["Risks", "Trends", "Opportunities", "Deeper analysis"]) {
+      expect(
+        screen.getByRole("button", { name }).getAttribute("aria-expanded"),
+      ).toBe("false");
+    }
   });
 
-  it("expands a collapsed section when its header is clicked", async () => {
+  it("shows AI-generated questions inside Deeper analysis after expanding", async () => {
     renderScreen();
-    await screen.findByText("Executive Project Summary");
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
     expect(screen.queryByText("Why did Supplier A slip?")).toBeNull();
-    expandSection("AI-Generated Questions to Ask");
+    expandSection("Deeper analysis");
     expect(
       await screen.findByText("Why did Supplier A slip?"),
     ).toBeTruthy();
   });
 
-  it("derives trend cards from the shared AI insight backend", async () => {
+  it("derives cards from project-scoped AI suggestions", async () => {
     suggestInsights.mockResolvedValue({
       projects: [
         {
@@ -293,14 +259,14 @@ describe("ProjectInsightScreen", () => {
       ],
     });
     renderScreen();
-    await screen.findByText("Executive Project Summary");
-    // The former Trend Detection panel is gone; trends come from AI insights.
-    expect(screen.queryByText("Trend Detection")).toBeNull();
-    expect((await screen.findAllByText("Spend up")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Trend").length).toBeGreaterThan(0);
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    expandSection("Trends");
+    expect(await screen.findByText("Spend up")).toBeTruthy();
+    expect(screen.getByText("Trend")).toBeTruthy();
+    await waitFor(() => expect(suggestInsights).toHaveBeenCalledWith(3, 42));
   });
 
-  it("shows unanswerable questions after expanding the Questions section", async () => {
+  it("shows unanswerable questions inside Deeper analysis", async () => {
     getInsight.mockResolvedValue({
       ...INSIGHT,
       questionsNeedingData: [
@@ -312,8 +278,8 @@ describe("ProjectInsightScreen", () => {
       ],
     });
     renderScreen();
-    await screen.findByText("Executive Project Summary");
-    expandSection("AI-Generated Questions to Ask");
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    expandSection("Deeper analysis");
     expect(await screen.findByText("Needs additional data")).toBeTruthy();
     expect(
       screen.getByText("What is employee headcount by department?"),
@@ -323,55 +289,47 @@ describe("ProjectInsightScreen", () => {
     ).toBeTruthy();
   });
 
-  it("shows suggestion status for executive summary cards", async () => {
-    renderScreen();
-    await screen.findByText("Executive Project Summary");
-    expect(screen.getByText("Supplier A SLA breach")).toBeTruthy();
-    expect(screen.getByText("Consolidate spend")).toBeTruthy();
-    expect(screen.getByText("Renegotiate contract")).toBeTruthy();
-  });
-
   it("does not render the legacy inline Ask box", async () => {
     renderScreen();
-    await screen.findByText("Executive Project Summary");
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
     expect(
       screen.queryByLabelText("Ask a question about this project"),
     ).toBeNull();
   });
 
-  it("opens the AI answer modal when a suggested question is clicked", async () => {
+  it("submits a project-scoped canonical Insight turn", async () => {
+    submitCanonicalTurn.mockResolvedValue({
+      conversation_id: 7,
+      conversation_created: true,
+      surface: "project_insights",
+      project_id: 42,
+      turn: {
+        id: 1,
+        sequence: 1,
+        user_message: "Why did Supplier A slip?",
+        assistant_message: "Because of a lead-time issue.",
+        status: "success",
+      },
+    });
     renderScreen();
-    await screen.findByText("Executive Project Summary");
-    expandSection("AI-Generated Questions to Ask");
-    const q = await screen.findByText("Why did Supplier A slip?");
-    fireEvent.click(q);
-    const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
-    expect(dialog.textContent).toContain("Why did Supplier A slip?");
-    expect(push).not.toHaveBeenCalled();
-  });
-
-  it("does not render the legacy recommended queries/dashboards section", async () => {
-    renderScreen();
-    await screen.findByText("Executive Project Summary");
-    expect(screen.queryByRole("heading", { name: "Recommended Queries" })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Recommended Dashboards" })).toBeNull();
-  });
-
-  it("shows a clean empty state for risks and opportunities", async () => {
-    renderScreen();
-    expect(
-      await screen.findByText(
-        "No risks detected from this project's data yet.",
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    const input = screen.getByLabelText(
+      "Ask anything across your connected data, documents, and dashboards",
+    );
+    fireEvent.change(input, { target: { value: "Why did Supplier A slip?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() =>
+      expect(submitCanonicalTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          surface: "project_insights",
+          project_id: 42,
+          message: "Why did Supplier A slip?",
+        }),
       ),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(
-        "No opportunities detected from this project's data yet.",
-      ),
-    ).toBeTruthy();
+    );
   });
 
-  it("renders AI-derived risk/opportunity cards with severity badges", async () => {
+  it("renders AI-derived risk/opportunity cards with severity badges and actions", async () => {
     suggestInsights.mockResolvedValue({
       projects: [
         {
@@ -389,10 +347,7 @@ describe("ProjectInsightScreen", () => {
               title: "Delivery lead time exceeds SLA threshold",
               summary: "Average lead time is high.",
               chart: null,
-              callout: {
-                type: "risk",
-                text: "Escalate with the supplier.",
-              },
+              callout: { type: "risk", text: "Escalate with the supplier." },
               sources: { tables: ["SUP_Quality_CSV"], documents: [] },
               executedAt: "2026-06-25T00:00:00Z",
             },
@@ -415,15 +370,27 @@ describe("ProjectInsightScreen", () => {
       ],
     });
     renderScreen();
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    expandSection("Risks");
+    const heading = await screen.findByText(
+      "Delivery lead time exceeds SLA threshold",
+    );
+    const card = heading.closest("article") as HTMLElement;
+    expect(within(card).getByText("Critical")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "More Actions" }));
+    expect(within(card).getByRole("button", { name: "Explain" })).toBeTruthy();
     expect(
-      (await screen.findAllByText("Delivery lead time exceeds SLA threshold")).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText("Recommendation").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Escalate with the supplier.").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("SUP_Quality_CSV").length).toBeGreaterThan(0);
+      within(card).getByRole("button", { name: "Add to dashboard" }),
+    ).toBeTruthy();
+    expandSection("Opportunities");
+    const oppHeading = await screen.findByText(
+      "Top-performing suppliers identified",
+    );
+    const oppCard = oppHeading.closest("article") as HTMLElement;
+    expect(within(oppCard).getByText("Recommendation")).toBeTruthy();
   });
 
-  it("opens the AI answer modal when an AI-derived card is investigated", async () => {
+  it("pins a card to Home", async () => {
     suggestInsights.mockResolvedValue({
       projects: [
         {
@@ -432,73 +399,14 @@ describe("ProjectInsightScreen", () => {
           projectColor: "#123456",
           insights: [
             {
-              id: "trend-1",
+              id: "risk-1",
               projectId: "42",
               projectName: "Boeing",
               projectColor: "#123456",
-              insightType: "trend_spend",
-              severity: "trend",
-              title: "Spend tracking over budget",
-              summary: "Spend is up.",
-              question: "How has total spend changed across recent periods?",
-              chart: null,
-              callout: null,
-              sources: { tables: ["FIN_Spend_CSV"], documents: [] },
-              executedAt: "2026-06-25T00:00:00Z",
-            },
-          ],
-        },
-      ],
-    });
-    renderScreen();
-    expect((await screen.findAllByText("Spend tracking over budget")).length).toBeGreaterThan(0);
-    const investigate = screen.getAllByRole("button", {
-      name: /investigate/i,
-    });
-    fireEvent.click(investigate[0]);
-    const dialog = await screen.findByRole("dialog", { name: "AI Answer" });
-    expect(dialog.textContent).toContain(
-      "How has total spend changed across recent periods?",
-    );
-    expect(push).not.toHaveBeenCalled();
-  });
-
-  it("shows a last-updated timestamp and Analyzing on refresh", async () => {
-    renderScreen();
-    expect(await screen.findByText(/Last updated:/)).toBeTruthy();
-    let release: (() => void) | undefined;
-    getInsight.mockReturnValue(
-      new Promise((resolve) => {
-        release = () => resolve(INSIGHT);
-      }),
-    );
-    const refresh = screen.getByRole("button", { name: /refresh/i });
-    fireEvent.click(refresh);
-    expect(await screen.findByText("Analyzing…")).toBeTruthy();
-    expect(
-      (screen.getByRole("button", { name: /refresh/i }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    release?.();
-  });
-
-  it("renders scoped inline insights and sends this project's id", async () => {
-    suggestInsights.mockResolvedValue({
-      projects: [
-        {
-          projectId: "42",
-          projectName: "Boeing",
-          projectColor: "#123456",
-          insights: [
-            {
-              id: "ins-1",
-              projectId: "42",
-              projectName: "Boeing",
-              projectColor: "#123456",
-              insightType: "opportunity_supplier",
-              severity: "recommendation",
-              title: "Consolidate spend with top suppliers",
-              summary: "Two suppliers account for most spend.",
+              insightType: "risk_sla",
+              severity: "critical",
+              title: "Delivery lead time exceeds SLA threshold",
+              summary: "Average lead time is high.",
               chart: null,
               callout: null,
               sources: { tables: [], documents: [] },
@@ -509,22 +417,46 @@ describe("ProjectInsightScreen", () => {
       ],
     });
     renderScreen();
-    const heading = await screen.findByRole("heading", {
-      name: "Insights & Opportunities",
-    });
-    expect(heading).toBeTruthy();
-    await waitFor(() =>
-      expect(suggestInsights).toHaveBeenCalledWith(3, 42),
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    expandSection("Risks");
+    const heading = await screen.findByText(
+      "Delivery lead time exceeds SLA threshold",
     );
-    const panel = heading.closest("section") as HTMLElement;
-    expect(
-      (await within(panel).findAllByText("Consolidate spend with top suppliers")).length,
-    ).toBeGreaterThan(0);
+    const card = heading.closest("article") as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: "Pin to Home" }));
+    await waitFor(() => expect(createHomePin).toHaveBeenCalled());
+    const payload = createHomePin.mock.calls[0][0] as { project_id: number };
+    expect(payload.project_id).toBe(42);
+  });
+
+  it("passes a single project id to Percent Change Summary", async () => {
+    renderScreen();
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    const panel = await screen.findByTestId("percent-change");
+    expect(panel.getAttribute("data-project-ids")).toBe("42");
+  });
+
+  it("shows a last-updated timestamp and analyzing status on refresh", async () => {
+    renderScreen();
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    expect(screen.getByText(/Last updated:/)).toBeTruthy();
+    let release: (() => void) | undefined;
+    getInsight.mockReturnValue(
+      new Promise((resolve) => {
+        release = () => resolve(INSIGHT);
+      }),
+    );
+    const refresh = screen.getByRole("button", {
+      name: /Refresh project insights/i,
+    });
+    fireEvent.click(refresh);
+    expect(await screen.findByText(/Analyzing this project/)).toBeTruthy();
+    release?.();
   });
 
   it("has no residual card shadows in the page body", async () => {
     const { container } = renderScreen();
-    await screen.findByText("Executive Project Summary");
-    expect(container.querySelector('[class*="shadow"]')).toBeNull();
+    await screen.findByRole("heading", { name: "Executive Project Summary" });
+    expect(container.querySelector('article [class*="shadow"]')).toBeNull();
   });
 });

@@ -105,6 +105,7 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
       pinMutation.mutate({
         pin_type: "live_widget",
         pin_key: `widget:${dashboardId}:${widget.id}`,
+        destination: "home",
         title: widget.title || "Pinned widget",
         project_id: projectId,
         config: {

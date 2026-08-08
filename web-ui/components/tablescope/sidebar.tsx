@@ -1,5 +1,6 @@
 "use client";
 
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -9,18 +10,11 @@ import {
   IconChevronDown,
   IconPlus,
   IconUsers,
-  IconBuildingBank,
-  IconShieldLock,
-  IconDatabaseShare,
-  IconPhoto,
-  IconMathFunction,
-  IconBrain,
-  IconFolders,
-  IconThumbUp,
   IconUserCircle,
   IconLogout,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
+  IconSettings,
 } from "@tabler/icons-react";
 import { signOut } from "@/lib/auth";
 import { cn } from "@/lib/cn";
@@ -31,96 +25,19 @@ import type {
   ProjectSummary,
   TenantSummary,
 } from "@/lib/ui/types";
-import { BrandMark } from "./brand-mark";
+
 import {
   homeNavGroups,
   projectNavGroups,
+  canViewSettings,
   type NavGroup,
   type NavItem,
-} from "./nav";
+} from "./nav";import { COLLAPSE_STORAGE_KEY } from "./sidebar/collapse-storage-key";
+import { SidebarProps } from "./sidebar/sidebar-props";
+import { NavGroupBlock } from "./sidebar/nav-group-block";
+import { AccountMenu } from "./sidebar/account-menu";
 
-const COLLAPSE_STORAGE_KEY = "tablescope:sidebar-collapsed";
 
-export interface SidebarProps {
-  mode: "home" | "project";
-  activeNav: NavKey;
-  tenant: TenantSummary;
-  user: CurrentUser;
-  project?: ProjectSummary | null;
-  otherProjects?: ProjectSummary[];
-  counts?: Partial<Record<"projects" | "queries" | "documents" | "actionCount", number>>;
-}
-
-function NavRow({
-  item,
-  active,
-  count,
-  collapsed,
-}: {
-  item: NavItem;
-  active: boolean;
-  count?: number;
-  collapsed: boolean;
-}) {
-  const Icon = item.icon;
-  return (
-    <Link
-      href={item.href}
-      title={collapsed ? item.label : undefined}
-      aria-label={collapsed ? item.label : undefined}
-      className={cn(
-        "relative flex items-center rounded-md text-[13px]",
-        collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2.5 py-1.5",
-        active
-          ? "bg-brand-50 font-semibold text-brand-500"
-          : "text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary",
-      )}
-    >
-      <Icon size={collapsed ? 18 : 15} stroke={1.8} className="shrink-0" />
-      {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
-      {!collapsed && typeof count === "number" && count > 0 && (
-        <span className="rounded-full bg-brand-50 px-1.5 text-[11px] font-medium text-brand-700">
-          {count}
-        </span>
-      )}
-      {collapsed && typeof count === "number" && count > 0 && (
-        <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-brand-500" />
-      )}
-    </Link>
-  );
-}
-
-function NavGroupBlock({
-  group,
-  activeNav,
-  counts,
-  collapsed,
-}: {
-  group: NavGroup;
-  activeNav: NavKey;
-  counts?: SidebarProps["counts"];
-  collapsed: boolean;
-}) {
-  return (
-    <div className="space-y-0.5">
-      {group.heading && !collapsed && (
-        <div className="px-2.5 pb-1 pt-3 text-caption uppercase tracking-wide text-ink-tertiary">
-          {group.heading}
-        </div>
-      )}
-      {group.heading && collapsed && <div className="pt-3" />}
-      {group.items.map((item) => (
-        <NavRow
-          key={item.key}
-          item={item}
-          active={item.key === activeNav}
-          count={item.countKey ? counts?.[item.countKey] : undefined}
-          collapsed={collapsed}
-        />
-      ))}
-    </div>
-  );
-}
 
 export function Sidebar({
   mode,
@@ -157,73 +74,31 @@ export function Sidebar({
 
   const groups =
     mode === "project" && project
-      ? projectNavGroups(project.id)
+      ? projectNavGroups(project.id, user)
       : homeNavGroups(user);
 
-  const canManageUsers =
-    Boolean(user.isSuperAdmin) ||
-    ["tenant_admin", "admin", "root_admin"].includes(user.rawRole ?? "");
   const isPlatformAdmin =
     Boolean(user.isSuperAdmin) || user.rawRole === "root_admin";
 
-  const adminItems: NavItem[] = canManageUsers
+  const adminManagementItems: NavItem[] = canViewSettings(user)
     ? [
         {
-          key: "admin-users",
-          label: "Users",
-          href: "/admin/users",
-          icon: IconUsers,
-        },
-        {
-          key: "admin-tenants",
-          label: isPlatformAdmin ? "Tenants" : "My Tenant",
-          href: "/admin/tenants",
-          icon: IconBuildingBank,
-        },
-        {
-          key: "admin-allowed-domains",
-          label: "Allowed Domains",
-          href: "/admin/allowed-domains",
-          icon: IconShieldLock,
-        },
-        {
-          key: "admin-data-source-assignments",
-          label: "Data Source Assignments",
-          href: "/admin/data-source-assignments",
-          icon: IconDatabaseShare,
-        },
-        {
-          key: "admin-branding",
-          label: "Branding",
-          href: "/admin/branding",
-          icon: IconPhoto,
-        },
-        {
-          key: "admin-analytical-methods",
-          label: "Analytical Methods",
-          href: "/admin/analytical-methods",
-          icon: IconMathFunction,
-        },
-        {
-          key: "admin-ai-governance",
-          label: "AI Governance",
-          href: "/admin/ai-governance",
-          icon: IconBrain,
-        },
-        {
-          key: "admin-repositories",
-          label: "Repositories",
-          href: "/admin/repositories",
-          icon: IconFolders,
-        },
-        {
-          key: "admin-insight-feedback",
-          label: "Insight Review",
-          href: "/admin/insight-feedback",
-          icon: IconThumbUp,
+          key: "admin-settings",
+          label: "Settings",
+          href: "/admin/settings",
+          icon: IconSettings,
         },
       ]
     : [];
+
+  if (isPlatformAdmin) {
+    adminManagementItems.push({
+      key: "admin-users",
+      label: "Users",
+      href: "/admin/users",
+      icon: IconUsers,
+    });
+  }
 
   return (
     <aside
@@ -237,9 +112,10 @@ export function Sidebar({
           <Link
             href="/"
             title="Tablescope home"
+            aria-label="Tablescope home"
             className="transition-opacity hover:opacity-80"
           >
-            <BrandMark />
+            <span className="text-h2 font-bold text-ink-primary">T</span>
           </Link>
           <button
             type="button"
@@ -255,10 +131,10 @@ export function Sidebar({
         <div className="flex items-center gap-2 px-4 py-3.5">
           <Link
             href="/"
+            aria-label="Tablescope home"
             className="flex min-w-0 flex-1 items-center gap-2 transition-opacity hover:opacity-80"
           >
-            <BrandMark />
-            <span className="truncate text-h2 text-ink-primary">Tablescope</span>
+            <span className="truncate text-h2 font-bold text-ink-primary">Tablescope</span>
           </Link>
           <button
             type="button"
@@ -330,9 +206,9 @@ export function Sidebar({
           />
         ))}
 
-        {mode === "home" && adminItems.length > 0 && (
+        {mode === "home" && adminManagementItems.length > 0 && (
           <NavGroupBlock
-            group={{ heading: "Administration", items: adminItems }}
+            group={{ heading: "Administration", items: adminManagementItems }}
             activeNav={activeNav}
             collapsed={collapsed}
           />
@@ -380,194 +256,5 @@ export function Sidebar({
 
       <AccountMenu user={user} collapsed={collapsed} />
     </aside>
-  );
-}
-
-function AccountMenu({
-  user,
-  collapsed,
-}: {
-  user: CurrentUser;
-  collapsed: boolean;
-}) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(e: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  return (
-    <div
-      ref={containerRef}
-      className={cn(
-        "relative flex items-center border-t border-line-tertiary py-3",
-        collapsed ? "flex-col gap-1 px-2" : "gap-2.5 px-3",
-      )}
-    >
-      <AvatarUploader user={user} />
-      {collapsed ? (
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          title={`${user.name} · account menu`}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-tertiary hover:bg-bg-secondary hover:text-ink-primary"
-        >
-          <IconChevronDown
-            size={14}
-            className={cn("transition-transform", open && "rotate-180")}
-          />
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-bg-secondary"
-        >
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-medium text-ink-primary">
-              {user.name}
-            </span>
-            <span className="block truncate text-caption text-ink-tertiary">
-              {user.role} · {user.tenantName}
-            </span>
-          </span>
-          <IconChevronDown
-            size={14}
-            className={cn(
-              "shrink-0 text-ink-tertiary transition-transform",
-              open && "rotate-180",
-            )}
-          />
-        </button>
-      )}
-
-      {open && (
-        <div
-          role="menu"
-          className={cn(
-            "absolute bottom-[calc(100%-4px)] z-20 overflow-hidden rounded-md border border-line-secondary bg-bg-primary py-1 shadow-lg",
-            collapsed ? "left-2 w-48" : "left-3 right-3",
-          )}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              router.push("/profile");
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-bg-secondary hover:text-ink-primary"
-          >
-            <IconUserCircle size={16} className="shrink-0" />
-            Profile
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              signOut();
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-danger hover:bg-danger/5"
-          >
-            <IconLogout size={16} className="shrink-0" />
-            Log out
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const ACCEPTED_AVATAR_TYPES = "image/png,image/jpeg,image/webp";
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
-
-function AvatarUploader({ user }: { user: CurrentUser }) {
-  const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleAvatarSelected(
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    if (file.size > MAX_AVATAR_BYTES) {
-      setError("Image too large (max 5 MB).");
-      return;
-    }
-    setError(null);
-    setUploading(true);
-    try {
-      await apiClient.upload("/api/users/me/avatar", file);
-      await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  return (
-    <>
-      <input
-        type="file"
-        accept={ACCEPTED_AVATAR_TYPES}
-        className="hidden"
-        ref={fileInputRef}
-        onChange={handleAvatarSelected}
-        aria-hidden="true"
-        tabIndex={-1}
-      />
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={uploading}
-        title={error ?? "Change profile picture"}
-        aria-label="Change profile picture"
-        className="group relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-50 text-[11px] font-semibold text-brand-700 ring-offset-1 hover:ring-2 hover:ring-brand-200 disabled:opacity-60"
-      >
-        {user.avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={user.avatarUrl}
-            alt=""
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <span>{user.initials}</span>
-        )}
-        {uploading && (
-          <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[9px] text-white">
-            …
-          </span>
-        )}
-      </button>
-    </>
   );
 }

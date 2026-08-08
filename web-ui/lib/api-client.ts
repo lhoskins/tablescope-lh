@@ -37,10 +37,20 @@ export class ApiError extends Error {
   }
 }
 
-const TOKEN_KEY = "tablescope.token";
+export const TOKEN_KEY = "tablescope.token";
 // Mirrors USER_META_KEY in lib/auth.ts; duplicated here to avoid an import
 // cycle (auth.ts imports from this module).
 const USER_META_KEY = "tablescope.user_meta";
+
+const RESERVED_PATH_SEGMENTS = new Set([
+  "login",
+  "set-password",
+  "forgot-password",
+  "mfa",
+  "api",
+  "admin",
+  "_next",
+]);
 
 // Error codes that mean the session/token is no longer valid (as opposed to a
 // legitimate authorization failure like project membership or MFA_REQUIRED).
@@ -54,6 +64,15 @@ let redirectingToLogin = false;
 
 function onAuthPage(pathname: string): boolean {
   return /(^|\/)(login|set-password|forgot-password)(\/|$)/.test(pathname);
+}
+
+export function extractTenantSlugFromPath(pathname?: string | null): string | null {
+  if (!pathname) return null;
+  const match = pathname.match(/^\/([^/]+)(?:\/|$)/);
+  if (!match) return null;
+  const slug = match[1];
+  if (RESERVED_PATH_SEGMENTS.has(slug)) return null;
+  return slug;
 }
 
 /**
@@ -70,6 +89,7 @@ function redirectToLogin(): void {
   } catch {
     /* ignore */
   }
+  slug = slug ?? extractTenantSlugFromPath(window.location.pathname);
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_META_KEY);
   const { pathname, search } = window.location;
@@ -79,6 +99,13 @@ function redirectToLogin(): void {
   const base = slug ? `/${slug}/login` : "/login";
   window.location.href = `${base}?next=${next}`;
 }
+
+/**
+ * Response header carrying a renewed session token. Mirrors
+ * `SESSION_TOKEN_HEADER` in the platform-api auth middleware, and must stay in
+ * that service's CORS `expose_headers` or the browser will hide it.
+ */
+const SESSION_TOKEN_HEADER = "X-Session-Token";
 
 /** Whether an HTTP status + error code represents an expired/invalid session. */
 function isAuthExpiry(status: number, code: string | null): boolean {
@@ -123,6 +150,14 @@ async function request<T>(
     headers,
     cache: "no-store",
   });
+
+  // The API slides the session forward while the user is active. Adopting the
+  // renewed token here is what stops a long task — reading an analysis, waiting
+  // on an insight refresh — from ending in a surprise logout at the TTL.
+  // Read before the `ok` check so a renewal riding on an error response is
+  // still picked up.
+  const renewed = response.headers.get(SESSION_TOKEN_HEADER);
+  if (renewed) storeToken(renewed);
 
   if (!response.ok) {
     let detail = `Request failed: ${response.status}`;
@@ -184,13 +219,20 @@ async function uploadFile<T>(
     body: form,
     headers,
   });
+  const renewedUpload = response.headers.get(SESSION_TOKEN_HEADER);
+  if (renewedUpload) storeToken(renewedUpload);
   if (!response.ok) {
     let detail = `Upload failed: ${response.status}`;
     let code: string | null = null;
     try {
       const payload = await response.json();
       code = payload?.code ?? payload?.error ?? null;
-      if (payload?.detail) detail = payload.detail;
+      if (payload?.detail) {
+        detail =
+          typeof payload.detail === "string"
+            ? payload.detail
+            : (payload.detail?.message ?? JSON.stringify(payload.detail));
+      }
     } catch {
       /* ignore */
     }
@@ -218,18 +260,23 @@ async function streamRequest(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  return fetch(`${getApiUrl()}${path}`, {
+  const response = await fetch(`${getApiUrl()}${path}`, {
     ...init,
     headers,
     cache: "no-store",
   });
+  // SSE runs are the longest-lived requests in the app — an insight refresh can
+  // straddle the TTL — so adopt a renewal here too.
+  const renewed = response.headers.get(SESSION_TOKEN_HEADER);
+  if (renewed) storeToken(renewed);
+  return response;
 }
 
 export const apiClient = {
   get: <T>(path: string) => request<T>(path),
   stream: (path: string, init?: RequestInit) => streamRequest(path, init),
-  post: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: "POST", body: JSON.stringify(body) }),
+  post: <T>(path: string, body: unknown, init?: RequestInit) =>
+    request<T>(path, { method: "POST", body: JSON.stringify(body), ...init }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   patch: <T>(path: string, body: unknown) =>

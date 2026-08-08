@@ -19,7 +19,11 @@ from app.database import get_db
 from app.models.project import Project
 from app.models.query_scope import QueryScope
 from app.models.saved_query import SavedQuery
-from app.routes.query import _auto_cast_aggregates, _resolve_vdb_database, _run_sql
+from app.routes.query_sql_helpers import (
+    _auto_cast_aggregates,
+    _resolve_vdb_database,
+    _run_sql,
+)
 from app.schemas.query_scope import (
     QueryScopeCreate,
     QueryScopeFilterRequest,
@@ -79,10 +83,10 @@ async def create_query_scope(
     session: AsyncSession = Depends(get_db),
     context: RequestContext = Depends(require_role(Role.EDITOR)),
 ) -> QueryScopeRead:
-    source_query, project = await _get_project_for_query(
+    source_query, _ = await _get_project_for_query(
         session, query_id=payload.query_id, tenant_id=context.tenant_id
     )
-    target_query, _ = await _get_project_for_query(
+    _, _ = await _get_project_for_query(
         session, query_id=payload.target_query_id, tenant_id=context.tenant_id
     )
     if not _FIELD_RE.match(payload.source_field):

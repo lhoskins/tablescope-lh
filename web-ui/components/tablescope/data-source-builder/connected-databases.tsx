@@ -33,7 +33,7 @@ function toSourceType(dbType: string): SourceType {
     : "postgresql";
 }
 
-export function ConnectedDatabases() {
+export function ConnectedDatabases({ projectId }: { projectId?: string }) {
   const { data: connections, isLoading } = useQuery({
     queryKey: ["builder", "saved-connections"],
     queryFn: listSavedConnections,
@@ -138,7 +138,7 @@ export function ConnectedDatabases() {
       <div className="rounded-lg border border-dashed border-line-secondary px-4 py-6 text-center text-small text-ink-tertiary">
         No connected databases yet. Create a connection on the{" "}
         <Link
-          href="/database-connectors"
+          href={projectId ? `/projects/${projectId}/database-connectors` : "/database-connectors"}
           className="font-medium text-brand-700 hover:underline"
         >
           Database Connectors

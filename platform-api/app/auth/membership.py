@@ -18,9 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext, get_request_context
 from app.auth.mfa_errors import MfaRequiredError
-from app.auth.mfa_policy import mfa_required_for_request
+from app.auth.mfa_policy import (
+    role_requires_mfa,
+    session_has_mfa,
+)
 from app.config import get_settings
 from app.database import get_db
+from app.models.tenant import Tenant
 from app.models.user import User
 
 # Routes reachable before completing MFA so an admin can read their identity and
@@ -73,11 +77,17 @@ async def require_membership(
     # Twilio SMS MFA: admin-tier roles must hold an aal2 session for any route
     # that is not on the MFA-exempt allowlist (identity + MFA setup/challenge).
     # Gated behind a master switch so the feature can ship without locking out
-    # admins before Twilio Verify is provisioned.
+    # admins before Twilio Verify is provisioned. When the tenant has turned on
+    # enforce_2fa, every member is required to complete MFA, not just admins.
+    tenant = await session.get(Tenant, context.tenant_id)
+    tenant_enforce_2fa = bool(tenant.enforce_2fa if tenant else False)
+    role_requires_effective = (
+        get_settings().mfa_enforcement_enabled and role_requires_mfa(user.role)
+    )
     if (
-        get_settings().mfa_enforcement_enabled
-        and not _is_mfa_exempt(request.url.path)
-        and mfa_required_for_request(user.role, context.aal)
+        not _is_mfa_exempt(request.url.path)
+        and not session_has_mfa(context.aal)
+        and (tenant_enforce_2fa or role_requires_effective)
     ):
         raise MfaRequiredError
 

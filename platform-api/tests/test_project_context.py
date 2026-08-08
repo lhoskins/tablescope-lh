@@ -26,7 +26,7 @@ def _headers(tenant_id: int, user_id: int, role: str = "editor") -> dict:
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
     from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
     class _FakeSupabase(SupabaseAuthService):
@@ -238,14 +238,14 @@ async def test_risk_lifecycle(client, service_headers):
             "title": "Supplier delay",
             "likelihood": "possible",
             "impact": "major",
-            "severity": "high",
             "status": "open",
         },
         headers=headers,
     )
     assert r.status_code == 201, r.text
     risk = r.json()
-    assert risk["severity"] == "high"
+    # Server computes severity from likelihood x impact.
+    assert risk["severity"] == "medium"
 
     r = await client.patch(
         f"/api/projects/{pid}/risks/{risk['id']}",
@@ -277,7 +277,7 @@ async def test_context_audit_records_mutations(client, service_headers):
 
 
 async def test_viewer_cannot_modify_context(client, service_headers):
-    tenant, user, project, _ = await _setup(client, service_headers, slug="ro-tenant")
+    tenant, _user, project, _ = await _setup(client, service_headers, slug="ro-tenant")
     # create a viewer user
     r = await client.post(
         f"/api/tenants/{tenant['id']}/users",

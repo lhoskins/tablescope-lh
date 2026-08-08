@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "change-me-please"
     jwt_algorithm: str = "HS256"
     jwt_access_token_ttl_minutes: int = 60
+    #: Ceiling on how long *activity* may keep extending one session before real
+    #: re-authentication. Sliding renewal (see `renew_access_token`) stops here.
+    jwt_session_absolute_ttl_minutes: int = 720
     jwt_issuer: str = "tablescope-platform-api"
     jwt_audience: str = "tablescope-clients"
 
@@ -82,8 +85,67 @@ class Settings(BaseSettings):
     tablescope_ai_api_url: str = ""
     tablescope_ai_signing_secret: str = ""
     tablescope_ai_default_scope: str = "project"
+
+    # --- LLM Framework (offline Ollama model deployment) ---
+    # Master switch. When false, /api/llm-framework/* returns 503 and the UI
+    # is hidden. Phase 1 is read-only inventory, so enabling it only exposes
+    # runtime/installation/routing data, not model downloads or activation.
+    llm_framework_enabled: bool = True
+    # Phase 2: enable the Hugging Face catalog search and staging flow.
+    llm_framework_hf_catalog_enabled: bool = True
+    # Phase 1 restricts the catalog to pre-quantized GGUF artifacts. Setting
+    # this to true blocks any FP16 / safetensors / conversion pipeline paths.
+    llm_model_catalog_gguf_only: bool = True
+    # Allow staging and activation of a verified artifact on a runtime target.
+    # Kept off until the deployment agent and canary pipeline are wired.
+    llm_deployment_enabled: bool = False
+    # Require two distinct platform administrators to approve a production
+    # model replacement before activation.
+    llm_two_person_approval_required: bool = True
+    # Automatically roll back an activation that fails its stabilization window.
+    llm_auto_rollback_enabled: bool = True
+    # Max bytes allowed in the model vault on the app server. The preflight
+    # check uses twice the artifact size plus reserve.
+    llm_model_vault_max_bytes: int = 107_374_182_400  # 100 GiB
+    # Path to the model vault on the app server (/opt/tablescope is mounted
+    # into platform-api, platform-api-worker, and the deployment agent).
+    llm_model_vault_path: str = "/opt/tablescope/model-vault"
+    # Ed25519/RSA signing key used to sign the artifact manifest. The public
+    # key is baked into the deployment agent so it never has to fetch it.
+    llm_manifest_signing_key_path: str = "/opt/tablescope/model-vault/signing.pem"
+    # Public-key fingerprint of the trusted manifest-signing key. The agent
+    # verifies artifacts against a key baked into its image, not fetched from
+    # the app server at deploy time.
+    llm_manifest_signing_key_fingerprint: str = ""
+    # Optional Hugging Face token for accessing gated models.
+    llm_huggingface_token: str = ""
+    # Phase 4: allow dynamic routing profile changes and activation.
+    llm_dynamic_routing_enabled: bool = False
+    # Phase 5: enable embedding-model re-index migrations (dual collection,
+    # re-embed, recall comparison, cut-over). Disabled until the AI server
+    # vector-store backend is wired.
+    llm_embedding_migration_enabled: bool = False
+    # Phase 6: enable FP16 / safetensors -> GGUF conversion. The converter must
+    # be a sandboxed command or container; the platform-api never installs the
+    # conversion toolchain itself.
+    llm_fp16_conversion_enabled: bool = False
+    llm_fp16_converter_command: str = ""
+    llm_embedding_recall_threshold: float = 0.95
+    # URL of the deployment agent on the AI host. If empty, deployment tasks
+    # fail closed with a descriptive quarantine reason.
+    llm_deployment_agent_url: str = ""
+    # Internal Ollama API URL used by the deployment agent and preflight checks.
+    llm_ollama_url: str = "http://ollama:11434"
+    # Path on the AI host where GGUF files are installed before ollama create.
+    # The agent writes here and Ollama's Modelfile references this path.
+    llm_model_install_path: str = "/mnt/tablescope-ai/ollama/models/imported"
+    # Number of Ollama model slots reserved for the previous (rollback) model.
+    llm_ollama_rollback_slots: int = 1
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
+    # Business Context (Goal Setting) workspace feature flags.
+    business_context_v2_enabled: bool = True
+    business_context_kpi_matching_enabled: bool = True
     # Max projects analysed concurrently by the Home intelligence SSE stream.
     # Bounds AI/Ollama load so a large project count doesn't flood the server
     # and silently time out into empty "0 insights" results.
@@ -154,7 +216,7 @@ class Settings(BaseSettings):
     # When enabled, a successful Knowledge Graph build enqueues a debounced
     # background re-analysis of that project (attributed to the project
     # owner) so the cache is warm before any user opens Home.
-    business_insight_event_refresh_enabled: bool = False
+    business_insight_event_refresh_enabled: bool = True
     # Safety-net freshness bound for cached results, covering data paths no
     # graph fingerprint watches. A cached result older than this is rebuilt
     # even if its KG version still matches.
@@ -168,7 +230,7 @@ class Settings(BaseSettings):
     # When enabled, a successful Knowledge Graph build (or document/reference
     # change) marks the project insight snapshot stale and enqueues a debounced
     # rebuild. The rebuild runs as the snapshot owner and refreshes the cache.
-    project_insight_event_rebuild_enabled: bool = False
+    project_insight_event_rebuild_enabled: bool = True
     # Maximum number of users who already have a Project Insight snapshot that a
     # background rebuild will refresh for one project.
     project_insight_max_rebuild_users: int = 10
@@ -267,6 +329,49 @@ class Settings(BaseSettings):
         default="support@tablescope.cloud",
         validation_alias=AliasChoices("SUPPORT_EMAIL", "TABLESCOPE_SUPPORT_EMAIL"),
     )
+
+    # --- File acquisition (Data Source Builder URL / UNC-SMB imports) ---
+    # Independent runtime flags so either acquisition method can be rolled
+    # back without touching local upload, database, or SaaS behaviour.
+    file_import_url_enabled: bool = True
+    file_import_network_enabled: bool = False
+    file_import_max_bytes: int = 104_857_600  # 100 MB
+    file_import_connect_timeout_seconds: float = 10.0
+    file_import_read_timeout_seconds: float = 60.0
+    file_import_total_timeout_seconds: float = 300.0
+    file_import_max_redirects: int = 5
+    file_import_max_concurrent_fetches: int = 4
+    file_import_quarantine_path: str = "/opt/tablescope/quarantine"
+    file_import_job_ttl_seconds: int = 86_400
+    # Comma-separated host suffix allowlist. Empty means "any public host".
+    file_import_allowed_url_domains: str = ""
+    # Comma-separated SMB host allowlist. Empty blocks every SMB host, so
+    # network import fails closed until operations approves specific hosts.
+    file_import_allowed_smb_hosts: str = ""
+    # Comma-separated CIDR allowlist for internal callers of /internal/file-proxy.
+    # The tenant Docker subnet is checked first; this is an extra operator bypass.
+    file_import_network_source_cidrs: str = ""
+    # Plain http:// fetches. Off by default; HTTPS-only is the contract.
+    file_import_allow_http: bool = False
+    # Malware scanning is real infrastructure (a private ClamAV service with
+    # operator-managed offline signature updates), not a toggle over an
+    # existing capability. When enabled and the scanner is unreachable the
+    # import fails closed unless fail_open is explicitly turned on.
+    file_import_malware_scan_enabled: bool = False
+    file_import_malware_scan_host: str = "clamav"
+    file_import_malware_scan_port: int = 3310
+    file_import_malware_scan_timeout_seconds: float = 30.0
+    file_import_malware_scan_fail_open: bool = False
+
+    @property
+    def file_import_url_domain_allowlist(self) -> list[str]:
+        raw = self.file_import_allowed_url_domains
+        return [d.strip().lower().lstrip(".") for d in raw.split(",") if d.strip()]
+
+    @property
+    def file_import_smb_host_allowlist(self) -> list[str]:
+        raw = self.file_import_allowed_smb_hosts
+        return [h.strip().lower() for h in raw.split(",") if h.strip()]
 
     @property
     def email_configured(self) -> bool:

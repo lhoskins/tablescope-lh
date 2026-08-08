@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconArrowLeft,
@@ -14,13 +14,17 @@ import { cn } from "@/lib/cn";
 import { NewProjectDialog } from "@/components/tablescope/project/new-project-dialog";
 import { listMyDataSources } from "@/lib/api/data-source-builder";
 import { useBuilderStore } from "@/lib/stores/data-source-builder-store";
-import { ActiveSourcesTable } from "./active-sources-table";
 import { buildExistingSources } from "./existing-sources";
-import { AiUploadDropzone } from "./ai-upload-dropzone";
 import { AvailableSources } from "./available-sources";
 import { ConfirmationModal } from "./confirmation-modal";
-import { ConnectedDatabases } from "./connected-databases";
 import { ProjectsColumn } from "./projects-column";
+import { AiUploadDropzone } from "./ai-upload-dropzone";
+import { UrlImportForm } from "./url-import-form";
+import { SourceMethodTabs, type SourceTab } from "./source-method-tabs";
+import { DataSourceSelectionSection } from "./data-source-selection-section";
+import { ConnectedSourcesSection } from "./connected-sources-section";
+import { DatabaseConnectionsPanel } from "./database-connections-panel";
+import { NetworkFileConnectionsPanel } from "./network-file-connections-panel";
 
 type Step = 1 | 2;
 
@@ -68,10 +72,48 @@ function Stepper({ step }: { step: Step }) {
   );
 }
 
+function UploadFilePanel({ projectId }: { projectId?: number }) {
+  return (
+    <div className="rounded-xl border border-line-tertiary p-4">
+      <h3 className="text-h3 text-ink-primary">Upload file</h3>
+      <p className="mt-0.5 text-small text-ink-tertiary">
+        Drag and drop a file or click to browse. Supported structured and
+        document formats are classified automatically.
+      </p>
+      <div className="mt-3">
+        <AiUploadDropzone projectId={projectId} />
+      </div>
+    </div>
+  );
+}
+
+function FileUrlPanel() {
+  return (
+    <div className="rounded-xl border border-line-tertiary p-4">
+      <h3 className="text-h3 text-ink-primary">Import from URL</h3>
+      <p className="mt-0.5 text-small text-ink-tertiary">
+        Provide a secure HTTPS URL. The platform fetches, validates, and
+        profiles the file.
+      </p>
+      <div className="mt-3 max-w-xl">
+        <UrlImportForm />
+      </div>
+    </div>
+  );
+}
+
+
+
 export function DataSourceBuilderWorkspace({
   tenantName,
+  initialProjectId,
+  initialSourceTab,
 }: {
   tenantName: string;
+  /** Pre-select this project in Step 2 (arrived from a project-scoped entry point). */
+  initialProjectId?: string;
+  /** Initial Step 1 tab from ?sourceTab= or legacy ?intent=. */
+  initialSourceTab?: SourceTab;
 }) {
   const queryClient = useQueryClient();
   const ensureTenant = useBuilderStore((s) => s.ensureTenant);
@@ -79,23 +121,56 @@ export function DataSourceBuilderWorkspace({
   const createdKeys = useBuilderStore((s) => s.createdKeys);
   const getPendingChanges = useBuilderStore((s) => s.getPendingChanges);
   const sources = useBuilderStore((s) => s.sources);
-  // Subscribe to projects so the summary + Apply button recompute when a
-  // project is toggled or a new project is created.
   const projects = useBuilderStore((s) => s.projects);
+  const toggleProject = useBuilderStore((s) => s.toggleProject);
 
   const [step, setStep] = useState<Step>(1);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [sourceTab, setSourceTabState] = useState<SourceTab>(
+    initialSourceTab ?? "upload",
+  );
 
-  // The session persists across refreshes (localStorage); rehydrate after mount
-  // (storage is skipped during SSR) then drop it only when the tenant changes.
+  const setSourceTab = (tab: SourceTab) => {
+    setSourceTabState(tab);
+    const url = new URL(window.location.href);
+    url.searchParams.set("sourceTab", tab);
+    window.history.replaceState({}, "", url.toString());
+  };
+
+  // Keep browser Back/Forward in sync with the active tab.
   useEffect(() => {
+    const applyUrlTab = () => {
+      const tab = new URLSearchParams(window.location.search).get("sourceTab");
+      if (
+        tab === "upload" ||
+        tab === "url" ||
+        tab === "database" ||
+        tab === "network"
+      ) {
+        setSourceTabState(tab);
+      }
+    };
+    window.addEventListener("popstate", applyUrlTab);
+    return () => window.removeEventListener("popstate", applyUrlTab);
+  }, []);
+
+  const preselected = useRef(false);
+  useEffect(() => {
+    if (!initialProjectId || preselected.current || step !== 2) return;
+    const row = projects.find((p) => p.projectId === initialProjectId);
+    if (row && !row.isToggled) {
+      preselected.current = true;
+      toggleProject(initialProjectId);
+    }
+  }, [initialProjectId, projects, step, toggleProject]);
+
+  useEffect(() => {
+    if (!tenantName) return;
     void useBuilderStore.persist.rehydrate();
     ensureTenant(tenantName);
   }, [ensureTenant, tenantName]);
 
-  // Load every data source the caller has already created (irrespective of
-  // project) so they show in the Active list after a refresh.
   const { data: myDataSources } = useQuery({
     queryKey: ["builder", "my-datasources"],
     queryFn: listMyDataSources,
@@ -107,12 +182,9 @@ export function DataSourceBuilderWorkspace({
 
   const stepHint =
     step === 1
-      ? "Step 1 of 2: Create data sources from files or connected databases."
+      ? "Step 1 of 2: Create data sources from uploads, URLs, databases, SaaS apps, or network shares."
       : "Step 2 of 2: Assign selected data sources to project(s).";
 
-  // Recompute whenever sources or projects change (toggles/new project).
-  // getPendingChanges reads store state internally, so the linter can't see
-  // that sources/projects are real dependencies.
   const pending = useMemo(
     () => getPendingChanges(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -128,9 +200,10 @@ export function DataSourceBuilderWorkspace({
   ).size;
   const canApply = pending.adding.length > 0 || pending.removing.length > 0;
 
+  const numericProjectId = initialProjectId ? Number(initialProjectId) : undefined;
+
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col">
-      {/* Stepper header */}
       <div className="shrink-0 border-b border-line-tertiary pb-3">
         <Stepper step={step} />
         <p className="mt-1.5 text-small text-ink-tertiary">{stepHint}</p>
@@ -138,17 +211,23 @@ export function DataSourceBuilderWorkspace({
 
       {step === 1 ? (
         <>
+          <div className="mt-4 shrink-0">
+            <SourceMethodTabs activeTab={sourceTab} onChange={setSourceTab} />
+          </div>
+
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-4">
-            <AiUploadDropzone />
+            {sourceTab === "upload" && (
+              <UploadFilePanel projectId={numericProjectId} />
+            )}
+            {sourceTab === "url" && <FileUrlPanel />}
+            {sourceTab === "database" && (
+              <DatabaseConnectionsPanel projectId={initialProjectId} />
+            )}
+            {sourceTab === "network" && <NetworkFileConnectionsPanel />}
 
-            <div>
-              <h3 className="mb-2 text-caption font-semibold uppercase tracking-wide text-ink-tertiary">
-                Connected Databases
-              </h3>
-              <ConnectedDatabases />
-            </div>
+            <ConnectedSourcesSection />
 
-            <ActiveSourcesTable />
+            <DataSourceSelectionSection projectId={initialProjectId} />
           </div>
 
           <div className="flex shrink-0 items-center justify-end border-t border-line-tertiary pt-3">
@@ -170,7 +249,6 @@ export function DataSourceBuilderWorkspace({
             <ProjectsColumn onNewProject={() => setNewProjectOpen(true)} />
           </div>
 
-          {/* Summary strip */}
           <div className="shrink-0 border-t border-line-tertiary py-2 text-caption text-ink-secondary">
             <span className="font-medium text-brand-700">
               {sourcesAdding} data sources adding to {projectsAddingTo} projects

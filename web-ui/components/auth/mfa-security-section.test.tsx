@@ -29,6 +29,7 @@ describe("MfaSecuritySection", () => {
     getMfaStatus.mockResolvedValue({
       role: "admin",
       roleRequiresMfa: true,
+      tenantRequiresMfa: false,
       aal: "aal2",
       mfaSatisfied: true,
       hasVerifiedFactor: true,
@@ -48,6 +49,7 @@ describe("MfaSecuritySection", () => {
     getMfaStatus.mockResolvedValue({
       role: "admin",
       roleRequiresMfa: true,
+      tenantRequiresMfa: false,
       aal: "aal1",
       mfaSatisfied: false,
       hasVerifiedFactor: false,
@@ -57,7 +59,7 @@ describe("MfaSecuritySection", () => {
     });
     render(<MfaSecuritySection />);
     await waitFor(() =>
-      expect(screen.getByText(/role requires sms verification/i)).toBeTruthy(),
+      expect(screen.getByText(/sms verification is required/i)).toBeTruthy(),
     );
     expect(
       screen.getByRole("button", { name: /add phone number/i }),

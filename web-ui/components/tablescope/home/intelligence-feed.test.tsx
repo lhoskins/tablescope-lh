@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { IntelligenceFeed } from "./intelligence-feed";
 import type { FilterableProject } from "./intelligence-strip";
@@ -22,6 +22,9 @@ vi.mock("@/lib/api/home-intelligence", async (importActual) => ({
 
 vi.mock("@/lib/api/insight-feedback", () => ({
   batchGetInsightFeedback: vi.fn().mockResolvedValue({ items: [] }),
+  batchGetInsightGovernance: vi.fn().mockResolvedValue({ items: [] }),
+  deleteInsightFeedback: vi.fn().mockResolvedValue({}),
+  respondToInsightFeedbackRequest: vi.fn().mockResolvedValue({}),
 }));
 
 const RISK: InsightCard = {
@@ -204,11 +207,16 @@ describe("IntelligenceFeed", () => {
       },
     });
     renderFeed();
-    fireEvent.click(screen.getByRole("button", { name: /Trends/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Trends/ }));
     await screen.findByText("Spend concentrated");
-    fireEvent.click(screen.getByRole("button", { name: /Explain/i }));
-    expect(await screen.findByText("Analytical method: Pareto analysis")).toBeTruthy();
-    expect(screen.getByText("Quality: reliable")).toBeTruthy();
+    const card = screen.getByText("Spend concentrated").closest("article") as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: "Explain" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByText("Analysis details", { selector: "summary" }),
+    );
+    expect(await within(dialog).findByText("Analytical method: Pareto analysis")).toBeTruthy();
+    expect(within(dialog).getByText("Quality: reliable")).toBeTruthy();
   });
 
   it("does not re-request intelligence on toggle", async () => {
@@ -216,10 +224,10 @@ describe("IntelligenceFeed", () => {
     await screen.findByRole("button", { name: /Risks/ });
     const before = streamHomeIntelligence.mock.calls.length;
 
-    fireEvent.click(screen.getByRole("button", { name: /Trends/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Trends/ }));
     expect(streamHomeIntelligence.mock.calls.length).toBe(before);
 
-    fireEvent.click(screen.getByRole("button", { name: /Opportunities/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Opportunities/ }));
     expect(streamHomeIntelligence.mock.calls.length).toBe(before);
   });
 
@@ -325,5 +333,56 @@ describe("IntelligenceFeed", () => {
         screen.queryByText("Cross-project synthesis body."),
       ).toBeNull(),
     );
+  });
+
+  it("renders every card in exactly one bucket, including shape and unknown types", async () => {
+    const shapeCard: InsightCard = {
+      ...RISK,
+      id: "shape-1",
+      insightType: "shape_scatter",
+      severity: "informational",
+      title: "Scatter of uptime vs incidents",
+    };
+    const futureCard: InsightCard = {
+      ...RISK,
+      id: "future-1",
+      insightType: "future_type",
+      severity: "informational",
+      title: "Future insight",
+    };
+    const snapshot = {
+      ...SNAPSHOT,
+      results: [
+        {
+          ...SNAPSHOT.results[0],
+          insights: [RISK, TREND, OPPORTUNITY, shapeCard, futureCard],
+        },
+      ],
+    };
+    renderFeed({ snapshot });
+
+    const buckets = [
+      { name: /Risks/, title: "SLA breach" },
+      { name: /Trends/, title: "Spend trending up" },
+      { name: /Opportunities/, title: "Consolidate suppliers" },
+      { name: /Deeper analysis/, title: "Scatter of uptime vs incidents" },
+    ];
+    for (const { name, title } of buckets) {
+      fireEvent.click(await screen.findByRole("button", { name }));
+      expect(await screen.findByText(title)).toBeTruthy();
+    }
+    // Future should also land in Deeper analysis.
+    expect(screen.getByText("Future insight")).toBeTruthy();
+
+    // Each card must appear exactly once across all buckets.
+    for (const title of [
+      "SLA breach",
+      "Spend trending up",
+      "Consolidate suppliers",
+      "Scatter of uptime vs incidents",
+      "Future insight",
+    ]) {
+      expect(screen.getAllByText(title).length).toBe(1);
+    }
   });
 });

@@ -9,11 +9,15 @@ const SOURCE_TYPES = new Set<SourceType>([
   "mysql",
   "snowflake",
   "bigquery",
+  "servicenow",
+  "salesforce",
+  "hubspot",
+  "quickbooks",
 ]);
 
-function toSourceType(dbType: string | null | undefined): SourceType {
-  return dbType && SOURCE_TYPES.has(dbType as SourceType)
-    ? (dbType as SourceType)
+function toSourceType(value: string | null | undefined): SourceType {
+  return value && SOURCE_TYPES.has(value as SourceType)
+    ? (value as SourceType)
     : "postgresql";
 }
 
@@ -39,6 +43,8 @@ export function buildExistingSources(items: MyDataSource[]): SessionSource[] {
         backendId: item.id,
         existing: true,
         projectId: item.projectId,
+        createdAt: item.createdAt,
+        loadedAt: item.createdAt,
         fileMetadata: {
           name: item.name,
           rows: 0,
@@ -55,9 +61,13 @@ export function buildExistingSources(items: MyDataSource[]): SessionSource[] {
         ],
       };
     }
+    const isSaaS = item.sourceType === "saas_object";
+    const sourceType = isSaaS
+      ? toSourceType(item.connectorType)
+      : toSourceType(item.dbType);
     return {
       id: `existing-db-${item.id}`,
-      sourceType: toSourceType(item.dbType),
+      sourceType,
       displayName: item.name,
       connectionConfig: {
         db_type: item.dbType ?? "",
@@ -65,10 +75,13 @@ export function buildExistingSources(items: MyDataSource[]): SessionSource[] {
       },
       status: "ready",
       isFileUpload: false,
+      isSaaS,
       viewName: item.viewName,
       backendId: item.id,
       existing: true,
       projectId: item.projectId,
+      createdAt: item.createdAt,
+      loadedAt: item.createdAt,
       tables: [
         {
           // Show the data-source name (not the raw table name) in the lists.

@@ -36,6 +36,13 @@ class Tenant(TimestampMixin, Base):
         String(255), unique=True, nullable=True, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # When true, every member of the tenant (not just admin/privileged roles) must
+    # complete SMS MFA before accessing tenant data. Admins are always required
+    # when the platform MFA master switch is on; this flag extends that requirement
+    # to all roles. Default off so it is an explicit tenant decision.
+    enforce_2fa: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
     # When true, only users whose email domain is on the allowed list (plus the
     # tenant owner/admins) may sign up, be invited, receive mail, or sign in.
     allowed_domains_enabled: Mapped[bool] = mapped_column(

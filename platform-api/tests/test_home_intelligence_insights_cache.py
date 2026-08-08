@@ -10,7 +10,7 @@ from app.auth.jwt import create_access_token
 
 @pytest_asyncio.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
     from app.services.supabase_auth_service import SupabaseAuthService, SupabaseUser
 
     class _FakeSupabase(SupabaseAuthService):
@@ -75,7 +75,7 @@ async def project(client, service_headers):
 async def test_home_insights_caches_result(client, db_engine, service_headers, project, monkeypatch):
     project_id, headers = project
 
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suggestions as hir
     monkeypatch.setattr(
         hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
     )
@@ -112,7 +112,7 @@ async def test_home_insights_caches_result(client, db_engine, service_headers, p
 async def test_home_insights_refresh_bypasses_cache(client, db_engine, service_headers, project, monkeypatch):
     project_id, headers = project
 
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suggestions as hir
     monkeypatch.setattr(
         hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
     )
@@ -157,7 +157,7 @@ async def test_home_insights_refresh_bypasses_cache(client, db_engine, service_h
 async def test_home_insights_stale_fallback_on_error(client, db_engine, service_headers, project, monkeypatch):
     project_id, headers = project
 
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suggestions as hir
     monkeypatch.setattr(
         hir, "SessionLocal", async_sessionmaker(db_engine, expire_on_commit=False)
     )

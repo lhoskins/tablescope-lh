@@ -193,11 +193,14 @@ async def acquire_tenant_slot(tenant_id: int, *, cap: int) -> bool:
     r = get_redis()
     key = _tenant_slots_key(tenant_id)
     held = await r.incr(key)
-    # Refresh the TTL each acquire so a leaked counter self-heals.
-    await r.expire(key, _TENANT_SLOT_TTL_SECONDS)
     if held > max(1, cap):
         await r.decr(key)
         return False
+    # Refresh the TTL only on a successful acquire. Refreshing it on a
+    # rejected attempt too would let a leaked/stuck counter's TTL be
+    # re-armed forever by the very retries it's blocking, defeating the
+    # self-heal this TTL exists for.
+    await r.expire(key, _TENANT_SLOT_TTL_SECONDS)
     return True
 
 

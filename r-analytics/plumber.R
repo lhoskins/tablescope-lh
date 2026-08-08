@@ -37,11 +37,22 @@ run_method <- function(req) {
     ))
   }
 
-  df <- tryCatch(as.data.frame(do.call(rbind, rows), stringsAsFactors = FALSE), error = function(e) NULL)
-  if (is.null(df)) {
+  df_result <- tryCatch({
+    if (is.matrix(rows) || is.data.frame(rows)) {
+      as.data.frame(rows, stringsAsFactors = FALSE)
+    } else {
+      m <- do.call(rbind, lapply(rows, function(r) {
+        v <- unlist(r)
+        if (is.null(v)) v <- NA
+        v
+      }))
+      as.data.frame(m, stringsAsFactors = FALSE)
+    }
+  }, error = function(e) list(error_message = conditionMessage(e)))
+  if (is.list(df_result) && !is.null(df_result$error_message)) {
     return(list(
       status = "error",
-      reason = paste("data frame conversion failed:", conditionMessage(e)),
+      reason = paste("data frame conversion failed:", df_result$error_message),
       results = list(),
       assumptions = list(),
       caveats = list(),
@@ -53,6 +64,7 @@ run_method <- function(req) {
       warnings = list()
     ))
   }
+  df <- df_result
   if (!is.null(columns) && length(columns) == ncol(df)) {
     names(df) <- columns
   }
@@ -115,4 +127,15 @@ function(req, res) {
 #* @get /health
 function() {
   list(status = "ok")
+}
+
+#* @get /methods
+function() {
+  methods <- names(Filter(is.function, as.list(.GlobalEnv)))
+  # exclude internal helpers / plumber entrypoints
+  methods <- setdiff(methods, c("run_method", "source_files", "%||%", "safe_numeric", "finite_only",
+                                 "finite_or_null", "ok_result", "insufficient", "error_result",
+                                 "ordered_value", "parse_time", "time_indexed_value",
+                                 "period_compare"))
+  list(methods = methods)
 }

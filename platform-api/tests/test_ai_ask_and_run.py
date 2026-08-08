@@ -43,7 +43,7 @@ class _FakeEmail:
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
@@ -118,7 +118,11 @@ def test_suggest_visualization_bar_for_category_and_numeric():
 def test_suggest_visualization_line_for_time_and_numeric():
     viz = _suggest_visualization(
         ["month", "revenue"],
-        [{"month": "2024-01", "revenue": 10}, {"month": "2024-02", "revenue": 20}],
+        [
+            {"month": "2024-01", "revenue": 10},
+            {"month": "2024-02", "revenue": 20},
+            {"month": "2024-03", "revenue": 30},
+        ],
     )
     assert viz["type"] == "line"
     assert viz["xField"] == "month"
@@ -139,7 +143,10 @@ async def test_ask_and_run_success(client, service_headers, monkeypatch):
     async def fake_execute(session, context, project_id, sql):
         return {
             "columns": ["supplier", "defects"],
-            "rows": [{"supplier": "A", "defects": 3}],
+            "rows": [
+                {"supplier": "A", "defects": 3},
+                {"supplier": "B", "defects": 5},
+            ],
         }
 
     monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
@@ -154,7 +161,10 @@ async def test_ask_and_run_success(client, service_headers, monkeypatch):
     body = r.json()
     assert body["status"] == "success"
     assert body["sql"] == "SELECT supplier, defects FROM q"
-    assert body["rows"] == [{"supplier": "A", "defects": 3}]
+    assert body["rows"] == [
+        {"supplier": "A", "defects": 3},
+        {"supplier": "B", "defects": 5},
+    ]
     assert body["suggestedVisualization"]["type"] == "bar"
 
 
@@ -584,7 +594,11 @@ async def test_generate_query_preview_success(
     async def fake_execute(session, context, project_id, sql):
         return {
             "columns": ["month", "revenue"],
-            "rows": [{"month": "2024-01", "revenue": 10}],
+            "rows": [
+                {"month": "2024-01", "revenue": 10},
+                {"month": "2024-02", "revenue": 20},
+                {"month": "2024-03", "revenue": 30},
+            ],
         }
 
     monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)

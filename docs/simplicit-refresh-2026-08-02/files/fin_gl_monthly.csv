@@ -1,0 +1,417 @@
+Month,AccountNumber,AccountName,AmountUSD
+2024-01-01,4000,Product Revenue,5254502.45
+2024-01-01,4100,Service Revenue,583833.6
+2024-01-01,5000,Direct Material,921688.11
+2024-01-01,5100,Direct Labor,763106.29
+2024-01-01,5200,Manufacturing Overhead,634811.61
+2024-01-01,5300,Scrap & Rework,95580.43
+2024-01-01,6000,Engineering Labor,732994.28
+2024-01-01,6100,Non-Recurring Engineering,293197.71
+2024-01-01,6200,Sales & Marketing,291916.8
+2024-01-01,6300,General & Administrative,350300.16
+2024-01-01,6400,IT & Systems,116766.72
+2024-01-01,6500,Facilities & EHS,87575.04
+2024-01-01,7000,Depreciation,175150.08
+2024-02-01,4000,Product Revenue,5298498.39
+2024-02-01,4100,Service Revenue,588722.04
+2024-02-01,5000,Direct Material,1425687.6
+2024-02-01,5100,Direct Labor,937959.11
+2024-02-01,5200,Manufacturing Overhead,654635.11
+2024-02-01,5300,Scrap & Rework,110801.93
+2024-02-01,6000,Engineering Labor,623441.34
+2024-02-01,6100,Non-Recurring Engineering,249376.54
+2024-02-01,6200,Sales & Marketing,294361.02
+2024-02-01,6300,General & Administrative,353233.23
+2024-02-01,6400,IT & Systems,117744.41
+2024-02-01,6500,Facilities & EHS,88308.31
+2024-02-01,7000,Depreciation,176616.61
+2024-03-01,4000,Product Revenue,5497737.98
+2024-03-01,4100,Service Revenue,610859.78
+2024-03-01,5000,Direct Material,1183202.28
+2024-03-01,5100,Direct Labor,903026.15
+2024-03-01,5200,Manufacturing Overhead,729916.67
+2024-03-01,5300,Scrap & Rework,98267.79
+2024-03-01,6000,Engineering Labor,665964.68
+2024-03-01,6100,Non-Recurring Engineering,266385.87
+2024-03-01,6200,Sales & Marketing,305429.89
+2024-03-01,6300,General & Administrative,366515.87
+2024-03-01,6400,IT & Systems,122171.96
+2024-03-01,6500,Facilities & EHS,91628.97
+2024-03-01,7000,Depreciation,183257.93
+2024-04-01,4000,Product Revenue,5518743.33
+2024-04-01,4100,Service Revenue,613193.7
+2024-04-01,5000,Direct Material,1286648.47
+2024-04-01,5100,Direct Labor,846242.52
+2024-04-01,5200,Manufacturing Overhead,730945.87
+2024-04-01,5300,Scrap & Rework,182333.24
+2024-04-01,6000,Engineering Labor,544572.03
+2024-04-01,6100,Non-Recurring Engineering,217828.81
+2024-04-01,6200,Sales & Marketing,306596.85
+2024-04-01,6300,General & Administrative,367916.22
+2024-04-01,6400,IT & Systems,122638.74
+2024-04-01,6500,Facilities & EHS,91979.06
+2024-04-01,7000,Depreciation,183958.11
+2024-05-01,4000,Product Revenue,5303236.63
+2024-05-01,4100,Service Revenue,589248.51
+2024-05-01,5000,Direct Material,1431524.87
+2024-05-01,5100,Direct Labor,919080.0
+2024-05-01,5200,Manufacturing Overhead,656273.16
+2024-05-01,5300,Scrap & Rework,146027.27
+2024-05-01,6000,Engineering Labor,794252.09
+2024-05-01,6100,Non-Recurring Engineering,317700.84
+2024-05-01,6200,Sales & Marketing,294624.26
+2024-05-01,6300,General & Administrative,353549.11
+2024-05-01,6400,IT & Systems,117849.7
+2024-05-01,6500,Facilities & EHS,88387.28
+2024-05-01,7000,Depreciation,176774.55
+2024-06-01,4000,Product Revenue,5312698.91
+2024-06-01,4100,Service Revenue,590299.88
+2024-06-01,5000,Direct Material,1294510.04
+2024-06-01,5100,Direct Labor,966300.97
+2024-06-01,5200,Manufacturing Overhead,567519.83
+2024-06-01,5300,Scrap & Rework,153532.36
+2024-06-01,6000,Engineering Labor,686324.77
+2024-06-01,6100,Non-Recurring Engineering,274529.91
+2024-06-01,6200,Sales & Marketing,295149.94
+2024-06-01,6300,General & Administrative,354179.93
+2024-06-01,6400,IT & Systems,118059.98
+2024-06-01,6500,Facilities & EHS,88544.98
+2024-06-01,7000,Depreciation,177089.96
+2024-07-01,4000,Product Revenue,5316780.74
+2024-07-01,4100,Service Revenue,590753.42
+2024-07-01,5000,Direct Material,1217270.59
+2024-07-01,5100,Direct Labor,828147.29
+2024-07-01,5200,Manufacturing Overhead,706874.75
+2024-07-01,5300,Scrap & Rework,176142.47
+2024-07-01,6000,Engineering Labor,848190.23
+2024-07-01,6100,Non-Recurring Engineering,339276.09
+2024-07-01,6200,Sales & Marketing,295376.71
+2024-07-01,6300,General & Administrative,354452.05
+2024-07-01,6400,IT & Systems,118150.68
+2024-07-01,6500,Facilities & EHS,88613.01
+2024-07-01,7000,Depreciation,177226.02
+2024-08-01,4000,Product Revenue,5268636.27
+2024-08-01,4100,Service Revenue,585404.03
+2024-08-01,5000,Direct Material,1138814.96
+2024-08-01,5100,Direct Labor,767281.99
+2024-08-01,5200,Manufacturing Overhead,549860.92
+2024-08-01,5300,Scrap & Rework,171093.98
+2024-08-01,6000,Engineering Labor,763329.55
+2024-08-01,6100,Non-Recurring Engineering,305331.82
+2024-08-01,6200,Sales & Marketing,292702.02
+2024-08-01,6300,General & Administrative,351242.42
+2024-08-01,6400,IT & Systems,117080.81
+2024-08-01,6500,Facilities & EHS,87810.6
+2024-08-01,7000,Depreciation,175621.21
+2024-09-01,4000,Product Revenue,5465367.81
+2024-09-01,4100,Service Revenue,607263.09
+2024-09-01,5000,Direct Material,1634797.9
+2024-09-01,5100,Direct Labor,853725.99
+2024-09-01,5200,Manufacturing Overhead,648919.97
+2024-09-01,5300,Scrap & Rework,140737.06
+2024-09-01,6000,Engineering Labor,562087.2
+2024-09-01,6100,Non-Recurring Engineering,224834.88
+2024-09-01,6200,Sales & Marketing,303631.55
+2024-09-01,6300,General & Administrative,364357.85
+2024-09-01,6400,IT & Systems,121452.62
+2024-09-01,6500,Facilities & EHS,91089.46
+2024-09-01,7000,Depreciation,182178.93
+2024-10-01,4000,Product Revenue,5676720.8
+2024-10-01,4100,Service Revenue,630746.76
+2024-10-01,5000,Direct Material,1569727.38
+2024-10-01,5100,Direct Labor,889044.77
+2024-10-01,5200,Manufacturing Overhead,569977.99
+2024-10-01,5300,Scrap & Rework,127636.0
+2024-10-01,6000,Engineering Labor,733847.76
+2024-10-01,6100,Non-Recurring Engineering,293539.1
+2024-10-01,6200,Sales & Marketing,315373.38
+2024-10-01,6300,General & Administrative,378448.05
+2024-10-01,6400,IT & Systems,126149.35
+2024-10-01,6500,Facilities & EHS,94612.01
+2024-10-01,7000,Depreciation,189224.03
+2024-11-01,4000,Product Revenue,5872448.38
+2024-11-01,4100,Service Revenue,652494.26
+2024-11-01,5000,Direct Material,1817058.97
+2024-11-01,5100,Direct Labor,926718.26
+2024-11-01,5200,Manufacturing Overhead,654206.64
+2024-11-01,5300,Scrap & Rework,155562.42
+2024-11-01,6000,Engineering Labor,582189.57
+2024-11-01,6100,Non-Recurring Engineering,232875.83
+2024-11-01,6200,Sales & Marketing,326247.13
+2024-11-01,6300,General & Administrative,391496.56
+2024-11-01,6400,IT & Systems,130498.85
+2024-11-01,6500,Facilities & EHS,97874.14
+2024-11-01,7000,Depreciation,195748.28
+2024-12-01,4000,Product Revenue,5964791.85
+2024-12-01,4100,Service Revenue,662754.65
+2024-12-01,5000,Direct Material,1042562.44
+2024-12-01,5100,Direct Labor,966588.31
+2024-12-01,5200,Manufacturing Overhead,769108.89
+2024-12-01,5300,Scrap & Rework,111839.74
+2024-12-01,6000,Engineering Labor,814849.98
+2024-12-01,6100,Non-Recurring Engineering,325939.99
+2024-12-01,6200,Sales & Marketing,331377.33
+2024-12-01,6300,General & Administrative,397652.79
+2024-12-01,6400,IT & Systems,132550.93
+2024-12-01,6500,Facilities & EHS,99413.2
+2024-12-01,7000,Depreciation,198826.39
+2025-01-01,4000,Product Revenue,5723887.11
+2025-01-01,4100,Service Revenue,635987.46
+2025-01-01,5000,Direct Material,1426770.85
+2025-01-01,5100,Direct Labor,857051.81
+2025-01-01,5200,Manufacturing Overhead,646602.47
+2025-01-01,5300,Scrap & Rework,107355.79
+2025-01-01,6000,Engineering Labor,811675.51
+2025-01-01,6100,Non-Recurring Engineering,324670.2
+2025-01-01,6200,Sales & Marketing,317993.73
+2025-01-01,6300,General & Administrative,381592.47
+2025-01-01,6400,IT & Systems,127197.49
+2025-01-01,6500,Facilities & EHS,95398.12
+2025-01-01,7000,Depreciation,190796.24
+2025-02-01,4000,Product Revenue,5894160.14
+2025-02-01,4100,Service Revenue,654906.68
+2025-02-01,5000,Direct Material,852285.66
+2025-02-01,5100,Direct Labor,917928.52
+2025-02-01,5200,Manufacturing Overhead,759840.01
+2025-02-01,5300,Scrap & Rework,149752.12
+2025-02-01,6000,Engineering Labor,700361.22
+2025-02-01,6100,Non-Recurring Engineering,280144.49
+2025-02-01,6200,Sales & Marketing,327453.34
+2025-02-01,6300,General & Administrative,392944.01
+2025-02-01,6400,IT & Systems,130981.34
+2025-02-01,6500,Facilities & EHS,98236.0
+2025-02-01,7000,Depreciation,196472.0
+2025-03-01,4000,Product Revenue,6021322.61
+2025-03-01,4100,Service Revenue,669035.85
+2025-03-01,5000,Direct Material,1647774.94
+2025-03-01,5100,Direct Labor,978535.62
+2025-03-01,5200,Manufacturing Overhead,714890.69
+2025-03-01,5300,Scrap & Rework,113990.86
+2025-03-01,6000,Engineering Labor,558172.34
+2025-03-01,6100,Non-Recurring Engineering,223268.94
+2025-03-01,6200,Sales & Marketing,334517.92
+2025-03-01,6300,General & Administrative,401421.51
+2025-03-01,6400,IT & Systems,133807.17
+2025-03-01,6500,Facilities & EHS,100355.38
+2025-03-01,7000,Depreciation,200710.75
+2025-04-01,4000,Product Revenue,6091291.99
+2025-04-01,4100,Service Revenue,676810.22
+2025-04-01,5000,Direct Material,1402726.08
+2025-04-01,5100,Direct Labor,1076845.57
+2025-04-01,5200,Manufacturing Overhead,674236.54
+2025-04-01,5300,Scrap & Rework,132497.08
+2025-04-01,6000,Engineering Labor,665210.56
+2025-04-01,6100,Non-Recurring Engineering,266084.22
+2025-04-01,6200,Sales & Marketing,338405.11
+2025-04-01,6300,General & Administrative,406086.13
+2025-04-01,6400,IT & Systems,135362.04
+2025-04-01,6500,Facilities & EHS,101521.53
+2025-04-01,7000,Depreciation,203043.07
+2025-05-01,4000,Product Revenue,5860584.69
+2025-05-01,4100,Service Revenue,651176.08
+2025-05-01,5000,Direct Material,1168095.11
+2025-05-01,5100,Direct Labor,1058503.3
+2025-05-01,5200,Manufacturing Overhead,611088.6
+2025-05-01,5300,Scrap & Rework,191556.21
+2025-05-01,6000,Engineering Labor,801775.8
+2025-05-01,6100,Non-Recurring Engineering,320710.32
+2025-05-01,6200,Sales & Marketing,325588.04
+2025-05-01,6300,General & Administrative,390705.65
+2025-05-01,6400,IT & Systems,130235.22
+2025-05-01,6500,Facilities & EHS,97676.41
+2025-05-01,7000,Depreciation,195352.82
+2025-06-01,4000,Product Revenue,5593895.66
+2025-06-01,4100,Service Revenue,621543.96
+2025-06-01,5000,Direct Material,1386371.9
+2025-06-01,5100,Direct Labor,957853.21
+2025-06-01,5200,Manufacturing Overhead,653382.36
+2025-06-01,5300,Scrap & Rework,99800.97
+2025-06-01,6000,Engineering Labor,800871.1
+2025-06-01,6100,Non-Recurring Engineering,320348.44
+2025-06-01,6200,Sales & Marketing,310771.98
+2025-06-01,6300,General & Administrative,372926.38
+2025-06-01,6400,IT & Systems,124308.79
+2025-06-01,6500,Facilities & EHS,93231.59
+2025-06-01,7000,Depreciation,186463.19
+2025-07-01,4000,Product Revenue,5509974.2
+2025-07-01,4100,Service Revenue,612219.36
+2025-07-01,5000,Direct Material,1430553.28
+2025-07-01,5100,Direct Labor,976825.39
+2025-07-01,5200,Manufacturing Overhead,618918.86
+2025-07-01,5300,Scrap & Rework,104365.29
+2025-07-01,6000,Engineering Labor,737148.43
+2025-07-01,6100,Non-Recurring Engineering,294859.37
+2025-07-01,6200,Sales & Marketing,306109.68
+2025-07-01,6300,General & Administrative,367331.61
+2025-07-01,6400,IT & Systems,122443.87
+2025-07-01,6500,Facilities & EHS,91832.9
+2025-07-01,7000,Depreciation,183665.81
+2025-08-01,4000,Product Revenue,5726229.16
+2025-08-01,4100,Service Revenue,636247.68
+2025-08-01,5000,Direct Material,1439805.64
+2025-08-01,5100,Direct Labor,928470.76
+2025-08-01,5200,Manufacturing Overhead,679730.21
+2025-08-01,5300,Scrap & Rework,139648.35
+2025-08-01,6000,Engineering Labor,677017.79
+2025-08-01,6100,Non-Recurring Engineering,270807.12
+2025-08-01,6200,Sales & Marketing,318123.84
+2025-08-01,6300,General & Administrative,381748.61
+2025-08-01,6400,IT & Systems,127249.54
+2025-08-01,6500,Facilities & EHS,95437.15
+2025-08-01,7000,Depreciation,190874.31
+2025-09-01,4000,Product Revenue,6006479.53
+2025-09-01,4100,Service Revenue,667386.61
+2025-09-01,5000,Direct Material,1253282.19
+2025-09-01,5100,Direct Labor,898015.4
+2025-09-01,5200,Manufacturing Overhead,720253.31
+2025-09-01,5300,Scrap & Rework,140642.3
+2025-09-01,6000,Engineering Labor,751254.36
+2025-09-01,6100,Non-Recurring Engineering,300501.74
+2025-09-01,6200,Sales & Marketing,333693.31
+2025-09-01,6300,General & Administrative,400431.97
+2025-09-01,6400,IT & Systems,133477.32
+2025-09-01,6500,Facilities & EHS,100107.99
+2025-09-01,7000,Depreciation,200215.98
+2025-10-01,4000,Product Revenue,6208667.08
+2025-10-01,4100,Service Revenue,689851.9
+2025-10-01,5000,Direct Material,1590650.86
+2025-10-01,5100,Direct Labor,956022.38
+2025-10-01,5200,Manufacturing Overhead,814839.65
+2025-10-01,5300,Scrap & Rework,177269.64
+2025-10-01,6000,Engineering Labor,731641.08
+2025-10-01,6100,Non-Recurring Engineering,292656.43
+2025-10-01,6200,Sales & Marketing,344925.95
+2025-10-01,6300,General & Administrative,413911.14
+2025-10-01,6400,IT & Systems,137970.38
+2025-10-01,6500,Facilities & EHS,103477.78
+2025-10-01,7000,Depreciation,206955.57
+2025-11-01,4000,Product Revenue,6357510.22
+2025-11-01,4100,Service Revenue,706390.02
+2025-11-01,5000,Direct Material,1405800.23
+2025-11-01,5100,Direct Labor,930856.55
+2025-11-01,5200,Manufacturing Overhead,763322.61
+2025-11-01,5300,Scrap & Rework,108049.29
+2025-11-01,6000,Engineering Labor,742027.06
+2025-11-01,6100,Non-Recurring Engineering,296810.82
+2025-11-01,6200,Sales & Marketing,353195.01
+2025-11-01,6300,General & Administrative,423834.01
+2025-11-01,6400,IT & Systems,141278.0
+2025-11-01,6500,Facilities & EHS,105958.5
+2025-11-01,7000,Depreciation,211917.01
+2025-12-01,4000,Product Revenue,6559415.45
+2025-12-01,4100,Service Revenue,728823.94
+2025-12-01,5000,Direct Material,1389677.72
+2025-12-01,5100,Direct Labor,997033.94
+2025-12-01,5200,Manufacturing Overhead,749739.09
+2025-12-01,5300,Scrap & Rework,113465.75
+2025-12-01,6000,Engineering Labor,707106.71
+2025-12-01,6100,Non-Recurring Engineering,282842.68
+2025-12-01,6200,Sales & Marketing,364411.97
+2025-12-01,6300,General & Administrative,437294.36
+2025-12-01,6400,IT & Systems,145764.79
+2025-12-01,6500,Facilities & EHS,109323.59
+2025-12-01,7000,Depreciation,218647.18
+2026-01-01,4000,Product Revenue,6029547.43
+2026-01-01,4100,Service Revenue,669949.71
+2026-01-01,5000,Direct Material,1179884.38
+2026-01-01,5100,Direct Labor,1117659.7
+2026-01-01,5200,Manufacturing Overhead,782276.1
+2026-01-01,5300,Scrap & Rework,136267.84
+2026-01-01,6000,Engineering Labor,634815.29
+2026-01-01,6100,Non-Recurring Engineering,253926.12
+2026-01-01,6200,Sales & Marketing,334974.86
+2026-01-01,6300,General & Administrative,401969.83
+2026-01-01,6400,IT & Systems,133989.94
+2026-01-01,6500,Facilities & EHS,100492.46
+2026-01-01,7000,Depreciation,200984.91
+2026-02-01,4000,Product Revenue,6310091.71
+2026-02-01,4100,Service Revenue,701121.3
+2026-02-01,5000,Direct Material,1975198.94
+2026-02-01,5100,Direct Labor,1137794.72
+2026-02-01,5200,Manufacturing Overhead,675873.17
+2026-02-01,5300,Scrap & Rework,194488.4
+2026-02-01,6000,Engineering Labor,812549.6
+2026-02-01,6100,Non-Recurring Engineering,325019.84
+2026-02-01,6200,Sales & Marketing,350560.65
+2026-02-01,6300,General & Administrative,420672.78
+2026-02-01,6400,IT & Systems,140224.26
+2026-02-01,6500,Facilities & EHS,105168.2
+2026-02-01,7000,Depreciation,210336.39
+2026-03-01,4000,Product Revenue,6552778.24
+2026-03-01,4100,Service Revenue,728086.47
+2026-03-01,5000,Direct Material,1031945.97
+2026-03-01,5100,Direct Labor,1032606.51
+2026-03-01,5200,Manufacturing Overhead,711852.03
+2026-03-01,5300,Scrap & Rework,215096.46
+2026-03-01,6000,Engineering Labor,697335.21
+2026-03-01,6100,Non-Recurring Engineering,278934.08
+2026-03-01,6200,Sales & Marketing,364043.24
+2026-03-01,6300,General & Administrative,436851.88
+2026-03-01,6400,IT & Systems,145617.29
+2026-03-01,6500,Facilities & EHS,109212.97
+2026-03-01,7000,Depreciation,218425.94
+2026-04-01,4000,Product Revenue,6456507.84
+2026-04-01,4100,Service Revenue,717389.76
+2026-04-01,5000,Direct Material,2018080.23
+2026-04-01,5100,Direct Labor,1097576.4
+2026-04-01,5200,Manufacturing Overhead,669377.65
+2026-04-01,5300,Scrap & Rework,207326.36
+2026-04-01,6000,Engineering Labor,826185.15
+2026-04-01,6100,Non-Recurring Engineering,330474.06
+2026-04-01,6200,Sales & Marketing,358694.88
+2026-04-01,6300,General & Administrative,430433.86
+2026-04-01,6400,IT & Systems,143477.95
+2026-04-01,6500,Facilities & EHS,107608.46
+2026-04-01,7000,Depreciation,215216.93
+2026-05-01,4000,Product Revenue,6212688.52
+2026-05-01,4100,Service Revenue,690298.72
+2026-05-01,5000,Direct Material,1006413.81
+2026-05-01,5100,Direct Labor,1156375.01
+2026-05-01,5200,Manufacturing Overhead,755867.63
+2026-05-01,5300,Scrap & Rework,150255.69
+2026-05-01,6000,Engineering Labor,704432.75
+2026-05-01,6100,Non-Recurring Engineering,281773.1
+2026-05-01,6200,Sales & Marketing,345149.36
+2026-05-01,6300,General & Administrative,414179.23
+2026-05-01,6400,IT & Systems,138059.74
+2026-05-01,6500,Facilities & EHS,103544.81
+2026-05-01,7000,Depreciation,207089.62
+2026-06-01,4000,Product Revenue,6029793.67
+2026-06-01,4100,Service Revenue,669977.07
+2026-06-01,5000,Direct Material,1370419.05
+2026-06-01,5100,Direct Labor,898438.28
+2026-06-01,5200,Manufacturing Overhead,643077.66
+2026-06-01,5300,Scrap & Rework,132420.14
+2026-06-01,6000,Engineering Labor,655538.39
+2026-06-01,6100,Non-Recurring Engineering,262215.36
+2026-06-01,6200,Sales & Marketing,334988.54
+2026-06-01,6300,General & Administrative,401986.24
+2026-06-01,6400,IT & Systems,133995.41
+2026-06-01,6500,Facilities & EHS,100496.56
+2026-06-01,7000,Depreciation,200993.12
+2026-07-01,4000,Product Revenue,6070868.83
+2026-07-01,4100,Service Revenue,674540.98
+2026-07-01,5000,Direct Material,1628599.89
+2026-07-01,5100,Direct Labor,1034580.2
+2026-07-01,5200,Manufacturing Overhead,752076.46
+2026-07-01,5300,Scrap & Rework,152450.48
+2026-07-01,6000,Engineering Labor,794160.89
+2026-07-01,6100,Non-Recurring Engineering,317664.36
+2026-07-01,6200,Sales & Marketing,337270.49
+2026-07-01,6300,General & Administrative,404724.59
+2026-07-01,6400,IT & Systems,134908.2
+2026-07-01,6500,Facilities & EHS,101181.15
+2026-07-01,7000,Depreciation,202362.29
+2026-08-01,4000,Product Revenue,6050484.51
+2026-08-01,4100,Service Revenue,672276.06
+2026-08-01,5000,Direct Material,1258220.94
+2026-08-01,5100,Direct Labor,1021967.21
+2026-08-01,5200,Manufacturing Overhead,677267.42
+2026-08-01,5300,Scrap & Rework,168421.62
+2026-08-01,6000,Engineering Labor,634556.33
+2026-08-01,6100,Non-Recurring Engineering,253822.53
+2026-08-01,6200,Sales & Marketing,336138.03
+2026-08-01,6300,General & Administrative,403365.63
+2026-08-01,6400,IT & Systems,134455.21
+2026-08-01,6500,Facilities & EHS,100841.41
+2026-08-01,7000,Depreciation,201682.82

@@ -12,6 +12,7 @@ import math
 from typing import Any
 
 from app.services.ai_governance import get_method_label, infer_governance_key
+from app.services.insight_confidence import evaluate_confidence
 
 
 def _method_label(method: str | None) -> str:
@@ -158,14 +159,41 @@ def _confidence(
     row_count: int | None,
     method: str,
     sql: str | None,
+    *,
+    result: dict[str, Any] | None = None,
+    chart: dict[str, Any] | None = None,
+    source_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # Delegate to the evidence-based evaluator when a result or chart is
+    # available; the row-count heuristic is only a last resort for legacy calls.
+    if result or chart:
+        try:
+            columns = [str(c) for c in (result.get("columns") or [])] if result else []
+            rows = result.get("rows") or [] if result else []
+            eval_ = evaluate_confidence(
+                validation={"rowCount": row_count or len(rows)},
+                result=result,
+                source_context=source_context,
+                columns=columns,
+                rows=rows,
+                is_document_only=(method == "document_synthesis"),
+                has_project_evidence=(result is not None),
+            )
+            return {
+                "level": eval_.level,
+                "score": eval_.score,
+                "basis": eval_.basis,
+                "confidenceEvaluation": eval_.to_dict(),
+            }
+        except Exception:
+            pass
     if method == "document_synthesis":
         level = "low" if row_count is None or row_count < 3 else "medium"
         basis = "Finding is derived from document metadata and summaries without query execution."
     elif sql:
         if row_count and row_count >= 5:
             level = "medium"
-            basis = "Result was supported by a successfully executed query with multiple rows."
+            basis = "Result was supported by a successfully executed query."
         elif row_count and row_count > 0:
             level = "medium"
             basis = "Result was supported by a successfully executed query with a small number of rows."
@@ -293,7 +321,19 @@ def build_explanation(
         "chart": None,
         "assumptions": assumptions or default_assumptions,
         "limitations": limitations or default_limitations,
-        "confidence": _confidence(row_count, method, sql),
+        "confidence": _confidence(
+            row_count,
+            method,
+            sql,
+            result=result,
+            chart=chart,
+            source_context={
+                "sourceTables": tables,
+                "sourceColumns": fields,
+                "periodColumn": period_column,
+                "referenceDocuments": documents,
+            },
+        ),
         "generatedAt": generated_at,
     }
     if governance:

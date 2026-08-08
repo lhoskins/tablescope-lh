@@ -58,6 +58,7 @@ class ProjectInsightResponse(BaseModel):
     risks: list[dict[str, Any]] = Field(default_factory=list)
     trends: list[dict[str, Any]] = Field(default_factory=list)
     opportunities: list[dict[str, Any]] = Field(default_factory=list)
+    analysis: list[dict[str, Any]] = Field(default_factory=list)
     whatChangedSinceLastVisit: WhatChangedSinceLastVisit = Field(
         default_factory=WhatChangedSinceLastVisit
     )

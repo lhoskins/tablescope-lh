@@ -30,7 +30,7 @@ class _FakeEmail:
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
@@ -426,7 +426,7 @@ async def test_non_creator_non_admin_cannot_delete(client, service_headers) -> N
 
 
 async def test_viewer_cannot_create_scope_set(client, service_headers) -> None:
-    _tenant, owner_headers, project, _queries = await _setup(
+    _tenant, _owner_headers, project, _queries = await _setup(
         client, service_headers
     )
     pid = project["id"]

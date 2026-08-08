@@ -95,7 +95,7 @@ def _editor_headers(tenant_id: int, user_id: int) -> dict:
 
 def _bind_sessions(monkeypatch, db_engine):
     """Point worker-side SessionLocal factories at the test engine."""
-    import app.routes.home_intelligence as hir
+    import app.routes.home_intelligence_suite as hir
     import app.tasks.workflows as workflows
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -278,12 +278,28 @@ async def test_kg_build_success_marks_project_insight_stale_and_enqueues(
 
     enqueued: list[tuple[int, int]] = []
 
-    async def fake_enqueue(*, tenant_id: int, project_id: int) -> str:
+    async def fake_pi_enqueue(*, tenant_id: int, project_id: int) -> str:
         enqueued.append((tenant_id, project_id))
         return "pi-job"
 
-    monkeypatch.setattr(workflows, "enqueue_rebuild_project_insight", fake_enqueue)
+    monkeypatch.setattr(workflows, "enqueue_rebuild_project_insight", fake_pi_enqueue)
     monkeypatch.setattr(get_settings(), "project_insight_event_rebuild_enabled", True)
+
+    kg_rebuilt_enqueued: list[tuple[int, int, int]] = []
+
+    async def fake_kg_rebuilt_enqueue(
+        *, tenant_id: int, project_id: int, build_id: int
+    ) -> str:
+        kg_rebuilt_enqueued.append((tenant_id, project_id, build_id))
+        # Run the downstream reaction synchronously so this test still
+        # exercises mark stale + PI enqueue without needing a live worker.
+        return await workflows.knowledge_graph_rebuilt(
+            {}, tenant_id, project_id, build_id
+        )
+
+    monkeypatch.setattr(
+        workflows, "enqueue_knowledge_graph_rebuilt", fake_kg_rebuilt_enqueue
+    )
 
     manager = KnowledgeGraphLifecycleManager(db_session)
     build, _ = await manager.request_full_rebuild(project.id, requested_by=user.id)
@@ -291,6 +307,7 @@ async def test_kg_build_success_marks_project_insight_stale_and_enqueues(
 
     result = await workflows.rebuild_knowledge_graph({}, build.id)
     assert result["status"] == "ok"
+    assert kg_rebuilt_enqueued == [(tenant.id, project.id, build.id)]
 
     await db_session.refresh(snap)
     assert snap.is_stale is True

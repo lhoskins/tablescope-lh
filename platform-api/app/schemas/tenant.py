@@ -25,6 +25,7 @@ class TenantRead(BaseModel):
     name: str
     external_id: str | None
     is_active: bool
+    enforce_2fa: bool = False
     logo_url: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -99,6 +100,39 @@ class AllowedDomainsResponse(BaseModel):
 
 class AllowedDomainsSettingsUpdate(BaseModel):
     enabled: bool
+
+
+class Enforce2faSettingsUpdate(BaseModel):
+    enabled: bool
+
+
+class Enforce2faSettingsResponse(BaseModel):
+    enabled: bool
+
+
+class TenantSettingsRead(BaseModel):
+    """Safe tenant-facing settings: no users, VDBs, or infrastructure metadata."""
+
+    id: int
+    name: str
+    slug: str
+    is_active: bool
+    enforce_2fa: bool
+    allowed_domains_enabled: bool
+    logo_url: str | None = None
+    login_url: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TenantReprocessResponse(BaseModel):
+    tenant_id: int
+    status: str
+    total_projects: int
+    projects_queued: int
+    projects_skipped: int
+    job_ids: list[str]
+    force: bool
 
 
 class AllowedDomainCreate(BaseModel):

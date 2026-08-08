@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -63,8 +63,19 @@ class ProjectAction(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(
         String(255), nullable=True, index=True
+    )
+    lock_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+
+    comments: Mapped[list[ProjectActionComment]] = relationship(
+        "ProjectActionComment",
+        back_populates="action",
+        cascade="all, delete-orphan",
+        order_by="ProjectActionComment.created_at.desc()",
     )
 
     subtasks: Mapped[list[ProjectActionSubtask]] = relationship(
@@ -116,6 +127,8 @@ class ProjectActionSubtask(TimestampMixin, Base):
     is_required: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    effort_points: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -123,6 +136,9 @@ class ProjectActionSubtask(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lock_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
 
     action: Mapped[ProjectAction] = relationship("ProjectAction", back_populates="subtasks")
 
@@ -130,4 +146,38 @@ class ProjectActionSubtask(TimestampMixin, Base):
         return (
             f"ProjectActionSubtask(id={self.id}, action_id={self.action_id}, "
             f"title={self.title!r}, status={self.status!r})"
+        )
+
+
+class ProjectActionComment(Base, TimestampMixin):
+    __tablename__ = "project_action_comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    action_id: Mapped[int] = mapped_column(
+        ForeignKey("project_actions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    author_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    action: Mapped[ProjectAction] = relationship("ProjectAction", back_populates="comments")
+
+    def __repr__(self) -> str:
+        return (
+            f"ProjectActionComment(id={self.id}, action_id={self.action_id}, "
+            f"author_user_id={self.author_user_id})"
         )

@@ -1,113 +1,23 @@
 "use client";
 
+
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { ToastViewport, useToasts } from "@/components/ui/toast";
+import { UnifiedUploadDialog } from "@/components/uploads/unified-upload-dialog";import { KnowledgeGraphScreen } from "./DocumentsTab/knowledge-graph-screen";
+import { FamilyDetailDrawer } from "./DocumentsTab/family-detail-drawer";
+import { ProjectDocument } from "./DocumentsTab/project-document";
+import { AITag } from "./DocumentsTab/aitag";
+import { AIEntity } from "./DocumentsTab/aientity";
+import { AIKPI } from "./DocumentsTab/aikpi";
+import { DocumentFamily } from "./DocumentsTab/document-family";
+import { FamilyMemberSuggested } from "./DocumentsTab/family-member-suggested";
+import { formatBytes } from "./DocumentsTab/format-bytes";
+import { statusBadge } from "./DocumentsTab/status-badge";
+import { fileIcon } from "./DocumentsTab/file-icon";
 
-const KnowledgeGraphScreen = lazy(() =>
-  import("@/components/tablescope/project/knowledge-graph-screen").then((m) => ({
-    default: m.KnowledgeGraphScreen,
-  }))
-);
 
-const FamilyDetailDrawer = lazy(() =>
-  import("./FamilyDetailDrawer").then((m) => ({ default: m.FamilyDetailDrawer }))
-);
-
-// ── Types ──────────────────────────────────────────────────────────
-
-type ProjectDocument = {
-  id: number;
-  title: string | null;
-  filename: string;
-  original_filename: string;
-  asset_type: string;
-  content_type: string | null;
-  file_extension: string | null;
-  file_size_bytes: number | null;
-  status: string;
-  ai_status: string | null;
-  ai_summary: string | null;
-  ai_metadata: Record<string, unknown> | null;
-  visibility: string;
-  created_at: string;
-};
-
-type AITag = {
-  tag_key: string;
-  display_name: string;
-  confidence: number;
-  source: string;
-};
-
-type AIEntity = {
-  entity_type: string;
-  name: string;
-  confidence: number;
-  evidence: string;
-};
-
-type AIKPI = {
-  kpi_key: string;
-  display_name: string;
-  confidence: number;
-  reason: string;
-};
-
-type DocumentFamily = {
-  family_name: string;
-  family_key: string;
-  family_type: string;
-  confidence: number;
-  role: string;
-  reason: string;
-  auto_link: boolean;
-};
-
-type FamilyMemberSuggested = {
-  member_type: string;
-  member_name: string;
-  relationship_type: string;
-  confidence: number;
-  reason: string;
-};
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number | null | undefined): string {
-  if (!bytes) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function statusBadge(status: string | null | undefined) {
-  const s = (status ?? "pending").toLowerCase();
-  const colors: Record<string, string> = {
-    uploaded: "bg-blue-100 text-blue-700",
-    extracting: "bg-yellow-100 text-yellow-700",
-    chunking: "bg-yellow-100 text-yellow-700",
-    profiling: "bg-purple-100 text-purple-700",
-    profiled: "bg-green-100 text-green-700",
-    failed: "bg-red-100 text-red-700",
-    pending: "bg-slate-100 text-slate-500",
-  };
-  return (
-    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${colors[s] ?? colors.pending}`}>
-      {s}
-    </span>
-  );
-}
-
-function fileIcon(ext: string | null | undefined) {
-  const e = (ext ?? "").toLowerCase().replace(".", "");
-  if (e === "pdf") return "📄";
-  if (e === "docx" || e === "doc") return "📝";
-  if (e === "pptx" || e === "ppt") return "📊";
-  if (e === "md") return "📋";
-  return "📃";
-}
 
 // ── Component ──────────────────────────────────────────────────────
 
@@ -122,15 +32,13 @@ export function DocumentsTab({
 }) {
   const queryClient = useQueryClient();
   const { toasts, push, dismiss } = useToasts();
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const [subTab, setSubTab] = useState<"documents" | "graph">("documents");
   const [forceReprocess, setForceReprocess] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(
     initialExpandedId ?? null,
   );
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [openFamilyId, setOpenFamilyId] = useState<number | null>(null);
 
   type FamilyListItem = {
@@ -172,25 +80,10 @@ export function DocumentsTab({
   }, [initialExpandedId, docs]);
 
   // ── Upload ─────────────────────────────────────────────────────
-  const handleUpload = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setUploading(true);
-    setUploadError(null);
-
-    const errors: string[] = [];
-    for (const file of Array.from(files)) {
-      try {
-        await apiClient.upload(`/api/projects/${projectId}/assets/upload`, file, {
-          asset_type: "document",
-          visibility: "shared_project",
-        });
-      } catch (err) {
-        errors.push(`${file.name}: ${err instanceof Error ? err.message : "upload failed"}`);
-      }
-    }
-
-    if (errors.length) setUploadError(errors.join("; "));
-    setUploading(false);
+  // Uploads run through the unified AI-Assisted Upload intake, which
+  // classifies each file and routes spreadsheets to the Data Source pipeline
+  // instead of creating a document from them.
+  const handleUploadsDone = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["project-documents", projectId] });
   }, [projectId, queryClient]);
 
@@ -312,22 +205,13 @@ export function DocumentsTab({
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
+            onClick={() => setUploadOpen(true)}
             className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand/90 disabled:opacity-50"
           >
-            {uploading ? "Uploading..." : "+ Upload Documents"}
+            + Upload Documents
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            accept=".pdf,.docx,.pptx,.txt,.md"
-            className="hidden"
-            onChange={(e) => handleUpload(e.target.files)}
-          />
           <span className="text-xs text-slate-400">
-            PDF, DOCX, PPTX, TXT, MD
+            Opens AI-Assisted Upload — spreadsheets become data sources
           </span>
           <div className="ml-auto flex items-center gap-3">
             <label className="flex items-center gap-1.5 text-xs text-slate-600">
@@ -349,9 +233,6 @@ export function DocumentsTab({
             </button>
           </div>
         </div>
-      )}
-      {uploadError && (
-        <div className="mb-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{uploadError}</div>
       )}
 
       {/* Documents list */}
@@ -702,6 +583,14 @@ export function DocumentsTab({
           />
         </Suspense>
       )}
+
+      <UnifiedUploadDialog
+        open={uploadOpen}
+        projectId={projectId}
+        preferredAssetFamily="unstructured_document"
+        onClose={() => setUploadOpen(false)}
+        onUploadsDone={handleUploadsDone}
+      />
 
       <ToastViewport toasts={toasts} onDismiss={dismiss} />
     </div>

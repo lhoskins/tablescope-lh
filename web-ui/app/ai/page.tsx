@@ -1,6 +1,14 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -8,7 +16,6 @@ import {
   IconSparkles,
   IconPlus,
   IconTrash,
-  IconMessageCircle,
   IconRefresh,
   IconDots,
   IconPencil,
@@ -33,28 +40,17 @@ import {
 } from "@/lib/api/conversational-analytics";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
 import type { SuggestedVisualization } from "@/lib/api/ai-actions";
-import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
+import type { CurrentUser, ProjectSummary, TenantSummary } from "@/lib/ui/types";
+import { AssistantHeader } from "./assistant-header";
+import { FALLBACK_USER } from "./fallback-user";
+import { FALLBACK_TENANT } from "./fallback-tenant";
+import { CHART_FOLLOW_UPS } from "./chart-follow-ups";
+import { ConversationRow } from "./conversation-row";
+import { UserBubble } from "./user-bubble";
+import { TurnBubbles } from "./turn-bubbles";
+import { groupConversationSummaries } from "@/lib/conversations/group-canonical";
 
-const FALLBACK_USER: CurrentUser = {
-  name: "",
-  email: "",
-  role: "",
-  tenantName: "",
-  initials: "··",
-};
-const FALLBACK_TENANT: TenantSummary = {
-  name: "Tablescope",
-  slug: "",
-  initials: "TS",
-};
 
-const CHART_FOLLOW_UPS = [
-  "change it to a line chart",
-  "change it to a horizontal bar chart",
-  "change it to a donut chart",
-  "sort by value descending",
-  "show as a table",
-];
 
 function AiAssistantPageInner() {
   const router = useRouter();
@@ -73,12 +69,41 @@ function AiAssistantPageInner() {
   const [needsProject, setNeedsProject] = useState(false);
   const [paramsRead, setParamsRead] = useState(false);
   const [autoStarted, setAutoStarted] = useState(false);
+  // Set only from a deep link, so "View all project conversations" lands on a
+  // list already narrowed to that project.
+  const [projectFilter, setProjectFilter] = useState<number | null>(null);
+  const [pendingTurnId, setPendingTurnId] = useState<number | null>(null);
   const { data: active } = useQuery({
     queryKey: ["conversational-analytics", "conversation", activeId],
     queryFn: () => getConversation(activeId as number),
     enabled: activeId != null,
   });
   const turns = active?.turns ?? [];
+  const assistantConversations = (conversations ?? []).filter(
+    (c) => projectFilter == null || c.project_id === projectFilter,
+  );
+
+  // Group canonical Insight threads so the sidebar shows one durable Business
+  // Insights row and one Project Insights row per project. Manual chats remain
+  // individual rows.
+  const groupedConversations = useMemo<ConversationSummary[]>(
+    () => groupConversationSummaries(assistantConversations, projects ?? []),
+    [assistantConversations, projects],
+  );
+
+  // Deterministic Project Overview back navigation based on the URL and the
+  // authorized project list. Never derive it from browser history or referrer.
+  const returnProject = useMemo<ProjectSummary | null>(() => {
+    if (searchParams.get("from") !== "project-overview") return null;
+    const rawProjectId = searchParams.get("projectId");
+    if (!rawProjectId || !/^\d+$/.test(rawProjectId)) return null;
+    const projectId = Number(rawProjectId);
+    if (projectId <= 0) return null;
+    return (
+      projects?.find((p) => Number(p.id) === projectId) ?? null
+    );
+  }, [searchParams, projects]);
+  const turnCount = turns.length;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // A conversation is scoped to one project for grounded answers; reflect it
@@ -92,15 +117,28 @@ function AiAssistantPageInner() {
     if (!getUserMeta()) router.replace("/login");
   }, [router]);
 
-  // Hydrate project + prompt from a deep link (e.g. "Open in AI Assistant").
+  // Hydrate project + prompt + existing conversation from a deep link.
   useEffect(() => {
     if (paramsRead) return;
     const q = searchParams.get("q");
     const pid = searchParams.get("projectId");
+    const cid = searchParams.get("conversation");
     if (q) setInput(q);
     if (pid) {
       const n = Number(pid);
-      if (!Number.isNaN(n)) setProjectId(n);
+      if (!Number.isNaN(n)) {
+        setProjectId(n);
+        setProjectFilter(n);
+      }
+    }
+    if (cid) {
+      const n = Number(cid);
+      if (!Number.isNaN(n)) setActiveId(n);
+    }
+    const tid = searchParams.get("turn");
+    if (tid) {
+      const n = Number(tid);
+      if (!Number.isNaN(n)) setPendingTurnId(n);
     }
     setParamsRead(true);
   }, [searchParams, paramsRead]);
@@ -112,21 +150,6 @@ function AiAssistantPageInner() {
       }),
     [queryClient],
   );
-
-  // Auto-start a conversation seeded from the deep-link parameters once.
-  useEffect(() => {
-    if (!paramsRead || autoStarted || !input.trim() || projectId == null || activeId != null)
-      return;
-    setAutoStarted(true);
-    const question = input.trim();
-    setInput("");
-    createConversation({ project_id: projectId, initial_message: question })
-      .then((convo) => {
-        setActiveId(convo.id);
-        invalidateConvos();
-      })
-      .catch(() => setInput(question));
-  }, [paramsRead, autoStarted, input, projectId, activeId, invalidateConvos]);
 
   const invalidateActive = (id: number) =>
     queryClient.invalidateQueries({
@@ -177,22 +200,45 @@ function AiAssistantPageInner() {
   const busy = sendMutation.isPending;
 
   useEffect(() => {
+    if (pendingTurnId != null) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [turns.length, busy]);
+  }, [turnCount, busy, pendingTurnId]);
 
-  const send = (raw: string) => {
-    const question = raw.trim();
-    if (!question || busy) return;
-    const pid = active?.project_id ?? projectId;
-    if (pid == null) {
-      // Prompt for the project instead of silently guessing one.
-      setNeedsProject(true);
-      return;
-    }
-    setNeedsProject(false);
-    setInput("");
-    sendMutation.mutate({ question, pid });
-  };
+  // Deep links may target one turn inside a long conversation.
+  useEffect(() => {
+    if (pendingTurnId == null || turnCount === 0) return;
+    const target = document.getElementById(`turn-${pendingTurnId}`);
+    if (!target) return;
+    target.scrollIntoView({ block: "start" });
+    setPendingTurnId(null);
+  }, [pendingTurnId, turnCount]);
+
+  const send = useCallback(
+    (raw: string) => {
+      const question = raw.trim();
+      if (!question || busy) return;
+      if (activeId == null && projectId == null) {
+        // Prompt for the project only when creating a brand-new conversation.
+        setNeedsProject(true);
+        return;
+      }
+      setNeedsProject(false);
+      setInput("");
+      const pid = active?.project_id ?? projectId ?? 0;
+      sendMutation.mutate({ question, pid });
+    },
+    [active, activeId, projectId, busy, sendMutation],
+  );
+
+  // Auto-start a conversation seeded from the deep-link parameters once.
+  useEffect(() => {
+    if (!paramsRead || autoStarted || !input.trim()) return;
+    // Need either an existing conversation (submit) or a project to create one.
+    if (activeId == null && projectId == null) return;
+    setAutoStarted(true);
+    const question = input.trim();
+    send(question);
+  }, [paramsRead, autoStarted, input, projectId, activeId, send]);
 
   const retryLast = () => {
     if (busy || !sendMutation.variables) return;
@@ -216,13 +262,11 @@ function AiAssistantPageInner() {
       tenant={tenant}
       user={user}
       counts={{ projects: projects?.length }}
-      topBarLeft={
-        <span className="text-h2 text-ink-primary">AI Assistant</span>
-      }
+      topBarLeft={<AssistantHeader returnProject={returnProject} />}
     >
       <div className="flex h-[calc(100vh-9rem)] gap-0 overflow-hidden rounded-lg border border-line-tertiary">
         {/* Left sidebar — conversations */}
-        <aside className="flex w-60 shrink-0 flex-col border-r border-line-tertiary bg-bg-secondary">
+        <aside className="flex w-[260px] shrink-0 flex-col border-r border-line-tertiary bg-bg-secondary">
           <div className="border-b border-line-tertiary p-2.5">
             <Button
               variant="secondary"
@@ -231,6 +275,7 @@ function AiAssistantPageInner() {
                 setActiveId(null);
                 setInput("");
                 setProjectId(null);
+                setProjectFilter(null);
               }}
             >
               <IconPlus size={14} />
@@ -238,14 +283,14 @@ function AiAssistantPageInner() {
             </Button>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {(conversations ?? []).length === 0 && (
+            {groupedConversations.length === 0 && (
               <p className="px-2 py-4 text-small text-ink-tertiary">
                 No conversations yet.
               </p>
             )}
-            {(conversations ?? []).map((c) => (
+            {groupedConversations.map((c) => (
               <ConversationRow
-                key={c.id}
+                key={c.canonical_key ?? c.id}
                 conversation={c}
                 active={activeId === c.id}
                 onSelect={() => setActiveId(c.id)}
@@ -282,7 +327,9 @@ function AiAssistantPageInner() {
             ) : (
               <div className="mx-auto max-w-3xl space-y-5">
                 {turns.map((t) => (
-                  <TurnBubbles key={t.id} turn={t} />
+                  <div key={t.id} id={`turn-${t.id}`}>
+                    <TurnBubbles turn={t} />
+                  </div>
                 ))}
                 {pendingQuestion && (
                   <UserBubble content={pendingQuestion} />
@@ -412,222 +459,6 @@ function AiAssistantPageInner() {
         onCancel={() => setConfirmDeleteId(null)}
       />
     </AppShell>
-  );
-}
-
-function ConversationRow({
-  conversation,
-  active,
-  onSelect,
-  onRename,
-  onDelete,
-}: {
-  conversation: ConversationSummary;
-  active: boolean;
-  onSelect: () => void;
-  onRename: (title: string) => void;
-  onDelete: () => void;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(conversation.title);
-
-  const startRename = () => {
-    setDraft(conversation.title);
-    setEditing(true);
-    setMenuOpen(false);
-  };
-
-  const commitRename = () => {
-    const next = draft.trim();
-    if (next && next !== conversation.title) onRename(next);
-    setEditing(false);
-  };
-
-  return (
-    <div
-      className={cn(
-        "group relative flex items-center gap-2 rounded-md px-2 py-2 text-[13px]",
-        active
-          ? "bg-brand-50 text-brand-700"
-          : "text-ink-secondary hover:bg-bg-primary",
-      )}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setMenuOpen(true);
-      }}
-    >
-      <IconMessageCircle size={14} className="shrink-0" />
-      {editing ? (
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commitRename}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitRename();
-            if (e.key === "Escape") setEditing(false);
-          }}
-          className="min-w-0 flex-1 rounded border border-line-secondary bg-bg-primary px-1.5 py-0.5 text-[13px] text-ink-primary focus:border-brand-500 focus:outline-none"
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={onSelect}
-          className="min-w-0 flex-1 truncate text-left"
-          title={conversation.title}
-        >
-          {conversation.title}
-        </button>
-      )}
-      {!editing && (
-        <button
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label="Conversation actions"
-          className={cn(
-            "shrink-0 rounded text-ink-tertiary hover:text-ink-secondary",
-            menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-          )}
-        >
-          <IconDots size={15} />
-        </button>
-      )}
-      {menuOpen && (
-        <>
-          <button
-            type="button"
-            aria-hidden
-            tabIndex={-1}
-            className="fixed inset-0 z-40 cursor-default"
-            onClick={() => setMenuOpen(false)}
-          />
-          <div className="absolute right-1 top-8 z-50 w-36 overflow-hidden rounded-md border border-line-tertiary bg-bg-primary py-1 shadow-lg">
-            <MenuItem
-              icon={<IconPencil size={14} />}
-              label="Rename"
-              onClick={startRename}
-            />
-            <MenuItem
-              icon={<IconTrash size={14} />}
-              label="Delete"
-              danger
-              onClick={() => {
-                onDelete();
-                setMenuOpen(false);
-              }}
-            />
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  danger,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-bg-secondary",
-        danger ? "text-danger" : "text-ink-secondary",
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function UserBubble({ content }: { content: string }) {
-  return (
-    <div className="flex flex-col items-end">
-      <div className="max-w-[75%] rounded-xl bg-brand px-4 py-3 text-[13px] leading-relaxed text-brand-fg">
-        <span className="whitespace-pre-wrap">{content}</span>
-      </div>
-    </div>
-  );
-}
-
-/** One conversational-analytics turn: the user's message + the AI answer. */
-function TurnBubbles({ turn }: { turn: ConversationTurn }) {
-  const result = turn.result;
-  const hasData = (result?.rows?.length ?? 0) > 0;
-  return (
-    <>
-      <UserBubble content={turn.user_message} />
-      <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-500">
-          <IconSparkles size={16} />
-        </div>
-        <div className={cn("flex flex-col", hasData ? "w-full" : "max-w-[75%]")}>
-          <div
-            className={cn(
-              "rounded-xl bg-bg-secondary px-4 py-3 text-[13px] leading-relaxed",
-              turn.status === "error" ? "text-danger" : "text-ink-primary",
-            )}
-          >
-            <span className="whitespace-pre-wrap">
-              {turn.assistant_message ??
-                (turn.status === "pending" ? "Working on it…" : "")}
-            </span>
-          </div>
-          {hasData && result && <TurnResult turn={turn} />}
-        </div>
-      </div>
-    </>
-  );
-}
-
-function TurnResult({ turn }: { turn: ConversationTurn }) {
-  const [showSql, setShowSql] = useState(false);
-  const result = turn.result;
-  if (!result) return null;
-  const chart = turn.chart_config;
-  // Map the persisted chart config onto the shared renderer contract; the
-  // subtype (horizontal_bar, donut, …) rides through as chartStyle.
-  const viz: SuggestedVisualization = chart
-    ? {
-        type: chart.type as SuggestedVisualization["type"],
-        xField: chart.labelColumn,
-        yField: chart.valueColumns?.[0],
-        chartStyle: chart.subtype,
-      }
-    : { type: "table" };
-  return (
-    <div className="mt-2 rounded-xl border border-line-tertiary bg-bg-primary p-3">
-      {chart && chart.type !== "table" && (
-        <ResultChart columns={result.columns} rows={result.rows} viz={viz} />
-      )}
-      <ResultTable columns={result.columns} rows={result.rows} />
-      {turn.sql && (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setShowSql((v) => !v)}
-            className="text-[11px] text-ink-tertiary hover:text-ink-secondary"
-          >
-            {showSql ? "Hide SQL" : "Show SQL"}
-          </button>
-          {showSql && (
-            <pre className="mt-1 overflow-auto rounded-md bg-bg-secondary p-2 text-[11px] text-ink-secondary">
-              {turn.sql}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 

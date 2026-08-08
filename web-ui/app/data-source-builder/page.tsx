@@ -1,55 +1,55 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/tablescope/app-shell";
-import { DataSourceBuilderWorkspace } from "@/components/tablescope/data-source-builder/workspace";
-import { getUserMeta } from "@/lib/auth";
-import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
-import type { CurrentUser, TenantSummary } from "@/lib/ui/types";
+import { Suspense } from "react";
+import { useEffect, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useProjectSummaries } from "@/lib/ui/use-shell-data";
 
-const FALLBACK_USER: CurrentUser = {
-  name: "",
-  email: "",
-  role: "",
-  tenantName: "",
-  initials: "··",
-};
-const FALLBACK_TENANT: TenantSummary = {
-  name: "Tablescope",
-  slug: "",
-  initials: "TS",
-};
-
-export default function DataSourceBuilderPage() {
+function DataSourceBuilderCompatibility() {
   const router = useRouter();
-  const { data: identity } = useCurrentUser();
-  const { data: projects } = useProjectSummaries();
+  const searchParams = useSearchParams();
+  const { data: projects, isLoading } = useProjectSummaries();
+
+  const requestedProjectId = searchParams.get("projectId");
+  const intent = searchParams.get("intent");
+
+  const accessibleIds = useMemo(
+    () => new Set((projects ?? []).map((p) => p.id)),
+    [projects],
+  );
 
   useEffect(() => {
-    if (!getUserMeta()) router.replace("/login");
-  }, [router]);
+    if (isLoading) return;
 
-  const user = identity?.user ?? FALLBACK_USER;
-  const tenant = identity?.tenant ?? FALLBACK_TENANT;
+    const qs = new URLSearchParams();
+    if (intent) qs.set("intent", intent);
+    const query = qs.toString() ? `?${qs.toString()}` : "";
 
+    if (requestedProjectId && accessibleIds.has(requestedProjectId)) {
+      router.replace(`/projects/${requestedProjectId}/data-source-builder${query}`);
+      return;
+    }
+
+    const list = projects ?? [];
+    if (list.length === 1) {
+      router.replace(`/projects/${list[0].id}/data-source-builder${query}`);
+      return;
+    }
+
+    router.replace(
+      `/projects${
+        list.length === 0 ? "" : "?notice=Select a project to open Data Source Builder."
+      }`,
+    );
+  }, [isLoading, projects, accessibleIds, requestedProjectId, intent, router]);
+
+  return null;
+}
+
+export default function DataSourceBuilderCompatibilityPage() {
   return (
-    <AppShell
-      mode="home"
-      activeNav="data-source-builder"
-      tenant={tenant}
-      user={user}
-      counts={{ projects: projects?.length }}
-      topBarLeft={
-        <div className="flex items-baseline gap-3">
-          <span className="text-h2 text-ink-primary">Data Source Builder</span>
-          <span className="text-small text-ink-tertiary">
-            Manage sources across projects in one session
-          </span>
-        </div>
-      }
-    >
-      <DataSourceBuilderWorkspace tenantName={tenant.name} />
-    </AppShell>
+    <Suspense fallback={null}>
+      <DataSourceBuilderCompatibility />
+    </Suspense>
   );
 }

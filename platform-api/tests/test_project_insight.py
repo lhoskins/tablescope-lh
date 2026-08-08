@@ -43,7 +43,7 @@ class _FakeEmail:
 
 @pytest.fixture(autouse=True)
 def _mock_supabase(monkeypatch):
-    import app.routes.tenants as tenants_module
+    import app.routes.tenants_users as tenants_module
 
     monkeypatch.setattr(tenants_module, "SupabaseAuthService", _FakeSupabase)
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
@@ -196,7 +196,7 @@ async def test_reference_library_not_used_as_sql_datasource(
 async def test_acknowledge_creates_audit_record(
     client, service_headers, _mock_ai, db_session
 ) -> None:
-    tenant, user, project, headers = await _setup(
+    _tenant, user, project, headers = await _setup(
         client, service_headers, "pi-ack"
     )
     pid = project["id"]
@@ -240,7 +240,7 @@ async def test_acknowledge_creates_audit_record(
 async def test_acknowledge_is_idempotent_and_surfaces_in_workflow(
     client, service_headers, _mock_ai
 ) -> None:
-    _, user, project, headers = await _setup(client, service_headers, "pi-idem")
+    _, _user, project, headers = await _setup(client, service_headers, "pi-idem")
     pid = project["id"]
 
     for _ in range(2):
@@ -443,7 +443,8 @@ def test_card_group_maps_insight_type() -> None:
     assert pis._card_group("risk_sla") == "risks"
     assert pis._card_group("trend_spend") == "trends"
     assert pis._card_group("opportunity_supplier") == "opportunities"
-    assert pis._card_group("something_else") is None
+    assert pis._card_group("shape_scatter") == "analysis"
+    assert pis._card_group("something_else") == "analysis"
 
 
 async def test_grouped_intelligence_cards_groups_and_maps(monkeypatch) -> None:

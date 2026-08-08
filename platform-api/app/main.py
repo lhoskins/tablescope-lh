@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 from app.auth.mfa_errors import MfaRequiredError, mfa_required_handler
-from app.auth.middleware import AuthMiddleware
+from app.auth.middleware import SESSION_TOKEN_HEADER, AuthMiddleware
 from app.config import get_settings
 from app.logging_config import configure_logging
 from app.observability import mount_metrics, setup_sentry
@@ -25,46 +25,96 @@ from app.routes import ai_proxy as ai_proxy_routes
 from app.routes import ai_reference_catalog as ai_reference_catalog_routes
 from app.routes import analytical_methods as analytical_methods_routes
 from app.routes import auth as auth_routes
+from app.routes import auth_sso as auth_sso_routes
 from app.routes import billing as billing_routes
 from app.routes import billing_admin as billing_admin_routes
+from app.routes import connected_sources as connected_sources_routes
 from app.routes import connectors as connectors_routes
-from app.routes import conversational_analytics as conversational_analytics_routes
-from app.routes import dashboards as dashboards_routes
+from app.routes import (
+    conversational_analytics_conversations as conversational_analytics_conversations_routes,
+)
+from app.routes import conversational_analytics_turns as conversational_analytics_turns_routes
+from app.routes import dashboards_crud as dashboards_crud_routes
+from app.routes import dashboards_widget_query as dashboards_widget_query_routes
 from app.routes import data_source_assignments as data_source_assignments_routes
-from app.routes import database_sources as database_sources_routes
-from app.routes import document_families as document_families_routes
+from app.routes import data_source_catalog as data_source_catalog_routes
+from app.routes import database_sources_connection as database_sources_connection_routes
+from app.routes import database_sources_lifecycle as database_sources_lifecycle_routes
+from app.routes import (
+    database_sources_saved_connections as database_sources_saved_connections_routes,
+)
+from app.routes import document_families_curation as document_families_curation_routes
+from app.routes import document_families_reads as document_families_reads_routes
+from app.routes import document_families_summary as document_families_summary_routes
+from app.routes import enterprise_auth_ldap as enterprise_auth_ldap_routes
+from app.routes import enterprise_auth_settings as enterprise_auth_settings_routes
+from app.routes import enterprise_auth_sso as enterprise_auth_sso_routes
 from app.routes import file_analysis as file_analysis_routes
+from app.routes import file_imports as file_imports_routes
 from app.routes import grid_preferences as grid_preferences_routes
 from app.routes import health as health_routes
-from app.routes import home_intelligence as home_intelligence_routes
+from app.routes import (
+    home_intelligence_dashboard_save as home_intelligence_dashboard_save_routes,
+)
+from app.routes import home_intelligence_snapshot as home_intelligence_snapshot_routes
+from app.routes import home_intelligence_suggestions as home_intelligence_suggestions_routes
+from app.routes import home_intelligence_suite as home_intelligence_suite_routes
 from app.routes import home_pins as home_pins_routes
-from app.routes import insight_feedback as insight_feedback_routes
+from app.routes import insight_chart_selection as insight_chart_selection_routes
+from app.routes import insight_feedback_crud as insight_feedback_crud_routes
+from app.routes import insight_feedback_review as insight_feedback_review_routes
+from app.routes import internal_file_proxy as internal_file_proxy_routes
 from app.routes import knowledge_graph as knowledge_graph_routes
+from app.routes import llm_framework_artifacts as llm_framework_artifacts_routes
+from app.routes import llm_framework_catalog as llm_framework_catalog_routes
+from app.routes import llm_framework_deployments as llm_framework_deployments_routes
+from app.routes import llm_framework_inventory as llm_framework_inventory_routes
 from app.routes import mfa as mfa_routes
-from app.routes import project_actions as project_actions_routes
+from app.routes import project_actions_comments as project_actions_comments_routes
+from app.routes import project_actions_crud as project_actions_crud_routes
+from app.routes import project_actions_lifecycle as project_actions_lifecycle_routes
 from app.routes import project_assets as project_assets_routes
 from app.routes import project_context as project_context_routes
 from app.routes import project_graph as project_graph_routes
 from app.routes import project_insight as project_insight_routes
-from app.routes import projects as projects_routes
+from app.routes import projects_aggregates as projects_aggregates_routes
+from app.routes import projects_crud as projects_crud_routes
+from app.routes import projects_datasources as projects_datasources_routes
+from app.routes import projects_members as projects_members_routes
+from app.routes import projects_metadata as projects_metadata_routes
+from app.routes import projects_queries as projects_queries_routes
 from app.routes import provisioning as provisioning_routes
 from app.routes import query as query_routes
 from app.routes import query_scopes as query_scopes_routes
-from app.routes import reference_library as reference_library_routes
 from app.routes import reference_library_bulk as reference_library_bulk_routes
+from app.routes import reference_library_documents as reference_library_documents_routes
+from app.routes import (
+    reference_library_project_views as reference_library_project_views_routes,
+)
+from app.routes import reference_library_suggestions as reference_library_suggestions_routes
 from app.routes import reports as reports_routes
 from app.routes import repository_connectors as repository_connectors_routes
 from app.routes import saas_sources as saas_sources_routes
-from app.routes import scope_sets as scope_sets_routes
+from app.routes import scope_sets_builder as scope_sets_builder_routes
+from app.routes import scope_sets_crud as scope_sets_crud_routes
 from app.routes import scopes as scopes_routes
 from app.routes import sharing as sharing_routes
 from app.routes import storage as storage_routes
-from app.routes import tenant_data_planes as tenant_data_planes_routes
-from app.routes import tenants as tenants_routes
-from app.routes import upload as upload_routes
+from app.routes import tenant_data_planes_crud as tenant_data_planes_crud_routes
+from app.routes import tenant_data_planes_network as tenant_data_planes_network_routes
+from app.routes import tenants_crud as tenants_crud_routes
+from app.routes import tenants_security_policy as tenants_security_policy_routes
+from app.routes import tenants_settings as tenants_settings_routes
+from app.routes import tenants_users as tenants_users_routes
+from app.routes import upload_core as upload_core_routes
+from app.routes import upload_datasources as upload_datasources_routes
+from app.routes import upload_replace as upload_replace_routes
+from app.routes import upload_versions as upload_versions_routes
+from app.routes import uploads as uploads_routes
 from app.routes import user_preferences as user_preferences_routes
 from app.routes import users as users_routes
 from app.services.connection_pool import pool_manager
+from app.services.llm_framework import ensure_primary_runtime_target_registered
 from app.services.project_context import ProjectContextConcurrencyError
 
 logger = logging.getLogger(__name__)
@@ -93,6 +143,19 @@ async def _reconcile_db_sources_on_startup() -> None:
             logger.warning(
                 "Startup DB-source reconcile attempt %s failed: %s", attempt, exc
             )
+
+
+async def _ensure_primary_llm_runtime_target() -> None:
+    """Register the configured primary Ollama target if no target exists yet."""
+    from app.database import SessionLocal
+
+    await asyncio.sleep(3)
+    try:
+        async with SessionLocal() as session:
+            await ensure_primary_runtime_target_registered(session)
+        logger.info("Primary LLM runtime target ensured")
+    except Exception as exc:
+        logger.warning("Primary LLM runtime target registration failed: %s", exc)
 
 
 async def _seed_reference_catalogs() -> None:
@@ -126,6 +189,115 @@ async def _seed_reference_catalogs() -> None:
         )
 
 
+MAX_KG_PIPELINE_VERSION_CHECK_PROJECTS = 50
+
+
+async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
+    """Proactively rebuild stale KG snapshots for recently-active projects.
+
+    After a deploy that bumps ``SNAPSHOT_PIPELINE_VERSION``, any cached snapshot
+    built under the previous version would only be rebuilt on the next user page
+    load. This startup check finds the N most-recently-active projects and
+    enqueues a full rebuild for any whose latest ``AIProjectGraphSnapshot``
+    carries an older (or missing) ``pipeline_version``.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.database import SessionLocal
+    from app.models import AIProjectGraphSnapshot, IntelligenceSnapshot
+    from app.models.knowledge_graph_snapshot import SNAPSHOT_KEY_FULL
+    from app.services.knowledge_graph.constants import SNAPSHOT_PIPELINE_VERSION
+    from app.services.knowledge_graph_lifecycle import KnowledgeGraphLifecycleManager
+    from app.tasks.workflows import enqueue_rebuild_knowledge_graph
+
+    await asyncio.sleep(15)
+    settings = get_settings()
+    days = getattr(settings, "business_insight_refresh_activity_days", 7)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    enqueued = 0
+    skipped = 0
+
+    try:
+        async with SessionLocal() as session:
+            recent_rows = (
+                await session.execute(
+                    select(
+                        IntelligenceSnapshot.payload,
+                        IntelligenceSnapshot.updated_at,
+                    )
+                    .where(IntelligenceSnapshot.updated_at >= cutoff)
+                    .order_by(IntelligenceSnapshot.updated_at.desc())
+                )
+            ).all()
+            seen: set[int] = set()
+            project_ids: list[int] = []
+            for payload, _ in recent_rows:
+                if not isinstance(payload, dict):
+                    continue
+                for p in (payload.get("projects") or []):
+                    try:
+                        project_id = int(p["id"])
+                    except (TypeError, KeyError, ValueError):
+                        continue
+                    if project_id in seen:
+                        continue
+                    seen.add(project_id)
+                    project_ids.append(project_id)
+                    if len(project_ids) >= MAX_KG_PIPELINE_VERSION_CHECK_PROJECTS:
+                        break
+                if len(project_ids) >= MAX_KG_PIPELINE_VERSION_CHECK_PROJECTS:
+                    break
+
+            logger.info(
+                "KG snapshot pipeline version check: running=%s active_projects=%s",
+                SNAPSHOT_PIPELINE_VERSION,
+                len(project_ids),
+            )
+
+            for project_id in project_ids:
+                try:
+                    snapshot = await session.scalar(
+                        select(AIProjectGraphSnapshot)
+                        .where(
+                            AIProjectGraphSnapshot.project_id == project_id,
+                            AIProjectGraphSnapshot.snapshot_key == SNAPSHOT_KEY_FULL,
+                        )
+                        .order_by(AIProjectGraphSnapshot.generated_at.desc())
+                        .limit(1)
+                    )
+                    if snapshot is not None and (
+                        snapshot.pipeline_version == SNAPSHOT_PIPELINE_VERSION
+                    ):
+                        skipped += 1
+                        continue
+
+                    manager = KnowledgeGraphLifecycleManager(session)
+                    build, _ = await manager.request_full_rebuild(
+                        project_id,
+                        trigger="pipeline_version_mismatch",
+                        requested_by=None,
+                    )
+                    await session.commit()
+                    await enqueue_rebuild_knowledge_graph(build.id)
+                    enqueued += 1
+                except Exception as exc:
+                    logger.warning(
+                        "KG snapshot pipeline version check failed for project %s: %s",
+                        project_id,
+                        exc,
+                    )
+    except Exception as exc:
+        logger.exception("KG snapshot pipeline version startup check failed: %s", exc)
+
+    logger.info(
+        "KG snapshot pipeline version check complete: enqueued=%s skipped=%s",
+        enqueued,
+        skipped,
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -139,12 +311,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         get_engine_mode().value,
     )
     reconcile_task = asyncio.create_task(_reconcile_db_sources_on_startup())
+    llm_target_task = asyncio.create_task(_ensure_primary_llm_runtime_target())
     seed_task = asyncio.create_task(_seed_reference_catalogs())
+    kg_pipeline_check_task = asyncio.create_task(
+        _check_kg_snapshot_pipeline_version_on_startup()
+    )
     try:
         yield
     finally:
         reconcile_task.cancel()
+        llm_target_task.cancel()
         seed_task.cancel()
+        kg_pipeline_check_task.cancel()
         await pool_manager.close_all()
         logger.info("Platform API shutdown complete")
 
@@ -164,6 +342,9 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Without this the browser drops the renewed-session header and every
+        # session dies at the TTL regardless of activity.
+        expose_headers=[SESSION_TOKEN_HEADER],
     )
     app.add_middleware(AuthMiddleware)
 
@@ -202,48 +383,99 @@ def create_app() -> FastAPI:
     mount_metrics(app)
 
     app.include_router(health_routes.router)
+    app.include_router(internal_file_proxy_routes.router)
 
     api_prefix = settings.api_prefix
     app.include_router(auth_routes.router, prefix=api_prefix)
-    app.include_router(tenants_routes.router, prefix=api_prefix)
-    app.include_router(tenant_data_planes_routes.router, prefix=api_prefix)
-    app.include_router(projects_routes.router, prefix=api_prefix)
+    app.include_router(auth_sso_routes.router, prefix=api_prefix)
+    app.include_router(tenants_crud_routes.router, prefix=api_prefix)
+    app.include_router(tenants_settings_routes.router, prefix=api_prefix)
+    app.include_router(tenants_security_policy_routes.router, prefix=api_prefix)
+    app.include_router(enterprise_auth_settings_routes.router, prefix=api_prefix)
+    app.include_router(enterprise_auth_ldap_routes.router, prefix=api_prefix)
+    app.include_router(enterprise_auth_sso_routes.router, prefix=api_prefix)
+    app.include_router(tenants_users_routes.router, prefix=api_prefix)
+    # Network router first: its literal /firewall-script path must be matched
+    # before the CRUD router's /{tenant_id}.
+    app.include_router(tenant_data_planes_network_routes.router, prefix=api_prefix)
+    app.include_router(tenant_data_planes_crud_routes.router, prefix=api_prefix)
+    # Aggregate reads first: their literal paths (e.g. ``/summaries``) must be
+    # matched before ``/{project_id}`` in projects_crud.
+    app.include_router(projects_aggregates_routes.router, prefix=api_prefix)
+    app.include_router(projects_crud_routes.router, prefix=api_prefix)
+    app.include_router(projects_datasources_routes.router, prefix=api_prefix)
+    app.include_router(projects_members_routes.router, prefix=api_prefix)
+    app.include_router(projects_queries_routes.router, prefix=api_prefix)
+    app.include_router(projects_metadata_routes.router, prefix=api_prefix)
     app.include_router(scopes_routes.router, prefix=api_prefix)
     app.include_router(query_routes.router, prefix=api_prefix)
     app.include_router(query_scopes_routes.router, prefix=api_prefix)
-    app.include_router(scope_sets_routes.router, prefix=api_prefix)
+    app.include_router(scope_sets_crud_routes.router, prefix=api_prefix)
+    app.include_router(scope_sets_builder_routes.router, prefix=api_prefix)
     app.include_router(sharing_routes.router, prefix=api_prefix)
     app.include_router(storage_routes.router, prefix=api_prefix)
-    app.include_router(database_sources_routes.router, prefix=api_prefix)
+    app.include_router(database_sources_connection_routes.router, prefix=api_prefix)
+    app.include_router(
+        database_sources_saved_connections_routes.router, prefix=api_prefix
+    )
+    app.include_router(database_sources_lifecycle_routes.router, prefix=api_prefix)
     app.include_router(
         data_source_assignments_routes.router, prefix=api_prefix
     )
     app.include_router(saas_sources_routes.router, prefix=api_prefix)
+    app.include_router(connected_sources_routes.router, prefix=api_prefix)
     app.include_router(connectors_routes.router, prefix=api_prefix)
+    app.include_router(data_source_catalog_routes.router, prefix=api_prefix)
     app.include_router(grid_preferences_routes.router, prefix=api_prefix)
-    app.include_router(upload_routes.router, prefix=api_prefix)
+    app.include_router(upload_core_routes.router, prefix=api_prefix)
+    app.include_router(upload_datasources_routes.router, prefix=api_prefix)
+    app.include_router(upload_replace_routes.router, prefix=api_prefix)
+    app.include_router(upload_versions_routes.router, prefix=api_prefix)
+    app.include_router(uploads_routes.router, prefix=api_prefix)
     app.include_router(file_analysis_routes.router, prefix=api_prefix)
-    app.include_router(dashboards_routes.router, prefix=api_prefix)
+    app.include_router(file_imports_routes.router, prefix=api_prefix)
+    app.include_router(file_imports_routes.connections_router, prefix=api_prefix)
+    app.include_router(file_imports_routes.hosts_router, prefix=api_prefix)
+    app.include_router(dashboards_crud_routes.router, prefix=api_prefix)
+    app.include_router(dashboards_widget_query_routes.router, prefix=api_prefix)
     app.include_router(ai_proxy_routes.router, prefix=api_prefix)
     app.include_router(ai_governance_routes.router, prefix=api_prefix)
     app.include_router(ai_reference_catalog_routes.router, prefix=api_prefix)
     app.include_router(analytical_methods_routes.router, prefix=api_prefix)
+    app.include_router(llm_framework_inventory_routes.router, prefix=api_prefix)
+    app.include_router(llm_framework_catalog_routes.router, prefix=api_prefix)
+    app.include_router(llm_framework_artifacts_routes.router, prefix=api_prefix)
+    app.include_router(llm_framework_deployments_routes.router, prefix=api_prefix)
     app.include_router(ai_asset_metadata_routes.router, prefix=api_prefix)
     app.include_router(project_assets_routes.router, prefix=api_prefix)
     app.include_router(project_context_routes.router, prefix=api_prefix)
     app.include_router(project_graph_routes.router, prefix=api_prefix)
-    app.include_router(project_actions_routes.router, prefix=api_prefix)
+    app.include_router(project_actions_crud_routes.router, prefix=api_prefix)
+    app.include_router(project_actions_lifecycle_routes.router, prefix=api_prefix)
+    app.include_router(project_actions_comments_routes.router, prefix=api_prefix)
     app.include_router(project_insight_routes.router, prefix=api_prefix)
     app.include_router(knowledge_graph_routes.router, prefix=api_prefix)
-    app.include_router(document_families_routes.router, prefix=api_prefix)
+    app.include_router(document_families_reads_routes.router, prefix=api_prefix)
+    app.include_router(document_families_curation_routes.router, prefix=api_prefix)
+    app.include_router(document_families_summary_routes.router, prefix=api_prefix)
     app.include_router(billing_routes.router, prefix=api_prefix)
     app.include_router(billing_admin_routes.router, prefix=api_prefix)
     app.include_router(provisioning_routes.router, prefix=api_prefix)
-    app.include_router(home_intelligence_routes.router, prefix=api_prefix)
+    app.include_router(home_intelligence_suite_routes.router, prefix=api_prefix)
+    app.include_router(home_intelligence_snapshot_routes.router, prefix=api_prefix)
+    app.include_router(home_intelligence_suggestions_routes.router, prefix=api_prefix)
+    app.include_router(home_intelligence_dashboard_save_routes.router, prefix=api_prefix)
     app.include_router(home_pins_routes.router, prefix=api_prefix)
-    app.include_router(conversational_analytics_routes.router, prefix=api_prefix)
-    app.include_router(insight_feedback_routes.router, prefix=api_prefix)
-    app.include_router(reference_library_routes.router, prefix=api_prefix)
+    app.include_router(insight_chart_selection_routes.router, prefix=api_prefix)
+    app.include_router(conversational_analytics_conversations_routes.router, prefix=api_prefix)
+    app.include_router(conversational_analytics_turns_routes.router, prefix=api_prefix)
+    # Review router first: its literal /review paths must be matched before the
+    # CRUD router's /{insight_id}.
+    app.include_router(insight_feedback_review_routes.router, prefix=api_prefix)
+    app.include_router(insight_feedback_crud_routes.router, prefix=api_prefix)
+    app.include_router(reference_library_documents_routes.router, prefix=api_prefix)
+    app.include_router(reference_library_project_views_routes.router, prefix=api_prefix)
+    app.include_router(reference_library_suggestions_routes.router, prefix=api_prefix)
     app.include_router(reference_library_bulk_routes.router, prefix=api_prefix)
     app.include_router(repository_connectors_routes.router, prefix=api_prefix)
     app.include_router(reports_routes.router, prefix=api_prefix)
