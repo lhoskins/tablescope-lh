@@ -65,7 +65,7 @@ deploy_vdb_file() {
     n=$(basename "$f")
     echo "[entrypoint] deploying VDB $n"
     /opt/wildfly/bin/jboss-cli.sh --connect --user="$WF_USER" --password="$WF_PASS" \
-        --command="deploy \"$f\" --name=\"$n\" --force" 2>&1 | tail -1 || true
+        --command="deploy $f --name=$n --force" 2>&1 | tail -1 || true
 }
 
 reconcile_missing_vdbs() {
