@@ -2,13 +2,19 @@
 
 This endpoint is intentionally not under ``/api`` and is whitelisted in the auth
 middleware.  It validates the caller by source IP (must be inside the tenant's
-Docker subnet) and streams the requested remote file back to Teiid.
+Docker subnet, the operator-supplied ``FILE_IMPORT_NETWORK_SOURCE_CIDRS`` list,
+or the Docker network the Teiid container is attached to) and streams the
+requested remote file back to Teiid.
 """
 
 from __future__ import annotations
 
+import fcntl
 import ipaddress
 import logging
+import socket
+import struct
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -45,12 +51,84 @@ def _ip_in_cidr(ip_str: str, cidr: str | None) -> bool:
         return False
 
 
-def _source_allowed(client_ip: str | None, tenant_cidr: str | None, extra: list[str]) -> bool:
+def _local_interface_networks() -> list[tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ipaddress.IPv4Network | ipaddress.IPv6Network]]:
+    """Return IPv4 address/network pairs for each non-loopback interface."""
+    networks: list[tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ipaddress.IPv4Network | ipaddress.IPv6Network]] = []
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        return networks
+    try:
+        for _idx, name in socket.if_nameindex():
+            if name == "lo":
+                continue
+            try:
+                ifaddr = fcntl.ioctl(
+                    sock.fileno(), 0x8915, struct.pack("256s", name.encode()[:15])
+                )[20:24]
+                ifmask = fcntl.ioctl(
+                    sock.fileno(), 0x891B, struct.pack("256s", name.encode()[:15])
+                )[20:24]
+                addr = socket.inet_ntoa(ifaddr)
+                mask = socket.inet_ntoa(ifmask)
+                network = ipaddress.ip_network(f"{addr}/{mask}", strict=False)
+                networks.append((ipaddress.ip_address(addr), network))
+            except OSError:
+                continue
+    finally:
+        sock.close()
+    return networks
+
+
+_TEIID_CIDR_CACHE: tuple[list[str], float] | None = None
+_TEIID_CIDR_TTL_SECONDS = 60
+_TEIID_HOSTNAMES = ("teiid", "tablescope-teiid-1")
+
+
+def _teiid_network_cidrs() -> list[str]:
+    """Return the Docker network CIDR(s) that the Teiid container lives on."""
+    global _TEIID_CIDR_CACHE
+    now = time.monotonic()
+    if _TEIID_CIDR_CACHE is not None and now - _TEIID_CIDR_CACHE[1] < _TEIID_CIDR_TTL_SECONDS:
+        return _TEIID_CIDR_CACHE[0]
+
+    cidrs: list[str] = []
+    try:
+        local_nets = _local_interface_networks()
+    except Exception:
+        local_nets = []
+
+    for hostname in _TEIID_HOSTNAMES:
+        try:
+            for family, _socktype, _proto, _canonname, sockaddr in socket.getaddrinfo(
+                hostname, None, socket.AF_INET
+            ):
+                if family != socket.AF_INET:
+                    continue
+                ip = ipaddress.ip_address(sockaddr[0])
+                for _addr, net in local_nets:
+                    if ip in net:
+                        cidrs.append(str(net))
+                        break
+        except socket.gaierror:
+            continue
+
+    cidrs = list(dict.fromkeys(cidrs))
+    _TEIID_CIDR_CACHE = (cidrs, now)
+    return cidrs
+
+
+def _source_allowed(
+    client_ip: str | None, tenant_cidr: str | None, extra: list[str]
+) -> bool:
     if not client_ip:
         return False
     if _ip_in_cidr(client_ip, tenant_cidr):
         return True
     for cidr in extra:
+        if _ip_in_cidr(client_ip, cidr):
+            return True
+    for cidr in _teiid_network_cidrs():
         if _ip_in_cidr(client_ip, cidr):
             return True
     return False

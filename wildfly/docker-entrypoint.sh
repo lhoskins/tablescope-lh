@@ -37,6 +37,93 @@ redeploy_vdbs() {
     done
 }
 
+test_pool() {
+    local ra="$1" cdef="$2"
+    /opt/wildfly/bin/jboss-cli.sh --connect --user="$WF_USER" --password="$WF_PASS" \
+        --command="/subsystem=resource-adapters/resource-adapter=$ra/connection-definitions=$cdef:test-connection-in-pool" 2>/dev/null \
+        | grep -q '"result" => \[true\]'
+}
+
+flush_pool() {
+    local ra="$1" cdef="$2"
+    echo "[entrypoint] flushing pool $cdef"
+    /opt/wildfly/bin/jboss-cli.sh --connect --user="$WF_USER" --password="$WF_PASS" \
+        --command="/subsystem=resource-adapters/resource-adapter=$ra/connection-definitions=$cdef:flush-all-connection-in-pool" >/dev/null 2>&1 || true
+}
+
+pool_health_loop() {
+    # Wait until the management interface reports the server is running.
+    for _ in $(seq 1 60); do
+        if /opt/wildfly/bin/jboss-cli.sh --connect --user="$WF_USER" --password="$WF_PASS" \
+                --command=":read-attribute(name=server-state)" 2>/dev/null | grep -q '"running"'; then
+            break
+        fi
+        sleep 5
+    done
+
+    local interval="${TEIID_POOL_HEALTH_INTERVAL:-60}"
+    local max_fail=3
+    local file_fail=0 excel_fail=0 remote_fail=0
+
+    while true; do
+        if ! test_pool "file" "fileDS"; then
+            echo "[entrypoint] fileDS connection test failed"
+            flush_pool "file" "fileDS"
+            if ! test_pool "file" "fileDS"; then
+                file_fail=$((file_fail + 1))
+                echo "[entrypoint] fileDS still failing after flush ($file_fail/$max_fail)"
+                if [ "$file_fail" -ge "$max_fail" ]; then
+                    echo "[entrypoint] restarting WildFly due to persistent fileDS failures"
+                    kill -TERM "$WF_PID" 2>/dev/null || true
+                    return
+                fi
+            else
+                file_fail=0
+                echo "[entrypoint] fileDS recovered after flush"
+            fi
+        else
+            file_fail=0
+        fi
+
+        if ! test_pool "file" "excelDS"; then
+            echo "[entrypoint] excelDS connection test failed"
+            flush_pool "file" "excelDS"
+            if ! test_pool "file" "excelDS"; then
+                excel_fail=$((excel_fail + 1))
+                if [ "$excel_fail" -ge "$max_fail" ]; then
+                    echo "[entrypoint] restarting WildFly due to persistent excelDS failures"
+                    kill -TERM "$WF_PID" 2>/dev/null || true
+                    return
+                fi
+            else
+                excel_fail=0
+            fi
+        else
+            excel_fail=0
+        fi
+
+        if ! test_pool "remote-file" "remote-file-ds"; then
+            echo "[entrypoint] remote-file-ds connection test failed"
+            flush_pool "remote-file" "remote-file-ds"
+            if ! test_pool "remote-file" "remote-file-ds"; then
+                remote_fail=$((remote_fail + 1))
+                if [ "$remote_fail" -ge "$max_fail" ]; then
+                    echo "[entrypoint] restarting WildFly due to persistent remote-file-ds failures"
+                    kill -TERM "$WF_PID" 2>/dev/null || true
+                    return
+                fi
+            else
+                remote_fail=0
+            fi
+        else
+            remote_fail=0
+        fi
+
+        sleep "$interval"
+    done
+}
+
 redeploy_vdbs &
+pool_health_loop &
 
 wait "$WF_PID"
