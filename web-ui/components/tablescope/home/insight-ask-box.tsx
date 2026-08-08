@@ -7,6 +7,7 @@ import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
 import { RAnalyticsBadge } from "./insight-engine-badge";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { aiActionsApi, type AiCardContext, type AskAndRunResult } from "@/lib/api/ai-actions";
+import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import type { InsightCard, InsightDiagnostic } from "@/lib/api/home-intelligence";
 
 /**
@@ -25,6 +26,7 @@ export function InsightAskBox({
   card: InsightCard;
   suggestions: string[];
 }) {
+  const { data: identity } = useCurrentUser();
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState("");
 
@@ -81,7 +83,7 @@ export function InsightAskBox({
         ariaLabel="Ask your own question about this insight"
         submitAriaLabel="Ask"
         busy={ask.isPending}
-        voiceEnabled={false}
+        voiceEnabled={identity?.tenant.voiceInputEnabled ?? false}
         projectId={card.projectId}
       />
 

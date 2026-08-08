@@ -12,7 +12,6 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  IconArrowUp,
   IconSparkles,
   IconPlus,
   IconTrash,
@@ -23,7 +22,7 @@ import {
 import { AppShell } from "@/components/tablescope/app-shell";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { AutosizeTextarea } from "@/components/ui/autosize-textarea";
+import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { cn } from "@/lib/cn";
 import { getUserMeta } from "@/lib/auth";
 import { useCurrentUser, useProjectSummaries } from "@/lib/ui/use-shell-data";
@@ -414,32 +413,17 @@ function AiAssistantPageInner() {
                 Please choose a project so I know which data to use.
               </p>
             )}
-            <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border border-line-secondary bg-bg-primary px-4 py-3 shadow-sm">
-              <AutosizeTextarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send(input);
-                  }
-                }}
-                minRows={2}
-                maxRows={8}
-                placeholder="Message Tablescope AI…"
-                aria-label="Message Tablescope AI"
-                className="flex-1 text-[13px] text-ink-primary placeholder:text-ink-tertiary"
-              />
-              <button
-                type="button"
-                onClick={() => send(input)}
-                disabled={busy || !input.trim()}
-                aria-label="Send"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-fg hover:bg-brand-700 disabled:opacity-40"
-              >
-                <IconArrowUp size={16} />
-              </button>
-            </div>
+            <AskAnythingComposer
+              value={input}
+              onChange={setInput}
+              onSubmit={send}
+              placeholder="Message Tablescope AI…"
+              ariaLabel="Message Tablescope AI"
+              busy={busy}
+              voiceEnabled={tenant.voiceInputEnabled ?? false}
+              projectId={projectId}
+              className="mx-auto max-w-3xl"
+            />
             <p className="mt-2 text-center text-[11px] text-ink-tertiary">
               Tablescope AI may produce inaccurate information. All responses
               are scoped to your tenant.

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
+import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { RoutePromptResponse } from "./route-prompt-response";
 
 
@@ -15,6 +16,7 @@ export function HomeAskBox({
   projectId?: number;
   onAsk?: (prompt: string) => void | Promise<void>;
 }) {
+  const { data: identity } = useCurrentUser();
   const router = useRouter();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -63,7 +65,7 @@ export function HomeAskBox({
           ariaLabel="Ask anything across your connected data, documents, and dashboards"
           submitAriaLabel="Ask"
           busy={submitting}
-          voiceEnabled={false}
+          voiceEnabled={identity?.tenant.voiceInputEnabled ?? false}
           projectId={projectId}
         />
       </div>
