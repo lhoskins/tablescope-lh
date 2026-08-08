@@ -263,8 +263,9 @@ function AiAssistantPageInner() {
       user={user}
       counts={{ projects: projects?.length }}
       topBarLeft={<AssistantHeader returnProject={returnProject} />}
+      scrollable={false}
     >
-      <div className="relative flex h-[calc(100vh-9rem)] flex-col gap-0 overflow-hidden rounded-lg border border-line-tertiary lg:flex-row">
+      <div className="relative flex h-[calc(100dvh-6.5rem)] min-h-0 flex-col gap-0 overflow-hidden rounded-lg border border-line-tertiary lg:flex-row">
         {/* Left sidebar — conversations (desktop) */}
         <aside className="hidden w-[260px] shrink-0 flex-col border-r border-line-tertiary bg-bg-secondary lg:flex">
           <ConversationListPanel
@@ -303,7 +304,7 @@ function AiAssistantPageInner() {
         />
 
         {/* Right — chat area */}
-        <div className="flex min-w-0 flex-1 flex-col bg-bg-primary">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary">
           {/* Mobile conversation toggle */}
           <div className="flex items-center justify-end border-b border-line-tertiary px-4 py-2 lg:hidden">
             <button
@@ -319,7 +320,7 @@ function AiAssistantPageInner() {
           {/* Messages */}
           <div
             ref={scrollRef}
-            className="flex-1 overflow-y-auto px-6 py-5"
+            className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
           >
             {turns.length === 0 && !pendingQuestion ? (
               <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center text-center">
