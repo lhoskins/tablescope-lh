@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .grounding import GroundingEvidence
+
 
 class VectorPayload(BaseModel):
     """Security payload stored with every vector in Qdrant."""
@@ -46,3 +48,4 @@ class ContextPackage(BaseModel):
     })
     retrieval_filters: dict[str, Any] = Field(default_factory=dict)
     audit_context_id: str = ""
+    grounding_evidence: GroundingEvidence | None = None

@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -42,6 +43,7 @@ async def ask(req: AskRequest) -> AskResponse:
             scope=req.scope,
             question=req.question,
             feature="ask",
+            grounding_evidence=req.grounding_evidence,
         )
     except ContextBuildError as e:
         raise HTTPException(
@@ -74,6 +76,16 @@ async def ask(req: AskRequest) -> AskResponse:
         request_id, req.tenant_id, req.project_id, req.user_id,
     )
 
+    grounding_manifest: dict[str, Any] | None = None
+    if req.grounding_evidence:
+        grounding_manifest = {
+            "question": req.grounding_evidence.question,
+            "passage_count": len(req.grounding_evidence.passages),
+            "kg_node_count": len(req.grounding_evidence.kg_nodes),
+            "kpi_count": len(req.grounding_evidence.kpis),
+            "retrieved_at": req.grounding_evidence.retrieved_at.isoformat(),
+        }
+
     return AskResponse(
         answer=answer,
         model_used=settings.reasoning_model,
@@ -86,4 +98,5 @@ async def ask(req: AskRequest) -> AskResponse:
             ),
             "query_count": len(ctx.allowed_context.get("queries", [])),
         },
+        grounding_manifest=grounding_manifest,
     )

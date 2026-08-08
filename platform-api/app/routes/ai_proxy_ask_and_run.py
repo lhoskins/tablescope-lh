@@ -19,6 +19,7 @@ from app.database import get_db
 from app.models.file_source_meta import FileSourceMeta
 from app.services import ai_intelligence_client as ai
 from app.services import ask_pipeline, insight_registry
+from app.services.ai_grounding import gather_grounding_evidence
 from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.analytical_method_engine import data_profiler
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
@@ -403,6 +404,7 @@ async def _generate_sql_for_question(
     *,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    grounding_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate SQL for a natural-language question via the AI server.
 
@@ -436,6 +438,7 @@ async def _generate_sql_for_question(
             preferred_sources=preferred_sources or [],
             relevant_columns=relevant_columns or [],
             knowledge_graph_context=await _kg_context(session, context, project_id),
+            grounding_evidence=grounding_evidence,
         )
     except ai.AIUnavailableError as exc:
         raise HTTPException(
@@ -517,6 +520,20 @@ async def _ask_and_run_core(
         card_context=card_context,
     )
 
+    # Gather proactive grounding evidence before generation.
+    # This runs before SQL generation so the prompt can include retrieved
+    # document passages, query-aware KG nodes, and ranked governed KPIs.
+    grounding = await gather_grounding_evidence(
+        session,
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        project_id=project_id,
+        question=question,
+        relevant_columns=resolver.relevant_columns,
+    )
+    grounding_evidence = grounding.model_dump() if grounding else None
+    grounding_manifest = grounding.manifest() if grounding else None
+
     # A question asked *from* a card carries that card with it. Grounding the
     # prompt in the finding — its text, its method and the query it was computed
     # from — is what makes "what is driving this?" dig into that insight instead
@@ -531,6 +548,7 @@ async def _ask_and_run_core(
             session, context, project_id, generation_question,
             preferred_sources=resolver.preferred_sources,
             relevant_columns=resolver.relevant_columns,
+            grounding_evidence=grounding_evidence,
         )
     except HTTPException as exc:
         friendly, details = _ai_generation_error(exc)
@@ -545,6 +563,7 @@ async def _ask_and_run_core(
             "status": "generation_error",
             "error": friendly,
             "errorDetails": details,
+            "groundingManifest": grounding_manifest,
         }
 
     allowed_tables = ai_result.pop("_allowed_tables", [])
@@ -561,6 +580,7 @@ async def _ask_and_run_core(
             "status": "generation_error",
             "error": "We could not safely build a query for this question.",
             "errorDetails": {"sql": sql} if sql else {},
+            "groundingManifest": grounding_manifest,
         }
 
     table_schema = await _project_table_schema(
@@ -589,6 +609,7 @@ async def _ask_and_run_core(
                 "sql": sql,
                 "executionError": exec_error,
             },
+            "groundingManifest": grounding_manifest,
         }
 
     columns = result.get("columns", [])
@@ -604,6 +625,7 @@ async def _ask_and_run_core(
         "dataSourcesUsed": [used] if used else [],
         "status": "success",
         "error": None,
+        "groundingManifest": ai_result.get("grounding_manifest") or grounding_manifest,
     }
     decision = _classify_intent_safe(question, columns, rows)
     if decision is not None:
@@ -759,6 +781,7 @@ async def _forward_prose_answer(
     scope: str = "project",
     include_query_history: bool = True,
     include_dashboard_context: bool = True,
+    grounding_evidence: dict[str, Any] | None = None,
 ) -> str:
     """Free-text answer from the AI server's documents + knowledge-graph path.
 
@@ -777,6 +800,7 @@ async def _forward_prose_answer(
             include_dashboard_context=include_dashboard_context,
             history=history or [],
             knowledge_graph_context=await _kg_context(session, context, project_id),
+            grounding_evidence=grounding_evidence,
         )
     except ai.AIUnavailableError:
         return ""
@@ -814,11 +838,13 @@ async def ai_ask_and_run(
         result["answerType"] = "data"
         return result
     if result.get("status") in ("generation_error", "execution_error"):
+        grounding_manifest = result.get("groundingManifest")
         prose = await _forward_prose_answer(
             session,
             context,
             project_id=req.project_id,
             question=req.question,
+            grounding_evidence=grounding_manifest,
         )
         if prose:
             prose_result: dict[str, Any] = {
@@ -832,6 +858,7 @@ async def ai_ask_and_run(
                 "status": "success",
                 "answerType": "text",
                 "error": None,
+                "groundingManifest": grounding_manifest,
             }
             _attach_presentation(prose_result)
             return prose_result

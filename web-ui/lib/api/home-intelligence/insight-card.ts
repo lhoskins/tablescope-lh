@@ -19,7 +19,24 @@ import { ProposedAction } from "./proposed-action";
 import { CrossReference } from "./cross-reference";
 import { TimeSeriesViewState } from "./time-series-view-state";
 
-
+export interface GroundingManifest {
+  question: string;
+  passageCount: number;
+  kgNodeCount: number;
+  kpiCount: number;
+  retrievedAt: string;
+  passages?: Array<{
+    documentId?: number | null;
+    chunkIndex?: number | null;
+    title?: string;
+    sourceType?: string;
+    tier?: string;
+    retrievalMethod?: string;
+    retrievalScore?: number;
+  }>;
+  kgNodes?: Array<{ id?: number | string; nodeType: string; title: string }>;
+  kpis?: Array<{ kpiKey: string; displayName?: string }>;
+}
 
 export interface InsightCard {
   id: string;
@@ -92,6 +109,8 @@ export interface InsightCard {
   evidenceFingerprint?: EvidenceFingerprint;
   /** Structured evidence-based confidence evaluation. */
   confidenceEvaluation?: InsightConfidenceEvaluation;
+  /** Grounding manifest for document passages, KG nodes, and governed KPIs. */
+  groundingManifest?: GroundingManifest;
   /** The selected visualization decision for this card's chart. */
   visualizationDecision?: VizDecision;
   /** Ranked compatible chart candidates the user can switch to. */

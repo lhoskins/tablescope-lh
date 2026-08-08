@@ -25,7 +25,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
-from app.models.schemas import ContextPackage
+from app.models.schemas import ContextPackage, GroundingEvidence
 from app.services import llm_client, vector_store
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,7 @@ async def build_context(
     scope: str,
     question: str,
     feature: str = "ask",
+    grounding_evidence: GroundingEvidence | None = None,
 ) -> ContextPackage:
     """Build the exact context the LLM is allowed to see.
 
@@ -152,9 +153,9 @@ async def build_context(
     # endpoint requires user authentication which the AI service cannot provide.
     metadata = perms.get("datasources", [])
 
-    # 2. Vector search (if question provided)
+    # 2. Vector search (if question provided and no pre-computed grounding)
     documents: list[dict[str, Any]] = []
-    if question:
+    if not grounding_evidence and question:
         query_embedding: list[float] | None = None
         try:
             query_embedding = await llm_client.generate_embedding(question)
@@ -189,6 +190,25 @@ async def build_context(
                     documents = documents + reference_docs
             except Exception as e:
                 logger.warning("Reference vector search failed: %s", e)
+
+    # 2b. Use platform-api provided grounding evidence when available.
+    if grounding_evidence:
+        documents = [
+            {
+                "id": p.id,
+                "score": p.retrieval_score,
+                "payload": {
+                    "chunk_text": p.text,
+                    "title": p.title,
+                    "source_type": p.source_type,
+                    "tier": p.tier,
+                    "retrieval_method": p.retrieval_method,
+                    "document_id": p.document_id,
+                    "chunk_index": p.chunk_index,
+                },
+            }
+            for p in (grounding_evidence.passages or [])
+        ]
 
     # 3. Saved queries, dashboards, and query scopes from permissions context
     queries = perms.get("saved_queries", [])
@@ -230,6 +250,7 @@ async def build_context(
             "user_id": user_id,
         },
         audit_context_id=audit_id,
+        grounding_evidence=grounding_evidence,
     )
 
     logger.info(
@@ -273,12 +294,14 @@ def context_to_prompt_text(context: ContextPackage) -> str:
             if not text:
                 continue
             title = payload.get("title")
+            method = payload.get("retrieval_method", "")
+            prefix = f"[{method}] " if method else ""
             if payload.get("source_type") == "reference_library" and title:
                 tier = payload.get("tier", "")
-                label = f"reference: {title}" + (f" ({tier})" if tier else "")
+                label = f"{prefix}reference: {title}" + (f" ({tier})" if tier else "")
                 parts.append(f"  - [{label}] {text[:500]}")
             else:
-                parts.append(f"  - {text[:500]}")
+                parts.append(f"  - {prefix}{title + ': ' if title else ''}{text[:500]}")
 
     # Saved queries
     if context.allowed_context.get("queries"):
@@ -345,5 +368,23 @@ def context_to_prompt_text(context: ContextPackage) -> str:
                 vals = members.get(kind) or []
                 if vals:
                     parts.append(f"      {kind}: {', '.join(str(v) for v in vals)}")
+
+    # Grounding knowledge-graph nodes (query-aware, when provided)
+    if context.grounding_evidence and context.grounding_evidence.kg_nodes:
+        parts.append("\nRelevant knowledge-graph findings:")
+        for node in context.grounding_evidence.kg_nodes:
+            line = f"  - {node.node_type}: {node.title}"
+            if node.summary:
+                line += f" — {node.summary[:200]}"
+            parts.append(line)
+
+    # Grounding governed KPIs (when provided)
+    if context.grounding_evidence and context.grounding_evidence.kpis:
+        parts.append("\nRelevant governed KPIs:")
+        for kpi in context.grounding_evidence.kpis:
+            line = f"  - {kpi.display_name or kpi.kpi_key}"
+            if kpi.business_domain:
+                line += f" ({kpi.business_domain})"
+            parts.append(line)
 
     return "\n".join(parts)

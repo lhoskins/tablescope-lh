@@ -105,6 +105,10 @@ def _gap_text(factor: ConfidenceFactor) -> str | None:
         return "Corroborate with a document reference or secondary data source."
     if factor.code == "execution_grounding":
         return "Ensure the query executes and returns a usable result."
+    if factor.code == "grounding_coverage":
+        return "Add project documents, build the knowledge graph, or define governed KPIs."
+    if factor.code == "source_freshness":
+        return "Re-run the grounded retrieval so the evidence is recent."
     if factor.status == "failed":
         return f"{factor.label} is insufficient."
     return None

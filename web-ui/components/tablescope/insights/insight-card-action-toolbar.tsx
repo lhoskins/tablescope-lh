@@ -112,6 +112,84 @@ function InsightCardSourceRow({ card }: { card: InsightCard }) {
   );
 }
 
+function GroundingSourcesDetails({ card }: { card: InsightCard }) {
+  const [open, setOpen] = useState(false);
+  const manifest = card.groundingManifest;
+  if (!manifest) return null;
+
+  const passages = manifest.passages ?? [];
+  const kgNodes = manifest.kgNodes ?? [];
+  const kpis = manifest.kpis ?? [];
+  const confidenceBasis = card.confidenceEvaluation?.basis;
+
+  return (
+    <div className="text-[12px]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-ink-tertiary hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+        aria-expanded={open}
+      >
+        {open ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+        <IconFileText size={13} />
+        Sources
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 border-l-2 border-line-tertiary pl-3 text-ink-secondary">
+        {card.sql && (
+          <div>
+            <span className="text-[11px] font-medium uppercase text-ink-tertiary">SQL</span>
+            <pre className="mt-0.5 max-h-24 overflow-auto rounded bg-bg-tertiary p-2 text-[11px]">{card.sql}</pre>
+          </div>
+        )}
+        {passages.length > 0 && (
+          <div>
+            <span className="text-[11px] font-medium uppercase text-ink-tertiary">Documents considered / passages used</span>
+            <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+              {passages.map((p, i) => (
+                <li key={`p-${i}`}>
+                  {p.title || `Document ${p.documentId ?? "?"}`}
+                  {p.tier ? ` (${p.tier}${p.retrievalMethod ? `, ${p.retrievalMethod}` : ""})` : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {kgNodes.length > 0 && (
+          <div>
+            <span className="text-[11px] font-medium uppercase text-ink-tertiary">Knowledge graph nodes</span>
+            <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+              {kgNodes.map((n, i) => (
+                <li key={`n-${i}`}>{n.nodeType ? `${n.nodeType}: ` : ""}{n.title}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {kpis.length > 0 && (
+          <div>
+            <span className="text-[11px] font-medium uppercase text-ink-tertiary">Governed KPIs</span>
+            <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+              {kpis.map((k, i) => (
+                <li key={`k-${i}`}>{k.displayName || k.kpiKey}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {confidenceBasis && (
+          <div>
+            <span className="text-[11px] font-medium uppercase text-ink-tertiary">Confidence reason</span>
+            <p className="mt-0.5 text-[11px]">{confidenceBasis}</p>
+          </div>
+        )}
+        <div className="text-[11px] text-ink-tertiary">
+          Grounding retrieved at {new Date(manifest.retrievedAt).toLocaleString()}.
+        </div>
+      </div>
+      )}
+    </div>
+  );
+}
+
 function IconButton({
   label,
   tooltip,
@@ -288,6 +366,7 @@ export function InsightCardActionToolbar({
             )}
           >
             <InsightCardSourceRow card={card} />
+            <GroundingSourcesDetails card={card} />
 
             <div
               className="flex flex-wrap items-center justify-end gap-1"

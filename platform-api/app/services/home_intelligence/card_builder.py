@@ -156,10 +156,12 @@ def _card(
             aggregations=None,
             grain=None,
             intent=chart_type,
+            grounding_evidence=result.get("groundingManifest") if result else None,
         )
         fp_dict = evidence_fp.to_dict()
         fp_dict["tenant_id"] = tenant_id
         card["evidenceFingerprint"] = fp_dict
+        card["groundingManifest"] = result.get("groundingManifest") if result else None
     except Exception as exc:
         logger.debug("evidence fingerprint failed for insight %s: %s", insight_id, exc)
 
@@ -198,6 +200,7 @@ def _card(
             uses_reference=bool(documents) and any(isinstance(d, str) for d in (documents or [])),
             has_project_evidence=(result is not None) or (bool(documents) and not all(isinstance(d, str) for d in (documents or []))),
             intent=chart_type,
+            grounding_evidence=result.get("groundingManifest") if result else None,
         )
         card["confidenceEvaluation"] = confidence_eval.to_dict()
         card["confidenceScore"] = confidence_eval.score

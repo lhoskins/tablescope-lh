@@ -58,6 +58,14 @@ from .family import (
     FamilySummarizeRequest,
     FamilySummarizeResponse,
 )
+from .grounding import (
+    GroundingEvidence,
+    GroundingKGNode,
+    GroundingKPI,
+    GroundingPassage,
+    GroundingSearchRequest,
+    GroundingSearchResponse,
+)
 from .file_analysis import (
     AnalyzeFileRequest,
     AnalyzeFileResponse,
@@ -125,6 +133,12 @@ __all__ = [
     "DraftActionSuccessCriterion",
     "FamilySummarizeRequest",
     "FamilySummarizeResponse",
+    "GroundingEvidence",
+    "GroundingKGNode",
+    "GroundingKPI",
+    "GroundingPassage",
+    "GroundingSearchRequest",
+    "GroundingSearchResponse",
     "GenerateRelationshipsRequest",
     "GenerateRelationshipsResponse",
     "GenerateSQLRequest",

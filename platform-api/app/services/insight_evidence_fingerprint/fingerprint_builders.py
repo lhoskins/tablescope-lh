@@ -11,11 +11,48 @@ from .canonicalization import (
     _canonicalize_rows,
     _canonicalize_value,
     _normalize_sql,
+    _normalize_whitespace,
     _parse_aggregations_from_sql,
     _parse_columns_from_sql,
     _parse_tables_from_sql,
     _sha256,
 )
+
+
+def build_grounding_fingerprint(
+    grounding: dict[str, Any] | None,
+) -> str | None:
+    """Canonical fingerprint of the evidence used to ground the answer.
+
+    Hashes the KG version, the IDs of the KG nodes, document chunks, and
+    governed KPIs referenced, plus the mix of retrieval methods.
+    """
+    if not grounding:
+        return None
+    passages = grounding.get("passages") or []
+    kg_nodes = grounding.get("kg_nodes") or grounding.get("kgNodes") or []
+    kpis = grounding.get("kpis") or []
+
+    payload = {
+        "kg_version_id": grounding.get("kg_version_id") or grounding.get("kgVersionId"),
+        "kg_node_ids": sorted(
+            {str(n.get("id")) for n in kg_nodes if n.get("id")}
+        ),
+        "chunk_keys": sorted(
+            {
+                f"{p.get('document_id') or p.get('documentId')}:{p.get('chunk_index') or p.get('chunkIndex')}:{p.get('source_type') or p.get('sourceType')}"
+                for p in passages
+            }
+        ),
+        "kpi_keys": sorted(
+            {str(k.get("kpi_key") or k.get("kpiKey") or "") for k in kpis if k.get("kpi_key") or k.get("kpiKey")}
+        ),
+        "retrieval_methods": sorted(
+            {str(p.get("retrieval_method") or p.get("retrievalMethod") or "") for p in passages}
+        ),
+        "question": _normalize_whitespace(grounding.get("question")),
+    }
+    return _sha256(_canonical_json(payload))
 
 
 def build_plan_fingerprint(
@@ -30,6 +67,19 @@ def build_plan_fingerprint(
     """Canonical fingerprint of the analysis plan (intent + source scope)."""
     analysis = analysis or {}
     sql = _normalize_sql(analysis.get("sql") if analysis else None)
+
+    # Source documents now carry chunk-level granularity when available.
+    source_documents = analysis.get("source_documents") or []
+    source_chunks: list[str] = []
+    for d in source_documents:
+        if isinstance(d, dict):
+            doc_id = str(d.get("id") or d.get("documentId") or "")
+            for ch in d.get("chunks") or []:
+                idx = ch.get("chunk_index") if isinstance(ch, dict) else None
+                source_chunks.append(f"{doc_id}:{idx}")
+        else:
+            source_chunks.append(str(d).lower())
+
     payload = {
         "v": EVIDENCE_FINGERPRINT_VERSION,
         "tenant_id": tenant_id,
@@ -39,9 +89,7 @@ def build_plan_fingerprint(
         "label_column": str(analysis.get("label_column", "")).lower() if analysis else "",
         "value_column": str(analysis.get("value_column", "")).lower() if analysis else "",
         "value_column_2": str(analysis.get("value_column_2", "")).lower() if analysis else "",
-        "source_documents": sorted(
-            str(d).lower() for d in (analysis.get("source_documents") if analysis else []) or []
-        ),
+        "source_documents": sorted(source_chunks),
         "sql_columns": sorted(
             c.lower() for c in (source_columns if source_columns else _parse_columns_from_sql(sql))
         ),
@@ -197,6 +245,7 @@ def build_evidence_fingerprint(
     aggregations: list[str] | None = None,
     grain: str | None = None,
     intent: str | None = None,
+    grounding_evidence: dict[str, Any] | None = None,
 ) -> EvidenceFingerprint:
     """Compute the full evidence fingerprint package for an insight card."""
     result_columns = []
@@ -248,11 +297,13 @@ def build_evidence_fingerprint(
         grain=grain,
         intent=intent,
     )
+    grounding_fp = build_grounding_fingerprint(grounding_evidence)
     return EvidenceFingerprint(
         plan_fingerprint=plan_fp,
         result_fingerprint=result_fp,
         semantic_fingerprint=semantic_fp,
         series_fingerprint=series_fp,
+        grounding_fingerprint=grounding_fp,
     )
 
 
@@ -266,6 +317,7 @@ def fingerprint_for_card(card: dict[str, Any]) -> EvidenceFingerprint:
             result_fingerprint=raw.get("result_fingerprint") or raw.get("resultFingerprint"),
             semantic_fingerprint=raw.get("semantic_fingerprint") or raw.get("semanticFingerprint"),
             series_fingerprint=raw.get("series_fingerprint") or raw.get("seriesFingerprint"),
+            grounding_fingerprint=raw.get("grounding_fingerprint") or raw.get("groundingFingerprint"),
         )
     return build_evidence_fingerprint(
         project_id=int(card.get("projectId") or 0),

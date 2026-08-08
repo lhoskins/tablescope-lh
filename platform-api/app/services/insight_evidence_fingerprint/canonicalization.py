@@ -17,6 +17,7 @@ class EvidenceFingerprint:
     result_fingerprint: str | None = None
     semantic_fingerprint: str | None = None
     series_fingerprint: str | None = None
+    grounding_fingerprint: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
