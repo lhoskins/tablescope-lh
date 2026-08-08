@@ -7,7 +7,9 @@ query.
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -36,6 +38,23 @@ class Tenant(TimestampMixin, Base):
         String(255), unique=True, nullable=True, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Tenant lifecycle: active | decommissioning | decommissioned.
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="active", server_default=text("'active'")
+    )
+    activity_blocked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    decommission_job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tenant_decommission_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    decommissioned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # When true, every member of the tenant (not just admin/privileged roles) must
     # complete SMS MFA before accessing tenant data. Admins are always required
     # when the platform MFA master switch is on; this flag extends that requirement

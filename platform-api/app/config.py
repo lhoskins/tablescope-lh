@@ -65,10 +65,18 @@ class Settings(BaseSettings):
     s3_region: str = "us-west-1"
     s3_enabled: bool = True
 
+    # --- Tenant decommission ---
+    # Comma-separated list of tenant slugs that can never be decommissioned.
+    protected_tenant_slugs: str = ""
+    # Terraform workspace/state used by the decommission runner.
+    terraform_workspace: str = "tablescope"
+    terraform_state_key: str = "terraform.tfstate"
+
     # Symmetric key used to encrypt database data-source passwords at rest.
     # In production set TABLESCOPE_SECRET_KEY to a stable Fernet key.  When
     # empty, a key is derived from JWT_SECRET_KEY so dev still works.
     tablescope_secret_key: str = ""
+    decommission_runner_secret: str = ""
 
     clerk_jwks_url: str = ""
     clerk_issuer: str = ""

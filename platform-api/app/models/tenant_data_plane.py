@@ -29,6 +29,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
+# JSONB on Postgres, plain JSON on other dialects (e.g. SQLite used in tests).
+_JSON = JSONB().with_variant(JSON(), "sqlite")
+
 DEFAULT_ISOLATION_MODE = "shared_ec2_tenant_vpc_container"
 DEFAULT_VDB_CONTAINER_PATH = "/opt/wildfly/teiidfiles/customers"
 
@@ -38,9 +41,6 @@ VPN_MODE_NONE = "none"
 VPN_MODE_CUSTOMER = "customer_vpn"
 VPN_MODES = (VPN_MODE_NONE, VPN_MODE_CUSTOMER)
 DEFAULT_VPN_MODE = VPN_MODE_NONE
-
-# JSONB on Postgres, plain JSON on other dialects (e.g. SQLite used in tests).
-_JSON = JSONB().with_variant(JSON(), "sqlite")
 
 
 class TenantDataPlane(TimestampMixin, Base):
@@ -97,6 +97,12 @@ class TenantDataPlane(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="provisioning")
     last_health_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
     last_health_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    decommission_job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tenant_decommission_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     secret_refs: Mapped[list[TenantSecretRef]] = relationship(
         back_populates="data_plane",
