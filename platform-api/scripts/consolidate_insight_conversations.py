@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import SessionLocal
@@ -166,7 +166,6 @@ async def consolidate(dry_run: bool = False) -> dict[str, Any]:
                         group_stats = await _merge_group(
                             session, rows, surface, project_id, dry_run=True
                         )
-                        project_name = group_stats["title"].split(" — ", 1)[1] if " — " in group_stats["title"] else None
                         rows[0].canonical_key = group_stats["canonical_key"]
                         rows[0].title = group_stats["title"]
                         await session.flush()
