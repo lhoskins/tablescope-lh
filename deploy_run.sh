@@ -2,7 +2,8 @@
 set -e
 cd /home/ubuntu/tablescope
 echo "[build] start $(date)"
-sudo docker compose build teiid platform-api web-ui
+sudo docker compose build teiid
+sudo docker compose build --no-cache platform-api web-ui
 echo "[up] recreate $(date)"
 sudo docker compose up -d teiid platform-api platform-api-worker web-ui
 echo "[migrate] $(date)"
