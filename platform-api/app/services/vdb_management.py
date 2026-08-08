@@ -135,7 +135,12 @@ class VDBManagementService:
 
         # Warm the asyncpg pool/connection for this VDB so the first user query
         # does not pay pool creation + pg_catalog materialization costs.
-        await warm_vdb(vdb_id, vdb_host=self._pg_host, vdb_port=self._pg_port)
+        await warm_vdb(
+            vdb_id,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
+            timeout=10.0,
+        )
 
         # Sync VDB file to S3 if enabled
         self._sync_vdb_to_s3(org_id, vdb_id, vdb_type="user", user_id=user_id)
@@ -181,7 +186,12 @@ class VDBManagementService:
 
         logger.info("Shared VDB created and deployed: vdb_id=%s", vdb_id)
 
-        await warm_vdb(vdb_id, vdb_host=self._pg_host, vdb_port=self._pg_port)
+        await warm_vdb(
+            vdb_id,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
+            timeout=10.0,
+        )
 
         # Sync VDB file to S3 if enabled
         self._sync_vdb_to_s3(org_id, vdb_id, vdb_type="shared")
@@ -240,7 +250,7 @@ class VDBManagementService:
             )
         logger.info("VDB redeployed: vdb_id=%s", vdb_id)
 
-        await warm_vdb(vdb_id)
+        await warm_vdb(vdb_id, timeout=10.0)
 
     async def delete_vdb(
         self,

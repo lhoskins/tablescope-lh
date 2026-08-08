@@ -190,7 +190,7 @@ async def _warm_vdbs(vdbs) -> None:
                 vdb_port=vdb.vdb_port,
                 vdb_username=vdb.vdb_username,
                 vdb_password=vdb.get_decrypted_password(),
-                timeout=10.0,
+                timeout=60.0,
             )
         except Exception as exc:
             logger.warning("VDB warm failed for %s: %s", vdb.vdb_id, exc)

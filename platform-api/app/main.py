@@ -246,7 +246,7 @@ async def _warm_all_vdbs_on_startup() -> None:
                     vdb_port=v["port"],
                     vdb_username=v["username"],
                     vdb_password=v["password"],
-                    timeout=10.0,
+                    timeout=60.0,
                 )
 
         await asyncio.gather(
