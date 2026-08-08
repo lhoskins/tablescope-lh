@@ -54,6 +54,8 @@ async def _merge_group(
     if not rows:
         return {"merged": 0, "moved_turns": 0}
 
+    # Keep the oldest conversation as the canonical target.
+    rows = sorted(rows, key=lambda c: c.created_at or c.id)
     target = rows[0]
     duplicates = rows[1:]
 
