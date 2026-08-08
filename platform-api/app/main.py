@@ -247,6 +247,7 @@ async def _warm_all_vdbs_on_startup() -> None:
                     vdb_username=v["username"],
                     vdb_password=v["password"],
                     timeout=60.0,
+                    warm_views=True,
                 )
 
         await asyncio.gather(
