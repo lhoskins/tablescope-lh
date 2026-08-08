@@ -30,10 +30,7 @@ redeploy_vdbs() {
     done
 
     find "$CUSTOMERS_DIR" -name "*-vdb.xml" 2>/dev/null | while read -r f; do
-        n=$(basename "$f")
-        echo "[entrypoint] deploying VDB $n"
-        /opt/wildfly/bin/jboss-cli.sh --connect --user="$WF_USER" --password="$WF_PASS" \
-            --command="deploy $f --name=$n --force" 2>&1 | tail -1 || true
+        deploy_vdb_file "$f"
     done
 }
 
@@ -51,6 +48,38 @@ flush_pool() {
         --command="/subsystem=resource-adapters/resource-adapter=$ra/connection-definitions=$cdef:flush-all-connection-in-pool" >/dev/null 2>&1 || true
 }
 
+list_deployed_vdbs() {
+    /opt/wildfly/bin/jboss-cli.sh --connect --user="$WF_USER" --password="$WF_PASS" \
+        --output-json --command="/deployment=*:read-attribute(name=runtime-name)" 2>/dev/null \
+        | grep -oE '"[^"]+-vdb\.xml"' \
+        | sed 's/"//g' \
+        | sort -u
+}
+
+deploy_vdb_file() {
+    local f="$1" n
+    n=$(basename "$f")
+    echo "[entrypoint] deploying VDB $n"
+    /opt/wildfly/bin/jboss-cli.sh --connect --user="$WF_USER" --password="$WF_PASS" \
+        --command="deploy \"$f\" --name=\"$n\" --force" 2>&1 | tail -1 || true
+}
+
+reconcile_missing_vdbs() {
+    local deployed_file missing_file
+    deployed_file=$(mktemp)
+    list_deployed_vdbs > "$deployed_file" || true
+
+    while IFS= read -r f; do
+        n=$(basename "$f")
+        if ! grep -qx "$n" "$deployed_file"; then
+            echo "[entrypoint] VDB $n missing from deployments; redeploying"
+            deploy_vdb_file "$f"
+        fi
+    done < <(find "$CUSTOMERS_DIR" -name "*-vdb.xml" 2>/dev/null)
+
+    rm -f "$deployed_file"
+}
+
 pool_health_loop() {
     # Wait until the management interface reports the server is running.
     for _ in $(seq 1 60); do
@@ -62,10 +91,19 @@ pool_health_loop() {
     done
 
     local interval="${TEIID_POOL_HEALTH_INTERVAL:-60}"
+    local vdb_reconcile_interval="${TEIID_VDB_RECONCILE_INTERVAL:-300}"
     local max_fail=3
     local file_fail=0 excel_fail=0 remote_fail=0
+    local next_vdb_reconcile=0
 
     while true; do
+        local now
+        now=$(date +%s)
+        if [ "$now" -ge "$next_vdb_reconcile" ]; then
+            reconcile_missing_vdbs
+            next_vdb_reconcile=$(( now + vdb_reconcile_interval ))
+        fi
+
         if ! test_pool "file" "fileDS"; then
             echo "[entrypoint] fileDS connection test failed"
             flush_pool "file" "fileDS"
