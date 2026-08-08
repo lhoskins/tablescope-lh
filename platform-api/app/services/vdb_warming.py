@@ -31,11 +31,14 @@ async def warm_vdb(
     timeout: float = 60.0,
     warm_views: bool = False,
     max_concurrent_views: int = 5,
+    max_attempts: int = 3,
+    retry_delay: float = 5.0,
 ) -> None:
     """Open a connection to a VDB and run a trivial SELECT to warm caches.
 
     Any failure is logged but not raised; warming must not break the caller's
-    primary flow.
+    primary flow. Retries are used because a VDB may still be completing a
+    redeploy when the warm is triggered.
     """
     settings = get_settings()
     host = vdb_host or settings.teiid_pg_host
@@ -43,29 +46,61 @@ async def warm_vdb(
     database = f"{vdb_id}.1"
 
     logger.info("Warming VDB %s at %s:%s/%s", vdb_id, host, port, database)
-    try:
-        pool = await asyncio.wait_for(
-            pool_manager.get_pool(
-                host=host,
-                port=port,
-                database=database,
-                username=vdb_username,
-                password=vdb_password,
-            ),
-            timeout=timeout,
-        )
-        await asyncio.wait_for(pool.fetch("SELECT 1"), timeout=timeout)
-        logger.info("Warmed VDB %s pool at %s:%s/%s", vdb_id, host, port, database)
-
-        if warm_views:
-            await _warm_mycompany_views(
-                pool,
-                vdb_id=vdb_id,
+    pool = None
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            pool = await asyncio.wait_for(
+                pool_manager.get_pool(
+                    host=host,
+                    port=port,
+                    database=database,
+                    username=vdb_username,
+                    password=vdb_password,
+                ),
                 timeout=timeout,
-                max_concurrent=max_concurrent_views,
             )
-    except Exception as exc:
-        logger.warning("VDB warm failed for %s: %s", vdb_id, exc)
+            await asyncio.wait_for(pool.fetch("SELECT 1"), timeout=timeout)
+            logger.info(
+                "Warmed VDB %s pool at %s:%s/%s (attempt %d/%d)",
+                vdb_id,
+                host,
+                port,
+                database,
+                attempt,
+                max_attempts,
+            )
+            break
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "VDB %s pool warm attempt %d/%d failed: %s (%s)",
+                vdb_id,
+                attempt,
+                max_attempts,
+                exc,
+                exc.__class__.__name__,
+            )
+            if attempt < max_attempts:
+                await asyncio.sleep(retry_delay)
+    else:
+        logger.warning(
+            "VDB warm failed for %s after %d attempts: %s",
+            vdb_id,
+            max_attempts,
+            last_exc,
+        )
+        return
+
+    if warm_views and pool is not None:
+        await _warm_mycompany_views(
+            pool,
+            vdb_id=vdb_id,
+            timeout=timeout,
+            max_concurrent=max_concurrent_views,
+            max_attempts=max_attempts,
+            retry_delay=retry_delay,
+        )
 
 
 async def _warm_mycompany_views(
@@ -74,18 +109,33 @@ async def _warm_mycompany_views(
     vdb_id: str,
     timeout: float,
     max_concurrent: int,
+    max_attempts: int,
+    retry_delay: float,
 ) -> None:
     """Load every MyCompany view once so source metadata is cached."""
-    try:
-        rows = await asyncio.wait_for(
-            pool.fetch(
-                "SELECT Name FROM SYS.Tables "
-                "WHERE SchemaName = 'MyCompany' AND IsSystem = false"
-            ),
-            timeout=timeout,
+    rows = None
+    last_exc = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            rows = await asyncio.wait_for(
+                pool.fetch(
+                    "SELECT Name FROM SYS.Tables "
+                    "WHERE SchemaName = 'MyCompany' AND IsSystem = false"
+                ),
+                timeout=timeout,
+            )
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_attempts:
+                await asyncio.sleep(retry_delay)
+    if rows is None:
+        logger.warning(
+            "VDB %s could not list MyCompany views after %d attempts: %s",
+            vdb_id,
+            max_attempts,
+            last_exc,
         )
-    except Exception as exc:
-        logger.warning("VDB %s could not list MyCompany views: %s", vdb_id, exc)
         return
 
     view_names = [r["Name"] for r in rows]
@@ -101,19 +151,28 @@ async def _warm_mycompany_views(
         nonlocal warmed, failed
         safe_name = name.replace('"', '""')
         async with semaphore:
-            try:
-                await asyncio.wait_for(
-                    pool.fetch(
-                        f'SELECT 1 FROM "MyCompany"."{safe_name}" LIMIT 1'
-                    ),
-                    timeout=timeout,
-                )
-                warmed += 1
-            except Exception as exc:
-                failed += 1
-                logger.debug(
-                    "View warm failed for %s.%s: %s", vdb_id, name, exc
-                )
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    await asyncio.wait_for(
+                        pool.fetch(
+                            f'SELECT 1 FROM "MyCompany"."{safe_name}" LIMIT 1'
+                        ),
+                        timeout=timeout,
+                    )
+                    warmed += 1
+                    return
+                except Exception as exc:
+                    if attempt == max_attempts:
+                        failed += 1
+                        logger.debug(
+                            "View warm failed for %s.%s: %s (%s)",
+                            vdb_id,
+                            name,
+                            exc,
+                            exc.__class__.__name__,
+                        )
+                    else:
+                        await asyncio.sleep(retry_delay)
 
     await asyncio.gather(*[_warm_one(name) for name in view_names])
     logger.info(
