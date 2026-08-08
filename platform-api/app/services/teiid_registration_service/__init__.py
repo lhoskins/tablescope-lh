@@ -144,7 +144,6 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
-        await self._warm_vdb(vdb_id)
         return body
 
     async def register_salesforce_source(
@@ -221,7 +220,6 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
-        await self._warm_vdb(vdb_id)
         return body
 
     async def register_hubspot_source(
@@ -290,7 +288,6 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
-        await self._warm_vdb(vdb_id)
         return body
 
     async def register_quickbooks_source(
@@ -368,7 +365,6 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
-        await self._warm_vdb(vdb_id)
         return body
 
     async def register_database_source(
@@ -457,7 +453,6 @@ class TeiidRegistrationService:
         if isinstance(body, dict) and body.get("error"):
             raise TeiidRegistrationError(str(body["error"]))
 
-        await self._warm_vdb(vdb_id)
         return body
 
 

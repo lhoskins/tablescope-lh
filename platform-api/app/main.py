@@ -225,26 +225,32 @@ async def _warm_all_vdbs_on_startup() -> None:
             shared_vdbs = list(result.scalars().all())
 
         vdbs = [
-            (v.vdb_id, v.vdb_host, v.vdb_port, v.vdb_username, v.get_decrypted_password())
+            {
+                "vdb_id": v.vdb_id,
+                "host": v.vdb_host,
+                "port": v.vdb_port,
+                "username": v.vdb_username,
+                "password": v.get_decrypted_password(),
+            }
             for v in user_vdbs + shared_vdbs
         ]
         logger.info("Pre-warming %d active VDB pools", len(vdbs))
 
         semaphore = asyncio.Semaphore(10)
 
-        async def _warm_one(vdb_id: str, host: str, port: int, user: str, password: str) -> None:
+        async def _warm_one(v: dict) -> None:
             async with semaphore:
                 await warm_vdb(
-                    vdb_id,
-                    vdb_host=host,
-                    vdb_port=port,
-                    vdb_username=user,
-                    vdb_password=password,
+                    v["vdb_id"],
+                    vdb_host=v["host"],
+                    vdb_port=v["port"],
+                    vdb_username=v["username"],
+                    vdb_password=v["password"],
                     timeout=10.0,
                 )
 
         await asyncio.gather(
-            *[_warm_one(*v) for v in vdbs],
+            *[_warm_one(v) for v in vdbs],
             return_exceptions=True,
         )
         logger.info("VDB pool pre-warm complete")
