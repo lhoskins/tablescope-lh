@@ -7,6 +7,7 @@ import type {
 } from "@/lib/ui/types";
 import { MfaGate } from "@/components/auth/mfa-gate";
 import { CompanyLogo } from "./company-logo";
+import { MobileNav } from "./mobile-nav";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -51,21 +52,36 @@ export function AppShell({
   return (
     <div className="flex h-dvh overflow-hidden bg-bg-secondary">
       <MfaGate />
-      <Sidebar
-        mode={mode}
-        activeNav={activeNav}
-        tenant={tenant}
-        user={user}
-        project={project}
-        otherProjects={otherProjects}
-        counts={counts}
-      />
+      <div className="hidden lg:flex">
+        <Sidebar
+          mode={mode}
+          activeNav={activeNav}
+          tenant={tenant}
+          user={user}
+          project={project}
+          otherProjects={otherProjects}
+          counts={counts}
+        />
+      </div>
       <div className="flex min-w-0 flex-1 flex-col">
         {/* The company logo stays alone in the header — page/workspace action
             buttons render in the page toolbar below (see topBarRight), so they
             no longer share space with the branding. */}
         <TopBar
-          left={topBarLeft}
+          left={
+            <>
+              <MobileNav
+                mode={mode}
+                activeNav={activeNav}
+                tenant={tenant}
+                user={user}
+                project={project}
+                otherProjects={otherProjects}
+                counts={counts}
+              />
+              {topBarLeft}
+            </>
+          }
           right={<CompanyLogo url={tenant.logoUrl} name={tenant.name} />}
         />
         {subHeader && (
