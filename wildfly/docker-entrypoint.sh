@@ -32,6 +32,10 @@ redeploy_vdbs() {
     find "$CUSTOMERS_DIR" -name "*-vdb.xml" 2>/dev/null | while read -r f; do
         deploy_vdb_file "$f"
     done
+
+    # Once the initial VDB redeploy pass is done, start the health watchdog
+    # so it does not race with this first-pass deployment.
+    pool_health_loop &
 }
 
 test_pool() {
@@ -162,6 +166,5 @@ pool_health_loop() {
 }
 
 redeploy_vdbs &
-pool_health_loop &
 
 wait "$WF_PID"
