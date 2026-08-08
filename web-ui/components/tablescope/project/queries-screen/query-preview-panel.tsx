@@ -58,7 +58,7 @@ export function QueryPreviewPanel({
     );
   }
   return (
-    <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…">
+    <ContextPanel title="Query Preview" askPlaceholder="Ask about this query…" collapsible={collapsible}>
       <div className="space-y-1">
         <div className="min-w-0 truncate text-caption uppercase tracking-wide text-ink-tertiary">
           {query.name}

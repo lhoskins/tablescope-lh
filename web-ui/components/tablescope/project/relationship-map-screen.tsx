@@ -238,7 +238,7 @@ function SelectedNodePanel({
     .filter((r) => r.other);
 
   return (
-    <ContextPanel title="Selected Node" askPlaceholder="Ask about this node…">
+    <ContextPanel title="Selected Node" askPlaceholder="Ask about this node…" collapsible={collapsible}>
       <div className="space-y-1">
         <div className="text-h3 text-ink-primary">{selected.label}</div>
         <Badge tone="neutral">{selected.type}</Badge>
