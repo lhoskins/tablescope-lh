@@ -305,15 +305,15 @@ function AiAssistantPageInner() {
         {/* Right — chat area */}
         <div className="flex min-w-0 flex-1 flex-col bg-bg-primary">
           {/* Mobile conversation toggle */}
-          <div className="flex items-center justify-between border-b border-line-tertiary px-4 py-2 lg:hidden">
-            <span className="text-h3 text-ink-primary">AI Assistant</span>
+          <div className="flex items-center justify-end border-b border-line-tertiary px-4 py-2 lg:hidden">
             <button
               type="button"
               onClick={() => setMobileConversationsOpen(true)}
               aria-label="Open conversations"
-              className="flex h-10 w-10 items-center justify-center rounded-md text-ink-secondary hover:bg-bg-secondary"
+              className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-[12px] font-medium text-ink-secondary hover:bg-bg-secondary"
             >
-              <IconMenu2 size={20} />
+              <IconMenu2 size={18} />
+              Conversations
             </button>
           </div>
           {/* Messages */}
