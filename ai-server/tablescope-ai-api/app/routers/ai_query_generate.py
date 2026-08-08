@@ -4,6 +4,7 @@ import difflib
 import logging
 import re
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -208,6 +209,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
             scope="project",
             question=req.prompt,
             feature="generate_sql",
+            grounding_evidence=req.grounding_evidence,
         )
     except ContextBuildError as e:
         raise HTTPException(
@@ -317,6 +319,16 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         req.tenant_id, req.project_id, repaired, [s.name for s in selected],
     )
 
+    grounding_manifest: dict[str, Any] | None = None
+    if req.grounding_evidence:
+        grounding_manifest = {
+            "question": req.grounding_evidence.question,
+            "passage_count": len(req.grounding_evidence.passages),
+            "kg_node_count": len(req.grounding_evidence.kg_nodes),
+            "kpi_count": len(req.grounding_evidence.kpis),
+            "retrieved_at": req.grounding_evidence.retrieved_at.isoformat(),
+        }
+
     return GenerateSQLResponse(
         sql=sql,
         explanation="",
@@ -326,6 +338,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         selected_sources=selected,
         repaired=repaired,
         knowledge_graph_context_used=bool(kg_block),
+        grounding_manifest=grounding_manifest,
     )
 
 

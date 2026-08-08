@@ -30,6 +30,7 @@ from . import (
     ai_dashboard,
     ai_document,
     ai_file_analysis,
+    ai_grounding,
     ai_indexing,
     ai_intelligence_fixsql,
     ai_intelligence_interpret,
@@ -167,6 +168,7 @@ from .ai_shared import (
 router = APIRouter(prefix="/ai", tags=["AI"])
 
 router.include_router(ai_ask.router)
+router.include_router(ai_grounding.router)
 router.include_router(ai_indexing.router)
 router.include_router(ai_relationships.router)
 router.include_router(ai_query_generate.router)

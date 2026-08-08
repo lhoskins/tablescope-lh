@@ -32,16 +32,20 @@ def evaluate_confidence(
     uses_reference: bool = False,
     has_project_evidence: bool = True,
     intent: str | None = None,
+    grounding_evidence: dict[str, Any] | None = None,
 ) -> ConfidenceEvaluation:
     """Return a deterministic, evidence-based confidence evaluation.
 
-    The score is the weighted sum of nine evidence factors (weights total 1.0).
-    Hard caps then clamp the score for document-only findings, tentative methods,
-    high join risk, or very small samples.
+    The score is the weighted sum of eleven evidence factors (weights total 1.0).
+    Grounding coverage, source freshness, and corroboration raise the cost of
+    ungrounded answers so execution success alone cannot reach 'high'. Hard caps
+    then clamp the score for document-only findings, tentative methods, high
+    join risk, or very small samples.
     """
     validation = validation or {}
     method_envelope = method_envelope or {}
     source_context = source_context or {}
+    has_grounding = bool(grounding_evidence)
     result_rows = rows or ((result.get("rows") or []) if result else [])
     result_columns = [str(c) for c in (columns or (result.get("columns") if result else []) or [])]
     row_count = int(validation.get("rowCount") or len(result_rows) or 0)
@@ -61,7 +65,8 @@ def evaluate_confidence(
     caps: list[str] = []
     gaps: list[str] = []
 
-    # 1. Execution grounding (0.20)
+    # 1. Execution grounding (0.20 legacy / 0.15 when grounding evidence is active)
+    exec_weight = 0.15 if has_grounding else 0.20
     if execution_status in ("success", "ok") and row_count > 0:
         exec_score = 1.0
         exec_status = "passed"
@@ -82,7 +87,7 @@ def evaluate_confidence(
             label="Execution grounding",
             status=exec_status,
             score=exec_score,
-            weight=0.20,
+            weight=exec_weight,
             evidence=exec_evidence,
         )
     )
@@ -155,7 +160,8 @@ def evaluate_confidence(
         )
     )
 
-    # 4. Analytical validation (0.15)
+    # 4. Analytical validation (0.15 legacy / 0.10 when grounding evidence is active)
+    analytical_weight = 0.10 if has_grounding else 0.15
     if method_status == "ok" and method_quality in ("reliable", "validated", "significant"):
         av_score = 1.0
         av_status = "passed"
@@ -181,7 +187,7 @@ def evaluate_confidence(
             label="Analytical validation",
             status=av_status,
             score=av_score,
-            weight=0.15,
+            weight=analytical_weight,
             evidence=av_evidence,
         )
     )
@@ -306,10 +312,123 @@ def evaluate_confidence(
         )
     )
 
-    # 8. Corroboration (0.05)
+    # 8. Grounding coverage (0.05 when grounded, not applicable otherwise)
+    cov_weight = 0.05 if has_grounding else 0.0
+    if grounding_evidence:
+        passages = grounding_evidence.get("passages") or []
+        kg_nodes = grounding_evidence.get("kg_nodes") or grounding_evidence.get("kgNodes") or []
+        kpis = grounding_evidence.get("kpis") or []
+        passage_count = grounding_evidence.get("passage_count") or grounding_evidence.get("passageCount") or len(passages)
+        kg_node_count = grounding_evidence.get("kg_node_count") or grounding_evidence.get("kgNodeCount") or len(kg_nodes)
+        kpi_count = grounding_evidence.get("kpi_count") or grounding_evidence.get("kpiCount") or len(kpis)
+        cov_score = min(1.0, passage_count * 0.08 + kg_node_count * 0.12 + kpi_count * 0.15)
+        if cov_score >= 0.7:
+            cov_status = "passed"
+            cov_evidence = f"Grounding evidence covers {passage_count} passages, {kg_node_count} graph nodes, {kpi_count} KPIs."
+        elif cov_score >= 0.3:
+            cov_status = "partial"
+            cov_evidence = f"Grounding evidence is limited: {passage_count} passages, {kg_node_count} graph nodes, {kpi_count} KPIs."
+        else:
+            cov_status = "failed"
+            cov_evidence = "Grounding evidence is insufficient to support the answer."
+            caps.append("insufficient_grounding")
+    else:
+        cov_score = 1.0
+        cov_status = "not_applicable"
+        cov_evidence = "Grounding evidence is not required for this pipeline."
+    factors.append(
+        ConfidenceFactor(
+            code="grounding_coverage",
+            label="Grounding coverage",
+            status=cov_status,
+            score=cov_score,
+            weight=cov_weight,
+            evidence=cov_evidence,
+        )
+    )
+
+    # 9. Source freshness (0.05 when grounded, not applicable otherwise)
+    fresh_weight = 0.05 if has_grounding else 0.0
+    if grounding_evidence:
+        fresh_score = 0.0
+        fresh_status = "failed"
+        fresh_evidence = "No grounding evidence timestamp is available."
+        retrieved_at = grounding_evidence.get("retrieved_at") or grounding_evidence.get("retrievedAt")
+        if retrieved_at:
+            try:
+                if isinstance(retrieved_at, str):
+                    retrieved_dt = datetime.fromisoformat(retrieved_at.replace("Z", "+00:00"))
+                elif isinstance(retrieved_at, datetime):
+                    retrieved_dt = retrieved_at
+                else:
+                    retrieved_dt = None
+                if retrieved_dt:
+                    age_hours = (datetime.now(UTC) - retrieved_dt).total_seconds() / 3600
+                    if age_hours <= 1:
+                        fresh_score = 1.0
+                        fresh_status = "passed"
+                        fresh_evidence = f"Grounding evidence retrieved {age_hours:.0f} minutes ago."
+                    elif age_hours <= 24:
+                        fresh_score = 0.7
+                        fresh_status = "partial"
+                        fresh_evidence = f"Grounding evidence is {age_hours:.0f} hours old."
+                    else:
+                        fresh_score = 0.4
+                        fresh_status = "partial"
+                        fresh_evidence = f"Grounding evidence is {age_hours:.0f} hours old."
+            except Exception:
+                fresh_evidence = "Grounding evidence timestamp could not be parsed."
+        else:
+            caps.append("no_retrieval_timestamp")
+    else:
+        fresh_score = 1.0
+        fresh_status = "not_applicable"
+        fresh_evidence = "Source freshness is not evaluated for this pipeline."
+    factors.append(
+        ConfidenceFactor(
+            code="source_freshness",
+            label="Source freshness",
+            status=fresh_status,
+            score=fresh_score,
+            weight=fresh_weight,
+            evidence=fresh_evidence,
+        )
+    )
+
+    # 10. Corroboration as a retrieval-quality score (0.05)
     reference_docs = source_context.get("referenceDocuments") if source_context else []
     has_reference = bool(reference_docs) or uses_reference
-    if has_project_evidence and has_reference:
+    if grounding_evidence:
+        passages = grounding_evidence.get("passages") or []
+        has_project = any((p.get("source_type") or p.get("sourceType")) == "project_asset" for p in passages)
+        has_ref_grounding = any((p.get("source_type") or p.get("sourceType")) == "reference_library" for p in passages)
+        methods = {
+            p.get("retrieval_method") or p.get("retrievalMethod")
+            for p in passages
+            if p.get("retrieval_method") or p.get("retrievalMethod")
+        }
+        cor_score = 0.0
+        if has_project:
+            cor_score += 0.5
+        if has_ref_grounding or has_reference:
+            cor_score += 0.3
+        if ("vector" in methods and "lexical" in methods) or "hybrid" in methods:
+            cor_score += 0.2
+        elif methods:
+            cor_score += 0.1
+        cor_score = min(1.0, cor_score)
+        if cor_score >= 0.8:
+            cor_status = "passed"
+            cor_evidence = "Project data is corroborated by multiple grounded sources."
+        elif cor_score >= 0.4:
+            cor_status = "partial"
+            cor_evidence = "Finding is partially corroborated by grounded sources."
+            caps.append("partial_corroboration")
+        else:
+            cor_status = "failed"
+            cor_evidence = "No corroborating grounded evidence."
+            caps.append("no_corroboration")
+    elif has_project_evidence and has_reference:
         cor_score = 1.0
         cor_status = "passed"
         cor_evidence = "Project data is corroborated by a reference document."
@@ -338,7 +457,7 @@ def evaluate_confidence(
         )
     )
 
-    # 9. Recency (0.05)
+    # 11. Recency (0.05)
     executed_at = validation.get("executedAt") if validation else None
     if executed_at:
         rec_score = 1.0

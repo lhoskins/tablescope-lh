@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .common import AIBaseRequest, QueryInfo
+from .grounding import GroundingEvidence
 
 
 class SourceCatalogEntry(BaseModel):
@@ -27,6 +28,8 @@ class GenerateSQLRequest(AIBaseRequest):
     # Compact, AI-safe Knowledge Graph summary (risks/gaps/measured KPIs/docs);
     # steers SQL toward validated business questions, never Reference Library.
     knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
+    # Proactive hybrid retrieval evidence (document passages, KG nodes, KPIs).
+    grounding_evidence: GroundingEvidence | None = None
 
 
 class MatchQueryRequest(AIBaseRequest):
@@ -67,3 +70,5 @@ class GenerateSQLResponse(BaseModel):
     # True when Knowledge Graph context was folded into the generation prompt,
     # so the platform can persist query metadata (knowledgeGraphContextUsed).
     knowledge_graph_context_used: bool = False
+    # Manifest of evidence used to ground the generation (when provided).
+    grounding_manifest: dict[str, Any] | None = None

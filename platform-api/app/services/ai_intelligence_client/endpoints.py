@@ -247,6 +247,7 @@ async def generate_sql(
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
     knowledge_graph_context: dict[str, Any] | None = None,
+    grounding_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Generate SQL for a natural-language question.
 
@@ -267,6 +268,7 @@ async def generate_sql(
                 "preferred_sources": preferred_sources or [],
                 "relevant_columns": relevant_columns or [],
                 "knowledge_graph_context": knowledge_graph_context or {},
+                "grounding_evidence": grounding_evidence,
             },
         )
 
@@ -300,6 +302,30 @@ async def generate_action_draft(
     )
 
 
+async def search_grounding_vectors(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    question: str,
+    scope: str = "project",
+    limit: int = 12,
+) -> dict[str, Any] | None:
+    """Query the AI server for vector-grounded passages (project + reference)."""
+    result = await _post(
+        "/ai/grounding/search",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "question": question,
+            "scope": scope,
+            "limit": limit,
+        },
+    )
+    return result if isinstance(result, dict) else None
+
+
 async def ask(
     *,
     tenant_id: int,
@@ -311,6 +337,7 @@ async def ask(
     include_dashboard_context: bool = True,
     history: list[dict[str, Any]] | None = None,
     knowledge_graph_context: dict[str, Any] | None = None,
+    grounding_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Free-text answer from the AI server's documents + knowledge-graph path.
 
@@ -331,5 +358,6 @@ async def ask(
                 "include_dashboard_context": include_dashboard_context,
                 "history": history or [],
                 "knowledge_graph_context": knowledge_graph_context or {},
+                "grounding_evidence": grounding_evidence,
             },
         )
