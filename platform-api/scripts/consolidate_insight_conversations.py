@@ -132,7 +132,9 @@ async def consolidate(dry_run: bool = False) -> dict[str, Any]:
                 # A dry run still needs a transaction for reads.
                 pass
 
-            # Group active Insight conversations by (tenant, user, surface, project).
+            # Group active Insight conversations.
+            # Business Insights is one canonical thread per tenant/user (surface
+            # only); Project Insights is one per project.
             result = await session.execute(
                 select(AnalyticsConversation)
                 .where(
@@ -151,7 +153,8 @@ async def consolidate(dry_run: bool = False) -> dict[str, Any]:
 
             groups: dict[tuple[int, int, str, int | None], list[AnalyticsConversation]] = {}
             for c in conversations:
-                key = (c.tenant_id, c.user_id, c.surface, c.project_id)
+                group_project = c.project_id if c.surface == "project_insights" else None
+                key = (c.tenant_id, c.user_id, c.surface, group_project)
                 groups.setdefault(key, []).append(c)
 
             for (tenant_id, user_id, surface, project_id), rows in groups.items():
