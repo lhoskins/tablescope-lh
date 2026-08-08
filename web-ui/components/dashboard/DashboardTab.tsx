@@ -6,6 +6,7 @@ import { apiClient } from "@/lib/api-client";
 import type { Dashboard, DashboardConfig, WidgetConfig } from "./types";
 import { DashboardViewer } from "./DashboardViewer";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
+import { useCurrentUser } from "@/lib/ui/use-shell-data";
 import { createHomePin } from "@/lib/api/home-pins";
 
 type SavedQuery = { id: number; name: string; sql_text: string | null };
@@ -25,6 +26,7 @@ const STATUS_BADGE: Record<string, { cls: string; label: string }> = {
 };
 
 export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: Props) {
+  const { data: identity } = useCurrentUser();
   const queryClient = useQueryClient();
   const [viewing, setViewing] = useState<Dashboard | null>(null);
   const [pinToast, setPinToast] = useState<string | null>(null);
@@ -168,7 +170,7 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
               ariaLabel="Describe the dashboard you want to generate"
               submitAriaLabel="Generate"
               busy={aiDashLoading}
-              voiceEnabled={false}
+              voiceEnabled={identity?.tenant.voiceInputEnabled ?? false}
               projectId={projectId}
             />
             {aiDashError && (
