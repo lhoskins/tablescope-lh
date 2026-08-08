@@ -247,7 +247,8 @@ def _normalize_raw_path(raw_path: str, connection: NetworkFileConnection) -> str
 
     # Allow only bare filenames (no path separators) to be treated as share-relative.
     if "/" not in raw and "\\" not in raw:
-        return f"//{connection.host}/{share}/{raw.lstrip('\\/')}"
+        raw_name = raw.lstrip("\\/")
+        return f"//{connection.host}/{share}/{raw_name}"
 
     return raw
 

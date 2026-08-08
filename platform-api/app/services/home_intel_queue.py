@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
@@ -95,7 +95,7 @@ async def create_run(
     """Register a run: its metadata and the set of project ids to expect."""
     r = get_redis()
     ttl = _ttl()
-    meta = {
+    meta: Mapping[str | bytes, str] = {
         "tenant_id": str(tenant_id),
         "user_id": str(user_id),
         "granularity": str(granularity),
@@ -261,7 +261,7 @@ async def subscribe(run_id: str) -> AsyncIterator[Any]:
     finally:
         try:
             await pubsub.unsubscribe(channel(run_id))
-            await pubsub.aclose()
+            await pubsub.close()
         except Exception:  # pragma: no cover - best-effort cleanup
             pass
 

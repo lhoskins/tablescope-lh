@@ -49,7 +49,7 @@ async def ready() -> HealthStatus:
             await redis.ping()
             components.append(ComponentHealth(name="redis", status="ok"))
         finally:
-            await redis.aclose()
+            await redis.close()
     except Exception as exc:
         overall_ok = False
         components.append(ComponentHealth(name="redis", status="error", detail=str(exc)))

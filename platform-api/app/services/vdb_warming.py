@@ -70,6 +70,7 @@ async def warm_vdb(
                 ),
                 timeout=timeout,
             )
+            assert conn is not None
             await asyncio.wait_for(conn.fetch("SELECT 1"), timeout=timeout)
             logger.info(
                 "Warmed VDB %s connection at %s:%s/%s (attempt %d/%d)",
