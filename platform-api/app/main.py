@@ -117,6 +117,7 @@ from app.routes import users as users_routes
 from app.services.connection_pool import pool_manager
 from app.services.llm_framework import ensure_primary_runtime_target_registered
 from app.services.project_context import ProjectContextConcurrencyError
+from app.services.vdb_warming import warm_vdb
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,65 @@ async def _seed_reference_catalogs() -> None:
 
 
 MAX_KG_PIPELINE_VERSION_CHECK_PROJECTS = 50
+
+
+async def _warm_all_vdbs_on_startup() -> None:
+    """Pre-warm asyncpg pools for every active VDB.
+
+    This moves the first-connection cost (PG-wire handshake + pg_catalog
+    materialization) out of the first user query and into startup.
+    """
+    await asyncio.sleep(10)
+    from sqlalchemy import or_, select
+
+    from app.database import SessionLocal
+    from app.models.shared_vdb import SharedVDB
+    from app.models.user_vdb import UserVDB
+
+    try:
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(UserVDB).where(
+                    UserVDB.is_active.is_(True),
+                    or_(
+                        UserVDB.health_status.in_(["deployed", "active", "healthy"]),
+                        UserVDB.health_status.is_(None),
+                    ),
+                )
+            )
+            user_vdbs = list(result.scalars().all())
+
+            result = await session.execute(
+                select(SharedVDB).where(SharedVDB.is_active.is_(True))
+            )
+            shared_vdbs = list(result.scalars().all())
+
+        vdbs = [
+            (v.vdb_id, v.vdb_host, v.vdb_port, v.vdb_username, v.get_decrypted_password())
+            for v in user_vdbs + shared_vdbs
+        ]
+        logger.info("Pre-warming %d active VDB pools", len(vdbs))
+
+        semaphore = asyncio.Semaphore(10)
+
+        async def _warm_one(vdb_id: str, host: str, port: int, user: str, password: str) -> None:
+            async with semaphore:
+                await warm_vdb(
+                    vdb_id,
+                    vdb_host=host,
+                    vdb_port=port,
+                    vdb_username=user,
+                    vdb_password=password,
+                    timeout=10.0,
+                )
+
+        await asyncio.gather(
+            *[_warm_one(*v) for v in vdbs],
+            return_exceptions=True,
+        )
+        logger.info("VDB pool pre-warm complete")
+    except Exception as exc:
+        logger.warning("VDB pool pre-warm failed: %s", exc)
 
 
 async def _check_kg_snapshot_pipeline_version_on_startup() -> None:
@@ -317,6 +377,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     kg_pipeline_check_task = asyncio.create_task(
         _check_kg_snapshot_pipeline_version_on_startup()
     )
+    warm_vdbs_task = asyncio.create_task(_warm_all_vdbs_on_startup())
     try:
         yield
     finally:
@@ -324,6 +385,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         llm_target_task.cancel()
         seed_task.cancel()
         kg_pipeline_check_task.cancel()
+        warm_vdbs_task.cancel()
         await pool_manager.close_all()
         logger.info("Platform API shutdown complete")
 
