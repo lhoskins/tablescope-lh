@@ -15,6 +15,7 @@ from app.services.ai_intelligence_client import AIUnavailableError as AIUnavaila
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
 )
+from app.services.insight_card_match import find_matching_insight_card
 from app.services.project_ai_context import build_project_ai_context
 
 from .chart_field_selection import _SUBTYPE_LABELS as _SUBTYPE_LABELS
@@ -288,9 +289,41 @@ async def execute_turn(
 
     if run.get("status") in ("generation_error", "execution_error"):
         # A question that cannot be grounded or executed on an authorized source
-        # may still be answerable from documents/KG; answer it with a prose
-        # fallback instead of a hard SQL error. Degrades gracefully if the AI
-        # service is busy.
+        # may already be answered by an existing, verified Insight Card — that
+        # analysis ran the real multi-query pipeline, so pointing back to it
+        # beats both a hard SQL error and unattributed KG prose. Check before
+        # falling further back.
+        card_match = await find_matching_insight_card(
+            session,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            question=question,
+        )
+        if card_match is not None:
+            turn.assistant_message = (
+                f"I found an existing analysis that answers this: "
+                f"**{card_match.title}**"
+            )
+            turn.chart_config = None
+            turn.result_cache = None
+            turn.sql = None
+            turn.sql_fingerprint = None
+            turn.datasource_context = {"dataSourcesUsed": []}
+            turn.matched_insight = {
+                "insightId": card_match.insight_id,
+                "projectId": card_match.project_id,
+                "projectName": card_match.project_name,
+                "title": card_match.title,
+                "summary": card_match.summary,
+                "chart": card_match.chart,
+                "severity": card_match.severity,
+            }
+            turn.status = "success"
+            return
+
+        # No existing card answers it either; the question may still be
+        # answerable from documents/KG prose instead of a hard SQL error.
+        # Degrades gracefully if the AI service is busy.
         prose = await _forward_prose_answer(
             session,
             context,

@@ -98,6 +98,7 @@ class TurnResponse(BaseModel):
     chart_config: dict[str, Any] | None
     explanation: dict[str, Any] | None
     error_code: str | None
+    matched_insight: dict[str, Any] | None
 
 
 class ConversationResponse(BaseModel):
@@ -165,6 +166,7 @@ def _turn_to_response(turn: AnalyticsConversationTurn) -> TurnResponse:
         chart_config=turn.chart_config,
         explanation=turn.explanation,
         error_code=turn.error_code,
+        matched_insight=turn.matched_insight,
     )
 
 

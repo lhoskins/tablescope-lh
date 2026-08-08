@@ -1,7 +1,20 @@
 import { apiClient } from "@/lib/api-client";
 import type { VizType } from "@/lib/api/ai-actions";
+import type { InsightChart } from "@/lib/api/home-intelligence/insight-chart";
 
 export type TurnStatus = "pending" | "success" | "error";
+
+/** Points a turn back to an existing verified Insight Card that already
+ *  answers the question, instead of a fresh (possibly shallower) SQL guess. */
+export interface MatchedInsight {
+  insightId: string;
+  projectId: number;
+  projectName: string;
+  title: string;
+  summary: string;
+  chart: InsightChart | null;
+  severity: string | null;
+}
 
 export interface TurnResult {
   columns: string[];
@@ -40,6 +53,7 @@ export interface ConversationTurn {
   chart_config: ChartConfig | null;
   explanation: Record<string, unknown> | null;
   error_code: string | null;
+  matched_insight: MatchedInsight | null;
 }
 
 export interface Conversation {
