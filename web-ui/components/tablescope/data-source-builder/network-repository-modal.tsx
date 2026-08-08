@@ -90,7 +90,9 @@ export function NetworkRepositoryModal({
         </p>
 
         <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-line-tertiary">
-          {loading ? (
+          {error ? (
+            <p className="p-4 text-small text-danger">{error}</p>
+          ) : loading ? (
             <div className="flex items-center gap-2 p-4 text-small text-ink-tertiary">
               <IconLoader2 size={15} className="animate-spin" /> Loading…
             </div>
@@ -140,8 +142,6 @@ export function NetworkRepositoryModal({
             </ul>
           )}
         </div>
-
-        {error && <p className="mt-2 text-caption text-danger">{error}</p>}
 
         <div className="mt-4 flex justify-end">
           <Button variant="secondary" onClick={onClose} disabled={importing}>

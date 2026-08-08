@@ -48,6 +48,7 @@ import { CHART_FOLLOW_UPS } from "./chart-follow-ups";
 import { ConversationRow } from "./conversation-row";
 import { UserBubble } from "./user-bubble";
 import { TurnBubbles } from "./turn-bubbles";
+import { groupConversationSummaries } from "@/lib/conversations/group-canonical";
 
 
 
@@ -80,6 +81,14 @@ function AiAssistantPageInner() {
   const turns = active?.turns ?? [];
   const assistantConversations = (conversations ?? []).filter(
     (c) => projectFilter == null || c.project_id === projectFilter,
+  );
+
+  // Group canonical Insight threads so the sidebar shows one durable Business
+  // Insights row and one Project Insights row per project. Manual chats remain
+  // individual rows.
+  const groupedConversations = useMemo<ConversationSummary[]>(
+    () => groupConversationSummaries(assistantConversations, projects ?? []),
+    [assistantConversations, projects],
   );
 
   // Deterministic Project Overview back navigation based on the URL and the
@@ -274,14 +283,14 @@ function AiAssistantPageInner() {
             </Button>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {assistantConversations.length === 0 && (
+            {groupedConversations.length === 0 && (
               <p className="px-2 py-4 text-small text-ink-tertiary">
                 No conversations yet.
               </p>
             )}
-            {assistantConversations.map((c) => (
+            {groupedConversations.map((c) => (
               <ConversationRow
-                key={c.id}
+                key={c.canonical_key ?? c.id}
                 conversation={c}
                 active={activeId === c.id}
                 onSelect={() => setActiveId(c.id)}

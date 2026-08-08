@@ -47,6 +47,7 @@ _STATUS_BY_CODE = {
     "HOST_UNREACHABLE": 502,
     "TIMEOUT": 504,
     "ACCESS_DENIED": 403,
+    "AUTH_FAILED": 403,
 }
 
 

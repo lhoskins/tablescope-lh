@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { InsightPanel, PanelEmpty } from "@/components/tablescope/insight-panel";
 import { TimeSeriesIntervalRangeControls } from "@/components/tablescope/insights/time-series-interval-range-controls";
 import { IconChartBar } from "@tabler/icons-react";
-import { Switch } from "@/components/ui/switch";
+import { PillToggle } from "@/components/ui/pill-toggle";
 import { usePercentChangeSummary } from "@/lib/hooks/use-percent-change-summary";
 import type {
   PercentChangeSummarySort,
@@ -144,6 +144,14 @@ export function PercentChangeSummaryPanel({
 
     return (
       <div className="space-y-3">
+        <div className="flex items-center">
+          <PillToggle
+            id="pcs-show-statistics"
+            label="Period statistics"
+            checked={showStatistics}
+            onChange={handleShowStatisticsChange}
+          />
+        </div>
         <PercentChangeSummaryTable
           periods={data.periods}
           rows={data.rows}
@@ -222,12 +230,6 @@ export function PercentChangeSummaryPanel({
                 <option value={50}>50</option>
               </select>
             </div>
-            <Switch
-              id="pcs-show-statistics"
-              checked={showStatistics}
-              onChange={handleShowStatisticsChange}
-              label="Show period statistics"
-            />
           </div>
         </div>
 

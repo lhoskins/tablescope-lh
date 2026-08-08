@@ -295,22 +295,70 @@ export const useBuilderStore = create<BuilderState>()(
       const prevExisting = new Map(
         state.sources.filter((s) => s.existing).map((s) => [s.id, s]),
       );
-      // Preserve the user's per-table selection across refetches.
+      const sessionSources = state.sources.filter((s) => !s.existing);
+      const sessionByIdentity = new Map<string, SessionSource>();
+      const sessionById = new Map<string, SessionSource>();
+      for (const s of sessionSources) {
+        sessionById.set(s.id, s);
+        const key = sourceExistingKey(s);
+        if (key) sessionByIdentity.set(key, s);
+      }
+      const replacedSessionIds = new Set<string>();
+
+      const mergeTables = (
+        next: SessionSource["tables"],
+        prev?: SessionSource["tables"],
+      ): SessionSource["tables"] => {
+        if (!prev || prev.length === 0) return next;
+        const prevByName = new Map(prev.map((t) => [t.tableName, t]));
+        return next.map((t) => {
+          const match = prevByName.get(t.tableName);
+          return match
+            ? { ...t, state: match.state, aiEnabled: match.aiEnabled }
+            : t;
+        });
+      };
+
+      const identityToIncoming = new Map<string, SessionSource>();
       const merged = incoming.map((s) => {
         const prev = prevExisting.get(s.id);
-        return prev ? { ...s, tables: prev.tables } : s;
+        if (prev) {
+          return { ...s, tables: mergeTables(s.tables, prev.tables) };
+        }
+        const identity = sourceExistingKey(s);
+        if (identity) identityToIncoming.set(identity, s);
+        const sessionMatch = identity ? sessionByIdentity.get(identity) : undefined;
+        if (sessionMatch) {
+          replacedSessionIds.add(sessionMatch.id);
+          return { ...s, tables: mergeTables(s.tables, sessionMatch.tables) };
+        }
+        return s;
       });
-      const sources = [
-        ...state.sources.filter((s) => !s.existing),
-        ...merged,
-      ];
-      const keptKeys = state.createdKeys.filter(
-        (k) => !k.startsWith("existing-"),
+
+      const keptNonExisting = state.sources.filter(
+        (s) => !s.existing && !replacedSessionIds.has(s.id),
       );
+      const sources = [...keptNonExisting, ...merged];
+
+      const keptKeys = state.createdKeys.filter((k) => {
+        const sourceId = k.split("::")[0];
+        // Drop keys for session sources that were replaced by an incoming
+        // existing source, and rebuild the existing-source keys below.
+        return !replacedSessionIds.has(sourceId) && !k.startsWith("existing-");
+      });
       const createdKeys = Array.from(
         new Set([...keptKeys, ...merged.map(createdKeyOf)]),
       );
-      return { sources, createdKeys };
+
+      let activeSourceId = state.activeSourceId;
+      if (activeSourceId && replacedSessionIds.has(activeSourceId)) {
+        const oldSession = sessionById.get(activeSourceId);
+        const identity = oldSession ? sourceExistingKey(oldSession) : null;
+        const replacement = identity ? identityToIncoming.get(identity) : undefined;
+        activeSourceId = replacement?.id ?? activeSourceId;
+      }
+
+      return { sources, activeSourceId, createdKeys };
     }),
 
   // ── All Data Sources selection ──
