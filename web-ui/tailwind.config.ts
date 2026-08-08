@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import containerQueries from "@tailwindcss/container-queries";
 
 const config: Config = {
   content: [
@@ -8,6 +9,9 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      screens: {
+        xs: "480px",
+      },
       colors: {
         bg: {
           primary: "var(--bg-primary)",
@@ -70,9 +74,21 @@ const config: Config = {
       height: {
         topbar: "64px",
       },
+      spacing: {
+        "safe-top": "env(safe-area-inset-top)",
+        "safe-bottom": "env(safe-area-inset-bottom)",
+        "safe-left": "env(safe-area-inset-left)",
+        "safe-right": "env(safe-area-inset-right)",
+      },
+      minWidth: {
+        touch: "44px",
+      },
+      minHeight: {
+        touch: "44px",
+      },
     },
   },
-  plugins: [],
+  plugins: [containerQueries],
 };
 
 export default config;

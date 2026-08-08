@@ -13,12 +13,17 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Tablescope",
   description: "Multi-tenant data platform",
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    viewportFit: "cover",
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body>
+      <body className="min-h-[100dvh] min-h-[100vh] pt-safe-top pr-safe-right pb-safe-bottom pl-safe-left">
         <Providers>{children}</Providers>
       </body>
     </html>

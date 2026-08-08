@@ -143,6 +143,15 @@ class Settings(BaseSettings):
     llm_ollama_rollback_slots: int = 1
     tablescope_ai_cross_project_enabled: bool = False
     tablescope_ai_tenant_scope_enabled: bool = False
+
+    # --- Voice transcription (private STT pipeline) ---
+    voice_input_enabled: bool = False  # master switch; per-tenant flag also required
+    voice_max_duration_seconds: int = 120
+    voice_max_upload_bytes: int = 20 * 1024 * 1024  # 20 MiB
+    voice_rate_limit_window_seconds: int = 600  # 10 minutes
+    voice_rate_limit_max_per_window: int = 30
+    voice_ai_timeout_seconds: float = 45.0
+
     # Business Context (Goal Setting) workspace feature flags.
     business_context_v2_enabled: bool = True
     business_context_kpi_matching_enabled: bool = True

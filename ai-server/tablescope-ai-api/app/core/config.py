@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     reasoning_model: str = "llama3.1:8b"
     embedding_model: str = "nomic-embed-text"
 
+    # Voice transcription (CPU-based faster-whisper by default)
+    voice_transcription_enabled: bool = False
+    voice_transcription_model: str = "tiny"  # faster-whisper model size or path
+    voice_transcription_device: str = "cpu"
+    voice_transcription_compute_type: str = "int8"
+    voice_transcription_beam_size: int = 5
+    voice_transcription_model_path: str = ""  # optional local path; empty = download
+    voice_max_duration_seconds: int = 120
+    voice_max_upload_bytes: int = 20 * 1024 * 1024
+
     class Config:
         env_file = ".env"
 

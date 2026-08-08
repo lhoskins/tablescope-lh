@@ -74,6 +74,8 @@ export interface TenantSummary {
   initials: string;
   /** Admin-uploaded company logo URL (absolute), or null when unset. */
   logoUrl?: string | null;
+  /** Whether voice input is enabled for the current tenant. */
+  voiceInputEnabled?: boolean;
 }
 
 export interface CurrentUser {

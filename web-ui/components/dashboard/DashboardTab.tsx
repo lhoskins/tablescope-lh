@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { Dashboard, DashboardConfig, WidgetConfig } from "./types";
 import { DashboardViewer } from "./DashboardViewer";
-import { AIPromptBar } from "@/components/ai/AIPromptBar";
+import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { createHomePin } from "@/lib/api/home-pins";
 
 type SavedQuery = { id: number; name: string; sql_text: string | null };
@@ -31,6 +31,7 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
   const [aiDashLoading, setAiDashLoading] = useState(false);
   const [aiDashError, setAiDashError] = useState<string | null>(null);
   const [aiDashSuccess, setAiDashSuccess] = useState<string | null>(null);
+  const [aiPrompt, setAiPrompt] = useState("");
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
@@ -44,6 +45,7 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
         { project_id: projectId, prompt },
       );
       setAiDashSuccess(`Dashboard created: ${result.dashboard_name} (${result.widgets_created} widgets)`);
+      setAiPrompt("");
       queryClient.invalidateQueries({ queryKey: ["project-dashboards", projectId] });
     } catch (err) {
       setAiDashError(err instanceof Error ? err.message : "AI dashboard generation failed");
@@ -158,11 +160,16 @@ export function DashboardTab({ projectId, savedQueries, datasources, canEdit }: 
             {createMutation.isPending ? "Creating..." : "+ Create Dashboard"}
           </button>
           <div className="flex-1">
-            <AIPromptBar
-              placeholder="Describe the dashboard you want to generate…"
-              submitLabel="Generate Dashboard"
+            <AskAnythingComposer
+              value={aiPrompt}
+              onChange={setAiPrompt}
               onSubmit={handleAIGenerateDashboard}
-              loading={aiDashLoading}
+              placeholder="Describe the dashboard you want to generate…"
+              ariaLabel="Describe the dashboard you want to generate"
+              submitAriaLabel="Generate"
+              busy={aiDashLoading}
+              voiceEnabled={false}
+              projectId={projectId}
             />
             {aiDashError && (
               <div className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{aiDashError}</div>

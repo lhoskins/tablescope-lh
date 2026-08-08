@@ -44,6 +44,7 @@ from . import (
     ai_relationships,
     ai_scopes,
     ai_shared,
+    ai_speech,
 )
 from .ai_actions import (
     _ACTION_DRAFT_SYSTEM_PROMPT,
@@ -170,6 +171,7 @@ router = APIRouter(prefix="/ai", tags=["AI"])
 router.include_router(ai_ask.router)
 router.include_router(ai_grounding.router)
 router.include_router(ai_indexing.router)
+router.include_router(ai_speech.router)
 router.include_router(ai_relationships.router)
 router.include_router(ai_query_generate.router)
 router.include_router(ai_dashboard.router)
@@ -205,6 +207,8 @@ _FEATURE_MODULES = (
     ai_document,
     ai_reference_library,
     ai_actions,
+    ai_grounding,
+    ai_speech,
 )
 
 
