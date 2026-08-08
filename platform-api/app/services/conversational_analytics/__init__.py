@@ -175,14 +175,13 @@ async def execute_turn(
     sql_question = data_question if data_question else question
     turn.intent_type = intent
 
+    # A clarification intent from the classifier is an ambiguous phrasing, not a
+    # reason to give up. Treat it like a new analysis so the SQL path gets a
+    # chance to answer; the ask-and-run core falls back to a prose/KG answer if
+    # it cannot ground the question on a data source.
     if intent == ConversationalIntent.CLARIFICATION:
-        turn.status = "error"
-        turn.error_code = "needs_clarification"
-        turn.assistant_message = (
-            "I'm not sure what you'd like me to do. You can ask a new question, "
-            "refine the current one, or ask for a different chart format."
-        )
-        return
+        intent = ConversationalIntent.NEW_ANALYSIS
+        turn.intent_type = intent
 
     if intent == ConversationalIntent.CHART_CHANGE:
         if prior_turn is None or prior_turn.result_cache is None:
@@ -287,10 +286,11 @@ async def execute_turn(
     turn.project_context_version = project_context.get("version") if project_context else None
     turn.sql_fingerprint = _sql_fingerprint(turn.sql)
 
-    if run.get("status") == "generation_error":
-        # A question that cannot be grounded on an authorized source may still
-        # be a document/KG question; answer it with a prose fallback instead of
-        # a hard SQL error. Degrades gracefully if the AI service is busy.
+    if run.get("status") in ("generation_error", "execution_error"):
+        # A question that cannot be grounded or executed on an authorized source
+        # may still be answerable from documents/KG; answer it with a prose
+        # fallback instead of a hard SQL error. Degrades gracefully if the AI
+        # service is busy.
         prose = await _forward_prose_answer(
             session,
             context,

@@ -813,7 +813,7 @@ async def ai_ask_and_run(
     if result.get("status") == "success":
         result["answerType"] = "data"
         return result
-    if result.get("status") == "generation_error":
+    if result.get("status") in ("generation_error", "execution_error"):
         prose = await _forward_prose_answer(
             session,
             context,

@@ -340,7 +340,12 @@ def _read_blocking(
     source_ip: str | None,
 ) -> bytes:
     import smbclient
-    from smbprotocol.exceptions import SMBOSError, SMBResponseException
+    from smbprotocol.exceptions import (
+        SMBAuthenticationError,
+        SMBConnectionClosed,
+        SMBOSError,
+        SMBResponseException,
+    )
 
     try:
         _register_session(connection, source_ip)
@@ -367,6 +372,12 @@ def _read_blocking(
     except PermissionError as exc:
         raise NetworkPathError(
             "ACCESS_DENIED", "Access to that file was denied."
+        ) from exc
+    except (SMBAuthenticationError, SMBConnectionClosed) as exc:
+        logger.info("SMB authentication failed for %s", resolved.redacted_locator)
+        raise NetworkPathError(
+            "AUTH_FAILED",
+            "Could not authenticate to the network location. Check the credentials.",
         ) from exc
     except (SMBOSError, SMBResponseException) as exc:
         # Never surface the raw SMB error: it can echo the full path and the
@@ -415,11 +426,16 @@ async def list_network_path(
 
     def _list() -> list[dict[str, object]]:
         import smbclient
-        from smbprotocol.exceptions import SMBOSError, SMBResponseException
+        from smbprotocol.exceptions import (
+            SMBAuthenticationError,
+            SMBConnectionClosed,
+            SMBOSError,
+            SMBResponseException,
+        )
 
         resolved = resolve_network_directory(raw_path, connection, approved_hosts)
-        _register_session(connection, source_ip)
         try:
+            _register_session(connection, source_ip)
             target = resolved.unc_path
             if not resolved.relative_path:
                 target = f"\\\\{resolved.host}\\{resolved.share}"
@@ -428,7 +444,13 @@ async def list_network_path(
                 name = entry.name
                 if name in (".", ".."):
                     continue
-                stat = entry.stat()
+                is_dir = entry.is_dir()
+                info = entry.smb_info
+                modified_ts = (
+                    info.last_write_time.timestamp()
+                    if info.last_write_time
+                    else None
+                )
                 entries.append(
                     {
                         "name": name,
@@ -437,12 +459,18 @@ async def list_network_path(
                             if resolved.relative_path
                             else name
                         ),
-                        "kind": "directory" if entry.is_dir() else "file",
-                        "size_bytes": stat.st_size if not entry.is_dir() else 0,
-                        "modified_at": stat.st_mtime if hasattr(stat, "st_mtime") else None,
+                        "kind": "directory" if is_dir else "file",
+                        "size_bytes": 0 if is_dir else info.end_of_file,
+                        "modified_at": modified_ts,
                     }
                 )
             return sorted(entries, key=lambda e: (e["kind"] != "directory", e["name"]))
+        except (SMBAuthenticationError, SMBConnectionClosed) as exc:
+            logger.info("SMB authentication failed for %s", resolved.redacted_locator)
+            raise NetworkPathError(
+                "AUTH_FAILED",
+                "Could not authenticate to the network location. Check the credentials.",
+            ) from exc
         except (SMBOSError, SMBResponseException) as exc:
             logger.info("SMB list failed for %s", resolved.redacted_locator)
             raise NetworkPathError(

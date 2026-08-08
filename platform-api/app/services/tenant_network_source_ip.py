@@ -9,11 +9,13 @@ reach that tenant's approved on-prem CIDRs.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import logging
 import socket
 import subprocess
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -22,6 +24,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.tenant_data_plane import TenantDataPlane
 
 logger = logging.getLogger(__name__)
+
+#: Cached tenant source IP lookup. The worker's interface inside a tenant Docker
+#: network is stable for the lifetime of the container, so a short TTL avoids
+#: repeating subprocess/DNS work on every network file request.
+_source_ip_cache: dict[int, tuple[str | None, datetime]] = {}
+_SOURCE_IP_CACHE_TTL = timedelta(seconds=60)
 
 
 def _ipv4_in_cidr(ip_str: str, network_str: str) -> bool:
@@ -116,11 +124,29 @@ async def get_tenant_source_ip(session: AsyncSession, tenant_id: int) -> str | N
 
     ``tenant_id`` is the application-level integer tenant id (the ``tenants.id``
     column). It is mapped through ``TenantDataPlane.org_tenant_id``.
+
+    The IP lookup does blocking subprocess/socket work, so it runs off the
+    async event loop and is cached for a short TTL.
     """
+    now = datetime.now(UTC)
+    cached = _source_ip_cache.get(tenant_id)
+    if cached is not None and now - cached[1] < _SOURCE_IP_CACHE_TTL:
+        return cached[0]
+
     plane = await session.scalar(
         select(TenantDataPlane).where(TenantDataPlane.org_tenant_id == tenant_id)
     )
     if plane is None:
         logger.debug("No TenantDataPlane for tenant %s", tenant_id)
         return None
-    return find_source_ip_for_cidr(plane.docker_subnet_cidr)
+
+    try:
+        ip = await asyncio.wait_for(
+            asyncio.to_thread(find_source_ip_for_cidr, plane.docker_subnet_cidr),
+            timeout=10,
+        )
+    except TimeoutError:
+        logger.warning("Timeout resolving source IP for tenant %s", tenant_id)
+        ip = None
+    _source_ip_cache[tenant_id] = (ip, now)
+    return ip
