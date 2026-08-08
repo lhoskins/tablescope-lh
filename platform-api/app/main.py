@@ -200,7 +200,6 @@ async def _warm_all_vdbs_on_startup() -> None:
     This moves the first-connection cost (PG-wire handshake + pg_catalog
     materialization) out of the first user query and into startup.
     """
-    await asyncio.sleep(10)
     from sqlalchemy import or_, select
 
     from app.database import SessionLocal
@@ -372,12 +371,21 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         get_engine_mode().value,
     )
     reconcile_task = asyncio.create_task(_reconcile_db_sources_on_startup())
+
+    async def _warm_after_reconcile() -> None:
+        # Don't race the DB-source reconciler, which redeploys VDBs.
+        try:
+            await reconcile_task
+        except Exception:
+            pass
+        await _warm_all_vdbs_on_startup()
+
     llm_target_task = asyncio.create_task(_ensure_primary_llm_runtime_target())
     seed_task = asyncio.create_task(_seed_reference_catalogs())
     kg_pipeline_check_task = asyncio.create_task(
         _check_kg_snapshot_pipeline_version_on_startup()
     )
-    warm_vdbs_task = asyncio.create_task(_warm_all_vdbs_on_startup())
+    warm_vdbs_task = asyncio.create_task(_warm_after_reconcile())
     try:
         yield
     finally:
