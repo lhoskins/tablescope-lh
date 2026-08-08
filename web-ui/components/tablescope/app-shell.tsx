@@ -96,8 +96,8 @@ export function AppShell({
             <div
               className={
                 centered
-                  ? "mx-auto w-full max-w-content px-5 py-6"
-                  : "px-5 py-5"
+                  ? "mx-auto w-full min-w-0 max-w-content px-5 py-6"
+                  : "min-w-0 px-5 py-5"
               }
             >
               {topBarRight && (
