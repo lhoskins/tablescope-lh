@@ -70,12 +70,39 @@ def _terms(text: str) -> set[str]:
 
 
 def _score(question_terms: set[str], card: dict[str, Any]) -> float:
+    """Overlap fraction, term found anywhere in title or summary.
+
+    This alone decides whether a card clears the match threshold at all —
+    recall stays as before. It does NOT decide which of several qualifying
+    cards wins; two differently-worded but semantically identical questions
+    (e.g. "increasing" vs "rising", both stopwords here) must not be able to
+    land on different cards, so ranking among qualifying candidates is
+    ``_rank_key``'s job, not this function's.
+    """
     haystack = f"{card.get('title', '')} {card.get('summary', '')}"
     card_terms = _terms(haystack)
     if not question_terms or not card_terms:
         return 0.0
     overlap = question_terms & card_terms
     return len(overlap) / len(question_terms)
+
+
+def _rank_key(question_terms: set[str], card: dict[str, Any], score: float) -> tuple[float, int, str]:
+    """Deterministic ranking among cards that already cleared the threshold.
+
+    A card whose *title* names the topic is a much stronger signal than one
+    that merely mentions it somewhere in a longer summary — "Material Cost
+    Over Time Indicates Potential Risks" is a better answer to a material-cost
+    question than "Vendor Spend Over Time (by Category): Cost Optimization
+    Opportunities", even though both may satisfy ``_score``'s bag-of-words
+    threshold. Title-term overlap is the primary tiebreaker; ``insightId`` is
+    a final, arbitrary-but-stable tiebreaker so the same question can never
+    resolve to different cards on different requests depending on
+    unordered database row iteration.
+    """
+    title_terms = _terms(str(card.get("title", "")))
+    title_overlap = len(question_terms & title_terms)
+    return (score, title_overlap, str(card.get("insightId") or ""))
 
 
 def _to_match(project_id: int, card: dict[str, Any]) -> InsightCardMatch:
@@ -104,17 +131,22 @@ async def _best_match_in_projects(
     rows = (
         (
             await session.execute(
-                select(BusinessInsightResult).where(
+                select(BusinessInsightResult)
+                .where(
                     BusinessInsightResult.tenant_id == tenant_id,
                     BusinessInsightResult.project_id.in_(project_ids),
                 )
+                # Deterministic row order. Ranking ties are broken by
+                # _rank_key below regardless, but an unordered scan makes
+                # even that harder to reason about — belt and suspenders.
+                .order_by(BusinessInsightResult.project_id, BusinessInsightResult.granularity)
             )
         )
         .scalars()
         .all()
     )
 
-    best_score = 0.0
+    best_key: tuple[float, int, str] | None = None
     best_card: dict[str, Any] | None = None
     best_project_id: int | None = None
     for row in rows:
@@ -125,12 +157,13 @@ async def _best_match_in_projects(
             if not isinstance(card, dict) or not card.get("insightId"):
                 continue
             score = _score(question_terms, card)
-            if score > best_score:
-                best_score = score
+            key = _rank_key(question_terms, card, score)
+            if best_key is None or key > best_key:
+                best_key = key
                 best_card = card
                 best_project_id = row.project_id
 
-    if best_card is None or best_project_id is None or best_score < min_score:
+    if best_card is None or best_project_id is None or best_key is None or best_key[0] < min_score:
         return None
     return _to_match(best_project_id, best_card)
 

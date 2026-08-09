@@ -150,6 +150,60 @@ async def test_matches_card_by_lexical_overlap(client, db_session, service_heade
     assert match.chart == {"type": "line", "data": {"rows": []}}
 
 
+async def test_prefers_the_card_whose_title_names_the_topic(
+    client, db_session, service_headers
+) -> None:
+    """Reproduces the reported inconsistency: a vaguely-related card (topic
+    only in its summary, if at all) and a precisely-on-topic card (topic in
+    its own title) both clear the match threshold. The on-topic one must win
+    -- deterministically, regardless of which order the two rows/cards come
+    back from the database in."""
+    project, tenant, user = await _project(client, service_headers)
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    _card(
+                        "vendor-spend",
+                        "Vendor Spend Over Time (by Category): Cost "
+                        "Optimization Opportunities",
+                        "Category-level vendor spend trends, including "
+                        "material and indirect cost categories, tracked "
+                        "over the last four quarters.",
+                    ),
+                    _card(
+                        "material-cost",
+                        "Material Cost Over Time Indicates Potential Risks",
+                        "Material cost has risen month over month; the "
+                        "trend correlates with a known supplier issue.",
+                    ),
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    for question in (
+        "Why is material cost increasing?",
+        "Why is material cost rising?",
+    ):
+        match = await find_matching_insight_card(
+            db_session,
+            context=_context(tenant["id"], user["id"]),
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            question=question,
+        )
+        assert match is not None
+        assert match.insight_id == "material-cost", (
+            f"question {question!r} resolved to {match.insight_id!r}, "
+            "expected the card whose own title names the topic"
+        )
+
+
 async def test_no_match_below_threshold(client, db_session, service_headers) -> None:
     project, tenant, user = await _project(client, service_headers)
     db_session.add(

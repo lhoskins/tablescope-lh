@@ -410,26 +410,6 @@ function AiAssistantPageInner() {
                 </span>
               </p>
             )}
-            <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2">
-              <label className="text-[12px] text-ink-tertiary">Project</label>
-              <select
-                value={active?.project_id ?? projectId ?? ""}
-                disabled={active != null}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setProjectId(v === "" ? null : Number(v));
-                }}
-                title="Optional — narrows the question to one project. Leave unset and I'll find the right project from what you ask."
-                className="min-w-0 flex-1 rounded-md border border-line-secondary bg-bg-primary px-2 py-1.5 text-[12px] text-ink-primary focus:border-brand-500 focus:outline-none disabled:opacity-60"
-              >
-                <option value="">Auto-detect from question</option>
-                {(projects ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
             <AskAnythingComposer
               value={input}
               onChange={setInput}
