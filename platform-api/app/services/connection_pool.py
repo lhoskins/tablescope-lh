@@ -65,6 +65,8 @@ class TeiidConnectionPoolManager:
             if pool is not None:
                 return pool
             logger.info("Creating new Teiid asyncpg pool for %s@%s:%s/%s", username, host, port, database)
+            # Teiid's PG wire does not support SSL; disable it to avoid a
+            # negotiation hang and cap the initial connection handshake.
             pool = await asyncpg.create_pool(
                 host=host,
                 port=port,
@@ -73,6 +75,8 @@ class TeiidConnectionPoolManager:
                 password=password,
                 min_size=self._min_size,
                 max_size=self._max_size,
+                ssl=False,
+                timeout=30,
                 command_timeout=60,
                 statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},

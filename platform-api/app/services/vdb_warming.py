@@ -2,7 +2,7 @@
 
 The first asyncpg connection to a freshly deployed VDB pays several one-time
 costs: pool creation, Teiid PG-wire handshake, and internal pg_catalog
-materialization. Warming opens a standalone connection, runs a trivial SELECT
+materialization. Warming creates/caches the asyncpg pool, runs a trivial SELECT
 so asyncpg's type introspection triggers that pg_catalog load, and optionally
 touches every MyCompany view so source translator metadata and result-set
 caches are loaded in the background.
@@ -54,26 +54,30 @@ async def warm_vdb(
     except Exception as exc:
         logger.debug("Could not evict stale pool for %s: %s", vdb_id, exc)
 
-    conn: asyncpg.Connection | None = None
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            conn = await asyncio.wait_for(
-                asyncpg.connect(
-                    host=host,
-                    port=port,
-                    database=database,
-                    user=vdb_username,
-                    password=vdb_password,
-                    command_timeout=60,
-                    server_settings={"application_name": "tablescope-vdb-warm"},
-                ),
-                timeout=timeout,
+            pool = await pool_manager.get_pool(
+                host=host,
+                port=port,
+                database=database,
+                username=vdb_username,
+                password=vdb_password,
             )
-            assert conn is not None
-            await asyncio.wait_for(conn.fetch("SELECT 1"), timeout=timeout)
+            # pool.fetch returns a connection to the pool; SELECT 1 warms the
+            # cached pool so the first real user query reuses a hot connection.
+            await asyncio.wait_for(pool.fetch("SELECT 1"), timeout=timeout)
+            if warm_views:
+                await _warm_mycompany_views(
+                    pool,
+                    vdb_id=vdb_id,
+                    timeout=timeout,
+                    max_concurrent=max_concurrent_views,
+                    max_attempts=max_attempts,
+                    retry_delay=retry_delay,
+                )
             logger.info(
-                "Warmed VDB %s connection at %s:%s/%s (attempt %d/%d)",
+                "Warmed VDB %s pool at %s:%s/%s (attempt %d/%d)",
                 vdb_id,
                 host,
                 port,
@@ -85,23 +89,15 @@ async def warm_vdb(
         except Exception as exc:
             last_exc = exc
             logger.warning(
-                "VDB %s connection warm attempt %d/%d failed: %s (%s)",
+                "VDB %s pool warm attempt %d/%d failed: %s (%s)",
                 vdb_id,
                 attempt,
                 max_attempts,
                 exc,
                 exc.__class__.__name__,
             )
-            if conn is not None:
-                try:
-                    await conn.close()
-                except Exception:
-                    pass
-                conn = None
             if attempt < max_attempts:
                 await asyncio.sleep(retry_delay)
-        else:
-            break
     else:
         logger.warning(
             "VDB warm failed for %s after %d attempts: %s",
@@ -109,30 +105,10 @@ async def warm_vdb(
             max_attempts,
             last_exc,
         )
-        return
-
-    if conn is None:
-        return
-
-    try:
-        if warm_views:
-            await _warm_mycompany_views(
-                conn,
-                vdb_id=vdb_id,
-                timeout=timeout,
-                max_concurrent=max_concurrent_views,
-                max_attempts=max_attempts,
-                retry_delay=retry_delay,
-            )
-    finally:
-        try:
-            await conn.close()
-        except Exception:
-            pass
 
 
 async def _warm_mycompany_views(
-    conn: asyncpg.Connection,
+    pool: asyncpg.Pool,
     *,
     vdb_id: str,
     timeout: float,
@@ -140,13 +116,18 @@ async def _warm_mycompany_views(
     max_attempts: int,
     retry_delay: float,
 ) -> None:
-    """Load every MyCompany view once so source metadata is cached."""
+    """Load every MyCompany view once so source translator metadata is cached.
+
+    Each view query runs through the pool with a concurrency semaphore; the
+    pool distributes them across connections without interleaving commands on
+    a single connection.
+    """
     rows = None
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
             rows = await asyncio.wait_for(
-                conn.fetch(
+                pool.fetch(
                     "SELECT Name FROM SYS.Tables "
                     "WHERE SchemaName = 'MyCompany' AND IsSystem = false"
                 ),
@@ -182,7 +163,7 @@ async def _warm_mycompany_views(
             for attempt in range(1, max_attempts + 1):
                 try:
                     await asyncio.wait_for(
-                        conn.fetch(
+                        pool.fetch(
                             f'SELECT 1 FROM "MyCompany"."{safe_name}" LIMIT 1'
                         ),
                         timeout=timeout,
