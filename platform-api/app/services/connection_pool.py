@@ -79,7 +79,7 @@ class TeiidConnectionPoolManager:
                 min_size=self._min_size,
                 max_size=self._max_size,
                 ssl=False,
-                timeout=15,
+                timeout=30,
                 command_timeout=60,
                 statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},

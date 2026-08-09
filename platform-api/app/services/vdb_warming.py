@@ -30,7 +30,7 @@ async def warm_vdb(
     vdb_password: str = "test",
     timeout: float = 60.0,
     warm_views: bool = False,
-    max_concurrent_views: int = 2,
+    max_concurrent_views: int = 1,
     max_attempts: int = 3,
     retry_delay: float = 5.0,
 ) -> None:
@@ -162,11 +162,11 @@ async def _warm_mycompany_views(
         async with semaphore:
             for attempt in range(1, max_attempts + 1):
                 try:
-                    # SELECT * forces Teiid to actually touch the source
-                    # translator, which loads its capabilities/capabilities.
+                    # Lightweight query that still forces Teiid to plan and
+                    # load per-source translator metadata for the view.
                     await asyncio.wait_for(
                         pool.fetch(
-                            f'SELECT * FROM "MyCompany"."{safe_name}" LIMIT 1'
+                            f'SELECT 1 FROM "MyCompany"."{safe_name}" LIMIT 1'
                         ),
                         timeout=timeout,
                     )
