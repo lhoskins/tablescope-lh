@@ -83,16 +83,25 @@ async def _cards_for_projects(
 ) -> list[tuple[int, dict[str, Any]]]:
     """Every (project_id, card) pair cached under the given, already-scoped
     projects. This is the only place that reads BusinessInsightResult for
-    this feature -- the LLM selector never sees anything this didn't fetch."""
+    this feature -- the LLM selector never sees anything this didn't fetch.
+
+    Ordered by freshest analysis first: ``_select_from_candidates`` bounds
+    what it offers the model to ``_MAX_CANDIDATES``, and an unordered result
+    set can silently drop the actually-relevant card behind arbitrary DB
+    ordering once a project accumulates more cards than that cap. Freshest
+    first means a truncation, if one happens, drops the stalest analyses.
+    """
     if not project_ids:
         return []
     rows = (
         (
             await session.execute(
-                select(BusinessInsightResult).where(
+                select(BusinessInsightResult)
+                .where(
                     BusinessInsightResult.tenant_id == tenant_id,
                     BusinessInsightResult.project_id.in_(project_ids),
                 )
+                .order_by(BusinessInsightResult.updated_at.desc())
             )
         )
         .scalars()

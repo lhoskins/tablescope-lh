@@ -1,7 +1,9 @@
 """Select which precomputed Insight Card, if any, answers a question."""
 
+import logging
 import uuid
 
+import httpx
 from fastapi import APIRouter
 
 from app.core.activity import update_activity
@@ -16,6 +18,7 @@ from app.services.prompt_loader import load_prompt_reference
 
 from .ai_shared import _parse_json_response
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -76,15 +79,29 @@ async def select_insight_card(
             model_used=settings.reasoning_model,
         )
 
-    raw = await llm_client.generate(
-        prompt=_select_insight_card_prompt(req),
-        system_prompt=_SELECT_INSIGHT_CARD_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
-        temperature=0.0,
-        max_tokens=200,
-        num_ctx=4096,
-        response_format="json",
-    )
+    try:
+        raw = await llm_client.generate(
+            prompt=_select_insight_card_prompt(req),
+            system_prompt=_SELECT_INSIGHT_CARD_SYSTEM_PROMPT,
+            model=settings.reasoning_model,
+            temperature=0.0,
+            max_tokens=200,
+            num_ctx=8192,
+            response_format="json",
+        )
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        # The caller (insight_card_match.py) already treats a declined match
+        # the same as an unreachable selector -- both just mean "no card
+        # surfaces" -- so degrade to a clean decline instead of letting an
+        # Ollama-side failure escape as an unhandled 500.
+        logger.warning("Insight-card selector LLM call failed: %s", exc)
+        return SelectInsightCardResponse(
+            insight_id=None,
+            confidence=0.0,
+            reason="The selector model was unavailable.",
+            request_id=request_id,
+            model_used=settings.reasoning_model,
+        )
     parsed = _parse_json_response(raw or "") or {}
 
     valid_ids = {c.insight_id for c in req.candidates}

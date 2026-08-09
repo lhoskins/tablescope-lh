@@ -10,6 +10,8 @@ decision gets trusted or rejected, not what "good" relevance looks like.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app.auth.context import RequestContext
@@ -466,3 +468,54 @@ async def test_allow_cross_project_false_never_widens(
     # The resolved project (IT) has no cards, so the selector is never even
     # called -- and critically, the widen pass to Finance never runs either.
     assert calls == []
+
+
+async def test_candidate_truncation_keeps_the_freshest_analyses(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    """When a project has more cached cards than the selector-call cap, the
+    truncation must be deterministic and favor recency -- an unordered
+    result set could silently drop the actually-relevant card behind
+    whatever order the database happens to return rows in."""
+    project, tenant, user = await _project(client, service_headers)
+
+    now = datetime.now(UTC)
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=1,
+            payload={"insights": [_card("old-001", "Stale analysis", "...")]},
+            updated_at=now - timedelta(days=7),
+        )
+    )
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={"insights": [_card("new-001", "Material cost on the rise", "...")]},
+            updated_at=now,
+        )
+    )
+    await db_session.commit()
+
+    monkeypatch.setattr(icm, "_MAX_CANDIDATES", 1)
+
+    offered: list[str] = []
+
+    async def _fake_select(*, candidates, **kwargs):
+        offered.extend(c["insight_id"] for c in candidates)
+        return {"insight_id": None, "confidence": 0.0, "reason": "declining, just observing"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=project["id"],
+        question="Why is material cost increasing?",
+    )
+
+    assert offered == ["new-001"]

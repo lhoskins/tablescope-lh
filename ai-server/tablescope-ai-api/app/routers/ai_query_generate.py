@@ -6,6 +6,7 @@ import re
 import uuid
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, status
 
 from app.core.activity import update_activity
@@ -32,6 +33,32 @@ router = APIRouter()
 
 def _needs_clarification(sql: str) -> bool:
     return "NEED_CLARIFICATION" in (sql or "").upper()
+
+
+def _llm_unavailable(tenant_id: int, project_id: int, reason: str) -> HTTPException:
+    """A failed Ollama call (crash, timeout, malformed response) as a 503.
+
+    Previously these exceptions were uncaught and bubbled up as a bare 500
+    with no detail -- the caller (platform-api) only ever saw "AI server
+    request failed with HTTP 500." A structured 503 does two things a plain
+    500 cannot: it carries the real reason through to the user-facing
+    message (via ``_ai_generation_error``'s dict-detail handling on the
+    caller side), and it lands on the *already-retried* path -- the
+    platform-api transport layer automatically retries a 503 with backoff,
+    so a transient GPU/Ollama hiccup can self-heal instead of failing the
+    turn outright.
+    """
+    logger.warning(
+        "SQL generation LLM call failed | tenant=%d project=%d | %s",
+        tenant_id, project_id, reason,
+    )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "message": "The AI model could not generate a query right now.",
+            "reason": reason,
+        },
+    )
 
 
 def _referenced_tables(sql: str) -> list[str]:
@@ -259,14 +286,19 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
 
     # Initial generation. Extract a single clean SQL statement so any prose the
     # model wraps around the query never reaches Teiid.
-    raw = await llm_client.generate_sql(
-        prompt=req.prompt,
-        context=context_text,
-        allowed_tables=allowed_tables,
-        source_catalog=catalog,
-        preferred_sources=req.preferred_sources,
-        relevant_columns=req.relevant_columns,
-    )
+    try:
+        raw = await llm_client.generate_sql(
+            prompt=req.prompt,
+            context=context_text,
+            allowed_tables=allowed_tables,
+            source_catalog=catalog,
+            preferred_sources=req.preferred_sources,
+            relevant_columns=req.relevant_columns,
+        )
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        raise _llm_unavailable(
+            req.tenant_id, req.project_id, f"LLM call failed: {exc}"
+        ) from exc
     if _needs_clarification(raw):
         raise _clarify("Model could not find a matching authorized source.")
     sql = _extract_sql(raw)
@@ -293,16 +325,21 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
                 "Repairing generated SQL (attempt %d) | error=%s",
                 attempt + 1, e.reason,
             )
-            raw = await llm_client.repair_sql(
-                prompt=req.prompt,
-                context=context_text,
-                allowed_tables=allowed_tables,
-                failed_sql=sql,
-                validation_error=e.reason,
-                source_catalog=catalog,
-                preferred_sources=req.preferred_sources,
-                relevant_columns=req.relevant_columns,
-            )
+            try:
+                raw = await llm_client.repair_sql(
+                    prompt=req.prompt,
+                    context=context_text,
+                    allowed_tables=allowed_tables,
+                    failed_sql=sql,
+                    validation_error=e.reason,
+                    source_catalog=catalog,
+                    preferred_sources=req.preferred_sources,
+                    relevant_columns=req.relevant_columns,
+                )
+            except (httpx.HTTPError, KeyError, ValueError) as exc:
+                raise _llm_unavailable(
+                    req.tenant_id, req.project_id, f"LLM repair call failed: {exc}"
+                ) from exc
             repaired = True
             if _needs_clarification(raw):
                 raise _clarify(last_error)
