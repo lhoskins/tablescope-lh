@@ -15,6 +15,7 @@ import pytest
 from app.auth.context import RequestContext
 from app.auth.jwt import TokenClaims, create_access_token
 from app.models.business_insight_result import BusinessInsightResult
+from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
 from app.services import insight_card_match as icm
 from app.services.ai_intelligence_client import AIUnavailableError
 
@@ -173,6 +174,109 @@ async def test_returns_the_llm_chosen_card(
     offered_ids = {c["insight_id"] for c in captured["candidates"]}
     assert offered_ids == {"abc123", "def456"}
     assert captured["question"] == "Why is material cost increasing?"
+
+
+async def test_offers_the_callers_project_insight_snapshot_cards(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    """A card that only exists in the caller's on-demand Project Insight
+    snapshot (never the hourly-refreshed Business Insight cache) must still
+    be offered to the selector -- otherwise a question naming it can only
+    ever be answered by an unrelated cached card, if any."""
+    project, tenant, user = await _project(client, service_headers)
+    db_session.add(
+        ProjectIntelligenceSnapshot(
+            tenant_id=tenant["id"],
+            user_id=user["id"],
+            project_id=project["id"],
+            suite="project_insight",
+            payload={
+                "risks": [
+                    _card(
+                        "snap789",
+                        "Material Costs vs Scrap Rate Trend",
+                        "Material costs are rising alongside scrap rate.",
+                    )
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    captured: dict = {}
+
+    async def _fake_select(**kwargs):
+        captured.update(kwargs)
+        return {"insight_id": "snap789", "confidence": 0.9, "reason": "on topic"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=project["id"],
+        question="Why is material cost increasing?",
+    )
+
+    assert match is not None
+    assert match.insight_id == "snap789"
+    assert match.title == "Material Costs vs Scrap Rate Trend"
+    offered_ids = {c["insight_id"] for c in captured["candidates"]}
+    assert "snap789" in offered_ids
+
+
+async def test_snapshot_card_skipped_when_cache_already_has_the_title(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    """The shared Business Insight cache is authoritative on a title
+    collision -- the snapshot only supplements what the cache is missing."""
+    project, tenant, user = await _project(client, service_headers)
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={
+                "insights": [_card("cache111", "Material cost on the rise", "...")]
+            },
+        )
+    )
+    db_session.add(
+        ProjectIntelligenceSnapshot(
+            tenant_id=tenant["id"],
+            user_id=user["id"],
+            project_id=project["id"],
+            suite="project_insight",
+            payload={
+                "risks": [
+                    _card("snap222", "Material cost on the rise", "duplicate title")
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    captured: dict = {}
+
+    async def _fake_select(**kwargs):
+        captured.update(kwargs)
+        return {"insight_id": "cache111", "confidence": 0.9, "reason": "on topic"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=project["id"],
+        question="Why is material cost increasing?",
+    )
+
+    assert match is not None
+    assert match.insight_id == "cache111"
+    offered_ids = {c["insight_id"] for c in captured["candidates"]}
+    assert offered_ids == {"cache111"}
 
 
 async def test_llm_decline_returns_no_match(
