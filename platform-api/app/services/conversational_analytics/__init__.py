@@ -301,8 +301,22 @@ async def execute_turn(
             question=question,
         )
         if card_match is not None:
+            # Say plainly that this is a fallback from a failed live attempt,
+            # not the intended primary answer — a phrase like "I found an
+            # existing analysis that answers this" reads as confident and
+            # deliberate, which hides the fact that fresh SQL generation or
+            # execution just failed. That failure is the more important
+            # signal when it's happening on questions that should trivially
+            # succeed (a plain "show me X by Y" lookup, not an analytical
+            # "why is X changing" question) — burying it behind a
+            # good-looking card citation makes a live regression invisible.
+            reason = (
+                "I couldn't build a live query for this question"
+                if run.get("status") == "generation_error"
+                else "I couldn't run a live query against your data just now"
+            )
             turn.assistant_message = (
-                f"I found an existing analysis that answers this: "
+                f"{reason}, but I found an existing analysis that may help: "
                 f"**{card_match.title}**"
             )
             turn.chart_config = None
@@ -318,6 +332,17 @@ async def execute_turn(
                 "summary": card_match.summary,
                 "chart": card_match.chart,
                 "severity": card_match.severity,
+            }
+            # Machine-readable trail for debugging why the live path failed,
+            # even though the turn itself completed successfully from the
+            # user's point of view. error_code is intentionally set despite
+            # status="success" -- nothing in the schema or frontend treats a
+            # non-null error_code as implying failure, and it is the only
+            # place this reason is queryable/filterable server-side.
+            turn.error_code = f"live_query_fallback_{run.get('status')}"
+            turn.result_metadata = {
+                "fallbackReason": run.get("status"),
+                "fallbackError": run.get("error"),
             }
             turn.status = "success"
             return

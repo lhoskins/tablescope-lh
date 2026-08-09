@@ -188,6 +188,14 @@ async def test_generation_error_surfaces_matching_insight_card_over_prose(
     assert turn["sql"] is None
     assert turn["chart_config"] is None
 
+    # The message must say plainly that this is a fallback from a failed
+    # live attempt -- "I found an existing analysis that answers this" reads
+    # as the deliberate primary answer and hides that live SQL generation
+    # just failed, which is itself important information (especially for a
+    # question simple enough that it should never fail to begin with).
+    assert "couldn't build a live query" in turn["assistant_message"]
+    assert turn["error_code"] == "live_query_fallback_generation_error"
+
 
 async def test_list_and_get_conversations(client, service_headers, monkeypatch):
     _, _, project, headers = await _setup(client, service_headers, "conv-list")
