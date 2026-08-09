@@ -162,9 +162,11 @@ async def _warm_mycompany_views(
         async with semaphore:
             for attempt in range(1, max_attempts + 1):
                 try:
+                    # SELECT * forces Teiid to actually touch the source
+                    # translator, which loads its capabilities/capabilities.
                     await asyncio.wait_for(
                         pool.fetch(
-                            f'SELECT 1 FROM "MyCompany"."{safe_name}" LIMIT 1'
+                            f'SELECT * FROM "MyCompany"."{safe_name}" LIMIT 1'
                         ),
                         timeout=timeout,
                     )
