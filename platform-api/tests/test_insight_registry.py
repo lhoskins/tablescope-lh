@@ -145,6 +145,68 @@ def test_ambiguous_text_asks_rather_than_answers():
     assert "- Revenue: year over year" in text
 
 
+def test_context_includes_recorded_values_for_the_model_to_analyze():
+    card = {
+        "title": "Scrap rate by plant",
+        "summary": "Plant B is highest.",
+        "sql": "SELECT plant, AVG(scrap_rate) FROM production GROUP BY plant",
+        "result": {
+            "columns": ["plant", "avg_scrap_rate"],
+            "rows": [
+                {"plant": "Plant A", "avg_scrap_rate": 1.2},
+                {"plant": "Plant B", "avg_scrap_rate": 4.8},
+            ],
+        },
+    }
+    ref = InsightRef(card=card, score=1.0, title=card["title"])
+    ctx = format_insight_context(ref)
+    assert "Recorded values" in ctx
+    assert "plant=Plant A, avg_scrap_rate=1.2" in ctx
+    assert "plant=Plant B, avg_scrap_rate=4.8" in ctx
+
+
+def test_context_omits_recorded_values_section_when_no_rows_stored():
+    ref = InsightRef(card=CARDS[1], score=1.0, title=CARDS[1]["title"])
+    ctx = format_insight_context(ref)
+    assert "Recorded values" not in ctx
+
+
+# ── Loading and normalizing Project Insight snapshot cards ──────────────────
+
+
+def test_project_insight_card_gets_sources_and_result_from_chart():
+    from app.services.insight_registry import _normalize_project_insight_card
+
+    card = {
+        "title": "Vendor Spend Concentration",
+        "summary": "Top vendor is 40% of spend.",
+        "sourceTables": ["vendor_spend_summary"],
+        "labelColumn": "vendor",
+        "valueColumn": "spend",
+        "chart": {"data": {"series": [{"label": "Acme", "value": 100}]}},
+    }
+    normalized = _normalize_project_insight_card(card)
+    assert normalized["sources"] == {"tables": ["vendor_spend_summary"]}
+    assert normalized["result"] == {
+        "columns": ["vendor", "spend"],
+        "rows": [{"vendor": "Acme", "spend": 100}],
+    }
+
+
+def test_project_insight_card_normalization_does_not_override_existing_fields():
+    from app.services.insight_registry import _normalize_project_insight_card
+
+    card = {
+        "title": "Already shaped",
+        "sources": {"tables": ["real_table"]},
+        "result": {"columns": ["x"], "rows": [{"x": 1}]},
+        "sourceTables": ["ignored_table"],
+    }
+    normalized = _normalize_project_insight_card(card)
+    assert normalized["sources"] == {"tables": ["real_table"]}
+    assert normalized["result"] == {"columns": ["x"], "rows": [{"x": 1}]}
+
+
 def test_catalog_lists_available_cards():
     catalog = insight_catalog_context(CARDS)
     assert "Material Costs vs Revenue Trend" in catalog
