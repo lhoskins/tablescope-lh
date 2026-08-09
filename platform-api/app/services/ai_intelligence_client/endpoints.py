@@ -173,6 +173,38 @@ async def classify_conversation_turn(
     return result
 
 
+async def select_matching_insight_card(
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    question: str,
+    candidates: list[dict[str, str]],
+) -> dict[str, Any] | None:
+    """Ask the LLM which candidate Insight Card, if any, answers ``question``.
+
+    ``candidates`` is ``[{"insight_id": ..., "title": ..., "summary": ...}, ...]``
+    -- cards the caller has already resolved to be authorized and within the
+    project scope being searched. Returns
+    ``{"insight_id": ... | None, "confidence": ..., "reason": ...}`` or
+    ``None`` when AI is disabled, so the caller can fall back to declining
+    the match rather than guessing.
+    """
+    result = await _post(
+        "/ai/intelligence/select-insight-card",
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "project_id": project_id,
+            "question": question,
+            "candidates": candidates,
+        },
+    )
+    if not isinstance(result, dict):
+        return None
+    return result
+
+
 async def fix_sql(
     *,
     tenant_id: int,

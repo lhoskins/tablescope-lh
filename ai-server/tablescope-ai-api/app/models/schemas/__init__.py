@@ -74,6 +74,11 @@ from .indexing import (
     IndexDocumentRequest,
     IndexReferenceRequest,
 )
+from .insight_card_match import (
+    InsightCardCandidate,
+    SelectInsightCardRequest,
+    SelectInsightCardResponse,
+)
 from .kg import (
     KnowledgeGraphCard,
     KnowledgeGraphInsightRequest,
@@ -152,6 +157,7 @@ __all__ = [
     "IntelligenceInterpretResponse",
     "IntelligencePlanRequest",
     "IntelligencePlanResponse",
+    "InsightCardCandidate",
     "InterpretAnalysisInput",
     "InterpretedInsight",
     "KnowledgeGraphCard",
@@ -170,6 +176,8 @@ __all__ = [
     "ReferenceSummarizeResponse",
     "RelationshipSuggestion",
     "ScopeSuggestion",
+    "SelectInsightCardRequest",
+    "SelectInsightCardResponse",
     "SelectedField",
     "SelectedSource",
     "SourceCatalogEntry",

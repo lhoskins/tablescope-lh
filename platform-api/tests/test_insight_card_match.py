@@ -1,4 +1,12 @@
-"""Tests for matching a conversational question to an existing insight card."""
+"""Tests for matching a conversational question to an existing insight card.
+
+Relevance judgment is LLM-driven (``ai_intelligence_client.select_matching_insight_card``,
+mocked below), not a local heuristic -- these tests cover what
+``insight_card_match.py`` itself is responsible for: which cards get
+offered as candidates at all (access control, project-scoping, the
+resolved-project-first/widen-on-miss search order) and how the model's
+decision gets trusted or rejected, not what "good" relevance looks like.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +15,8 @@ import pytest
 from app.auth.context import RequestContext
 from app.auth.jwt import TokenClaims, create_access_token
 from app.models.business_insight_result import BusinessInsightResult
-from app.services.insight_card_match import find_matching_insight_card
+from app.services import insight_card_match as icm
+from app.services.ai_intelligence_client import AIUnavailableError
 
 
 def _editor_headers(tenant_id: int, user_id: int) -> dict:
@@ -98,6 +107,11 @@ def _mock_supabase(monkeypatch):
     monkeypatch.setattr(tenants_module, "EmailService", _FakeEmail)
 
 
+@pytest.fixture(autouse=True)
+def _ai_enabled(monkeypatch):
+    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: True)
+
+
 def _card(insight_id: str, title: str, summary: str) -> dict:
     return {
         "insightId": insight_id,
@@ -109,7 +123,13 @@ def _card(insight_id: str, title: str, summary: str) -> dict:
     }
 
 
-async def test_matches_card_by_lexical_overlap(client, db_session, service_headers) -> None:
+def _mock_select(monkeypatch, fn):
+    monkeypatch.setattr(icm.ai_intelligence_client, "select_matching_insight_card", fn)
+
+
+async def test_returns_the_llm_chosen_card(
+    client, db_session, service_headers, monkeypatch
+) -> None:
     project, tenant, user = await _project(client, service_headers)
     db_session.add(
         BusinessInsightResult(
@@ -118,24 +138,23 @@ async def test_matches_card_by_lexical_overlap(client, db_session, service_heade
             granularity=3,
             payload={
                 "insights": [
-                    _card(
-                        "abc123",
-                        "Material cost on the rise",
-                        "Weekly material cost for the MFG program has increased "
-                        "steadily since January 2026.",
-                    ),
-                    _card(
-                        "def456",
-                        "Supplier on-time delivery slipping",
-                        "SLA breach rate for Supplier A rose last quarter.",
-                    ),
+                    _card("abc123", "Material cost on the rise", "..."),
+                    _card("def456", "Supplier on-time delivery slipping", "..."),
                 ]
             },
         )
     )
     await db_session.commit()
 
-    match = await find_matching_insight_card(
+    captured: dict = {}
+
+    async def _fake_select(**kwargs):
+        captured.update(kwargs)
+        return {"insight_id": "abc123", "confidence": 0.9, "reason": "on topic"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    match = await icm.find_matching_insight_card(
         db_session,
         context=_context(tenant["id"], user["id"]),
         tenant_id=tenant["id"],
@@ -149,82 +168,149 @@ async def test_matches_card_by_lexical_overlap(client, db_session, service_heade
     assert match.project_id == project["id"]
     assert match.chart == {"type": "line", "data": {"rows": []}}
 
+    # Both candidates in the resolved project were offered -- the model
+    # judges relevance, this module never pre-filters by its own guess.
+    offered_ids = {c["insight_id"] for c in captured["candidates"]}
+    assert offered_ids == {"abc123", "def456"}
+    assert captured["question"] == "Why is material cost increasing?"
 
-async def test_prefers_the_card_whose_title_names_the_topic(
-    client, db_session, service_headers
+
+async def test_llm_decline_returns_no_match(
+    client, db_session, service_headers, monkeypatch
 ) -> None:
-    """Reproduces the reported inconsistency: a vaguely-related card (topic
-    only in its summary, if at all) and a precisely-on-topic card (topic in
-    its own title) both clear the match threshold. The on-topic one must win
-    -- deterministically, regardless of which order the two rows/cards come
-    back from the database in."""
     project, tenant, user = await _project(client, service_headers)
     db_session.add(
         BusinessInsightResult(
             tenant_id=tenant["id"],
             project_id=project["id"],
             granularity=3,
-            payload={
-                "insights": [
-                    _card(
-                        "vendor-spend",
-                        "Vendor Spend Over Time (by Category): Cost "
-                        "Optimization Opportunities",
-                        "Category-level vendor spend trends, including "
-                        "material and indirect cost categories, tracked "
-                        "over the last four quarters.",
-                    ),
-                    _card(
-                        "material-cost",
-                        "Material Cost Over Time Indicates Potential Risks",
-                        "Material cost has risen month over month; the "
-                        "trend correlates with a known supplier issue.",
-                    ),
-                ]
-            },
+            payload={"insights": [_card("abc123", "Supplier on-time delivery slipping", "...")]},
         )
     )
     await db_session.commit()
 
-    for question in (
-        "Why is material cost increasing?",
-        "Why is material cost rising?",
-    ):
-        match = await find_matching_insight_card(
-            db_session,
-            context=_context(tenant["id"], user["id"]),
-            tenant_id=tenant["id"],
-            project_id=project["id"],
-            question=question,
-        )
-        assert match is not None
-        assert match.insight_id == "material-cost", (
-            f"question {question!r} resolved to {match.insight_id!r}, "
-            "expected the card whose own title names the topic"
-        )
+    async def _fake_select(**kwargs):
+        return {"insight_id": None, "confidence": 0.0, "reason": "no candidate is on topic"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=project["id"],
+        question="Why is material cost increasing?",
+    )
+
+    assert match is None
 
 
-async def test_no_match_below_threshold(client, db_session, service_headers) -> None:
+async def test_rejects_an_id_the_model_was_not_offered(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    """Defense in depth: even though the ai-server endpoint already enforces
+    this, the platform must never trust an id it didn't actually offer as a
+    candidate, in case that validation is ever weakened independently."""
     project, tenant, user = await _project(client, service_headers)
     db_session.add(
         BusinessInsightResult(
             tenant_id=tenant["id"],
             project_id=project["id"],
             granularity=3,
-            payload={
-                "insights": [
-                    _card(
-                        "abc123",
-                        "Supplier on-time delivery slipping",
-                        "SLA breach rate for Supplier A rose last quarter.",
-                    ),
-                ]
-            },
+            payload={"insights": [_card("abc123", "Material cost on the rise", "...")]},
         )
     )
     await db_session.commit()
 
-    match = await find_matching_insight_card(
+    async def _fake_select(**kwargs):
+        return {"insight_id": "not-a-real-id", "confidence": 0.9, "reason": "hallucinated"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=project["id"],
+        question="Why is material cost increasing?",
+    )
+
+    assert match is None
+
+
+async def test_no_cards_never_calls_the_model(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    project, tenant, user = await _project(client, service_headers)
+
+    async def _fail_if_called(**kwargs):
+        raise AssertionError("selector must not be called with no candidates")
+
+    _mock_select(monkeypatch, _fail_if_called)
+
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=project["id"],
+        question="Why is material cost increasing?",
+    )
+
+    assert match is None
+
+
+async def test_ai_disabled_returns_none_without_calling_selector(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    project, tenant, user = await _project(client, service_headers)
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={"insights": [_card("abc123", "Material cost on the rise", "...")]},
+        )
+    )
+    await db_session.commit()
+
+    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: False)
+
+    async def _fail_if_called(**kwargs):
+        raise AssertionError("selector must not be called when AI is disabled")
+
+    _mock_select(monkeypatch, _fail_if_called)
+
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=project["id"],
+        question="Why is material cost increasing?",
+    )
+
+    assert match is None
+
+
+async def test_selector_unavailable_degrades_to_no_match(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    project, tenant, user = await _project(client, service_headers)
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={"insights": [_card("abc123", "Material cost on the rise", "...")]},
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_unavailable(**kwargs):
+        raise AIUnavailableError("AI server timed out; retry shortly.")
+
+    _mock_select(monkeypatch, _fake_unavailable)
+
+    match = await icm.find_matching_insight_card(
         db_session,
         context=_context(tenant["id"], user["id"]),
         tenant_id=tenant["id"],
@@ -236,7 +322,7 @@ async def test_no_match_below_threshold(client, db_session, service_headers) -> 
 
 
 async def test_widens_to_other_accessible_projects_when_resolved_project_has_no_match(
-    client, db_session, service_headers
+    client, db_session, service_headers, monkeypatch
 ) -> None:
     """Project routing and Insight Card generation are separate pipelines and
     can disagree on which project "owns" a topic. A card in a project the
@@ -251,20 +337,23 @@ async def test_widens_to_other_accessible_projects_when_resolved_project_has_no_
             tenant_id=tenant["id"],
             project_id=card_project["id"],
             granularity=3,
-            payload={
-                "insights": [
-                    _card(
-                        "abc123",
-                        "Material cost on the rise",
-                        "Weekly material cost has increased steadily since January.",
-                    ),
-                ]
-            },
+            payload={"insights": [_card("abc123", "Material cost on the rise", "...")]},
         )
     )
     await db_session.commit()
 
-    match = await find_matching_insight_card(
+    calls: list[list[str]] = []
+
+    async def _fake_select(*, candidates, **kwargs):
+        ids = [c["insight_id"] for c in candidates]
+        calls.append(ids)
+        if "abc123" in ids:
+            return {"insight_id": "abc123", "confidence": 0.9, "reason": "on topic"}
+        return {"insight_id": None, "confidence": 0.0, "reason": "nothing here"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    match = await icm.find_matching_insight_card(
         db_session,
         context=_context(tenant["id"], user["id"]),
         tenant_id=tenant["id"],
@@ -275,14 +364,19 @@ async def test_widens_to_other_accessible_projects_when_resolved_project_has_no_
     assert match is not None
     assert match.insight_id == "abc123"
     assert match.project_id == card_project["id"]
+    # The resolved project (IT) has no cards at all, so the selector is
+    # never called for it -- nothing to offer -- and the search widens
+    # straight to the accessible-projects pass, which finds the card.
+    assert calls == [["abc123"]]
 
 
 async def test_never_widens_into_a_project_the_user_cannot_access(
-    client, db_session, service_headers
+    client, db_session, service_headers, monkeypatch
 ) -> None:
-    """The widened search must stay inside the caller's own authorization —
-    a perfectly matching card in another user's private, unshared project in
-    the same tenant must never surface, no matter how well it scores."""
+    """The widened search must stay inside the caller's own authorization --
+    a card in another user's private, unshared project in the same tenant
+    must never even be offered as a candidate, no matter how eager to match
+    the model is."""
     tenant = await _tenant(client, service_headers)
     owner = await _user_in(client, service_headers, tenant["id"], "owner@test.com")
     owner_headers = _editor_headers(tenant["id"], owner["id"])
@@ -295,15 +389,7 @@ async def test_never_widens_into_a_project_the_user_cannot_access(
             tenant_id=tenant["id"],
             project_id=private_project["id"],
             granularity=3,
-            payload={
-                "insights": [
-                    _card(
-                        "abc123",
-                        "Material cost on the rise",
-                        "Weekly material cost has increased steadily since January.",
-                    ),
-                ]
-            },
+            payload={"insights": [_card("abc123", "Material cost on the rise", "...")]},
         )
     )
     await db_session.commit()
@@ -312,7 +398,20 @@ async def test_never_widens_into_a_project_the_user_cannot_access(
     other_headers = _editor_headers(tenant["id"], other_user["id"])
     other_project = await _project_in(client, other_headers, name="IT Project")
 
-    match = await find_matching_insight_card(
+    all_offered_ids: list[str] = []
+
+    async def _eager_select(*, candidates, **kwargs):
+        # Deliberately maximally eager: "match" whatever it's given, to prove
+        # the private card is excluded at the offering stage, not because
+        # the model happened to decline it.
+        all_offered_ids.extend(c["insight_id"] for c in candidates)
+        if candidates:
+            return {"insight_id": candidates[0]["insight_id"], "confidence": 1.0, "reason": "eager"}
+        return {"insight_id": None, "confidence": 0.0, "reason": "nothing offered"}
+
+    _mock_select(monkeypatch, _eager_select)
+
+    match = await icm.find_matching_insight_card(
         db_session,
         context=_context(tenant["id"], other_user["id"]),
         tenant_id=tenant["id"],
@@ -321,17 +420,4 @@ async def test_never_widens_into_a_project_the_user_cannot_access(
     )
 
     assert match is None
-
-
-async def test_no_terms_returns_none(client, db_session, service_headers) -> None:
-    project, tenant, user = await _project(client, service_headers)
-
-    match = await find_matching_insight_card(
-        db_session,
-        context=_context(tenant["id"], user["id"]),
-        tenant_id=tenant["id"],
-        project_id=project["id"],
-        question="???",
-    )
-
-    assert match is None
+    assert "abc123" not in all_offered_ids

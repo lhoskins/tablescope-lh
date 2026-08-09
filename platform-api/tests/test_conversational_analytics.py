@@ -161,6 +161,9 @@ async def test_generation_error_surfaces_matching_insight_card_over_prose(
     async def _fail_if_called(*args, **kwargs):
         raise AssertionError("prose fallback must not run when a card matches")
 
+    async def _fake_select(**kwargs):
+        return {"insight_id": "mat-cost-001", "confidence": 0.9, "reason": "on topic"}
+
     monkeypatch.setattr(
         "app.services.conversational_analytics._ask_and_run_core",
         _fake_generation_error,
@@ -169,6 +172,10 @@ async def test_generation_error_surfaces_matching_insight_card_over_prose(
         "app.services.conversational_analytics._forward_prose_answer",
         _fail_if_called,
     )
+    from app.services import insight_card_match as icm
+
+    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: True)
+    monkeypatch.setattr(icm.ai_intelligence_client, "select_matching_insight_card", _fake_select)
 
     r = await client.post(
         "/api/conversational-analytics/conversations",
@@ -238,10 +245,17 @@ async def test_matched_insight_fallback_surfaces_ai_server_unavailable_detail(
             "errorDetails": {"validationError": "AI server is unavailable"},
         }
 
+    async def _fake_select(**kwargs):
+        return {"insight_id": "backup-001", "confidence": 0.9, "reason": "on topic"}
+
     monkeypatch.setattr(
         "app.services.conversational_analytics._ask_and_run_core",
         _fake_ai_server_down,
     )
+    from app.services import insight_card_match as icm
+
+    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: True)
+    monkeypatch.setattr(icm.ai_intelligence_client, "select_matching_insight_card", _fake_select)
 
     r = await client.post(
         "/api/conversational-analytics/conversations",

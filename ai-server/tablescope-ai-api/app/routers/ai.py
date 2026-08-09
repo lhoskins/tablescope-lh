@@ -32,6 +32,7 @@ from . import (
     ai_file_analysis,
     ai_grounding,
     ai_indexing,
+    ai_insight_match,
     ai_intelligence_fixsql,
     ai_intelligence_interpret,
     ai_intelligence_knowledge_graph,
@@ -80,6 +81,11 @@ from .ai_file_analysis import analyze_file
 from .ai_indexing import (
     index_document,
     index_reference,
+)
+from .ai_insight_match import (
+    _SELECT_INSIGHT_CARD_SYSTEM_PROMPT,
+    _select_insight_card_prompt,
+    select_insight_card,
 )
 from .ai_intelligence_fixsql import intelligence_fix_sql
 from .ai_intelligence_interpret import intelligence_interpret
@@ -178,6 +184,7 @@ router.include_router(ai_dashboard.router)
 router.include_router(ai_intelligence_plan.router)
 router.include_router(ai_intelligence_fixsql.router)
 router.include_router(ai_conversation.router)
+router.include_router(ai_insight_match.router)
 router.include_router(ai_intelligence_interpret.router)
 router.include_router(ai_intelligence_knowledge_graph.router)
 router.include_router(ai_project_insight.router)
@@ -199,6 +206,7 @@ _FEATURE_MODULES = (
     ai_intelligence_plan,
     ai_intelligence_fixsql,
     ai_conversation,
+    ai_insight_match,
     ai_intelligence_interpret,
     ai_intelligence_knowledge_graph,
     ai_project_insight,
@@ -249,6 +257,7 @@ __all__ = [
     "_KG_SYSTEM_PROMPT",
     "_MAX_HISTORY_TURNS",
     "_PROJECT_INSIGHT_SYSTEM_PROMPT",
+    "_SELECT_INSIGHT_CARD_SYSTEM_PROMPT",
     "_SELECT_RE",
     "_SOURCE_DECL_RE",
     "_SOURCE_SUFFIX_RE",
@@ -296,6 +305,7 @@ __all__ = [
     "_sanitize_chart_patch",
     "_sanitize_markdown",
     "_score_source_match",
+    "_select_insight_card_prompt",
     "_selected_sources",
     "_split_select_expressions",
     "_sql_table_count",
@@ -323,6 +333,7 @@ __all__ = [
     "profile_document",
     "project_insight",
     "router",
+    "select_insight_card",
     "settings",
     "suggest_dashboard",
     "suggest_dashboards_multi",

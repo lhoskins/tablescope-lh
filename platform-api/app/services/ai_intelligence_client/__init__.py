@@ -11,6 +11,7 @@ from .endpoints import knowledge_graph_cards as knowledge_graph_cards
 from .endpoints import plan as plan
 from .endpoints import project_insight as project_insight
 from .endpoints import search_grounding_vectors as search_grounding_vectors
+from .endpoints import select_matching_insight_card as select_matching_insight_card
 from .transport import _BUSY_DEFAULT_RETRY_SECONDS as _BUSY_DEFAULT_RETRY_SECONDS
 from .transport import _BUSY_MAX_ATTEMPTS as _BUSY_MAX_ATTEMPTS
 from .transport import _BUSY_MAX_RETRY_SECONDS as _BUSY_MAX_RETRY_SECONDS
