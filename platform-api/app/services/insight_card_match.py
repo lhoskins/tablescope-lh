@@ -165,13 +165,23 @@ async def find_matching_insight_card(
     tenant_id: int,
     project_id: int,
     question: str,
+    allow_cross_project: bool = True,
 ) -> InsightCardMatch | None:
     """Best-matching cached insight card the caller can reach, or ``None``.
 
     Tries the conversation's already-resolved project first; if nothing
-    matches there, widens to every project ``context``'s user can access.
-    Declines (returns None) whenever the AI service is disabled/unavailable
-    or the model finds no candidate genuinely on-topic -- never guesses.
+    matches there and ``allow_cross_project`` is true, widens to every
+    project ``context``'s user can access. Declines (returns None) whenever
+    the AI service is disabled/unavailable or the model finds no candidate
+    genuinely on-topic -- never guesses.
+
+    ``allow_cross_project`` reflects the calling surface, not a preference:
+    the AI Assistant and Business Insights ask boxes are cross-project by
+    design (a user with access to several projects should get an answer from
+    whichever one actually has it), while Project Insights and a card's own
+    follow-up box are explicitly scoped to one project -- widening there
+    would surface another project's data under a page the user picked
+    specifically to stay inside one project.
     """
     resolved_pairs = await _cards_for_projects(
         session, tenant_id=tenant_id, project_ids=[project_id]
@@ -183,7 +193,7 @@ async def find_matching_insight_card(
         question=question,
         pairs=resolved_pairs,
     )
-    if match is not None:
+    if match is not None or not allow_cross_project:
         return match
 
     accessible = await _authorized_project_ids(session, context)

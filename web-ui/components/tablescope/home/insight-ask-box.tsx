@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { IconSparkles } from "@tabler/icons-react";
 import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
+import { MatchedInsightBlock } from "@/components/tablescope/conversation/matched-insight-block";
 import { RAnalyticsBadge } from "./insight-engine-badge";
 import { AskAnythingComposer } from "@/components/ai/ask-anything-composer";
 import { aiActionsApi, type AiCardContext, type AskAndRunResult } from "@/lib/api/ai-actions";
@@ -119,8 +120,10 @@ export function InsightAskBox({
                 </div>
               ) : null}
 
-              {/* Charts and tables use the same fit-ranked path as the cards. */}
-              {result.rows?.length ? (
+              {result.matchedInsight ? (
+                <MatchedInsightBlock match={result.matchedInsight} />
+              ) : result.rows?.length ? (
+                /* Charts and tables use the same fit-ranked path as the cards. */
                 <>
                   <div className="mt-3">
                     <ResultChart

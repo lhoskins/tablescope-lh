@@ -35,7 +35,7 @@ import { ResultChart, ResultTable } from "@/components/ai/ai-result-view";
 import type { SuggestedVisualization } from "@/lib/api/ai-actions";
 import type { CurrentUser, TenantSummary } from "@/lib/ui/types";import { UserBubble } from "./user-bubble";
 import { TurnResult } from "./turn-result";
-import { MatchedInsightBlock } from "./matched-insight-block";
+import { MatchedInsightBlock } from "@/components/tablescope/conversation/matched-insight-block";
 
 
 

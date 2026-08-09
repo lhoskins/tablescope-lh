@@ -421,3 +421,48 @@ async def test_never_widens_into_a_project_the_user_cannot_access(
 
     assert match is None
     assert "abc123" not in all_offered_ids
+
+
+async def test_allow_cross_project_false_never_widens(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    """Project Insights (and a card's own follow-up box) are pinned to one
+    project by the surface itself -- widening there would answer from a
+    different project than the page the question was asked on. This must
+    stay scoped even though the same user can access the other project and
+    it does hold a matching card."""
+    tenant, user, headers = await _tenant_and_headers(client, service_headers)
+    resolved_project = await _project_in(client, headers, name="IT Project")
+    card_project = await _project_in(client, headers, name="Finance Project")
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=card_project["id"],
+            granularity=3,
+            payload={"insights": [_card("abc123", "Material cost on the rise", "...")]},
+        )
+    )
+    await db_session.commit()
+
+    calls: list[list[str]] = []
+
+    async def _fake_select(*, candidates, **kwargs):
+        calls.append([c["insight_id"] for c in candidates])
+        return {"insight_id": None, "confidence": 0.0, "reason": "nothing here"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=resolved_project["id"],
+        question="Why is material cost increasing?",
+        allow_cross_project=False,
+    )
+
+    assert match is None
+    # The resolved project (IT) has no cards, so the selector is never even
+    # called -- and critically, the widen pass to Finance never runs either.
+    assert calls == []

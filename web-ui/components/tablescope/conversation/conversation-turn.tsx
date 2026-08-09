@@ -9,6 +9,7 @@ import {
 import { ResponsePresenter } from "@/components/ai/ResponsePresenter";
 import type { ResponseEnvelope, SuggestedVisualization } from "@/lib/api/ai-actions";
 import type { ConversationTurn } from "@/lib/api/conversational-analytics";
+import { MatchedInsightBlock } from "./matched-insight-block";
 
 const CHART_FOLLOW_UPS = [
   "change it to a line chart",
@@ -80,6 +81,9 @@ export function TurnBubble({
             <>
               <p className="mb-2 whitespace-pre-wrap">{turn.assistant_message}</p>
               {envelope && <ResponsePresenter envelope={envelope} />}
+              {turn.matched_insight && (
+                <MatchedInsightBlock match={turn.matched_insight} />
+              )}
             </>
           )}
         </div>

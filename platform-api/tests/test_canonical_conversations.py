@@ -170,6 +170,91 @@ async def test_project_insights_appends_to_one_conversation_per_project(client, 
     assert body2["turn"]["sequence"] == 2
 
 
+async def test_project_insights_never_widens_to_another_project(
+    client, db_session, service_headers, monkeypatch
+):
+    """Project Insights is scoped to the project the user picked -- a card
+    that only lives in a different project the user can also access must
+    never be offered as the answer, even though AI Assistant and Business
+    Insights would happily widen the search to find it."""
+    from app.models.business_insight_result import BusinessInsightResult
+
+    tenant, _, project, headers = await _setup(client, service_headers, "pi-no-widen")
+
+    other_r = await client.post(
+        "/api/projects",
+        json={"name": "Other Project", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert other_r.status_code == 201
+    other_project = other_r.json()
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=other_project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    {
+                        "insightId": "other-001",
+                        "projectName": "Other Project",
+                        "title": "Some other analysis",
+                        "summary": "...",
+                        "chart": {"type": "line", "data": {"rows": []}},
+                        "severity": "info",
+                    }
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_generation_error(*args, **kwargs):
+        return {"status": "generation_error", "sql": "", "error": "no source matched"}
+
+    async def _fake_no_prose(*args, **kwargs):
+        return ""
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_generation_error,
+    )
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._forward_prose_answer",
+        _fake_no_prose,
+    )
+
+    from app.services import insight_card_match as icm
+
+    calls: list[list[str]] = []
+
+    async def _fake_select(*, candidates, **kwargs):
+        calls.append([c["insight_id"] for c in candidates])
+        return {"insight_id": "other-001", "confidence": 0.9, "reason": "eager"}
+
+    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: True)
+    monkeypatch.setattr(icm.ai_intelligence_client, "select_matching_insight_card", _fake_select)
+
+    r = await client.post(
+        "/api/conversational-analytics/canonical-turns",
+        json={
+            "surface": "project_insights",
+            "project_id": project["id"],
+            "message": "Why is this changing?",
+            "client_request_id": "req-1",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turn"]
+    assert turn["matched_insight"] is None
+    # `project` (the surface's own project) has no cards at all, so with
+    # widening disabled there is nothing to offer -- the selector must never
+    # even be called for the widen pass into `other_project`.
+    assert calls == []
+
+
 async def test_canonical_turns_are_idempotent_by_client_request_id(client, service_headers):
     _, _, _, headers = await _setup(client, service_headers, "bi-idempotent")
 

@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/api-client";
+import type { MatchedInsight } from "@/lib/api/conversational-analytics";
 
 /**
  * Chart families a conversational answer can request.
@@ -170,6 +171,8 @@ export interface AskAndRunResult {
   envelope?: ResponseEnvelope;
   analyticalMethod?: MethodEnvelope;
   intent?: Record<string, unknown>;
+  /** Set when a live query failed but an existing Insight Card answers it. */
+  matchedInsight?: MatchedInsight | null;
 }
 
 export interface GenerateQueryPreviewResult {

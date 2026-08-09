@@ -299,17 +299,22 @@ async def execute_turn(
             tenant_id=context.tenant_id,
             project_id=project_id,
             question=question,
+            # Project Insights is scoped to the project the user is already
+            # looking at — widening there would answer from a different
+            # project than the page the question was asked on. AI Assistant
+            # and Business Insights have no such single-project framing, so
+            # a card from any project the user can access is fair game.
+            allow_cross_project=conversation.surface != "project_insights",
         )
         if card_match is not None:
-            # Say plainly that this is a fallback from a failed live attempt,
-            # not the intended primary answer — a phrase like "I found an
-            # existing analysis that answers this" reads as confident and
-            # deliberate, which hides the fact that fresh SQL generation or
-            # execution just failed. That failure is the more important
-            # signal when it's happening on questions that should trivially
-            # succeed (a plain "show me X by Y" lookup, not an analytical
-            # "why is X changing" question) — burying it behind a
-            # good-looking card citation makes a live regression invisible.
+            # State plainly that a fresh live query failed, and why, so a
+            # real regression on a question that should trivially succeed
+            # (a plain "show me X by Y" lookup) never hides behind a
+            # good-looking card citation. But do not phrase it so the failure
+            # reads as "I couldn't find an answer" — a card WAS found and
+            # does answer the question; that has to be the sentence's actual
+            # subject, with the live-query failure stated as its own fact
+            # alongside it rather than swallowing it.
             reason = (
                 "I couldn't build a live query for this question"
                 if run.get("status") == "generation_error"
@@ -338,8 +343,8 @@ async def execute_turn(
             ))
             detail_suffix = f" ({'; '.join(detail_bits)})" if detail_bits else ""
             turn.assistant_message = (
-                f"{reason}{detail_suffix}, but I found an existing analysis "
-                f"that may help: **{card_match.title}**"
+                f"{reason}{detail_suffix}. I found an existing analysis "
+                f"that answers this: **{card_match.title}**"
             )
             turn.chart_config = None
             turn.result_cache = None

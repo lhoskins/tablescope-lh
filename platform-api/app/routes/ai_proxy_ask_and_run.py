@@ -23,6 +23,7 @@ from app.services.ai_grounding import gather_grounding_evidence
 from app.services.analytical_method_engine import analyze as analyze_methods
 from app.services.analytical_method_engine import data_profiler
 from app.services.analytical_method_engine.config import EngineMode, get_engine_mode
+from app.services.insight_card_match import find_matching_insight_card
 from app.services.intent_engine import IntentDecision, classify_intent
 from app.services.presentation_engine import PresentationMode, mode_for_ask_and_run
 from app.services.presentation_engine import describe as describe_presentation
@@ -394,6 +395,37 @@ def _ai_generation_error(exc: HTTPException) -> tuple[str, dict[str, Any]]:
     elif isinstance(detail, str) and detail:
         details["validationError"] = detail
     return friendly, details
+
+
+def _matched_insight_message(result: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """The "live query failed, here's why" clause for a matched-card fallback.
+
+    Returns ``(reason_sentence, error_details)``; the caller appends the card
+    citation itself so the failure is stated plainly (a real regression on a
+    question that should trivially succeed must never hide behind a
+    good-looking card citation) without the combined sentence reading as
+    "nothing was found" -- a card was found and does answer the question.
+    Mirrors ``conversational_analytics.execute_turn()``'s equivalent wording
+    so the same fallback reads the same way on every surface.
+    """
+    error_details = result.get("errorDetails")
+    validation_error = (
+        error_details.get("validationError")
+        if isinstance(error_details, dict)
+        else None
+    )
+    detail_bits = list(dict.fromkeys(
+        d for d in (result.get("error"), validation_error) if d
+    ))
+    detail_suffix = f" ({'; '.join(detail_bits)})" if detail_bits else ""
+    reason = (
+        "I couldn't build a live query for this question"
+        if result.get("status") == "generation_error"
+        else "I couldn't run a live query against your data just now"
+    )
+    return f"{reason}{detail_suffix}.", {
+        "validationError": validation_error,
+    } if validation_error else {}
 
 
 async def _generate_sql_for_question(
@@ -820,10 +852,12 @@ async def ai_ask_and_run(
     the SQL (when available) and an error message so the modal can render an
     inline error and reveal the SQL instead of navigating away.
 
-    When the question can't be grounded on a data source (``generation_error``
-    from source resolution), fall back to the free-text documents/knowledge-graph
-    answer — the same path the AI Assistant uses — so analytical questions are
-    answered as prose instead of showing a "couldn't match a source" error.
+    When the live query fails, an existing verified Insight Card that answers
+    the same question is checked first (scoped to this one project only), and
+    only then does the question fall back to the free-text documents/
+    knowledge-graph answer — the same precedence the AI Assistant uses — so
+    analytical questions are answered as prose instead of showing a
+    "couldn't match a source" error.
     """
     await _check_project_access(session, context, req.project_id)
     result = await _ask_and_run_core(
@@ -839,6 +873,53 @@ async def ai_ask_and_run(
         return result
     if result.get("status") in ("generation_error", "execution_error"):
         grounding_manifest = result.get("groundingManifest")
+
+        # A question this route can't ground or execute live may already be
+        # answered by an existing, verified Insight Card -- same precedence
+        # conversational_analytics.execute_turn() applies before falling to
+        # unattributed KG prose. Never widened: this route is always asked
+        # from inside one specific project (often one specific card), never
+        # a cross-project surface.
+        card_match = await find_matching_insight_card(
+            session,
+            context=context,
+            tenant_id=context.tenant_id,
+            project_id=req.project_id,
+            question=req.question,
+            allow_cross_project=False,
+        )
+        if card_match is not None:
+            reason, details = _matched_insight_message(result)
+            explanation = (
+                f"{reason} I found an existing analysis that answers this: "
+                f"**{card_match.title}**"
+            )
+            match_result: dict[str, Any] = {
+                "question": req.question,
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "suggestedVisualization": {"type": "table"},
+                "explanation": explanation,
+                "dataSourcesUsed": [],
+                "status": "success",
+                "answerType": "text",
+                "error": None,
+                "errorDetails": details,
+                "matchedInsight": {
+                    "insightId": card_match.insight_id,
+                    "projectId": card_match.project_id,
+                    "projectName": card_match.project_name,
+                    "title": card_match.title,
+                    "summary": card_match.summary,
+                    "chart": card_match.chart,
+                    "severity": card_match.severity,
+                },
+                "groundingManifest": grounding_manifest,
+            }
+            _attach_presentation(match_result)
+            return match_result
+
         prose = await _forward_prose_answer(
             session,
             context,

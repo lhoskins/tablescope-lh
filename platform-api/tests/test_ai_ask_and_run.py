@@ -232,6 +232,144 @@ async def test_ask_and_run_falls_back_to_prose_when_no_source(
     assert body["rows"] == []
 
 
+async def test_ask_and_run_surfaces_matching_insight_card_over_prose(
+    client, db_session, service_headers, monkeypatch
+):
+    """A card's own "ask about this insight" follow-up box: when a fresh
+    query can't be generated, an existing verified Insight Card that answers
+    the question takes precedence over falling straight to bare KG prose --
+    same precedence conversational_analytics.execute_turn() applies."""
+    from app.models.business_insight_result import BusinessInsightResult
+    from app.services import insight_card_match as icm
+
+    tenant, _, project, headers = await _setup(client, service_headers, "askcard")
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    {
+                        "insightId": "backup-001",
+                        "projectName": "Ask Project",
+                        "title": "Backup Jobs by System",
+                        "summary": "Backup job counts grouped by system.",
+                        "chart": {"type": "bar", "data": {"rows": []}},
+                        "severity": "info",
+                    }
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        raise HTTPException(status_code=503, detail="AI server unreachable")
+
+    async def _fail_if_called(*, question, **kwargs):
+        raise AssertionError("prose fallback must not run when a card matches")
+
+    async def _fake_select(**kwargs):
+        return {"insight_id": "backup-001", "confidence": 0.9, "reason": "on topic"}
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy.ai, "ask", _fail_if_called)
+    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: True)
+    monkeypatch.setattr(icm.ai_intelligence_client, "select_matching_insight_card", _fake_select)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "Show me IT backup jobs by system"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "success"
+    assert body["matchedInsight"]["insightId"] == "backup-001"
+    assert body["matchedInsight"]["title"] == "Backup Jobs by System"
+    assert body["matchedInsight"]["chart"] == {"type": "bar", "data": {"rows": []}}
+    assert "unreachable" in body["explanation"]
+    assert "I found an existing analysis that answers this" in body["explanation"]
+    assert body["rows"] == []
+    assert body["sql"] == ""
+
+
+async def test_ask_and_run_matched_insight_search_never_widens(
+    client, db_session, service_headers, monkeypatch
+):
+    """This route is always asked from inside one specific project (often one
+    specific card) -- unlike the AI Assistant and Business Insights, it must
+    never widen the insight-card search into a different project even when
+    the same user can access it and it holds a matching card."""
+    from app.models.business_insight_result import BusinessInsightResult
+    from app.services import insight_card_match as icm
+
+    tenant, _, project, headers = await _setup(client, service_headers, "asknowiden")
+
+    other_r = await client.post(
+        "/api/projects",
+        json={"name": "Other Project", "description": "x", "is_shared": False},
+        headers=headers,
+    )
+    assert other_r.status_code == 201
+    other_project = other_r.json()
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=other_project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    {
+                        "insightId": "other-001",
+                        "projectName": "Other Project",
+                        "title": "Some other analysis",
+                        "summary": "...",
+                        "chart": {"type": "line", "data": {"rows": []}},
+                        "severity": "info",
+                    }
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    async def fake_generate(session, context, project_id, question, **kwargs):
+        raise HTTPException(status_code=503, detail="AI server unreachable")
+
+    async def fake_ask(*, question, **kwargs):
+        return {"answer": "prose fallback answer"}
+
+    calls: list[list[str]] = []
+
+    async def _fake_select(*, candidates, **kwargs):
+        calls.append([c["insight_id"] for c in candidates])
+        return {"insight_id": "other-001", "confidence": 0.9, "reason": "eager"}
+
+    monkeypatch.setattr(ai_proxy, "_generate_sql_for_question", fake_generate)
+    monkeypatch.setattr(ai_proxy.ai, "ask", fake_ask)
+    monkeypatch.setattr(icm.ai_intelligence_client, "is_enabled", lambda: True)
+    monkeypatch.setattr(icm.ai_intelligence_client, "select_matching_insight_card", _fake_select)
+
+    r = await client.post(
+        "/api/ai/actions/ask-and-run",
+        json={"project_id": project["id"], "question": "Why is this changing?"},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # `project` has no cards of its own, so with widening disabled the
+    # selector is never called -- the question falls through to prose.
+    assert calls == []
+    assert body.get("matchedInsight") is None
+    assert body["status"] == "success"
+    assert body["answerType"] == "text"
+    assert "prose fallback answer" in body["explanation"]
+
+
 async def test_ask_and_run_success_attaches_intent_metadata(
     client, service_headers, monkeypatch
 ):
