@@ -268,6 +268,7 @@ async def _warm_all_vdbs_on_startup() -> None:
                     vdb_port=v["port"],
                     vdb_username=v["username"],
                     vdb_password=v["password"],
+                    connect_timeout=45.0,
                     timeout=15.0,
                     warm_views=True,
                     max_attempts=2,

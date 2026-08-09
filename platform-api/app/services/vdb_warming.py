@@ -29,6 +29,7 @@ async def warm_vdb(
     vdb_username: str = "test",
     vdb_password: str = "test",
     timeout: float = 60.0,
+    connect_timeout: float | None = None,
     warm_views: bool = False,
     max_concurrent_views: int = 1,
     max_attempts: int = 3,
@@ -66,7 +67,10 @@ async def warm_vdb(
             )
             # pool.fetch returns a connection to the pool; SELECT 1 warms the
             # cached pool so the first real user query reuses a hot connection.
-            await asyncio.wait_for(pool.fetch("SELECT 1"), timeout=timeout)
+            # Use a longer connect timeout because this is where the first
+            # pg_catalog/materialization load happens for the VDB.
+            conn_timeout = connect_timeout or timeout
+            await asyncio.wait_for(pool.fetch("SELECT 1"), timeout=conn_timeout)
             if warm_views:
                 await _warm_mycompany_views(
                     pool,
