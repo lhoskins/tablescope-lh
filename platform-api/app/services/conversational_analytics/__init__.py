@@ -295,6 +295,7 @@ async def execute_turn(
         # falling further back.
         card_match = await find_matching_insight_card(
             session,
+            context=context,
             tenant_id=context.tenant_id,
             project_id=project_id,
             question=question,

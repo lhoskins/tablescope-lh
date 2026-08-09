@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.auth.jwt import create_access_token
+from app.auth.context import RequestContext
+from app.auth.jwt import TokenClaims, create_access_token
 from app.models.business_insight_result import BusinessInsightResult
 from app.services.insight_card_match import find_matching_insight_card
 
@@ -16,33 +17,47 @@ def _editor_headers(tenant_id: int, user_id: int) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _tenant_and_headers(client, service_headers):
+def _context(tenant_id: int, user_id: int, role: str = "editor") -> RequestContext:
+    return RequestContext(
+        claims=TokenClaims(sub="u", tenant_id=tenant_id, user_id=user_id, role=role)
+    )
+
+
+async def _tenant(client, service_headers, slug: str = "icm-tenant"):
     r = await client.post(
         "/api/tenants",
-        json={"slug": "icm-tenant", "name": "Insight Match Tenant"},
+        json={"slug": slug, "name": "Insight Match Tenant"},
         headers=service_headers,
     )
     assert r.status_code == 201
-    tenant = r.json()
+    return r.json()
+
+
+async def _user_in(client, service_headers, tenant_id: int, email: str):
     r = await client.post(
-        f"/api/tenants/{tenant['id']}/users",
+        f"/api/tenants/{tenant_id}/users",
         json={
-            "email": "icm@test.com",
+            "email": email,
             "display_name": "ICM User",
             "role": "editor",
-            "external_id": "ext-icm",
+            "external_id": f"ext-{email}",
         },
         headers=service_headers,
     )
     assert r.status_code == 201
-    user = r.json()
-    return tenant, _editor_headers(tenant["id"], user["id"])
+    return r.json()
 
 
-async def _project_in(client, headers, name: str = "MFG Project"):
+async def _tenant_and_headers(client, service_headers, slug: str = "icm-tenant"):
+    tenant = await _tenant(client, service_headers, slug)
+    user = await _user_in(client, service_headers, tenant["id"], "icm@test.com")
+    return tenant, user, _editor_headers(tenant["id"], user["id"])
+
+
+async def _project_in(client, headers, name: str = "MFG Project", is_shared: bool = False):
     r = await client.post(
         "/api/projects",
-        json={"name": name, "description": "t", "is_shared": False},
+        json={"name": name, "description": "t", "is_shared": is_shared},
         headers=headers,
     )
     assert r.status_code == 201
@@ -50,9 +65,9 @@ async def _project_in(client, headers, name: str = "MFG Project"):
 
 
 async def _project(client, service_headers, name: str = "MFG Project"):
-    tenant, headers = await _tenant_and_headers(client, service_headers)
+    tenant, user, headers = await _tenant_and_headers(client, service_headers)
     project = await _project_in(client, headers, name)
-    return project, tenant
+    return project, tenant, user
 
 
 @pytest.fixture(autouse=True)
@@ -95,7 +110,7 @@ def _card(insight_id: str, title: str, summary: str) -> dict:
 
 
 async def test_matches_card_by_lexical_overlap(client, db_session, service_headers) -> None:
-    project, tenant = await _project(client, service_headers)
+    project, tenant, user = await _project(client, service_headers)
     db_session.add(
         BusinessInsightResult(
             tenant_id=tenant["id"],
@@ -122,6 +137,7 @@ async def test_matches_card_by_lexical_overlap(client, db_session, service_heade
 
     match = await find_matching_insight_card(
         db_session,
+        context=_context(tenant["id"], user["id"]),
         tenant_id=tenant["id"],
         project_id=project["id"],
         question="Why is material cost increasing?",
@@ -130,11 +146,12 @@ async def test_matches_card_by_lexical_overlap(client, db_session, service_heade
     assert match is not None
     assert match.insight_id == "abc123"
     assert match.title == "Material cost on the rise"
+    assert match.project_id == project["id"]
     assert match.chart == {"type": "line", "data": {"rows": []}}
 
 
 async def test_no_match_below_threshold(client, db_session, service_headers) -> None:
-    project, tenant = await _project(client, service_headers)
+    project, tenant, user = await _project(client, service_headers)
     db_session.add(
         BusinessInsightResult(
             tenant_id=tenant["id"],
@@ -155,6 +172,7 @@ async def test_no_match_below_threshold(client, db_session, service_headers) -> 
 
     match = await find_matching_insight_card(
         db_session,
+        context=_context(tenant["id"], user["id"]),
         tenant_id=tenant["id"],
         project_id=project["id"],
         question="Why is material cost increasing?",
@@ -163,14 +181,21 @@ async def test_no_match_below_threshold(client, db_session, service_headers) -> 
     assert match is None
 
 
-async def test_scoped_to_the_given_project_only(client, db_session, service_headers) -> None:
-    tenant, headers = await _tenant_and_headers(client, service_headers)
-    project_a = await _project_in(client, headers, name="MFG Project")
-    project_b = await _project_in(client, headers, name="IT Project")
+async def test_widens_to_other_accessible_projects_when_resolved_project_has_no_match(
+    client, db_session, service_headers
+) -> None:
+    """Project routing and Insight Card generation are separate pipelines and
+    can disagree on which project "owns" a topic. A card in a project the
+    user can access, but that isn't the one this question resolved to, must
+    still be found."""
+    tenant, user, headers = await _tenant_and_headers(client, service_headers)
+    resolved_project = await _project_in(client, headers, name="IT Project")
+    card_project = await _project_in(client, headers, name="Finance Project")
+
     db_session.add(
         BusinessInsightResult(
             tenant_id=tenant["id"],
-            project_id=project_a["id"],
+            project_id=card_project["id"],
             granularity=3,
             payload={
                 "insights": [
@@ -185,12 +210,59 @@ async def test_scoped_to_the_given_project_only(client, db_session, service_head
     )
     await db_session.commit()
 
-    # The exact same matching question, scoped to a different project, must
-    # not surface project_a's card.
     match = await find_matching_insight_card(
         db_session,
+        context=_context(tenant["id"], user["id"]),
         tenant_id=tenant["id"],
-        project_id=project_b["id"],
+        project_id=resolved_project["id"],
+        question="Why is material cost increasing?",
+    )
+
+    assert match is not None
+    assert match.insight_id == "abc123"
+    assert match.project_id == card_project["id"]
+
+
+async def test_never_widens_into_a_project_the_user_cannot_access(
+    client, db_session, service_headers
+) -> None:
+    """The widened search must stay inside the caller's own authorization —
+    a perfectly matching card in another user's private, unshared project in
+    the same tenant must never surface, no matter how well it scores."""
+    tenant = await _tenant(client, service_headers)
+    owner = await _user_in(client, service_headers, tenant["id"], "owner@test.com")
+    owner_headers = _editor_headers(tenant["id"], owner["id"])
+    private_project = await _project_in(
+        client, owner_headers, name="Finance Project", is_shared=False
+    )
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=private_project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    _card(
+                        "abc123",
+                        "Material cost on the rise",
+                        "Weekly material cost has increased steadily since January.",
+                    ),
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    other_user = await _user_in(client, service_headers, tenant["id"], "other@test.com")
+    other_headers = _editor_headers(tenant["id"], other_user["id"])
+    other_project = await _project_in(client, other_headers, name="IT Project")
+
+    match = await find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], other_user["id"]),
+        tenant_id=tenant["id"],
+        project_id=other_project["id"],
         question="Why is material cost increasing?",
     )
 
@@ -198,10 +270,11 @@ async def test_scoped_to_the_given_project_only(client, db_session, service_head
 
 
 async def test_no_terms_returns_none(client, db_session, service_headers) -> None:
-    project, tenant = await _project(client, service_headers)
+    project, tenant, user = await _project(client, service_headers)
 
     match = await find_matching_insight_card(
         db_session,
+        context=_context(tenant["id"], user["id"]),
         tenant_id=tenant["id"],
         project_id=project["id"],
         question="???",
