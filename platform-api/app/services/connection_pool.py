@@ -67,6 +67,9 @@ class TeiidConnectionPoolManager:
             logger.info("Creating new Teiid asyncpg pool for %s@%s:%s/%s", username, host, port, database)
             # Teiid's PG wire does not support SSL; disable it to avoid a
             # negotiation hang and cap the initial connection handshake.
+            # min_size=0 makes pool creation instant; connections are created
+            # lazily by the first pool.fetch, which happens during background
+            # warming so real user queries reuse an already-hot pool.
             pool = await asyncpg.create_pool(
                 host=host,
                 port=port,
@@ -116,6 +119,6 @@ class TeiidConnectionPoolManager:
 
 _settings = get_settings()
 pool_manager = TeiidConnectionPoolManager(
-    min_size=max(1, _settings.database_pool_min_size // 4),
+    min_size=0,
     max_size=min(_settings.database_pool_max_size, 10),
 )
