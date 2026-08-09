@@ -425,6 +425,76 @@ async def test_selector_unavailable_degrades_to_no_match(
     assert match is None
 
 
+async def test_low_confidence_pick_is_treated_as_a_decline_and_widens(
+    client, db_session, service_headers, monkeypatch
+) -> None:
+    """Reproduces the reported production case: the resolved project only
+    has a tangentially-related card ("Vendor Spend..." for a material-cost
+    question). The model is expected to decline per its own best-practices
+    doc, but is not guaranteed to -- if it instead returns a weak, non-zero
+    confidence pick, that must still be treated as a decline so the search
+    widens to the other project that actually has the on-topic card, rather
+    than locking in on whatever the resolved project happened to offer."""
+    tenant, user, headers = await _tenant_and_headers(client, service_headers)
+    resolved_project = await _project_in(client, headers, name="IT Project")
+    card_project = await _project_in(client, headers, name="Finance Project")
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=resolved_project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    _card(
+                        "vendor1",
+                        "Vendor Spend vs Data Classification Over Time",
+                        "Category-level vendor spend, only mentions cost in passing.",
+                    )
+                ]
+            },
+        )
+    )
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=card_project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    _card(
+                        "material1",
+                        "Material Cost Over Time Indicates Potential Risks",
+                        "Material cost has risen month over month.",
+                    )
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_select(*, candidates, **kwargs):
+        ids = [c["insight_id"] for c in candidates]
+        if "material1" in ids:
+            return {"insight_id": "material1", "confidence": 0.9, "reason": "on topic"}
+        # The resolved project's only candidate is tangential -- a weak,
+        # non-zero confidence pick rather than a clean decline.
+        return {"insight_id": "vendor1", "confidence": 0.35, "reason": "mentions cost"}
+
+    _mock_select(monkeypatch, _fake_select)
+
+    match = await icm.find_matching_insight_card(
+        db_session,
+        context=_context(tenant["id"], user["id"]),
+        tenant_id=tenant["id"],
+        project_id=resolved_project["id"],
+        question="Why is material cost increasing?",
+    )
+
+    assert match is not None
+    assert match.insight_id == "material1"
+
+
 async def test_widens_to_other_accessible_projects_when_resolved_project_has_no_match(
     client, db_session, service_headers, monkeypatch
 ) -> None:

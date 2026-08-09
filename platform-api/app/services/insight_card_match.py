@@ -55,6 +55,16 @@ logger = logging.getLogger(__name__)
 # as candidates in that one call.
 _MAX_CANDIDATES = 40
 
+# The selector's own best-practices doc instructs it to decline (insight_id
+# null, confidence 0.0) rather than force a tangential match -- but an LLM
+# call is not guaranteed to follow that rule every time. A pick below this
+# floor is treated as a decline here too, in code, the same defense-in-depth
+# already applied to a hallucinated id: it costs nothing on a genuine match
+# (the doc's own worked examples score 0.85-0.9), and it is what lets a
+# resolved project's tangential candidate fall through to the cross-project
+# widen instead of silently winning just because it was offered first.
+_MIN_CONFIDENCE = 0.6
+
 
 @dataclass
 class InsightCardMatch:
@@ -175,6 +185,17 @@ async def _select_from_candidates(
 
     chosen_id = (decision or {}).get("insight_id")
     if not chosen_id:
+        return None
+    try:
+        confidence = float((decision or {}).get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence < _MIN_CONFIDENCE:
+        logger.info(
+            "Insight-card selector picked %s below the confidence floor "
+            "(%.2f < %.2f); treating as a decline",
+            chosen_id, confidence, _MIN_CONFIDENCE,
+        )
         return None
     for pid, card in bounded:
         if str(card.get("insightId")) == chosen_id:
