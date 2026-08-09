@@ -1,11 +1,13 @@
 """Background warming for Teiid VDBs.
 
 The first asyncpg connection to a freshly deployed VDB pays several one-time
-costs: pool creation, Teiid PG-wire handshake, and internal pg_catalog
-materialization. Warming creates/caches the asyncpg pool, runs a trivial SELECT
-so asyncpg's type introspection triggers that pg_catalog load, and optionally
-touches every MyCompany view so source translator metadata and result-set
-caches are loaded in the background.
+costs: pool creation, Teiid PG-wire handshake, internal pg_catalog
+materialization, and per-source translator capability loading. Warming opens a
+direct (short-lived) connection, runs a trivial SELECT so asyncpg's type
+introspection triggers pg_catalog load, and optionally touches every MyCompany
+view so source translator metadata and result-set caches are loaded in the
+background. The platform-api connection pool is left for real user queries, so
+this warming does not hold idle connections open.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ async def warm_vdb(
     max_attempts: int = 3,
     retry_delay: float = 5.0,
 ) -> None:
-    """Open a connection to a VDB and run queries to warm caches.
+    """Open a direct connection to a VDB and run queries to warm caches.
 
     Any failure is logged but not raised; warming must not break the caller's
     primary flow. Retries are used because a VDB may still be completing a
@@ -56,24 +58,27 @@ async def warm_vdb(
         logger.debug("Could not evict stale pool for %s: %s", vdb_id, exc)
 
     last_exc: Exception | None = None
+    conn_timeout = connect_timeout or timeout
     for attempt in range(1, max_attempts + 1):
+        conn: asyncpg.Connection | None = None
         try:
-            pool = await pool_manager.get_pool(
+            conn = await asyncpg.connect(
                 host=host,
                 port=port,
                 database=database,
-                username=vdb_username,
+                user=vdb_username,
                 password=vdb_password,
+                ssl=False,
+                timeout=conn_timeout,
+                command_timeout=timeout,
+                statement_cache_size=0,
+                server_settings={"application_name": "tablescope-platform-api-warm"},
             )
-            # pool.fetch returns a connection to the pool; SELECT 1 warms the
-            # cached pool so the first real user query reuses a hot connection.
-            # Use a longer connect timeout because this is where the first
-            # pg_catalog/materialization load happens for the VDB.
-            conn_timeout = connect_timeout or timeout
-            await asyncio.wait_for(pool.fetch("SELECT 1"), timeout=conn_timeout)
+            # SELECT 1 warms pg_catalog / type introspection for the VDB.
+            await asyncio.wait_for(conn.fetch("SELECT 1"), timeout=conn_timeout)
             if warm_views:
                 await _warm_mycompany_views(
-                    pool,
+                    conn,
                     vdb_id=vdb_id,
                     timeout=timeout,
                     max_concurrent=max_concurrent_views,
@@ -81,7 +86,7 @@ async def warm_vdb(
                     retry_delay=retry_delay,
                 )
             logger.info(
-                "Warmed VDB %s pool at %s:%s/%s (attempt %d/%d)",
+                "Warmed VDB %s at %s:%s/%s (attempt %d/%d)",
                 vdb_id,
                 host,
                 port,
@@ -93,7 +98,7 @@ async def warm_vdb(
         except Exception as exc:
             last_exc = exc
             logger.warning(
-                "VDB %s pool warm attempt %d/%d failed: %s (%s)",
+                "VDB %s warm attempt %d/%d failed: %s (%s)",
                 vdb_id,
                 attempt,
                 max_attempts,
@@ -102,6 +107,12 @@ async def warm_vdb(
             )
             if attempt < max_attempts:
                 await asyncio.sleep(retry_delay)
+        finally:
+            if conn is not None:
+                try:
+                    await conn.close()
+                except Exception as close_exc:
+                    logger.debug("Could not close warm connection for %s: %s", vdb_id, close_exc)
     else:
         logger.warning(
             "VDB warm failed for %s after %d attempts: %s",
@@ -112,7 +123,7 @@ async def warm_vdb(
 
 
 async def _warm_mycompany_views(
-    pool: asyncpg.Pool,
+    conn: asyncpg.Connection,
     *,
     vdb_id: str,
     timeout: float,
@@ -122,16 +133,15 @@ async def _warm_mycompany_views(
 ) -> None:
     """Load every MyCompany view once so source translator metadata is cached.
 
-    Each view query runs through the pool with a concurrency semaphore; the
-    pool distributes them across connections without interleaving commands on
-    a single connection.
+    Each view query uses the same connection with a concurrency semaphore so
+    commands are never interleaved on a single asyncpg connection.
     """
     rows = None
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
             rows = await asyncio.wait_for(
-                pool.fetch(
+                conn.fetch(
                     "SELECT Name FROM SYS.Tables "
                     "WHERE SchemaName = 'MyCompany' AND IsSystem = false"
                 ),
@@ -169,7 +179,7 @@ async def _warm_mycompany_views(
                     # Lightweight query that still forces Teiid to plan and
                     # load per-source translator metadata for the view.
                     await asyncio.wait_for(
-                        pool.fetch(
+                        conn.fetch(
                             f'SELECT 1 FROM "MyCompany"."{safe_name}" LIMIT 1'
                         ),
                         timeout=timeout,

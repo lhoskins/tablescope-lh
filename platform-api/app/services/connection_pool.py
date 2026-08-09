@@ -41,9 +41,16 @@ class PoolKey:
 class TeiidConnectionPoolManager:
     """Maintains per-VDB asyncpg pools with bounded size."""
 
-    def __init__(self, *, min_size: int = 1, max_size: int = 10) -> None:
+    def __init__(
+        self,
+        *,
+        min_size: int = 1,
+        max_size: int = 10,
+        max_inactive_time: float = 120.0,
+    ) -> None:
         self._min_size = min_size
         self._max_size = max_size
+        self._max_inactive_time = max_inactive_time
         self._pools: dict[PoolKey, asyncpg.Pool] = {}
         self._lock = asyncio.Lock()
 
@@ -78,8 +85,9 @@ class TeiidConnectionPoolManager:
                 password=password,
                 min_size=self._min_size,
                 max_size=self._max_size,
+                max_inactive_time=self._max_inactive_time,
                 ssl=False,
-                timeout=45,
+                timeout=20,
                 command_timeout=60,
                 statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},
@@ -120,5 +128,6 @@ class TeiidConnectionPoolManager:
 _settings = get_settings()
 pool_manager = TeiidConnectionPoolManager(
     min_size=0,
-    max_size=min(_settings.database_pool_max_size, 10),
+    max_size=min(_settings.database_pool_max_size, 5),
+    max_inactive_time=120.0,
 )

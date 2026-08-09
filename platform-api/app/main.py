@@ -258,9 +258,8 @@ async def _warm_all_vdbs_on_startup() -> None:
 
         # Pre-warm is best-effort background work; it must never block
         # application startup. Warm each VDB's pg_catalog with a cheap
-        # SELECT 1. Per-view source metadata is loaded on first real query
-        # (or can be warmed explicitly via a background task) so startup is
-        # fast and does not saturate Teiid.
+        # SELECT 1, then touch every MyCompany view once so per-source
+        # translator metadata is cached before the first real user query.
         semaphore = asyncio.Semaphore(1)
 
         async def _warm_one(v: dict) -> None:
@@ -271,10 +270,11 @@ async def _warm_all_vdbs_on_startup() -> None:
                     vdb_port=v["port"],
                     vdb_username=v["username"],
                     vdb_password=v["password"],
-                    connect_timeout=10.0,
-                    timeout=5.0,
-                    warm_views=False,
-                    max_attempts=2,
+                    connect_timeout=15.0,
+                    timeout=15.0,
+                    warm_views=True,
+                    max_concurrent_views=1,
+                    max_attempts=1,
                     retry_delay=2.0,
                 )
 
