@@ -197,6 +197,67 @@ async def test_generation_error_surfaces_matching_insight_card_over_prose(
     assert turn["error_code"] == "live_query_fallback_generation_error"
 
 
+async def test_matched_insight_fallback_surfaces_ai_server_unavailable_detail(
+    client, db_session, service_headers, monkeypatch
+):
+    """_ai_generation_error()'s "friendly" message defaults to a generic
+    string in exactly the AI-server-unavailable case -- the real reason only
+    ever lands in errorDetails.validationError. That must reach the visible
+    message, not just a DB column nobody reads, or an outage looks identical
+    to "no relevant source" and is impossible to tell apart from the UI."""
+    from app.models.business_insight_result import BusinessInsightResult
+
+    tenant, _, project, headers = await _setup(client, service_headers, "conv-ai-down")
+
+    db_session.add(
+        BusinessInsightResult(
+            tenant_id=tenant["id"],
+            project_id=project["id"],
+            granularity=3,
+            payload={
+                "insights": [
+                    {
+                        "insightId": "backup-001",
+                        "projectName": "Conv Project",
+                        "title": "Backup Jobs by System",
+                        "summary": "Backup job counts grouped by system.",
+                        "chart": {"type": "bar", "data": {"rows": []}},
+                        "severity": "info",
+                    }
+                ]
+            },
+        )
+    )
+    await db_session.commit()
+
+    async def _fake_ai_server_down(*args, **kwargs):
+        return {
+            "status": "generation_error",
+            "sql": "",
+            "error": "We could not safely build a query for this question.",
+            "errorDetails": {"validationError": "AI server is unavailable"},
+        }
+
+    monkeypatch.setattr(
+        "app.services.conversational_analytics._ask_and_run_core",
+        _fake_ai_server_down,
+    )
+
+    r = await client.post(
+        "/api/conversational-analytics/conversations",
+        json={
+            "project_id": project["id"],
+            "initial_message": "Show me IT backup jobs by system",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    turn = r.json()["turns"][0]
+    assert turn["status"] == "success"
+    assert "AI server is unavailable" in turn["assistant_message"]
+    assert turn["matched_insight"]["insightId"] == "backup-001"
+
+
 async def test_list_and_get_conversations(client, service_headers, monkeypatch):
     _, _, project, headers = await _setup(client, service_headers, "conv-list")
 

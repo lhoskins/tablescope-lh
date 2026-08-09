@@ -315,9 +315,31 @@ async def execute_turn(
                 if run.get("status") == "generation_error"
                 else "I couldn't run a live query against your data just now"
             )
+            # _ai_generation_error()'s "friendly" message defaults to a
+            # generic string ("We could not safely build a query for this
+            # question.") in exactly the cases that most need a real reason
+            # -- e.g. the AI server being unreachable -- because the actual
+            # detail only lands in errorDetails.validationError, which
+            # nothing surfaces anywhere visible. Include it (still no raw
+            # stack traces or dict reprs reach here -- both fields are
+            # already sanitized by _ai_generation_error before this point).
+            error_details = run.get("errorDetails")
+            validation_error = (
+                error_details.get("validationError")
+                if isinstance(error_details, dict)
+                else None
+            )
+            # Dedupe in case the friendly message and the validation detail
+            # happen to be identical (e.g. a plain string HTTPException
+            # detail with no dict wrapper flows into both) -- dict.fromkeys
+            # dedupes while preserving order, unlike a set.
+            detail_bits = list(dict.fromkeys(
+                d for d in (run.get("error"), validation_error) if d
+            ))
+            detail_suffix = f" ({'; '.join(detail_bits)})" if detail_bits else ""
             turn.assistant_message = (
-                f"{reason}, but I found an existing analysis that may help: "
-                f"**{card_match.title}**"
+                f"{reason}{detail_suffix}, but I found an existing analysis "
+                f"that may help: **{card_match.title}**"
             )
             turn.chart_config = None
             turn.result_cache = None
@@ -343,6 +365,7 @@ async def execute_turn(
             turn.result_metadata = {
                 "fallbackReason": run.get("status"),
                 "fallbackError": run.get("error"),
+                "fallbackErrorDetails": error_details,
             }
             turn.status = "success"
             return
