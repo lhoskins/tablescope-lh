@@ -893,7 +893,10 @@ async def _retrieve_stored_insight_query(
         if not insight_registry.is_query_request(question):
             return None
         cards = await insight_registry.load_tenant_insight_cards(
-            session, tenant_id=context.tenant_id, project_id=project_id
+            session,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            user_id=context.user_id,
         )
         if not cards:
             return None
@@ -942,7 +945,10 @@ async def _insight_card_context(
     """
     try:
         cards = await insight_registry.load_tenant_insight_cards(
-            session, tenant_id=context.tenant_id, project_id=project_id
+            session,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            user_id=context.user_id,
         )
         return insight_registry.build_insight_context(question, cards)
     except Exception:

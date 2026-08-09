@@ -213,8 +213,22 @@ def format_insight_context(ref: InsightRef) -> str:
 
     result = card.get("result") or {}
     columns = result.get("columns") if isinstance(result, dict) else None
+    rows = result.get("rows") if isinstance(result, dict) else None
     if columns:
         lines.append("Result columns: " + ", ".join(str(c) for c in columns[:12]))
+    if isinstance(rows, list) and rows:
+        lines.append(
+            "Recorded values from this insight (use these to analyze further, "
+            "spot trends, or answer follow-up questions — do not invent numbers "
+            "not shown here):"
+        )
+        for row in rows[:10]:
+            if isinstance(row, dict):
+                lines.append(
+                    "- " + ", ".join(f"{k}={v}" for k, v in row.items())
+                )
+            else:
+                lines.append(f"- {row}")
 
     return "\n".join(lines)
 
@@ -251,18 +265,77 @@ def insight_catalog_context(cards: list[dict[str, Any]], *, limit: int = 40) -> 
 # ── Loading the cards a tenant actually has ──────────────────────────────────
 
 
+#: Project Insight report sections that hold Business-Insight-style cards.
+_PROJECT_INSIGHT_CARD_KEYS = ("risks", "trends", "opportunities", "analysis")
+
+
+def _project_insight_result(card: dict[str, Any]) -> dict[str, Any] | None:
+    """Reconstruct a ``{columns, rows}`` result from a Project Insight card's
+    rendered chart, so cards that never stored a query result (e.g. narrative
+    or graph-derived cards) still give the model real values to reason over.
+    """
+    chart = card.get("chart") or {}
+    data = chart.get("data") if isinstance(chart, dict) else None
+    series = data.get("series") if isinstance(data, dict) else None
+    if not isinstance(series, list) or not series:
+        return None
+    label_col = str(card.get("labelColumn") or "label")
+    value_col = str(card.get("valueColumn") or "value")
+    if isinstance(series[0], dict):
+        return {
+            "columns": [label_col, value_col],
+            "rows": [
+                {label_col: s.get("label"), value_col: s.get("value")}
+                for s in series
+                if isinstance(s, dict)
+            ],
+        }
+    return {
+        "columns": [label_col, value_col],
+        "rows": [
+            {label_col: s[0], value_col: s[1]}
+            for s in series
+            if isinstance(s, list | tuple) and len(s) >= 2
+        ],
+    }
+
+
+def _normalize_project_insight_card(card: dict[str, Any]) -> dict[str, Any]:
+    """Adapt a Project Insight card to the shape ``format_insight_context``
+    expects (nested ``sources.tables`` rather than a flat ``sourceTables``, and
+    a ``result`` block reconstructed from the chart when none was stored).
+    """
+    normalized = dict(card)
+    if not normalized.get("sources"):
+        tables = card.get("sourceTables") or []
+        if tables:
+            normalized["sources"] = {"tables": tables}
+    if not normalized.get("result"):
+        result = _project_insight_result(card)
+        if result:
+            normalized["result"] = result
+    return normalized
+
+
 async def load_tenant_insight_cards(
     session: Any,
     *,
     tenant_id: int,
     project_id: int | None = None,
+    user_id: int | None = None,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     """Every generated insight card visible to a tenant, newest first.
 
     Reads the shared Business-Insight cache rather than regenerating: the cards
     the user is looking at on screen are exactly the rows stored there, so a
-    question about one resolves against what they can actually see.
+    question about one resolves against what they can actually see. When asking
+    about a single project, the caller's own Project Insight snapshot is also
+    searched — those cards (risks/trends/opportunities/analysis) are generated
+    by a separate on-demand run and never land in the shared Business Insight
+    cache, so a card visible on the Project Insight page would otherwise be
+    invisible to this lookup. Cards already in the Business Insight cache win on
+    a title collision; the snapshot only supplements what isn't already there.
 
     Fail-open — a cache problem returns no cards, which degrades the assistant to
     its previous (non-card-aware) behaviour rather than breaking the answer.
@@ -281,6 +354,7 @@ async def load_tenant_insight_cards(
 
         rows = (await session.scalars(stmt)).all()
         cards: list[dict[str, Any]] = []
+        seen_titles: set[str] = set()
         for row in rows:
             payload = row.payload or {}
             insights = payload.get("insights")
@@ -289,8 +363,21 @@ async def load_tenant_insight_cards(
             for card in insights:
                 if isinstance(card, dict) and card.get("title"):
                     cards.append(card)
+                    seen_titles.add(str(card["title"]).strip().lower())
                 if len(cards) >= limit:
                     return cards
+
+        if project_id is not None and user_id is not None:
+            cards.extend(
+                await _load_project_insight_snapshot_cards(
+                    session,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    project_id=project_id,
+                    exclude_titles=seen_titles,
+                    limit=limit - len(cards),
+                )
+            )
         return cards
     except Exception:
         logger.exception(
@@ -298,6 +385,56 @@ async def load_tenant_insight_cards(
             tenant_id, project_id,
         )
         return []
+
+
+async def _load_project_insight_snapshot_cards(
+    session: Any,
+    *,
+    tenant_id: int,
+    user_id: int,
+    project_id: int,
+    exclude_titles: set[str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Cards from the caller's own Project Insight snapshot, newest first.
+
+    One row per (tenant, user, project, suite); ``suite`` defaults to
+    ``"project_insight"`` for the standard report.
+    """
+    if limit <= 0:
+        return []
+    from sqlalchemy import select
+
+    from app.models.project_intelligence_snapshot import ProjectIntelligenceSnapshot
+
+    snap = await session.scalar(
+        select(ProjectIntelligenceSnapshot).where(
+            ProjectIntelligenceSnapshot.tenant_id == tenant_id,
+            ProjectIntelligenceSnapshot.user_id == user_id,
+            ProjectIntelligenceSnapshot.project_id == project_id,
+            ProjectIntelligenceSnapshot.suite == "project_insight",
+        )
+    )
+    if snap is None:
+        return []
+
+    payload = snap.payload or {}
+    cards: list[dict[str, Any]] = []
+    for key in _PROJECT_INSIGHT_CARD_KEYS:
+        section = payload.get(key)
+        if not isinstance(section, list):
+            continue
+        for card in section:
+            if not isinstance(card, dict) or not card.get("title"):
+                continue
+            title = str(card["title"]).strip().lower()
+            if title in exclude_titles:
+                continue
+            exclude_titles.add(title)
+            cards.append(_normalize_project_insight_card(card))
+            if len(cards) >= limit:
+                return cards
+    return cards
 
 
 def build_insight_context(question: str, cards: list[dict[str, Any]]) -> str:
