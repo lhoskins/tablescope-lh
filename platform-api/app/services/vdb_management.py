@@ -143,7 +143,12 @@ class VDBManagementService:
             vdb_id,
             vdb_host=self._pg_host,
             vdb_port=self._pg_port,
-            timeout=10.0,
+            connect_timeout=60.0,
+            timeout=15.0,
+            warm_views=True,
+            max_concurrent_views=1,
+            max_attempts=1,
+            retry_delay=2.0,
         )
 
         # Sync VDB file to S3 if enabled
@@ -196,7 +201,12 @@ class VDBManagementService:
             vdb_id,
             vdb_host=self._pg_host,
             vdb_port=self._pg_port,
-            timeout=10.0,
+            connect_timeout=60.0,
+            timeout=15.0,
+            warm_views=True,
+            max_concurrent_views=1,
+            max_attempts=1,
+            retry_delay=2.0,
         )
 
         # Sync VDB file to S3 if enabled
@@ -258,7 +268,17 @@ class VDBManagementService:
 
         await pool_manager.evict_by_vdb_id(vdb_id)
 
-        await warm_vdb(vdb_id, timeout=10.0)
+        await warm_vdb(
+            vdb_id,
+            vdb_host=self._pg_host,
+            vdb_port=self._pg_port,
+            connect_timeout=60.0,
+            timeout=15.0,
+            warm_views=True,
+            max_concurrent_views=1,
+            max_attempts=1,
+            retry_delay=2.0,
+        )
 
     async def delete_vdb(
         self,
