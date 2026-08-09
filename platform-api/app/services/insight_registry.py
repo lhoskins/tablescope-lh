@@ -369,7 +369,7 @@ async def load_tenant_insight_cards(
 
         if project_id is not None and user_id is not None:
             cards.extend(
-                await _load_project_insight_snapshot_cards(
+                await load_project_insight_snapshot_cards(
                     session,
                     tenant_id=tenant_id,
                     user_id=user_id,
@@ -387,7 +387,7 @@ async def load_tenant_insight_cards(
         return []
 
 
-async def _load_project_insight_snapshot_cards(
+async def load_project_insight_snapshot_cards(
     session: Any,
     *,
     tenant_id: int,

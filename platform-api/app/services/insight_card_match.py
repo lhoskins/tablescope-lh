@@ -6,7 +6,8 @@ answered in depth — the card's analysis ran the real multi-query, verified
 pipeline; a single retry SQL guess is a downgrade, not an alternative. Rather
 than falling straight to unattributed KG prose in that case, check whether an
 already-computed card (business_insight_cache.py's ``BusinessInsightResult``
-rows) answers the same question closely enough to point back to it.
+rows, plus the caller's own Project Insight snapshot) answers the same
+question closely enough to point back to it.
 
 Relevance judgment is LLM-driven, governed by
 ``insight_card_match_best_practices.md`` on the AI server (see
@@ -42,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.context import RequestContext
 from app.models import BusinessInsightResult
-from app.services import ai_intelligence_client
+from app.services import ai_intelligence_client, insight_registry
 from app.services.ai_intelligence_client import AIUnavailableError
 from app.services.business_insight_project_resolver import _authorized_project_ids
 
@@ -79,11 +80,23 @@ def _to_match(project_id: int, card: dict[str, Any]) -> InsightCardMatch:
 
 
 async def _cards_for_projects(
-    session: AsyncSession, *, tenant_id: int, project_ids: list[int]
+    session: AsyncSession,
+    *,
+    tenant_id: int,
+    project_ids: list[int],
+    user_id: int | None = None,
 ) -> list[tuple[int, dict[str, Any]]]:
-    """Every (project_id, card) pair cached under the given, already-scoped
-    projects. This is the only place that reads BusinessInsightResult for
-    this feature -- the LLM selector never sees anything this didn't fetch."""
+    """Every (project_id, card) pair the caller could plausibly mean, across
+    the given, already-scoped projects.
+
+    Reads the shared Business Insight cache (``BusinessInsightResult``) plus,
+    when ``user_id`` is known, each project's caller-specific Project Insight
+    snapshot -- those risks/trends/opportunities/analysis cards are generated
+    by a separate on-demand run and never land in the shared cache, so a card
+    visible on a project's Insights page would otherwise never be offered to
+    the selector. A snapshot card is skipped when its title already matches a
+    cached card in the same project (the cache is authoritative there).
+    """
     if not project_ids:
         return []
     rows = (
@@ -99,6 +112,7 @@ async def _cards_for_projects(
         .all()
     )
     pairs: list[tuple[int, dict[str, Any]]] = []
+    seen_titles_by_project: dict[int, set[str]] = {pid: set() for pid in project_ids}
     for row in rows:
         cards = (row.payload or {}).get("insights")
         if not isinstance(cards, list):
@@ -106,6 +120,23 @@ async def _cards_for_projects(
         for card in cards:
             if isinstance(card, dict) and card.get("insightId"):
                 pairs.append((row.project_id, card))
+                title = str(card.get("title") or "").strip().lower()
+                if title:
+                    seen_titles_by_project.setdefault(row.project_id, set()).add(
+                        title
+                    )
+
+    if user_id is not None:
+        for pid in project_ids:
+            snapshot_cards = await insight_registry.load_project_insight_snapshot_cards(
+                session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                project_id=pid,
+                exclude_titles=seen_titles_by_project.get(pid, set()),
+                limit=_MAX_CANDIDATES,
+            )
+            pairs.extend((pid, card) for card in snapshot_cards)
     return pairs
 
 
@@ -184,7 +215,10 @@ async def find_matching_insight_card(
     specifically to stay inside one project.
     """
     resolved_pairs = await _cards_for_projects(
-        session, tenant_id=tenant_id, project_ids=[project_id]
+        session,
+        tenant_id=tenant_id,
+        project_ids=[project_id],
+        user_id=context.user_id,
     )
     match = await _select_from_candidates(
         context=context,
@@ -201,7 +235,10 @@ async def find_matching_insight_card(
     if not other_ids:
         return None
     other_pairs = await _cards_for_projects(
-        session, tenant_id=tenant_id, project_ids=other_ids
+        session,
+        tenant_id=tenant_id,
+        project_ids=other_ids,
+        user_id=context.user_id,
     )
     return await _select_from_candidates(
         context=context,
