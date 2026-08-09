@@ -107,6 +107,15 @@ function AiAssistantPageInner() {
   const turnCount = turns.length;
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Read-only: which project the current conversation resolved to. There is
+  // no picker anymore, so this is the only way to see (and debug) what the
+  // backend chose when a question wasn't explicitly scoped.
+  const resolvedProjectName = useMemo(() => {
+    const pid = active?.project_id;
+    if (pid == null) return null;
+    return projects?.find((p) => Number(p.id) === pid)?.name ?? null;
+  }, [active?.project_id, projects]);
+
   // A conversation is scoped to one project for grounded answers; reflect it
   // in the picker (and lock the picker) while that thread is open.
   useEffect(() => {
@@ -392,6 +401,14 @@ function AiAssistantPageInner() {
                   </button>
                 ))}
               </div>
+            )}
+            {resolvedProjectName && (
+              <p className="mx-auto mb-2 max-w-3xl text-[11px] text-ink-tertiary">
+                Answered from{" "}
+                <span className="font-medium text-ink-secondary">
+                  {resolvedProjectName}
+                </span>
+              </p>
             )}
             <AskAnythingComposer
               value={input}

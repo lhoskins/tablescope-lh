@@ -12,6 +12,18 @@ Deliberately cheap and deterministic: lexical term overlap between the
 question and each card's title/summary, over cards already sitting in the
 database. No LLM call, no new query — this only ever runs after a SQL
 generation/execution failure, so it adds no latency to the common path.
+
+Checked in two passes. The conversation's already-resolved project is tried
+first (the common, cheap case — one row lookup). Project routing
+(``resolve_business_insight_project``, which scores by data-source/column
+terms) and Insight Card generation (a separate, independent pipeline) don't
+always agree on which project "owns" a topic, so a card can legitimately
+exist under a different project than the one routing picked for this
+question. If the resolved project has no match, widen the search to every
+project the *asking user* can access — never further; this mirrors the exact
+access-filtering ``resolve_business_insight_project`` already applies via
+``_authorized_project_ids``, re-derived from ``context`` alone rather than
+trusted from anywhere else.
 """
 
 from __future__ import annotations
@@ -23,7 +35,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.context import RequestContext
 from app.models import BusinessInsightResult
+from app.services.business_insight_project_resolver import _authorized_project_ids
 
 # A minimum score is required so an unrelated card with one incidental shared
 # word (e.g. both mention "project") never gets surfaced as a false match.
@@ -76,22 +90,15 @@ def _to_match(project_id: int, card: dict[str, Any]) -> InsightCardMatch:
     )
 
 
-async def find_matching_insight_card(
+async def _best_match_in_projects(
     session: AsyncSession,
     *,
     tenant_id: int,
-    project_id: int,
-    question: str,
-    min_score: float = _MIN_SCORE,
+    project_ids: list[int],
+    question_terms: set[str],
+    min_score: float,
 ) -> InsightCardMatch | None:
-    """Best-scoring cached insight card for one project, or ``None``.
-
-    Scoped to the project the conversation already resolved to — this runs
-    after project routing/access checks have already happened, so it never
-    needs its own authorization pass.
-    """
-    question_terms = _terms(question)
-    if not question_terms:
+    if not project_ids:
         return None
 
     rows = (
@@ -99,7 +106,7 @@ async def find_matching_insight_card(
             await session.execute(
                 select(BusinessInsightResult).where(
                     BusinessInsightResult.tenant_id == tenant_id,
-                    BusinessInsightResult.project_id == project_id,
+                    BusinessInsightResult.project_id.in_(project_ids),
                 )
             )
         )
@@ -109,6 +116,7 @@ async def find_matching_insight_card(
 
     best_score = 0.0
     best_card: dict[str, Any] | None = None
+    best_project_id: int | None = None
     for row in rows:
         cards = (row.payload or {}).get("insights")
         if not isinstance(cards, list):
@@ -120,7 +128,49 @@ async def find_matching_insight_card(
             if score > best_score:
                 best_score = score
                 best_card = card
+                best_project_id = row.project_id
 
-    if best_card is None or best_score < min_score:
+    if best_card is None or best_project_id is None or best_score < min_score:
         return None
-    return _to_match(project_id, best_card)
+    return _to_match(best_project_id, best_card)
+
+
+async def find_matching_insight_card(
+    session: AsyncSession,
+    *,
+    context: RequestContext,
+    tenant_id: int,
+    project_id: int,
+    question: str,
+    min_score: float = _MIN_SCORE,
+) -> InsightCardMatch | None:
+    """Best-scoring cached insight card the caller can reach, or ``None``.
+
+    Tries the conversation's already-resolved project first; if nothing
+    matches there, widens to every project ``context``'s user can access.
+    """
+    question_terms = _terms(question)
+    if not question_terms:
+        return None
+
+    match = await _best_match_in_projects(
+        session,
+        tenant_id=tenant_id,
+        project_ids=[project_id],
+        question_terms=question_terms,
+        min_score=min_score,
+    )
+    if match is not None:
+        return match
+
+    accessible = await _authorized_project_ids(session, context)
+    other_ids = [pid for pid, _name in accessible if pid != project_id]
+    if not other_ids:
+        return None
+    return await _best_match_in_projects(
+        session,
+        tenant_id=tenant_id,
+        project_ids=other_ids,
+        question_terms=question_terms,
+        min_score=min_score,
+    )

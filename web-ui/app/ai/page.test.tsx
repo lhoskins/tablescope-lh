@@ -133,6 +133,23 @@ describe("AiAssistantPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows which project answered, read-only, once the conversation resolves one", async () => {
+    renderPage();
+
+    const input = await screen.findByLabelText("Message Tablescope AI");
+    fireEvent.change(input, {
+      target: { value: "Why is material cost increasing?" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(createConversation).toHaveBeenCalledTimes(1));
+    await screen.findByText("Finance");
+    expect(screen.getByText(/answered from/i)).toBeInTheDocument();
+
+    // Read-only — no interactive control backs it.
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  });
+
   it("still honors a project supplied via a project-scoped deep link", async () => {
     // Deep links (e.g. "Ask AI" from a project page) are a different
     // mechanism than the removed manual picker — they should keep working.
