@@ -256,8 +256,11 @@ async def _warm_all_vdbs_on_startup() -> None:
         ]
         logger.info("Pre-warming %d active VDB pools", len(vdbs))
 
-        # Warm one VDB at a time. Teiid's PG transport and source translators
-        # are easily saturated by concurrent cold handshakes/planning.
+        # Pre-warm is best-effort background work; it must never block
+        # application startup. Warm each VDB's pg_catalog with a cheap
+        # SELECT 1. Per-view source metadata is loaded on first real query
+        # (or can be warmed explicitly via a background task) so startup is
+        # fast and does not saturate Teiid.
         semaphore = asyncio.Semaphore(1)
 
         async def _warm_one(v: dict) -> None:
@@ -268,17 +271,22 @@ async def _warm_all_vdbs_on_startup() -> None:
                     vdb_port=v["port"],
                     vdb_username=v["username"],
                     vdb_password=v["password"],
-                    connect_timeout=45.0,
-                    timeout=15.0,
-                    warm_views=True,
+                    connect_timeout=10.0,
+                    timeout=5.0,
+                    warm_views=False,
                     max_attempts=2,
+                    retry_delay=2.0,
                 )
 
-        await asyncio.gather(
-            *[_warm_one(v) for v in vdbs],
-            return_exceptions=True,
-        )
-        logger.info("VDB pool pre-warm complete")
+        async def _background_warm() -> None:
+            await asyncio.gather(
+                *[_warm_one(v) for v in vdbs],
+                return_exceptions=True,
+            )
+            logger.info("VDB pool pre-warm complete")
+
+        # Best-effort background warm; fire-and-forget is intentional here.
+        asyncio.create_task(_background_warm())  # noqa: RUF006
     except Exception as exc:
         logger.warning("VDB pool pre-warm failed: %s", exc)
 
