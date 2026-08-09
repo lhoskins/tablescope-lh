@@ -256,7 +256,9 @@ async def _warm_all_vdbs_on_startup() -> None:
         ]
         logger.info("Pre-warming %d active VDB pools", len(vdbs))
 
-        semaphore = asyncio.Semaphore(10)
+        # Cap concurrency so Teiid's PG transport is not overwhelmed by
+        # simultaneous handshakes; background warm can be slower.
+        semaphore = asyncio.Semaphore(3)
 
         async def _warm_one(v: dict) -> None:
             async with semaphore:

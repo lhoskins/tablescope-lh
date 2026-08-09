@@ -76,7 +76,7 @@ class TeiidConnectionPoolManager:
                 min_size=self._min_size,
                 max_size=self._max_size,
                 ssl=False,
-                timeout=30,
+                timeout=15,
                 command_timeout=60,
                 statement_cache_size=0,
                 server_settings={"application_name": "tablescope-platform-api"},
@@ -117,5 +117,5 @@ class TeiidConnectionPoolManager:
 _settings = get_settings()
 pool_manager = TeiidConnectionPoolManager(
     min_size=max(1, _settings.database_pool_min_size // 4),
-    max_size=_settings.database_pool_max_size,
+    max_size=min(_settings.database_pool_max_size, 10),
 )

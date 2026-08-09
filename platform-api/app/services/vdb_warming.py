@@ -30,7 +30,7 @@ async def warm_vdb(
     vdb_password: str = "test",
     timeout: float = 60.0,
     warm_views: bool = False,
-    max_concurrent_views: int = 5,
+    max_concurrent_views: int = 2,
     max_attempts: int = 3,
     retry_delay: float = 5.0,
 ) -> None:
