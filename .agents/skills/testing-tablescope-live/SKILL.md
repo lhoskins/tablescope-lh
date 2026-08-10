@@ -139,6 +139,8 @@ SQL
 - `Object of type datetime is not JSON serializable` in `platform-api` means a query returned `datetime`/`date` columns and `result_cache` could not be persisted; this should now be handled by JSON-safe row serialization, but if it recurs, rephrase the question to avoid raw date columns (e.g., ask for counts or sums grouped by string columns).
 - Reference Library grounding reaches the model through `reference_documents` in the prompt; verify the response names a Reference Library document title. If the answer instead cites insight cards, the reference-doc context may not be rendered.
 - Fallback turns expose `error_code` and failure details in `result_metadata`/`result_cache` rather than the user message. If user-facing prose cites an unrelated insight card, the insight-card scorer may be over-matching on generic terms like "cost" or "rate".
+- To verify that `datetime`/`date` columns serialize correctly after the `result_profiling.py` fix, ask a question that is known to return date/time values, e.g. `Show me the latest backup start time for each IT system` (project 44). Check `result_metadata.datetimeColumns` is populated and the turn status is `success` with no `Object of type datetime is not JSON serializable` traceback.
+- If the Reference Library question returns a fallback with `error_code = live_query_fallback_generation_error` and `fallbackErrorDetails` mentioning an AI server 422, the user-facing prose may still cite Reference Library documents when the fallback prompt includes them; verify by checking that the assistant message names a document title and does not rely solely on unrelated insight cards.
 
 ## Cleanup checklist
 

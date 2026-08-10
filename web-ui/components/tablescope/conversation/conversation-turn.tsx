@@ -79,8 +79,11 @@ export function TurnBubble({
             <p className="text-red-600">{turn.assistant_message}</p>
           ) : (
             <>
-              <p className="mb-2 whitespace-pre-wrap">{turn.assistant_message}</p>
-              {envelope && <ResponsePresenter envelope={envelope} />}
+              {envelope ? (
+                <ResponsePresenter envelope={envelope} />
+              ) : (
+                <p className="mb-2 whitespace-pre-wrap">{turn.assistant_message}</p>
+              )}
               {turn.matched_insight && (
                 <MatchedInsightBlock match={turn.matched_insight} />
               )}
