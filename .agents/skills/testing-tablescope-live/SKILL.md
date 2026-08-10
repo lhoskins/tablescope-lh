@@ -123,6 +123,23 @@ VALUES ('Test Target', 'ollama', 'http://ollama:11434', '0.0.1', 'active', true,
 SQL
 ```
 
+## Testing Ask Anything / conversational analytics
+
+- Use deep-link URLs to exercise exact prompts reliably, because typing long questions into the AI Assistant composer can be truncated or submitted early:
+  ```
+  https://app.tablescope.cloud/ai?projectId=<PROJECT_ID>&q=<URL_ENCODED_QUESTION>
+  https://app.tablescope.cloud/business-insight?q=<URL_ENCODED_QUESTION>
+  ```
+- The Business Insight Ask Anything flow is synchronous; the "TableScope is thinking…" state can last 60–180 seconds. Wait for a response before interacting again.
+- If a turn stays in "Working on it…" or "TableScope is thinking…" indefinitely, check the `platform-api` logs and `analytics_conversation_turns`:
+  ```bash
+  docker compose logs --tail=50 platform-api
+  docker compose exec -T db psql -U tablescope -d tablescope -c "SELECT id, conversation_id, status, error_code, LEFT(assistant_message, 120) FROM analytics_conversation_turns ORDER BY id DESC LIMIT 10;"
+  ```
+- `Object of type datetime is not JSON serializable` in `platform-api` means a query returned `datetime`/`date` columns and `result_cache` could not be persisted; rephrase the question to avoid date columns (e.g., ask for counts or sums grouped by string columns) or wait for a backend fix.
+- Reference Library grounding is currently only effective if `reference_documents` are rendered into the LLM prompt; verify that the response actually names a Reference Library document title. If the answer instead cites insight cards, the reference-doc context is likely not reaching the model.
+- Fallback turns now expose `error_code` and failure details in `result_metadata`/`result_cache` rather than the user message, but the user-facing prose may still be grounded in unrelated insight cards.
+
 ## Cleanup checklist
 
 1. Delete any test rows inserted during the test.

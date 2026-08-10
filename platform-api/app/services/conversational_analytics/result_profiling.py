@@ -4,9 +4,24 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from .intent_classification import _MAX_PREVIEW_BYTES, _MAX_PREVIEW_ROWS
+
+
+def _json_default(value: Any) -> Any:
+    """Serialize non-JSON-native values to strings for storage/prompts."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, set):
+        return list(value)
+    return str(value)
 
 
 def _answer_text(columns: list[str], rows: list[dict[str, Any]]) -> str:
@@ -30,14 +45,17 @@ def _sql_fingerprint(sql: str | None) -> str | None:
 
 
 def _bound_result(rows: list[dict[str, Any]], max_rows: int = _MAX_PREVIEW_ROWS, max_bytes: int = _MAX_PREVIEW_BYTES) -> tuple[list[dict[str, Any]], bool]:
-    """Trim preview rows/columns to bounded limits."""
+    """Trim preview rows to bounded limits and make them JSONB-safe."""
     if not rows:
         return [], False
     bounded = rows[:max_rows]
-    total = json.dumps(bounded, default=str)
+    # Convert datetime, date, Decimal, sets, etc. so SQLAlchemy JSONB and
+    # downstream json.dumps never fail.
+    bounded = json.loads(json.dumps(bounded, default=_json_default))
+    total = json.dumps(bounded)
     while len(total.encode()) > max_bytes and len(bounded) > 1:
         bounded = bounded[: len(bounded) // 2]
-        total = json.dumps(bounded, default=str)
+        total = json.dumps(bounded)
     truncated = len(rows) > len(bounded)
     return bounded, truncated
 

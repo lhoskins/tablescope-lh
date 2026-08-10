@@ -155,10 +155,13 @@ async def ask(req: AskRequest) -> AskResponse:
             f"{context_text}\n\n{grounded_block}\n\n"
             f"{history_text}"
             f"User question: {req.question}\n\n"
-            "Answer the user's question using ONLY the live query result and/or "
-            "matched insight card analysis shown above. Cite specific numbers, "
-            "trends, and chart series. Do not invent data or SQL that is not shown. "
-            "Keep the answer concise and conversational."
+            "Ground your answer in the live query result and/or matched insight "
+            "card analysis above. Cite specific numbers, trends, and chart series. "
+            "If a live result is present, use it as the primary source; use matched "
+            "insight cards only when they directly address the question's subject. "
+            "You may also use Reference Library documents, KG findings, and other "
+            "context above as supporting material. Do not invent data or SQL that "
+            "is not shown. Keep the answer concise and conversational."
         )
     else:
         prompt = f"{context_text}\n\n{history_text}User question: {req.question}"
