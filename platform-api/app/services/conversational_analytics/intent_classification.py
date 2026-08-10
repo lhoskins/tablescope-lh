@@ -21,7 +21,29 @@ class ConversationalIntent(str):
     CHART_CHANGE = "chart_change"
     EXPLAIN = "explain"
     CLARIFICATION = "clarification"
+    DOCUMENT_QA = "document_qa"
     UNSUPPORTED = "unsupported"
+
+
+# Document/reference-library question markers. These short-circuit the SQL
+# generation path so the response is grounded in Reference Library docs/KG.
+_DOCUMENT_KEYWORDS = {
+    "reference library", "reference libraries",
+    "document", "documents", "doc",
+    "policy", "policies", "procedure", "procedures",
+    "guideline", "guidelines", "guidance", "standard", "standards",
+    "framework", "frameworks", "best practice", "best practices",
+    "compliance", "regulatory", "regulation", "regulations",
+    "nist", "iso", "soc2", "gdpr", "hipaa",
+}
+_DOCUMENT_LIST_PATTERNS = [
+    re.compile(r"\b(?:list|show|give me|what are|which)\b.*\b(?:document|documents|doc|docs|policy|policies|procedure|procedures|guideline|guidelines|standard|standards)\b"),
+    re.compile(r"\b(?:document|documents|doc|docs|policy|policies|procedure|procedures|guideline|guidelines|standard|standards)\b.*\b(?:about|for|on|related to|in|in the)\b"),
+]
+_DOCUMENT_DETAIL_PATTERNS = [
+    re.compile(r"\b(?:tell me more about|what does|what is in|details? (?:for|about|on)|more about|describe|explain)\b.*\b(?:document|doc|policy|procedure|guideline|standard|framework)\b"),
+    re.compile(r"\b(?:the|a)\s+(?:document|doc|policy|procedure|guideline|standard|framework)\s+(?:called|named|titled)\b"),
+]
 
 
 # Closed chart vocabulary the web-ui WidgetRenderer supports. Used to VALIDATE
@@ -76,6 +98,22 @@ _FALLBACK_EXPLAIN = re.compile(
 
 def _normalize_question(question: str) -> str:
     return re.sub(r"\s+", " ", question.strip().lower())
+
+
+def _is_document_question(question: str) -> bool:
+    """True when the user is asking about Reference Library documents/policies.
+
+    These questions should bypass SQL generation and be answered directly from
+    the grounded Reference Library and KG context.
+    """
+    text = _normalize_question(question)
+    if any(k in text for k in _DOCUMENT_KEYWORDS):
+        return True
+    if any(p.search(text) for p in _DOCUMENT_LIST_PATTERNS):
+        return True
+    if any(p.search(text) for p in _DOCUMENT_DETAIL_PATTERNS):
+        return True
+    return False
 
 
 def _prior_turn_state(prior_turn: AnalyticsConversationTurn | None) -> dict[str, Any]:

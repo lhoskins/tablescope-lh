@@ -52,6 +52,35 @@ def _question_tokens(question: str) -> set[str]:
     return {t.lower() for t in _GROUNDING_TOKEN_RE.findall(question or "") if len(t) > 2}
 
 
+# Phrases to strip from reference-document search queries so natural-language
+# wrappers ("list documents about ...", "tell me more about ...") do not AND
+# filler words into the full-text search.
+_REFERENCE_QUERY_FILLER_PATTERNS = [
+    re.compile(r"^\s*(?:list|show|give me|what are|which)\s+(?:of\s+)?(?:the\s+)?(?:document|documents|doc|docs|policy|policies|procedure|procedures|guideline|guidelines|standard|standards)\s+(?:about|for|on|related to|in|in the|that)\s*", re.IGNORECASE),
+    re.compile(r"^\s*(?:what does|what is in|what do|tell me more about|more about|details? (?:for|about|on)|describe|explain)\s+(?:the|a|an)?\s*", re.IGNORECASE),
+    re.compile(r"^\s*(?:the|a|an)\s+(?:document|doc|policy|procedure|guideline|standard|framework)\s+(?:called|named|titled)\s*", re.IGNORECASE),
+    re.compile(r"^\s*(?:reference\s+library|reference\s+libraries)\s+(?:say|says|say about|says about)?\s*", re.IGNORECASE),
+]
+_REFERENCE_QUERY_STOPWORDS = {
+    "list", "show", "give", "what", "which", "are", "tell", "more", "about", "does", "is",
+    "do", "in", "the", "a", "an", "and", "or", "of", "to", "for", "on", "from", "by",
+    "with", "that", "this", "these", "those", "they", "them", "their", "there", "where",
+    "when", "who", "why", "how", "can", "could", "would", "should", "will", "shall",
+    "may", "might", "must", "have", "has", "had", "be", "been", "being", "am", "was",
+    "were", "it", "its", "i", "you", "we", "he", "she", "me", "us", "him", "her", "my",
+    "your", "our", "his", "say", "says", "said", "document", "documents", "doc", "docs",
+}
+
+
+def _clean_reference_search_query(question: str) -> list[str]:
+    """Return the meaningful search tokens for a Reference Library query."""
+    text = question or ""
+    for pattern in _REFERENCE_QUERY_FILLER_PATTERNS:
+        text = pattern.sub("", text)
+    tokens = [t for t in _GROUNDING_TOKEN_RE.findall(text) if t.lower() not in _REFERENCE_QUERY_STOPWORDS and len(t) > 2]
+    return tokens
+
+
 def _token_overlap_score(texts: list[str], tokens: set[str]) -> float:
     """Simple overlap score: fraction of question tokens present in the texts."""
     if not tokens:
@@ -152,6 +181,10 @@ async def _lexical_reference_documents(
     limit: int = 8,
 ) -> list[GroundingPassage]:
     """Postgres FTS over reference documents (title + AI summary)."""
+    search_tokens = _clean_reference_search_query(question)
+    if not search_tokens:
+        return []
+    tsquery = " | ".join(search_tokens)
     try:
         result = await session.execute(
             text(
@@ -161,9 +194,9 @@ async def _lexical_reference_documents(
                     title,
                     ai_summary,
                     tier,
-                    ts_rank(tsv, plainto_tsquery('english', :query)) AS rank
+                    ts_rank(tsv, to_tsquery('english', :tsquery)) AS rank
                 FROM reference_documents
-                WHERE tsv @@ plainto_tsquery('english', :query)
+                WHERE tsv @@ to_tsquery('english', :tsquery)
                   AND status = 'active'
                   AND (
                     tier = 'industry'
@@ -177,7 +210,7 @@ async def _lexical_reference_documents(
             {
                 "tenant_id": tenant_id,
                 "project_id": project_id,
-                "query": question,
+                "tsquery": tsquery,
                 "limit": limit,
             },
         )
@@ -577,6 +610,10 @@ async def _reference_documents_for_question(
     limit: int = 6,
 ) -> list[GroundingReferenceDocument]:
     """Rank Reference Library documents by full-text relevance to the question."""
+    search_tokens = _clean_reference_search_query(question)
+    if not search_tokens:
+        return []
+    tsquery = " | ".join(search_tokens)
     try:
         result = await session.execute(
             text(
@@ -588,9 +625,9 @@ async def _reference_documents_for_question(
                     domain_tag,
                     source_url,
                     tier,
-                    ts_rank(tsv, plainto_tsquery('english', :query)) AS rank
+                    ts_rank(tsv, to_tsquery('english', :tsquery)) AS rank
                 FROM reference_documents
-                WHERE tsv @@ plainto_tsquery('english', :query)
+                WHERE tsv @@ to_tsquery('english', :tsquery)
                   AND status = 'active'
                   AND (
                     tier = 'industry'
@@ -604,7 +641,7 @@ async def _reference_documents_for_question(
             {
                 "tenant_id": tenant_id,
                 "project_id": project_id,
-                "query": question,
+                "tsquery": tsquery,
                 "limit": limit,
             },
         )
