@@ -52,6 +52,26 @@ bash deploy_feat.sh
 
 `deploy_feat.sh` builds `platform-api` and `web-ui`, recreates `platform-api`, `platform-api-worker`, and `web-ui`, and runs `alembic upgrade head`.
 
+### GPU AI-server image deploy
+
+The GPU AI server (`i-0d938409d1b57ff12`, `32.186.54.52`) has no outbound internet, so build the `ai-server` images on the app EC2 and transfer them to the GPU host:
+
+```bash
+# On app EC2 (13.57.117.13)
+cd /home/ubuntu/tablescope/ai-server
+docker compose build tablescope-ai-api ai-worker
+docker save ai-server-tablescope-ai-api:latest ai-server-ai-worker:latest | gzip > /tmp/ai-images.tar.gz
+
+# Transfer to the GPU host and load/recreate
+scp /tmp/ai-images.tar.gz ubuntu@32.186.54.52:/home/ubuntu/ai-images.tar.gz
+ssh ubuntu@32.186.54.52 '
+  cd /home/ubuntu/tablescope/ai-server
+  docker load -i /home/ubuntu/ai-images.tar.gz
+  docker compose up -d --no-deps tablescope-ai-api ai-worker
+  curl -s http://localhost:8000/health
+'
+```
+
 ## Authenticating for UI tests
 
 The live environment enforces Twilio SMS MFA for admin-tier roles. The simplest test harness is to mint a short-lived JWT inside the `platform-api` container using the runtime `JWT_SECRET_KEY`:
