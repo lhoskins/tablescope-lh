@@ -126,12 +126,15 @@ def _extract_terms(text: str) -> set[str]:
 
     Splits camelCase/PascalCase and snake_case so series like
     ``MaterialCosts`` or ``ScrapRate`` become ``material``, ``costs``,
-    ``scrap``, ``rate``.
+    ``scrap``, ``rate``. Also includes a simple singular form for common
+    plurals (``costs`` -> ``cost``) so questions and series labels match
+    even when one uses the plural and the other does not.
     """
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
     spaced = re.sub(r"_+", " ", spaced)
-    tokens = set(re.findall(r"[a-z0-9]+", spaced.lower()))
-    return tokens - _STOPWORDS
+    tokens = set(re.findall(r"[a-z0-9]+", spaced.lower())) - _STOPWORDS
+    singulars = {t[:-1] for t in tokens if len(t) > 3 and t.endswith("s")}
+    return tokens | singulars
 
 
 def _trend_word(value: float, threshold: float = 0.02) -> str:
