@@ -136,9 +136,9 @@ SQL
   docker compose logs --tail=50 platform-api
   docker compose exec -T db psql -U tablescope -d tablescope -c "SELECT id, conversation_id, status, error_code, LEFT(assistant_message, 120) FROM analytics_conversation_turns ORDER BY id DESC LIMIT 10;"
   ```
-- `Object of type datetime is not JSON serializable` in `platform-api` means a query returned `datetime`/`date` columns and `result_cache` could not be persisted; rephrase the question to avoid date columns (e.g., ask for counts or sums grouped by string columns) or wait for a backend fix.
-- Reference Library grounding is currently only effective if `reference_documents` are rendered into the LLM prompt; verify that the response actually names a Reference Library document title. If the answer instead cites insight cards, the reference-doc context is likely not reaching the model.
-- Fallback turns now expose `error_code` and failure details in `result_metadata`/`result_cache` rather than the user message, but the user-facing prose may still be grounded in unrelated insight cards.
+- `Object of type datetime is not JSON serializable` in `platform-api` means a query returned `datetime`/`date` columns and `result_cache` could not be persisted; this should now be handled by JSON-safe row serialization, but if it recurs, rephrase the question to avoid raw date columns (e.g., ask for counts or sums grouped by string columns).
+- Reference Library grounding reaches the model through `reference_documents` in the prompt; verify the response names a Reference Library document title. If the answer instead cites insight cards, the reference-doc context may not be rendered.
+- Fallback turns expose `error_code` and failure details in `result_metadata`/`result_cache` rather than the user message. If user-facing prose cites an unrelated insight card, the insight-card scorer may be over-matching on generic terms like "cost" or "rate".
 
 ## Cleanup checklist
 
