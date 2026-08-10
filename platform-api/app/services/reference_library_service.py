@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import re
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,6 +72,49 @@ def domain_storage_key(domain: str | None) -> str:
     return "".join(c if c.isalnum() else "_" for c in domain.strip().lower()).strip("_")
 
 
+# Case-insensitive regex matching known domain tags and common aliases.
+# Longest aliases first so "supply chain" wins over "supply" / "chain".
+_REFERENCE_DOMAIN_PATTERN: re.Pattern | None = None
+
+
+def _build_reference_domain_pattern() -> re.Pattern:
+    global _REFERENCE_DOMAIN_PATTERN
+    if _REFERENCE_DOMAIN_PATTERN is None:
+        candidates = set(_DOMAIN_ALIASES.keys()) | {d.lower() for d in DOMAIN_TAGS}
+        ordered = sorted(candidates, key=len, reverse=True)
+        _REFERENCE_DOMAIN_PATTERN = re.compile(
+            r"\b(" + "|".join(re.escape(c) for c in ordered) + r")\b",
+            re.IGNORECASE,
+        )
+    return _REFERENCE_DOMAIN_PATTERN
+
+
+def extract_reference_domains(text: str | None) -> list[str]:
+    """Return the canonical Reference Library domain tags mentioned in *text*.
+
+    Recognizes both official ``DOMAIN_TAGS`` (e.g. ``IT & Cybersecurity``) and
+    common aliases (``it`` -> ``IT & Cybersecurity``). The ``it`` alias is only
+    treated as the IT domain when it appears as the acronym ``IT`` to avoid
+    matching the common pronoun.
+    """
+    if not text:
+        return []
+    pattern = _build_reference_domain_pattern()
+    seen: dict[str, None] = {}
+    for match in pattern.finditer(text):
+        matched = match.group(1)
+        key = matched.strip().lower()
+        canonical = _DOMAIN_ALIASES.get(key) or _DOMAIN_LOOKUP.get(key)
+        if not canonical:
+            continue
+        # Avoid matching the pronoun "it"; require the IT acronym.
+        if key == "it" and matched != "IT":
+            continue
+        if canonical not in seen:
+            seen[canonical] = None
+    return list(seen.keys())
+
+
 # ── Permissions ──────────────────────────────────────────────────────────────
 
 
@@ -84,9 +128,7 @@ def can_write_company(context: RequestContext) -> bool:
     return has_role(context.role, Role.TENANT_ADMIN)
 
 
-async def can_write_project(
-    session: AsyncSession, context: RequestContext, project_id: int
-) -> bool:
+async def can_write_project(session: AsyncSession, context: RequestContext, project_id: int) -> bool:
     """Project-tier writes require project admin (or tenant/platform admin)."""
     if has_role(context.role, Role.TENANT_ADMIN):
         return True
@@ -162,10 +204,6 @@ async def find_duplicate_in_tier(
 
 async def count_documents_by_tier(session: AsyncSession, tier: str) -> int:
     return int(
-        await session.scalar(
-            select(func.count())
-            .select_from(ReferenceDocument)
-            .where(ReferenceDocument.tier == tier)
-        )
+        await session.scalar(select(func.count()).select_from(ReferenceDocument).where(ReferenceDocument.tier == tier))
         or 0
     )

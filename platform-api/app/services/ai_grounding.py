@@ -41,6 +41,7 @@ from app.services import ai_intelligence_client, insight_registry
 from app.services.insight_card_match import _chart_signature, _data_shape_score, _extract_terms
 from app.services.knowledge_graph_builder import _load_stored_graph, enrich_node
 from app.services.reference_catalog_service import get_reference_kpis
+from app.services.reference_library_service import extract_reference_domains
 
 logger = logging.getLogger(__name__)
 
@@ -56,29 +57,122 @@ def _question_tokens(question: str) -> set[str]:
 # wrappers ("list documents about ...", "tell me more about ...") do not AND
 # filler words into the full-text search.
 _REFERENCE_QUERY_FILLER_PATTERNS = [
-    re.compile(r"^\s*(?:list|show|give me|what are|which)\s+(?:of\s+)?(?:the\s+)?(?:document|documents|doc|docs|policy|policies|procedure|procedures|guideline|guidelines|standard|standards)\s+(?:about|for|on|related to|in|in the|that)\s*", re.IGNORECASE),
-    re.compile(r"^\s*(?:what does|what is in|what do|tell me more about|more about|details? (?:for|about|on)|describe|explain)\s+(?:the|a|an)?\s*", re.IGNORECASE),
-    re.compile(r"^\s*(?:the|a|an)\s+(?:document|doc|policy|procedure|guideline|standard|framework)\s+(?:called|named|titled)\s*", re.IGNORECASE),
-    re.compile(r"^\s*(?:reference\s+library|reference\s+libraries)\s+(?:say|says|say about|says about)?\s*", re.IGNORECASE),
+    re.compile(
+        r"^\s*(?:list|show|give me|what are|which)\s+(?:of\s+)?(?:the\s+)?(?:document|documents|doc|docs|policy|policies|procedure|procedures|guideline|guidelines|standard|standards)\s+(?:about|for|on|related to|in|in the|that)\s*",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:what does|what is in|what do|tell me more about|more about|details? (?:for|about|on)|describe|explain)\s+(?:the|a|an)?\s*",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:the|a|an)\s+(?:document|doc|policy|procedure|guideline|standard|framework)\s+(?:called|named|titled)\s*",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:reference\s+library|reference\s+libraries)\s+(?:say|says|say about|says about)?\s*", re.IGNORECASE
+    ),
 ]
 _REFERENCE_QUERY_STOPWORDS = {
-    "list", "show", "give", "what", "which", "are", "tell", "more", "about", "does", "is",
-    "do", "in", "the", "a", "an", "and", "or", "of", "to", "for", "on", "from", "by",
-    "with", "that", "this", "these", "those", "they", "them", "their", "there", "where",
-    "when", "who", "why", "how", "can", "could", "would", "should", "will", "shall",
-    "may", "might", "must", "have", "has", "had", "be", "been", "being", "am", "was",
-    "were", "it", "its", "i", "you", "we", "he", "she", "me", "us", "him", "her", "my",
-    "your", "our", "his", "say", "says", "said", "document", "documents", "doc", "docs",
+    "list",
+    "show",
+    "give",
+    "what",
+    "which",
+    "are",
+    "tell",
+    "more",
+    "about",
+    "does",
+    "is",
+    "do",
+    "in",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "of",
+    "to",
+    "for",
+    "on",
+    "from",
+    "by",
+    "with",
+    "that",
+    "this",
+    "these",
+    "those",
+    "they",
+    "them",
+    "their",
+    "there",
+    "where",
+    "when",
+    "who",
+    "why",
+    "how",
+    "can",
+    "could",
+    "would",
+    "should",
+    "will",
+    "shall",
+    "may",
+    "might",
+    "must",
+    "have",
+    "has",
+    "had",
+    "be",
+    "been",
+    "being",
+    "am",
+    "was",
+    "were",
+    "it",
+    "its",
+    "i",
+    "you",
+    "we",
+    "he",
+    "she",
+    "me",
+    "us",
+    "him",
+    "her",
+    "my",
+    "your",
+    "our",
+    "his",
+    "say",
+    "says",
+    "said",
+    "document",
+    "documents",
+    "doc",
+    "docs",
+    "related",
+    "regarding",
+    "concerning",
+    "pertaining",
 }
 
 
-def _clean_reference_search_query(question: str) -> list[str]:
-    """Return the meaningful search tokens for a Reference Library query."""
+def _clean_reference_search_query(question: str) -> tuple[list[str], list[str]]:
+    """Return (search_tokens, domain_tags) for a Reference Library query.
+
+    ``search_tokens`` are the meaningful non-domain words used for full-text
+    search; ``domain_tags`` are canonical Reference Library domains detected in
+    the question (e.g. ``IT & Cybersecurity`` from the word ``IT``)."""
     text = question or ""
+    domains = extract_reference_domains(text)
     for pattern in _REFERENCE_QUERY_FILLER_PATTERNS:
         text = pattern.sub("", text)
-    tokens = [t for t in _GROUNDING_TOKEN_RE.findall(text) if t.lower() not in _REFERENCE_QUERY_STOPWORDS and len(t) > 2]
-    return tokens
+    tokens = [
+        t for t in _GROUNDING_TOKEN_RE.findall(text) if t.lower() not in _REFERENCE_QUERY_STOPWORDS and len(t) > 2
+    ]
+    return tokens, domains
 
 
 def _token_overlap_score(texts: list[str], tokens: set[str]) -> float:
@@ -181,38 +275,50 @@ async def _lexical_reference_documents(
     limit: int = 8,
 ) -> list[GroundingPassage]:
     """Postgres FTS over reference documents (title + AI summary)."""
-    search_tokens = _clean_reference_search_query(question)
-    if not search_tokens:
+    search_tokens, domain_tags = _clean_reference_search_query(question)
+    if not search_tokens and not domain_tags:
         return []
-    tsquery = " | ".join(search_tokens)
+
+    tsquery = " | ".join(search_tokens) if search_tokens else None
+    clauses = [
+        "status = 'active'",
+        "(tier = 'industry' OR (tier = 'company' AND tenant_id = :tenant_id) OR (tier = 'project' AND project_id = :project_id))",
+    ]
+    params: dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "project_id": project_id,
+        "limit": limit,
+    }
+    if tsquery:
+        clauses.append("tsv @@ to_tsquery('english', :tsquery)")
+        params["tsquery"] = tsquery
+        rank_expr = "ts_rank(tsv, to_tsquery('english', :tsquery)) AS rank"
+        order_by = "rank DESC"
+    else:
+        rank_expr = "0.0 AS rank"
+        order_by = "title ASC"
+
+    if domain_tags:
+        quoted = ",".join(f"'{d.replace(chr(39), chr(39)+chr(39))}'" for d in domain_tags)
+        clauses.append(f"domain_tag IN ({quoted})")
+
     try:
         result = await session.execute(
             text(
-                """
+                f"""
                 SELECT
                     id,
                     title,
                     ai_summary,
                     tier,
-                    ts_rank(tsv, to_tsquery('english', :tsquery)) AS rank
+                    {rank_expr}
                 FROM reference_documents
-                WHERE tsv @@ to_tsquery('english', :tsquery)
-                  AND status = 'active'
-                  AND (
-                    tier = 'industry'
-                    OR (tier = 'company' AND tenant_id = :tenant_id)
-                    OR (tier = 'project' AND project_id = :project_id)
-                  )
-                ORDER BY rank DESC
+                WHERE {" AND ".join(clauses)}
+                ORDER BY {order_by}
                 LIMIT :limit
                 """
             ),
-            {
-                "tenant_id": tenant_id,
-                "project_id": project_id,
-                "tsquery": tsquery,
-                "limit": limit,
-            },
+            params,
         )
         rows = result.fetchall()
     except Exception as exc:
@@ -247,9 +353,7 @@ async def _ranked_kg_nodes(
 ) -> list[GroundingKGNode]:
     """Load the project KG and re-rank nodes by question relevance."""
     try:
-        raw_nodes, _raw_edges = await _load_stored_graph(
-            session, tenant_id=tenant_id, project_id=project_id
-        )
+        raw_nodes, _raw_edges = await _load_stored_graph(session, tenant_id=tenant_id, project_id=project_id)
     except Exception as exc:
         logger.warning("KG load failed for grounding: %s", exc)
         return []
@@ -372,11 +476,7 @@ async def _project_names(
     if not project_ids:
         return {}
     try:
-        rows = (
-            await session.execute(
-                select(Project.id, Project.name).where(Project.id.in_(project_ids))
-            )
-        ).all()
+        rows = (await session.execute(select(Project.id, Project.name).where(Project.id.in_(project_ids)))).all()
         return {row[0]: row[1] for row in rows}
     except Exception as exc:
         logger.warning("Could not load project names: %s", exc)
@@ -418,9 +518,7 @@ def _grounding_snapshot_from_card(
     preview_lines: list[str] = []
     for row in rows[:5]:
         if isinstance(row, dict):
-            preview_lines.append(
-                ", ".join(f"{k}={v}" for k, v in row.items())
-            )
+            preview_lines.append(", ".join(f"{k}={v}" for k, v in row.items()))
         else:
             preview_lines.append(str(row))
     result_preview = "\n".join(preview_lines)[:1200]
@@ -431,13 +529,7 @@ def _grounding_snapshot_from_card(
         if isinstance(sources, dict):
             sql = str(sources.get("sql") or "")
 
-    card_type = (
-        card.get("type")
-        or card.get("insightType")
-        or card.get("cardType")
-        or card.get("category")
-        or ""
-    )
+    card_type = card.get("type") or card.get("insightType") or card.get("cardType") or card.get("category") or ""
 
     return GroundingInsightSnapshot(
         insight_id=str(card.get("insightId") or card.get("id") or ""),
@@ -610,14 +702,37 @@ async def _reference_documents_for_question(
     limit: int = 6,
 ) -> list[GroundingReferenceDocument]:
     """Rank Reference Library documents by full-text relevance to the question."""
-    search_tokens = _clean_reference_search_query(question)
-    if not search_tokens:
+    search_tokens, domain_tags = _clean_reference_search_query(question)
+    if not search_tokens and not domain_tags:
         return []
-    tsquery = " | ".join(search_tokens)
+
+    tsquery = " | ".join(search_tokens) if search_tokens else None
+    clauses = [
+        "status = 'active'",
+        "(tier = 'industry' OR (tier = 'company' AND tenant_id = :tenant_id) OR (tier = 'project' AND project_id = :project_id))",
+    ]
+    params: dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "project_id": project_id,
+        "limit": limit,
+    }
+    if tsquery:
+        clauses.append("tsv @@ to_tsquery('english', :tsquery)")
+        params["tsquery"] = tsquery
+        rank_expr = "ts_rank(tsv, to_tsquery('english', :tsquery)) AS rank"
+        order_by = "rank DESC"
+    else:
+        rank_expr = "0.0 AS rank"
+        order_by = "title ASC"
+
+    if domain_tags:
+        quoted = ",".join(f"'{d.replace(chr(39), chr(39)+chr(39))}'" for d in domain_tags)
+        clauses.append(f"domain_tag IN ({quoted})")
+
     try:
         result = await session.execute(
             text(
-                """
+                f"""
                 SELECT
                     id,
                     title,
@@ -625,25 +740,14 @@ async def _reference_documents_for_question(
                     domain_tag,
                     source_url,
                     tier,
-                    ts_rank(tsv, to_tsquery('english', :tsquery)) AS rank
+                    {rank_expr}
                 FROM reference_documents
-                WHERE tsv @@ to_tsquery('english', :tsquery)
-                  AND status = 'active'
-                  AND (
-                    tier = 'industry'
-                    OR (tier = 'company' AND tenant_id = :tenant_id)
-                    OR (tier = 'project' AND project_id = :project_id)
-                  )
-                ORDER BY rank DESC
+                WHERE {" AND ".join(clauses)}
+                ORDER BY {order_by}
                 LIMIT :limit
                 """
             ),
-            {
-                "tenant_id": tenant_id,
-                "project_id": project_id,
-                "tsquery": tsquery,
-                "limit": limit,
-            },
+            params,
         )
         rows = result.fetchall()
     except Exception as exc:
@@ -741,7 +845,7 @@ async def gather_grounding_evidence(
                     ("project_passages", "project_asset"),
                     ("reference_passages", "reference_library"),
                 ):
-                    for p in (search_result.get(field) or []):
+                    for p in search_result.get(field) or []:
                         # ai-server returns GroundingPassage-compatible dicts.
                         passage = GroundingPassage.model_validate(p)
                         if source_type and not passage.source_type:
@@ -806,7 +910,13 @@ async def gather_grounding_evidence(
     logger.info(
         "Gathered grounding evidence tenant=%d project=%d: %d passages, %d kg_nodes, %d kpis, "
         "%d insight_snapshots, %d network_connections, %d reference_documents",
-        tenant_id, project_id, len(evidence.passages), len(evidence.kg_nodes), len(evidence.kpis),
-        len(evidence.insight_snapshots), len(evidence.network_connections), len(evidence.reference_documents),
+        tenant_id,
+        project_id,
+        len(evidence.passages),
+        len(evidence.kg_nodes),
+        len(evidence.kpis),
+        len(evidence.insight_snapshots),
+        len(evidence.network_connections),
+        len(evidence.reference_documents),
     )
     return evidence

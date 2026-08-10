@@ -169,10 +169,11 @@ async def ask(req: AskRequest) -> AskResponse:
             f"User question: {req.question}\n\n"
             "Answer from the Reference Library documents, Knowledge Graph, and "
             "project context above. If the question asks for a list of documents, "
-            "return a concise list with each document title and a one-line summary. "
-            "If it asks about a specific document, answer from that document's "
-            "summary and cite its title. Do not invent data or SQL that is not shown. "
-            "Keep the answer concise and conversational."
+            "return a concise list with each document title, its domain tag, and a one-line summary. "
+            "If the question names a domain (e.g. IT, ESG, Finance), only include documents "
+            "whose domain_tag matches that domain. If it asks about a specific document, "
+            "answer from that document's summary and cite its title. Do not invent data or SQL "
+            "that is not shown. Keep the answer concise and conversational."
         )
 
     answer = await llm_client.generate(
