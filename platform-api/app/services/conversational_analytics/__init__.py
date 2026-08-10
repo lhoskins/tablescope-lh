@@ -11,6 +11,7 @@ from app.models.analytics_conversation import AnalyticsConversation, AnalyticsCo
 from app.routes.ai_proxy import _ask_and_run_core, _forward_prose_answer
 from app.services import ai_intelligence_client as ai_intelligence_client
 from app.services.ai_governance import ai_governance_service, infer_governance_key
+from app.services.ai_grounding import gather_grounding_evidence
 from app.services.ai_intelligence_client import AIUnavailableError as AIUnavailableError
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
@@ -36,6 +37,7 @@ from .intent_classification import _MAX_PREVIEW_BYTES as _MAX_PREVIEW_BYTES
 from .intent_classification import _MAX_PREVIEW_ROWS, ConversationalIntent, classify_turn, logger
 from .intent_classification import _fallback_classify as _fallback_classify
 from .intent_classification import _grounded_data_question as _grounded_data_question
+from .intent_classification import _is_document_question as _is_document_question
 from .intent_classification import _normalize_question as _normalize_question
 from .intent_classification import _prior_turn_state as _prior_turn_state
 from .result_profiling import _answer_text, _bound_result, _profile_result, _sql_fingerprint
@@ -388,6 +390,45 @@ async def execute_turn(
         turn.status = "error"
         turn.error_code = "ai_governance_blocked"
         turn.assistant_message = pre_decision.user_message
+        return
+
+    # Phase D: Reference Library / document Q&A bypasses SQL generation.
+    # These questions are answered directly from grounded documents and KG context.
+    if _is_document_question(question):
+        grounding = await gather_grounding_evidence(
+            session,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            question=question,
+        )
+        if grounding is None:
+            from app.schemas.ai_grounding import GroundingEvidence
+            grounding = GroundingEvidence()
+        grounding_dict = grounding.model_dump()
+        prose = await _forward_prose_answer(
+            session,
+            context,
+            project_id=project_id,
+            question=question,
+            history=[],
+            scope="project",
+            include_query_history=False,
+            include_dashboard_context=False,
+            grounding_evidence=grounding_dict,
+        )
+        turn.assistant_message = (
+            prose
+            or "I couldn't find a relevant document for that question. Try rephrasing or checking the Reference Library."
+        )
+        turn.status = "success"
+        turn.intent_type = ConversationalIntent.DOCUMENT_QA
+        turn.result_metadata = {
+            "documentQa": {
+                "referenceDocumentCount": len(grounding.reference_documents),
+                "kgNodeCount": len(grounding.kg_nodes),
+            }
+        }
         return
 
     run = await _run_analytical_turn(

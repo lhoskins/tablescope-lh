@@ -242,9 +242,16 @@ async def ask(
     # resolver can ground on a source is answered with a real executed result —
     # chart + table + hidden SQL — rather than a prose answer that merely prints
     # the SQL. Anything the resolver can't ground falls through to prose below.
-    data_response = await _ask_data_first(
-        session, context, project_id=req.project_id, question=req.question
+    # Document/reference-library questions bypass SQL generation entirely.
+    from app.services.conversational_analytics.intent_classification import (
+        _is_document_question,
     )
+
+    data_response = None
+    if not _is_document_question(req.question):
+        data_response = await _ask_data_first(
+            session, context, project_id=req.project_id, question=req.question
+        )
     if data_response is not None:
         # Synthesize a natural-language answer from the executed result, falling
         # back to the deterministic short answer if the AI server is unavailable.
