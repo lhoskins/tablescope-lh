@@ -8,12 +8,16 @@ from .common import AIBaseRequest
 class InsightCardCandidate(BaseModel):
     """One already-computed card the platform is offering as a candidate.
 
-    Title and summary only — the model judges relevance from these, never
-    from chart data or SQL, and never proposes new analysis of its own.
+    The model judges relevance from the chart's data shape (series labels,
+    axes, trend) and summary, never from the title alone and never from SQL.
+    It never proposes new analysis of its own.
     """
     insight_id: str
     title: str = ""
     summary: str = ""
+    chart_signature: str = ""
+    series: str = ""
+    trend: str = ""
 
 
 class SelectInsightCardRequest(AIBaseRequest):

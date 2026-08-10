@@ -31,7 +31,11 @@ _SELECT_INSIGHT_CARD_SYSTEM_PROMPT = (
 def _select_insight_card_prompt(req: SelectInsightCardRequest) -> str:
     best_practices = load_prompt_reference("insight_card_match_best_practices.md")
     candidate_lines = "\n".join(
-        f'- id="{c.insight_id}" title="{c.title}" summary="{c.summary}"'
+        (
+            f'- id="{c.insight_id}" title="{c.title}" '
+            f'chart_signature="{c.chart_signature}" series="{c.series}" '
+            f'trend="{c.trend}" summary="{c.summary}"'
+        )
         for c in req.candidates
     )
     return (

@@ -35,7 +35,9 @@ alone rather than trusted from anywhere else.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
+from statistics import mean
 from typing import Any
 
 from sqlalchemy import select
@@ -53,7 +55,7 @@ logger = logging.getLogger(__name__)
 # safety cap in case a widened search spans many projects' worth of cards,
 # not a relevance cutoff. Cards beyond this count are simply never offered
 # as candidates in that one call.
-_MAX_CANDIDATES = 40
+_MAX_CANDIDATES = 20
 
 # The selector's own best-practices doc instructs it to decline (insight_id
 # null, confidence 0.0) rather than force a tangential match -- but an LLM
@@ -87,6 +89,190 @@ def _to_match(project_id: int, card: dict[str, Any]) -> InsightCardMatch:
         chart=card.get("chart") if isinstance(card.get("chart"), dict) else None,
         severity=card.get("severity"),
     )
+
+
+# Stopwords for lightweight question/candidate token overlap.
+_STOPWORDS = {
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "can", "this", "that", "these", "those",
+    "i", "you", "he", "she", "it", "we", "they", "me", "him", "her",
+    "us", "them", "my", "your", "his", "its", "our", "their", "and", "or",
+    "but", "if", "then", "of", "in", "on", "at", "to", "for", "with",
+    "about", "by", "from", "as", "into", "through", "during", "before",
+    "after", "above", "below", "between", "under", "again", "further",
+    "why", "what", "which", "who", "when", "where", "how", "all", "any",
+    "both", "each", "few", "more", "most", "other", "some", "such", "no",
+    "not", "only", "own", "same", "so", "than", "too", "very", "just",
+    "show", "tell", "give", "get", "see", "look", "find", "list",
+}
+
+
+_TREND_SYNONYMS = {
+    "increasing": ["rising", "up", "growing", "higher", "climb"],
+    "decreasing": ["falling", "down", "declining", "lower", "drop"],
+    "stable": ["flat", "steady", "unchanged"],
+}
+
+
+def _extract_terms(text: str) -> set[str]:
+    """Lowercased alphanumeric tokens with stopwords removed.
+
+    Splits camelCase/PascalCase and snake_case so series like
+    ``MaterialCosts`` or ``ScrapRate`` become ``material``, ``costs``,
+    ``scrap``, ``rate``.
+    """
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
+    spaced = re.sub(r"_+", " ", spaced)
+    tokens = set(re.findall(r"[a-z0-9]+", spaced.lower()))
+    return tokens - _STOPWORDS
+
+
+def _trend_word(value: float, threshold: float = 0.02) -> str:
+    """Label a numeric direction as rising/falling/stable."""
+    if value > threshold:
+        return "rising"
+    if value < -threshold:
+        return "falling"
+    return "stable"
+
+
+def _series_trend(
+    series: list[dict[str, Any]],
+    key: str,
+) -> tuple[str, str]:
+    """Return (trend_word, note) for a numeric series.
+
+    Trend is computed by comparing the mean of the first quarter of points to
+    the mean of the last quarter; this is robust to noisy/seasonal data.
+    """
+    values: list[float] = []
+    for point in series:
+        if isinstance(point, dict):
+            raw = point.get(key)
+            if isinstance(raw, int | float):
+                values.append(float(raw))
+    if len(values) < 2:
+        return "stable", "insufficient data"
+    n = max(1, len(values) // 4)
+    first = mean(values[:n])
+    last = mean(values[-n:])
+    if first == 0:
+        delta = 0.0
+    else:
+        delta = (last - first) / abs(first)
+    return _trend_word(delta, threshold=0.05), f"{delta:+.1%}"
+
+
+def _chart_signature(card: dict[str, Any]) -> tuple[str, str, str]:
+    """Build a concise data-shape signature for an insight card.
+
+    Returns (chart_signature, series, trend) strings. These are fed to the
+    LLM selector so it can judge from the actual chart data, not the title.
+    """
+    chart = card.get("chart") if isinstance(card.get("chart"), dict) else {}
+    if not chart:
+        return "", "", ""
+
+    ctype = chart.get("type") or card.get("chartType") or "chart"
+    title = chart.get("title") or ""
+    roles = chart.get("roles") or {}
+    series_labels = chart.get("seriesLabels") or {}
+    x_label = roles.get("x") or series_labels.get("x") or ""
+    y_label = roles.get("y") or series_labels.get("value") or ""
+    y2_label = roles.get("y2") or series_labels.get("value2") or ""
+
+    series = chart.get("data", {}).get("series", [])
+    if not isinstance(series, list):
+        series = []
+
+    y1_trend, _ = _series_trend(series, "value")
+    y2_trend, _ = _series_trend(series, "value2")
+
+    signature_parts = [f"{ctype} chart"]
+    if title:
+        signature_parts.append(f"title={title}")
+    if x_label:
+        signature_parts.append(f"x={x_label}")
+    if y_label:
+        signature_parts.append(f"y={y_label}")
+    if y2_label:
+        signature_parts.append(f"y2={y2_label}")
+
+    chart_signature = "; ".join(signature_parts)
+
+    series_parts: list[str] = []
+    trend_parts: list[str] = []
+    if y_label:
+        series_parts.append(y_label)
+        trend_parts.append(f"{y_label} {y1_trend}")
+    if y2_label:
+        series_parts.append(y2_label)
+        trend_parts.append(f"{y2_label} {y2_trend}")
+
+    return chart_signature, ", ".join(series_parts), ", ".join(trend_parts)
+
+
+def _question_trend_terms(question: str) -> set[str]:
+    """Map trend words in the question to a normalized set."""
+    terms = _extract_terms(question)
+    expanded = set(terms)
+    for term in list(terms):
+        for direction, synonyms in _TREND_SYNONYMS.items():
+            if term == direction or term in synonyms:
+                expanded.update([direction, *synonyms])
+    return expanded
+
+
+def _data_shape_score(question: str, card: dict[str, Any]) -> float:
+    """Score a candidate by overlap between the question and chart data/summary.
+
+    Title is deliberately not part of the score; the model must judge from the
+    chart series, trend, and summary instead.
+    """
+    q_terms = _question_trend_terms(question)
+    if not q_terms:
+        return 0.0
+
+    chart_signature, series, trend = _chart_signature(card)
+    summary = str(card.get("summary") or "")
+    haystack = " ".join([chart_signature, series, trend, summary]).lower()
+    haystack_terms = _extract_terms(haystack)
+
+    # Direct token overlap in series/trend/summary.
+    overlap = len(q_terms & haystack_terms)
+    score = float(overlap)
+
+    # Bonus when a series label directly names a question subject.
+    series_terms = _extract_terms(series)
+    has_subject_in_series = bool(series_terms and q_terms & series_terms)
+    if has_subject_in_series:
+        score += 2.0
+
+    # Trend-direction bonus only when the subject is also present.
+    q_direction_terms: set[str] = set()
+    for direction, synonyms in _TREND_SYNONYMS.items():
+        if direction in q_terms or any(s in q_terms for s in synonyms):
+            q_direction_terms.add(direction)
+            q_direction_terms.update(synonyms)
+    trend_terms = _extract_terms(trend)
+    if has_subject_in_series and q_direction_terms and (q_direction_terms & trend_terms):
+        score += 1.5
+
+    return score
+
+
+def _enriched_candidate(card: dict[str, Any]) -> dict[str, str]:
+    """Candidate dict for the AI selector, including chart data shape."""
+    chart_signature, series, trend = _chart_signature(card)
+    return {
+        "insight_id": str(card.get("insightId")),
+        "title": str(card.get("title") or ""),
+        "summary": str(card.get("summary") or ""),
+        "chart_signature": chart_signature,
+        "series": series,
+        "trend": trend,
+    }
 
 
 async def _cards_for_projects(
@@ -161,15 +347,15 @@ async def _select_from_candidates(
     if not pairs or not ai_intelligence_client.is_enabled():
         return None
 
-    bounded = pairs[:_MAX_CANDIDATES]
-    candidates = [
-        {
-            "insight_id": str(card.get("insightId")),
-            "title": str(card.get("title") or ""),
-            "summary": str(card.get("summary") or ""),
-        }
-        for _pid, card in bounded
-    ]
+    # Order candidates by data-shape overlap so the LLM sees the strongest
+    # chart/trend matches first, without relying on title.
+    scored = sorted(
+        pairs,
+        key=lambda pair: _data_shape_score(question, pair[1]),
+        reverse=True,
+    )
+    bounded = scored[:_MAX_CANDIDATES]
+    candidates = [_enriched_candidate(card) for _pid, card in bounded]
 
     try:
         decision = await ai_intelligence_client.select_matching_insight_card(

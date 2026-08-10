@@ -16,45 +16,46 @@ cards. Pick at most one existing card exactly as given, or decline.
 
 ## Decision rules
 
-1. A card's own title is the strongest signal that it is about the question's
-   topic. A card titled directly after the subject of the question ("Material
-   Cost Over Time Indicates Potential Risks" for "why is material cost
-   increasing") is a far stronger match than a card that only mentions the
-   same words in passing within a longer summary about a different subject
-   ("Vendor Spend Trends Indicate Potential Cost Optimization Opportunities"
-   merely touching on cost).
-2. Prefer specificity over incidental overlap. A card sharing one word with
-   the question is not evidence of a match by itself — judge whether the card
-   is actually about what was asked, not just whether it contains matching
-   vocabulary.
-3. Decline (return no card) when no candidate is genuinely about the
-   question's subject. A vague, tangential, or partial match is worse than
-   admitting nothing existing answers it — the platform falls back to a
-   different path when you decline, so declining is always safe.
-4. Never pick a card because it is the only one provided. "Best of a bad set"
-   is still a decline if none of them are actually on-topic.
-5. Give a one-sentence reason either way, grounded in the specific card
-   title/summary text you compared against the question — never a generic
-   restatement like "this card is relevant."
+1. **Do NOT rely on the card title.** Titles are marketing-style labels and
+can be misleading. The strongest signal is the card's actual **chart data
+shape**: the `chart_signature`, the `series` names, and the `trend` direction
+computed from the data points.
+2. A card answers the question only when its chart series and trend directly
+match the question's subject and direction. "Why is material cost increasing?"
+requires a card whose series is named `MaterialCosts` (or an unambiguous
+synonym like `AveragePrice`/`DirectMaterial`) and whose trend is `rising`. A
+card whose series is `ScrapRate` is not a match, even if the title contains the
+word "material" or "scrap".
+3. Prefer specificity over incidental overlap. A card sharing one word with
+the question is not evidence of a match by itself — judge whether the card's
+chart is actually about what was asked.
+4. Decline (return no card) when no candidate's chart series and trend genuinely
+match the question's subject and direction. A vague, tangential, or partial
+match is worse than admitting nothing existing answers it.
+5. Never pick a card because it is the only one provided. "Best of a bad set"
+is still a decline if none of them are actually on-topic.
+6. Give a one-sentence reason either way, grounded in the specific
+`series`/`trend` you compared against the question — never a generic
+restatement like "this card is relevant."
 
 ## Examples (fictional data — never copy their wording into your output)
 
 Question: "why is material cost increasing?"
 Candidates:
-- id=c1 title="Material Cost Over Time Indicates Potential Risks" summary="Material cost has risen month over month; the trend correlates with a known supplier issue."
-- id=c2 title="Vendor Spend Trends Indicate Potential Cost Optimization Opportunities" summary="Category-level vendor spend trends, including material and indirect cost categories, tracked over the last four quarters."
+- id=c1 title="Rising Material Costs Outpacing Declining Scrap Rates" chart_signature="combo chart; x=Period; y=MaterialCosts; y2=ScrapRate" series="MaterialCosts, ScrapRate" trend="MaterialCosts rising, ScrapRate falling" summary="Material costs are increasing while scrap rates are decreasing, indicating a potential risk to profitability."
+- id=c2 title="Scrap Rate Trend Indicates Quality Control Issues" chart_signature="line chart; x=Period; y=ScrapRate" series="ScrapRate" trend="ScrapRate rising" summary="Scrap rate in June 2026 is 105.10%, indicating significant quality control issues."
 ->
-{"insightId": "c1", "confidence": 0.9, "reason": "c1's own title names material cost directly and its summary describes the same rising trend; c2 is about vendor spend broadly and only mentions material cost in passing."}
+{"insightId": "c1", "confidence": 0.92, "reason": "c1's series MaterialCosts has a rising trend, which directly matches the question's subject and direction; c2 is only about ScrapRate."}
 
 Question: "what is driving the drop in on-time delivery?"
 Candidates:
-- id=c1 title="Warehouse Utilization Nearing Capacity" summary="Storage utilization across three warehouses is above 85%."
-- id=c2 title="Q2 Headcount Summary" summary="Current headcount by department for Q2."
+- id=c1 title="Warehouse Utilization Nearing Capacity" chart_signature="line chart; x=Period; y=Utilization" series="Utilization" trend="Utilization rising" summary="Storage utilization across three warehouses is above 85%."
+- id=c2 title="Q2 Headcount Summary" chart_signature="bar chart; x=Department; y=Headcount" series="Headcount" trend="Headcount stable" summary="Current headcount by department for Q2."
 ->
-{"insightId": null, "confidence": 0.0, "reason": "Neither candidate is about on-time delivery or its drivers; declining rather than forcing an unrelated match."}
+{"insightId": null, "confidence": 0.0, "reason": "Neither candidate's series is about on-time delivery or its drivers; declining rather than forcing an unrelated match."}
 
 Question: "show me backup jobs by system"
 Candidates:
-- id=c1 title="Backup Jobs by System: Potential Backup Job Overload" summary="Backup job counts grouped by system, flagging systems above the expected job count."
+- id=c1 title="Backup Jobs by System: Potential Backup Job Overload" chart_signature="bar chart; x=System; y=JobCount" series="JobCount" trend="JobCount stable" summary="Backup job counts grouped by system, flagging systems above the expected job count."
 ->
-{"insightId": "c1", "confidence": 0.85, "reason": "c1 is titled and scoped exactly to backup jobs by system, the same grouping the question asks for."}
+{"insightId": "c1", "confidence": 0.88, "reason": "c1's series JobCount by System matches the question's requested grouping and subject."}
