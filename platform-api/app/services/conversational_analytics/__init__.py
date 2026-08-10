@@ -357,44 +357,12 @@ async def execute_turn(
         if card_matches:
             primary = card_matches[0]
             related = card_matches[1:]
-            # State plainly that a fresh live query failed, and why, so a
-            # real regression on a question that should trivially succeed
-            # (a plain "show me X by Y" lookup) never hides behind a
-            # good-looking card citation. But do not phrase it so the failure
-            # reads as "I couldn't find an answer" — a card WAS found and
-            # does answer the question; that has to be the sentence's actual
-            # subject, with the live-query failure stated as its own fact
-            # alongside it rather than swallowing it.
-            reason = (
-                "I couldn't build a live query for this question"
-                if run.get("status") == "generation_error"
-                else "I couldn't run a live query against your data just now"
-            )
-            # _ai_generation_error()'s "friendly" message defaults to a
-            # generic string ("We could not safely build a query for this
-            # question.") in exactly the cases that most need a real reason
-            # -- e.g. the AI server being unreachable -- because the actual
-            # detail only lands in errorDetails.validationError, which
-            # nothing surfaces anywhere visible. Include it (still no raw
-            # stack traces or dict reprs reach here -- both fields are
-            # already sanitized by _ai_generation_error before this point).
-            error_details = run.get("errorDetails")
-            validation_error = (
-                error_details.get("validationError")
-                if isinstance(error_details, dict)
-                else None
-            )
-            # Dedupe in case the friendly message and the validation detail
-            # happen to be identical (e.g. a plain string HTTPException
-            # detail with no dict wrapper flows into both) -- dict.fromkeys
-            # dedupes while preserving order, unlike a set.
-            detail_bits = list(dict.fromkeys(
-                d for d in (run.get("error"), validation_error) if d
-            ))
-            detail_suffix = f" ({'; '.join(detail_bits)})" if detail_bits else ""
+            # Keep the fallback message focused on the existing analysis the
+            # user can act on. The live-query failure reason is still captured
+            # in result_metadata for debugging, but it is not user-facing text.
             turn.assistant_message = (
-                f"{reason}{detail_suffix}. I found an existing analysis "
-                f"that answers this: **{primary.title}**"
+                f"I found an existing analysis that answers this: "
+                f"**{primary.title}**"
             )
             if primary.summary:
                 turn.assistant_message += f"\n\n{primary.summary}"
@@ -440,7 +408,7 @@ async def execute_turn(
             turn.result_metadata = {
                 "fallbackReason": run.get("status"),
                 "fallbackError": run.get("error"),
-                "fallbackErrorDetails": error_details,
+                "fallbackErrorDetails": run.get("errorDetails"),
                 "insightCardScores": [m.score for m in card_matches],
             }
             turn.status = "success"
