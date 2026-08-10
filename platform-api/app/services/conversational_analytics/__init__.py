@@ -15,7 +15,12 @@ from app.services.ai_intelligence_client import AIUnavailableError as AIUnavaila
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
 )
-from app.services.insight_card_match import find_matching_insight_cards
+from app.services.insight_card_match import (
+    _extract_terms as _extract_insight_terms,
+)
+from app.services.insight_card_match import (
+    find_matching_insight_cards,
+)
 from app.services.project_ai_context import build_project_ai_context
 
 from .chart_field_selection import _SUBTYPE_LABELS as _SUBTYPE_LABELS
@@ -105,6 +110,43 @@ def _format_context_prompt(project_context: dict[str, Any] | None) -> str:
         parts.append("Risks: " + ", ".join(r["title"] for r in risks[:5] if r.get("title")))
     parts.append("--- End project context ---")
     return "\n".join(parts)[:1200]
+
+
+def _live_query_score(
+    question: str,
+    result_cache: dict[str, Any],
+    data_sources: list[str],
+) -> float:
+    """Score how directly a live result answers the question.
+
+    Returns a 0-1 value based on term overlap between the question and the
+    result columns, source names, and a few sample values. A high score means
+    the live query already covers the user's topic; a low score means the
+    result may be generic or off-topic, so a matched Insight Card can add
+    grounded analysis.
+    """
+    q_terms = _extract_insight_terms(question)
+    if not q_terms:
+        return 0.0
+
+    columns = result_cache.get("columns") or []
+    rows = result_cache.get("rows") or []
+    sample_values: list[str] = []
+    for row in rows[:3]:
+        for v in row.values():
+            if isinstance(v, str | int | float):
+                sample_values.append(str(v))
+
+    haystack = " ".join(
+        [str(c) for c in columns]
+        + [str(s) for s in data_sources]
+        + sample_values
+    )
+    h_terms = _extract_insight_terms(haystack)
+    overlap = len(q_terms & h_terms)
+    if not overlap:
+        return 0.1 if rows else 0.0
+    return min(1.0, overlap / len(q_terms))
 
 
 async def _run_analytical_turn(
@@ -490,3 +532,54 @@ async def execute_turn(
     turn.datasource_context = {"dataSourcesUsed": run.get("dataSourcesUsed", [])}
     turn.assistant_message = run.get("explanation") or _answer_text(columns, bounded_rows)
     turn.status = "success"
+
+    # If the live result is on-topic but there is a strong, precomputed Insight
+    # Card that adds deeper grounded analysis, return both. The Insight Card is
+    # surfaced below the live chart so the user gets the fresh numbers plus the
+    # existing diagnostics and proposed actions.
+    live_score = _live_query_score(
+        question, result_cache, run.get("dataSourcesUsed") or []
+    )
+    if live_score < 0.95:
+        insight_matches = await find_matching_insight_cards(
+            session,
+            context=context,
+            tenant_id=context.tenant_id,
+            project_id=project_id,
+            question=question,
+            allow_cross_project=conversation.surface != "project_insights",
+            max_cards=2,
+            use_llm=False,
+        )
+        if insight_matches:
+            primary = insight_matches[0]
+            normalized_insight_score = min(1.0, (primary.score or 0.0) / 4.0)
+            if normalized_insight_score >= 0.65 and normalized_insight_score > live_score:
+                related = insight_matches[1:]
+                turn.matched_insight = {
+                    "insightId": primary.insight_id,
+                    "projectId": primary.project_id,
+                    "projectName": primary.project_name,
+                    "title": primary.title,
+                    "summary": primary.summary,
+                    "chart": primary.chart,
+                    "severity": primary.severity,
+                    "diagnostics": primary.diagnostics,
+                    "proposedActions": primary.proposed_actions,
+                    "score": primary.score,
+                    "relatedInsights": [
+                        {
+                            "insightId": m.insight_id,
+                            "projectId": m.project_id,
+                            "projectName": m.project_name,
+                            "title": m.title,
+                            "summary": m.summary,
+                            "chart": m.chart,
+                            "severity": m.severity,
+                            "diagnostics": m.diagnostics,
+                            "proposedActions": m.proposed_actions,
+                            "score": m.score,
+                        }
+                        for m in related
+                    ],
+                }

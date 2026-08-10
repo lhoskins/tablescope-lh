@@ -363,16 +363,19 @@ async def _select_from_candidates(
     question: str,
     pairs: list[tuple[int, dict[str, Any]]],
     max_cards: int = 3,
+    use_llm: bool = True,
 ) -> list[InsightCardMatch]:
     """Return the best matching insight card(s) for ``question``.
 
-    The primary match is chosen by the LLM selector from the top data-shape
-    candidates; secondary matches are added from the same ranked list when
-    their score is close to the primary's score. This lets a single question
-    surface both the trend and the risk/combo cards that together answer it.
+    When ``use_llm`` is true, the primary match is chosen by the LLM selector
+    from the top data-shape candidates. Secondary matches are added from the same
+    ranked list when their score is close to the primary's score. When
+    ``use_llm`` is false, the function returns the top data-shape matches
+    directly without an LLM call (used to cheaply suggest related cards
+    alongside a successful live query result).
     """
     matches: list[InsightCardMatch] = []
-    if not pairs or not ai_intelligence_client.is_enabled():
+    if not pairs:
         return matches
 
     # Order candidates by data-shape overlap so the LLM sees the strongest
@@ -381,21 +384,23 @@ async def _select_from_candidates(
     if not scored:
         return matches
 
-    bounded = scored[:_MAX_CANDIDATES]
-    candidates = [_enriched_candidate(card) for _score, _pid, card in bounded]
-
     primary: InsightCardMatch | None = None
-    try:
-        decision = await ai_intelligence_client.select_matching_insight_card(
-            tenant_id=tenant_id,
-            user_id=context.user_id,
-            project_id=project_id,
-            question=question,
-            candidates=candidates,
-        )
-    except AIUnavailableError as exc:
-        logger.warning("Insight-card match selector unavailable: %s", exc)
-        decision = None
+    decision: dict[str, Any] | None = None
+    if use_llm and ai_intelligence_client.is_enabled():
+        bounded = scored[:_MAX_CANDIDATES]
+        candidates = [_enriched_candidate(card) for _score, _pid, card in bounded]
+
+        try:
+            decision = await ai_intelligence_client.select_matching_insight_card(
+                tenant_id=tenant_id,
+                user_id=context.user_id,
+                project_id=project_id,
+                question=question,
+                candidates=candidates,
+            )
+        except AIUnavailableError as exc:
+            logger.warning("Insight-card match selector unavailable: %s", exc)
+            decision = None
 
     chosen_id = (decision or {}).get("insight_id") if decision else None
     if chosen_id:
@@ -459,6 +464,7 @@ async def find_matching_insight_cards(
     question: str,
     allow_cross_project: bool = True,
     max_cards: int = 3,
+    use_llm: bool = True,
 ) -> list[InsightCardMatch]:
     """Best-matching cached insight cards the caller can reach.
 
@@ -503,6 +509,7 @@ async def find_matching_insight_cards(
         question=question,
         pairs=pairs,
         max_cards=max_cards,
+        use_llm=use_llm,
     )
 
 
