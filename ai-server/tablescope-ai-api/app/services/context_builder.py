@@ -225,6 +225,21 @@ async def build_context(
     # 6. Document families (family-aware retrieval)
     document_families = perms.get("document_families", [])
 
+    # 7. Grounding evidence extras (insight snapshots, network repos, reference docs)
+    insight_snapshots = []
+    network_connections = []
+    reference_documents = []
+    if grounding_evidence:
+        insight_snapshots = [
+            s.model_dump(exclude_none=True) for s in grounding_evidence.insight_snapshots or []
+        ]
+        network_connections = [
+            c.model_dump(exclude_none=True) for c in grounding_evidence.network_connections or []
+        ]
+        reference_documents = [
+            d.model_dump(exclude_none=True) for d in grounding_evidence.reference_documents or []
+        ]
+
     # Build context package
     context = ContextPackage(
         tenant_id=tenant_id,
@@ -241,6 +256,9 @@ async def build_context(
             "graph_nodes": graph_nodes,
             "graph_edges": graph_edges,
             "document_families": document_families,
+            "insight_snapshots": insight_snapshots,
+            "network_connections": network_connections,
+            "reference_documents": reference_documents,
             "memories": [],
         },
         retrieval_filters={
@@ -386,5 +404,62 @@ def context_to_prompt_text(context: ContextPackage) -> str:
             if kpi.business_domain:
                 line += f" ({kpi.business_domain})"
             parts.append(line)
+
+    # Precomputed insight snapshots (Business/Project Insight cards)
+    if context.allowed_context.get("insight_snapshots"):
+        parts.append("\nPrecomputed insight snapshots (answer from these when relevant):")
+        for snap in context.allowed_context["insight_snapshots"]:
+            title = snap.get("title", "unknown")
+            project = snap.get("project_name") or f"project {snap.get('project_id')}"
+            ctype = snap.get("chart_type", "chart")
+            series = ", ".join(snap.get("series", []))
+            trend = snap.get("trend", "")
+            line = f"  - {title} ({project})"
+            if snap.get("card_type"):
+                line += f" [{snap['card_type']}]"
+            parts.append(line)
+            if snap.get("summary"):
+                parts.append(f"      summary: {snap['summary'][:200]}")
+            if series:
+                parts.append(f"      chart: {ctype} with series {series}")
+            if trend:
+                parts.append(f"      trend: {trend}")
+            if snap.get("result_preview"):
+                parts.append(f"      recorded values:\n{snap['result_preview']}")
+            if snap.get("sql"):
+                parts.append(f"      SQL:\n```sql\n{snap['sql'][:500]}\n```")
+
+    # Network file connections
+    if context.allowed_context.get("network_connections"):
+        parts.append("\nApproved network file connections:")
+        for conn in context.allowed_context["network_connections"]:
+            line = f"  - {conn.get('name', 'unknown')}: {conn.get('protocol', 'smb')}://{conn.get('host')}/{conn.get('share_name')}"
+            root = conn.get("approved_root_path")
+            if root:
+                line += f" path={root}"
+            parts.append(line)
+
+    # Reference Library documents
+    if context.allowed_context.get("reference_documents"):
+        parts.append("\nReference Library documents:")
+        for doc in context.allowed_context["reference_documents"]:
+            title = doc.get("title", "unknown")
+            tier = doc.get("tier", "")
+            domain = doc.get("domain_tag") or ""
+            line = f"  - {title}"
+            if tier:
+                line += f" ({tier}"
+                if domain:
+                    line += f", domain={domain}"
+                line += ")"
+            elif domain:
+                line += f" (domain={domain})"
+            parts.append(line)
+            summary = doc.get("ai_summary")
+            if summary:
+                parts.append(f"      summary: {summary[:300]}")
+            source_url = doc.get("source_url")
+            if source_url:
+                parts.append(f"      source: {source_url}")
 
     return "\n".join(parts)

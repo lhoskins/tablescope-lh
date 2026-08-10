@@ -26,6 +26,86 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _format_data_result(question: str, data: dict[str, Any]) -> str:
+    """Render an executed query result as a grounded block for the LLM."""
+    lines: list[str] = ["LIVE QUERY RESULT", f"User question: {question}", ""]
+
+    sql = data.get("sql") or data.get("query")
+    if sql:
+        lines.append(f"SQL: {sql}")
+
+    columns = data.get("columns") or []
+    rows = data.get("rows") or []
+    row_count = data.get("rowCount") or len(rows)
+    truncated = data.get("truncated")
+    if columns:
+        lines.append(f"Columns: {', '.join(str(c) for c in columns)}")
+    if row_count:
+        lines.append(f"Row count: {row_count}{' (truncated)' if truncated else ''}")
+
+    if rows:
+        lines.append("Rows:")
+        for row in rows[:20]:
+            if isinstance(row, dict):
+                lines.append(
+                    "  - " + ", ".join(f"{k}={v}" for k, v in row.items())
+                )
+            else:
+                lines.append(f"  - {row}")
+
+    viz = data.get("suggestedVisualization") or data.get("chart_config") or {}
+    if viz.get("type"):
+        lines.append(f"Suggested chart: {viz['type']}")
+        if viz.get("xField"):
+            lines.append(f"  x: {viz['xField']}")
+        if viz.get("yField"):
+            lines.append(f"  y: {viz['yField']}")
+        if viz.get("y2Field"):
+            lines.append(f"  y2: {viz['y2Field']}")
+
+    return "\n".join(lines)
+
+
+def _format_matched_insights(question: str, insights: list[dict[str, Any]]) -> str:
+    """Render matched insight card(s) as a grounded block for the LLM."""
+    lines: list[str] = ["MATCHED INSIGHT CARD ANALYSIS", f"User question: {question}", ""]
+    for idx, insight in enumerate(insights[:6], 1):
+        title = insight.get("title") or "Untitled"
+        project = insight.get("projectName") or f"project {insight.get('projectId')}"
+        lines.append(f"{idx}. {title} ({project})")
+        if insight.get("summary"):
+            lines.append(f"   Summary: {insight['summary'][:400]}")
+        if insight.get("card_type") or insight.get("type"):
+            lines.append(f"   Type: {insight.get('card_type') or insight.get('type')}")
+        chart = insight.get("chart") or {}
+        if chart.get("type"):
+            lines.append(f"   Chart: {chart['type']}")
+        if insight.get("series"):
+            lines.append(f"   Series: {', '.join(str(s) for s in insight['series'])}")
+        if insight.get("trend"):
+            lines.append(f"   Trend: {insight['trend']}")
+        if insight.get("diagnostics"):
+            lines.append("   Diagnostics:")
+            for d in insight["diagnostics"][:5]:
+                if isinstance(d, dict):
+                    lines.append(f"      - {d.get('title', '')}: {d.get('detail', '')}")
+                else:
+                    lines.append(f"      - {d}")
+        if insight.get("proposedActions"):
+            lines.append("   Proposed actions:")
+            for a in insight["proposedActions"][:5]:
+                if isinstance(a, dict):
+                    lines.append(f"      - {a.get('title', '')}: {a.get('detail', '')}")
+                else:
+                    lines.append(f"      - {a}")
+        if insight.get("result_preview"):
+            lines.append(f"   Recorded values:\n{insight['result_preview']}")
+        if insight.get("sql"):
+            lines.append(f"   SQL:\n```sql\n{insight['sql'][:500]}\n```")
+        lines.append("")
+    return "\n".join(lines)
+
+
 @router.post("/ask", response_model=AskResponse)
 async def ask(req: AskRequest) -> AskResponse:
     """Ask Tablescope AI a question about the active project."""
@@ -59,7 +139,29 @@ async def ask(req: AskRequest) -> AskResponse:
     if kg_block:
         context_text = f"{context_text}\n\n{kg_block}"
     history_text = _format_conversation_history(req.history)
-    prompt = f"{context_text}\n\n{history_text}User question: {req.question}"
+
+    # Synthesize an answer from a live query result and/or matched insight card(s)
+    # when the app has already done the analytical work. Otherwise fall through
+    # to the normal document/KG-grounded prose path.
+    grounded_block = ""
+    if req.data_result:
+        grounded_block = _format_data_result(req.question, req.data_result)
+    if req.matched_insights:
+        insight_block = _format_matched_insights(req.question, req.matched_insights)
+        grounded_block = f"{grounded_block}\n\n{insight_block}".strip()
+
+    if grounded_block:
+        prompt = (
+            f"{context_text}\n\n{grounded_block}\n\n"
+            f"{history_text}"
+            f"User question: {req.question}\n\n"
+            "Answer the user's question using ONLY the live query result and/or "
+            "matched insight card analysis shown above. Cite specific numbers, "
+            "trends, and chart series. Do not invent data or SQL that is not shown. "
+            "Keep the answer concise and conversational."
+        )
+    else:
+        prompt = f"{context_text}\n\n{history_text}User question: {req.question}"
 
     answer = await llm_client.generate(
         prompt=prompt,

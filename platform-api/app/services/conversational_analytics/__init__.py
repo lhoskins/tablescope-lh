@@ -186,6 +186,76 @@ async def _run_analytical_turn(
     return run
 
 
+def _data_result_for_synthesis(
+    result_cache: dict[str, Any],
+    chart_config: dict[str, Any],
+    sql: str | None,
+    data_sources_used: list[str],
+) -> dict[str, Any]:
+    """Shape the executed result into a block the AI server can synthesize."""
+    data: dict[str, Any] = {
+        "columns": result_cache.get("columns", []),
+        "rows": result_cache.get("rows", []),
+        "rowCount": result_cache.get("rowCount", 0),
+        "truncated": result_cache.get("truncated", False),
+        "sql": sql or "",
+        "dataSourcesUsed": data_sources_used,
+    }
+    if chart_config:
+        data["chart_config"] = chart_config
+    return data
+
+
+def _matched_insight_dict(m: Any) -> dict[str, Any]:
+    """Serialize an InsightCardMatch (or related dict) for the AI server."""
+    if isinstance(m, dict):
+        return m
+    return {
+        "insightId": m.insight_id,
+        "projectId": m.project_id,
+        "projectName": m.project_name,
+        "title": m.title,
+        "summary": m.summary,
+        "chart": m.chart,
+        "severity": m.severity,
+        "diagnostics": m.diagnostics,
+        "proposedActions": m.proposed_actions,
+        "score": m.score,
+    }
+
+
+async def _synthesize_answer(
+    context: RequestContext,
+    project_id: int,
+    question: str,
+    *,
+    data_result: dict[str, Any] | None = None,
+    matched_insights: list[dict[str, Any]] | None = None,
+) -> str | None:
+    """Ask the LLM to synthesize the final answer from data and/or insight cards.
+
+    Returns ``None`` when the AI server is unavailable so callers can fall back
+    to deterministic text.
+    """
+    try:
+        response = await ai_intelligence_client.ask(
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            project_id=project_id,
+            question=question,
+            scope="project",
+            data_result=data_result,
+            matched_insights=matched_insights,
+        )
+        if response and response.get("answer"):
+            return str(response["answer"]).strip()
+    except AIUnavailableError:
+        logger.warning("AI answer synthesis unavailable; using deterministic fallback")
+    except Exception as exc:
+        logger.warning("Answer synthesis failed: %s", exc)
+    return None
+
+
 async def execute_turn(
     session: AsyncSession,
     context: RequestContext,
@@ -357,20 +427,14 @@ async def execute_turn(
         if card_matches:
             primary = card_matches[0]
             related = card_matches[1:]
-            # Keep the fallback message focused on the existing analysis the
-            # user can act on. The live-query failure reason is still captured
-            # in result_metadata for debugging, but it is not user-facing text.
-            turn.assistant_message = (
-                f"I found an existing analysis that answers this: "
-                f"**{primary.title}**"
-            )
-            if primary.summary:
-                turn.assistant_message += f"\n\n{primary.summary}"
             turn.chart_config = None
             turn.result_cache = None
             turn.sql = None
             turn.sql_fingerprint = None
             turn.datasource_context = {"dataSourcesUsed": []}
+            matched_insights = [_matched_insight_dict(primary)] + [
+                _matched_insight_dict(m) for m in related
+            ]
             turn.matched_insight = {
                 "insightId": primary.insight_id,
                 "projectId": primary.project_id,
@@ -398,6 +462,20 @@ async def execute_turn(
                     for m in related
                 ],
             }
+            # Keep the fallback message focused on the existing analysis the
+            # user can act on. The live-query failure reason is still captured
+            # in result_metadata for debugging, but it is not user-facing text.
+            synthesized = await _synthesize_answer(
+                context,
+                project_id,
+                question,
+                matched_insights=matched_insights,
+            )
+            turn.assistant_message = (
+                synthesized
+                or f"I found an existing analysis that answers this: **{primary.title}**"
+                + (f"\n\n{primary.summary}" if primary.summary else "")
+            )
             # Machine-readable trail for debugging why the live path failed,
             # even though the turn itself completed successfully from the
             # user's point of view. error_code is intentionally set despite
@@ -498,13 +576,13 @@ async def execute_turn(
         turn.sql, result_cache, chart_config, governance=post_decision.to_explanation_dict()
     )
     turn.datasource_context = {"dataSourcesUsed": run.get("dataSourcesUsed", [])}
-    turn.assistant_message = run.get("explanation") or _answer_text(columns, bounded_rows)
     turn.status = "success"
 
     # If the live result is on-topic but there is a strong, precomputed Insight
     # Card that adds deeper grounded analysis, return both. The Insight Card is
     # surfaced below the live chart so the user gets the fresh numbers plus the
     # existing diagnostics and proposed actions.
+    matched_insights_for_synthesis: list[dict[str, Any]] | None = None
     live_score = _live_query_score(
         question, result_cache, run.get("dataSourcesUsed") or []
     )
@@ -551,3 +629,22 @@ async def execute_turn(
                         for m in related
                     ],
                 }
+                matched_insights_for_synthesis = [_matched_insight_dict(primary)] + [
+                    _matched_insight_dict(m) for m in related
+                ]
+
+    data_result = _data_result_for_synthesis(
+        result_cache, chart_config, turn.sql, run.get("dataSourcesUsed") or []
+    )
+    synthesized = await _synthesize_answer(
+        context,
+        project_id,
+        question,
+        data_result=data_result,
+        matched_insights=matched_insights_for_synthesis,
+    )
+    turn.assistant_message = (
+        synthesized
+        or run.get("explanation")
+        or _answer_text(columns, bounded_rows)
+    )
