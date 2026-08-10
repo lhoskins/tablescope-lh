@@ -120,6 +120,17 @@ _TREND_SYNONYMS = {
     "stable": ["flat", "steady", "unchanged"],
 }
 
+# Generic measure words that appear across many unrelated series; matching on
+# these alone (e.g. "cost") is not enough to say a card answers the subject.
+_GENERIC_SUBJECT_TERMS = {
+    "cost", "costs", "rate", "rates", "amount", "value", "values", "total",
+    "count", "number", "time", "date", "id", "name", "job", "jobs",
+    "system", "systems", "type", "types", "category", "categories", "item",
+    "items", "status", "code", "level", "metric", "quantity", "qty",
+    "score", "scores", "index", "percent", "percentage", "avg", "average",
+    "min", "max", "sum", "data", "info",
+}
+
 
 def _extract_terms(text: str) -> set[str]:
     """Lowercased alphanumeric tokens with stopwords removed.
@@ -233,6 +244,17 @@ def _question_trend_terms(question: str) -> set[str]:
     return expanded
 
 
+def _question_subject_terms(question: str) -> set[str]:
+    """Return the subject-specific (non-generic, non-direction) tokens."""
+    q_terms = _extract_terms(question)
+    direction_terms: set[str] = set()
+    for direction, synonyms in _TREND_SYNONYMS.items():
+        if direction in q_terms or any(s in q_terms for s in synonyms):
+            direction_terms.add(direction)
+            direction_terms.update(synonyms)
+    return q_terms - direction_terms - _GENERIC_SUBJECT_TERMS
+
+
 def _data_shape_score(question: str, card: dict[str, Any]) -> float:
     """Score a candidate by overlap between the question and chart data/summary.
 
@@ -252,13 +274,16 @@ def _data_shape_score(question: str, card: dict[str, Any]) -> float:
     overlap = len(q_terms & haystack_terms)
     score = float(overlap)
 
-    # Bonus when a series label directly names a question subject.
+    # Bonus only when a series label contains a specific question subject.
+    # Generic terms like "cost" or "rate" alone do not count as a subject match.
+    subject_terms = _question_subject_terms(question)
     series_terms = _extract_terms(series)
-    has_subject_in_series = bool(series_terms and q_terms & series_terms)
+    matching_subjects = subject_terms & series_terms
+    has_subject_in_series = bool(subject_terms and matching_subjects)
     if has_subject_in_series:
-        score += 2.0
+        score += 2.0 + len(matching_subjects)
 
-    # Trend-direction bonus only when the subject is also present.
+    # Trend-direction bonus only when the specific subject is also present.
     q_direction_terms: set[str] = set()
     for direction, synonyms in _TREND_SYNONYMS.items():
         if direction in q_terms or any(s in q_terms for s in synonyms):

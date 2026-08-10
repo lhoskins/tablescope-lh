@@ -195,14 +195,12 @@ async def test_generation_error_surfaces_matching_insight_card_over_prose(
     assert turn["sql"] is None
     assert turn["chart_config"] is None
 
-    # The message must state plainly that a fresh live query failed (a
-    # regression on a question simple enough to trivially succeed must never
-    # hide behind a good-looking card citation) *and* that a card was found
-    # that answers it -- not phrased so the failure reads as "nothing was
-    # found" when a card genuinely does answer the question.
-    assert "couldn't build a live query" in turn["assistant_message"]
+    # The failure reason is server-side metadata only; the user-facing message
+    # should be clean and focused on the existing Insight Card answer.
+    assert "couldn't build a live query" not in turn["assistant_message"]
     assert "I found an existing analysis that answers this" in turn["assistant_message"]
     assert turn["error_code"] == "live_query_fallback_generation_error"
+    assert turn["result_metadata"]["fallbackError"] == "no source matched"
 
 
 async def test_matched_insight_fallback_surfaces_ai_server_unavailable_detail(
@@ -269,8 +267,11 @@ async def test_matched_insight_fallback_surfaces_ai_server_unavailable_detail(
     assert r.status_code == 200, r.text
     turn = r.json()["turns"][0]
     assert turn["status"] == "success"
-    assert "AI server is unavailable" in turn["assistant_message"]
     assert turn["matched_insight"]["insightId"] == "backup-001"
+    # The AI-server outage detail is surfaced in result_metadata for
+    # troubleshooting, not in the user-facing assistant message.
+    assert "AI server is unavailable" not in turn["assistant_message"]
+    assert turn["result_metadata"]["fallbackErrorDetails"]["validationError"] == "AI server is unavailable"
 
 
 async def test_list_and_get_conversations(client, service_headers, monkeypatch):

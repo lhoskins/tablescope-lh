@@ -41,6 +41,48 @@ class GroundingKPI(BaseModel):
     match_score: float = 0.0
 
 
+class GroundingInsightSnapshot(BaseModel):
+    """A precomputed insight card from Business or Project Insight snapshots."""
+
+    insight_id: str = ""
+    project_id: int | None = None
+    project_name: str = ""
+    title: str = ""
+    summary: str = ""
+    card_type: str = ""
+    sql: str = ""
+    result_preview: str = ""
+    chart_type: str = ""
+    series: list[str] = Field(default_factory=list)
+    trend: str = ""
+    retrieval_score: float = 0.0
+
+
+class GroundingNetworkConnection(BaseModel):
+    """An approved SMB/UNC network file connection available to the project."""
+
+    id: int | None = None
+    name: str = ""
+    protocol: str = ""
+    host: str = ""
+    share_name: str = ""
+    approved_root_path: str = ""
+    domain: str | None = None
+    enabled: bool = True
+
+
+class GroundingReferenceDocument(BaseModel):
+    """A Reference Library document profiled by AI, surfaced for grounding."""
+
+    id: int | None = None
+    title: str = ""
+    ai_summary: str = ""
+    tier: str = ""
+    domain_tag: str | None = None
+    source_url: str | None = None
+    retrieval_score: float = 0.0
+
+
 class GroundingEvidence(BaseModel):
     """Bundle of evidence retrieved to ground an AI answer."""
 
@@ -48,6 +90,9 @@ class GroundingEvidence(BaseModel):
     passages: list[GroundingPassage] = Field(default_factory=list)
     kg_nodes: list[GroundingKGNode] = Field(default_factory=list)
     kpis: list[GroundingKPI] = Field(default_factory=list)
+    insight_snapshots: list[GroundingInsightSnapshot] = Field(default_factory=list)
+    network_connections: list[GroundingNetworkConnection] = Field(default_factory=list)
+    reference_documents: list[GroundingReferenceDocument] = Field(default_factory=list)
     retrieved_at: datetime = Field(default_factory=datetime.utcnow)
     kg_version_id: int | None = None
 

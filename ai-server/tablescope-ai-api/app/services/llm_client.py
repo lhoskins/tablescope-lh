@@ -110,6 +110,10 @@ _TEIID_RULES = (
     "expression that is already a date/timestamp (e.g. do NOT write "
     "PARSETIMESTAMP(PARSETIMESTAMP(\"Month\", 'yyyy-MM-dd'), 'M/d/yyyy')). "
     "Use the exact same date expression in SELECT, GROUP BY, and ORDER BY.\n"
+    "16. Generate a single SELECT statement. Do NOT use UNION or UNION ALL "
+    "unless the user explicitly asks to combine rows from two different tables. "
+    "Never place ORDER BY inside a UNION branch; in Teiid ORDER BY is only "
+    "valid at the very end of the entire query.\n"
 )
 
 _SEMANTIC_RULES = (

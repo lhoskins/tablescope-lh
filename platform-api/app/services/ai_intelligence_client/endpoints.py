@@ -370,12 +370,14 @@ async def ask(
     history: list[dict[str, Any]] | None = None,
     knowledge_graph_context: dict[str, Any] | None = None,
     grounding_evidence: dict[str, Any] | None = None,
+    data_result: dict[str, Any] | None = None,
+    matched_insights: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    """Free-text answer from the AI server's documents + knowledge-graph path.
+    """Free-text answer or synthesized data/insight summary from the AI server.
 
-    Used for non-data questions and as a fallback when a question cannot be
-    grounded on an authorized source. Bounded and retry-aware for the same KG
-    contention reason as :func:`generate_sql`.
+    When ``data_result`` is provided the LLM synthesizes the final answer from
+    the executed query result. When ``matched_insights`` is provided it answers
+    from the grounded insight card analysis. Both can be supplied together.
     """
     async with _chat_sem():
         return await _post(
@@ -391,5 +393,7 @@ async def ask(
                 "history": history or [],
                 "knowledge_graph_context": knowledge_graph_context or {},
                 "grounding_evidence": grounding_evidence,
+                "data_result": data_result,
+                "matched_insights": matched_insights,
             },
         )

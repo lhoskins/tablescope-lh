@@ -89,6 +89,33 @@ def _is_inside_function_call(sql: str, pos: int) -> bool:
     return False
 
 
+_UNION_SPLIT_RE = re.compile(r"\bUNION\s+(?:ALL|DISTINCT)\b|\bUNION\b", re.IGNORECASE)
+_ORDER_BY_RE = re.compile(r"\bORDER\s+BY\b", re.IGNORECASE)
+
+
+def _validate_union_order_by(sql: str, violations: list[str]) -> None:
+    """Reject ORDER BY inside a UNION/INTERSECT/EXCEPT branch."""
+    # Work on a normalized copy where string literals are blanked so a literal
+    # containing the words does not trigger a false positive.
+    masked = _BLOCK_COMMENT_RE.sub(" ", sql)
+    masked = _LINE_COMMENT_RE.sub(" ", masked)
+    masked = _STRING_LITERAL_RE.sub("''", masked)
+
+    if not _UNION_SPLIT_RE.search(masked):
+        return
+
+    branches = _UNION_SPLIT_RE.split(masked)
+    # The last branch is allowed to have an ORDER BY. Any earlier branch with
+    # ORDER BY is invalid SQL.
+    for branch in branches[:-1]:
+        if _ORDER_BY_RE.search(branch):
+            violations.append(
+                "ORDER BY is not allowed inside a UNION branch; place it only "
+                "at the end of the entire query"
+            )
+            return
+
+
 def _validate_columns(
     sql: str,
     table_columns: dict[str, list[str]],
@@ -222,6 +249,10 @@ def validate_sql(
     # Check for SELECT *
     if SELECT_STAR_PATTERN.search(sql):
         violations.append("SELECT * is not allowed — specify columns explicitly")
+
+    # Check for invalid UNION/ORDER BY placement. In Teiid an ORDER BY is only
+    # valid at the end of the entire UNION statement; inside a branch it fails.
+    _validate_union_order_by(sql, violations)
 
     # Check table references
     if allowed_tables:

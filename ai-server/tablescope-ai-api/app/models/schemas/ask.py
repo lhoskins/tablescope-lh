@@ -22,6 +22,13 @@ class AskRequest(AIBaseRequest):
     knowledge_graph_context: dict[str, Any] = Field(default_factory=dict)
     # Proactive hybrid retrieval evidence (document passages, KG nodes, KPIs).
     grounding_evidence: GroundingEvidence | None = None
+    # Optional live query result the platform-api already executed. When
+    # present, the LLM synthesizes the final answer from this data rather than
+    # generating a new query.
+    data_result: dict[str, Any] | None = None
+    # Optional precomputed insight card(s) the question matched. When present,
+    # the LLM answers from the grounded card analysis instead of inventing one.
+    matched_insights: list[dict[str, Any]] | None = None
 
 
 class AskResponse(BaseModel):
