@@ -77,6 +77,8 @@ class InsightCardMatch:
     summary: str
     chart: dict[str, Any] | None
     severity: str | None
+    diagnostics: list[dict[str, Any]] | None = None
+    proposed_actions: list[dict[str, Any]] | None = None
 
 
 def _to_match(project_id: int, card: dict[str, Any]) -> InsightCardMatch:
@@ -88,6 +90,8 @@ def _to_match(project_id: int, card: dict[str, Any]) -> InsightCardMatch:
         summary=str(card.get("summary") or ""),
         chart=card.get("chart") if isinstance(card.get("chart"), dict) else None,
         severity=card.get("severity"),
+        diagnostics=card.get("diagnostics") if isinstance(card.get("diagnostics"), list) else None,
+        proposed_actions=card.get("proposedActions") if isinstance(card.get("proposedActions"), list) else None,
     )
 
 
@@ -427,30 +431,24 @@ async def find_matching_insight_card(
         project_ids=[project_id],
         user_id=context.user_id,
     )
-    match = await _select_from_candidates(
-        context=context,
-        tenant_id=tenant_id,
-        project_id=project_id,
-        question=question,
-        pairs=resolved_pairs,
-    )
-    if match is not None or not allow_cross_project:
-        return match
+    pairs = list(resolved_pairs)
 
-    accessible = await _authorized_project_ids(session, context)
-    other_ids = [pid for pid, _name in accessible if pid != project_id]
-    if not other_ids:
-        return None
-    other_pairs = await _cards_for_projects(
-        session,
-        tenant_id=tenant_id,
-        project_ids=other_ids,
-        user_id=context.user_id,
-    )
+    if allow_cross_project:
+        accessible = await _authorized_project_ids(session, context)
+        other_ids = [pid for pid, _name in accessible if pid != project_id]
+        if other_ids:
+            other_pairs = await _cards_for_projects(
+                session,
+                tenant_id=tenant_id,
+                project_ids=other_ids,
+                user_id=context.user_id,
+            )
+            pairs.extend(other_pairs)
+
     return await _select_from_candidates(
         context=context,
         tenant_id=tenant_id,
         project_id=project_id,
         question=question,
-        pairs=other_pairs,
+        pairs=pairs,
     )

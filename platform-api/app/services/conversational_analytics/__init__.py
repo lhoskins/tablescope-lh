@@ -346,6 +346,8 @@ async def execute_turn(
                 f"{reason}{detail_suffix}. I found an existing analysis "
                 f"that answers this: **{card_match.title}**"
             )
+            if card_match.summary:
+                turn.assistant_message += f"\n\n{card_match.summary}"
             turn.chart_config = None
             turn.result_cache = None
             turn.sql = None
@@ -359,6 +361,8 @@ async def execute_turn(
                 "summary": card_match.summary,
                 "chart": card_match.chart,
                 "severity": card_match.severity,
+                "diagnostics": card_match.diagnostics,
+                "proposedActions": card_match.proposed_actions,
             }
             # Machine-readable trail for debugging why the live path failed,
             # even though the turn itself completed successfully from the

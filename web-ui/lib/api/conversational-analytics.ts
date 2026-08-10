@@ -1,6 +1,8 @@
 import { apiClient } from "@/lib/api-client";
 import type { VizType } from "@/lib/api/ai-actions";
 import type { InsightChart } from "@/lib/api/home-intelligence/insight-chart";
+import type { InsightDiagnostic } from "@/lib/api/home-intelligence/insight-diagnostic";
+import type { ProposedAction } from "@/lib/api/home-intelligence/proposed-action";
 
 export type TurnStatus = "pending" | "success" | "error";
 
@@ -14,6 +16,8 @@ export interface MatchedInsight {
   summary: string;
   chart: InsightChart | null;
   severity: string | null;
+  diagnostics?: InsightDiagnostic[];
+  proposedActions?: ProposedAction[];
 }
 
 export interface TurnResult {

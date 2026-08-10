@@ -900,6 +900,8 @@ async def ai_ask_and_run(
                 f"{reason} I found an existing analysis that answers this: "
                 f"**{card_match.title}**"
             )
+            if card_match.summary:
+                explanation += f"\n\n{card_match.summary}"
             match_result: dict[str, Any] = {
                 "question": req.question,
                 "sql": "",
@@ -920,6 +922,8 @@ async def ai_ask_and_run(
                     "summary": card_match.summary,
                     "chart": card_match.chart,
                     "severity": card_match.severity,
+                    "diagnostics": card_match.diagnostics,
+                    "proposedActions": card_match.proposed_actions,
                 },
                 "groundingManifest": grounding_manifest,
             }
