@@ -46,11 +46,11 @@ class TeiidConnectionPoolManager:
         *,
         min_size: int = 1,
         max_size: int = 10,
-        max_inactive_time: float = 120.0,
+        max_inactive_connection_lifetime: float = 120.0,
     ) -> None:
         self._min_size = min_size
         self._max_size = max_size
-        self._max_inactive_time = max_inactive_time
+        self._max_inactive_connection_lifetime = max_inactive_connection_lifetime
         self._pools: dict[PoolKey, asyncpg.Pool] = {}
         self._lock = asyncio.Lock()
 
@@ -85,7 +85,7 @@ class TeiidConnectionPoolManager:
                 password=password,
                 min_size=self._min_size,
                 max_size=self._max_size,
-                max_inactive_time=self._max_inactive_time,
+                max_inactive_connection_lifetime=self._max_inactive_connection_lifetime,
                 ssl=False,
                 timeout=30,
                 command_timeout=60,
@@ -129,5 +129,5 @@ _settings = get_settings()
 pool_manager = TeiidConnectionPoolManager(
     min_size=0,
     max_size=min(_settings.database_pool_max_size, 5),
-    max_inactive_time=120.0,
+    max_inactive_connection_lifetime=120.0,
 )
