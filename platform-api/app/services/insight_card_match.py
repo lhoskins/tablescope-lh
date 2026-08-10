@@ -79,9 +79,10 @@ class InsightCardMatch:
     severity: str | None
     diagnostics: list[dict[str, Any]] | None = None
     proposed_actions: list[dict[str, Any]] | None = None
+    score: float = 0.0
 
 
-def _to_match(project_id: int, card: dict[str, Any]) -> InsightCardMatch:
+def _to_match(project_id: int, card: dict[str, Any], score: float = 0.0) -> InsightCardMatch:
     return InsightCardMatch(
         insight_id=str(card.get("insightId") or ""),
         project_id=project_id,
@@ -92,6 +93,7 @@ def _to_match(project_id: int, card: dict[str, Any]) -> InsightCardMatch:
         severity=card.get("severity"),
         diagnostics=card.get("diagnostics") if isinstance(card.get("diagnostics"), list) else None,
         proposed_actions=card.get("proposedActions") if isinstance(card.get("proposedActions"), list) else None,
+        score=score,
     )
 
 
@@ -340,6 +342,19 @@ async def _cards_for_projects(
     return pairs
 
 
+def _ranked_pairs(
+    question: str,
+    pairs: list[tuple[int, dict[str, Any]]],
+) -> list[tuple[float, int, dict[str, Any]]]:
+    """Sort candidates by deterministic data-shape score descending."""
+    scored = [
+        (_data_shape_score(question, card), pid, card)
+        for pid, card in pairs
+    ]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored
+
+
 async def _select_from_candidates(
     *,
     context: RequestContext,
@@ -347,20 +362,29 @@ async def _select_from_candidates(
     project_id: int,
     question: str,
     pairs: list[tuple[int, dict[str, Any]]],
-) -> InsightCardMatch | None:
+    max_cards: int = 3,
+) -> list[InsightCardMatch]:
+    """Return the best matching insight card(s) for ``question``.
+
+    The primary match is chosen by the LLM selector from the top data-shape
+    candidates; secondary matches are added from the same ranked list when
+    their score is close to the primary's score. This lets a single question
+    surface both the trend and the risk/combo cards that together answer it.
+    """
+    matches: list[InsightCardMatch] = []
     if not pairs or not ai_intelligence_client.is_enabled():
-        return None
+        return matches
 
     # Order candidates by data-shape overlap so the LLM sees the strongest
     # chart/trend matches first, without relying on title.
-    scored = sorted(
-        pairs,
-        key=lambda pair: _data_shape_score(question, pair[1]),
-        reverse=True,
-    )
-    bounded = scored[:_MAX_CANDIDATES]
-    candidates = [_enriched_candidate(card) for _pid, card in bounded]
+    scored = _ranked_pairs(question, pairs)
+    if not scored:
+        return matches
 
+    bounded = scored[:_MAX_CANDIDATES]
+    candidates = [_enriched_candidate(card) for _score, _pid, card in bounded]
+
+    primary: InsightCardMatch | None = None
     try:
         decision = await ai_intelligence_client.select_matching_insight_card(
             tenant_id=tenant_id,
@@ -371,36 +395,62 @@ async def _select_from_candidates(
         )
     except AIUnavailableError as exc:
         logger.warning("Insight-card match selector unavailable: %s", exc)
-        return None
+        decision = None
 
-    chosen_id = (decision or {}).get("insight_id")
-    if not chosen_id:
-        return None
-    try:
-        confidence = float((decision or {}).get("confidence", 0.0))
-    except (TypeError, ValueError):
-        confidence = 0.0
-    if confidence < _MIN_CONFIDENCE:
-        logger.info(
-            "Insight-card selector picked %s below the confidence floor "
-            "(%.2f < %.2f); treating as a decline",
-            chosen_id, confidence, _MIN_CONFIDENCE,
-        )
-        return None
-    for pid, card in bounded:
-        if str(card.get("insightId")) == chosen_id:
-            return _to_match(pid, card)
-    # The model must only pick an id it was actually offered -- the ai-server
-    # endpoint already enforces this, but never trust a second time whether
-    # a returned id maps to a real candidate before using it.
-    logger.warning(
-        "Insight-card selector returned an id not in the offered candidates: %s",
-        chosen_id,
-    )
-    return None
+    chosen_id = (decision or {}).get("insight_id") if decision else None
+    if chosen_id:
+        try:
+            confidence = float((decision or {}).get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if confidence < _MIN_CONFIDENCE:
+            logger.info(
+                "Insight-card selector picked %s below the confidence floor "
+                "(%.2f < %.2f); treating as a decline",
+                chosen_id, confidence, _MIN_CONFIDENCE,
+            )
+            chosen_id = None
+
+    if chosen_id:
+        for score, pid, card in scored:
+            if str(card.get("insightId")) == chosen_id:
+                primary = _to_match(pid, card, score=score)
+                break
+        if primary is None:
+            logger.warning(
+                "Insight-card selector returned an id not in the offered candidates: %s",
+                chosen_id,
+            )
+
+    # If the LLM selector declined or returned an unknown id, fall back to the
+    # deterministic top data-shape matches.
+    if primary is None:
+        top = scored[:max_cards]
+        return [_to_match(pid, card, score=score) for score, pid, card in top if score > 0]
+
+    matches.append(primary)
+
+    # Add closely-related secondary cards: same data shape, within a fraction of
+    # the primary score, and above a modest floor. This supports questions like
+    # "Why are material costs increasing?" surfacing both the trend line and the
+    # risk/combo card that explains the trend.
+    primary_score = primary.score or 0.0
+    if primary_score > 0:
+        for score, pid, card in scored:
+            if len(matches) >= max_cards:
+                break
+            if str(card.get("insightId")) == primary.insight_id:
+                continue
+            # Secondary must be genuinely related: score at least 75% of the
+            # primary and above the raw floor. This prevents cross-project
+            # filler-word matches from piggybacking on a strong primary.
+            if score >= primary_score * 0.75 and score >= 1.5:
+                matches.append(_to_match(pid, card, score=score))
+
+    return matches
 
 
-async def find_matching_insight_card(
+async def find_matching_insight_cards(
     session: AsyncSession,
     *,
     context: RequestContext,
@@ -408,12 +458,13 @@ async def find_matching_insight_card(
     project_id: int,
     question: str,
     allow_cross_project: bool = True,
-) -> InsightCardMatch | None:
-    """Best-matching cached insight card the caller can reach, or ``None``.
+    max_cards: int = 3,
+) -> list[InsightCardMatch]:
+    """Best-matching cached insight cards the caller can reach.
 
     Tries the conversation's already-resolved project first; if nothing
     matches there and ``allow_cross_project`` is true, widens to every
-    project ``context``'s user can access. Declines (returns None) whenever
+    project ``context``'s user can access. Declines (empty list) whenever
     the AI service is disabled/unavailable or the model finds no candidate
     genuinely on-topic -- never guesses.
 
@@ -451,4 +502,27 @@ async def find_matching_insight_card(
         project_id=project_id,
         question=question,
         pairs=pairs,
+        max_cards=max_cards,
     )
+
+
+async def find_matching_insight_card(
+    session: AsyncSession,
+    *,
+    context: RequestContext,
+    tenant_id: int,
+    project_id: int,
+    question: str,
+    allow_cross_project: bool = True,
+) -> InsightCardMatch | None:
+    """Single best-matching cached insight card; convenience wrapper."""
+    matches = await find_matching_insight_cards(
+        session,
+        context=context,
+        tenant_id=tenant_id,
+        project_id=project_id,
+        question=question,
+        allow_cross_project=allow_cross_project,
+        max_cards=1,
+    )
+    return matches[0] if matches else None

@@ -15,7 +15,7 @@ from app.services.ai_intelligence_client import AIUnavailableError as AIUnavaila
 from app.services.business_insight_project_resolver import (
     resolve_business_insight_project,
 )
-from app.services.insight_card_match import find_matching_insight_card
+from app.services.insight_card_match import find_matching_insight_cards
 from app.services.project_ai_context import build_project_ai_context
 
 from .chart_field_selection import _SUBTYPE_LABELS as _SUBTYPE_LABELS
@@ -225,24 +225,29 @@ async def execute_turn(
         return
 
     # New analysis or query-changing follow-up
+    # Re-resolve the project every turn for cross-project surfaces (Business
+    # Insight / AI Assistant) so a follow-up can switch projects and a question
+    # like "Show me IT backup jobs" routes to the IT project even if the
+    # conversation was previously pinned to Manufacturing. Project Insights is
+    # page-scoped, so its project never changes mid-conversation.
+    is_project_scoped = conversation.surface == "project_insights"
     project_id = conversation.project_id
-    if project_id is None:
-        # Business Insight and similar flows may have created the conversation
-        # before project resolution existed; resolve from the question now.
+    if not is_project_scoped:
         resolved = await resolve_business_insight_project(
             session, context, question
         )
         if resolved.status == "resolved" and resolved.project_id:
             project_id = resolved.project_id
             conversation.project_id = project_id
-        else:
-            turn.status = "error"
-            turn.error_code = "no_project"
-            turn.assistant_message = (
-                "I couldn't tell which project this question belongs to. "
-                "Please ask from a project page or mention a project name."
-            )
-            return
+
+    if project_id is None:
+        turn.status = "error"
+        turn.error_code = "no_project"
+        turn.assistant_message = (
+            "I couldn't tell which project this question belongs to. "
+            "Please ask from a project page or mention a project name."
+        )
+        return
 
     project_context: dict[str, Any] | None = None
     try:
@@ -289,11 +294,11 @@ async def execute_turn(
 
     if run.get("status") in ("generation_error", "execution_error"):
         # A question that cannot be grounded or executed on an authorized source
-        # may already be answered by an existing, verified Insight Card — that
-        # analysis ran the real multi-query pipeline, so pointing back to it
+        # may already be answered by one or more existing, verified Insight Cards —
+        # that analysis ran the real multi-query pipeline, so pointing back to it
         # beats both a hard SQL error and unattributed KG prose. Check before
         # falling further back.
-        card_match = await find_matching_insight_card(
+        card_matches = await find_matching_insight_cards(
             session,
             context=context,
             tenant_id=context.tenant_id,
@@ -305,8 +310,11 @@ async def execute_turn(
             # and Business Insights have no such single-project framing, so
             # a card from any project the user can access is fair game.
             allow_cross_project=conversation.surface != "project_insights",
+            max_cards=3,
         )
-        if card_match is not None:
+        if card_matches:
+            primary = card_matches[0]
+            related = card_matches[1:]
             # State plainly that a fresh live query failed, and why, so a
             # real regression on a question that should trivially succeed
             # (a plain "show me X by Y" lookup) never hides behind a
@@ -344,25 +352,41 @@ async def execute_turn(
             detail_suffix = f" ({'; '.join(detail_bits)})" if detail_bits else ""
             turn.assistant_message = (
                 f"{reason}{detail_suffix}. I found an existing analysis "
-                f"that answers this: **{card_match.title}**"
+                f"that answers this: **{primary.title}**"
             )
-            if card_match.summary:
-                turn.assistant_message += f"\n\n{card_match.summary}"
+            if primary.summary:
+                turn.assistant_message += f"\n\n{primary.summary}"
             turn.chart_config = None
             turn.result_cache = None
             turn.sql = None
             turn.sql_fingerprint = None
             turn.datasource_context = {"dataSourcesUsed": []}
             turn.matched_insight = {
-                "insightId": card_match.insight_id,
-                "projectId": card_match.project_id,
-                "projectName": card_match.project_name,
-                "title": card_match.title,
-                "summary": card_match.summary,
-                "chart": card_match.chart,
-                "severity": card_match.severity,
-                "diagnostics": card_match.diagnostics,
-                "proposedActions": card_match.proposed_actions,
+                "insightId": primary.insight_id,
+                "projectId": primary.project_id,
+                "projectName": primary.project_name,
+                "title": primary.title,
+                "summary": primary.summary,
+                "chart": primary.chart,
+                "severity": primary.severity,
+                "diagnostics": primary.diagnostics,
+                "proposedActions": primary.proposed_actions,
+                "score": primary.score,
+                "relatedInsights": [
+                    {
+                        "insightId": m.insight_id,
+                        "projectId": m.project_id,
+                        "projectName": m.project_name,
+                        "title": m.title,
+                        "summary": m.summary,
+                        "chart": m.chart,
+                        "severity": m.severity,
+                        "diagnostics": m.diagnostics,
+                        "proposedActions": m.proposed_actions,
+                        "score": m.score,
+                    }
+                    for m in related
+                ],
             }
             # Machine-readable trail for debugging why the live path failed,
             # even though the turn itself completed successfully from the
@@ -375,6 +399,7 @@ async def execute_turn(
                 "fallbackReason": run.get("status"),
                 "fallbackError": run.get("error"),
                 "fallbackErrorDetails": error_details,
+                "insightCardScores": [m.score for m in card_matches],
             }
             turn.status = "success"
             return

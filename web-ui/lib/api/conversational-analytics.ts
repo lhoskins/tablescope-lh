@@ -18,6 +18,8 @@ export interface MatchedInsight {
   severity: string | null;
   diagnostics?: InsightDiagnostic[];
   proposedActions?: ProposedAction[];
+  score?: number;
+  relatedInsights?: MatchedInsight[];
 }
 
 export interface TurnResult {

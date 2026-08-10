@@ -64,12 +64,7 @@ function ProposedActionItem({
   );
 }
 
-/**
- * Points a chat turn back at an existing, verified Insight Card instead of
- * a fresh (and here, unanswerable) SQL guess — the real chart from that
- * card's analysis, plus its grounded full analysis and proposed actions.
- */
-export function MatchedInsightBlock({ match }: { match: MatchedInsight }) {
+function InsightCard({ match }: { match: MatchedInsight }) {
   const diagnostics = (match.diagnostics ?? []).filter(
     (d) => !d.title?.startsWith("Claim:"),
   );
@@ -78,7 +73,7 @@ export function MatchedInsightBlock({ match }: { match: MatchedInsight }) {
   );
 
   return (
-    <div className="mt-2 w-full rounded-xl border border-line-tertiary bg-bg-primary p-3">
+    <div className="w-full rounded-xl border border-line-tertiary bg-bg-primary p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] font-medium uppercase tracking-wide text-ink-tertiary">
@@ -132,6 +127,23 @@ export function MatchedInsightBlock({ match }: { match: MatchedInsight }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Points a chat turn back at existing, verified Insight Cards instead of
+ * a fresh (and here, unanswerable) SQL guess — the real charts from those
+ * cards' analyses, plus their grounded full analysis and proposed actions.
+ */
+export function MatchedInsightBlock({ match }: { match: MatchedInsight }) {
+  const related = match.relatedInsights ?? [];
+  return (
+    <div className="mt-2 space-y-3">
+      <InsightCard match={match} />
+      {related.map((r) => (
+        <InsightCard key={r.insightId} match={r} />
+      ))}
     </div>
   );
 }
