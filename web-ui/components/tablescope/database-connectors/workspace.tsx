@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconLoader2, IconPlus } from "@tabler/icons-react";
+import { IconLoader2 } from "@tabler/icons-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -18,55 +18,13 @@ import {
   type CreatedConnection,
   type InstalledConnector,
 } from "@/lib/api/connectors";
+import { ConnectorCarousel } from "./connector-carousel";
 import { connectorSpec } from "./connector-fields";
 import { BrandLogo, connectorChip } from "./brand-logo";
 import { ConnectionModal } from "./connection-modal";
 
 const INSTALLED_QK = ["connectors", "installed"];
 const CREATED_QK = ["connectors", "created-connections"];
-
-function ConnectorTile({
-  connector,
-  onCreate,
-}: {
-  connector: InstalledConnector;
-  onCreate: () => void;
-}) {
-  return (
-    <div className="flex flex-col rounded-xl border border-line-tertiary bg-bg-primary p-4">
-      <div className="mb-3 flex items-center gap-3">
-        <span
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${connectorChip(
-            connector.key,
-          )}`}
-        >
-          <BrandLogo connector={connector.key} size={22} />
-        </span>
-        <div className="min-w-0">
-          <div className="truncate text-[15px] font-semibold text-ink-primary">
-            {connector.name}
-          </div>
-          <div className="text-caption text-ink-tertiary">
-            {connector.kind === "database"
-              ? "Database connector"
-              : "SaaS connector"}
-          </div>
-        </div>
-      </div>
-      <Badge tone="success" className="mb-3 w-fit capitalize">
-        {connector.status}
-      </Badge>
-      <Button
-        variant="secondary"
-        size="sm"
-        className="mt-auto w-full"
-        onClick={onCreate}
-      >
-        <IconPlus size={14} /> Create connection
-      </Button>
-    </div>
-  );
-}
 
 export function DatabaseConnectorsWorkspace({
   projectId,
@@ -174,15 +132,10 @@ export function DatabaseConnectorsWorkspace({
             <IconLoader2 size={16} className="animate-spin" /> Loading connectors…
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {(installed ?? []).map((c) => (
-              <ConnectorTile
-                key={c.key}
-                connector={c}
-                onCreate={() => openCreate(c.key)}
-              />
-            ))}
-          </div>
+          <ConnectorCarousel
+            connectors={installed ?? []}
+            onCreate={(c) => openCreate(c.key)}
+          />
         )}
       </section>
 
