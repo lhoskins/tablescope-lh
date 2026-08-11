@@ -133,6 +133,7 @@ async def install_artifact(
         status="installed",
         installed_path=result.installed_path,
         modelfile_content=result.modelfile_content,
+        ollama_model_name=result.ollama_model_name,
         installed_at=datetime.now(UTC),
     )
     session.add(installation)

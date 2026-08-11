@@ -88,6 +88,8 @@ class InstallationSummary(BaseModel):
     target_id: int
     status: str
     installed_path: str | None
+    modelfile_content: str | None
+    ollama_model_name: str | None
     installed_at: datetime | None
     activated_at: datetime | None
     rolled_back_at: datetime | None

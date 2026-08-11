@@ -77,13 +77,13 @@ async def select_insight_card(
             confidence=0.0,
             reason="No candidates were offered.",
             request_id=request_id,
-            model_used=settings.reasoning_model,
+            model_used=req.model or settings.reasoning_model,
         )
 
     raw = await llm_client.generate(
         prompt=_select_insight_card_prompt(req),
         system_prompt=_SELECT_INSIGHT_CARD_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.0,
         max_tokens=200,
         num_ctx=4096,
@@ -111,5 +111,5 @@ async def select_insight_card(
         confidence=confidence,
         reason=str(parsed.get("reason") or "")[:300],
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

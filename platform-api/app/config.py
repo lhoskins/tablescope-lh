@@ -97,8 +97,7 @@ class Settings(BaseSettings):
     # this to true blocks any FP16 / safetensors / conversion pipeline paths.
     llm_model_catalog_gguf_only: bool = True
     # Allow staging and activation of a verified artifact on a runtime target.
-    # Kept off until the deployment agent and canary pipeline are wired.
-    llm_deployment_enabled: bool = False
+    llm_deployment_enabled: bool = True
     # Require two distinct platform administrators to approve a production
     # model replacement before activation.
     llm_two_person_approval_required: bool = True
@@ -120,7 +119,7 @@ class Settings(BaseSettings):
     # Optional Hugging Face token for accessing gated models.
     llm_huggingface_token: str = ""
     # Phase 4: allow dynamic routing profile changes and activation.
-    llm_dynamic_routing_enabled: bool = False
+    llm_dynamic_routing_enabled: bool = True
     # Phase 5: enable embedding-model re-index migrations (dual collection,
     # re-embed, recall comparison, cut-over). Disabled until the AI server
     # vector-store backend is wired.

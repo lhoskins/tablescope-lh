@@ -59,7 +59,7 @@ async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateR
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=SYSTEM_PROMPT,
-        model=settings.sql_model,
+        model=req.model or settings.sql_model,
         temperature=0.0,
     )
 
@@ -84,5 +84,5 @@ async def generate_relationships(req: GenerateRelationshipsRequest) -> GenerateR
     return GenerateRelationshipsResponse(
         relationships=relationships,
         request_id=request_id,
-        model_used=settings.sql_model,
+        model_used=req.model or settings.sql_model,
     )

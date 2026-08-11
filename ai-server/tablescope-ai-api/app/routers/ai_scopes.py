@@ -64,7 +64,7 @@ async def analyze_scopes(req: AnalyzeScopesRequest) -> AnalyzeScopesResponse:
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt="You are a data analyst that identifies drill-down relationships between SQL queries. Return only valid JSON.",
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.0,
     )
 
@@ -88,5 +88,5 @@ async def analyze_scopes(req: AnalyzeScopesRequest) -> AnalyzeScopesResponse:
     return AnalyzeScopesResponse(
         scopes=scopes,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

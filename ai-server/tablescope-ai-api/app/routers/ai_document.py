@@ -298,7 +298,7 @@ Rules:
     try:
         raw = await llm_client.generate(
             prompt=prompt,
-            model=settings.reasoning_model,
+            model=req.model or settings.reasoning_model,
             temperature=0.2,
             max_tokens=1200,
         )
@@ -324,5 +324,5 @@ Rules:
         missing_documents=_strlist(parsed.get("missing_documents")),
         suggested_questions=_strlist(parsed.get("suggested_questions")),
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

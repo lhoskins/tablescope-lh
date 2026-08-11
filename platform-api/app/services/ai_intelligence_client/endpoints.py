@@ -4,8 +4,40 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import get_settings
+from app.services.llm_framework import resolve_active_model_for_capability
 
 from .transport import _chat_sem, _post
+
+_CAPABILITY_BY_PATH: dict[str, str | None] = {
+    "/ai/intelligence/plan": "dashboard_planning",
+    "/ai/intelligence/project-insight": "insight_interpretation",
+    "/ai/intelligence/knowledge-graph": "insight_interpretation",
+    "/ai/intelligence/conversation-turn": "general_reasoning",
+    "/ai/intelligence/select-insight-card": "insight_interpretation",
+    "/ai/intelligence/fix-sql": "sql_generation",
+    "/ai/intelligence/interpret": "insight_interpretation",
+    "/ai/query/generate": "sql_generation",
+    "/ai/actions/draft": "general_reasoning",
+    "/ai/ask": "general_reasoning",
+    "/ai/grounding/search": None,
+}
+
+
+async def _post_with_model(
+    path: str,
+    payload: dict[str, Any],
+    *,
+    capability: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any] | None:
+    """Wrap _post and inject the active LLM model for the call's capability."""
+    if capability is None:
+        capability = _CAPABILITY_BY_PATH.get(path)
+    if capability:
+        model = await resolve_active_model_for_capability(capability)
+        if model:
+            payload = {**payload, "model": model, "capability": capability}
+    return await _post(path, payload, **kwargs)
 
 
 async def plan(
@@ -25,7 +57,7 @@ async def plan(
     """Ask the LLM to propose diagnostic analyses. Returns ``analyses`` or None."""
     settings = get_settings()
     max_retries = max(0, settings.home_intelligence_plan_max_retries)
-    result = await _post(
+    result = await _post_with_model(
         "/ai/intelligence/plan",
         {
             "tenant_id": tenant_id,
@@ -75,7 +107,7 @@ async def project_insight(
     insightValidationWorkflow), or ``None`` if the AI server is unavailable so
     the caller can degrade gracefully.
     """
-    result = await _post(
+    result = await _post_with_model(
         "/ai/intelligence/project-insight",
         {
             "tenant_id": tenant_id,
@@ -112,7 +144,7 @@ async def knowledge_graph_cards(
     Returns the raw card dicts, or ``None`` when the AI server is unavailable so
     the caller can fall back to the deterministic cards.
     """
-    result = await _post(
+    result = await _post_with_model(
         "/ai/intelligence/knowledge-graph",
         {
             "tenant_id": tenant_id,
@@ -152,7 +184,7 @@ async def classify_conversation_turn(
     or ``None`` when AI is disabled, so the caller can fall back to its
     deterministic degraded path.
     """
-    result = await _post(
+    result = await _post_with_model(
         "/ai/intelligence/conversation-turn",
         {
             "tenant_id": tenant_id,
@@ -190,7 +222,7 @@ async def select_matching_insight_card(
     ``None`` when AI is disabled, so the caller can fall back to declining
     the match rather than guessing.
     """
-    result = await _post(
+    result = await _post_with_model(
         "/ai/intelligence/select-insight-card",
         {
             "tenant_id": tenant_id,
@@ -220,7 +252,7 @@ async def fix_sql(
     Returns a corrected SQL string, or None if the AI is unavailable or
     declines to fix it.
     """
-    result = await _post(
+    result = await _post_with_model(
         "/ai/intelligence/fix-sql",
         {
             "tenant_id": tenant_id,
@@ -249,7 +281,7 @@ async def interpret(
     """Turn executed results into prose. Returns ``{analysis_id: insight}`` or None."""
     if not analyses:
         return {}
-    result = await _post(
+    result = await _post_with_model(
         "/ai/intelligence/interpret",
         {
             "tenant_id": tenant_id,
@@ -288,7 +320,7 @@ async def generate_sql(
     Returns ``None`` when the AI service is disabled or unreachable.
     """
     async with _chat_sem():
-        return await _post(
+        return await _post_with_model(
             "/ai/query/generate",
             {
                 "tenant_id": tenant_id,
@@ -316,7 +348,7 @@ async def generate_action_draft(
 
     Returns ``None`` when the AI service is disabled or unreachable.
     """
-    return await _post(
+    return await _post_with_model(
         "/ai/actions/draft",
         {
             "tenant_id": tenant_id,
@@ -344,7 +376,7 @@ async def search_grounding_vectors(
     limit: int = 12,
 ) -> dict[str, Any] | None:
     """Query the AI server for vector-grounded passages (project + reference)."""
-    result = await _post(
+    result = await _post_with_model(
         "/ai/grounding/search",
         {
             "tenant_id": tenant_id,
@@ -380,7 +412,7 @@ async def ask(
     from the grounded insight card analysis. Both can be supplied together.
     """
     async with _chat_sem():
-        return await _post(
+        return await _post_with_model(
             "/ai/ask",
             {
                 "tenant_id": tenant_id,

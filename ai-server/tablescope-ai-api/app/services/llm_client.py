@@ -196,6 +196,7 @@ async def generate_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    model: str | None = None,
 ) -> str:
     """Generate SQL using the code-specialized model with semantic discovery."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -225,7 +226,7 @@ async def generate_sql(
     return await generate(
         prompt=prompt,
         system_prompt=system_prompt,
-        model=settings.sql_model,
+        model=model or settings.sql_model,
         temperature=0.0,
     )
 
@@ -239,6 +240,7 @@ async def repair_sql(
     source_catalog: list[Any] | None = None,
     preferred_sources: list[str] | None = None,
     relevant_columns: list[str] | None = None,
+    model: str | None = None,
 ) -> str:
     """Ask the model to fix SQL that failed validation, preserving intent."""
     catalog = _catalog_text(allowed_tables, source_catalog)
@@ -270,7 +272,7 @@ async def repair_sql(
     return await generate(
         prompt=repair_prompt,
         system_prompt=system_prompt,
-        model=settings.sql_model,
+        model=model or settings.sql_model,
         temperature=0.0,
     )
 

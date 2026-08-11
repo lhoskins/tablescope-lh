@@ -82,7 +82,7 @@ async def intelligence_fix_sql(
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_INTEL_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.1,
         num_ctx=8192,
     )
@@ -98,5 +98,5 @@ async def intelligence_fix_sql(
     return IntelligenceFixSQLResponse(
         sql=fixed,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

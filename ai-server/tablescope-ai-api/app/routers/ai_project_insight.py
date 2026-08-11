@@ -182,7 +182,7 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_PROJECT_INSIGHT_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.2,
         num_ctx=24576,
         response_format="json",
@@ -211,5 +211,5 @@ async def project_insight(req: ProjectInsightRequest) -> ProjectInsightResponse:
             parsed.get("insightValidationWorkflow"), 12
         ),
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

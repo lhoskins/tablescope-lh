@@ -452,7 +452,7 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_INTEL_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.2,
         # The window is shared by the prompt AND the generated JSON. The plan
         # prompt (schema + documents + relationship evidence + knowledge-graph
@@ -595,5 +595,5 @@ async def intelligence_plan(req: IntelligencePlanRequest) -> IntelligencePlanRes
     return IntelligencePlanResponse(
         analyses=analyses,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

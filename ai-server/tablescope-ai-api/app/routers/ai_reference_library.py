@@ -40,7 +40,7 @@ async def summarize_reference_document(req: ReferenceSummarizeRequest) -> Refere
     text_preview = (req.extracted_text or "").strip()[:8000]
     if not text_preview:
         return ReferenceSummarizeResponse(
-            summary="", request_id=request_id, model_used=settings.reasoning_model
+            summary="", request_id=request_id, model_used=req.model or settings.reasoning_model
         )
 
     prompt = f"""You are summarizing a reference document (standard, regulation, framework, or policy) for use as AI grounding context.
@@ -62,7 +62,7 @@ Return ONLY the summary text — no preamble, no headings, no JSON."""
     try:
         raw = await llm_client.generate(
             prompt=prompt,
-            model=settings.reasoning_model,
+            model=req.model or settings.reasoning_model,
             temperature=0.2,
             max_tokens=400,
         )
@@ -76,7 +76,7 @@ Return ONLY the summary text — no preamble, no headings, no JSON."""
     return ReferenceSummarizeResponse(
         summary=(raw or "").strip(),
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )
 
 
@@ -122,7 +122,7 @@ Rules:
     try:
         raw = await llm_client.generate(
             prompt=prompt,
-            model=settings.reasoning_model,
+            model=req.model or settings.reasoning_model,
             temperature=0.2,
             max_tokens=800,
         )
@@ -148,5 +148,5 @@ Rules:
     return ReferenceSuggestResponse(
         suggestions=suggestions,
         request_id=request_id,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
     )

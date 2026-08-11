@@ -212,7 +212,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
-        model=settings.sql_model,
+        model=req.model or settings.sql_model,
         temperature=0.3,
         # Larger window so the injected dashboard_best_practices reference fits
         # alongside the project context without truncation.
@@ -260,7 +260,7 @@ async def suggest_dashboard(req: SuggestDashboardRequest) -> SuggestDashboardRes
     return SuggestDashboardResponse(
         suggestions=suggestions,
         request_id=request_id,
-        model_used=settings.sql_model,
+        model_used=req.model or settings.sql_model,
     )
 
 
@@ -380,7 +380,7 @@ async def suggest_dashboards_multi(
     raw = await llm_client.generate(
         prompt=prompt,
         system_prompt=_DASHBOARD_INSIGHT_SYSTEM_PROMPT,
-        model=settings.sql_model,
+        model=req.model or settings.sql_model,
         temperature=0.4,
         num_ctx=24576,
         response_format="json",
@@ -455,5 +455,5 @@ async def suggest_dashboards_multi(
     return SuggestDashboardsMultiResponse(
         suggestions=suggestions,
         request_id=request_id,
-        model_used=settings.sql_model,
+        model_used=req.model or settings.sql_model,
     )

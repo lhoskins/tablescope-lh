@@ -266,6 +266,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         source_catalog=catalog,
         preferred_sources=req.preferred_sources,
         relevant_columns=req.relevant_columns,
+        model=req.model,
     )
     if _needs_clarification(raw):
         raise _clarify("Model could not find a matching authorized source.")
@@ -302,6 +303,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
                 source_catalog=catalog,
                 preferred_sources=req.preferred_sources,
                 relevant_columns=req.relevant_columns,
+                model=req.model,
             )
             repaired = True
             if _needs_clarification(raw):
@@ -334,7 +336,7 @@ async def generate_sql_endpoint(req: GenerateSQLRequest) -> GenerateSQLResponse:
         explanation="",
         allowed_tables_used=allowed_tables,
         request_id=request_id,
-        model_used=settings.sql_model,
+        model_used=req.model or settings.sql_model,
         selected_sources=selected,
         repaired=repaired,
         knowledge_graph_context_used=bool(kg_block),
@@ -354,7 +356,7 @@ async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
 
     if not req.existing_queries:
         return MatchQueryResponse(
-            match_id=None, request_id=request_id, model_used=settings.reasoning_model,
+            match_id=None, request_id=request_id, model_used=req.model or settings.reasoning_model,
         )
 
     existing_text = "\n".join(
@@ -381,7 +383,7 @@ async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
             "You compare SQL queries for functional equivalence. "
             "Respond with ONLY 'MATCH=<id>' or 'NO_MATCH' — no other text."
         ),
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.0,
     )
 
@@ -395,5 +397,5 @@ async def match_query(req: MatchQueryRequest) -> MatchQueryResponse:
     update_activity(req.user_id, req.tenant_id, req.project_id)
 
     return MatchQueryResponse(
-        match_id=match_id, request_id=request_id, model_used=settings.reasoning_model,
+        match_id=match_id, request_id=request_id, model_used=req.model or settings.reasoning_model,
     )

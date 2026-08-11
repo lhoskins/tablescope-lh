@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from arq import create_pool
 from arq.connections import RedisSettings
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -52,6 +53,47 @@ async def validate_routing_capability(capability: str) -> str:
             f"Routable capabilities are: {', '.join(ROUTING_CAPABILITIES)}"
         )
     return normalized
+
+
+async def get_active_routing_model(session: AsyncSession, capability: str) -> str | None:
+    """Return the active Ollama model name for a routable capability, if any."""
+    try:
+        normalized = await validate_routing_capability(capability)
+    except InvalidCapabilityError:
+        return None
+    stmt = (
+        select(LLMRoutingProfile)
+        .where(
+            LLMRoutingProfile.capability == normalized,
+            LLMRoutingProfile.is_active.is_(True),
+        )
+        .options(selectinload(LLMRoutingProfile.installation))
+        .order_by(LLMRoutingProfile.priority.desc())
+        .limit(1)
+    )
+    try:
+        profile = (await session.execute(stmt)).scalar_one_or_none()
+    except SQLAlchemyError as exc:
+        logger.warning("Failed to resolve active LLM routing profile: %s", exc)
+        return None
+    if profile is None or profile.installation is None:
+        return None
+    return profile.installation.ollama_model_name
+
+
+async def resolve_active_model_for_capability(capability: str) -> str | None:
+    """Resolve the active model for a capability using a short-lived session.
+
+    Returns ``None`` when dynamic routing is disabled or no active profile exists,
+    letting the AI server fall back to its static defaults.
+    """
+    settings = get_settings()
+    if not settings.llm_dynamic_routing_enabled:
+        return None
+    from app.database import SessionLocal
+
+    async with SessionLocal() as session:
+        return await get_active_routing_model(session, capability)
 
 
 async def get_inventory(session: AsyncSession) -> dict:

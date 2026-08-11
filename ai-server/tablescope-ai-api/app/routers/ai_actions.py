@@ -112,7 +112,7 @@ async def draft_action(req: DraftActionRequest) -> DraftActionResponse:
     raw = await llm_client.generate(
         prompt,
         system_prompt=_ACTION_DRAFT_SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
         temperature=0.2,
         response_format="json",
         max_tokens=2048,
@@ -186,6 +186,6 @@ async def draft_action(req: DraftActionRequest) -> DraftActionResponse:
         description=description,
         subtasks=subtasks,
         success_criteria=criteria,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
         request_id=request_id,
     )

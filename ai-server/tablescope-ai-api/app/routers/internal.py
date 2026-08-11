@@ -8,15 +8,12 @@ server itself does not have the toolchain to perform.
 from __future__ import annotations
 
 import logging
-import uuid
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from app.core.config import settings
 from app.core.security import verify_signature
-from app.services import llm_client, vector_store
+from app.services import vector_store
 
 logger = logging.getLogger(__name__)
 

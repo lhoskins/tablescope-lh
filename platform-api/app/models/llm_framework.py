@@ -172,6 +172,7 @@ class LLMInstallation(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="staged")
     installed_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     modelfile_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ollama_model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

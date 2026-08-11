@@ -179,7 +179,7 @@ async def ask(req: AskRequest) -> AskResponse:
     answer = await llm_client.generate(
         prompt=prompt,
         system_prompt=SYSTEM_PROMPT,
-        model=settings.reasoning_model,
+        model=req.model or settings.reasoning_model,
     )
 
     # 4. Update activity
@@ -203,7 +203,7 @@ async def ask(req: AskRequest) -> AskResponse:
 
     return AskResponse(
         answer=answer,
-        model_used=settings.reasoning_model,
+        model_used=req.model or settings.reasoning_model,
         request_id=request_id,
         context_summary={
             "metadata_count": len(ctx.allowed_context.get("metadata", [])),

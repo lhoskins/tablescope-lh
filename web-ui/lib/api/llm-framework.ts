@@ -72,6 +72,8 @@ export interface Installation {
   target_id: number;
   status: string;
   installed_path: string | null;
+  modelfile_content: string | null;
+  ollama_model_name: string | null;
   installed_at: string | null;
   activated_at: string | null;
   rolled_back_at: string | null;
